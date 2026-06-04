@@ -1,0 +1,6 @@
+[package]
+name = "return_values_only"
+type = "bin"
+authors = [""]
+
+[dependencies]

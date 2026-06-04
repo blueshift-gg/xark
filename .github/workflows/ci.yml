@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test (release)
+        # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
+        # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
+        # in debug. Debug-mode workspace takes 10+ minutes; release ~90s.
+        run: cargo test --workspace --release

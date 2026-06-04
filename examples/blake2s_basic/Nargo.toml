@@ -1,0 +1,6 @@
+[package]
+name = "blake2s_basic"
+type = "bin"
+authors = [""]
+
+[dependencies]

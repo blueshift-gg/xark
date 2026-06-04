@@ -1,0 +1,6 @@
+[package]
+name = "unsupported_blake2s"
+type = "bin"
+authors = [""]
+
+[dependencies]

@@ -1,0 +1,6 @@
+[package]
+name = "ecdsa_r1_basic"
+type = "bin"
+authors = [""]
+
+[dependencies]

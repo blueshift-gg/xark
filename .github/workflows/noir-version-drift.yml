@@ -1,0 +1,185 @@
+name: Noir version drift
+
+# Periodically check whether the upstream Noir release we pin in
+# `Cargo.toml` / `NOIR_VERSION.md` still matches the latest released tag,
+# bump it on a throwaway branch, regenerate the example fixtures with the
+# new nargo, and re-run the full test suite. Posts an issue when the bump
+# breaks anything so we know exactly when downstream compatibility breaks.
+
+on:
+  schedule:
+    # Sundays 06:00 UTC. Cheap enough to run weekly; Noir cuts a beta every
+    # few weeks so this catches drift before users do.
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: 'Noir tag to test against (defaults to the latest release tag)'
+        required: false
+        default: ''
+
+jobs:
+  drift:
+    name: bump-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          # Different cache key from CI: the noir bump invalidates the cache.
+          key: noir-drift-${{ hashFiles('Cargo.lock') }}
+
+      - name: Resolve latest Noir tag
+        id: resolve
+        run: |
+          if [ -n "${{ github.event.inputs.target_tag }}" ]; then
+            TAG="${{ github.event.inputs.target_tag }}"
+          else
+            # GitHub API returns the latest *release* (annotated, not draft).
+            # Noir publishes betas as releases so this is correct for the
+            # drift check.
+            TAG=$(curl -fsSL https://api.github.com/repos/noir-lang/noir/releases/latest | jq -r .tag_name)
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "::error::Could not resolve a Noir tag"
+            exit 1
+          fi
+          echo "target_tag=$TAG" >> "$GITHUB_OUTPUT"
+          CURRENT=$(grep -E 'tag = "v[^"]+"' Cargo.toml | head -n1 | sed -E 's/.*tag = "(v[^"]+)".*/\1/')
+          echo "current_tag=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Current pin: $CURRENT"
+          echo "Latest tag:  $TAG"
+
+      - name: Skip when already at latest
+        if: steps.resolve.outputs.target_tag == steps.resolve.outputs.current_tag
+        run: |
+          echo "Already at $tag; nothing to do."
+          exit 0
+
+      - name: Resolve commit hash for target tag
+        if: steps.resolve.outputs.target_tag != steps.resolve.outputs.current_tag
+        id: resolve_sha
+        run: |
+          SHA=$(curl -fsSL https://api.github.com/repos/noir-lang/noir/git/refs/tags/${{ steps.resolve.outputs.target_tag }} \
+            | jq -r .object.sha)
+          # Annotated tags need a second deref.
+          TYPE=$(curl -fsSL https://api.github.com/repos/noir-lang/noir/git/refs/tags/${{ steps.resolve.outputs.target_tag }} \
+            | jq -r .object.type)
+          if [ "$TYPE" = "tag" ]; then
+            SHA=$(curl -fsSL https://api.github.com/repos/noir-lang/noir/git/tags/$SHA | jq -r .object.sha)
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Bump Cargo.toml to target tag
+        if: steps.resolve.outputs.target_tag != steps.resolve.outputs.current_tag
+        run: |
+          # Replace every `tag = "vX.Y.Z..."` git dependency that lives in the
+          # noir repo with the new tag. We trust that all such pins move
+          # together (they do at the time of writing — acir, acir_field, acvm).
+          sed -i -E \
+            's|(tag = ")v[^"]+(",\s*default-features = false,\s*features = \["bn254"\])|\1${{ steps.resolve.outputs.target_tag }}\2|g' \
+            Cargo.toml
+          if grep -q "${{ steps.resolve.outputs.target_tag }}" Cargo.toml; then
+            echo "Bumped pins to ${{ steps.resolve.outputs.target_tag }}."
+          else
+            echo "::error::sed replacement failed; Cargo.toml format may have changed"
+            exit 1
+          fi
+          cargo update --workspace || true
+
+      - name: Install nargo at target tag
+        if: steps.resolve.outputs.target_tag != steps.resolve.outputs.current_tag
+        run: |
+          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          export PATH="$HOME/.nargo/bin:$PATH"
+          noirup --version ${{ steps.resolve.outputs.target_tag }}
+          nargo --version
+
+      - name: Regenerate fixtures with the new nargo
+        if: steps.resolve.outputs.target_tag != steps.resolve.outputs.current_tag
+        run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
+          # Each example regenerates its own .json + .gz under examples/<name>/target/.
+          # The fixtures under tests/fixtures/ are then refreshed by the
+          # `regenerate-fixtures` helper (no such helper today — this step
+          # documents intent; until WS-E lands a tool here, the test suite
+          # uses the example outputs directly).
+          for dir in examples/*/; do
+            (cd "$dir" && nargo compile 2>&1 | head -20 && nargo execute 2>&1 | head -5) || true
+          done
+
+      - name: Build + clippy + test
+        if: steps.resolve.outputs.target_tag != steps.resolve.outputs.current_tag
+        id: test
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+          cargo test --workspace --release 2>&1 | tee test.log
+
+      - name: Open issue on failure
+        if: steps.test.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const target = '${{ steps.resolve.outputs.target_tag }}';
+            const current = '${{ steps.resolve.outputs.current_tag }}';
+            const clippy = fs.existsSync('clippy.log') ? fs.readFileSync('clippy.log', 'utf8').slice(-3000) : '';
+            const test = fs.existsSync('test.log') ? fs.readFileSync('test.log', 'utf8').slice(-5000) : '';
+            const title = `Noir bump ${current} → ${target} breaks the build`;
+            const body = [
+              `The weekly Noir-version-drift job tried to bump from \`${current}\` to \`${target}\` and the test suite broke.`,
+              ``,
+              `### Last 3 KB of clippy output`,
+              '```',
+              clippy,
+              '```',
+              ``,
+              `### Last 5 KB of test output`,
+              '```',
+              test,
+              '```',
+              ``,
+              `Re-run via the **Run workflow** button on the [Noir version drift](https://github.com/${{ github.repository }}/actions/workflows/noir-version-drift.yml) action if needed.`,
+            ].join('\n');
+            // De-dup: only open one issue per (current, target) combo.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'noir-version-drift',
+              per_page: 100,
+            });
+            const dup = existing.data.find(i => i.title === title);
+            if (dup) {
+              console.log(`Issue already open: ${dup.html_url}`);
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['noir-version-drift'],
+            });
+
+      - name: Mark job failed when bump breaks the suite
+        if: steps.test.outcome == 'failure'
+        run: exit 1

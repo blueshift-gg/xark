@@ -1,0 +1,8 @@
+{
+  "curve": "bn254",
+  "field": "fr",
+  "encoding": "decimal-string",
+  "inputs": [
+    "81"
+  ]
+}

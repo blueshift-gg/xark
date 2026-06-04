@@ -1,0 +1,6 @@
+[package]
+name = "memory_var"
+type = "bin"
+authors = [""]
+
+[dependencies]
