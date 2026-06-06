@@ -9,24 +9,24 @@ use std::collections::BTreeMap;
 
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
+use ark_relations::gr1cs::{ConstraintSystemRef, LinearCombination, SynthesisError, Variable};
 use ark_relations::lc;
-use ark_relations::r1cs::{ConstraintSystemRef, LinearCombination, SynthesisError, Variable};
 
 use crate::artifact::WitnessIndex;
-use crate::witness::{WitnessMap, CALLEE_NAMESPACE_STRIDE};
+use crate::witness::{CALLEE_NAMESPACE_STRIDE, WitnessMap};
 
 /// Tracks the Arkworks `Variable` allocated for each ACIR witness.
 pub struct R1csBuilder<'a> {
     cs: ConstraintSystemRef<Fr>,
     map: BTreeMap<WitnessIndex, Variable>,
     witness: Option<&'a WitnessMap<Fr>>,
-    /// Auxiliary witness values injected by Call lowering (B.5). When
+    /// Auxiliary witness values injected by Call lowering. When
     /// inlining a callee circuit, we shift the callee's witness indices by
     /// a per-call offset and inject the shifted (index, value) pairs here
     /// so downstream `alloc_witness` lookups succeed without disturbing the
     /// main witness map.
     extra_witnesses: BTreeMap<WitnessIndex, Fr>,
-    /// Next free offset for Call-namespace shifting (B.5). Each call site
+    /// Next free offset for Call-namespace shifting. Each call site
     /// (top-level *or* nested) grabs `CALLEE_NAMESPACE_STRIDE` of fresh
     /// witness-index space and then bumps this counter. The first allocation
     /// returns `CALLEE_NAMESPACE_STRIDE` (so the main circuit's witnesses,
@@ -40,12 +40,11 @@ pub struct R1csBuilder<'a> {
     /// via [`R1csBuilder::enforce`] is gated by `p` using the auxiliary-error
     /// trick: emit `A·B = C + e` plus `p·e = 0`, where `e = A·B − C` is a
     /// fresh witness. This makes every gadget (RANGE, SHA-256, Keccak,
-    /// memory ops, ...) work uniformly under a Call's predicate without
+    /// memory ops,...) work uniformly under a Call's predicate without
     /// per-gadget refactoring; the cost is roughly 2× the constraint count
     /// for code paths emitted while a predicate is active. Pushed/popped by
     /// [`R1csBuilder::push_predicate`] and the matching restore helper at
-    /// Call-inlining sites in `lower::lower_call_at`. See ROADMAP step
-    /// WS-B.5 follow-up.
+    /// Call-inlining sites in `lower::lower_call_at`.
     current_predicate: Option<Variable>,
 }
 
@@ -106,7 +105,7 @@ impl<'a> R1csBuilder<'a> {
 
     /// Inject (index → value) pairs into the auxiliary witness pool consulted
     /// by `alloc_witness` and `maybe_witness_value`. Used by Call lowering
-    /// (B.5) to supply the shifted callee witness map.
+    /// to supply the shifted callee witness map.
     pub fn inject_witnesses(&mut self, values: impl IntoIterator<Item = (WitnessIndex, Fr)>) {
         self.extra_witnesses.extend(values);
     }
@@ -185,7 +184,7 @@ impl<'a> R1csBuilder<'a> {
         c: LinearCombination<Fr>,
     ) -> Result<(), SynthesisError> {
         match self.current_predicate {
-            None => self.cs.enforce_constraint(a, b, c),
+            None => self.cs.enforce_r1cs_constraint(|| a, || b, || c),
             Some(p) => self.enforce_gated(a, b, c, p),
         }
     }
@@ -211,10 +210,10 @@ impl<'a> R1csBuilder<'a> {
             // Original constraint is `0 · 0 = C`, equivalent to `C = 0`.
             // Gated form: `p · C = 0`. When `p = 0`, the constraint is
             // satisfied for any value of `C`; when `p = 1`, `C = 0`.
-            return self.cs.enforce_constraint(
-                LinearCombination::from((Fr::one(), p)),
-                c,
-                lc!(),
+            return self.cs.enforce_r1cs_constraint(
+                || LinearCombination::from((Fr::one(), p)),
+                || c,
+                || lc!(),
             );
         }
 
@@ -237,15 +236,15 @@ impl<'a> R1csBuilder<'a> {
         // Modified original: `A · B = C + e` ⇔ `A · B - C - e = 0`.
         let mut c_plus_e = c;
         c_plus_e.0.push((Fr::one(), e));
-        self.cs.enforce_constraint(a, b, c_plus_e)?;
+        self.cs.enforce_r1cs_constraint(|| a, || b, || c_plus_e)?;
 
         // Gating: `p · e = 0`. When `p = 0`, `e` is unconstrained (so the
         // original A·B = C is disabled). When `p = 1`, `e = 0`, so the
         // modified original collapses to A·B = C exactly.
-        self.cs.enforce_constraint(
-            LinearCombination::from((Fr::one(), p)),
-            LinearCombination::from((Fr::one(), e)),
-            lc!(),
+        self.cs.enforce_r1cs_constraint(
+            || LinearCombination::from((Fr::one(), p)),
+            || LinearCombination::from((Fr::one(), e)),
+            || lc!(),
         )?;
         Ok(())
     }

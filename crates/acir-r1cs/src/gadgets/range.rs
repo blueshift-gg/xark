@@ -2,14 +2,14 @@
 //!
 //! `decompose_into_bits(v, n)` allocates `n` boolean witnesses `b_0..b_{n-1}`
 //! and enforces:
-//!   1. each `b_i` is in `{0, 1}` (via [`enforce_boolean`]),
-//!   2. `sum_i 2^i * b_i = v`.
+//! 1. each `b_i` is in `{0, 1}` (via [`enforce_boolean`]),
+//! 2. `sum_i 2^i * b_i = v`.
 //!
 //! A pure range check is the same thing with the bits discarded.
 
 use ark_bn254::Fr;
 use ark_ff::{One, PrimeField};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::field::fr_to_be_bytes;
 use crate::gadgets::boolean::enforce_boolean;
@@ -27,11 +27,7 @@ fn ith_bit(value: Option<Fr>, i: usize) -> Option<Fr> {
         let byte_index = 31 - i / 8;
         let bit_within = i % 8;
         let bit = (bytes[byte_index] >> bit_within) & 1;
-        if bit == 1 {
-            Fr::one()
-        } else {
-            Fr::from(0u64)
-        }
+        if bit == 1 { Fr::one() } else { Fr::from(0u64) }
     })
 }
 

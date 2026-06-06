@@ -7,24 +7,23 @@
 //!
 //! Operations:
 //!
-//! | op        | constraints / 32-bit word                                          |
+//! | op | constraints / 32-bit word |
 //! |-----------|--------------------------------------------------------------------|
-//! | `rotr`    | 0 (pure index permutation)                                         |
-//! | `shr`     | 0 (top `k` bits become the zero LC)                                |
-//! | `not`     | 0 (per-bit `1 - x` LC)                                             |
-//! | `and`     | 32 (`a_i * b_i = out_i`, output implicitly boolean)                |
-//! | `xor`     | 32 (`(2 a_i) * b_i = aux_i`, plus output LC `a + b - aux`)         |
-//! | `add_mod` | 32 (boolean bits) + 1 small linear (recompose), per call            |
+//! | `rotr` | 0 (pure index permutation) |
+//! | `shr` | 0 (top `k` bits become the zero LC) |
+//! | `not` | 0 (per-bit `1 - x` LC) |
+//! | `and` | 32 (`a_i * b_i = out_i`, output implicitly boolean) |
+//! | `xor` | 32 (`(2 a_i) * b_i = aux_i`, plus output LC `a + b - aux`) |
+//! | `add_mod` | 32 (boolean bits) + 1 small linear (recompose), per call |
 //!
 //! For widths other than 32 (e.g. `u8`, `u16`, `u64`), see [`WordN`] and
 //! [`and_n`] / [`xor_n`]. These mirror the 32-bit primitives but parameterise
 //! the bit width. Used by `BlackBoxFuncCall::{AND, XOR}` for Noir integer
-//! types of arbitrary width up to 64. See ROADMAP step **WS-B.1** for the
-//! design.
+//! types of arbitrary width up to 64.
 
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::gadgets::boolean::enforce_boolean;
 use crate::gadgets::range::{decompose_into_bits, enforce_recompose_equals, pow2};
@@ -297,7 +296,7 @@ fn log2_ceil(n: usize) -> usize {
 /// Maximum bit width accepted by [`WordN`] / [`and_n`] / [`xor_n`].
 ///
 /// Noir's `BlackBoxFuncCall::{AND, XOR}` carry a `num_bits: u32` width.
-/// Per ROADMAP step **WS-B.1**, we cap at 64 bits — wider integer types are
+/// We cap at 64 bits — wider integer types are
 /// not part of Noir's surface for these opcodes.
 pub const WORDN_MAX_BITS: usize = 64;
 
@@ -305,7 +304,7 @@ pub const WORDN_MAX_BITS: usize = 64;
 /// proving-time concrete value (stored as `u64`).
 ///
 /// Used for the variable-width path that backs `BlackBoxFuncCall::{AND, XOR}`.
-/// See ROADMAP step **WS-B.1** for context. For the fixed 32-bit path used by
+/// For the fixed 32-bit path used by
 /// SHA-256, see [`Word32`].
 #[derive(Clone)]
 pub struct WordN {
@@ -343,8 +342,8 @@ impl WordN {
     ) -> Result<Self, SynthesisError> {
         assert!(
             (1..=WORDN_MAX_BITS).contains(&num_bits),
-            "WordN width {num_bits} out of range; see ROADMAP step WS-B.1 \
-             ({WORDN_MAX_BITS}-bit cap on BlackBoxFuncCall::AND/XOR)"
+            "WordN width {num_bits} out of range \
+ (max {WORDN_MAX_BITS} bits; cap on BlackBoxFuncCall::AND/XOR)"
         );
         let bit_vars = decompose_into_bits(builder, value_var, num_bits, value)?;
         let u64_value = value.map(fr_to_u64_low);
@@ -384,7 +383,7 @@ pub fn and_n(builder: &mut R1csBuilder<'_>, a: &WordN, b: &WordN) -> Result<Word
     let num_bits = a.num_bits;
     assert!(
         (1..=WORDN_MAX_BITS).contains(&num_bits),
-        "and_n: width {num_bits} out of range; see ROADMAP step WS-B.1"
+        "and_n: width {num_bits} out of range (max {WORDN_MAX_BITS} bits)"
     );
 
     let out_value = match (a.value, b.value) {
@@ -411,7 +410,7 @@ pub fn and_n(builder: &mut R1csBuilder<'_>, a: &WordN, b: &WordN) -> Result<Word
 }
 
 /// N-way bitwise XOR of arbitrary-width words (all the same width).
-/// Computes `out_i = b1_i ⊕ b2_i ⊕ ... ⊕ bN_i` per bit position via the
+/// Computes `out_i = b1_i ⊕ b2_i ⊕... ⊕ bN_i` per bit position via the
 /// parity identity `Σ_j bj_i = out_i + 2·k_i`, where `k_i ∈ [0, ⌊N/2⌋]`
 /// is a small auxiliary carry. Cost per bit ≈ `1 boolean (out) + ceil(log2(⌊N/2⌋+1)) booleans (k) + 1 linear`.
 ///
@@ -439,21 +438,17 @@ pub fn xor_n_inputs(
     let carry_bits = max(1, bit_width_for(max_carry));
 
     // Aggregate proving-time value: XOR all inputs together.
-    let out_value: Option<u64> = inputs.iter().try_fold(0u64, |acc, w| w.value.map(|v| acc ^ v));
+    let out_value: Option<u64> = inputs
+        .iter()
+        .try_fold(0u64, |acc, w| w.value.map(|v| acc ^ v));
 
     let mut out_bits: Vec<LinearCombination<Fr>> = Vec::with_capacity(num_bits);
     for bit_i in 0..num_bits {
         // Sum the i-th input bits' values at proving time.
-        let sum_val: Option<u64> = inputs.iter().try_fold(0u64, |acc, w| {
-            w.value.map(|v| acc + ((v >> bit_i) & 1))
-        });
-        let out_bit_val = sum_val.map(|s| {
-            if s & 1 == 1 {
-                Fr::one()
-            } else {
-                Fr::zero()
-            }
-        });
+        let sum_val: Option<u64> = inputs
+            .iter()
+            .try_fold(0u64, |acc, w| w.value.map(|v| acc + ((v >> bit_i) & 1)));
+        let out_bit_val = sum_val.map(|s| if s & 1 == 1 { Fr::one() } else { Fr::zero() });
         let out_var = builder.alloc_with_value(out_bit_val)?;
         enforce_boolean(builder, out_var)?;
 
@@ -509,7 +504,7 @@ pub fn xor_n(builder: &mut R1csBuilder<'_>, a: &WordN, b: &WordN) -> Result<Word
     let num_bits = a.num_bits;
     assert!(
         (1..=WORDN_MAX_BITS).contains(&num_bits),
-        "xor_n: width {num_bits} out of range; see ROADMAP step WS-B.1"
+        "xor_n: width {num_bits} out of range (max {WORDN_MAX_BITS} bits)"
     );
 
     let two = Fr::one() + Fr::one();
@@ -567,10 +562,10 @@ fn fr_to_u64_low(fr: Fr) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_relations::r1cs::ConstraintSystem;
-    use rand::rngs::StdRng;
+    use ark_relations::gr1cs::ConstraintSystem;
     use rand::Rng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn alloc_constant_word(builder: &mut R1csBuilder<'_>, value: u32) -> Word32 {
         // Build 32 fresh boolean wires for the value; gives us a full-Variable Word32
@@ -607,8 +602,8 @@ mod tests {
     fn xor_matches_native_random() {
         let mut rng = StdRng::seed_from_u64(0xCAFE_F00D);
         for _ in 0..10 {
-            let a: u32 = rng.gen();
-            let b: u32 = rng.gen();
+            let a: u32 = rng.r#gen();
+            let b: u32 = rng.r#gen();
             assert!(
                 run(|builder| {
                     let aw = alloc_constant_word(builder, a);
@@ -625,8 +620,8 @@ mod tests {
     fn and_matches_native_random() {
         let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
         for _ in 0..10 {
-            let a: u32 = rng.gen();
-            let b: u32 = rng.gen();
+            let a: u32 = rng.r#gen();
+            let b: u32 = rng.r#gen();
             assert!(
                 run(|builder| {
                     let aw = alloc_constant_word(builder, a);
@@ -643,7 +638,7 @@ mod tests {
     fn not_rotr_shr_match_native() {
         let mut rng = StdRng::seed_from_u64(0x1234_5678);
         for _ in 0..10 {
-            let a: u32 = rng.gen();
+            let a: u32 = rng.r#gen();
             let k = rng.gen_range(0..32);
             assert!(
                 run(|builder| {
@@ -664,7 +659,7 @@ mod tests {
     fn add_mod_32_matches_native() {
         let mut rng = StdRng::seed_from_u64(0xABCD_0001);
         for _ in 0..10 {
-            let vals: Vec<u32> = (0..5).map(|_| rng.gen()).collect();
+            let vals: Vec<u32> = (0..5).map(|_| rng.r#gen()).collect();
             let expect = vals.iter().fold(0u32, |acc, &x| acc.wrapping_add(x));
             let vals_clone = vals.clone();
             assert!(
@@ -714,8 +709,8 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0xA11D_AA7E);
         for &num_bits in &[8usize, 16, 32, 64] {
             for _ in 0..8 {
-                let a: u64 = rng.gen::<u64>() & mask(num_bits);
-                let b: u64 = rng.gen::<u64>() & mask(num_bits);
+                let a: u64 = rng.r#gen::<u64>() & mask(num_bits);
+                let b: u64 = rng.r#gen::<u64>() & mask(num_bits);
                 let expect = a & b;
                 assert!(
                     run(|builder| {
@@ -736,8 +731,8 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x8E7E_4042);
         for &num_bits in &[8usize, 16, 32, 64] {
             for _ in 0..8 {
-                let a: u64 = rng.gen::<u64>() & mask(num_bits);
-                let b: u64 = rng.gen::<u64>() & mask(num_bits);
+                let a: u64 = rng.r#gen::<u64>() & mask(num_bits);
+                let b: u64 = rng.r#gen::<u64>() & mask(num_bits);
                 let expect = a ^ b;
                 assert!(
                     run(|builder| {

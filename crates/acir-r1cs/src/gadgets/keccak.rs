@@ -1,20 +1,20 @@
-//! Keccak-f[1600] permutation gadget (ROADMAP step **WS-D.1**).
+//! Keccak-f[1600] permutation gadget.
 //!
 //! Implements the FIPS 202 Keccak-f[1600] permutation as 24 rounds over a 5x5
 //! array of 64-bit lanes. Each lane is held as a 64-bit [`WordN`] (LSB first).
 //!
 //! The four bit-twiddles needed by Keccak are:
 //!
-//! | op            | R1CS cost per 64-bit lane                                                     |
+//! | op | R1CS cost per 64-bit lane |
 //! |---------------|-------------------------------------------------------------------------------|
-//! | `rotl_lane`   | 0 (pure index permutation; no fresh witnesses, no constraints)                 |
-//! | `not_lane`    | 0 (per-bit `1 - x` LC; no fresh witnesses, no constraints)                     |
-//! | `xor_n`       | 64 (one fresh boolean witness per bit + the `(2a)*b = a+b-out` XOR constraint)  |
-//! | `and_n`       | 64 (one fresh witness per bit; constraint `a_i * b_i = out_i`)                  |
+//! | `rotl_lane` | 0 (pure index permutation; no fresh witnesses, no constraints) |
+//! | `not_lane` | 0 (per-bit `1 - x` LC; no fresh witnesses, no constraints) |
+//! | `xor_n` | 64 (one fresh boolean witness per bit + the `(2a)*b = a+b-out` XOR constraint) |
+//! | `and_n` | 64 (one fresh witness per bit; constraint `a_i * b_i = out_i`) |
 //!
 //! Per round we use roughly:
 //! * θ: 5 lane-XORs (the column parities) + 5 lane-XORs (D = C[x-1] XOR rotl(C[x+1],1))
-//!   + 25 lane-XORs (A'[x,y] = A[x,y] XOR D[x]) ≈ 35 × 64 = ~2240 XOR constraints.
+//! + 25 lane-XORs (A'[x,y] = A[x,y] XOR D[x]) ≈ 35 × 64 = ~2240 XOR constraints.
 //! * ρ + π: 0 (pure permutations).
 //! * χ: 25 NOT + 25 AND + 25 XOR = 25 × (64 + 64) = ~3200 constraints.
 //! * ι: one lane-XOR with the round-constant lane ≈ 64 constraints.
@@ -27,9 +27,9 @@
 
 use ark_bn254::Fr;
 use ark_ff::One;
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
-use crate::gadgets::bitwise::{and_n, xor_n, xor_n_inputs, WordN};
+use crate::gadgets::bitwise::{WordN, and_n, xor_n, xor_n_inputs};
 use crate::gadgets::range::{decompose_into_bits, enforce_recompose_equals};
 use crate::r1cs_builder::R1csBuilder;
 
@@ -340,10 +340,10 @@ mod tests {
     use super::*;
     use crate::witness::WitnessMap;
     use ark_ff::PrimeField;
-    use ark_relations::r1cs::ConstraintSystem;
-    use rand::rngs::StdRng;
+    use ark_relations::gr1cs::ConstraintSystem;
     use rand::Rng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Expected output of Keccak-f[1600] applied to the all-zero state.
     ///
@@ -391,12 +391,8 @@ mod tests {
         (v, Some(fr))
     }
 
-    fn lane_var_value(cs: &ark_relations::r1cs::ConstraintSystemRef<Fr>, v: Variable) -> Fr {
-        // Variable::Witness(k) maps to the proving-time assignment at index k.
-        match v {
-            Variable::Witness(idx) => cs.borrow().unwrap().witness_assignment[idx],
-            _ => panic!("lane_var_value: not a witness"),
-        }
+    fn lane_var_value(cs: &ark_relations::gr1cs::ConstraintSystemRef<Fr>, v: Variable) -> Fr {
+        cs.assigned_value(v).expect("variable has an assignment")
     }
 
     fn fr_to_u64(fr: Fr) -> u64 {
@@ -460,7 +456,7 @@ mod tests {
     #[test]
     fn in_circuit_random_state_matches_native() {
         let mut rng = StdRng::seed_from_u64(0xD1_D1_D1_D1);
-        let input: [u64; KECCAK_LANES] = std::array::from_fn(|_| rng.gen::<u64>());
+        let input: [u64; KECCAK_LANES] = std::array::from_fn(|_| rng.r#gen::<u64>());
 
         let mut expected = input;
         keccakf1600_native(&mut expected);

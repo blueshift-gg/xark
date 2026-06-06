@@ -1,5 +1,5 @@
-//! Lowering arms for `Opcode::MemoryInit` and `Opcode::MemoryOp` (ROADMAP
-//! steps **WS-C.4** + **WS-C.5**, design note in `docs/memory.md`).
+//! Lowering arms for `Opcode::MemoryInit` and `Opcode::MemoryOp` (design
+//! note in `docs/memory.md`).
 //!
 //! `MemoryInit` allocates an Arkworks `Variable` for each init witness and
 //! records the per-slot `(Variable, Option<Fr>)` pair (alias
@@ -32,13 +32,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use acir::circuit::opcodes::{BlockId, BlockType, MemOp, MemOpKind};
-use acir::circuit::Opcode;
-use acir::native_types::Witness;
 use acir::FieldElement;
+use acir::circuit::Opcode;
+use acir::circuit::opcodes::{BlockId, BlockType, MemOp, MemOpKind};
+use acir::native_types::Witness;
 use ark_bn254::Fr;
 use ark_ff::{Field, One, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::artifact::WitnessIndex;
 use crate::error::BackendError;
@@ -52,8 +52,8 @@ use crate::r1cs_builder::R1csBuilder;
 /// This is the **conservative** detector described in `docs/memory.md`:
 /// any witness pinned via this single-term shape is detected. Witnesses
 /// indirectly pinned through mul terms or longer linear chains are missed
-/// — those `MemoryOp`s will fall through to the variable-index rejection
-/// path and surface as the user-facing "see WS-C.5" error.
+/// — those `MemoryOp`s fall through to the variable-index lowering path
+/// (the selector argument).
 pub fn extract_pinned_constants(opcodes: &[Opcode<FieldElement>]) -> BTreeMap<WitnessIndex, Fr> {
     let mut pinned: BTreeMap<WitnessIndex, Fr> = BTreeMap::new();
     for op in opcodes {
@@ -132,9 +132,9 @@ pub fn lower_memory_init(
             opcode: "MemoryInit[databus]".to_string(),
             index: opcode_index,
             help: "Databus memory blocks (BlockType::CallData / ReturnData) are not \
-                   supported by the xark backend. Recompile the Noir program \
-                   without --enable-databus, or file an issue if you need this \
-                   feature for recursive proof schemes."
+ supported by the xark backend. Recompile the Noir program \
+ without --enable-databus, or file an issue if you need this \
+ feature for recursive proof schemes."
                 .to_string(),
         });
     }
@@ -156,8 +156,8 @@ pub fn lower_memory_init(
 
 /// Lower an `Opcode::MemoryOp`. Constant-index reads emit a single
 /// equality constraint to the shadow witness; constant-index writes update
-/// the shadow without emitting a constraint. Variable-index ops are
-/// rejected with the "see ROADMAP WS-C.5" error.
+/// the shadow without emitting a constraint. Variable-index reads and
+/// writes are lowered via the selector argument.
 pub fn lower_memory_op(
     builder: &mut R1csBuilder<'_>,
     pinned_constants: &BTreeMap<WitnessIndex, Fr>,
@@ -174,8 +174,8 @@ pub fn lower_memory_op(
                 index: opcode_index,
                 help: format!(
                     "MemoryOp references block id {block_id} which was never \
-                 declared via MemoryInit. This is malformed ACIR; \
-                 regenerate the artifact with a clean `nargo execute`."
+ declared via MemoryInit. This is malformed ACIR; \
+ regenerate the artifact with a clean `nargo execute`."
                 ),
             })?;
 
@@ -186,7 +186,7 @@ pub fn lower_memory_op(
     let index_fr = match index_fr_opt {
         Some(fr) => fr,
         None => {
-            // Variable-index path (ROADMAP step WS-C.5). Handles both reads
+            // Variable-index path. Handles both reads
             // (selector argument over the shadow Variables) and writes
             // (selector-gated per-slot shadow update).
             return lower_memory_op_variable_index(
@@ -204,8 +204,8 @@ pub fn lower_memory_op(
         opcode: "MemoryOp[out-of-range-constant-index]".to_string(),
         index: opcode_index,
         help: "Constant index does not fit in `usize`. This is almost certainly \
-               a bug in the Noir source — array indices should be small \
-               nonnegative integers."
+ a bug in the Noir source — array indices should be small \
+ nonnegative integers."
             .to_string(),
     })?;
 
@@ -215,7 +215,7 @@ pub fn lower_memory_op(
             index: opcode_index,
             help: format!(
                 "Constant index {j} is out of bounds for block of length {len}. \
-                 This is a bug in the Noir source.",
+ This is a bug in the Noir source.",
                 len = shadow.len()
             ),
         });
@@ -256,18 +256,18 @@ fn synthesis_to_backend(err: SynthesisError) -> BackendError {
     }
 }
 
-/// Selector-argument lowering for variable-index memory ops (ROADMAP step
-/// **WS-C.5**, see `docs/memory.md`). For an `N`-slot block we allocate
+/// Selector-argument lowering for variable-index memory ops (see
+/// `docs/memory.md`). For an `N`-slot block we allocate
 /// `N` boolean selectors `s_j`, enforce `Σ s_j = 1` and `s_j * (index - j) = 0`
 /// for each `j`, then express the read result as `value = Σ s_j * arr[j]`.
 /// Per-access cost: `2N + 2` boolean + linear constraints, plus `N` mul
 /// constraints for the selected-slot products.
 ///
-/// Writes via variable-index are not yet implemented: the selector-gated
-/// shadow update introduces a per-slot fresh witness with its value
-/// constrained by `arr_post[j] = (1-s_j)*arr_pre[j] + s_j*value`, which is
-/// straightforward to write but bumps the constraint cost to `~3N` per
-/// write. Tracked as a follow-up.
+/// Variable-index writes use a selector-gated shadow update: each slot gets a
+/// fresh `arr_post[j]` witness constrained by
+/// `arr_post[j] = (1-s_j)*arr_pre[j] + s_j*value` (emitted as
+/// `s_j * (value - arr_pre[j]) = arr_post[j] - arr_pre[j]`), bumping the cost
+/// to `~3N` per write. See the `MemOpKind::Write` arm below.
 fn lower_memory_op_variable_index(
     builder: &mut R1csBuilder<'_>,
     shadow: &mut [ShadowEntry],
@@ -300,7 +300,7 @@ fn lower_memory_op_variable_index(
                 index: opcode_index,
                 help: format!(
                     "Variable-index access resolved to slot {j} but block has \
-                     length {n}. This is a Noir-source bug."
+ length {n}. This is a Noir-source bug."
                 ),
             });
         }
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn variable_index_read_two_slot_block_satisfies() {
         use crate::witness::WitnessMap;
-        use ark_relations::r1cs::ConstraintSystem;
+        use ark_relations::gr1cs::ConstraintSystem;
         let mut witness_map = WitnessMap::<Fr>::new();
         witness_map.insert(WitnessIndex(100), Fr::from(7u64));
         witness_map.insert(WitnessIndex(101), Fr::from(13u64));
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn variable_index_read_inconsistent_witness_unsatisfied() {
         use crate::witness::WitnessMap;
-        use ark_relations::r1cs::ConstraintSystem;
+        use ark_relations::gr1cs::ConstraintSystem;
         let mut witness_map = WitnessMap::<Fr>::new();
         witness_map.insert(WitnessIndex(100), Fr::from(7u64));
         witness_map.insert(WitnessIndex(101), Fr::from(13u64));
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn variable_index_write_then_read_propagates_new_value() {
         use crate::witness::WitnessMap;
-        use ark_relations::r1cs::ConstraintSystem;
+        use ark_relations::gr1cs::ConstraintSystem;
         let mut witness_map = WitnessMap::<Fr>::new();
         // Block init: [10, 20, 30] at witnesses 100, 101, 102.
         witness_map.insert(WitnessIndex(100), Fr::from(10u64));
@@ -626,7 +626,7 @@ mod tests {
     #[test]
     fn variable_index_write_does_not_affect_other_slots() {
         use crate::witness::WitnessMap;
-        use ark_relations::r1cs::ConstraintSystem;
+        use ark_relations::gr1cs::ConstraintSystem;
         let mut witness_map = WitnessMap::<Fr>::new();
         witness_map.insert(WitnessIndex(100), Fr::from(10u64));
         witness_map.insert(WitnessIndex(101), Fr::from(20u64));

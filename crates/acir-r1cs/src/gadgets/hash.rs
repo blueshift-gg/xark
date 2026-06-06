@@ -9,9 +9,9 @@
 
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
-use crate::gadgets::bitwise::{add_mod_32, and, not, rotr, shr, xor, Word32};
+use crate::gadgets::bitwise::{Word32, add_mod_32, and, not, rotr, shr, xor};
 use crate::gadgets::range::decompose_into_bits;
 use crate::r1cs_builder::R1csBuilder;
 
@@ -157,13 +157,7 @@ fn xor_triple(
             (Some(x), Some(y), Some(z)) => Some(x + y + z),
             _ => None,
         };
-        let out_bit_val = sum_val.map(|s| {
-            if s & 1 == 1 {
-                Fr::one()
-            } else {
-                Fr::zero()
-            }
-        });
+        let out_bit_val = sum_val.map(|s| if s & 1 == 1 { Fr::one() } else { Fr::zero() });
         let out_var = builder.alloc_with_value(out_bit_val)?;
         enforce_boolean(builder, out_var)?;
 
@@ -210,9 +204,8 @@ mod tests {
     use super::*;
     use crate::witness::WitnessMap;
     use ark_ff::One;
-    use ark_relations::r1cs::ConstraintSystem;
-    use sha2::compress256;
-    use sha2::digest::generic_array::GenericArray;
+    use ark_relations::gr1cs::ConstraintSystem;
+    use sha2::block_api::compress256;
 
     fn alloc_word_with_bits(builder: &mut R1csBuilder<'_>, value: u32) -> Word32 {
         let mut bit_vars = Vec::with_capacity(32);
@@ -238,7 +231,7 @@ mod tests {
         // length in bits = 24, big-endian in last 8 bytes.
         block[63] = 24;
 
-        // Reference: sha2's compress256 takes a slice of GenericArray<u8,64>.
+        // Reference: sha2 0.11's compress256 takes a slice of `[u8; 64]`.
         let mut state = [
             0x6a09e667u32,
             0xbb67ae85,
@@ -249,12 +242,11 @@ mod tests {
             0x1f83d9ab,
             0x5be0cd19,
         ];
-        let block_arr = GenericArray::clone_from_slice(&block);
-        compress256(&mut state, &[block_arr]);
+        compress256(&mut state, &[block]);
 
         let expected = state;
         // SHA-256("abc") canonical: ba7816bf 8f01cfea 414140de 5dae2223
-        //                          b00361a3 96177a9c b410ff61 f20015ad
+        // b00361a3 96177a9c b410ff61 f20015ad
         assert_eq!(expected[0], 0xba7816bf);
         assert_eq!(expected[7], 0xf20015ad);
 

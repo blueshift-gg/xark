@@ -1,30 +1,27 @@
 name: Solana E2E
 
-# Roadmap step **E.2.d** — end-to-end on-chain verification harness.
-#
-# This workflow runs the Mollusk-driven SBF integration tests for the
-# `xark-solana-verifier` program. Mollusk only accepts SBF ELF binaries
-# (no host-side Rust processor API exists), so this job installs the Anza
-# Solana toolchain and runs `cargo build-sbf` before `cargo test`. The
-# main `ci.yml` workflow does not need the Solana toolchain because the
-# Mollusk tests are gated behind the `ark-backend` feature *and* the
-# harness skips when the SBF ELF is absent.
+# On-chain verifier tests. The `#[svm_test]` bodies in
+# `crates/tests/tests/sbpf.rs` are each compiled to their own SBF program
+# (svm-unit-test shells out to `cargo build-sbf`) and run in Mollusk on the
+# real `alt_bn128` syscalls — positive across every committed circuit, plus
+# negative tests that bad inputs are rejected on chain. This needs the Anza
+# Solana toolchain, so it lives in its own workflow gated to verifier changes.
 
 on:
   push:
     paths:
-      - "crates/xark-solana-verifier/**"
-      - "crates/groth16-backend/src/solana.rs"
+      - "crates/verifier/**"
+      - "crates/backend/src/solana.rs"
       - ".github/workflows/solana-ci.yml"
   pull_request:
     paths:
-      - "crates/xark-solana-verifier/**"
-      - "crates/groth16-backend/src/solana.rs"
+      - "crates/verifier/**"
+      - "crates/backend/src/solana.rs"
       - ".github/workflows/solana-ci.yml"
 
 jobs:
-  mollusk-e2e:
-    name: mollusk on-chain verifier tests
+  sbpf:
+    name: on-chain verifier tests (Mollusk + SBF)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -47,11 +44,7 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
-      - name: Build SBF program
-        working-directory: crates/xark-solana-verifier
-        run: cargo build-sbf
-
-      - name: Run on-chain verifier tests (release)
-        # Release-mode mandatory: the `verify_arithmetic_square_proof_via_ark_backend`
-        # test runs a real Groth16 prove + verify, which is unusably slow in debug.
-        run: cargo test -p xark-solana-verifier --features ark-backend --release
+      - name: Run on-chain verifier tests
+        # svm-unit-test invokes `cargo build-sbf` per `#[svm_test]`; --release
+        # because the bodies run real Groth16 verification.
+        run: cargo test -p xark-tests --test sbpf --release

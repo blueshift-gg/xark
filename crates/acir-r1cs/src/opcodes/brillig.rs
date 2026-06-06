@@ -1,4 +1,4 @@
-//! Lowering arm for `Opcode::BrilligCall` (ROADMAP step **WS-C.2**).
+//! Lowering arm for `Opcode::BrilligCall`.
 //!
 //! Brillig is Noir's unconstrained VM used to compute *hint* witnesses
 //! (modular inverses, bit decompositions, division quotient/remainder, etc.).
@@ -25,7 +25,7 @@
 //! effect is already encoded in the ACIR we lower.
 
 use acir::circuit::brillig::BrilligOutputs;
-use ark_relations::r1cs::SynthesisError;
+use ark_relations::gr1cs::SynthesisError;
 
 use crate::artifact::WitnessIndex;
 use crate::r1cs_builder::R1csBuilder;

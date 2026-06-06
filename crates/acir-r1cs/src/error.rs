@@ -22,8 +22,8 @@ pub enum BackendError {
 
     #[error(
         "Missing witness value: witness {witness}\n\n\
-         The circuit references witness {witness}, but it was not present in the witness file.\n\
-         Regenerate the witness with `nargo execute`."
+ The circuit references witness {witness}, but it was not present in the witness file.\n\
+ Regenerate the witness with `nargo execute`."
     )]
     MissingWitness { witness: u32 },
 
@@ -32,8 +32,8 @@ pub enum BackendError {
 
     #[error(
         "Unsupported Noir/ACIR artifact version.\n\n\
-         Supported:\n  Noir: {supported}\nFound:\n  {found}\n\n\
-         Pin nargo to the supported version or update acir-r1cs parsing."
+ Supported:\n Noir: {supported}\nFound:\n {found}\n\n\
+ Pin nargo to the supported version or update acir-r1cs parsing."
     )]
     ArtifactVersionUnsupported { found: String, supported: String },
 

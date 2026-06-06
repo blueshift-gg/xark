@@ -115,12 +115,12 @@ jobs:
         if: steps.resolve.outputs.target_tag != steps.resolve.outputs.current_tag
         run: |
           export PATH="$HOME/.nargo/bin:$PATH"
-          # Each example regenerates its own .json + .gz under examples/<name>/target/.
-          # The fixtures under tests/fixtures/ are then refreshed by the
-          # `regenerate-fixtures` helper (no such helper today — this step
-          # documents intent; until WS-E lands a tool here, the test suite
-          # uses the example outputs directly).
-          for dir in examples/*/; do
+          # Each circuit regenerates its own .json + .gz under
+          # crates/tests/circuits/<name>/target/. The fixtures under
+          # crates/tests/fixtures/ are then refreshed by hand (no automated
+          # helper today — this step just documents intent; the test suite
+          # uses the circuit outputs directly).
+          for dir in crates/tests/circuits/*/; do
             (cd "$dir" && nargo compile 2>&1 | head -20 && nargo execute 2>&1 | head -5) || true
           done
 

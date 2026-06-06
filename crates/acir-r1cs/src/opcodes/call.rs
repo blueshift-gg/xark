@@ -1,4 +1,4 @@
-//! Cross-circuit `Opcode::Call` lowering (ROADMAP step **WS-B.5**).
+//! Cross-circuit `Opcode::Call` lowering.
 //!
 //! Strategy: inline the callee circuit's opcodes into the caller's
 //! `ConstraintSystem`, rewriting every callee `Witness` index by adding a
@@ -19,10 +19,12 @@
 //!
 //! ## Predicate
 //!
-//! Only the trivial predicate is supported in this revision: the call must
-//! be unconditional (predicate evaluates to a constant `1`). Predicated
-//! calls would require gating every emitted constraint by the predicate, a
-//! larger refactor that's tracked as a follow-up.
+//! Both unconditional and predicated calls are supported. When the predicate
+//! is the constant `1` (the common case) the call is inlined directly; for a
+//! non-trivial predicate, `lower.rs` materialises it, range-checks it to
+//! `{0,1}`, combines it with any outer call-site predicate, and gates every
+//! constraint the callee emits via the builder's auxiliary-error predicate
+//! mechanism (see [`crate::r1cs_builder::R1csBuilder::push_predicate`]).
 //!
 //! ## Recursion
 //!
@@ -34,14 +36,14 @@
 //! [`R1csBuilder::alloc_call_offset`], so independent invocations can never
 //! alias each other.
 
+use acir::FieldElement;
 use acir::circuit::brillig::BrilligOutputs;
-use acir::circuit::opcodes::{BlackBoxFuncCall, BlockId, FunctionInput, MemOp};
+use acir::circuit::opcodes::{BlackBoxFuncCall, BlockId, FunctionInput};
 use acir::circuit::{Circuit, Opcode};
 use acir::native_types::{Expression, Witness};
-use acir::FieldElement;
 use ark_bn254::Fr;
 use ark_ff::One;
-use ark_relations::r1cs::LinearCombination;
+use ark_relations::gr1cs::LinearCombination;
 use std::collections::BTreeMap;
 
 use crate::artifact::WitnessIndex;
@@ -403,11 +405,3 @@ fn alias(
         })?;
     Ok(())
 }
-
-/// Lightweight test-only helper: the dispatch in `lower.rs` checks `Memlon::Memory`
-/// for `_phantom` unused-field via a `_` discard in destructuring. Keep this trait
-/// import alive for documentation.
-#[allow(dead_code)]
-const _: fn() = || {
-    let _ = MemOp::<FieldElement>::read_at_mem_index;
-};

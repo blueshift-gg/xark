@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use acir::native_types::{Witness, WitnessStack};
 use acir::FieldElement;
+use acir::native_types::{Witness, WitnessStack};
 use ark_bn254::Fr;
 
 use crate::artifact::WitnessIndex;
@@ -72,7 +72,7 @@ pub fn parse_witness_bytes(bytes: &[u8]) -> Result<WitnessMap<Fr>, BackendError>
         ));
     }
 
-    // For multi-function programs (B.4 + B.5), the witness stack carries one
+    // For multi-function programs, the witness stack carries one
     // entry per function. Top of stack (index 0) is `main`; remaining entries
     // are callees keyed by their `AcirFunctionId`.
     let mut out = WitnessMap::<Fr>::new();

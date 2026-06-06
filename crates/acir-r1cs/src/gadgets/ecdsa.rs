@@ -1,4 +1,4 @@
-//! ECDSA secp256k1 signature verification gadget (ROADMAP step **WS-D.6**).
+//! ECDSA secp256k1 signature verification gadget.
 //!
 //! Verifies a single ECDSA signature `(r, s)` over secp256k1 against a public
 //! key `Q = (Qx, Qy)` and a 32-byte message digest `m`. Soundness contract:
@@ -36,14 +36,14 @@
 //!
 //! Per-operation constraint budget:
 //!
-//! | op                  | constraints                                  |
+//! | op | constraints |
 //! |---------------------|----------------------------------------------|
-//! | `mul_mod`           | ~24 muls (4×4 partial products + carries) + 256 bool (bit decomp) ≈ 300 |
-//! | `inv_mod`           | one `mul_mod` (a · a_inv = 1) ≈ 300            |
-//! | affine point add    | 6 `mul_mod` + 1 `inv_mod` + cheap linears ≈ 2100 |
-//! | affine point double | 5 `mul_mod` + 1 `inv_mod`                ≈ 1800  |
-//! | 256-bit scalar mul  | 256 doubles + ~128 adds                  ≈ 730k  |
-//! | full ECDSA verify   | 2 scalar muls + 1 add + bookkeeping      ≈ 1.5M  |
+//! | `mul_mod` | ~24 muls (4×4 partial products + carries) + 256 bool (bit decomp) ≈ 300 |
+//! | `inv_mod` | one `mul_mod` (a · a_inv = 1) ≈ 300 |
+//! | affine point add | 6 `mul_mod` + 1 `inv_mod` + cheap linears ≈ 2100 |
+//! | affine point double | 5 `mul_mod` + 1 `inv_mod` ≈ 1800 |
+//! | 256-bit scalar mul | 256 doubles + ~128 adds ≈ 730k |
+//! | full ECDSA verify | 2 scalar muls + 1 add + bookkeeping ≈ 1.5M |
 //!
 //! This is deliberately the un-optimised "schoolbook" lowering — windowed
 //! scalar muls and Strauss-style 2P combinations would cut the cost by ~3x
@@ -51,7 +51,7 @@
 
 use ark_bn254::Fr;
 use ark_ff::{AdditiveGroup, One, PrimeField, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 use num_bigint::BigUint;
 use num_traits::Num;
 use std::sync::OnceLock;
@@ -475,7 +475,7 @@ pub fn bigint256_mul_mod(
     let m_fr: [Fr; LIMBS] = std::array::from_fn(|i| fr_from_u64(m_limbs[i]));
 
     // For each output position k in 0..2*LIMBS-1, the identity is
-    //   (Σ_{i+j=k} a_i · b_j) - (Σ_{i+j=k} q_i · m_j) - c_k - β·carry_k_out = -carry_k_in
+    // (Σ_{i+j=k} a_i · b_j) - (Σ_{i+j=k} q_i · m_j) - c_k - β·carry_k_out = -carry_k_in
     // i.e. (a·b - q·m - c) has zero on every output limb modulo β.
     //
     // We materialise each "a_i · b_j" product as a fresh aux variable
@@ -539,8 +539,8 @@ pub fn bigint256_mul_mod(
             let m_l = m_limbs;
             // Use i128 sign arithmetic, accumulating signed partial sums.
             // For each position k: signed_sum_k = Σ_{i+j=k} av[i]*bv[j] (i128 fits 128 bits ×4 max)
-            //                                    - Σ_{i+j=k} qv_l[i]*m_l[j]
-            //                                    - cv_l[k] (if k<LIMBS)
+            // - Σ_{i+j=k} qv_l[i]*m_l[j]
+            // - cv_l[k] (if k<LIMBS)
             // Plus incoming carry. Output carry = signed_sum / β (round toward -inf).
             let beta_u: u128 = 1u128 << 64;
             let mut carries = Vec::with_capacity(n_carries);
@@ -598,7 +598,7 @@ pub fn bigint256_mul_mod(
 
     // We carry "shifted" carry values: carry_shifted = carry + 2^69
     // (so they're always non-negative). The per-position equation becomes:
-    //   signed_sum_k + (carry_shifted_in - 2^69) = β * (carry_shifted_out - 2^69)
+    // signed_sum_k + (carry_shifted_in - 2^69) = β * (carry_shifted_out - 2^69)
     // We allocate carry_shifted vars and range-check them to 70 bits.
     let shift: BigUint = BigUint::from(1u128 << 69);
     let shift_fr: Fr = {
@@ -616,12 +616,12 @@ pub fn bigint256_mul_mod(
     }
 
     // Now emit one linear constraint per output position k:
-    //   Σ ab_prods[i][j] for i+j=k    (positive)
-    //   - Σ m_fr[j] * q.limbs[i] for i+j=k    (negative)
-    //   - c.limbs[k] (if k<LIMBS)    (negative)
-    //   + (prev carry shifted - shift)    (incoming)
-    //   - β * (current carry shifted - shift)    (outgoing)
-    //   = 0
+    // Σ ab_prods[i][j] for i+j=k (positive)
+    // - Σ m_fr[j] * q.limbs[i] for i+j=k (negative)
+    // - c.limbs[k] (if k<LIMBS) (negative)
+    // + (prev carry shifted - shift) (incoming)
+    // - β * (current carry shifted - shift) (outgoing)
+    // = 0
     #[allow(clippy::needless_range_loop)]
     for k in 0..n_positions {
         let mut lc: Vec<(Fr, Variable)> = Vec::new();
@@ -1139,19 +1139,19 @@ pub fn enforce_in_range_one_to_n(
 // secp256k1:
 //
 // ```text
-//   a1 = +0x3086D221A7D46BCDE86C90E49284EB15
-//   b1 = -0xE4437ED6010E88286F547FA90ABFE4C3
-//   a2 = +0x114CA50F7A8E2F3F657C1108D9D44CFD8
-//   b2 = +0x3086D221A7D46BCDE86C90E49284EB15
+// a1 = +0x3086D221A7D46BCDE86C90E49284EB15
+// b1 = -0xE4437ED6010E88286F547FA90ABFE4C3
+// a2 = +0x114CA50F7A8E2F3F657C1108D9D44CFD8
+// b2 = +0x3086D221A7D46BCDE86C90E49284EB15
 // ```
 //
 // Native decomposition:
 //
 // ```text
-//   c1 = round(b2 · k / n)
-//   c2 = round(-b1 · k / n)
-//   k1 = k − c1·a1 − c2·a2
-//   k2 =   − c1·b1 − c2·b2
+// c1 = round(b2 · k / n)
+// c2 = round(-b1 · k / n)
+// k1 = k − c1·a1 − c2·a2
+// k2 = − c1·b1 − c2·b2
 // ```
 //
 // Bound: `|k1|, |k2| < 2^129` for every `k ∈ [0, n)`.
@@ -1169,9 +1169,7 @@ fn secp256k1_glv_basis() -> &'static GlvBasis {
     use num_bigint::{BigInt, Sign};
     static B: OnceLock<GlvBasis> = OnceLock::new();
     B.get_or_init(|| {
-        let from_hex = |hex: &str| -> BigInt {
-            BigInt::parse_bytes(hex.as_bytes(), 16).unwrap()
-        };
+        let from_hex = |hex: &str| -> BigInt { BigInt::parse_bytes(hex.as_bytes(), 16).unwrap() };
         let a1 = from_hex("3086D221A7D46BCDE86C90E49284EB15");
         let b1 = -from_hex("E4437ED6010E88286F547FA90ABFE4C3");
         let a2 = from_hex("114CA50F7A8E2F3F657C1108D9D44CFD8");
@@ -1222,7 +1220,7 @@ struct SignedScalar {
 /// [`glv_decompose_native`], allocates `(|k1|, sign(k1), |k2|, sign(k2))`,
 /// and the gadget enforces:
 ///
-/// * `|k1|, |k2| < 2^129`  (29 extra bits over the 100-bit-ish "tight"
+/// * `|k1|, |k2| < 2^129` (29 extra bits over the 100-bit-ish "tight"
 ///   bound — 129 is enough for the standard GLV bound and gives margin
 ///   for tie-breaking edge cases in `round_div`).
 /// * `sign(k1), sign(k2) ∈ {0, 1}`.
@@ -1260,13 +1258,11 @@ fn glv_decompose_in_circuit(
 
     let k1_abs = alloc_bigint256(builder, k1_abs_val.clone())?;
     let k2_abs = alloc_bigint256(builder, k2_abs_val.clone())?;
-    let k1_sign = builder.alloc_with_value(
-        k1_sign_val.map(|s| if s { Fr::one() } else { Fr::zero() }),
-    )?;
+    let k1_sign =
+        builder.alloc_with_value(k1_sign_val.map(|s| if s { Fr::one() } else { Fr::zero() }))?;
     enforce_boolean(builder, k1_sign)?;
-    let k2_sign = builder.alloc_with_value(
-        k2_sign_val.map(|s| if s { Fr::one() } else { Fr::zero() }),
-    )?;
+    let k2_sign =
+        builder.alloc_with_value(k2_sign_val.map(|s| if s { Fr::one() } else { Fr::zero() }))?;
     enforce_boolean(builder, k2_sign)?;
 
     // 129-bit range check on |k1|, |k2|. The BigInt256 limb decomposition
@@ -1333,10 +1329,7 @@ fn glv_decompose_in_circuit(
 
 /// Enforce that `value < 2^129`: BigInt256 limbs are LSB-first u64s, so
 /// `limb[3] = 0` and `limb[2] < 2`.
-fn enforce_129_bit(
-    builder: &mut R1csBuilder<'_>,
-    value: &BigInt256,
-) -> Result<(), SynthesisError> {
+fn enforce_129_bit(builder: &mut R1csBuilder<'_>, value: &BigInt256) -> Result<(), SynthesisError> {
     builder.enforce(
         builder.zero_lc(),
         builder.zero_lc(),
@@ -1416,10 +1409,9 @@ fn negate_point(
     let neg_y = alloc_bigint256(builder, neg_y_val)?;
     enforce_lt(builder, &neg_y, p_field)?;
     // Enforce y + neg_y ≡ 0 (mod p).
-    let k_val = p
-        .y
-        .to_biguint()
-        .map(|v| if v.is_zero() { 0u64 } else { 1u64 });
+    let k_val =
+        p.y.to_biguint()
+            .map(|v| if v.is_zero() { 0u64 } else { 1u64 });
     let k = builder.alloc_with_value(k_val.map(fr_from_u64))?;
     enforce_boolean(builder, k)?;
     let p_fr = bigint_to_fr(p_field);
@@ -1447,10 +1439,7 @@ fn conditional_negate(
 ) -> Result<CurvePoint, SynthesisError> {
     let neg = negate_point(builder, p_field, p)?;
     let y = select_bigint256(builder, sign_var, sign_val, &neg.y, &p.y)?;
-    Ok(CurvePoint {
-        x: p.x.clone(),
-        y,
-    })
+    Ok(CurvePoint { x: p.x.clone(), y })
 }
 
 // =============================================================================
@@ -1598,9 +1587,9 @@ fn select4_point(
             // out_i − a_i − b1·(b_i − a_i) − b2·(c_i − a_i) − b1·b2·(a_i − b_i − c_i + d_i) = 0
             //
             // Split into three mul aux:
-            //   t1_i = b1 · (b_i − a_i)
-            //   t2_i = b2 · (c_i − a_i)
-            //   t3_i = b1·b2 · (a_i − b_i − c_i + d_i)
+            // t1_i = b1 · (b_i − a_i)
+            // t2_i = b2 · (c_i − a_i)
+            // t3_i = b1·b2 · (a_i − b_i − c_i + d_i)
             // then enforce out_i − a_i − t1_i − t2_i − t3_i = 0 linearly.
             let snap = |bit_val: Option<bool>, x: &BigInt256, y: &BigInt256| -> Option<Fr> {
                 let bv = bit_val?;
@@ -1700,7 +1689,12 @@ pub fn scalar_mul_2p_with_curve(
 
     // Precompute T = P1 + P2 (one ec_add).
     let t_in_circuit = ec_add_with_curve(builder, params, p1, p2)?;
-    let t_native = match (p1.x.to_biguint(), p1.y.to_biguint(), p2.x.to_biguint(), p2.y.to_biguint()) {
+    let t_native = match (
+        p1.x.to_biguint(),
+        p1.y.to_biguint(),
+        p2.x.to_biguint(),
+        p2.y.to_biguint(),
+    ) {
         (Some(x1), Some(y1), Some(x2), Some(y2)) => {
             ec_add_native_with_modulus((&x1, &y1), (&x2, &y2), p_field)
         }
@@ -1709,12 +1703,9 @@ pub fn scalar_mul_2p_with_curve(
 
     // Blinding seed: `2 · G`. Known non-zero, on the curve, derived from
     // public parameters so it's circuit-shape-stable.
-    let blinding_native = ec_double_native_with_curve(
-        (&params.g.0, &params.g.1),
-        p_field,
-        &a_mod_p,
-    )
-    .expect("double generator G");
+    let blinding_native =
+        ec_double_native_with_curve((&params.g.0, &params.g.1), p_field, &a_mod_p)
+            .expect("double generator G");
 
     // Precompute 2^256 · blinding natively (constant for this curve).
     let two256_blinding_native = {
@@ -1757,7 +1748,9 @@ pub fn scalar_mul_2p_with_curve(
             u2_bit_vars[i],
             u2_bit_vals[i],
             p1, // filler when (0,0)
-            p1, p2, &t_in_circuit,
+            p1,
+            p2,
+            &t_in_circuit,
         )?;
 
         // Native value of the chosen addend (for the candidate-add
@@ -1792,9 +1785,8 @@ pub fn scalar_mul_2p_with_curve(
             (Some(a), Some(b)) => Some(a || b),
             _ => None,
         };
-        let do_add_var = builder.alloc_with_value(
-            do_add_val.map(|v| if v { Fr::one() } else { Fr::zero() }),
-        )?;
+        let do_add_var =
+            builder.alloc_with_value(do_add_val.map(|v| if v { Fr::one() } else { Fr::zero() }))?;
         builder.enforce(
             builder.zero_lc(),
             builder.zero_lc(),
@@ -1900,12 +1892,7 @@ fn select16_point(
         let pair0 = &table[2 * j];
         let pair1 = &table[2 * j + 1];
         level.push(select_point_with_p(
-            builder,
-            p_field,
-            bits[0].0,
-            bits[0].1,
-            pair1,
-            pair0,
+            builder, p_field, bits[0].0, bits[0].1, pair1, pair0,
         )?);
     }
     // Level 2: select between pairs based on bits[1].
@@ -2018,12 +2005,9 @@ pub fn scalar_mul_2p_secp256k1_glv(
     let (b_k2b, v_k2b) = decompose_glv_half_bits(builder, &k2b.abs)?;
 
     // 5) Blinding seed and 2^129 · blinding for end-of-loop subtraction.
-    let blinding_native = ec_double_native_with_curve(
-        (&params.g.0, &params.g.1),
-        p_field,
-        &a_mod_p,
-    )
-    .expect("double generator G");
+    let blinding_native =
+        ec_double_native_with_curve((&params.g.0, &params.g.1), p_field, &a_mod_p)
+            .expect("double generator G");
     let two129_blinding_native = {
         let mut acc = blinding_native.clone();
         for _ in 0..129 {
@@ -2068,10 +2052,7 @@ pub fn scalar_mul_2p_secp256k1_glv(
         let addend = select16_point(builder, p_field, bits, &table_arr)?;
         let table_index: Option<usize> = match (v_k2b[i], v_k2a[i], v_k1b[i], v_k1a[i]) {
             (Some(b3), Some(b2), Some(b1), Some(b0)) => Some(
-                ((b3 as usize) << 3)
-                    | ((b2 as usize) << 2)
-                    | ((b1 as usize) << 1)
-                    | (b0 as usize),
+                ((b3 as usize) << 3) | ((b2 as usize) << 2) | ((b1 as usize) << 1) | (b0 as usize),
             ),
             _ => None,
         };
@@ -2093,9 +2074,8 @@ pub fn scalar_mul_2p_secp256k1_glv(
         let nn_1_0 = bool_and(builder, n1.0, n1.1, n0.0, n0.1)?;
         let nn_all = bool_and(builder, nn_3_2.0, nn_3_2.1, nn_1_0.0, nn_1_0.1)?;
         let do_add_val: Option<bool> = nn_all.1.map(|v| !v);
-        let do_add_var = builder.alloc_with_value(
-            do_add_val.map(|v| if v { Fr::one() } else { Fr::zero() }),
-        )?;
+        let do_add_var =
+            builder.alloc_with_value(do_add_val.map(|v| if v { Fr::one() } else { Fr::zero() }))?;
         builder.enforce(
             builder.zero_lc(),
             builder.zero_lc(),
@@ -2208,7 +2188,7 @@ fn secp256k1_comb_table() -> &'static Vec<CombRow> {
 /// `table[d]` where `d = b3·8 + b2·4 + b1·2 + b0` and the table entries
 /// are 16 known affine points. Implemented as a polynomial expansion over
 /// the bit auxiliaries — one R1CS row per output limb, 11 cross-term
-/// `aux = b_i · b_j ...` muls shared across all output limbs of this
+/// `aux = b_i · b_j...` muls shared across all output limbs of this
 /// window. Cheaper than a 4-deep tree of `select_point_with_p` when the
 /// table entries are constants (the tree path would force allocating each
 /// table entry as 8 fresh limb Variables).
@@ -2220,10 +2200,8 @@ fn const_table16_select_point(
     // Resolve table_native (1..15 all guaranteed Some; index 0 is the
     // identity placeholder, used only when `d == 0` which never selects
     // through this function because we OR-of-4-bits-gate the add).
-    let mut table_x: [BigUint; COMB_TABLE_SIZE] =
-        std::array::from_fn(|_| BigUint::from(0u64));
-    let mut table_y: [BigUint; COMB_TABLE_SIZE] =
-        std::array::from_fn(|_| BigUint::from(0u64));
+    let mut table_x: [BigUint; COMB_TABLE_SIZE] = std::array::from_fn(|_| BigUint::from(0u64));
+    let mut table_y: [BigUint; COMB_TABLE_SIZE] = std::array::from_fn(|_| BigUint::from(0u64));
     for d in 1..COMB_TABLE_SIZE {
         let (x, y) = table[d].as_ref().expect("comb table entry");
         table_x[d] = x.clone();
@@ -2268,87 +2246,91 @@ fn const_table16_select_point(
     }
 
     // Express each coordinate of the output as
-    //   out_coord = Σ_{d=0..15} 1[d == bits] · table[d].coord
+    // out_coord = Σ_{d=0..15} 1[d == bits] · table[d].coord
     // The indicator `1[d == bits]` expands via inclusion–exclusion to a
     // signed linear combination of `cross[subset]` terms. Specifically:
-    //   1[d == bits] = Σ_{S ⊇ d_set} (−1)^(|S| − |d_set|) · ∏_{j ∈ S} b_j
+    // 1[d == bits] = Σ_{S ⊇ d_set} (−1)^(|S| − |d_set|) · ∏_{j ∈ S} b_j
     // For each output limb we precompute the constant coefficient on each
     // `cross[mask]` term as
-    //   coeff[mask] = Σ_{d ⊆ mask} (−1)^(|mask| − |d|) · table[d].limb
+    // coeff[mask] = Σ_{d ⊆ mask} (−1)^(|mask| − |d|) · table[d].limb
     // (Möbius inversion: each `cross[mask]` contributes to all `d ⊆ mask`
     // indicators; conversely each `d`'s indicator pulls from masks
     // containing `d`.)
-    let mut select_one_coord = |table_vals: &[BigUint; COMB_TABLE_SIZE]| -> Result<BigInt256, SynthesisError> {
-        // Compute the output's BigUint value natively from the selected
-        // bits' values.
-        let bit_vals: Option<[bool; COMB_W]> = (|| -> Option<[bool; COMB_W]> {
-            let mut arr = [false; COMB_W];
-            for j in 0..COMB_W {
-                arr[j] = bits[j].1?;
-            }
-            Some(arr)
-        })();
-        let out_val: Option<BigUint> = bit_vals.map(|bv| {
-            let mut idx = 0usize;
-            for (j, &b) in bv.iter().enumerate() {
-                if b {
-                    idx |= 1 << j;
+    let mut select_one_coord =
+        |table_vals: &[BigUint; COMB_TABLE_SIZE]| -> Result<BigInt256, SynthesisError> {
+            // Compute the output's BigUint value natively from the selected
+            // bits' values.
+            let bit_vals: Option<[bool; COMB_W]> = (|| -> Option<[bool; COMB_W]> {
+                let mut arr = [false; COMB_W];
+                for j in 0..COMB_W {
+                    arr[j] = bits[j].1?;
                 }
-            }
-            table_vals[idx].clone()
-        });
-        let out_limbs_val: Option<[u64; LIMBS]> = out_val.as_ref().map(biguint_to_limbs);
-
-        let p_field = secp256k1_p();
-        let mut limbs = [Variable::One; LIMBS];
-        for i in 0..LIMBS {
-            let lv = out_limbs_val.map(|l| l[i]);
-            limbs[i] = alloc_u64_limb(builder, lv)?;
-        }
-        let out = BigInt256 { limbs, value: out_limbs_val };
-        let _ = p_field;
-
-        // For each output limb i, enforce
-        //   out.limbs[i] = Σ_{mask=0..15} coeff_i[mask] · cross[mask].var
-        // where `coeff_i[mask] = Σ_{d ⊆ mask} (−1)^(|mask|−|d|) · table_vals[d].limb_i`.
-        for limb_i in 0..LIMBS {
-            // Compute the 16 coefficients for this limb.
-            let mut coeffs: [Fr; COMB_TABLE_SIZE] = [Fr::zero(); COMB_TABLE_SIZE];
-            for (mask, slot) in coeffs.iter_mut().enumerate() {
-                let mut acc = Fr::zero();
-                let mut d = mask as i64;
-                // Iterate over all d ⊆ mask (subsets of mask).
-                loop {
-                    let popcount_diff = (mask as u32 - (d as u32)).count_ones() as i32;
-                    let sign_is_neg = popcount_diff % 2 != 0;
-                    let limb_val = biguint_to_limbs(&table_vals[d as usize])[limb_i];
-                    let term = Fr::from(limb_val);
-                    if sign_is_neg {
-                        acc -= term;
-                    } else {
-                        acc += term;
+                Some(arr)
+            })();
+            let out_val: Option<BigUint> = bit_vals.map(|bv| {
+                let mut idx = 0usize;
+                for (j, &b) in bv.iter().enumerate() {
+                    if b {
+                        idx |= 1 << j;
                     }
-                    if d == 0 {
-                        break;
+                }
+                table_vals[idx].clone()
+            });
+            let out_limbs_val: Option<[u64; LIMBS]> = out_val.as_ref().map(biguint_to_limbs);
+
+            let p_field = secp256k1_p();
+            let mut limbs = [Variable::One; LIMBS];
+            for i in 0..LIMBS {
+                let lv = out_limbs_val.map(|l| l[i]);
+                limbs[i] = alloc_u64_limb(builder, lv)?;
+            }
+            let out = BigInt256 {
+                limbs,
+                value: out_limbs_val,
+            };
+            let _ = p_field;
+
+            // For each output limb i, enforce
+            // out.limbs[i] = Σ_{mask=0..15} coeff_i[mask] · cross[mask].var
+            // where `coeff_i[mask] = Σ_{d ⊆ mask} (−1)^(|mask|−|d|) · table_vals[d].limb_i`.
+            for limb_i in 0..LIMBS {
+                // Compute the 16 coefficients for this limb.
+                let mut coeffs: [Fr; COMB_TABLE_SIZE] = [Fr::zero(); COMB_TABLE_SIZE];
+                for (mask, slot) in coeffs.iter_mut().enumerate() {
+                    let mut acc = Fr::zero();
+                    let mut d = mask as i64;
+                    // Iterate over all d ⊆ mask (subsets of mask).
+                    loop {
+                        let popcount_diff = (mask as u32 - (d as u32)).count_ones() as i32;
+                        let sign_is_neg = popcount_diff % 2 != 0;
+                        let limb_val = biguint_to_limbs(&table_vals[d as usize])[limb_i];
+                        let term = Fr::from(limb_val);
+                        if sign_is_neg {
+                            acc -= term;
+                        } else {
+                            acc += term;
+                        }
+                        if d == 0 {
+                            break;
+                        }
+                        d = (d - 1) & mask as i64;
                     }
-                    d = (d - 1) & mask as i64;
+                    *slot = acc;
                 }
-                *slot = acc;
-            }
-            // Emit out.limbs[i] − Σ_mask coeff[mask] · cross[mask].var = 0.
-            let mut lc: Vec<(Fr, Variable)> = Vec::new();
-            lc.push((Fr::one(), out.limbs[limb_i]));
-            for (mask, c) in coeffs.iter().enumerate() {
-                if c.is_zero() {
-                    continue;
+                // Emit out.limbs[i] − Σ_mask coeff[mask] · cross[mask].var = 0.
+                let mut lc: Vec<(Fr, Variable)> = Vec::new();
+                lc.push((Fr::one(), out.limbs[limb_i]));
+                for (mask, c) in coeffs.iter().enumerate() {
+                    if c.is_zero() {
+                        continue;
+                    }
+                    let (var, _) = cross[mask].expect("cross-term aux");
+                    lc.push((-(*c), var));
                 }
-                let (var, _) = cross[mask].expect("cross-term aux");
-                lc.push((-(*c), var));
+                builder.enforce(builder.zero_lc(), builder.zero_lc(), LinearCombination(lc))?;
             }
-            builder.enforce(builder.zero_lc(), builder.zero_lc(), LinearCombination(lc))?;
-        }
-        Ok(out)
-    };
+            Ok(out)
+        };
 
     let x = select_one_coord(&table_x)?;
     let y = select_one_coord(&table_y)?;
@@ -2377,8 +2359,8 @@ fn build_comb_table(params: &CurveParams) -> Vec<CombRow> {
     for base in &window_base {
         let mut row: CombRow = std::array::from_fn(|_| None);
         row[1] = Some(base.clone());
-        let two_base = ec_double_native_with_curve((&base.0, &base.1), p, &a)
-            .expect("comb-row double");
+        let two_base =
+            ec_double_native_with_curve((&base.0, &base.1), p, &a).expect("comb-row double");
         row[2] = Some(two_base.clone());
         let mut acc = two_base;
         for slot in row.iter_mut().skip(3) {
@@ -2414,12 +2396,9 @@ fn scalar_mul_g_comb(
     let (bit_vars, bit_vals) = decompose_scalar_bits(builder, u1)?;
 
     // Blinding seed = 2·G; constant 2·G is on the curve and non-zero.
-    let blinding_native = ec_double_native_with_curve(
-        (&params.g.0, &params.g.1),
-        p_field,
-        &a_mod_p,
-    )
-    .expect("blinding seed");
+    let blinding_native =
+        ec_double_native_with_curve((&params.g.0, &params.g.1), p_field, &a_mod_p)
+            .expect("blinding seed");
 
     let mut acc = CurvePoint {
         x: alloc_bigint256(builder, Some(blinding_native.0.clone()))?,
@@ -2460,9 +2439,7 @@ fn scalar_mul_g_comb(
 
         let candidate = ec_add_with_curve(builder, params, &acc, &addend)?;
         let candidate_native = match (acc_native.as_ref(), addend_native.as_ref()) {
-            (Some(a), Some(b)) => {
-                ec_add_native_with_modulus((&a.0, &a.1), (&b.0, &b.1), p_field)
-            }
+            (Some(a), Some(b)) => ec_add_native_with_modulus((&a.0, &a.1), (&b.0, &b.1), p_field),
             _ => None,
         };
 
@@ -2475,9 +2452,8 @@ fn scalar_mul_g_comb(
         let nn_a = bool_and(builder, n3.0, n3.1, n2.0, n2.1)?;
         let nn_b = bool_and(builder, n1.0, n1.1, n0.0, n0.1)?;
         let nn_all = bool_and(builder, nn_a.0, nn_a.1, nn_b.0, nn_b.1)?;
-        let do_add_var = builder.alloc_with_value(
-            any_bit_val.map(|v| if v { Fr::one() } else { Fr::zero() }),
-        )?;
+        let do_add_var = builder
+            .alloc_with_value(any_bit_val.map(|v| if v { Fr::one() } else { Fr::zero() }))?;
         builder.enforce(
             builder.zero_lc(),
             builder.zero_lc(),
@@ -2539,8 +2515,8 @@ fn windowed_scalar_mul_q(
     let (bit_vars, bit_vals) = decompose_scalar_bits(builder, u2)?;
 
     // 2) Precompute multiples 1·Q, 2·Q, …, 15·Q in-circuit. Index 0 is
-    //    a filler (use `Q` itself) so the conditional ec_add stays in
-    //    the generic case when the window digit is 0.
+    // a filler (use `Q` itself) so the conditional ec_add stays in
+    // the generic case when the window digit is 0.
     let mut table: Vec<CurvePoint> = Vec::with_capacity(16);
     table.push(q.clone()); // filler for d=0 (never bound to acc when do_add=0)
     table.push(q.clone()); // d=1
@@ -2553,13 +2529,10 @@ fn windowed_scalar_mul_q(
     }
 
     // 3) Blinding seed: 2·G of the *base curve* (a known on-curve
-    //    non-zero point unrelated to Q).
-    let blinding_native = ec_double_native_with_curve(
-        (&params.g.0, &params.g.1),
-        p_field,
-        &a_mod_p,
-    )
-    .expect("blinding seed");
+    // non-zero point unrelated to Q).
+    let blinding_native =
+        ec_double_native_with_curve((&params.g.0, &params.g.1), p_field, &a_mod_p)
+            .expect("blinding seed");
     let two256_blinding_native = {
         let mut acc = blinding_native.clone();
         for _ in 0..256 {
@@ -2593,7 +2566,12 @@ fn windowed_scalar_mul_q(
         }
 
         // 16-way binary-tree select on the precomputed Q multiples.
-        let addend = select16_point(builder, p_field, bits, table.as_slice().try_into().expect("16"))?;
+        let addend = select16_point(
+            builder,
+            p_field,
+            bits,
+            table.as_slice().try_into().expect("16"),
+        )?;
         let table_index: Option<usize> = (|| -> Option<usize> {
             let mut idx = 0usize;
             for (k, (_, v)) in bits.iter().enumerate() {
@@ -2626,9 +2604,8 @@ fn windowed_scalar_mul_q(
         let nn_b = bool_and(builder, n1.0, n1.1, n0.0, n0.1)?;
         let nn_all = bool_and(builder, nn_a.0, nn_a.1, nn_b.0, nn_b.1)?;
         let any_bit_val: Option<bool> = nn_all.1.map(|v| !v);
-        let do_add_var = builder.alloc_with_value(
-            any_bit_val.map(|v| if v { Fr::one() } else { Fr::zero() }),
-        )?;
+        let do_add_var = builder
+            .alloc_with_value(any_bit_val.map(|v| if v { Fr::one() } else { Fr::zero() }))?;
         builder.enforce(
             builder.zero_lc(),
             builder.zero_lc(),
@@ -2712,12 +2689,9 @@ fn scalar_mul_2p_secp256k1_comb_glv(
 
     // Precompute T = Q' + φQ'.
     let t = ec_add_with_curve(builder, &params, &q_signed, &phi_q_signed)?;
-    let blinding_native = ec_double_native_with_curve(
-        (&params.g.0, &params.g.1),
-        p_field,
-        &a_mod_p,
-    )
-    .expect("blinding");
+    let blinding_native =
+        ec_double_native_with_curve((&params.g.0, &params.g.1), p_field, &a_mod_p)
+            .expect("blinding");
     let two129_blinding_native = {
         let mut acc = blinding_native.clone();
         for _ in 0..129 {
@@ -2732,14 +2706,16 @@ fn scalar_mul_2p_secp256k1_comb_glv(
     };
     let mut acc_native: Option<(BigUint, BigUint)> = Some(blinding_native.clone());
 
-    let q_native: Option<(BigUint, BigUint)> = match (q_signed.x.to_biguint(), q_signed.y.to_biguint()) {
-        (Some(x), Some(y)) => Some((x, y)),
-        _ => None,
-    };
-    let phi_q_native: Option<(BigUint, BigUint)> = match (phi_q_signed.x.to_biguint(), phi_q_signed.y.to_biguint()) {
-        (Some(x), Some(y)) => Some((x, y)),
-        _ => None,
-    };
+    let q_native: Option<(BigUint, BigUint)> =
+        match (q_signed.x.to_biguint(), q_signed.y.to_biguint()) {
+            (Some(x), Some(y)) => Some((x, y)),
+            _ => None,
+        };
+    let phi_q_native: Option<(BigUint, BigUint)> =
+        match (phi_q_signed.x.to_biguint(), phi_q_signed.y.to_biguint()) {
+            (Some(x), Some(y)) => Some((x, y)),
+            _ => None,
+        };
     let t_native: Option<(BigUint, BigUint)> = match (t.x.to_biguint(), t.y.to_biguint()) {
         (Some(x), Some(y)) => Some((x, y)),
         _ => None,
@@ -2791,9 +2767,8 @@ fn scalar_mul_2p_secp256k1_comb_glv(
             (Some(a), Some(b)) => Some(a || b),
             _ => None,
         };
-        let do_add_var = builder.alloc_with_value(
-            do_add_val.map(|v| if v { Fr::one() } else { Fr::zero() }),
-        )?;
+        let do_add_var =
+            builder.alloc_with_value(do_add_val.map(|v| if v { Fr::one() } else { Fr::zero() }))?;
         builder.enforce(
             builder.zero_lc(),
             builder.zero_lc(),
@@ -2868,10 +2843,10 @@ pub fn ecdsa_verify_with_curve(
     // ECDSA input validation. The spec rejects signatures with `r` or `s`
     // outside `[1, n − 1]`; without these checks a malicious prover could
     // (a) submit `s = 0` and bypass the `inv_mod(s)` constraint by
-    //     supplying a wildcard pseudo-inverse, or
+    // supplying a wildcard pseudo-inverse, or
     // (b) submit `r ≥ n` and exploit the fact that
-    //     `target = xr mod n` collapses to the same value for two
-    //     different `r`.
+    // `target = xr mod n` collapses to the same value for two
+    // different `r`.
     // We also enforce that the public key lies on the curve — without
     // this, a malicious prover could place `Q` off the curve and exploit
     // the looser arithmetic the generic add/double formulas allow.
@@ -2884,13 +2859,13 @@ pub fn ecdsa_verify_with_curve(
     let u2 = bigint256_mul_mod(builder, r, &w, n_field)?;
     // Curve-specific scalar mul dispatch:
     // * secp256k1: u1·G via fixed-base 4-bit comb plus u2·Q via GLV +
-    //   2-way joint Strauss-Shamir over 129-bit halves. Combined via a
-    //   final ec_add.
+    // 2-way joint Strauss-Shamir over 129-bit halves. Combined via a
+    // final ec_add.
     // * secp256r1: u1·G via fixed-base 4-bit comb plus u2·Q via 4-bit
-    //   windowed double-and-add. P-256 has no useful endomorphism, so
-    //   GLV doesn't apply; the comb-plus-windowed split still beats joint
-    //   Strauss-Shamir by saving 192 adds (a chained 64-window scan with
-    //   one add per window vs. the 256 adds the joint loop did).
+    // windowed double-and-add. P-256 has no useful endomorphism, so
+    // GLV doesn't apply; the comb-plus-windowed split still beats joint
+    // Strauss-Shamir by saving 192 adds (a chained 64-window scan with
+    // one add per window vs. the 256 adds the joint loop did).
     let r_point = if std::ptr::eq(params.p as *const _, secp256k1_p() as *const _) {
         scalar_mul_2p_secp256k1_comb_glv(builder, &u1, public_key, &u2)?
     } else {
@@ -2935,7 +2910,7 @@ pub fn ecdsa_verify_with_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_relations::r1cs::ConstraintSystem;
+    use ark_relations::gr1cs::ConstraintSystem;
 
     fn run<F: FnOnce(&mut R1csBuilder<'_>)>(f: F) -> bool {
         let cs = ConstraintSystem::<Fr>::new_ref();
@@ -3135,8 +3110,8 @@ mod tests {
     fn ecdsa_native_kat_via_k256() {
         // KAT from RFC 6979 / k256's own test vectors. We just confirm the
         // native helper builds in dev mode.
-        use k256::ecdsa::signature::hazmat::PrehashSigner;
         use k256::ecdsa::SigningKey;
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
         let sk = SigningKey::from_slice(&[1u8; 32]).unwrap();
         let vk = sk.verifying_key();
         let msg_digest = [0u8; 32];
@@ -3153,11 +3128,7 @@ mod tests {
 
     /// Construct a [`CurvePoint`] from a `(BigUint, BigUint)` pair. Convenience
     /// wrapper for the baseline measurement tests below.
-    fn point_from_biguints(
-        builder: &mut R1csBuilder<'_>,
-        x: BigUint,
-        y: BigUint,
-    ) -> CurvePoint {
+    fn point_from_biguints(builder: &mut R1csBuilder<'_>, x: BigUint, y: BigUint) -> CurvePoint {
         CurvePoint {
             x: alloc_bigint256(builder, Some(x)).unwrap(),
             y: alloc_bigint256(builder, Some(y)).unwrap(),
@@ -3168,8 +3139,8 @@ mod tests {
     /// run the in-circuit verifier on it, and return the constraint count.
     /// Used as the optimization baseline.
     fn measure_ecdsa_verify_secp256k1() -> usize {
-        use k256::ecdsa::signature::hazmat::PrehashSigner;
         use k256::ecdsa::SigningKey;
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
         let sk = SigningKey::from_slice(&[7u8; 32]).unwrap();
         let vk = sk.verifying_key();
         let msg_digest = [0x5au8; 32];
@@ -3202,7 +3173,7 @@ mod tests {
             let which = cs.which_is_unsatisfied().unwrap();
             panic!(
                 "KAT must satisfy the gadget; constraint count={n_constraints}; \
-                 first unsatisfied: {which:?}"
+ first unsatisfied: {which:?}"
             );
         }
         n_constraints
@@ -3270,14 +3241,14 @@ mod tests {
     /// History:
     /// * 17.6M — initial implementation (LSB-first double-and-add, separate
     ///   scalar muls per `u1·G` and `u2·Q`).
-    /// * 9.1M  — MSB-first joint Strauss-Shamir (shared doublings).
-    /// * 6.1M  — `sub_mod` simplified to one allocation + one linear
+    /// * 9.1M — MSB-first joint Strauss-Shamir (shared doublings).
+    /// * 6.1M — `sub_mod` simplified to one allocation + one linear
     ///   constraint (was two `add_mod`s + alias check).
-    /// * 5.8M  — `enforce_lt` elided from `select_*` outputs (inputs are
+    /// * 5.8M — `enforce_lt` elided from `select_*` outputs (inputs are
     ///   already `< p`).
-    /// * 4.0M  — GLV endomorphism: 4-way joint Strauss-Shamir over 129-bit
+    /// * 4.0M — GLV endomorphism: 4-way joint Strauss-Shamir over 129-bit
     ///   halves with a 16-entry precomputed addend table.
-    /// * 3.6M  — Fixed-base 4-bit generator comb for `u1·G` + 2-way joint
+    /// * 3.6M — Fixed-base 4-bit generator comb for `u1·G` + 2-way joint
     ///   GLV Strauss-Shamir for `u2·Q`. Also includes the on-curve and
     ///   range-check soundness validations added concurrently.
     #[test]
@@ -3297,8 +3268,8 @@ mod tests {
     /// inside `ecdsa_verify_with_curve`. The signature is generated with
     /// the `p256` crate and re-verified in-circuit.
     fn measure_ecdsa_verify_secp256r1() -> usize {
-        use p256::ecdsa::signature::hazmat::PrehashSigner;
         use p256::ecdsa::SigningKey;
+        use p256::ecdsa::signature::hazmat::PrehashSigner;
         let sk = SigningKey::from_slice(&[11u8; 32]).unwrap();
         let vk = sk.verifying_key();
         let msg_digest = [0xa5u8; 32];
@@ -3342,10 +3313,10 @@ mod tests {
     ///
     /// History:
     /// * 18.2M — initial implementation.
-    /// * 9.4M  — MSB-first joint Strauss-Shamir.
-    /// * 6.4M  — simplified `sub_mod`.
-    /// * 6.1M  — `enforce_lt` elision in `select_*`.
-    /// * 5.4M  — Fixed-base 4-bit comb for `u1·G` + 4-bit windowed
+    /// * 9.4M — MSB-first joint Strauss-Shamir.
+    /// * 6.4M — simplified `sub_mod`.
+    /// * 6.1M — `enforce_lt` elision in `select_*`.
+    /// * 5.4M — Fixed-base 4-bit comb for `u1·G` + 4-bit windowed
     ///   double-and-add for `u2·Q`. P-256 has no useful endomorphism, so
     ///   GLV doesn't apply; this split saves the 192 adds the joint
     ///   Strauss-Shamir loop was paying per-bit.

@@ -1,4 +1,4 @@
-//! Blake2s compression + padding gadget (ROADMAP step **WS-D.2**).
+//! Blake2s compression + padding gadget.
 //!
 //! Implements the RFC 7693 Blake2s hash on a **variable-length byte input**
 //! producing a 32-byte digest. Used by Noir's `BlackBoxFuncCall::Blake2s`.
@@ -58,9 +58,9 @@
 
 use ark_bn254::Fr;
 use ark_ff::One;
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
-use crate::gadgets::bitwise::{add_mod_32, xor, Word32};
+use crate::gadgets::bitwise::{Word32, add_mod_32, xor};
 use crate::gadgets::range::{decompose_into_bits, enforce_recompose_equals};
 use crate::r1cs_builder::R1csBuilder;
 
@@ -286,7 +286,7 @@ pub fn blake2s_in_circuit(
 /// Build the 16 32-bit message words for a single 64-byte block.
 ///
 /// Each message word `m[j]` is constructed from the bits of bytes
-/// `[block_start + 4j .. block_start + 4j + 4]`. Bytes past the input length
+/// `[block_start + 4j.. block_start + 4j + 4]`. Bytes past the input length
 /// `n` are zero-padded with the constant-zero LC (`LinearCombination(vec![])`).
 fn pack_block_message(
     byte_bits: &[[Variable; 8]],
@@ -420,11 +420,11 @@ fn fr_to_u8_low(fr: Fr) -> u8 {
 mod tests {
     use super::*;
     use crate::witness::WitnessMap;
-    use ark_relations::r1cs::ConstraintSystem;
+    use ark_relations::gr1cs::ConstraintSystem;
     use blake2::{Blake2s256, Digest};
-    use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Expected `blake2s(b"abc")` digest from RFC 7693 / `blake2` crate.
     const ABC_DIGEST_HEX: &str = "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982";
@@ -435,12 +435,8 @@ mod tests {
         (v, Some(fr))
     }
 
-    fn byte_var_value(cs: &ark_relations::r1cs::ConstraintSystemRef<Fr>, v: Variable) -> u8 {
-        let fr = match v {
-            Variable::Witness(idx) => cs.borrow().unwrap().witness_assignment[idx],
-            Variable::One => Fr::one(),
-            _ => panic!("byte_var_value: not a witness or one"),
-        };
+    fn byte_var_value(cs: &ark_relations::gr1cs::ConstraintSystemRef<Fr>, v: Variable) -> u8 {
+        let fr = cs.assigned_value(v).expect("variable has an assignment");
         fr_to_u8_low(fr)
     }
 
@@ -460,7 +456,7 @@ mod tests {
         // Cover empty, sub-block, exact-block, two-block, and just-past-two-block
         // edge cases to exercise the padding logic.
         for &len in &[0usize, 1, 17, 55, 56, 63, 64, 65, 100, 128, 129] {
-            let input: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+            let input: Vec<u8> = (0..len).map(|_| rng.r#gen()).collect();
             let got = blake2s_native(&input);
             let mut hasher = Blake2s256::new();
             hasher.update(&input);
@@ -504,7 +500,7 @@ mod tests {
         // block to make sure the multi-block path executes.
         let lens = [3usize, 31, 64, 65, 100];
         for &len in &lens {
-            let input: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+            let input: Vec<u8> = (0..len).map(|_| rng.r#gen()).collect();
             let cs = ConstraintSystem::<Fr>::new_ref();
             let map = WitnessMap::<Fr>::new();
             let mut b = R1csBuilder::new(cs.clone(), Some(&map));

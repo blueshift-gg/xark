@@ -22,7 +22,7 @@ pub mod gadgets;
 
 pub use artifact::{ArtifactMetadata, NoirArtifact, WitnessIndex};
 pub use error::BackendError;
-pub use lower::{lower_program, LoweredAcirCircuit};
+pub use lower::{LoweredAcirCircuit, lower_program};
 pub use witness::WitnessMap;
 
 /// Backend lowering semantics version, baked into the circuit hash so that any

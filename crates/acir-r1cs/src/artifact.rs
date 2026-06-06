@@ -9,10 +9,10 @@
 
 use std::path::Path;
 
-use acir::circuit::{Circuit, Opcode, Program};
 use acir::FieldElement;
-use base64::engine::general_purpose::STANDARD as B64;
+use acir::circuit::{Circuit, Opcode, Program};
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
 
 use crate::error::BackendError;
@@ -60,8 +60,8 @@ pub struct NoirArtifact {
 impl NoirArtifact {
     /// The ACIR function we lower. For multi-function programs (Noir-emitted
     /// helpers that survive inlining) we only lower `functions[0]`; any
-    /// `Opcode::Call` in `main` is rejected by the lowering layer's
-    /// unsupported-opcode path. See ROADMAP step B.4.
+    /// `Opcode::Call` in `main` is handled by the lowering layer's
+    /// call-inlining path.
     pub fn main_circuit(&self) -> &Circuit<FieldElement> {
         &self.program.functions[0]
     }
@@ -133,12 +133,12 @@ pub fn parse_artifact_bytes(
         BackendError::ArtifactParse(format!("ACIR bytecode deserialization failed: {e}"))
     })?;
 
-    // ROADMAP B.4: accept multi-function programs. We only synthesize
-    // `functions[0]` (the `main` entry point). Helpers exist in the artifact
-    // because Noir's inliner left them as separate ACIR functions; if `main`
-    // never invokes them via `Opcode::Call`, they are dead from our point
-    // of view. If `main` does use `Opcode::Call`, the lowering layer
-    // rejects it via `OpcodeClass::Call` -> unsupported.
+    // Accept multi-function programs. We only synthesize `functions[0]`
+    // (the `main` entry point). Helpers exist in the artifact because
+    // Noir's inliner left them as separate ACIR functions; if `main` never
+    // invokes them via `Opcode::Call`, they are dead from our point of
+    // view. If `main` does use `Opcode::Call`, the lowering layer inlines
+    // the callee.
     //
     // A program with *zero* functions is pathological — reject explicitly
     // so downstream indexing of `program.functions[0]` is sound.
@@ -222,12 +222,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn workspace_fixture(name: &str) -> PathBuf {
-        // crates/acir-r1cs/src/artifact.rs -> .../src -> .../acir-r1cs -> .../crates -> workspace root
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        manifest
+        // CARGO_MANIFEST_DIR = crates/acir-r1cs; its sibling crates/tests holds
+        // the committed fixtures.
+        Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .and_then(|p| p.parent())
-            .expect("workspace root")
+            .expect("crates dir")
             .join("tests")
             .join("fixtures")
             .join(name)
@@ -241,12 +240,12 @@ mod tests {
         assert!(artifact.helper_function_names().is_empty());
     }
 
-    /// ROADMAP B.4 acceptance: multi-function artifacts must now parse
-    /// cleanly (the pre-B.4 code returned `MultiFunctionProgram` here).
+    /// Multi-function artifacts must now parse cleanly (earlier code
+    /// returned `MultiFunctionProgram` here).
     #[test]
     fn multi_function_artifact_parses_and_reports_helpers() {
         let artifact = parse_artifact_file(&workspace_fixture("multi_function.json"))
-            .expect("multi_function parses after B.4");
+            .expect("multi_function parses");
         assert!(
             artifact.num_helper_functions() >= 1,
             "expected helpers, got: {}",

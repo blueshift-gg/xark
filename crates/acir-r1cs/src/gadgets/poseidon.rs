@@ -22,7 +22,7 @@
 //! to keep linear-combination sizes bounded and to give us a clean witness
 //! handle for the next round's S-box / matrix mix.
 
-// The `for r in start..end { ... rc_table[r] ... }` loops below are clearer as
+// The `for r in start..end {... rc_table[r]... }` loops below are clearer as
 // indexed range loops (the index `r` is the round number, used in trace logs
 // and round-half/internal-round branching) than as `iter().skip(...).take(...)`
 // chains.
@@ -32,7 +32,7 @@ use std::sync::OnceLock;
 
 use ark_bn254::Fr;
 use ark_ff::{One, PrimeField, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::r1cs_builder::R1csBuilder;
 
@@ -862,7 +862,7 @@ pub fn poseidon2_permutation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_relations::r1cs::ConstraintSystem;
+    use ark_relations::gr1cs::ConstraintSystem;
 
     use crate::field::fr_from_decimal_str;
     use crate::witness::WitnessMap;
@@ -935,7 +935,7 @@ mod tests {
         cs.finalize();
         let assigned = cs.borrow().unwrap().assigned_value(out_vars[0]).unwrap();
         let _ = assigned; // sanity-check assignment exists
-                          // Use a fresh borrow to fetch each Variable's value.
+        // Use a fresh borrow to fetch each Variable's value.
         let cs_ref = cs.borrow().unwrap();
         for i in 0..T {
             let v = cs_ref.assigned_value(out_vars[i]).expect("assigned");
@@ -990,7 +990,7 @@ mod tests {
     }
 
     /// Helper: emit `poseidon2_permutation([1,2,3,4])` in decimal. Used to
-    /// populate the Noir `Prover.toml` for `examples/poseidon_basic/`. Gated
+    /// populate the Noir `Prover.toml` for `crates/tests/circuits/poseidon_basic/`. Gated
     /// behind `--ignored` so it doesn't pollute normal CI output.
     #[test]
     #[ignore]

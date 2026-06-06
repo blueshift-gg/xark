@@ -3,30 +3,29 @@
 //! Currently supports:
 //! * `RANGE` (via [`crate::gadgets::range::enforce_range`])
 //! * `Sha256Compression` (via [`crate::gadgets::hash::sha256_compression`])
-//! * `AND` / `XOR` (via [`crate::gadgets::bitwise::{and_n, xor_n}`],
-//!   ROADMAP step **WS-B.1**)
+//! * `AND` / `XOR` (via [`crate::gadgets::bitwise::{and_n, xor_n}`])
 //!
 //! All other variants are rejected before lowering ever starts (see
 //! [`crate::opcodes::OpcodeClass::is_supported`] and the eager check in
 //! [`crate::lower::LoweredAcirCircuit::new`]).
 
+use acir::FieldElement;
 use acir::circuit::opcodes::{BlackBoxFuncCall, FunctionInput};
 use acir::native_types::Witness;
-use acir::FieldElement;
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::artifact::WitnessIndex;
 use crate::field::noir_field_to_fr;
 use crate::gadgets::aes::aes128_encrypt_in_circuit;
-use crate::gadgets::bitwise::{and_n, xor_n, WordN, WORDN_MAX_BITS};
+use crate::gadgets::bitwise::{WORDN_MAX_BITS, WordN, and_n, xor_n};
 use crate::gadgets::blake2s::blake2s_in_circuit;
 use crate::gadgets::blake3::blake3_in_circuit;
-use crate::gadgets::curve::{curve_point_from_vars, ec_add_in_circuit, msm_in_circuit, CurvePoint};
+use crate::gadgets::curve::{CurvePoint, curve_point_from_vars, ec_add_in_circuit, msm_in_circuit};
 use crate::gadgets::hash::{sha256_compression, word32_from_value_var};
-use crate::gadgets::keccak::{keccakf1600_in_circuit, KECCAK_LANES};
-use crate::gadgets::poseidon::{poseidon2_permutation, T as POSEIDON2_T};
+use crate::gadgets::keccak::{KECCAK_LANES, keccakf1600_in_circuit};
+use crate::gadgets::poseidon::{T as POSEIDON2_T, poseidon2_permutation};
 use crate::gadgets::range::enforce_range;
 use crate::r1cs_builder::R1csBuilder;
 
@@ -44,7 +43,7 @@ pub fn lower_black_box(
 ) -> Result<(), SynthesisError> {
     match bb {
         BlackBoxFuncCall::RANGE { input, num_bits } => {
-            // Constant fast path (ROADMAP WS-B.3): if the input is a known
+            // Constant fast path: if the input is a known
             // constant, the range check is statically resolvable — no
             // constraints emitted. Otherwise fall back to the bit-decomposition
             // gadget on the underlying witness.
@@ -53,7 +52,7 @@ pub fn lower_black_box(
                 if !bound_fits {
                     tracing::error!(
                         "RANGE constant {fr} doesn't fit in {num_bits} bits — \
-                         circuit is unsatisfiable as written."
+ circuit is unsatisfiable as written."
                     );
                     return Err(SynthesisError::Unsatisfiable);
                 }
@@ -145,7 +144,7 @@ pub fn lower_black_box(
 }
 
 /// Lower `BlackBoxFuncCall::EmbeddedCurveAdd { input1, input2, outputs }`
-/// (ROADMAP step **WS-D.5**). Both points are Grumpkin affine `(x, y, is_inf)`
+///. Both points are Grumpkin affine `(x, y, is_inf)`
 /// triples; the output is a fresh affine triple bound to the three ACIR
 /// output witnesses.
 fn lower_embedded_curve_add(
@@ -180,7 +179,7 @@ fn lower_multi_scalar_mul(
     if points.len() % 3 != 0 || scalars.len() % 2 != 0 {
         tracing::error!(
             "MultiScalarMul: points.len() ({}) must be a multiple of 3 and scalars.len() ({}) \
-             must be a multiple of 2",
+ must be a multiple of 2",
             points.len(),
             scalars.len(),
         );
@@ -284,7 +283,7 @@ fn bind_var_to_witness(
 }
 
 /// Lower `BlackBoxFuncCall::AES128Encrypt { inputs, iv, key, outputs }`
-/// (ROADMAP step **WS-D.7**). The opcode is **CBC mode, no padding** —
+///. The opcode is **CBC mode, no padding** —
 /// `inputs.len()` is required to be a positive multiple of 16. (Noir's
 /// `std::aes128::aes128_encrypt` wrapper handles PKCS#7 padding in Noir
 /// before emitting the opcode, so a 16-byte plaintext shows up here as
@@ -299,8 +298,8 @@ fn lower_aes128_encrypt(
     if inputs.is_empty() || inputs.len() % 16 != 0 {
         tracing::error!(
             "lower_aes128_encrypt: input length {} must be a positive multiple of 16 \
-             (the AES128Encrypt opcode is CBC mode with NO padding; Noir's stdlib pads \
-             before invoking the opcode).",
+ (the AES128Encrypt opcode is CBC mode with NO padding; Noir's stdlib pads \
+ before invoking the opcode).",
             inputs.len()
         );
         return Err(SynthesisError::Unsatisfiable);
@@ -350,8 +349,8 @@ fn lower_aes128_encrypt(
     Ok(())
 }
 
-/// Lower `BlackBoxFuncCall::Blake2s { inputs, outputs }` (ROADMAP step
-/// **WS-D.2**). Each `FunctionInput` is a u8-valued field element (Noir emits
+/// Lower `BlackBoxFuncCall::Blake2s { inputs, outputs }`. Each `FunctionInput`
+/// is a u8-valued field element (Noir emits
 /// the u8 range check via a separate RANGE opcode, so we don't re-decompose
 /// here — `blake2s_in_circuit` does an internal 8-bit decomposition for its
 /// own bit-packing, which is the equivalent of a RANGE check). The 32 output
@@ -385,8 +384,8 @@ fn lower_blake2s(
     Ok(())
 }
 
-/// Lower `BlackBoxFuncCall::Blake3 { inputs, outputs }` (ROADMAP step
-/// **WS-D.3**). Each `FunctionInput` is a u8-valued field element; the gadget
+/// Lower `BlackBoxFuncCall::Blake3 { inputs, outputs }`. Each `FunctionInput`
+/// is a u8-valued field element; the gadget
 /// internally bit-decomposes each byte (which doubles as the implicit
 /// 8-bit range check). The 32 output bytes are bound to fresh ACIR output
 /// witnesses via single linear equalities. Handles inputs of any length via
@@ -417,8 +416,8 @@ fn lower_blake3(
     Ok(())
 }
 
-/// Lower `BlackBoxFuncCall::Keccakf1600 { inputs, outputs }` (ROADMAP step
-/// **WS-D.1**). Each lane is a 64-bit u64 packed into one field element on
+/// Lower `BlackBoxFuncCall::Keccakf1600 { inputs, outputs }`. Each lane is a
+/// 64-bit u64 packed into one field element on
 /// both the input and output side. We bit-decompose every input lane (which
 /// also enforces the implicit 64-bit range check), run the in-circuit
 /// permutation, then bind each output Witness to its lane's bit sum.
@@ -513,7 +512,7 @@ fn lower_poseidon2_permutation(
 
 /// Lower `BlackBoxFuncCall::AND { lhs, rhs, num_bits, output }`.
 ///
-/// Per ROADMAP step **WS-B.1**, this supports `num_bits ∈ [1, 64]`. Both
+/// Supports `num_bits ∈ [1, 64]`. Both
 /// inputs are bit-decomposed into `num_bits` boolean wires, AND'd bit-wise
 /// via [`and_n`], then recomposed into the output witness.
 fn lower_bitwise_and(
@@ -531,7 +530,7 @@ fn lower_bitwise_and(
 
 /// Lower `BlackBoxFuncCall::XOR { lhs, rhs, num_bits, output }`.
 ///
-/// Per ROADMAP step **WS-B.1**, this supports `num_bits ∈ [1, 64]`. Both
+/// Supports `num_bits ∈ [1, 64]`. Both
 /// inputs are bit-decomposed into `num_bits` boolean wires, XOR'd bit-wise
 /// via [`xor_n`], then recomposed into the output witness.
 fn lower_bitwise_xor(
@@ -551,7 +550,7 @@ fn lower_bitwise_xor(
 /// outside `[1, WORDN_MAX_BITS]` are rejected as `SynthesisError::Unsatisfiable`
 /// — the user-facing `BackendError` is raised earlier by
 /// `LoweredAcirCircuit::check_bitwise_widths` at setup time, so reaching this
-/// branch implies a caller skipped the preflight. See ROADMAP step **WS-B.1**.
+/// branch implies a caller skipped the preflight.
 fn decompose_function_input(
     builder: &mut R1csBuilder<'_>,
     fi: &FunctionInput<FieldElement>,
@@ -561,8 +560,7 @@ fn decompose_function_input(
     if !(1..=WORDN_MAX_BITS).contains(&num_bits) {
         tracing::error!(
             "BlackBoxFuncCall::{{AND,XOR}}: num_bits={num_bits} > {WORDN_MAX_BITS}; \
-             setup-time preflight (`check_bitwise_widths`) should have caught this. \
-             See ROADMAP step WS-B.1."
+ setup-time preflight (`check_bitwise_widths`) should have caught this."
         );
         return Err(SynthesisError::Unsatisfiable);
     }
@@ -648,7 +646,7 @@ fn function_input_to_var(
     }
 }
 
-/// Constant fast path (ROADMAP step **WS-B.3**). Returns `Some(value)` when
+/// Constant fast path. Returns `Some(value)` when
 /// `fi` is a `FunctionInput::Constant`, allowing the caller to short-circuit
 /// gadgets whose result is statically determined by a known constant input.
 /// Returns `None` for witness inputs.
@@ -695,7 +693,7 @@ fn fr_fits_in_bits(value: &Fr, num_bits: usize) -> bool {
 }
 
 /// Lower `BlackBoxFuncCall::EcdsaSecp256k1` / `EcdsaSecp256r1`
-/// (ROADMAP step **WS-D.6**), parameterised by the curve so the same code
+///, parameterised by the curve so the same code
 /// path serves both Noir opcodes.
 ///
 /// Inputs: 32-byte public-key X / Y / hashed-message (each `[u8; 32]`) and a
@@ -723,8 +721,8 @@ fn lower_ecdsa_with_curve(
     use crate::gadgets::ecdsa;
     tracing::warn!(
         "Lowering BlackBoxFuncCall::Ecdsa{} — this gadget emits roughly \
-         20M R1CS constraints per verification (schoolbook non-native arithmetic). \
-         Expect very long setup + prove times on circuits dominated by ECDSA.",
+ 20M R1CS constraints per verification (schoolbook non-native arithmetic). \
+ Expect very long setup + prove times on circuits dominated by ECDSA.",
         curve_name,
     );
 

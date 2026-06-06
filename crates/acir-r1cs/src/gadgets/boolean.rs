@@ -2,7 +2,7 @@
 
 use ark_bn254::Fr;
 use ark_ff::One;
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::r1cs_builder::R1csBuilder;
 

@@ -8,7 +8,7 @@ inspection.
 
 Uses Arkworks' `CanonicalSerialize`/`CanonicalDeserialize` with
 `Compress::Yes` and `Validate::Yes` on read. The on-disk layout is
-exactly what `ark-groth16` 0.5 produces for `ProvingKey<Bn254>`,
+exactly what `ark-groth16` 0.6 produces for `ProvingKey<Bn254>`,
 `VerifyingKey<Bn254>`, and `Proof<Bn254>`.
 
 Files:
@@ -27,11 +27,11 @@ choice so future hex support can opt in.
 
 ```json
 {
-  "curve": "bn254",
-  "protocol": "groth16",
-  "a": { "x": "<dec>", "y": "<dec>" },
-  "b": { "x": ["<c0>", "<c1>"], "y": ["<c0>", "<c1>"] },
-  "c": { "x": "<dec>", "y": "<dec>" }
+ "curve": "bn254",
+ "protocol": "groth16",
+ "a": { "x": "<dec>", "y": "<dec>" },
+ "b": { "x": ["<c0>", "<c1>"], "y": ["<c0>", "<c1>"] },
+ "c": { "x": "<dec>", "y": "<dec>" }
 }
 ```
 
@@ -42,13 +42,13 @@ G2 coordinates use the `Fq2 = c0 + c1*u` convention. The `x` array stores
 
 ```json
 {
-  "curve": "bn254",
-  "protocol": "groth16",
-  "alpha_g1": { "x": "...", "y": "..." },
-  "beta_g2":  { "x": ["...","..."], "y": ["...","..."] },
-  "gamma_g2": { "x": ["...","..."], "y": ["...","..."] },
-  "delta_g2": { "x": ["...","..."], "y": ["...","..."] },
-  "gamma_abc_g1": [ { "x": "...", "y": "..." }, ... ]
+ "curve": "bn254",
+ "protocol": "groth16",
+ "alpha_g1": { "x": "...", "y": "..." },
+ "beta_g2": { "x": ["...","..."], "y": ["...","..."] },
+ "gamma_g2": { "x": ["...","..."], "y": ["...","..."] },
+ "delta_g2": { "x": ["...","..."], "y": ["...","..."] },
+ "gamma_abc_g1": [ { "x": "...", "y": "..." },... ]
 }
 ```
 
@@ -56,10 +56,10 @@ G2 coordinates use the `Fq2 = c0 + c1*u` convention. The `x` array stores
 
 ```json
 {
-  "curve": "bn254",
-  "field": "fr",
-  "encoding": "decimal-string",
-  "inputs": ["..."]
+ "curve": "bn254",
+ "field": "fr",
+ "encoding": "decimal-string",
+ "inputs": ["..."]
 }
 ```
 

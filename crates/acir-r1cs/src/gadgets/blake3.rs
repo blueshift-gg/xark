@@ -1,4 +1,4 @@
-//! Blake3 hash gadget (ROADMAP step **WS-D.3**).
+//! Blake3 hash gadget.
 //!
 //! Implements the [Blake3](https://github.com/BLAKE3-team/BLAKE3) hash on a
 //! **variable-length byte input** producing a 32-byte digest. Used by Noir's
@@ -40,10 +40,10 @@
 //!
 //! For the only-chunk-in-the-tree case, the per-block flags are:
 //!
-//! * First block of a multi-block chunk:        `CHUNK_START` (`= 1`)
-//! * Middle blocks:                              `0`
-//! * Last block of the root chunk:               `CHUNK_END | ROOT` (`= 10`)
-//! * Single block that's also the root:          `CHUNK_START | CHUNK_END | ROOT` (`= 11`)
+//! * First block of a multi-block chunk: `CHUNK_START` (`= 1`)
+//! * Middle blocks: `0`
+//! * Last block of the root chunk: `CHUNK_END | ROOT` (`= 10`)
+//! * Single block that's also the root: `CHUNK_START | CHUNK_END | ROOT` (`= 11`)
 //!
 //! For empty input we still run a single compression with `block_len = 0`,
 //! `flags = CHUNK_START | CHUNK_END | ROOT`, message all zeros — the official
@@ -59,9 +59,9 @@
 
 use ark_bn254::Fr;
 use ark_ff::One;
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
-use crate::gadgets::bitwise::{add_mod_32, xor, Word32};
+use crate::gadgets::bitwise::{Word32, add_mod_32, xor};
 use crate::gadgets::range::{decompose_into_bits, enforce_recompose_equals};
 use crate::r1cs_builder::R1csBuilder;
 
@@ -606,10 +606,10 @@ fn fr_to_u8_low(fr: Fr) -> u8 {
 mod tests {
     use super::*;
     use crate::witness::WitnessMap;
-    use ark_relations::r1cs::ConstraintSystem;
-    use rand::rngs::StdRng;
+    use ark_relations::gr1cs::ConstraintSystem;
     use rand::Rng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Expected `blake3(b"abc")` digest from the official Blake3 spec / test
     /// vectors. Reproduced here so the native test acts as a true KAT and is
@@ -622,12 +622,8 @@ mod tests {
         (v, Some(fr))
     }
 
-    fn byte_var_value(cs: &ark_relations::r1cs::ConstraintSystemRef<Fr>, v: Variable) -> u8 {
-        let fr = match v {
-            Variable::Witness(idx) => cs.borrow().unwrap().witness_assignment[idx],
-            Variable::One => Fr::one(),
-            _ => panic!("byte_var_value: not a witness or one"),
-        };
+    fn byte_var_value(cs: &ark_relations::gr1cs::ConstraintSystemRef<Fr>, v: Variable) -> u8 {
+        let fr = cs.assigned_value(v).expect("variable has an assignment");
         fr_to_u8_low(fr)
     }
 
@@ -650,7 +646,7 @@ mod tests {
             // and several chunks crossing the 4096-byte / 8192-byte boundary.
             1025, 1500, 2048, 2049, 3000, 4096, 5000, 8192, 8193, 12000,
         ] {
-            let input: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+            let input: Vec<u8> = (0..len).map(|_| rng.r#gen()).collect();
             let got = blake3_native(&input);
             let want: [u8; 32] = blake3::hash(&input).into();
             assert_eq!(got, want, "blake3_native mismatch at len={len}");
@@ -707,17 +703,17 @@ mod tests {
     fn blake3_in_circuit_block_boundaries() {
         // Each of these lengths exercises a boundary in the multi-block /
         // flag bookkeeping:
-        //   63   — single sub-block, CHUNK_START | CHUNK_END | ROOT
-        //   64   — single block, full block length
-        //   65   — two blocks (CHUNK_START + CHUNK_END | ROOT)
-        //   127  — two blocks, second is partial
-        //   128  — exactly two full blocks
-        //   1023 — sixteen blocks, last partial (single chunk boundary)
-        //   1024 — sixteen full blocks (single chunk boundary, exact)
+        // 63 — single sub-block, CHUNK_START | CHUNK_END | ROOT
+        // 64 — single block, full block length
+        // 65 — two blocks (CHUNK_START + CHUNK_END | ROOT)
+        // 127 — two blocks, second is partial
+        // 128 — exactly two full blocks
+        // 1023 — sixteen blocks, last partial (single chunk boundary)
+        // 1024 — sixteen full blocks (single chunk boundary, exact)
         let lens = [63usize, 64, 65, 127, 128, 1023, 1024];
         let mut rng = StdRng::seed_from_u64(0x0B3B_0DE5);
         for &len in &lens {
-            let input: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+            let input: Vec<u8> = (0..len).map(|_| rng.r#gen()).collect();
 
             let cs = ConstraintSystem::<Fr>::new_ref();
             let map = WitnessMap::<Fr>::new();
@@ -747,7 +743,7 @@ mod tests {
         // Random non-trivial lengths up to the single-chunk limit.
         let lens = [3usize, 31, 200, 511, 800];
         for &len in &lens {
-            let input: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+            let input: Vec<u8> = (0..len).map(|_| rng.r#gen()).collect();
             let cs = ConstraintSystem::<Fr>::new_ref();
             let map = WitnessMap::<Fr>::new();
             let mut b = R1csBuilder::new(cs.clone(), Some(&map));
@@ -785,7 +781,7 @@ mod tests {
             let mut b = R1csBuilder::new(cs.clone(), Some(&map));
             b.finish_public_pass();
 
-            let input: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+            let input: Vec<u8> = (0..len).map(|_| rng.r#gen()).collect();
             let in_vars: Vec<(Variable, Option<Fr>)> =
                 input.iter().map(|&byte| alloc_byte(&mut b, byte)).collect();
             let out = blake3_in_circuit(&mut b, &in_vars).unwrap();

@@ -6,14 +6,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use acir::circuit::opcodes::BlockId;
 use acir::AcirField;
+use acir::FieldElement;
+use acir::circuit::opcodes::BlockId;
 use acir::circuit::{Opcode, Program};
 use acir::native_types::Expression;
-use acir::FieldElement;
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
-use ark_relations::r1cs::{ConstraintSystemRef, LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{ConstraintSystemRef, LinearCombination, SynthesisError, Variable};
 use sha2::{Digest, Sha256};
 
 use crate::artifact::{NoirArtifact, WitnessIndex};
@@ -53,10 +53,10 @@ impl LoweredAcirCircuit {
             estimated_constraints,
         };
         // Memory ops pass the classify-time gate unconditionally, but the
-        // *variable-index* rejection lives in the lowering pass (it requires
+        // detailed memory validation lives in the lowering pass (it requires
         // walking the AssertZero stream to detect pinned-constant indices).
         // Run the memory-only pre-flight now so users get the rich
-        // "see ROADMAP WS-C.5" error at `setup` / `inspect` time rather than
+        // diagnostic at `setup` / `inspect` time rather than
         // a `SynthesisError::Unsatisfiable` deep inside `prove`.
         lowered.check_memory_support()?;
         // AND/XOR opcodes carry a `num_bits` field that is unconstrained at
@@ -74,8 +74,8 @@ impl LoweredAcirCircuit {
     /// classification path so users get one error format regardless of why an
     /// opcode is unsupported.
     pub fn check_bitwise_widths(&self) -> Result<(), BackendError> {
-        use acir::circuit::opcodes::BlackBoxFuncCall;
         use crate::gadgets::bitwise::WORDN_MAX_BITS;
+        use acir::circuit::opcodes::BlackBoxFuncCall;
         for (i, op) in self.artifact.opcodes().iter().enumerate() {
             if let Opcode::BlackBoxFuncCall(bb) = op {
                 let (kind, num_bits) = match bb {
@@ -90,12 +90,12 @@ impl LoweredAcirCircuit {
                         index: i,
                         help: format!(
                             "BlackBoxFuncCall::{kind} with num_bits={n} is outside the supported \
-                             range [1, {WORDN_MAX_BITS}].\n\n\
-                             Noir 1.0.0-beta.21 emits AND/XOR only for u8/u16/u32/u64 operands; \
-                             wider integer types are decomposed at the source level before \
-                             reaching ACIR. If you have produced an artifact that violates this, \
-                             you are probably on a newer Noir version — file an issue with the \
-                             artifact and we will widen the gadget. See ROADMAP step WS-B.1."
+ range [1, {WORDN_MAX_BITS}].\n\n\
+ Noir 1.0.0-beta.21 emits AND/XOR only for u8/u16/u32/u64 operands; \
+ wider integer types are decomposed at the source level before \
+ reaching ACIR. If you have produced an artifact that violates this, \
+ you are probably on a newer Noir version — file an issue with the \
+ artifact and we will widen the gadget."
                         ),
                     });
                 }
@@ -115,19 +115,18 @@ impl LoweredAcirCircuit {
 
         // 1) Allocate public inputs first, in declaration order.
         for idx in &self.artifact.public_inputs {
-            builder.alloc_public(*idx)?;
+            let _ = builder.alloc_public(*idx)?;
         }
         builder.finish_public_pass();
 
         // 1b) Pre-pass: detect witnesses pinned to constants by a trivial
-        //     `AssertZero` of the shape `coeff * w + q_c = 0`. Constant-index
-        //     `MemoryOp` lowering uses this map to recognise when an op's
-        //     index witness is actually a compile-time constant. See
-        //     `docs/memory.md` and ROADMAP step WS-C.4. The map is mutable so
-        //     that Call inlining can splice in callee-scope pins discovered
-        //     from shifted callee opcodes.
-        let mut pinned_constants =
-            memory_lower::extract_pinned_constants(self.artifact.opcodes());
+        // `AssertZero` of the shape `coeff * w + q_c = 0`. Constant-index
+        // `MemoryOp` lowering uses this map to recognise when an op's
+        // index witness is actually a compile-time constant. See
+        // `docs/memory.md`. The map is mutable so
+        // that Call inlining can splice in callee-scope pins discovered
+        // from shifted callee opcodes.
+        let mut pinned_constants = memory_lower::extract_pinned_constants(self.artifact.opcodes());
         // Shadow of declared memory blocks: maps each `BlockId` to the
         // per-slot witness indices currently stored. `MemoryInit` populates
         // it; constant-index `MemoryOp[write]` updates it in-place. Shared
@@ -137,10 +136,10 @@ impl LoweredAcirCircuit {
         let mut memory_blocks: HashMap<BlockId, Vec<memory_lower::ShadowEntry>> = HashMap::new();
 
         // 2) Lower every opcode. Anything not classified as supported was
-        //    rejected at `new()` time, so the only opcodes we expect here are
-        //    `AssertZero`, supported black-box calls (RANGE, Sha256Compression,
-        //    bitwise, ...), `BrilligCall` (trust-outputs), and the memory
-        //    opcodes.
+        // rejected at `new()` time, so the only opcodes we expect here are
+        // `AssertZero`, supported black-box calls (RANGE, Sha256Compression,
+        // bitwise,...), `BrilligCall` (trust-outputs), and the memory
+        // opcodes.
         for (i, op) in self.artifact.opcodes().iter().enumerate() {
             self.lower_opcode(
                 &mut builder,
@@ -157,7 +156,7 @@ impl LoweredAcirCircuit {
     }
 
     /// Dispatch a single opcode through its appropriate lowering arm. Shared
-    /// between the top-level circuit and inlined callee bodies (B.5). The
+    /// between the top-level circuit and inlined callee bodies. The
     /// `predicate` parameter carries the combined call-site predicate: it is
     /// `None` at the top level (constraints always fire) and `Some(p)` inside
     /// a callee whose `Call`'s predicate is non-trivial (constraints are
@@ -194,9 +193,7 @@ impl LoweredAcirCircuit {
                 builder.restore_predicate(saved);
                 r
             }
-            Opcode::BlackBoxFuncCall(bb) => {
-                crate::opcodes::blackbox::lower_black_box(builder, bb)
-            }
+            Opcode::BlackBoxFuncCall(bb) => crate::opcodes::blackbox::lower_black_box(builder, bb),
             Opcode::BrilligCall { outputs, .. } => {
                 // Trust-outputs strategy: allocate the declared output
                 // witnesses (so they're pinned in the constraint system) and
@@ -253,7 +250,7 @@ impl LoweredAcirCircuit {
     }
 
     /// Lower a `Call` opcode by inlining the callee with witness-index
-    /// shifting (ROADMAP step WS-B.5). Recurses on nested `Opcode::Call`
+    /// shifting. Recurses on nested `Opcode::Call`
     /// inside the callee. Handles predicated calls by gating every callee
     /// `AssertZero` by the combined predicate; rejects BlackBox/Memory
     /// opcodes under a non-trivial predicate (per-gadget predicate threading
@@ -275,7 +272,10 @@ impl LoweredAcirCircuit {
         // Look up the callee circuit.
         let callee_idx = callee_id.0 as usize;
         if callee_idx >= self.artifact.program.functions.len() {
-            tracing::error!("Call opcode at index {opcode_index} references function id {callee_idx} but program has {} functions", self.artifact.program.functions.len());
+            tracing::error!(
+                "Call opcode at index {opcode_index} references function id {callee_idx} but program has {} functions",
+                self.artifact.program.functions.len()
+            );
             return Err(SynthesisError::Unsatisfiable);
         }
         let callee_circuit = &self.artifact.program.functions[callee_idx];
@@ -296,8 +296,7 @@ impl LoweredAcirCircuit {
         } else {
             Some(materialize_predicate(builder, predicate)?)
         };
-        let combined_predicate =
-            combine_predicates(builder, parent_predicate, call_predicate)?;
+        let combined_predicate = combine_predicates(builder, parent_predicate, call_predicate)?;
 
         // Pull the callee's witness map (if proving). In setup mode the
         // builder has no witness, so we pass None and rely on alloc_witness
@@ -339,7 +338,7 @@ impl LoweredAcirCircuit {
 
     /// Walk the opcode stream and return the first `BackendError` raised by
     /// memory lowering (constant-index detection failures, databus blocks,
-    /// out-of-bounds constants, ...). Useful for surfacing memory errors at
+    /// out-of-bounds constants,...). Useful for surfacing memory errors at
     /// `setup` time without running the full Arkworks synthesis dance.
     pub fn check_memory_support(&self) -> Result<(), BackendError> {
         let pinned_constants = memory_lower::extract_pinned_constants(self.artifact.opcodes());
@@ -355,8 +354,8 @@ impl LoweredAcirCircuit {
                     // constraint system so the helper's signature lines up,
                     // but the init lowering does not actually touch the
                     // builder beyond reading the block id / witnesses.
-                    let cs = ark_relations::r1cs::ConstraintSystem::<Fr>::new_ref();
-                    cs.set_mode(ark_relations::r1cs::SynthesisMode::Setup);
+                    let cs = ark_relations::gr1cs::ConstraintSystem::<Fr>::new_ref();
+                    cs.set_mode(ark_relations::gr1cs::SynthesisMode::Setup);
                     let mut builder = R1csBuilder::new(cs, None);
                     memory_lower::lower_memory_init(
                         &mut builder,
@@ -372,8 +371,8 @@ impl LoweredAcirCircuit {
                     // half of `lower_memory_op` to fire its error if the op
                     // is variable-index. Allocating witnesses against a
                     // throwaway builder is cheap.
-                    let cs = ark_relations::r1cs::ConstraintSystem::<Fr>::new_ref();
-                    cs.set_mode(ark_relations::r1cs::SynthesisMode::Setup);
+                    let cs = ark_relations::gr1cs::ConstraintSystem::<Fr>::new_ref();
+                    cs.set_mode(ark_relations::gr1cs::SynthesisMode::Setup);
                     let mut builder = R1csBuilder::new(cs, None);
                     builder.finish_public_pass();
                     memory_lower::lower_memory_op(
@@ -466,8 +465,8 @@ fn backend_to_synthesis(err: BackendError) -> SynthesisError {
 /// row. The cost is one extra mul aux per mul term (vs. ungated 0-mul or
 /// 1-mul cases) plus one gating constraint per AssertZero — independent of
 /// the gadget's internal shape, so any opcode whose lowering reduces to a
-/// stream of AssertZeros can be predicated uniformly. (See ROADMAP step
-/// WS-B.5 follow-up for non-trivial-predicate Call support.)
+/// stream of AssertZeros can be predicated uniformly. This is what backs
+/// non-trivial-predicate `Call` support.
 fn lower_assert_zero_gated(
     builder: &mut R1csBuilder,
     expr: &Expression<FieldElement>,
@@ -644,7 +643,11 @@ fn materialize_predicate(
         sum_lc.push((q_c_fr, Variable::One));
     }
     sum_lc.push((-Fr::one(), p));
-    builder.enforce(builder.zero_lc(), builder.zero_lc(), LinearCombination(sum_lc))?;
+    builder.enforce(
+        builder.zero_lc(),
+        builder.zero_lc(),
+        LinearCombination(sum_lc),
+    )?;
     enforce_boolean(builder, p)?;
     Ok(CallPredicate {
         var: p,
@@ -688,11 +691,7 @@ fn evaluate_expression(
             }
         }
     }
-    if have_values {
-        Ok(Some(acc))
-    } else {
-        Ok(None)
-    }
+    if have_values { Ok(Some(acc)) } else { Ok(None) }
 }
 
 /// Combine an outer call-site predicate with an inner one. `None`
@@ -769,7 +768,7 @@ mod tests {
     use super::*;
     use acir::circuit::{Circuit, Program, PublicInputs};
     use acir::native_types::{Expression, Witness};
-    use ark_relations::r1cs::ConstraintSystem;
+    use ark_relations::gr1cs::ConstraintSystem;
     use std::collections::BTreeSet;
 
     use crate::artifact::{ArtifactMetadata, NoirArtifact};
@@ -841,7 +840,7 @@ mod tests {
         }
     }
 
-    fn run(artifact: NoirArtifact, witness: Vec<(u32, Fr)>) -> ark_relations::r1cs::Result<bool> {
+    fn run(artifact: NoirArtifact, witness: Vec<(u32, Fr)>) -> ark_relations::gr1cs::Result<bool> {
         let lowered = LoweredAcirCircuit::new(artifact).expect("lower");
         let cs = ConstraintSystem::<Fr>::new_ref();
         let mut map = WitnessMap::new();
@@ -954,16 +953,18 @@ mod tests {
         };
         let art = build_artifact(vec![Opcode::AssertZero(expr)], vec![5], vec![1, 2, 3, 4]);
         // 2 * 3 + 4 * 5 = 6 + 20 = 26
-        assert!(run(
-            art,
-            vec![(1, fr(2)), (2, fr(3)), (3, fr(4)), (4, fr(5)), (5, fr(26))]
-        )
-        .unwrap());
+        assert!(
+            run(
+                art,
+                vec![(1, fr(2)), (2, fr(3)), (3, fr(4)), (4, fr(5)), (5, fr(26))]
+            )
+            .unwrap()
+        );
     }
 
     #[test]
     fn negative_coefficient_constant_term() {
-        // -2 * x + 5 = 0  =>  x = 5/2 (not integer, but valid in the field)
+        // -2 * x + 5 = 0 => x = 5/2 (not integer, but valid in the field)
         // For an integer-friendly version: 3*x + (-9) = 0 => x = 3.
         let expr = Expression {
             mul_terms: vec![],
@@ -1156,7 +1157,7 @@ mod tests {
         artifact: NoirArtifact,
         caller_witness: Vec<(u32, Fr)>,
         callee_witness: Vec<(u32, Fr)>,
-    ) -> ark_relations::r1cs::Result<bool> {
+    ) -> ark_relations::gr1cs::Result<bool> {
         let lowered = LoweredAcirCircuit::new(artifact).expect("lower");
         let cs = ConstraintSystem::<Fr>::new_ref();
         let mut map = WitnessMap::new();
@@ -1316,12 +1317,7 @@ mod tests {
         })];
         let art = predicated_helper_artifact(1, 10, helper_opcodes);
         // p=0, input=300 (out of 8-bit range, but gated off).
-        let ok = run_multi(
-            art,
-            vec![(1, fr(300)), (10, fr(0))],
-            vec![(1, fr(300))],
-        )
-        .unwrap();
+        let ok = run_multi(art, vec![(1, fr(300)), (10, fr(0))], vec![(1, fr(300))]).unwrap();
         assert!(ok, "predicate=0 must disable the RANGE check");
     }
 
@@ -1334,12 +1330,7 @@ mod tests {
         })];
         let art = predicated_helper_artifact(1, 10, helper_opcodes);
         // p=1, input=300 (out of 8-bit range, gating active → rejected).
-        let ok = run_multi(
-            art,
-            vec![(1, fr(300)), (10, fr(1))],
-            vec![(1, fr(300))],
-        )
-        .unwrap();
+        let ok = run_multi(art, vec![(1, fr(300)), (10, fr(1))], vec![(1, fr(300))]).unwrap();
         assert!(!ok, "predicate=1 must catch out-of-range value");
     }
 
@@ -1351,12 +1342,7 @@ mod tests {
             num_bits: 8,
         })];
         let art = predicated_helper_artifact(1, 10, helper_opcodes);
-        let ok = run_multi(
-            art,
-            vec![(1, fr(200)), (10, fr(1))],
-            vec![(1, fr(200))],
-        )
-        .unwrap();
+        let ok = run_multi(art, vec![(1, fr(200)), (10, fr(1))], vec![(1, fr(200))]).unwrap();
         assert!(ok, "predicate=1, valid 8-bit input must satisfy");
     }
 
@@ -1470,15 +1456,17 @@ mod tests {
             num_bits: 128,
         };
         let art = build_artifact(vec![Opcode::BlackBoxFuncCall(bb)], vec![3], vec![1, 2]);
-        let err = LoweredAcirCircuit::new(art).err().expect("AND num_bits=128 must reject");
+        let err = LoweredAcirCircuit::new(art)
+            .err()
+            .expect("AND num_bits=128 must reject");
         let msg = format!("{err}");
         assert!(
             msg.contains("BlackBoxFuncCall::AND") && msg.contains("num_bits=128"),
             "error should name the opcode and offending width: {msg}"
         );
         assert!(
-            msg.contains("ROADMAP step WS-B.1"),
-            "error should point at ROADMAP step WS-B.1: {msg}"
+            msg.contains("outside the supported"),
+            "error should explain the width is out of range: {msg}"
         );
     }
 }

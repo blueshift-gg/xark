@@ -1,4 +1,4 @@
-//! AES-128 (CBC mode, no padding) encryption gadget (ROADMAP step **WS-D.7**).
+//! AES-128 (CBC mode, no padding) encryption gadget.
 //!
 //! Implements FIPS 197 AES-128 encryption in CBC mode with **no padding**
 //! (input must be a multiple of 16 bytes). Used by Noir's
@@ -16,12 +16,12 @@
 //!
 //! ## Per-round cost
 //!
-//! | Step          | R1CS cost per byte                                    |
+//! | Step | R1CS cost per byte |
 //! |---------------|-------------------------------------------------------|
-//! | SubBytes      | ~83 constraints (see [`s_box_in_circuit`] below)      |
-//! | ShiftRows     | 0 (pure permutation of byte handles)                  |
-//! | MixColumns    | per byte: ~8 XOR constraints                          |
-//! | AddRoundKey   | per byte: 8 XOR constraints                           |
+//! | SubBytes | ~83 constraints (see [`s_box_in_circuit`] below) |
+//! | ShiftRows | 0 (pure permutation of byte handles) |
+//! | MixColumns | per byte: ~8 XOR constraints |
+//! | AddRoundKey | per byte: 8 XOR constraints |
 //!
 //! Total ≈ 200 S-box invocations per CBC block (10 rounds × 16 bytes + 40
 //! during key schedule), each costing ~83 constraints, so ~17k constraints
@@ -33,12 +33,12 @@
 //! Each byte's S-box value is derived via the **GF(2^8) inverse + affine
 //! transform** definition (FIPS 197 §5.1.1). The prover supplies the
 //! 8-bit inverse `x_inv` and a `is_zero` flag; we verify
-//!   * `x * x_inv = 1 - is_zero` in **GF(2^8)** (a bit-multiplication
-//!     constraint over the 64 cross-products),
-//!   * `x * is_zero = 0` (as field elements; forces `x = 0` when
-//!     `is_zero = 1`),
-//!   * `x_inv * is_zero = 0` (forces `x_inv = 0` when `is_zero = 1`),
-//!   * `is_zero` is boolean.
+//! * `x * x_inv = 1 - is_zero` in **GF(2^8)** (a bit-multiplication
+//!   constraint over the 64 cross-products),
+//! * `x * is_zero = 0` (as field elements; forces `x = 0` when
+//!   `is_zero = 1`),
+//! * `x_inv * is_zero = 0` (forces `x_inv = 0` when `is_zero = 1`),
+//! * `is_zero` is boolean.
 //!
 //! That makes `x_inv` the unique GF(2^8) inverse of `x` when `x ≠ 0`, and
 //! `x_inv = 0` when `x = 0` (matching FIPS 197's convention `S(0) = 0x63`,
@@ -52,7 +52,7 @@
 
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 
 use crate::gadgets::boolean::enforce_boolean;
 use crate::gadgets::range::{decompose_into_bits, pow2};
@@ -82,22 +82,22 @@ const RCON: [u8; 11] = [
 /// derives output bits algebraically — see [`s_box_in_circuit`].
 #[rustfmt::skip]
 const SBOX: [u8; 256] = [
-    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
-    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
-    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
-    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
-    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
-    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
-    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
-    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
-    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
-    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
-    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
-    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
-    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
-    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
-    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
-    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
+ 0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+ 0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+ 0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+ 0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+ 0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+ 0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+ 0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+ 0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+ 0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+ 0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+ 0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+ 0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+ 0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+ 0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+ 0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+ 0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
 ];
 
 // =============================================================================
@@ -211,11 +211,7 @@ fn mix_columns_native(state: &mut [u8; 16]) {
 fn xtime(b: u8) -> u8 {
     let hi = b >> 7;
     let shifted = b << 1;
-    if hi == 1 {
-        shifted ^ 0x1b
-    } else {
-        shifted
-    }
+    if hi == 1 { shifted ^ 0x1b } else { shifted }
 }
 
 // =============================================================================
@@ -306,14 +302,14 @@ impl Byte {
     fn xtime(&self, builder: &mut R1csBuilder<'_>) -> Result<Byte, SynthesisError> {
         let b = &self.bits;
         // Output bits b0..b7 for "multiply by x" in GF(2^8) with reduction 0x1B:
-        //   out_0 = b7
-        //   out_1 = b0 XOR b7
-        //   out_2 = b1
-        //   out_3 = b2 XOR b7
-        //   out_4 = b3 XOR b7
-        //   out_5 = b4
-        //   out_6 = b5
-        //   out_7 = b6
+        // out_0 = b7
+        // out_1 = b0 XOR b7
+        // out_2 = b1
+        // out_3 = b2 XOR b7
+        // out_4 = b3 XOR b7
+        // out_5 = b4
+        // out_6 = b5
+        // out_7 = b6
         let value = self.value.map(xtime);
         let input_value = self.value;
         let bit_vals_pair = |i: usize, j: usize| -> Option<[u8; 2]> {
@@ -475,8 +471,8 @@ fn xor_bits_to_bit(
 /// see single-Variable LCs).
 ///
 /// Output bit `i` (LSB first) =
-///   `x_i XOR x_{(i+4) mod 8} XOR x_{(i+5) mod 8}
-///    XOR x_{(i+6) mod 8} XOR x_{(i+7) mod 8} XOR c_i`
+/// `x_i XOR x_{(i+4) mod 8} XOR x_{(i+5) mod 8}
+/// XOR x_{(i+6) mod 8} XOR x_{(i+7) mod 8} XOR c_i`
 /// where the constant byte is `0x63 = 0110_0011`, bit `i` of which is `c_i`.
 fn affine_transform(builder: &mut R1csBuilder<'_>, input: &Byte) -> Result<Byte, SynthesisError> {
     let constant_byte: u8 = 0x63;
@@ -569,7 +565,7 @@ fn s_box_in_circuit(builder: &mut R1csBuilder<'_>, input: &Byte) -> Result<Byte,
 
     // -- Enforce `x_inv * is_zero = 0` (single R1CS). --------------------------
     // Forces `x_inv = 0` when `is_zero = 1` (so the S-box output is uniquely
-    // determined: `Affine(0) XOR 0x63 = 0x63 XOR 0x63 = ...`, see below).
+    // determined: `Affine(0) XOR 0x63 = 0x63 XOR 0x63 =...`, see below).
     let x_inv_value_lc = {
         let mut terms: Vec<(Fr, Variable)> = Vec::with_capacity(8);
         for i in 0..8 {
@@ -806,16 +802,16 @@ fn mix_columns(
         let s2 = &s2;
         let s3 = &s3;
         // out[0] = xtime(s0) XOR (xtime(s1) XOR s1) XOR s2 XOR s3
-        //        = t0 XOR t1 XOR s1 XOR s2 XOR s3
+        // = t0 XOR t1 XOR s1 XOR s2 XOR s3
         out[c * 4] = chain_xor(builder, &[&t0, &t1, s1, s2, s3])?;
         // out[1] = s0 XOR xtime(s1) XOR (xtime(s2) XOR s2) XOR s3
-        //        = s0 XOR t1 XOR t2 XOR s2 XOR s3
+        // = s0 XOR t1 XOR t2 XOR s2 XOR s3
         out[c * 4 + 1] = chain_xor(builder, &[s0, &t1, &t2, s2, s3])?;
         // out[2] = s0 XOR s1 XOR xtime(s2) XOR (xtime(s3) XOR s3)
-        //        = s0 XOR s1 XOR t2 XOR t3 XOR s3
+        // = s0 XOR s1 XOR t2 XOR t3 XOR s3
         out[c * 4 + 2] = chain_xor(builder, &[s0, s1, &t2, &t3, s3])?;
         // out[3] = (xtime(s0) XOR s0) XOR s1 XOR s2 XOR xtime(s3)
-        //        = t0 XOR s0 XOR s1 XOR s2 XOR t3
+        // = t0 XOR s0 XOR s1 XOR s2 XOR t3
         out[c * 4 + 3] = chain_xor(builder, &[&t0, s0, s1, s2, &t3])?;
     }
     *state = out;
@@ -849,16 +845,10 @@ fn chain_xor(builder: &mut R1csBuilder<'_>, terms: &[&Byte]) -> Result<Byte, Syn
     let mut out_bits: [LinearCombination<Fr>; 8] =
         std::array::from_fn(|_| LinearCombination(vec![]));
     for bit_i in 0..8 {
-        let sum_val: Option<u32> = terms
-            .iter()
-            .try_fold(0u32, |acc, b| b.value.map(|v| acc + (((v >> bit_i) & 1) as u32)));
-        let out_bit_val = sum_val.map(|s| {
-            if s & 1 == 1 {
-                Fr::one()
-            } else {
-                Fr::zero()
-            }
+        let sum_val: Option<u32> = terms.iter().try_fold(0u32, |acc, b| {
+            b.value.map(|v| acc + (((v >> bit_i) & 1) as u32))
         });
+        let out_bit_val = sum_val.map(|s| if s & 1 == 1 { Fr::one() } else { Fr::zero() });
         let out_var = builder.alloc_with_value(out_bit_val)?;
         enforce_boolean(builder, out_var)?;
 
@@ -959,7 +949,7 @@ pub fn aes128_encrypt_in_circuit(
     assert!(
         !plaintext_vars.is_empty() && plaintext_vars.len() % BLOCK_BYTES == 0,
         "aes128_encrypt_in_circuit: input length {} must be a positive \
-         multiple of {}",
+ multiple of {}",
         plaintext_vars.len(),
         BLOCK_BYTES,
     );
@@ -1046,11 +1036,11 @@ fn fr_to_u8_low(fr: Fr) -> u8 {
 mod tests {
     use super::*;
     use crate::witness::WitnessMap;
-    use aes::cipher::{block_padding::NoPadding, BlockModeEncrypt, KeyIvInit};
-    use ark_relations::r1cs::ConstraintSystem;
-    use rand::rngs::StdRng;
+    use aes::cipher::{BlockModeEncrypt, KeyIvInit, block_padding::NoPadding};
+    use ark_relations::gr1cs::ConstraintSystem;
     use rand::Rng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
 
@@ -1069,12 +1059,8 @@ mod tests {
         (v, Some(fr))
     }
 
-    fn byte_var_value(cs: &ark_relations::r1cs::ConstraintSystemRef<Fr>, v: Variable) -> u8 {
-        let fr = match v {
-            Variable::Witness(idx) => cs.borrow().unwrap().witness_assignment[idx],
-            Variable::One => Fr::one(),
-            _ => panic!("byte_var_value: not a witness or one"),
-        };
+    fn byte_var_value(cs: &ark_relations::gr1cs::ConstraintSystemRef<Fr>, v: Variable) -> u8 {
+        let fr = cs.assigned_value(v).expect("variable has an assignment");
         fr_to_u8_low(fr)
     }
 

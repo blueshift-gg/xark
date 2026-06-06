@@ -2,62 +2,54 @@
 resolver = "2"
 members = [
     "crates/acir-r1cs",
-    "crates/groth16-backend",
-    "crates/xark-cli",
-    "crates/xark-solana-verifier",
-    "crates/xark-arithmetic-square-program",
+    "crates/backend",
+    "crates/cli",
+    "crates/verifier",
+    "crates/tests",
 ]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/blueshift/xark"
-rust-version = "1.74"
+rust-version = "1.85"
 
 [workspace.dependencies]
-# `parallel` activates rayon-backed multi-threaded MSMs / FFTs / polynomial
-# arithmetic inside Arkworks. This is Arkworks' own default but we explicitly
-# turn it back on here because `default-features = false` (set so `std`
-# wasn't pulled in unintentionally during the early CLI build) had silently
-# disabled it too. With `parallel`, `setup` and `prove` on a circuit with
-# n constraints scale with the number of cores; without it, both ran
-# single-threaded. Measured speedup on `sha256_basic`: ~5–6× on a 10-core
-# machine. Solana SBPF compilation (the on-chain verifier crate) cannot use
-# rayon and pulls these deps without `parallel` via its own feature gate.
-ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
-ark-ff = { version = "0.5", default-features = false, features = ["parallel"] }
-ark-ec = { version = "0.5", default-features = false, features = ["parallel"] }
-ark-groth16 = { version = "0.5", default-features = false, features = ["parallel"] }
-ark-relations = { version = "0.5", default-features = false }
-ark-r1cs-std = { version = "0.5", default-features = false, features = ["parallel"] }
-ark-poly = { version = "0.5", default-features = false, features = ["parallel"] }
-ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
-ark-std = { version = "0.5", default-features = false, features = ["parallel"] }
-ark-snark = { version = "0.5", default-features = false }
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-ff = { version = "0.6", default-features = false, features = ["parallel"] }
+ark-ec = { version = "0.6", default-features = false, features = ["parallel"] }
+ark-groth16 = { version = "0.6", default-features = false, features = ["parallel"] }
+ark-relations = { version = "0.6", default-features = false }
+ark-r1cs-std = { version = "0.6", default-features = false, features = ["parallel"] }
+ark-poly = { version = "0.6", default-features = false, features = ["parallel"] }
+ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
+ark-std = { version = "0.6", default-features = false, features = ["parallel"] }
+ark-snark = { version = "0.6", default-features = false }
 
 # Pinned to nargo 1.0.0-beta.21 (commit 89a0f0faf3a5f1273c8ac4843b7877882437e277).
+# `acir` re-exports the `acir_field` / `acvm` types and pulls them in at the
+# same pinned commit, so we only need to declare `acir` here.
 acir = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0-beta.21", default-features = false, features = ["bn254"] }
-acir_field = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0-beta.21", default-features = false, features = ["bn254"] }
-acvm = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0-beta.21", default-features = false, features = ["bn254"] }
 
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-flate2 = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 base64 = "0.22"
 num-bigint = "0.4"
 num-traits = "0.2"
-sha2 = "0.10"
+sha2 = "0.11.0"
+# Pinned to 0.8 / 0.3 to match arkworks 0.6, which depends on rand 0.8
+# (rand_core 0.6). RNGs handed to `Groth16::prove` / `circuit_specific_setup`
+# must implement *that* `RngCore`; rand 0.9/0.10 expose an incompatible trait.
 rand = "0.8"
 rand_chacha = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-rmp-serde = "1"
 
 [profile.release]
 lto = "thin"

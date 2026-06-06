@@ -1,7 +1,7 @@
 //! Helpers for turning unsupported opcodes into [`BackendError`] values.
 
-use acir::circuit::Opcode;
 use acir::FieldElement;
+use acir::circuit::Opcode;
 
 use crate::error::BackendError;
 use crate::opcodes::classify;

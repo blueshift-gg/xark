@@ -1,4 +1,4 @@
-//! Grumpkin embedded-curve operations (ROADMAP step **WS-D.5**).
+//! Grumpkin embedded-curve operations.
 //!
 //! Implements `BlackBoxFuncCall::EmbeddedCurveAdd` and
 //! `BlackBoxFuncCall::MultiScalarMul`. The embedded curve over BN254 Fr is
@@ -21,9 +21,9 @@
 //!
 //! 1. The prover supplies the output `(x3, y3, is_inf3)` and the slope
 //!    `lambda` such that:
-//!    * Generic case (different x): `lambda = (y2 - y1) / (x2 - x1)`.
-//!    * Doubling case (same point): `lambda = 3 x1^2 / (2 y1)`.
-//!    * Inverse case (`y1 = -y2, x1 = x2`): result is infinity, `lambda = 0`.
+//! * Generic case (different x): `lambda = (y2 - y1) / (x2 - x1)`.
+//! * Doubling case (same point): `lambda = 3 x1^2 / (2 y1)`.
+//! * Inverse case (`y1 = -y2, x1 = x2`): result is infinity, `lambda = 0`.
 //! 2. We allocate selector booleans
 //!    `lhs_inf, rhs_inf, is_double, is_inverse` and prove they are consistent
 //!    with the input flags / coordinates.
@@ -61,7 +61,7 @@ use ark_bn254::{Fq, Fr};
 use ark_ec::short_weierstrass::{self as sw, SWCurveConfig};
 use ark_ec::{AffineRepr, CurveConfig, CurveGroup, PrimeGroup};
 use ark_ff::{AdditiveGroup, Field, One, PrimeField, Zero};
-use ark_relations::r1cs::{LinearCombination, SynthesisError, Variable};
+use ark_relations::gr1cs::{LinearCombination, SynthesisError, Variable};
 use num_bigint::BigUint;
 
 use crate::gadgets::boolean::enforce_boolean;
@@ -94,6 +94,10 @@ impl SWCurveConfig for GrumpkinConfig {
     const COEFF_B: Fr = ark_ff::MontFp!("-17");
     const GENERATOR: GrumpkinAffine = GrumpkinAffine::new_unchecked(Fr::ONE, GENERATOR_Y);
 
+    // arkworks 0.6 added this associated type; `()` selects the default
+    // (0,0)-is-infinity zero-flag representation the built-in configs use.
+    type ZeroFlag = ();
+
     #[inline(always)]
     fn mul_by_a(_: Fr) -> Fr {
         Fr::ZERO
@@ -106,9 +110,7 @@ impl SWCurveConfig for GrumpkinConfig {
 const GENERATOR_Y: Fr =
     ark_ff::MontFp!("17631683881184975370165255887551781615748388533673675138860");
 
-#[allow(dead_code)]
 pub type GrumpkinAffine = sw::Affine<GrumpkinConfig>;
-#[allow(dead_code)]
 pub type GrumpkinProjective = sw::Projective<GrumpkinConfig>;
 
 // ---------------------------------------------------------------------------
@@ -231,13 +233,10 @@ fn enforce_on_curve_grumpkin(
 
     // (1 − is_infinity) · (y² − x³ + 17) = 0.
     //
-    //   A = 1 − is_infinity
-    //   B = y_sq − x_cu + 17·Variable::One
-    //   C = 0
-    let a = LinearCombination(vec![
-        (Fr::one(), Variable::One),
-        (-Fr::one(), is_infinity),
-    ]);
+    // A = 1 − is_infinity
+    // B = y_sq − x_cu + 17·Variable::One
+    // C = 0
+    let a = LinearCombination(vec![(Fr::one(), Variable::One), (-Fr::one(), is_infinity)]);
     let b = LinearCombination(vec![
         (Fr::one(), y_sq),
         (-Fr::one(), x_cu),
@@ -324,18 +323,18 @@ fn affine_add_full(p1: GrumpkinAffine, p2: GrumpkinAffine) -> GrumpkinAffine {
 ///   where `extra_double_correction = 2*y1*lambda - 3*x1^2` is also computed
 ///   from witnesses — but we side-step that complexity by writing two gated
 ///   equations:
-///   - `(1 - is_double) * (1 - is_inverse) * ((x2 - x1) * lambda - (y2 - y1)) = 0`
-///   - `is_double * (2 * y1 * lambda - 3 * x1 * x1) = 0`
+/// - `(1 - is_double) * (1 - is_inverse) * ((x2 - x1) * lambda - (y2 - y1)) = 0`
+/// - `is_double * (2 * y1 * lambda - 3 * x1 * x1) = 0`
 /// * Generic output:
 ///   `xg = lambda^2 - x1 - x2`, `yg = lambda * (x1 - xg) - y1`.
 /// * Final output selection:
-///     ```text
-///     x3 = lhs_inf * x2 + (1 - lhs_inf) * (rhs_inf * x1 + (1 - rhs_inf) * (1 - is_inverse) * xg)
-///     y3 = lhs_inf * y2 + (1 - lhs_inf) * (rhs_inf * y1 + (1 - rhs_inf) * (1 - is_inverse) * yg)
-///     is_inf3 = lhs_inf * rhs_inf
-///                + (1 - lhs_inf) * (1 - rhs_inf) * is_inverse + ...
-///     ```
-///   For readability we flatten this in code using pin_lc.
+/// ```text
+/// x3 = lhs_inf * x2 + (1 - lhs_inf) * (rhs_inf * x1 + (1 - rhs_inf) * (1 - is_inverse) * xg)
+/// y3 = lhs_inf * y2 + (1 - lhs_inf) * (rhs_inf * y1 + (1 - rhs_inf) * (1 - is_inverse) * yg)
+/// is_inf3 = lhs_inf * rhs_inf
+/// + (1 - lhs_inf) * (1 - rhs_inf) * is_inverse +...
+/// ```
+/// For readability we flatten this in code using pin_lc.
 pub fn ec_add_in_circuit(
     builder: &mut R1csBuilder<'_>,
     p1: &CurvePoint,
@@ -402,9 +401,9 @@ pub fn ec_add_in_circuit(
     let same_y = alloc_bool(builder, same_y_val)?;
 
     // --- enforce same_x correctness via hinted inverse: ---
-    //   same_x * (x2 - x1) = 0
-    //   (x2 - x1) * inv_dx = 1 - same_x  (when same_x = 0, this pins inv_dx
-    //   to be the true inverse; when same_x = 1, dx must be 0 by previous).
+    // same_x * (x2 - x1) = 0
+    // (x2 - x1) * inv_dx = 1 - same_x (when same_x = 0, this pins inv_dx
+    // to be the true inverse; when same_x = 1, dx must be 0 by previous).
     let dx_lc = sub_lc(&var_lc(p2.x), &var_lc(p1.x));
     builder.enforce(var_lc(same_x), dx_lc.clone(), builder.zero_lc())?;
     let inv_dx_val: Option<Fr> = match (p1.x_val, p2.x_val) {
@@ -492,9 +491,9 @@ pub fn ec_add_in_circuit(
 
     // --- slope equations ---
     // Generic case (when neither inf, not doubling, not inverse):
-    //   (x2 - x1) * lambda = y2 - y1
+    // (x2 - x1) * lambda = y2 - y1
     // Doubling case (when is_double = 1):
-    //   2 * y1 * lambda = 3 * x1^2
+    // 2 * y1 * lambda = 3 * x1^2
     //
     // We gate each by selectors. To avoid emitting them at all when at-infinity
     // or in inverse case (where lambda is unused), we gate further by
@@ -541,8 +540,8 @@ pub fn ec_add_in_circuit(
     )?;
 
     // Constraint: generic_active * ((x2 - x1) * lambda - (y2 - y1)) = 0
-    //   We split into: t_dxl = (x2 - x1) * lambda, then enforce
-    //   generic_active * (t_dxl - (y2 - y1)) = 0.
+    // We split into: t_dxl = (x2 - x1) * lambda, then enforce
+    // generic_active * (t_dxl - (y2 - y1)) = 0.
     let t_dxl_val: Option<Fr> = match (p1.x_val, p2.x_val, lambda_val) {
         (Some(a), Some(b), Some(l)) => Some((b - a) * l),
         _ => None,
@@ -571,8 +570,8 @@ pub fn ec_add_in_circuit(
     builder.enforce(var_lc(is_double), doubling_diff, builder.zero_lc())?;
 
     // --- generic output (xg, yg) ---
-    //   xg = lambda^2 - x1 - x2
-    //   yg = lambda * (x1 - xg) - y1
+    // xg = lambda^2 - x1 - x2
+    // yg = lambda * (x1 - xg) - y1
     let lambda_sq_val = lambda_val.map(|l| l * l);
     let lambda_sq = builder.alloc_with_value(lambda_sq_val)?;
     builder.enforce(var_lc(lambda), var_lc(lambda), var_lc(lambda_sq))?;
@@ -592,7 +591,7 @@ pub fn ec_add_in_circuit(
     let xg = pin_lc(builder, xg_lc, xg_val)?;
 
     // yg = lambda * (x1 - xg) - y1
-    //   t_x1_minus_xg LC: x1 - xg
+    // t_x1_minus_xg LC: x1 - xg
     let x1_minus_xg = sub_lc(&var_lc(p1.x), &var_lc(xg));
     let lambda_times_x1_minus_xg_val: Option<Fr> = match (lambda_val, p1.x_val, xg_val) {
         (Some(l), Some(x1), Some(x3)) => Some(l * (x1 - x3)),
@@ -613,18 +612,18 @@ pub fn ec_add_in_circuit(
 
     // --- output selection ---
     // We compute the final output coordinates as:
-    //   x3 = lhs_inf * x2 + not_lhs * (rhs_inf * x1 + not_rhs * (not_inverse * xg))
-    //   y3 = lhs_inf * y2 + not_lhs * (rhs_inf * y1 + not_rhs * (not_inverse * yg))
-    //   is_inf3 = lhs_inf * is_inf_lhs_case + not_lhs * (rhs_inf * is_inf_rhs_case + not_rhs * is_inverse)
+    // x3 = lhs_inf * x2 + not_lhs * (rhs_inf * x1 + not_rhs * (not_inverse * xg))
+    // y3 = lhs_inf * y2 + not_lhs * (rhs_inf * y1 + not_rhs * (not_inverse * yg))
+    // is_inf3 = lhs_inf * is_inf_lhs_case + not_lhs * (rhs_inf * is_inf_rhs_case + not_rhs * is_inverse)
     // where:
-    //   is_inf_lhs_case = rhs_inf (if both at infinity, output is also infinity; if p1 inf, output = p2)
-    //   is_inf_rhs_case = lhs_inf (already 0 here, but for symmetry)
+    // is_inf_lhs_case = rhs_inf (if both at infinity, output is also infinity; if p1 inf, output = p2)
+    // is_inf_rhs_case = lhs_inf (already 0 here, but for symmetry)
     //
     // Concretely:
-    //   - If lhs_inf: out = (x2, y2, rhs_inf)
-    //   - Elif rhs_inf: out = (x1, y1, lhs_inf) = (x1, y1, 0)
-    //   - Elif is_inverse: out = (0, 0, 1)
-    //   - Else (incl is_double or generic): out = (xg, yg, 0)
+    // - If lhs_inf: out = (x2, y2, rhs_inf)
+    // - Elif rhs_inf: out = (x1, y1, lhs_inf) = (x1, y1, 0)
+    // - Elif is_inverse: out = (0, 0, 1)
+    // - Else (incl is_double or generic): out = (xg, yg, 0)
     //
     // We compute the witness values from `native_out`.
     let (x3_val, y3_val, is_inf3_val) = match native_out {
@@ -640,13 +639,13 @@ pub fn ec_add_in_circuit(
     };
 
     // Pin selection helpers.
-    // alpha = not_lhs * not_rhs * not_inverse  (when 1, output is (xg, yg, 0))
+    // alpha = not_lhs * not_rhs * not_inverse (when 1, output is (xg, yg, 0))
     // We already have `generic_active = not_lhs * not_rhs * not_in_special`.
     // We want a slightly different selector since `not_in_special` excludes
     // `is_double` too, but in the doubling case xg/yg ARE the correct
     // doubling output. So define:
-    //   take_generic = both_finite * not_inverse  -- selects the (xg, yg, 0)
-    //   branch when not at infinity and not in the p + (-p) case.
+    // take_generic = both_finite * not_inverse -- selects the (xg, yg, 0)
+    // branch when not at infinity and not in the p + (-p) case.
     let take_generic_val = match (both_finite_val, is_inverse_val) {
         (Some(bf), Some(inv)) => {
             if bf == Fr::one() && !inv {
@@ -664,7 +663,7 @@ pub fn ec_add_in_circuit(
         var_lc(take_generic),
     )?;
 
-    // take_inverse = both_finite * is_inverse  (output: (0, 0, 1))
+    // take_inverse = both_finite * is_inverse (output: (0, 0, 1))
     let take_inverse_val = match (both_finite_val, is_inverse_val) {
         (Some(bf), Some(inv)) => Some(if bf == Fr::one() && inv {
             Fr::one()
@@ -683,8 +682,8 @@ pub fn ec_add_in_circuit(
     // For the lhs_inf branch the result equals p2; for the rhs_inf branch
     // (when !lhs_inf) the result equals p1. We compute these as products,
     // then sum.
-    //   take_p2 = lhs_inf (result = (x2, y2, rhs_inf) — i3 = rhs_inf when only lhs is inf)
-    //   take_p1 = not_lhs * rhs_inf
+    // take_p2 = lhs_inf (result = (x2, y2, rhs_inf) — i3 = rhs_inf when only lhs is inf)
+    // take_p1 = not_lhs * rhs_inf
     let take_p2 = p1.is_infinity;
     let take_p1_val = match (lhs_inf_val, rhs_inf_val) {
         (Some(li), Some(ri)) => Some(if !li && ri { Fr::one() } else { Fr::zero() }),
@@ -762,10 +761,10 @@ pub fn ec_add_in_circuit(
     builder.enforce(builder.zero_lc(), builder.zero_lc(), y3_lc)?;
 
     // is_inf3 = take_p2 * rhs_inf + take_p1 * lhs_inf + take_inverse * 1
-    //         = take_p2 * rhs_inf + take_p1 * 0 (since take_p1 requires not lhs_inf) + take_inverse
-    //         = take_p2 * rhs_inf + take_inverse
+    // = take_p2 * rhs_inf + take_p1 * 0 (since take_p1 requires not lhs_inf) + take_inverse
+    // = take_p2 * rhs_inf + take_inverse
     // (We compute it via the simpler relation.)
-    //   prod_inf_rhs = take_p2 * rhs_inf
+    // prod_inf_rhs = take_p2 * rhs_inf
     let prod_inf_rhs_val = match (lhs_inf_val, rhs_inf_val) {
         (Some(a), Some(b)) => Some(if a && b { Fr::one() } else { Fr::zero() }),
         _ => None,
@@ -926,7 +925,7 @@ pub fn scalar_mul_in_circuit(
 /// limb variables with their 128-bit values; we bit-decompose each limb into
 /// 128 boolean bits (LSB-first) so the total scalar width is 256.
 ///
-/// `scalar_limbs` slice: `[(lo_var, lo_val, hi_var, hi_val), ...]`.
+/// `scalar_limbs` slice: `[(lo_var, lo_val, hi_var, hi_val),...]`.
 pub fn msm_in_circuit(
     builder: &mut R1csBuilder<'_>,
     points: &[CurvePoint],
@@ -980,7 +979,7 @@ fn bits_of(value: Fr, num_bits: usize) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_relations::r1cs::ConstraintSystem;
+    use ark_relations::gr1cs::ConstraintSystem;
     use ark_std::UniformRand;
 
     use crate::witness::WitnessMap;
@@ -1226,7 +1225,7 @@ mod tests {
         assert!(cs.is_satisfied().unwrap(), "msm two points");
     }
 
-    /// Constraint count for one EC add, for the WS-D.5 report.
+    /// Constraint count for one EC add.
     #[test]
     fn report_ec_add_constraints() {
         let g = grumpkin_generator();
@@ -1243,7 +1242,7 @@ mod tests {
         let before = cs.num_constraints();
         let _sum = ec_add_in_circuit(&mut builder, &p1, &p2).unwrap();
         let after = cs.num_constraints();
-        eprintln!("WS-D.5 ec_add constraints: {}", after - before);
+        eprintln!("ec_add constraints: {}", after - before);
     }
 
     /// Constraint count for a 1-point MSM (256-bit scalar), for the report.
@@ -1266,11 +1265,11 @@ mod tests {
         )
         .unwrap();
         let after = cs.num_constraints();
-        eprintln!("WS-D.5 1-point MSM constraints: {}", after - before);
+        eprintln!("1-point MSM constraints: {}", after - before);
     }
 
     /// Emit generator and `2G` as decimal `Fr` strings. Used to populate the
-    /// Noir `Prover.toml` for `examples/curve_basic/`. Gated behind
+    /// Noir `Prover.toml` for `crates/tests/circuits/curve_basic/`. Gated behind
     /// `--ignored` so it doesn't pollute normal CI output.
     #[test]
     #[ignore]
@@ -1279,8 +1278,8 @@ mod tests {
         let (gx, gy) = g.xy().unwrap();
         let g2 = ec_double_native(g);
         let (tx, ty) = g2.xy().unwrap();
-        println!("G.x  = {}", crate::field::fr_to_decimal_string(&gx));
-        println!("G.y  = {}", crate::field::fr_to_decimal_string(&gy));
+        println!("G.x = {}", crate::field::fr_to_decimal_string(&gx));
+        println!("G.y = {}", crate::field::fr_to_decimal_string(&gy));
         println!("2G.x = {}", crate::field::fr_to_decimal_string(&tx));
         println!("2G.y = {}", crate::field::fr_to_decimal_string(&ty));
     }

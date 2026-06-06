@@ -1,7 +1,6 @@
 # Security Review Checklist
 
 The release-gating soundness walk-through for xark's Groth16 backend.
-Covers ROADMAP step **WS-F.4**.
 
 Two audiences: (1) a release engineer ticking
 [§5](#5-release-gating-checklist) before shipping a circuit; (2) an external
@@ -9,9 +8,8 @@ auditor reading [§2](#2-per-gadget-soundness-sketches) to find load-bearing
 claims to attack. Every claim has a pointer into the codebase; when the
 implementation drifts, *this document is the canonical place to update*.
 Supporting design notes: [`architecture.md`](architecture.md),
-[`acir-lowering.md`](acir-lowering.md), [`brillig.md`](brillig.md),
-[`memory.md`](memory.md), [`serialization.md`](serialization.md),
-[`trusted-setup.md`](trusted-setup.md).
+[`brillig.md`](brillig.md), [`memory.md`](memory.md),
+[`serialization.md`](serialization.md), [`CEREMONY.md`](CEREMONY.md).
 
 ---
 
@@ -23,17 +21,17 @@ The prover is fully adversarial:
 
 * may construct any `WitnessMap` (any assignment to private witnesses).
 * may lie about Brillig hint outputs (modular inverses, bit decompositions,
-  quotients/remainders).
+ quotients/remainders).
 * may craft public inputs that do not match the circuit's intended semantics.
 * may attempt to produce a proof for a statement the verifier rejects.
 
 We do **not** model:
 
 * the prover obtaining the trusted-setup trapdoor (τ, α, β, γ, δ). Anyone with
-  these can produce proofs for any statement; this is the standard Groth16
-  assumption.
+ these can produce proofs for any statement; this is the standard Groth16
+ assumption.
 * the prover compromising the verifier's view of `(VK, public_inputs)`. The
-  verifier's transport-level integrity is out of scope.
+ verifier's transport-level integrity is out of scope.
 
 ### What the verifier consumes
 
@@ -65,20 +63,20 @@ the current state of xark's setup modes.
 We are explicitly *not* defending against:
 
 * **A Noir compiler bug producing under-constrained witnesses for Brillig
-  outputs.** Our `BrilligCall` handling assumes the Noir compiler's
-  hint-then-check invariant; see [`docs/brillig.md`](brillig.md) and
-  [§2.15](#215-brilligcall-trust-outputs) below.
+ outputs.** Our `BrilligCall` handling assumes the Noir compiler's
+ hint-then-check invariant; see [`docs/brillig.md`](brillig.md) and
+ [§2.15](#215-brilligcall-trust-outputs) below.
 * **A future Arkworks Groth16 implementation regression.** We pin via
-  Cargo.lock; bumping `ark-groth16` requires re-verifying the byte-level
-  serialization round-trip test
-  (`crates/groth16-backend/tests/serialization.rs`).
+ Cargo.lock; bumping `ark-groth16` requires re-verifying the byte-level
+ serialization round-trip test
+ (`crates/tests/tests/serialization.rs`).
 * **Side-channel leakage in the prover.** No constant-time guarantees are
-  made; the prover should not run on untrusted hardware.
+ made; the prover should not run on untrusted hardware.
 * **Side-channel leakage in trusted-setup randomness.** `OsRng` is treated as
-  a primitive; if the host entropy is compromised, so is the setup.
+ a primitive; if the host entropy is compromised, so is the setup.
 * **Curve-level attacks on BN254.** BN254 has ~100 bits of security against
-  Special TNFS at this size; consumers needing more should not use BN254
-  Groth16.
+ Special TNFS at this size; consumers needing more should not use BN254
+ Groth16.
 
 ---
 
@@ -165,10 +163,10 @@ in `{0, 1}` by prior bit-decomposition). Output `out: Word32` such that
 
 | `a_i` | `b_i` | `a_i + b_i - 2 a_i b_i` | XOR |
 |-------|-------|--------------------------|-----|
-|   0   |   0   |             0            |  0  |
-|   0   |   1   |             1            |  1  |
-|   1   |   0   |             1            |  1  |
-|   1   |   1   |             0            |  0  |
+| 0 | 0 | 0 | 0 |
+| 0 | 1 | 1 | 1 |
+| 1 | 0 | 1 | 1 |
+| 1 | 1 | 0 | 0 |
 
 So whenever the inputs are boolean (which the caller guarantees), the algebra
 forces the XOR table. The extra boolean check on `out_i` is redundant in this
@@ -207,9 +205,9 @@ boolean (so we save a redundant boolean check that XOR has to pay).
 **Constraints emitted.**
 
 1. Allocate 32 boolean result bits + `⌈log2(MAX_TERMS)⌉ = 3` boolean carry
-   bits (32 + 3 = 35 boolean checks).
+ bits (32 + 3 = 35 boolean checks).
 2. One linear constraint:
-   `Σ_terms Σ_i 2^i * a_i = Σ_{i=0..32} 2^i * result_i + Σ_{j=0..k} 2^(32+j) * carry_j`.
+ `Σ_terms Σ_i 2^i * a_i = Σ_{i=0..32} 2^i * result_i + Σ_{j=0..k} 2^(32+j) * carry_j`.
 
 **Argument.** Each result/carry bit is in `{0, 1}` by §2.1. The linear
 constraint pins the integer value of the right-hand side to the integer
@@ -244,12 +242,12 @@ LCs in place).
 **Argument.** The composition is byte-by-byte the FIPS 180-4 algorithm:
 
 * Message schedule W[16..64] uses `σ0(x) = ROTR^7 ⊕ ROTR^18 ⊕ SHR^3` and
-  `σ1(x) = ROTR^17 ⊕ ROTR^19 ⊕ SHR^10`, each a triple-XOR of pure
-  permutations of `w[i-15]` / `w[i-2]`, then sums four 32-bit words via
-  `add_mod_32`.
+ `σ1(x) = ROTR^17 ⊕ ROTR^19 ⊕ SHR^10`, each a triple-XOR of pure
+ permutations of `w[i-15]` / `w[i-2]`, then sums four 32-bit words via
+ `add_mod_32`.
 * Working state updates use `Σ0`, `Σ1`, `Ch(e,f,g) = (e ∧ f) ⊕ (¬e ∧ g)`,
-  `Maj(a,b,c) = (a ∧ b) ⊕ (a ∧ c) ⊕ (b ∧ c)`, each of which is a fixed
-  pattern of `xor`, `and`, `not` calls.
+ `Maj(a,b,c) = (a ∧ b) ⊕ (a ∧ c) ⊕ (b ∧ c)`, each of which is a fixed
+ pattern of `xor`, `and`, `not` calls.
 * The final state is `state[i] + working[i] mod 2^32` for each `i`.
 
 Because every primitive used (`xor`, `and`, `not`, `rotr`, `shr`,
@@ -356,18 +354,18 @@ Boyer-Peralta optimization (the published 32-AND/83-XOR straight-line
 program); we use an algebraic decomposition:
 
 1. Hint `x_inv = x^{-1}` in GF(2^8) (with `x_inv = 0` when `x = 0`) via a
-   witness.
+ witness.
 2. Enforce `x * is_zero = 0` and `x_inv * is_zero = 0` for a boolean
-   `is_zero` indicator. Together these pin `is_zero = (x == 0)` *as long as
-   `x` is in [0, 255]*, which is true because the caller bit-decomposes
-   every byte. (If `x` were outside the byte range, `is_zero = 1` could be
-   satisfied with `x ≠ 0`; the byte range check upstream prevents this.)
+ `is_zero` indicator. Together these pin `is_zero = (x == 0)` *as long as
+ `x` is in [0, 255]*, which is true because the caller bit-decomposes
+ every byte. (If `x` were outside the byte range, `is_zero = 1` could be
+ satisfied with `x ≠ 0`; the byte range check upstream prevents this.)
 3. Compute the 64 cross-products `p_{i,j} = bit_i(x) * bit_j(x_inv)` via 64
-   AND constraints.
+ AND constraints.
 4. Reduce the polynomial product mod the AES reduction polynomial
-   `m(x) = x^8 + x^4 + x^3 + x + 1` to get the bits of `x * x_inv` in
-   GF(2^8); enforce these equal `1` if `x ≠ 0` else `0`. This pins
-   `x_inv = x^{-1}` (or both are 0).
+ `m(x) = x^8 + x^4 + x^3 + x + 1` to get the bits of `x * x_inv` in
+ GF(2^8); enforce these equal `1` if `x ≠ 0` else `0`. This pins
+ `x_inv = x^{-1}` (or both are 0).
 5. Apply the AES affine transform to `x_inv` to get the S-box output.
 
 ShiftRows is a pure index permutation (zero constraints). MixColumns and
@@ -393,18 +391,18 @@ edge-case handling for doubling, identity, and inversion.
 **Argument.** The constraint system uses selector witnesses:
 
 * `same_x ∈ {0, 1}` pinned by `same_x * (x2 - x1) = 0` plus an inverse hint
-  `(x2 - x1) * inv_dx = 1 - same_x`. The hint forces `same_x = 1 ⟺ x1 = x2`:
-  if `x1 = x2` then the first row trivially holds and `inv_dx = 0`, `same_x = 1`
-  satisfies the second; if `x1 ≠ x2` then the first row forces `same_x = 0`,
-  and `inv_dx = (x2 - x1)^{-1}` satisfies the second.
+ `(x2 - x1) * inv_dx = 1 - same_x`. The hint forces `same_x = 1 ⟺ x1 = x2`:
+ if `x1 = x2` then the first row trivially holds and `inv_dx = 0`, `same_x = 1`
+ satisfies the second; if `x1 ≠ x2` then the first row forces `same_x = 0`,
+ and `inv_dx = (x2 - x1)^{-1}` satisfies the second.
 * `same_y` is analogous.
 * `is_double = same_x ∧ same_y ∧ ¬lhs_inf ∧ ¬rhs_inf`,
-  `is_inverse = same_x ∧ ¬same_y ∧ ¬lhs_inf ∧ ¬rhs_inf`. Both are pinned
-  via Boolean AND chains.
+ `is_inverse = same_x ∧ ¬same_y ∧ ¬lhs_inf ∧ ¬rhs_inf`. Both are pinned
+ via Boolean AND chains.
 * `lambda` is computed from one of three formulas (doubling, inversion,
-  general add) selected by the selectors; the result coordinates are then
-  computed from `lambda` via the standard `x3 = lambda^2 - x1 - x2`,
-  `y3 = lambda * (x1 - x3) - y1`.
+ general add) selected by the selectors; the result coordinates are then
+ computed from `lambda` via the standard `x3 = lambda^2 - x1 - x2`,
+ `y3 = lambda * (x1 - x3) - y1`.
 
 The selector polynomial argument ensures each case is mutually exclusive
 and exhaustive. The inverse hints are the load-bearing soundness step: an
@@ -438,12 +436,12 @@ referenced by the expression.
 **Constraints emitted.** Three cases based on `mul_terms.len()`:
 
 * **0 mul terms (linear-only).** Emit one row `0 * 0 = -(linear + q_c)`,
-  which forces `linear + q_c = 0`.
+ which forces `linear + q_c = 0`.
 * **1 mul term `q_M * a * b`.** Emit one row `a * (q_M * b) = -(linear + q_c)`.
 * **`m > 1` mul terms.** For each `(q_M_i, a_i, b_i)`, allocate an aux
-  variable `t_i` and emit `a_i * b_i = t_i` (one row each, pinning `t_i` to
-  the witness product). Then emit one final linear row
-  `Σ_i q_M_i * t_i + linear + q_c = 0`.
+ variable `t_i` and emit `a_i * b_i = t_i` (one row each, pinning `t_i` to
+ the witness product). Then emit one final linear row
+ `Σ_i q_M_i * t_i + linear + q_c = 0`.
 
 **Argument.** In all three cases, the emitted rows are equivalent to the
 original `Expression = 0`. For the multi-mul case, the `t_i = a_i * b_i`
@@ -474,14 +472,14 @@ in the verifier silently accepting a proof for a different statement.
 `builder.alloc_public(idx)` for each entry **before any opcode is lowered**.
 This guarantees the Arkworks R1CS sees public-input variables in the same
 order as `public_inputs.json`. The verifier in
-`groth16-backend::verify::verify` consumes `&[Fr]` slices ordered the same
+`xark-backend::verify::verify` consumes `&[Fr]` slices ordered the same
 way. The `circuit_hash` (see `lower.rs:circuit_hash`) folds the public-input
 witness indices into the hash, so any reordering changes the circuit
 identity.
 
 **Tests.** `lower::tests::circuit_hash_changes_with_public_input_order` and
 the end-to-end matrix in
-`crates/xark-cli/tests/public_inputs_matrix.rs`:
+`crates/tests/tests/public_inputs_matrix.rs`:
 
 * `return_values_only_verifies`
 * `mixed_pi_verifies`
@@ -532,23 +530,24 @@ were derived for.
 
 ### Current state
 
-| Setup mode             | Source of randomness | `production_safe` | metadata.json `setup_mode` |
+| Setup mode | Source of randomness | `production_safe` | metadata.json `setup_mode` |
 |------------------------|----------------------|-------------------|-----------------------------|
-| `--insecure-dev-mode`  | `OsRng` (default) or `ChaCha20Rng(seed)` if `--deterministic-rng <seed>` | `false`           | `"insecure-dev-mode"`       |
-| Phase-2 from ptau      | unimplemented (ROADMAP F.1 lands the parser, F.2 lands the ceremony driver) | n/a               | n/a                         |
+| `--insecure-dev-mode` | `OsRng` (default) or `ChaCha20Rng(seed)` if `--deterministic-rng <seed>` | `false` | `"insecure-dev-mode"` |
+| `xark setup --ptau-file` | snarkjs Powers-of-Tau (phase-1) + a single phase-2 contribution | `true` | `"phase2-from-ptau"` |
+| `xark ceremony …` | snarkjs Powers-of-Tau (phase-1) + multi-contributor phase-2 MPC | `true` | `"phase2-from-ptau+mpc[N contributors]"` |
 
 `KeyMetadata` is defined in
-`crates/groth16-backend/src/keys.rs` and includes:
+`crates/xark-backend/src/keys.rs` and includes:
 
 * `setup_mode: String` — e.g. `"insecure-dev-mode"`.
 * `production_safe: bool` — `false` for any dev-mode key.
 * `deterministic_rng_seed: Option<u64>` — present only when the operator
-  explicitly chose reproducibility.
+ explicitly chose reproducibility.
 * `ptau_source: Option<String>` — filename of the consumed Powers-of-Tau
-  transcript (post-F.1).
+ transcript.
 * `phase2_seed_hash: Option<String>` — SHA-256 of the *seed* used to
-  derive `(γ, δ)`; the seed itself must be discarded immediately after
-  setup.
+ derive `(γ, δ)`; the seed itself must be discarded immediately after
+ setup.
 
 ### Dev-mode trapdoor lifecycle
 
@@ -563,14 +562,16 @@ is a single point of failure, there's no public transcript, and the
 metadata flag `production_safe: false` should be rejected by any
 production deployment script.
 
-### Production setup, future work
+### Production setup
 
-Production setup requires a Powers-of-Tau transcript (consumed via
-ROADMAP step **F.1**) plus a phase-2 contribution (driven by **F.2**).
-Both are currently **unimplemented**; the `crates/groth16-backend/src/ptau.rs`
-parser ships in F.1 but is not yet wired into the setup CLI. Until those
-land, the only setup mode is `--insecure-dev-mode`. See
-[`docs/trusted-setup.md`](trusted-setup.md) and ROADMAP §F.
+Production setup requires a Powers-of-Tau transcript plus a phase-2
+contribution. Both are **implemented**: `crates/xark-backend/src/ptau.rs`
+parses a snarkjs `.ptau` (with admissibility checks), `setup_phase2.rs`
+derives a phase-2 setup from it, and `ceremony.rs` drives a multi-contributor
+MPC ceremony (Schnorr PoKs + δ-consistency pairing checks), exposed as
+`xark ceremony {init,contribute,verify,finalize}`. The `--insecure-dev-mode`
+path remains for local iteration only (`production_safe: false` in metadata).
+See [`docs/CEREMONY.md`](CEREMONY.md).
 
 ---
 
@@ -579,53 +580,47 @@ land, the only setup mode is `--insecure-dev-mode`. See
 Working list; update as work lands.
 
 * **No formal verification of the lowering layer.** Every gadget has unit
-  tests, KAT cross-checks against established reference crates (`sha2`,
-  `keccak`, `blake2`, `blake3`, `aes`, arkworks Grumpkin), and adversarial
-  tests rejecting forged witnesses. **No proof-assistant verification, no
-  fuzzing harness.**
+ tests, KAT cross-checks against established reference crates (`sha2`,
+ `keccak`, `blake2`, `blake3`, `aes`, arkworks Grumpkin), and adversarial
+ tests rejecting forged witnesses. **No proof-assistant verification, no
+ fuzzing harness.**
 
-* **Solidity verifier export.** Tested against Foundry
-  (`crates/groth16-backend/tests/evm_export.rs`) but **not against a deployed
-  mainnet verifier**; gas-cost / tamper edge cases unaudited end-to-end.
-
-* **Solana on-chain verifier.** `crates/xark-solana-verifier/` is tested via
-  Mollusk (`tests/mollusk_e2e.rs`); round-trip serialization in
-  `crates/groth16-backend/tests/solana_format.rs`. **Never deployed to
-  mainnet**; not audited for compute-budget / malformed-input attacks.
+* **Solana on-chain verifier.** `crates/xark-verifier/` is tested in Mollusk
+ on the real `alt_bn128` syscalls (`crates/tests/tests/sbpf.rs` — positive
+ across every committed circuit plus on-chain negative tests), with
+ public-input binding (`crates/tests/tests/binding.rs`), adversarial fuzzing
+ (`crates/tests/tests/fuzz.rs`), and an independent snarkjs differential
+ (`scripts/differential_snarkjs.sh`).
+ **Never deployed to mainnet**; not externally audited.
 
 * **Poseidon2 parameters.** Inherit Noir's
-  `bn254_blackbox_solver::poseidon2_constants` (v1.0.0-beta.21) verbatim.
-  **Not independently re-derived.** A regression in Noir's table ships here
-  unchanged.
+ `bn254_blackbox_solver::poseidon2_constants` (v1.0.0-beta.21) verbatim.
+ **Not independently re-derived.** A regression in Noir's table ships here
+ unchanged.
 
 * **AES S-box decomposition.** Algebraic `x * x_inv = 1 - is_zero`, not the
-  Boyer-Peralta straight-line program. Exhaustively cross-checked against
-  `aes` on all 256 inputs (`sbox_all_inputs_match_table`,
-  `gf256_inv_roundtrips`, `sbox_zero_input_special_case`) but the algebraic
-  uniqueness argument has **not been independently audited**.
+ Boyer-Peralta straight-line program. Exhaustively cross-checked against
+ `aes` on all 256 inputs (`sbox_all_inputs_match_table`,
+ `gf256_inv_roundtrips`, `sbox_zero_input_special_case`) but the algebraic
+ uniqueness argument has **not been independently audited**.
 
 * **Grumpkin selector polynomial.** `same_x` / `same_y` / `is_double` /
-  `is_inverse` logic in `ec_add_in_circuit` is tested against doubling,
-  identity, inverse-point (§2.12 KAT list) but **not formally verified**.
+ `is_inverse` logic in `ec_add_in_circuit` is tested against doubling,
+ identity, inverse-point (§2.12 KAT list) but **not formally verified**.
 
-* **Phase-2 setup from PoT (F.1).** Parser exists in `ptau.rs`; the actual
-  phase-2 contribution into Arkworks keys is **unimplemented**.
+* **Trusted-setup ceremony.** Implemented end-to-end (ptau ingest,
+ phase-2 derivation, MPC driver) and cross-checked against snarkjs, but the
+ ceremony code itself has **not been externally audited**, and a real
+ deployment's security still rests on the off-chain conduct of the ceremony
+ (honest participants, transcript integrity).
 
-* **MPC ceremony driver (F.2).** Entirely unimplemented; no `xark ceremony`
-  subcommand.
+* **`RecursiveAggregation`.** Rejected. BN254 doesn't form a cycle
+ with itself; supporting recursion requires a curve cycle.
 
-* **Variable-index `MemoryOp` (C.5).** Rejected at lowering time.
-  Constant-index memory (C.4) is supported.
-
-* **Cross-circuit `Call` (B.5).** Rejected; only single-function ACIR.
-
-* **`RecursiveAggregation` (D.8).** Rejected. BN254 doesn't form a cycle
-  with itself; supporting recursion requires a curve cycle.
-
-* **ECDSA-secp256k1 / -secp256r1 (D.6).** Not implemented; rejected.
+* **ECDSA-secp256k1 / -secp256r1.** Not implemented; rejected.
 
 * **Side-channel safety of the prover.** Out of scope per
-  [§1](#1-threat-model).
+ [§1](#1-threat-model).
 
 ---
 
@@ -634,40 +629,39 @@ Working list; update as work lands.
 This is the literal checklist a release engineer should walk through
 before tagging a production release of a circuit deployed via xark.
 
-* [ ] **Noir version pinned.** `NOIR_VERSION.md` records the Noir version
-      the artifact was compiled with, and it matches the deployment target.
+* [ ] **nargo/ACIR version pinned.** `NOIR_VERSION.md` records the `nargo`
+ version (and thus the ACIR artifact format) the circuit was compiled
+ with, and it matches the deployment target. The pin is on the ACIR
+ format xark lowers, not the Noir source language.
 * [ ] **All gadgets used by the target circuit have a KAT test.** Run
-      `xark inspect <artifact>` to enumerate the black-box opcodes used and
-      cross-reference each against [§2](#2-per-gadget-soundness-sketches).
+ `xark inspect <artifact>` to enumerate the black-box opcodes used and
+ cross-reference each against [§2](#2-per-gadget-soundness-sketches).
 * [ ] **`circuit_hash` is recorded in deployed metadata** and matches what
-      the verifier (both the host-side `verify` command and the on-chain
-      programs) expects.
+ the verifier (both the host-side `verify` command and the on-chain
+ programs) expects.
 * [ ] **Setup mode is not `insecure-dev-mode`.** Check
-      `metadata.json`'s `setup_mode` field — for production it must be
-      `"phase2-from-ptau"` (or whatever post-F.2 mode ships) and
-      `production_safe: true`.
+ `metadata.json`'s `setup_mode` field — for production it must be
+ `"phase2-from-ptau"` (or whatever a production mode ships) and
+ `production_safe: true`.
 * [ ] **`deterministic_rng_seed` is `null` in production metadata.** A
-      non-null seed means the operator chose reproducibility, which is
-      acceptable only in dev/test artifacts.
+ non-null seed means the operator chose reproducibility, which is
+ acceptable only in dev/test artifacts.
 * [ ] **Public input order matches the verifier's expected order.**
-      Run the end-to-end verify against the deployed verifier with the
-      canonical `public_inputs.json` from the build.
+ Run the end-to-end verify against the deployed verifier with the
+ canonical `public_inputs.json` from the build.
 * [ ] **Constraint count has been benchmarked and matches a recorded
-      baseline.** Sudden changes in constraint count without a corresponding
-      change in the source artifact indicate either a backend regression or
-      an artifact regression.
+ baseline.** Sudden changes in constraint count without a corresponding
+ change in the source artifact indicate either a backend regression or
+ an artifact regression.
 * [ ] **Tampered-input integration tests cover every public input.** For
-      each public input `p_i`, an integration test flips `p_i` and asserts
-      the verifier returns false. See
-      `crates/xark-cli/tests/public_inputs_matrix.rs` for the template.
-* [ ] **EVM verifier export compiles with the targeted Solidity version**
-      and matches the deployed `Verifier.sol` byte-for-byte (re-export and
-      diff before deploy).
+ each public input `p_i`, an integration test flips `p_i` and asserts
+ the verifier returns false. See
+ `crates/tests/tests/public_inputs_matrix.rs` for the template.
 * [ ] **Solana verifier program ID matches the deployed `.so`.** Re-build
-      the verifier with `cargo build-sbf` and confirm the program ID hash
-      matches the deployed program's on-chain hash.
+ the verifier with `cargo build-sbf` and confirm the program ID hash
+ matches the deployed program's on-chain hash.
 * [ ] **Operator has read [§4](#4-known-unaudited-paths)** and explicitly
-      acknowledged each item that touches the deployed circuit.
+ acknowledged each item that touches the deployed circuit.
 
 ---
 
@@ -676,25 +670,24 @@ before tagging a production release of a circuit deployed via xark.
 External auditors should focus first on:
 
 1. **The lowering layer** — `crates/acir-r1cs/src/lower.rs` plus
-   `crates/acir-r1cs/src/opcodes/blackbox.rs` plus every file under
-   `crates/acir-r1cs/src/gadgets/`. This is the layer that turns Noir
-   semantics into R1CS rows; a bug here is a soundness break in every
-   downstream circuit. The load-bearing sub-claims are
-   [§2.2](#22-decompose_into_bits-range-gadget) (the 253-bit boundary),
-   [§2.11](#211-aes-128-encryption) (the algebraic S-box decomposition),
-   [§2.12](#212-grumpkin-curve-embeddedcurveadd--msm) (the selector
-   polynomial), and [§2.10](#210-poseidon2-permutation) (parameter-set
-   inheritance from Noir).
-2. **The serialization layer** — `crates/groth16-backend/src/serialization.rs`,
-   `crates/groth16-backend/src/solana.rs`,
-   `crates/groth16-backend/src/evm.rs`. Any byte-layout drift here would
-   silently cause the on-chain verifier to read a different proof than the
-   one the prover produced. The G2 `(c1, c0)` byte order in the Solana
-   exporter is the easiest place to get wrong; see
-   `solana::tests::g2_c1_c0_ordering_documented`.
+ `crates/acir-r1cs/src/opcodes/blackbox.rs` plus every file under
+ `crates/acir-r1cs/src/gadgets/`. This is the layer that turns Noir
+ semantics into R1CS rows; a bug here is a soundness break in every
+ downstream circuit. The load-bearing sub-claims are
+ [§2.2](#22-decompose_into_bits-range-gadget) (the 253-bit boundary),
+ [§2.11](#211-aes-128-encryption) (the algebraic S-box decomposition),
+ [§2.12](#212-grumpkin-curve-embeddedcurveadd--msm) (the selector
+ polynomial), and [§2.10](#210-poseidon2-permutation) (parameter-set
+ inheritance from Noir).
+2. **The serialization layer** — `crates/xark-backend/src/serialization.rs`
+ and `crates/xark-backend/src/solana.rs`. Any byte-layout drift here would
+ silently cause the on-chain verifier to read a different proof than the
+ one the prover produced. The little-endian G2 `(c0, c1)` component order
+ and the 32-byte LE limb encoding in the Solana exporter
+ (`encode_g2_le` / `assemble_*_bytes_le`) are the easiest places to get
+ wrong; the round-trip tests in `solana::tests` pin them.
 3. **The on-chain verifier program** —
-   `crates/xark-solana-verifier/src/verifier.rs`. The instruction-data
-   parser (`split_instruction_data`), the pairing input assembly, and the
-   pre-negated `A` convention should all be reviewed against a concrete
-   proof byte-for-byte. The EVM verifier
-   (`crates/groth16-backend/src/evm.rs`) is a smaller parallel surface.
+ `crates/xark-verifier/src/verifier.rs`. The instruction-data
+ parser (`split_instruction_data`), the pairing input assembly, and the
+ pre-negated `A` convention should all be reviewed against a concrete
+ proof byte-for-byte.
