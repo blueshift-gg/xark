@@ -73,7 +73,7 @@ Wraps `xark-acir-r1cs` for `ark-groth16`:
 * `ptau.rs` / `setup_phase2.rs` / `ceremony.rs` — the real trusted-setup path:
  ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup,
  and run a multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency
- pairing checks. See `docs/CEREMONY.md`.
+ pairing checks. See `docs/trusted-setup.md`.
 * `keys.rs`, `proof.rs` — binary I/O using Arkworks' `CanonicalSerialize`.
 * `serialization.rs` — JSON encodings for proofs, verifying keys, and public
  inputs (decimal-string coordinates; `encoding` recorded explicitly).

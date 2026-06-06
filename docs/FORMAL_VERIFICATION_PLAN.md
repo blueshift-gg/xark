@@ -102,7 +102,7 @@ expected outputs.
 ## What this does **not** buy
 
 Even full Layer-A+B verification leaves: the trusted setup (a ceremony concern,
-not code — see `docs/CEREMONY.md`), bugs in arkworks / the `alt_bn128` syscalls /
+not code — see `docs/trusted-setup.md`), bugs in arkworks / the `alt_bn128` syscalls /
 `nargo`'s ACVM (dependencies we trust), and side channels. FV raises the floor
 dramatically; it is not a substitute for the ceremony or for trusting the
 underlying primitives.

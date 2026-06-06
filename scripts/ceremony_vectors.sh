@@ -12,7 +12,7 @@
 # The phase-1 contribution entropy and the phase-2 seed below are FIXED so the
 # vectors are reproducible. For a real production ceremony, replace them with
 # genuine independent contributions and a public beacon, and record the
-# transcript (see docs/CEREMONY.md).
+# transcript (see docs/trusted-setup.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

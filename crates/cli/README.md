@@ -27,7 +27,7 @@ cargo install --path crates/cli # or: cargo run -p xark-cli -- <command>
 - **`xark write-vk`** — write the verifying key in the Solana LE wire format.
 - **`xark ceremony`** — run a real Groth16 trusted setup: `init` from a snarkjs
  `powersoftau` file, `contribute` (phase-2 MPC), `verify`, and `finalize`. See
- `docs/CEREMONY.md`.
+ `docs/trusted-setup.md`.
 
 ## Pipeline
 

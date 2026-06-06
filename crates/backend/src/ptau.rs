@@ -53,7 +53,7 @@
 //! The phase-2 circuit-specific setup that turns a [`PtauFile`] into Groth16
 //! keys lives in [`crate::setup_phase2::setup_from_ptau`] (re-exported here as
 //! [`setup_from_ptau`]); `xark setup --ptau-file` and the `xark ceremony`
-//! commands drive it. See `docs/CEREMONY.md`.
+//! commands drive it. See `docs/trusted-setup.md`.
 
 use std::convert::TryFrom;
 

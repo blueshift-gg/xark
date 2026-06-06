@@ -20,7 +20,7 @@ external auditor should focus on first. Pairs with
  Noir's compiler, not on anything xark enforces directly.
 * [`memory.md`](memory.md) — soundness of the selector-argument
  variable-index memory lowering.
-* [`CEREMONY.md`](CEREMONY.md) — the phase-2 MPC ceremony
+* [`trusted-setup.md`](trusted-setup.md) — the phase-2 MPC ceremony
  driver and the admissibility checks on imported `.ptau` transcripts.
 * Test suite of ~200 unit + integration tests including:
  * KAT cross-checks against `k256`, `p256`, `sha2`, `keccak`,

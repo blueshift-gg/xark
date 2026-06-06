@@ -6,18 +6,27 @@ regardless of how correct the verifier is. The committed test vectors are
 currently produced with `--insecure-dev-mode` (a recoverable trapdoor) and are
 fine for tests, but production keys must come from a real multi-party ceremony.
 
-This document records that the ceremony pipeline **works end-to-end** and how to
-reproduce it. Verified on this repo:
+xark runs the **circuit-specific phase 2** of the ceremony itself — no external
+prover is in the loop:
 
-1. **Phase 1 (universal, snarkjs)** — `powersoftau` over BN254 with a
- contribution and a public beacon, then `prepare phase2`.
-2. **Phase 2 (circuit-specific, xark)** — `xark setup --ptau-file … --phase2-seed …`
- consumes the snarkjs `.ptau` and derives `ProvingKey`/`VerifyingKey`
- ([`xark_backend::ptau::setup_from_ptau`]). The phase-2 MPC is driven by
- `xark ceremony {init,contribute,verify,finalize}`.
-3. **Independent check** — proofs produced from the ceremony keys verify under
- **both** xark and **snarkjs** (`groth16 verify`), confirming the keys are
- well-formed and the proofs valid in a separate implementation.
+* `xark setup --ptau-file … --phase2-seed …` derives the
+  `ProvingKey`/`VerifyingKey` from a phase-1 transcript
+  ([`xark_backend::ptau::setup_from_ptau`]); and
+* `xark ceremony {init,contribute,verify,finalize}` drives the
+  multi-contributor phase-2 MPC — each contributor applies a fresh secret `δ_i`,
+  publishes a Schnorr proof of contribution, and the chain is checked with
+  δ-consistency pairing checks.
+
+The only thing you supply is the **universal phase-1 powers-of-tau transcript**,
+which is circuit-*independent*. Don't roll your own — **reuse an existing,
+audited public transcript** ([Perpetual Powers of Tau], Hermez); it has far more
+contributors (a stronger 1-of-N honest assumption) than anything you'd run
+locally. `xark setup --ptau-file` reads the standard `.ptau` format directly, so
+you `wget` the file and go. (For a throwaway *test* transcript you can mint a
+small one yourself — see [Reproduce](#reproduce-single-circuit-end-to-end) — but
+never ship those keys.)
+
+[Perpetual Powers of Tau]: https://github.com/privacy-scaling-explorations/perpetualpowersoftau
 
 There is also a fully **self-contained, in-process** regression test of this
 whole path — `crates/tests/tests/ceremony_e2e.rs`. It synthesizes a valid
@@ -33,8 +42,14 @@ builds phase-1 itself it *knows* the toxic waste — it proves the pipeline is
 
 ## Reproduce (single circuit, end-to-end)
 
+For a real deployment, replace phase 1 below with a downloaded public `.ptau`
+(see above). The recipe mints a tiny throwaway transcript locally so a single
+circuit can be run end-to-end without downloading a multi-GB file — those keys
+are **not** production-safe.
+
 ```bash
-# --- phase 1: powers of tau (2^12 covers small circuits) ---
+# --- phase 1: a throwaway test transcript (2^12 covers small circuits) ---
+# Any tool that emits the standard .ptau works; here, snarkjs:
 snarkjs powersoftau new bn128 12 p0.ptau
 snarkjs powersoftau contribute p0.ptau p1.ptau --name=c1 -e="<entropy>"
 snarkjs powersoftau beacon p1.ptau pb.ptau 0102..1f20 10 -n=beacon
@@ -52,7 +67,7 @@ xark ceremony finalize --ceremony-dir ceremony/
 # --- prove + verify with the finalized keys ---
 xark prove --artifact … --witness … --proving-key ceremony/proving_key.bin --out proof.bin
 xark verify --verifying-key ceremony/verifying_key.bin --proof proof.bin --public-inputs public_inputs.json
-# => Proof verified: true (and snarkjs groth16 verify => OK!)
+# => Proof verified: true
 ```
 
 ## Regenerating all committed test vectors

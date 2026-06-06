@@ -104,7 +104,7 @@ Verifier:
 Trusted setup:
 
 * `.ptau` phase-1 transcript parsing with admissibility checks
- (`docs/CEREMONY.md`).
+ (`docs/trusted-setup.md`).
 * Phase-2 setup derived from a `.ptau` file and per-deployment seed.
 * Multi-contributor phase-2 MPC ceremony with Schnorr proofs of
  knowledge and δ-consistency pairing checks.

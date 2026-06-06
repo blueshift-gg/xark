@@ -155,6 +155,14 @@ edition = "2024"
 # The verifier core. If you are using an unpublished or local xark-verifier,
 # replace this with a path or git source.
 xark-verifier = "0.1"
+
+# `target_os = "solana"` / `target_arch = "bpf"` are Solana-toolchain-only cfg
+# values; declare them so a host build with upstream rustc (1.80+) doesn't warn.
+[lints.rust]
+unexpected_cfgs = {{ level = "warn", check-cfg = [
+    'cfg(target_os, values("solana"))',
+    'cfg(target_arch, values("bpf"))',
+] }}
 "#
     )
 }

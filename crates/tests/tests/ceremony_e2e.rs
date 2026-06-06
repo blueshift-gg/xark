@@ -17,7 +17,7 @@
 //! this proves the pipeline is *correct* (well-formed keys, valid proofs, every
 //! public input bound), not that a real ceremony is *secret*. Secrecy is an
 //! operational property of an actual multi-party ceremony — see
-//! `docs/CEREMONY.md`.
+//! `docs/trusted-setup.md`.
 
 use ark_bn254::Fr;
 use rand::SeedableRng;

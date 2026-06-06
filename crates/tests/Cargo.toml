@@ -42,3 +42,6 @@ proptest = "1"
 [[bench]]
 name = "groth16"
 harness = false
+
+[lints]
+workspace = true

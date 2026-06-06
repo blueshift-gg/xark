@@ -37,7 +37,7 @@ the backend directly.
 The `test-deterministic` feature seeds proving/setup RNG from a fixed value so
 fixtures and differential tests reproduce byte-for-byte. **Do not** enable it in
 production — a real deployment needs a genuine trusted-setup ceremony (see
-`xark ceremony` and `docs/CEREMONY.md`).
+`xark ceremony` and `docs/trusted-setup.md`).
 
 [`xark-acir-r1cs`]:../acir-r1cs
 [`xark-verifier`]:../verifier

@@ -9,7 +9,7 @@ claims to attack. Every claim has a pointer into the codebase; when the
 implementation drifts, *this document is the canonical place to update*.
 Supporting design notes: [`architecture.md`](architecture.md),
 [`brillig.md`](brillig.md), [`memory.md`](memory.md),
-[`serialization.md`](serialization.md), [`CEREMONY.md`](CEREMONY.md).
+[`serialization.md`](serialization.md), [`trusted-setup.md`](trusted-setup.md).
 
 ---
 
@@ -571,7 +571,7 @@ derives a phase-2 setup from it, and `ceremony.rs` drives a multi-contributor
 MPC ceremony (Schnorr PoKs + δ-consistency pairing checks), exposed as
 `xark ceremony {init,contribute,verify,finalize}`. The `--insecure-dev-mode`
 path remains for local iteration only (`production_safe: false` in metadata).
-See [`docs/CEREMONY.md`](CEREMONY.md).
+See [`docs/trusted-setup.md`](trusted-setup.md).
 
 ---
 
