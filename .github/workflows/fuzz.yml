@@ -1,0 +1,48 @@
+name: Fuzz (cargo-fuzz smoke)
+
+# Runs `cargo fuzz` on each parser + the lowering for a short interval as a
+# regression guard against panics on adversarial inputs. The full fuzz
+# campaign runs externally (OSS-Fuzz / dedicated infra); this job's job is
+# to catch regressions that surface on the first ~30s of corpus exploration.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fuzz-smoke:
+    name: smoke (artifact / witness / lowering parsers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install nightly Rust toolchain (cargo-fuzz needs nightly)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fuzz/target
+          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.toml') }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run artifact-parser fuzz target (30 s)
+        working-directory: fuzz
+        run: cargo fuzz run artifact_parser -- -max_total_time=30 -timeout=5
+
+      - name: Run witness-parser fuzz target (30 s)
+        working-directory: fuzz
+        run: cargo fuzz run witness_parser -- -max_total_time=30 -timeout=5
+
+      - name: Run lowering fuzz target (60 s)
+        working-directory: fuzz
+        run: cargo fuzz run lowering -- -max_total_time=60 -timeout=10

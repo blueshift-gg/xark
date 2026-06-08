@@ -1,0 +1,40 @@
+name: Determinism (R1CS propagation analyzer)
+
+# Layer-B / track 1 of docs/FORMAL_VERIFICATION_PLAN.md.
+#
+# Runs `crates/tests/tests/determinism_propagation.rs` — a linear-only
+# propagation analyzer that pins witness wires uniquely determined by the
+# public inputs over BN254 Fr. Findings = wires not pinned by the linear
+# pass; the test asserts each fixture stays at or above its recorded pinned
+# floor so any regression (newly-introduced under-constraint condition or
+# analyzer drift) fails CI.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  propagation:
+    name: probe (R1CS determinism — linear propagation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-propagation-${{ hashFiles('Cargo.lock') }}
+
+      - name: Run propagation analyzer
+        run: cargo test --release -p xark-tests --test determinism_propagation -- --nocapture

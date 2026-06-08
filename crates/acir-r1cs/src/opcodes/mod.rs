@@ -3,6 +3,7 @@
 pub mod arithmetic;
 pub mod blackbox;
 pub mod brillig;
+pub mod brillig_check;
 pub mod call;
 pub mod memory;
 pub mod unsupported;

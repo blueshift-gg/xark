@@ -7,6 +7,7 @@ use serde::Serialize;
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::{LoweredAcirCircuit, estimate_constraints, summarize_opcodes};
 use xark_acir_r1cs::opcodes::CoverageSummary;
+use xark_acir_r1cs::opcodes::brillig_check::check_brillig_outputs_pinned;
 
 #[derive(Args, Debug)]
 pub struct InspectArgs {
@@ -17,6 +18,14 @@ pub struct InspectArgs {
     /// Emit machine-readable JSON instead of human-readable text.
     #[arg(long, default_value_t = false)]
     pub json: bool,
+
+    /// Run the Brillig output-pinning `(SI)` invariant check and exit
+    /// non-zero if any `BrilligCall` output witness is not referenced by a
+    /// surrounding constraining opcode. See `docs/brillig.md` for the
+    /// invariant statement and `crates/acir-r1cs/src/opcodes/brillig_check.rs`
+    /// for the analyser. Recommended for production-deployment gating.
+    #[arg(long, default_value_t = false)]
+    pub strict: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,6 +99,27 @@ pub fn run(args: InspectArgs) -> Result<()> {
     } else {
         print_human(&report);
     }
+
+    if args.strict {
+        let report = check_brillig_outputs_pinned(opcodes);
+        if report.is_ok() {
+            eprintln!(
+                "Brillig pinning OK: {} output(s) all referenced by surrounding opcodes.",
+                report.brillig_outputs_total
+            );
+        } else {
+            eprintln!(
+                "Brillig pinning FAILED: {} unpinned output(s) out of {} total — \
+                 this is a `(SI)`-invariant violation; see docs/brillig.md.\n\
+                 Unpinned witness indices: {:?}",
+                report.unpinned_outputs.len(),
+                report.brillig_outputs_total,
+                report.unpinned_outputs
+            );
+            anyhow::bail!("Brillig output-pinning check failed under --strict");
+        }
+    }
+
     Ok(())
 }
 

@@ -7,11 +7,18 @@ members = [
     "crates/verifier",
     "crates/tests",
 ]
+# The reference Solana program lives under `crates/verifier/reference-program/`
+# but is *intentionally* kept out of the workspace: it's only built via
+# `cargo-build-sbf` (with its own pinned `Cargo.lock`) as the
+# reproducible-build target. See `docs/reproducible-build.md`.
+exclude = [
+    "crates/verifier/reference-program",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/blueshift/xark"
 rust-version = "1.85"
 
@@ -58,6 +65,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(target_os, values("solana"))',
     'cfg(target_arch, values("bpf"))',
+    'cfg(kani)',
 ] }
 
 [profile.release]

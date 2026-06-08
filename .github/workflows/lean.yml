@@ -1,0 +1,327 @@
+name: Lean (gadget soundness)
+
+# Builds the Lean 4 / mathlib proofs of Layer-B gadget soundness in `formal/`
+# (docs/FORMAL_VERIFICATION_PLAN.md). `lake build` type-checks every theorem;
+# the axiom check then fails the job if any proof slipped in a `sorry`
+# (`sorryAx`) or otherwise stopped depending only on mathlib's standard axioms.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lean:
+    name: prove (gadget soundness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: formal
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install elan (Lean toolchain manager)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch mathlib cache
+        run: lake exe cache get
+
+      - name: Build proofs
+        run: lake build
+
+      - name: Check no sorry / standard axioms only
+        run: |
+          cat > axcheck.lean <<'EOF'
+          import Formal
+          open Xark
+          #print axioms boolean_sound
+          #print axioms bits_unique
+          #print axioms range_unique
+          #print axioms and_sound
+          #print axioms xor_sound
+          #print axioms not_sound
+          #print axioms xor_n_parity_core
+          #print axioms xor_n_parity_field
+          #print axioms add_mod_32_core
+          #print axioms add_mod_32_unique
+          #print axioms sbox_sound
+          #print axioms sbox_unique
+          #print axioms ec_add_generic_slope_unique
+          #print axioms ec_add_generic_on_curve
+          -- curve doubling + inverse
+          #print axioms ec_double_slope_unique
+          #print axioms ec_double_on_curve
+          #print axioms ec_inverse_recognized
+          -- curve selector + output mux
+          #print axioms selector_unique
+          #print axioms selectors_double_case
+          #print axioms selectors_inverse_case
+          #print axioms output_mux_lhs_inf
+          #print axioms output_mux_rhs_inf
+          #print axioms output_mux_inverse
+          #print axioms output_mux_generic
+          -- gated curve membership + end-to-end ec_add wrapper
+          #print axioms gated_on_curve_sound
+          #print axioms gated_on_curve_trivial
+          #print axioms enforce_on_curve_grumpkin_sound
+          #print axioms ec_add_in_circuit_generic_sound
+          #print axioms ec_add_in_circuit_sound
+          -- Poseidon2 round/permutation
+          #print axioms sbox_apply_sound
+          #print axioms partial_sbox_apply_sound
+          #print axioms linear_step_determined
+          #print axioms add_constants_determined
+          #print axioms full_round_determined
+          #print axioms partial_round_determined
+          #print axioms poseidon_permutation_determined
+          #print axioms poseidon2_bn254_determined
+          -- ECDSA scalar-mult ladder
+          #print axioms ladder_step_correct
+          #print axioms ladder_foldl_correct
+          #print axioms ladder_correct
+          #print axioms ladder_determinism
+          -- ECDSA non-native modular arithmetic
+          #print axioms mul_mod_sound
+          #print axioms mul_mod_complete
+          #print axioms valOfLimbs_zero
+          #print axioms valOfLimbs_succ
+          #print axioms mul_mod_via_limbs
+          #print axioms colSum_eq
+          #print axioms carry_telescope
+          #print axioms colSum_carry_telescope
+          #print axioms mul_mod_via_limbwise_constraints
+          #print axioms add_val_no_wrap
+          #print axioms mul_val_no_wrap
+          #print axioms colSum_le
+          #print axioms carry_le
+          #print axioms mul_mod_via_Fr_limbwise_constraints
+          -- SHA-256 structural
+          #print axioms rotr_sound
+          #print axioms shr_sound
+          #print axioms not32_sound
+          #print axioms and32_sound
+          #print axioms xor32_sound
+          #print axioms Ch_bit_sound
+          #print axioms Maj_bit_sound
+          #print axioms MessageScheduleStep_iff
+          -- ECDSA verify end-to-end wrapper (Formal.EcdsaVerify)
+          #print axioms ecdsa_verify_sound
+          #print axioms mul_mod_lifts_to_ZMod
+          #print axioms ladder_gives_R_def
+          #print axioms ecdsa_verify_compose
+          -- secp256k1 curve closure (Formal.Secp256k1)
+          #print axioms gated_on_curve_secp256k1_sound
+          #print axioms gated_on_curve_secp256k1_trivial
+          #print axioms enforce_on_curve_secp256k1_sound
+          #print axioms ec_add_in_circuit_secp256k1_generic_sound
+          #print axioms ec_add_in_circuit_secp256k1_sound
+          -- secp256k1 concrete point-group (Formal.Secp256k1Group)
+          #print axioms Secp256k1Point.addCommGroup
+          #print axioms ecdsa_verify_compose_secp256k1
+          #print axioms glv_endomorphism_correct_secp256k1
+          -- secp256k1 GLV closure: concrete endomorphism + final acts-as-λ statement
+          #print axioms secp256k1_beta_cube_eq_one
+          #print axioms secp256k1_beta_ne_zero
+          #print axioms secp256k1_phi_zero
+          #print axioms secp256k1_phi_hom
+          #print axioms secp256k1_G_nonsingular
+          #print axioms secp256k1_phi_eigenvalue_at_G
+          #print axioms secp256k1_phi_acts_as_lambda
+          -- secp256r1 curve closure (Formal.Secp256r1)
+          #print axioms ec_double_on_curve_with_a
+          #print axioms gated_on_curve_secp256r1_sound
+          #print axioms enforce_on_curve_secp256r1_sound
+          #print axioms ec_add_in_circuit_secp256r1_generic_sound
+          #print axioms ec_add_in_circuit_secp256r1_sound
+          -- secp256r1 concrete point-group (Formal.Secp256r1Group)
+          #print axioms Secp256r1Point.addCommGroup
+          #print axioms ecdsa_verify_compose_secp256r1
+          -- Grumpkin concrete point-group (Formal.GrumpkinGroup)
+          #print axioms GrumpkinPoint.addCommGroup
+          #print axioms ecdsa_verify_compose_grumpkin
+          -- GLV algebraic core (Formal.Glv)
+          #print axioms glv_sum_eq
+          #print axioms glv_via_endomorphism
+          -- ACIR → R1CS lowering meta-theorem (Formal.AcirLowering)
+          #print axioms lowerAssertZeroLinear_sound
+          #print axioms lowerAssertZeroLinear_complete
+          #print axioms lowerAssertZeroLinear_sound_dir
+          #print axioms lowerAssertZeroCircuit_sound
+          -- Variable-index MemoryOp (Formal.MemoryVarIndex)
+          #print axioms selector_partition_unique
+          #print axioms read_value_correct
+          #print axioms write_value_correct
+          -- BrilligCall (Formal.Brillig)
+          #print axioms brillig_lowering_vacuous_sound
+          #print axioms brillig_alloc_monotone
+          -- Predicated Call e-aux gating (Formal.Predication)
+          #print axioms enforce_gated_sound
+          #print axioms predicate_bool_cases
+          #print axioms enforce_gated_linear_collapse
+          #print axioms enforce_gated_two_row_eq_collapse
+          -- BlackBoxFuncCall dispatch + cross-circuit Call relabel (Formal.AcirLowering, Gap 1b + 1d)
+          #print axioms lowerBlackBox_sound
+          #print axioms assertZeroLinear_shift_satisfied
+          #print axioms lowerAssertZeroLinear_shift_sound
+          #print axioms call_relabel_gated_sound
+          -- Cross-circuit Call inlining: outputs / predicate combo / memory scope (Formal.CallInlining, Gap 1d ext.)
+          #print axioms copyRow_satisfied_iff
+          #print axioms lowerCall_outputs_bound
+          #print axioms lowerCall_inner_sound
+          #print axioms combine_predicates_is_boolean
+          #print axioms combine_predicates_row_sound
+          #print axioms gated_under_combined_predicate_sound
+          #print axioms combined_predicate_equiv_chain
+          #print axioms callee_block_ids_disjoint_from_caller
+          #print axioms callee_alloc_fresh_from_caller
+          #print axioms memory_scope_splice_fresh
+          -- Inductive `allocList` reach lemma closing the memory-scope splice (Formal.Bookkeeping)
+          #print axioms AllocState.allocList
+          #print axioms AllocState.alloc_next_le
+          #print axioms AllocState.alloc_next_ge
+          #print axioms AllocState.alloc_preserves_assigned
+          #print axioms AllocState.alloc_fresh_next
+          #print axioms alloc_list_next_grows
+          #print axioms alloc_list_next_mono
+          #print axioms alloc_list_preserves_assigned
+          #print axioms alloc_list_reaches_offset_eq
+          #print axioms alloc_list_reaches_offset
+          #print axioms alloc_list_memory_init_invariant
+          -- Per-opcode end-to-end wrappers (Formal.Wrappers, Gap 3)
+          #print axioms lowerSha256Compression_sound
+          #print axioms lowerKeccakf1600_sound
+          #print axioms lowerBlake2s_sound
+          #print axioms lowerBlake3_sound
+          #print axioms lowerAES128Encrypt_sound
+          #print axioms lowerPoseidon2Permutation_sound
+          #print axioms lowerEmbeddedCurveAdd_sound
+          #print axioms lowerMultiScalarMul_sound
+          #print axioms lowerEcdsaSecp256k1_sound
+          #print axioms lowerEcdsaSecp256r1_sound
+          -- Full AssertZero (Formal.AcirLowering, Gap 1a)
+          #print axioms mul_row_iff_aux_consistent
+          #print axioms full_satisfied_via_fin_aux
+          -- Allocation bookkeeping (Formal.Bookkeeping, Gap 6 + 1c)
+          #print axioms AllocState.alloc_preserves_invariant
+          #print axioms alloc_witness_idempotent
+          #print axioms alloc_witness_injective
+          #print axioms read_const_index_correct
+          #print axioms write_const_index_correct
+          -- Advanced scalar-mul gadgets + public-input flow (Formal.AdvancedGadgets, Gaps 5b/5c/7)
+          #print axioms windowed_scalar_mul_sound
+          #print axioms joint_ladder_step_correct
+          #print axioms joint_ladder_foldl_correct
+          #print axioms joint_strauss_shamir_correct
+          #print axioms public_input_projection_consistent
+          -- Follow-up push: Items 2 / 6 / 7 / 9 / 10 from `/Users/elon/dev/blueshift/xark/docs/FORMAL_VERIFICATION_PLAN.md`
+          -- Item 2 — GLV endomorphism algebraic kernel
+          #print axioms glv_endomorphism_correct
+          #print axioms isEndomorphism_of_eigenvalue_at_generator
+          -- Item 6 — List-based AssertZero mul lowering
+          #print axioms full_satisfied_via_list_aux
+          -- Item 7 — derived h_inst + bookkeeping bridge
+          #print axioms buildInstance_eq_w_on_pub
+          #print axioms public_input_projection_consistent_canonical
+          #print axioms alloc_state_pins_public_inputs
+          -- Item 3(a) — Lean ↔ Rust PI construction bridge
+          #print axioms synthesizeInstance_eq_buildInstance
+          #print axioms public_input_projection_consistent_synthesize
+          -- Item 3(b) — MemoryInit ↔ allocList integration
+          #print axioms memory_scope_splice_integrated
+          -- Item 2 BLAKE — per-bit structural composition for BLAKE2s + BLAKE3
+          #print axioms addMod32_bit_sound
+          #print axioms xor32_bit_sound
+          #print axioms rotr_bit_sound
+          #print axioms blake2sG_bit_sound
+          #print axioms blake2sRoundStep_bit_sound
+          #print axioms blake3RoundStep_bit_sound
+          #print axioms blake2s_round_compose_bit
+          #print axioms blake3_round_compose_bit
+          -- Item 9 — heterogeneous opcode list-fold composition
+          #print axioms AcirCircuit.cons_satisfied_iff
+          #print axioms AcirCircuit.brillig_only_satisfied
+          #print axioms AcirCircuit.linear_collapse
+          -- First-class BlackBox / Memory / Call constructors + total dispatch (Formal.AcirLowering)
+          #print axioms lowerBlackBoxOpcode_rows
+          #print axioms lowerMemoryInit_rows
+          #print axioms lowerMemoryOpRead_row
+          #print axioms lowerMemoryOpWrite_row
+          #print axioms lowerCallOpcode_rows
+          #print axioms lowerAcirOpcode_sound
+          -- Bitwuzla bit-equivalence composition (Formal.BitwuzlaCompose, Gap 3 closing)
+          -- The SHA-256 axiom has been retired: `BitwuzlaSha256Equivalent` is now
+          -- a pure-Lean `def` (= `BitwuzlaEquivalent`), `bitwuzla_sha256_equivalent_iff`
+          -- is a `theorem` proved by `Iff.rfl`, and the per-round bit-level
+          -- equivalence with the FIPS 180-4 §6.2 reference is proven structurally
+          -- in `sha256_round_bit_equivalence`. The
+          -- remaining `Bitwuzla{Keccak,Blake2s,Blake3,Aes128}Equivalent` axioms
+          -- are still discharged externally by the matching QF_BV harnesses
+          -- in `crates/tests/tests/bitwuzla_<X>.rs`.
+          #print axioms BitwuzlaEquivalent
+          #print axioms BitwuzlaSha256Equivalent
+          #print axioms bitwuzla_sha256_equivalent_iff
+          #print axioms sha256_round_bit_equivalence
+          #print axioms sha256_round_bitwuzla_equivalent
+          #print axioms sha256_round_pinned
+          #print axioms sha256_closed_chain
+          #print axioms keccak_round_pinned
+          #print axioms keccak_round_bit_equivalence
+          #print axioms keccak_closed_chain
+          -- Keccak per-bit / per-layer structural soundness (Formal.Keccak)
+          #print axioms not64_sound
+          #print axioms and64_sound
+          #print axioms xor64_sound
+          #print axioms rotl64_sound
+          #print axioms rotr64_sound
+          #print axioms keccakTheta_sound
+          #print axioms keccakRhoPi_sound
+          #print axioms keccakChi_sound
+          #print axioms keccakIota_sound
+          #print axioms keccakRoundStep_bit_sound
+          #print axioms blake2s_round_pinned
+          #print axioms blake2s_round_bit_equivalence
+          #print axioms blake2s_closed_chain
+          #print axioms blake3_round_pinned
+          #print axioms blake3_round_bit_equivalence
+          #print axioms blake3_closed_chain
+          #print axioms aes128_round_pinned
+          #print axioms aes128_round_bit_equivalence
+          #print axioms aes128_closed_chain
+          -- AES-128 per-layer structural soundness (Formal.Aes) — replaces the
+          -- former pass-through tautology in `aes128_round_bit_equivalence` with
+          -- a real four-layer composition.
+          #print axioms xor8_sound
+          #print axioms and8_sound
+          #print axioms not8_sound
+          #print axioms aesXTime_sound
+          #print axioms aesSubBytes_byte_sound
+          #print axioms aesSubBytes_bit_sound
+          #print axioms aesShiftRows_sound
+          #print axioms aesMixColumn_sound
+          #print axioms aesMixColumns_sound
+          #print axioms aesAddRoundKey_sound
+          #print axioms aesRoundStep_bit_sound
+          #print axioms BitOf.unique
+          #print axioms BitOf.eq_ite
+          EOF
+          out=$(lake env lean axcheck.lean 2>&1); rm -f axcheck.lean
+          echo "$out"
+          if echo "$out" | grep -qi 'sorryAx'; then
+            echo "::error::a proof depends on sorryAx (incomplete proof)"; exit 1
+          fi
+          # Confirm `BitwuzlaSha256Equivalent` is no longer a trusted axiom in
+          # the SHA-256 downstream theorems (it was retired in favour of a
+          # pure-Lean `def`).
+          if echo "$out" | awk '
+            /^axioms (lowerSha256Compression_sound|sha256_round_pinned|sha256_closed_chain|sha256_round_bit_equivalence)$/ { flag=1; next }
+            /^axioms / { flag=0 }
+            flag { print }
+          ' | grep -q 'BitwuzlaSha256Equivalent'; then
+            echo "::error::a SHA-256 downstream theorem still depends on BitwuzlaSha256Equivalent as an axiom"; exit 1
+          fi

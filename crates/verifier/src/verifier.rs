@@ -251,6 +251,51 @@ fn g2_at(buf: &[u8], off: usize) -> G2Point {
     G2Point::from_le_bytes(bytes)
 }
 
+// -- curve-op wrappers (Kani stub seam) ---------------------------------------
+//
+// Thin `#[inline(always)]` wrappers around the BN254 backend's `Mul` / `Add`
+// / `pairing` calls. Production code is identical post-inlining (LLVM erases
+// the wrappers), but they give Kani a stable, nominal function path to swap
+// via `#[kani::stub(super::g1_scalar_mul, …)]`. Without them, stubbing the
+// trait-method / const-generic callsites is awkward.
+
+#[inline(always)]
+fn g1_scalar_mul(p: G1Point, s: &[u8; FR_BYTES]) -> Result<G1Point, AltBn128Error> {
+    p * *s
+}
+
+#[inline(always)]
+fn g1_add(a: G1Point, b: G1Point) -> Result<G1Point, AltBn128Error> {
+    a + b
+}
+
+#[inline(always)]
+fn g16_pairing(pairs: &[(G1Point, G2Point); 4]) -> Result<[u8; 32], AltBn128Error> {
+    pairing(pairs)
+}
+
+/// Pure assembly of the Groth16 final-check operand array, in the canonical
+/// order `[(−A, B), (α, β), (vk_x, γ), (C, δ)]`. Split out so a Kani harness
+/// can verify the *order* (Layer-A #5, operand-assembly rewrite check) by
+/// inspecting the assembled array directly, without needing to stub the
+/// pairing itself.
+///
+/// `a` is the *already-negated* proof A (the exporter pre-negates).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn g16_assemble_pairs(
+    a: G1Point,
+    b: G2Point,
+    alpha: G1Point,
+    beta: G2Point,
+    vk_x: G1Point,
+    gamma: G2Point,
+    c: G1Point,
+    delta: G2Point,
+) -> [(G1Point, G2Point); 4] {
+    [(a, b), (alpha, beta), (vk_x, gamma), (c, delta)]
+}
+
 // -- core verifier ------------------------------------------------------------
 
 /// Verify a Groth16 proof. The curve arithmetic resolves to the `alt_bn128`
@@ -324,8 +369,8 @@ pub fn verify_groth16(
         if !scalar_is_canonical(&scalar) {
             return Err(VerifierError::NonCanonicalPublicInput { index: i as u32 });
         }
-        let term = (ic_i * scalar)?;
-        acc = (acc + term)?;
+        let term = g1_scalar_mul(ic_i, &scalar)?;
+        acc = g1_add(acc, term)?;
     }
 
     // ---- Pairing check -----------------------------------------------------
@@ -354,7 +399,8 @@ pub(crate) fn groth16_pairing_check(
     c: G1Point,
     delta: G2Point,
 ) -> Result<bool, VerifierError> {
-    let result = pairing(&[(a, b), (alpha, beta), (vk_x, gamma), (c, delta)])?;
+    let pairs = g16_assemble_pairs(a, b, alpha, beta, vk_x, gamma, c, delta);
+    let result = g16_pairing(&pairs)?;
     // The pairing scalar is a 32-byte LE u256: identity in GT iff it equals 1.
     Ok(result[0] == 1 && result[1..].iter().all(|b| *b == 0))
 }
@@ -478,5 +524,529 @@ mod tests {
         assert!(coords_canonical(&buf));
         buf[2 * FR_BYTES + (FR_BYTES - 1)] = 0xFF; // make the 3rd chunk >= q
         assert!(!coords_canonical(&buf));
+    }
+}
+
+/// Formal-verification harnesses (Kani bounded model checker). Run with
+/// `cargo kani`. These discharge the Layer-A canonicality lemmas from
+/// `docs/FORMAL_VERIFICATION_PLAN.md` over **all** inputs — the all-input
+/// guarantee the finite-sample unit/fuzz tests can't give. Compiled only under
+/// `cfg(kani)`, so they're inert in normal builds.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Trusted reference: interpret a 32-byte LE buffer as a 256-bit integer
+    /// (low/high `u128` halves) and compare. `le_lt` must agree with this for
+    /// every input.
+    fn u256_lt_le(a: &[u8; FR_BYTES], b: &[u8; FR_BYTES]) -> bool {
+        let a_lo = u128::from_le_bytes(a[..16].try_into().unwrap());
+        let a_hi = u128::from_le_bytes(a[16..].try_into().unwrap());
+        let b_lo = u128::from_le_bytes(b[..16].try_into().unwrap());
+        let b_hi = u128::from_le_bytes(b[16..].try_into().unwrap());
+        a_hi < b_hi || (a_hi == b_hi && a_lo < b_lo)
+    }
+
+    /// `le_lt` is a correct unsigned 256-bit little-endian comparison for ALL
+    /// inputs (and never panics — Kani checks the harness is panic-free).
+    #[kani::proof]
+    fn le_lt_is_correct_u256_compare() {
+        let a: [u8; FR_BYTES] = kani::any();
+        let m: [u8; FR_BYTES] = kani::any();
+        assert_eq!(le_lt(&a, &m), u256_lt_le(&a, &m));
+    }
+
+    /// `scalar_is_canonical(s) ⇔ s < r`, for ALL `s` — the public-input
+    /// canonicality property.
+    #[kani::proof]
+    fn scalar_is_canonical_iff_lt_r() {
+        let s: [u8; FR_BYTES] = kani::any();
+        assert_eq!(scalar_is_canonical(&s), u256_lt_le(&s, &FR_MODULUS_LE));
+    }
+
+    /// `fq_is_canonical(c) ⇔ c < q`, for ALL `c` — the coordinate canonicality
+    /// property behind non-malleability: any encoding with an unused top bit set
+    /// is `>= q`, hence rejected by the `*_strict` path.
+    #[kani::proof]
+    fn fq_is_canonical_iff_lt_q() {
+        let c: [u8; FR_BYTES] = kani::any();
+        assert_eq!(fq_is_canonical(&c), u256_lt_le(&c, &FQ_MODULUS_LE));
+    }
+
+    /// `coords_canonical` is the conjunction of the per-coordinate check, for ALL
+    /// inputs. Bounded to two 32-byte chunks; the loop body is identical for any
+    /// length, so two chunks exercise both the "rejects on a bad chunk" and
+    /// "accepts when all good" paths.
+    #[kani::proof]
+    fn coords_canonical_is_conjunction() {
+        let buf: [u8; 2 * FR_BYTES] = kani::any();
+        let c0: [u8; FR_BYTES] = buf[..FR_BYTES].try_into().unwrap();
+        let c1: [u8; FR_BYTES] = buf[FR_BYTES..].try_into().unwrap();
+        assert_eq!(
+            coords_canonical(&buf),
+            fq_is_canonical(&c0) && fq_is_canonical(&c1)
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Layer-A items #2 (fail-closed), #4 (strict non-malleability), #5 (arity)
+    // from docs/FORMAL_VERIFICATION_PLAN.md.
+    //
+    // These harnesses exercise the parse path of `verify_groth16` /
+    // `verify_groth16_strict` and rely on the fact that every structural error
+    // path early-exits *before* any `alt_bn128` curve operation runs. That lets
+    // us prove them without stubbing the BN254 backend: the curve ops are
+    // unreachable on the error paths these harnesses cover.
+    //
+    // Layer-A #1 (totality over the *full* `verify_groth16` body, i.e. proving
+    // no panic for an *accepted* input — where the curve ops *do* run) is
+    // deliberately *not* discharged here. Kani cannot symbolically execute the
+    // BN254 pairing/scalar-mul (the syscall path resolves to Arkworks
+    // fallback off-chain, and the cost blows up the bounded solver). Doing it
+    // would require `kani::stub` replacements for `G1Point::Mul`, `G1Point::Add`,
+    // and `pairing` — pending in a follow-up. The current set still rules out
+    // every structural-bug class (the production-attack surface) over all
+    // bounded inputs.
+    //
+    // All harnesses bound `N` (= public-input count) to a small concrete value
+    // so Kani's enumeration stays tractable. The verifier code is uniform in
+    // `N`, so each bounded harness witnesses the general property.
+    // -------------------------------------------------------------------------
+
+    /// **Fail-closed: a `proof_bytes` length other than 256 always returns
+    /// `Err(ProofLength)`.** Curve ops are not reached because the parse path
+    /// errors out before the IC scan. (`vk_bytes` is chosen large enough that
+    /// the `TruncatedVk` check does not fire first, so the failure is forced
+    /// onto the `ProofLength` path.)
+    #[kani::proof]
+    fn proof_wrong_length_rejected() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; 100] = kani::any(); // != PROOF_BYTES (256)
+        let pi: [u8; FR_BYTES] = kani::any();
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::ProofLength { .. })));
+    }
+
+    /// **Fail-closed: a `vk_bytes` shorter than the fixed prefix + one IC point
+    /// always returns `Err(TruncatedVk)`.** The function returns at the first
+    /// length guard, before any byte decode.
+    #[kani::proof]
+    fn vk_truncated_rejected() {
+        // Exactly one byte short of the minimum.
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES - 1] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES] = kani::any();
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::TruncatedVk { .. })));
+    }
+
+    /// **Fail-closed: a `vk_bytes` whose IC region is not a whole number of
+    /// 64-byte G1 points always returns `Err(IcLengthMismatch)`.** Bounded to
+    /// `VK_FIXED_PREFIX_BYTES + G1_BYTES + 1` (one byte past two complete IC
+    /// points → the IC slice has length `65`, not a multiple of `G1_BYTES`).
+    #[kani::proof]
+    fn vk_ic_unaligned_rejected() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES + 1] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES] = kani::any();
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::IcLengthMismatch { .. })));
+    }
+
+    /// **Fail-closed: a `public_inputs` length that is not a multiple of 32
+    /// always returns `Err(PublicInputsLength)`.** vk and proof are chosen
+    /// valid in shape so the failure is forced onto the PI-length path.
+    #[kani::proof]
+    fn pi_unaligned_rejected() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES + 1] = kani::any(); // 33 B, not a multiple of 32
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::PublicInputsLength { .. })));
+    }
+
+    /// **Arity / fail-closed: `ic_count - 1 != num_inputs` always returns
+    /// `Err(InputArityMismatch)`.** Here vk encodes `ic_count = 2`
+    /// (`VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES`), so the verifier expects exactly
+    /// `1` public input; we hand it `0` instead.
+    #[kani::proof]
+    fn arity_mismatch_rejected_ic2_pi0() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; 0] = []; // 0 inputs, but vk expects 1
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::InputArityMismatch { .. })));
+    }
+
+    /// **Arity / fail-closed: same as above with `ic_count = 2, num_inputs = 2`
+    /// (one too many).** Together with the previous harness this exhausts the
+    /// off-by-one neighbourhood of the accepted arity at `N = 1`.
+    #[kani::proof]
+    fn arity_mismatch_rejected_ic2_pi2() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; 2 * FR_BYTES] = kani::any(); // 2 inputs, but vk expects 1
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::InputArityMismatch { .. })));
+    }
+
+    /// **Fail-closed: a non-canonical public-input scalar (`>= r`) always
+    /// returns `Err(NonCanonicalPublicInput)`.** vk/proof are valid in shape
+    /// and arity. The IC point reads via `g1_at` are pure byte copies (no
+    /// panic, no curve op); the failure fires on the `scalar_is_canonical`
+    /// check before the curve mul.
+    #[kani::proof]
+    fn noncanonical_pi_rejected() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let mut pi: [u8; FR_BYTES] = kani::any();
+        // Force pi >= r by saturating the top limb. Combined with `>= r`,
+        // setting the top byte to 0xFF makes the value > r for sure
+        // (r's top byte is 0x30).
+        pi[FR_BYTES - 1] = 0xFF;
+        let r = verify_groth16(&vk, &proof, &pi);
+        assert!(matches!(
+            r,
+            Err(VerifierError::NonCanonicalPublicInput { .. })
+        ));
+    }
+
+    /// **Strict non-malleability (#4): `verify_groth16_strict` rejects any
+    /// `vk_bytes` with a non-canonical `Fq` coordinate.** Here we set the top
+    /// (unused-flag) bit of byte 31 of `vk_bytes[0..32]` (the first coordinate
+    /// of `alpha`). The resulting 32-byte value is `>= 2^255 > q`, hence
+    /// non-canonical, and the strict path must reject with
+    /// `Err(NonCanonicalCoordinate)`. Note that the non-strict path *would*
+    /// silently accept this (the syscall masks the bit) — that is the
+    /// malleability path the strict variant exists to close.
+    #[kani::proof]
+    fn strict_rejects_top_bit_set_in_vk() {
+        let mut vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        // Set bit 255 of the first 32-byte coordinate (alpha.x).
+        vk[FR_BYTES - 1] |= 0x80;
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES] = kani::any();
+        let r = verify_groth16_strict(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::NonCanonicalCoordinate)));
+    }
+
+    /// **Strict non-malleability (#4): same, but the top bit is set inside
+    /// `proof_bytes`.** Targets `proof.A.x` (the first 32 bytes of the proof);
+    /// the strict path must reject before any curve op runs.
+    #[kani::proof]
+    fn strict_rejects_top_bit_set_in_proof() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let mut proof: [u8; PROOF_BYTES] = kani::any();
+        proof[FR_BYTES - 1] |= 0x80; // top bit of proof.A.x
+        let pi: [u8; FR_BYTES] = kani::any();
+        let r = verify_groth16_strict(&vk, &proof, &pi);
+        assert!(matches!(r, Err(VerifierError::NonCanonicalCoordinate)));
+    }
+
+    /// **`verify_proof_only` shares the same structural-error contract as
+    /// `verify_groth16`.** Specifically, a too-short `instruction_data`
+    /// (less than `PROOF_BYTES`) must return `Err(ProofLength)`.
+    #[kani::proof]
+    fn proof_only_too_short_rejected() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES] = kani::any();
+        let data: [u8; PROOF_BYTES - 1] = kani::any();
+        let r = verify_proof_only(&vk, &data);
+        assert!(matches!(r, Err(VerifierError::ProofLength { .. })));
+    }
+
+    // -------------------------------------------------------------------------
+    // Layer-A #1 — totality (no panic) over the FULL verify_groth16 body,
+    // including the curve ops, with kani::stub replacing the BN254 operators.
+    //
+    // The curve ops (G1Point::Mul, G1Point::Add, pairing) resolve to the
+    // alt_bn128 syscall on-chain and the Arkworks fallback off-chain — neither
+    // is symbolically executable inside Kani's budget. The harnesses route
+    // every call site through three #[inline(always)] wrappers
+    // (g1_scalar_mul, g1_add, g16_pairing, defined above) and swap them out
+    // with kani::stub replacements that return unconstrained
+    // Result<_, AltBn128Error>. Production codegen is byte-identical.
+    //
+    // What this proves: panic freedom of the Rust around the curve ops on any
+    // backend behaviour. What it does NOT prove: anything about the *value* of
+    // the boolean return (Layer C — Groth16 soundness — out of scope), nor
+    // that successful curve ops produce on-curve points (orthogonal to panic
+    // freedom).
+    //
+    // N (= public-input count) is bounded to {0, 1, 2}. The body is uniform
+    // in N (the only N-dependent path is the IC accumulator loop, whose body
+    // is identical per iteration), so the three values witness {empty,
+    // single-iter, multi-iter} loop patterns.
+    // -------------------------------------------------------------------------
+
+    /// Stub replacement for `g1_scalar_mul`. Returns an unconstrained Result:
+    /// either an arbitrary-bytes G1 point or a backend error. Kani then
+    /// explores both branches of the `?` operator at every call site.
+    fn stub_g1_scalar_mul(
+        _p: G1Point,
+        _s: &[u8; FR_BYTES],
+    ) -> Result<G1Point, AltBn128Error> {
+        if kani::any() {
+            let bytes: [u8; G1_BYTES] = kani::any();
+            Ok(G1Point(bytes))
+        } else {
+            Err(AltBn128Error::GroupError)
+        }
+    }
+
+    fn stub_g1_add(_a: G1Point, _b: G1Point) -> Result<G1Point, AltBn128Error> {
+        if kani::any() {
+            let bytes: [u8; G1_BYTES] = kani::any();
+            Ok(G1Point(bytes))
+        } else {
+            Err(AltBn128Error::GroupError)
+        }
+    }
+
+    fn stub_g16_pairing(
+        _pairs: &[(G1Point, G2Point); 4],
+    ) -> Result<[u8; 32], AltBn128Error> {
+        if kani::any() {
+            let bytes: [u8; 32] = kani::any();
+            Ok(bytes)
+        } else {
+            Err(AltBn128Error::GroupError)
+        }
+    }
+
+    /// Totality (no panic) for `verify_groth16` with N = 0 public inputs.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn verify_groth16_totality_n0() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; 0] = [];
+        let _ = verify_groth16(&vk, &proof, &pi);
+    }
+
+    /// Totality for `verify_groth16` with N = 1 (one loop iter).
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn verify_groth16_totality_n1() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES] = kani::any();
+        let _ = verify_groth16(&vk, &proof, &pi);
+    }
+
+    /// Totality for `verify_groth16` with N = 2 (multi-iter).
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn verify_groth16_totality_n2() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 3 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; 2 * FR_BYTES] = kani::any();
+        let _ = verify_groth16(&vk, &proof, &pi);
+    }
+
+    /// Totality for `verify_groth16_strict` with N = 0. Adds the
+    /// `coords_canonical` scan over vk + proof bytes.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn verify_groth16_strict_totality_n0() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; 0] = [];
+        let _ = verify_groth16_strict(&vk, &proof, &pi);
+    }
+
+    /// Totality for `verify_groth16_strict` with N = 1.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn verify_groth16_strict_totality_n1() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES] = kani::any();
+        let _ = verify_groth16_strict(&vk, &proof, &pi);
+    }
+
+    /// Totality for `verify_groth16_strict` with N = 2.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn verify_groth16_strict_totality_n2() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 3 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; 2 * FR_BYTES] = kani::any();
+        let _ = verify_groth16_strict(&vk, &proof, &pi);
+    }
+
+    /// **Layer-A #5 — pairing operand-assembly order.** Proves over all
+    /// symbolic inputs that `g16_assemble_pairs` produces the canonical
+    /// `[(−A, B), (α, β), (vk_x, γ), (C, δ)]` order. The exporter pre-negates
+    /// A, so the "−A" slot literally receives the caller's `a` argument.
+    /// Discharged directly without a stub by virtue of the assembly being a
+    /// pure helper.
+    #[kani::proof]
+    fn pairing_operand_assembly_order() {
+        let a_bytes: [u8; G1_BYTES] = kani::any();
+        let b_bytes: [u8; G2_BYTES] = kani::any();
+        let alpha_bytes: [u8; G1_BYTES] = kani::any();
+        let beta_bytes: [u8; G2_BYTES] = kani::any();
+        let vk_x_bytes: [u8; G1_BYTES] = kani::any();
+        let gamma_bytes: [u8; G2_BYTES] = kani::any();
+        let c_bytes: [u8; G1_BYTES] = kani::any();
+        let delta_bytes: [u8; G2_BYTES] = kani::any();
+
+        let a = G1Point(a_bytes);
+        let b = G2Point(b_bytes);
+        let alpha = G1Point(alpha_bytes);
+        let beta = G2Point(beta_bytes);
+        let vk_x = G1Point(vk_x_bytes);
+        let gamma = G2Point(gamma_bytes);
+        let c = G1Point(c_bytes);
+        let delta = G2Point(delta_bytes);
+
+        let pairs = g16_assemble_pairs(a, b, alpha, beta, vk_x, gamma, c, delta);
+
+        assert!(pairs[0].0.0 == a_bytes && pairs[0].1.0 == b_bytes);
+        assert!(pairs[1].0.0 == alpha_bytes && pairs[1].1.0 == beta_bytes);
+        assert!(pairs[2].0.0 == vk_x_bytes && pairs[2].1.0 == gamma_bytes);
+        assert!(pairs[3].0.0 == c_bytes && pairs[3].1.0 == delta_bytes);
+    }
+
+    // -------------------------------------------------------------------------
+    // Plan-named aliases for Layer-A #1 (totality) and operand assembly.
+    //
+    // The N-parameterised totality harnesses above (verify_groth16_totality_n0/
+    // n1/n2 and the strict variants) discharge Layer-A #1 for verify_groth16
+    // and verify_groth16_strict. The three harnesses below provide the
+    // single-entry-point names called out in docs/FORMAL_VERIFICATION_PLAN.md
+    // (and the task spec):
+    //
+    //   * totality_verify_groth16     — totality of the public verify_groth16
+    //                                   entry point on accepted-input shape.
+    //   * totality_verify_proof_only  — totality of verify_proof_only's split
+    //                                   wrapper plus its downstream verify_groth16.
+    //   * pairing_operand_assembly    — byte-level concatenation check that the
+    //                                   buffer presented to the alt_bn128_pairing
+    //                                   syscall equals
+    //                                   neg(A) || B || α || β || vk_x || γ || C || δ.
+    //
+    // All three use the same g1_scalar_mul / g1_add / g16_pairing stubs as the
+    // N-parameterised totality block above.
+    // -------------------------------------------------------------------------
+
+    /// **Layer-A #1 — totality of `verify_groth16` over an accepted-input
+    /// shape.** The vk/proof/public-inputs are unconstrained 8-bit-symbolic
+    /// arrays, sized so the structural checks accept them; the curve-op
+    /// wrappers are stubbed so the harness exercises the *post-canonicality*
+    /// path that reaches `g1_scalar_mul`, `g1_add`, and `g16_pairing`. Proves
+    /// no panic / no OOB / no overflow over the full body.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn totality_verify_groth16() {
+        // ic_count = 2  ⇒  expects exactly 1 public input. Both branches of
+        // the IC accumulator loop's `?` (Ok / Err) are explored via the stubs.
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let proof: [u8; PROOF_BYTES] = kani::any();
+        let pi: [u8; FR_BYTES] = kani::any();
+        let _ = verify_groth16(&vk, &proof, &pi);
+    }
+
+    /// **Layer-A #1 — totality of `verify_proof_only`.** Covers the split
+    /// wrapper that peels off `PROOF_BYTES` from a single `instruction_data`
+    /// blob, then delegates to `verify_groth16`. Same stubbing as
+    /// `totality_verify_groth16`.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
+    fn totality_verify_proof_only() {
+        // ic_count = 2  ⇒  expects exactly 1 public input  ⇒  instruction_data
+        // is exactly `PROOF_BYTES + FR_BYTES` long.
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let instr: [u8; PROOF_BYTES + FR_BYTES] = kani::any();
+        let _ = verify_proof_only(&vk, &instr);
+    }
+
+    /// **Layer-A operand-assembly rewrite check.** The pairing syscall takes a
+    /// contiguous `[G1 || G2]`-per-pair byte buffer (see the on-chain branch of
+    /// `solana_nostd_alt_bn128::pairing`). This harness proves that the byte
+    /// concatenation of the `g16_assemble_pairs` result equals the canonical
+    /// `neg(A) || B || α || β || vk_x || γ || C || δ` — i.e. the algebraic
+    /// equation `e(−A,B)·e(α,β)·e(vk_x,γ)·e(C,δ) = 1` is what the assembled
+    /// operand list literally encodes. `a` is the already-negated proof A
+    /// (the exporter pre-negates), so the "neg(A)" slot is `a` itself.
+    #[kani::proof]
+    fn pairing_operand_assembly() {
+        let a_bytes: [u8; G1_BYTES] = kani::any();
+        let b_bytes: [u8; G2_BYTES] = kani::any();
+        let alpha_bytes: [u8; G1_BYTES] = kani::any();
+        let beta_bytes: [u8; G2_BYTES] = kani::any();
+        let vk_x_bytes: [u8; G1_BYTES] = kani::any();
+        let gamma_bytes: [u8; G2_BYTES] = kani::any();
+        let c_bytes: [u8; G1_BYTES] = kani::any();
+        let delta_bytes: [u8; G2_BYTES] = kani::any();
+
+        let pairs = g16_assemble_pairs(
+            G1Point(a_bytes),
+            G2Point(b_bytes),
+            G1Point(alpha_bytes),
+            G2Point(beta_bytes),
+            G1Point(vk_x_bytes),
+            G2Point(gamma_bytes),
+            G1Point(c_bytes),
+            G2Point(delta_bytes),
+        );
+
+        // Flatten exactly as `solana_nostd_alt_bn128::pairing` does on-chain:
+        // a contiguous `[[u8; PAIRING_PAIR_BYTES]; 4]` of `G1 || G2` per pair.
+        // This is the byte buffer the `alt_bn128` syscall actually receives.
+        let mut buffer = [[0u8; PAIRING_PAIR_BYTES]; 4];
+        for (slot, (g1, g2)) in buffer.iter_mut().zip(pairs.iter()) {
+            slot[..G1_BYTES].copy_from_slice(&g1.0);
+            slot[G1_BYTES..].copy_from_slice(&g2.0);
+        }
+
+        // Canonical expected layout: neg(A) || B || α || β || vk_x || γ || C || δ.
+        // (`a_bytes` is the pre-negated proof A; see the doc comment above.)
+        let mut expected = [0u8; 4 * PAIRING_PAIR_BYTES];
+        let mut off = 0;
+        let mut put_g1 = |dst: &mut [u8; 4 * PAIRING_PAIR_BYTES],
+                         off: &mut usize,
+                         src: &[u8; G1_BYTES]| {
+            dst[*off..*off + G1_BYTES].copy_from_slice(src);
+            *off += G1_BYTES;
+        };
+        let mut put_g2 = |dst: &mut [u8; 4 * PAIRING_PAIR_BYTES],
+                         off: &mut usize,
+                         src: &[u8; G2_BYTES]| {
+            dst[*off..*off + G2_BYTES].copy_from_slice(src);
+            *off += G2_BYTES;
+        };
+        put_g1(&mut expected, &mut off, &a_bytes);
+        put_g2(&mut expected, &mut off, &b_bytes);
+        put_g1(&mut expected, &mut off, &alpha_bytes);
+        put_g2(&mut expected, &mut off, &beta_bytes);
+        put_g1(&mut expected, &mut off, &vk_x_bytes);
+        put_g2(&mut expected, &mut off, &gamma_bytes);
+        put_g1(&mut expected, &mut off, &c_bytes);
+        put_g2(&mut expected, &mut off, &delta_bytes);
+        assert!(off == 4 * PAIRING_PAIR_BYTES);
+
+        // Flatten the per-pair buffer for a single byte-equality check.
+        let mut flat = [0u8; 4 * PAIRING_PAIR_BYTES];
+        for (i, slot) in buffer.iter().enumerate() {
+            flat[i * PAIRING_PAIR_BYTES..(i + 1) * PAIRING_PAIR_BYTES].copy_from_slice(slot);
+        }
+        assert!(flat == expected);
     }
 }

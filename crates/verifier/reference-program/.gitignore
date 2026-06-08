@@ -1,0 +1,3 @@
+# Build output is reproducible from source; the audit-relevant hash is
+# pinned in `expected.sha256` and enforced in CI.
+target/
