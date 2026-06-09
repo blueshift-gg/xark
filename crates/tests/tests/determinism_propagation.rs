@@ -1,4 +1,4 @@
-//! Layer-B (track 1) R1CS under-constraint analyzer via concrete propagation.
+//! R1CS under-constraint analyzer via concrete propagation.
 //!
 //! For each committed fixture we lower to R1CS, instantiate the public-input
 //! wires with their values from the committed witness, and then propagate
@@ -40,9 +40,9 @@
 //!       depends on a discriminant being nonzero by value coincidence).
 //!
 //! The result: a set of un-determined witness wires per circuit. Circuits
-//! we expect to be fully pinned (every committed gadget that has Layer-B
-//! soundness theorems in `formal/`) are asserted to come back with the
-//! empty set. The rest are printed as findings.
+//! we expect to be fully pinned (every committed gadget that has soundness
+//! theorems in `formal/`) are asserted to come back with the empty set. The
+//! rest are printed as findings.
 //!
 //! Big gadgets (sha/keccak/blake/aes/ecdsa) are reported only — pinning
 //! coverage there is interpreted as a measure of structural redundancy,
@@ -58,9 +58,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ark_bn254::Fr;
 use ark_ff::{Field, Zero};
-use ark_relations::gr1cs::{
-    ConstraintSynthesizer, ConstraintSystem, Matrix, R1CS_PREDICATE_LABEL,
-};
+use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem, Matrix, R1CS_PREDICATE_LABEL};
 
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::LoweredAcirCircuit;
@@ -113,10 +111,7 @@ fn lower(name: &str) -> R1csValued {
 ///
 /// `is_determined(col)` returns whether wire `col` has a known value
 /// (`known_values[col].is_some()`).
-fn split_lc(
-    row: &[(Fr, usize)],
-    known: &BTreeMap<usize, Fr>,
-) -> (Fr, BTreeMap<usize, Fr>) {
+fn split_lc(row: &[(Fr, usize)], known: &BTreeMap<usize, Fr>) -> (Fr, BTreeMap<usize, Fr>) {
     let mut det = Fr::zero();
     let mut res: BTreeMap<usize, Fr> = BTreeMap::new();
     for (coeff, col) in row {
@@ -242,10 +237,7 @@ fn propagate(r: &R1csValued) -> BTreeSet<usize> {
                 // value must match by soundness of the analyzer + system
                 // satisfiability.
                 if let Some(existing) = known.get(&w) {
-                    debug_assert_eq!(
-                        *existing, v,
-                        "propagation inconsistency at wire {w}"
-                    );
+                    debug_assert_eq!(*existing, v, "propagation inconsistency at wire {w}");
                 } else {
                     known.insert(w, v);
                     changed = true;
@@ -312,7 +304,7 @@ const PINNED_FLOOR: &[(&str, usize)] = &[
 fn propagation_determinism() {
     let verbose = std::env::var_os("XARK_PROPAGATION_VERBOSE").is_some();
     eprintln!(
-        "\n  R1CS propagation-based determinism analyzer (Layer-B / track 1):\n  \
+        "\n  R1CS propagation-based determinism analyzer:\n  \
          linear-only propagation; quadratic gadgets (booleans, square roots, …) are\n  \
          correctly *not* pinned — Picus/Ecne is the next escalation for those.\n\n  \
          {:<28} {:>8} {:>8} {:>9}  pinned   floor",
@@ -349,9 +341,7 @@ fn propagation_determinism() {
         }
     }
 
-    eprintln!(
-        "\n  Set XARK_PROPAGATION_VERBOSE=1 to print per-circuit unpinned-wire indices.\n"
-    );
+    eprintln!("\n  Set XARK_PROPAGATION_VERBOSE=1 to print per-circuit unpinned-wire indices.\n");
 
     if !regressions.is_empty() {
         for r in &regressions {

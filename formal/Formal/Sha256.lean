@@ -17,12 +17,12 @@ set_option linter.style.header false
 set_option linter.flexible false
 
 /-!
-# xark SHA-256 structural soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark SHA-256 structural soundness — mechanised in Lean 4 / mathlib
 
 This file builds the **structural** soundness layer for the SHA-256 compression
-gadget in `crates/acir-r1cs/src/gadgets/hash.rs`. Per
-`docs/FORMAL_VERIFICATION_PLAN.md`, bit-level equivalence of *individual*
-per-bit gadgets (`and`, `xor`, `not`, boolean range checks, parity carry,
+gadget in `crates/acir-r1cs/src/gadgets/hash.rs`. Bit-level equivalence of
+*individual* per-bit gadgets (`and`, `xor`, `not`, boolean range checks,
+parity carry,
 wrapping-add carry) is discharged elsewhere — see `Formal/Bitwise.lean` and
 `Formal/Arith.lean`, which prove each per-bit / per-word constraint pins its
 output to the intended boolean / arithmetic function over the BN254 scalar

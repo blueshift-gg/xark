@@ -11,7 +11,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# secp256r1 (NIST P-256) in-circuit point-addition soundness (Layer B)
+# secp256r1 (NIST P-256) in-circuit point-addition soundness
 
 Mirrors `Formal.Secp256k1` but for **secp256r1** (NIST P-256):
 
@@ -62,7 +62,6 @@ theorem ec_double_on_curve_with_a {F : Type*} [Field F]
 `b` (the secp256r1 curve constant). -/
 theorem gated_on_curve_secp256r1_sound {F : Type*} [Field F]
     (b x y is_inf : F)
-    (_hbool : is_inf * (is_inf - 1) = 0)
     (hgate : (1 - is_inf) * (y ^ 2 - x ^ 3 + 3 * x - b) = 0)
     (hzero : is_inf = 0) :
     y ^ 2 = x ^ 3 - 3 * x + b := by
@@ -87,7 +86,7 @@ theorem enforce_on_curve_secp256r1_sound {F : Type*} [Field F]
     · exact Or.inl h
     · exact Or.inr (by linear_combination h)
   rcases hcases with h0 | h1
-  · exact Or.inr (gated_on_curve_secp256r1_sound b x y is_inf hbool hgate h0)
+  · exact Or.inr (gated_on_curve_secp256r1_sound b x y is_inf hgate h0)
   · exact Or.inl h1
 
 /-! ## Bundled witness predicate
@@ -149,9 +148,9 @@ theorem ec_add_in_circuit_secp256r1_generic_sound {F : Type*} [Field F]
   have hy3' : y3 = lambda * (x1 - x3) - y1 := by
     rw [hy3, h.yg_def, hx3, h.xg_def]
   have hC1 : y1 ^ 2 = x1 ^ 3 - 3 * x1 + b :=
-    gated_on_curve_secp256r1_sound b x1 y1 0 h.is_inf1_bool h.on_curve1 rfl
+    gated_on_curve_secp256r1_sound b x1 y1 0 h.on_curve1 rfl
   have hC2 : y2 ^ 2 = x2 ^ 3 - 3 * x2 + b :=
-    gated_on_curve_secp256r1_sound b x2 y2 0 h.is_inf2_bool h.on_curve2 rfl
+    gated_on_curve_secp256r1_sound b x2 y2 0 h.on_curve2 rfl
   -- Cast to the `y² = x³ + a·x + b` form (a = -3).
   have hE1 : y1 ^ 2 = x1 ^ 3 + (-3 : F) * x1 + b := by linear_combination hC1
   have hE2 : y2 ^ 2 = x2 ^ 3 + (-3 : F) * x2 + b := by linear_combination hC2
@@ -268,9 +267,9 @@ theorem ec_add_in_circuit_secp256r1_sound {F : Type*} [Field F]
           obtain ⟨hx3, hy3, hi3⟩ := output_mux_inverse hmux_at
           rw [hx3, hy3, hi3]
           have hC1 : y1 ^ 2 = x1 ^ 3 - 3 * x1 + b :=
-            gated_on_curve_secp256r1_sound b x1 y1 0 h.is_inf1_bool h.on_curve1 rfl
+            gated_on_curve_secp256r1_sound b x1 y1 0 h.on_curve1 rfl
           have hC2 : y2 ^ 2 = x2 ^ 3 - 3 * x2 + b :=
-            gated_on_curve_secp256r1_sound b x2 y2 0 h.is_inf2_bool h.on_curve2 rfl
+            gated_on_curve_secp256r1_sound b x2 y2 0 h.on_curve2 rfl
           have hyy : y1 ^ 2 = y2 ^ 2 := by
             rw [hC1, hC2, hxeq]
           have hfact : (y1 - y2) * (y1 + y2) = 0 := by linear_combination hyy

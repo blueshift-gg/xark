@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "acir"
-version = "1.0.0-beta.21"
-source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.21#89a0f0faf3a5f1273c8ac4843b7877882437e277"
+version = "1.0.0-beta.22"
+source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.22#c57152f91260ecdb9faad4efc20abb14b6d2ece7"
 dependencies = [
  "acir_field",
  "base64 0.22.1",
  "brillig",
  "flate2",
- "noirc_span",
+ "msgpack_tagged",
  "num-bigint 0.4.6",
  "num-traits",
  "num_enum",
@@ -25,15 +25,17 @@ dependencies = [
 
 [[package]]
 name = "acir_field"
-version = "1.0.0-beta.21"
-source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.21#89a0f0faf3a5f1273c8ac4843b7877882437e277"
+version = "1.0.0-beta.22"
+source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.22#c57152f91260ecdb9faad4efc20abb14b6d2ece7"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
  "cfg-if",
  "hex",
+ "msgpack_tagged",
  "num-bigint 0.4.6",
  "serde",
+ "serde_bytes",
 ]
 
 [[package]]
@@ -886,11 +888,12 @@ dependencies = [
 
 [[package]]
 name = "brillig"
-version = "1.0.0-beta.21"
-source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.21#89a0f0faf3a5f1273c8ac4843b7877882437e277"
+version = "1.0.0-beta.22"
+source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.22#c57152f91260ecdb9faad4efc20abb14b6d2ece7"
 dependencies = [
  "acir_field",
  "itertools 0.14.0",
+ "msgpack_tagged",
  "serde",
 ]
 
@@ -1088,27 +1091,6 @@ name = "cmov"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
-
-[[package]]
-name = "codespan"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "583f52b0658b321b25fd6b209b6c76cf058f433071297de64e5980c3d9aad937"
-dependencies = [
- "codespan-reporting",
- "serde",
-]
-
-[[package]]
-name = "codespan-reporting"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
-dependencies = [
- "serde",
- "termcolor",
- "unicode-width",
-]
 
 [[package]]
 name = "colorchoice"
@@ -2354,12 +2336,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "noirc_span"
-version = "1.0.0-beta.21"
-source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.21#89a0f0faf3a5f1273c8ac4843b7877882437e277"
+name = "msgpack_tagged"
+version = "1.0.0-beta.20"
+source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.22#c57152f91260ecdb9faad4efc20abb14b6d2ece7"
 dependencies = [
- "codespan",
+ "msgpack_tagged_derive",
+ "rmp",
+ "rmp-serde",
  "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "msgpack_tagged_derive"
+version = "1.0.0-beta.20"
+source = "git+https://github.com/noir-lang/noir.git?tag=v1.0.0-beta.22#c57152f91260ecdb9faad4efc20abb14b6d2ece7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -4394,15 +4389,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4624,12 +4610,6 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
-
-[[package]]
-name = "unicode-width"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "unicode-xid"
@@ -5134,6 +5114,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "sha3 0.11.0",
+ "solana-nostd-alt-bn128",
  "svm-unit-test",
  "xark-acir-r1cs",
  "xark-backend",

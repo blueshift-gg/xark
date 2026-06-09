@@ -12,7 +12,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# Cross-circuit `Call` inlining (Gap 1d, extended)
+# Cross-circuit `Call` inlining
 
 `crates/acir-r1cs/src/lower.rs::lower_call_at` performs three pieces of
 work beyond the witness-index shift already covered in `Formal.AcirLowering`
@@ -33,7 +33,8 @@ work beyond the witness-index shift already covered in `Formal.AcirLowering`
    are spliced in scope so the constant-index `MemoryOp` shortcut still
    fires inside the callee.
 
-This file models items (1)–(3) on top of the existing Gap 1d primitives.
+This file models items (1)–(3) on top of the witness-shift primitives
+in `Formal.AcirLowering`.
 All theorems are `sorryAx`-free.
 -/
 
@@ -47,7 +48,7 @@ binding and predicate combination. Mirrors the relevant fields of
 
 * `inputs` / `outputs` — caller-side witness indices.
 * `inner_opcodes` — the callee body, modelled here as a list of linear
-  `AssertZero` opcodes (the case where Gap 1d composes recursively after
+  `AssertZero` opcodes (the case where the relabel composes recursively after
   BlackBox/Memory rejection under non-trivial predicates).
 * `offset` — the fresh per-call witness-index / block-id offset allocated
   by `R1csBuilder::alloc_call_offset`.
@@ -216,7 +217,7 @@ theorem gated_under_combined_predicate_sound {F : Type*} [Field F]
     combine_predicates_is_boolean p_outer p_inner h_outer_bool h_inner_bool
   -- Apply enforce_gated_sound with the combined predicate.
   have h := enforce_gated_sound a b c (combine_predicates p_outer p_inner) e h_orig h_gate hp_combined_bool
-  apply h.1
+  apply h
   unfold combine_predicates
   rw [hpo, hpi]
   ring
@@ -334,7 +335,7 @@ theorem memory_scope_splice_fresh
     apply callee_block_ids_disjoint_from_caller caller_block_count offset h_offset caller_id (callee_block_id + offset) h_caller
     exact ⟨callee_block_id, rfl⟩
 
-/-! ### Item 3(b) — Integration of `MemoryInit` pass with `allocList`
+/-! ### Integration of `MemoryInit` pass with `allocList`
 
 `memory_scope_splice_fresh` takes the `h_state_bounded` hypothesis at
 face value. In practice this hypothesis is discharged by the caller's

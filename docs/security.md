@@ -299,14 +299,14 @@ plus `blake2s_in_circuit_matches_native_on_abc`,
 
 ### 2.9 Blake3
 
-**File.** `crates/acir-r1cs/src/gadgets/blake3.rs`. Currently single-chunk
-only (`inputs.len() ≤ CHUNK_BYTES = 1024`); multi-chunk is explicitly
-rejected at lowering time.
+**File.** `crates/acir-r1cs/src/gadgets/blake3.rs`. Supports both single-chunk
+(`inputs.len() ≤ CHUNK_BYTES = 1024`) and multi-chunk inputs via the standard
+binary-tree CV combination.
 
 **Argument.** The compression function is almost identical to Blake2s with
-slightly different mixing constants. The single-chunk restriction is
-enforced in `opcodes::blackbox::lower_blake3` *before* any constraints
-are emitted.
+slightly different mixing constants. Single-chunk uses the fast path
+(`chunk_compress_in_circuit` directly); multi-chunk computes per-chunk CVs
+and combines them via a binary tree per the BLAKE3 spec.
 
 **KAT.** `gadgets::blake3::tests::blake3_native_matches_blake3_crate_on_abc`,
 `blake3_in_circuit_matches_native_on_abc`,
@@ -318,7 +318,7 @@ are emitted.
 
 **File.** `crates/acir-r1cs/src/gadgets/poseidon.rs`. Constants taken
 verbatim from `acvm-repo/bn254_blackbox_solver/src/poseidon2.rs` in Noir
-**v1.0.0-beta.21** (the version pinned in `NOIR_VERSION.md`).
+**v1.0.0-beta.22** (the version pinned in `NOIR_VERSION.md`).
 
 **Relation.** State width `T = 4`, `R_F = 8` full rounds, `R_P = 56` partial
 rounds, S-box `x^5`, external matrix `M_E` (the standard 4×4 partner of the
@@ -427,7 +427,7 @@ MSM uses double-and-add over the bit decomposition of each scalar limb pair
 ### 2.13 ACIR `AssertZero` lowering
 
 **File.** `crates/acir-r1cs/src/lower.rs`,
-function `lower_assert_zero`.
+function `lower_assert_zero_gated`.
 
 **Relation.** Each `AssertZero(Expression)` opcode asserts
 `q_c + Σ_k coef_k * w_k + Σ_i q_M_i * a_i * b_i = 0` for the witness map
@@ -472,7 +472,7 @@ in the verifier silently accepting a proof for a different statement.
 `builder.alloc_public(idx)` for each entry **before any opcode is lowered**.
 This guarantees the Arkworks R1CS sees public-input variables in the same
 order as `public_inputs.json`. The verifier in
-`xark-backend::verify::verify` consumes `&[Fr]` slices ordered the same
+`xark_backend::verify::verify` consumes `&[Fr]` slices ordered the same
 way. The `circuit_hash` (see `lower.rs:circuit_hash`) folds the public-input
 witness indices into the hash, so any reordering changes the circuit
 identity.
@@ -537,7 +537,7 @@ were derived for.
 | `xark ceremony …` | snarkjs Powers-of-Tau (phase-1) + multi-contributor phase-2 MPC | `true` | `"phase2-from-ptau+mpc[N contributors]"` |
 
 `KeyMetadata` is defined in
-`crates/xark-backend/src/keys.rs` and includes:
+`crates/backend/src/keys.rs` and includes:
 
 * `setup_mode: String` — e.g. `"insecure-dev-mode"`.
 * `production_safe: bool` — `false` for any dev-mode key.
@@ -565,7 +565,7 @@ production deployment script.
 ### Production setup
 
 Production setup requires a Powers-of-Tau transcript plus a phase-2
-contribution. Both are **implemented**: `crates/xark-backend/src/ptau.rs`
+contribution. Both are **implemented**: `crates/backend/src/ptau.rs`
 parses a snarkjs `.ptau` (with admissibility checks), `setup_phase2.rs`
 derives a phase-2 setup from it, and `ceremony.rs` drives a multi-contributor
 MPC ceremony (Schnorr PoKs + δ-consistency pairing checks), exposed as
@@ -585,7 +585,7 @@ Working list; update as work lands.
  tests rejecting forged witnesses. **No proof-assistant verification, no
  fuzzing harness.**
 
-* **Solana on-chain verifier.** `crates/xark-verifier/` is tested in Mollusk
+* **Solana on-chain verifier.** `crates/verifier/` is tested in Mollusk
  on the real `alt_bn128` syscalls (`crates/tests/tests/sbpf.rs` — positive
  across every committed circuit plus on-chain negative tests), with
  public-input binding (`crates/tests/tests/binding.rs`), adversarial fuzzing
@@ -594,7 +594,7 @@ Working list; update as work lands.
  **Never deployed to mainnet**; not externally audited.
 
 * **Poseidon2 parameters.** Inherit Noir's
- `bn254_blackbox_solver::poseidon2_constants` (v1.0.0-beta.21) verbatim.
+ `bn254_blackbox_solver::poseidon2_constants` (v1.0.0-beta.22) verbatim.
  **Not independently re-derived.** A regression in Noir's table ships here
  unchanged.
 
@@ -679,15 +679,15 @@ External auditors should focus first on:
  [§2.12](#212-grumpkin-curve-embeddedcurveadd--msm) (the selector
  polynomial), and [§2.10](#210-poseidon2-permutation) (parameter-set
  inheritance from Noir).
-2. **The serialization layer** — `crates/xark-backend/src/serialization.rs`
- and `crates/xark-backend/src/solana.rs`. Any byte-layout drift here would
+2. **The serialization layer** — `crates/backend/src/serialization.rs`
+ and `crates/backend/src/solana.rs`. Any byte-layout drift here would
  silently cause the on-chain verifier to read a different proof than the
  one the prover produced. The little-endian G2 `(c0, c1)` component order
  and the 32-byte LE limb encoding in the Solana exporter
  (`encode_g2_le` / `assemble_*_bytes_le`) are the easiest places to get
  wrong; the round-trip tests in `solana::tests` pin them.
 3. **The on-chain verifier program** —
- `crates/xark-verifier/src/verifier.rs`. The instruction-data
+ `crates/verifier/src/verifier.rs`. The instruction-data
  parser (`split_instruction_data`), the pairing input assembly, and the
  pre-negated `A` convention should all be reviewed against a concrete
  proof byte-for-byte.

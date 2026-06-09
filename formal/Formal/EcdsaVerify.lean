@@ -11,7 +11,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# ECDSA verification end-to-end soundness (Layer B wrapper)
+# ECDSA verification end-to-end soundness
 
 Top-level soundness statement for the in-circuit ECDSA verifier in
 `crates/acir-r1cs/src/gadgets/ecdsa.rs::ecdsa_verify_with_curve`, packaging the
@@ -28,12 +28,9 @@ into one theorem of the form
 ## Scope
 
 This wrapper is **parametric over the curve point group**
-`G : Type*` `[AddCommGroup G]` because secp256k1 / secp256r1 curve closure
-is not yet mechanised in `formal/` (only Grumpkin, in `Formal.Curve`). The
-wrapper is therefore the most we can say in Lean without first re-doing the
-curve-arithmetic proofs for secp256k1 / secp256r1. Specialising `G` to a
-verified secp256k1 point-group model (future work, or trusting the
-`solana_nostd_alt_bn128` reference implementation) closes the chain.
+`G : Type*` `[AddCommGroup G]`. Concrete specialisations live in
+`Formal.Secp256k1Group` and `Formal.Secp256r1Group`, which close the chain
+by providing verified `AddCommGroup` instances for the two ECDSA curves.
 
 What the wrapper *does* close, in Lean, over all assignments:
 
@@ -187,8 +184,7 @@ theorem ladder_gives_R_def {G : Type*} [AddCommGroup G]
 guarantees in the exact shape produced by the existing soundness theorems
 (`mul_mod_via_Fr_limbwise_constraints` for the two products, `ladder_correct`
 + ec_add for the point-side, the gadget's algebraic checks for the rest) and
-concludes the textbook `EcdsaVerifyRel`. This is the "one theorem" the audit
-plan asks for.
+concludes the textbook `EcdsaVerifyRel`.
 
 Hypotheses, in the order they appear in `ecdsa_verify_with_curve`:
 

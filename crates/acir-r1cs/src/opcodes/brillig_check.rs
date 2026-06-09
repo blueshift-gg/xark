@@ -1,4 +1,4 @@
-//! Brillig output-pinning coverage check (Non-FV Gap of `docs/FORMAL_VERIFICATION_PLAN.md`).
+//! Brillig output-pinning coverage check.
 //!
 //! The trust-outputs lowering strategy used by [`brillig::lower_brillig_call`]
 //! emits no R1CS constraints for the `BrilligCall` itself. Soundness rests on
@@ -60,9 +60,7 @@ impl BrilligPinningReport {
 /// * `Opcode::Call` — input witnesses are passed into a callee whose body
 ///   itself emits constraints; outputs are returned through fresh witnesses
 ///   that are themselves subject to the same `(SI)` check recursively.
-pub fn check_brillig_outputs_pinned(
-    opcodes: &[Opcode<FieldElement>],
-) -> BrilligPinningReport {
+pub fn check_brillig_outputs_pinned(opcodes: &[Opcode<FieldElement>]) -> BrilligPinningReport {
     let mut brillig_outs: BTreeSet<u32> = BTreeSet::new();
     let mut referenced: BTreeSet<u32> = BTreeSet::new();
 

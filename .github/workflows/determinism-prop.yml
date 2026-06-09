@@ -1,7 +1,5 @@
 name: Determinism (R1CS propagation analyzer)
 
-# Layer-B / track 1 of docs/FORMAL_VERIFICATION_PLAN.md.
-#
 # Runs `crates/tests/tests/determinism_propagation.rs` — a linear-only
 # propagation analyzer that pins witness wires uniquely determined by the
 # public inputs over BN254 Fr. Findings = wires not pinned by the linear

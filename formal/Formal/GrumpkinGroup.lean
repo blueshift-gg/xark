@@ -12,7 +12,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# Grumpkin point group as a concrete `AddCommGroup` (Layer B closure)
+# Grumpkin point group as a concrete `AddCommGroup`
 
 Mirrors `Formal.Secp256k1Group` for **Grumpkin** (the BN254 embedded curve
 used by Noir's circuit-level scalar mul). Closes the end-to-end chain at

@@ -1,5 +1,4 @@
-//! Bitwuzla SHA-256 bit-blasted equivalence harness — Layer B, track 2 of
-//! `docs/FORMAL_VERIFICATION_PLAN.md`.
+//! Bitwuzla SHA-256 bit-blasted equivalence harness.
 //!
 //! Generates two independent QF_BV encodings of SHA-256 compression:
 //!
@@ -148,7 +147,11 @@ fn small_sigma1(x: &str) -> String {
 /// Emit one full 64-round compression, returning the SMT-LIB body
 /// (a sequence of `define-fun` declarations) plus the names of the 8
 /// final output words.
-fn emit_compression(prefix: &str, input_names: &[String; 16], state_names: &[String; 8]) -> (String, [String; 8]) {
+fn emit_compression(
+    prefix: &str,
+    input_names: &[String; 16],
+    state_names: &[String; 8],
+) -> (String, [String; 8]) {
     let mut body = String::new();
 
     // -- Message schedule W[0..64] ----------------------------------------
@@ -308,7 +311,7 @@ fn sha256_compression_gadget_equals_fips_spec() {
         eprintln!(
             "bitwuzla: not on PATH and XARK_RUN_BITWUZLA not set — skipping.\n  \
              Install bitwuzla (https://bitwuzla.github.io/docs/install.html) to run \
-             this Layer-B equivalence proof."
+             this equivalence proof."
         );
         return;
     }

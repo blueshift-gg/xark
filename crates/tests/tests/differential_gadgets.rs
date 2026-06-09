@@ -1,4 +1,5 @@
-//! Differential gadget tests — Gap 20 of `docs/FORMAL_VERIFICATION_PLAN.md`.
+#![allow(clippy::needless_range_loop, clippy::type_complexity)]
+//! Differential gadget tests.
 //!
 //! For every committed gadget under `crates/acir-r1cs/src/gadgets/`, this file
 //! systematically:
@@ -225,11 +226,17 @@ fn bitwise_add_mod_32_matches_native_on_adversarial_inputs() {
         let (cs, map) = fresh_cs();
         let mut bld = R1csBuilder::new(cs.clone(), Some(&map));
         bld.finish_public_pass();
-        let words: Vec<Word32> = inputs.iter().map(|&v| alloc_constant_word32(&mut bld, v)).collect();
+        let words: Vec<Word32> = inputs
+            .iter()
+            .map(|&v| alloc_constant_word32(&mut bld, v))
+            .collect();
         let refs: Vec<&Word32> = words.iter().collect();
         let out = add_mod_32(&mut bld, &refs).unwrap();
         assert_eq!(out.value, Some(expected), "add_mod_32({inputs:?})");
-        assert!(cs.is_satisfied().unwrap(), "add_mod_32 CS unsatisfied: {inputs:?}");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "add_mod_32 CS unsatisfied: {inputs:?}"
+        );
     }
 }
 
@@ -243,7 +250,13 @@ fn bitwise_and_xor_n_match_native_on_max_per_width() {
         } else {
             (1u64 << num_bits) - 1
         };
-        for (a, b) in [(0u64, 0u64), (mask, 0), (0, mask), (mask, mask), (mask, mask >> 1)] {
+        for (a, b) in [
+            (0u64, 0u64),
+            (mask, 0),
+            (0, mask),
+            (mask, mask),
+            (mask, mask >> 1),
+        ] {
             let (cs, map) = fresh_cs();
             let mut bld = R1csBuilder::new(cs.clone(), Some(&map));
             bld.finish_public_pass();
@@ -251,8 +264,16 @@ fn bitwise_and_xor_n_match_native_on_max_per_width() {
             let bw = alloc_constant_word_n(&mut bld, b, num_bits);
             let and_out = and_n(&mut bld, &aw, &bw).unwrap();
             let xor_out = xor_n(&mut bld, &aw, &bw).unwrap();
-            assert_eq!(and_out.value, Some(a & b), "and_n width {num_bits} {a:#x} {b:#x}");
-            assert_eq!(xor_out.value, Some(a ^ b), "xor_n width {num_bits} {a:#x} {b:#x}");
+            assert_eq!(
+                and_out.value,
+                Some(a & b),
+                "and_n width {num_bits} {a:#x} {b:#x}"
+            );
+            assert_eq!(
+                xor_out.value,
+                Some(a ^ b),
+                "xor_n width {num_bits} {a:#x} {b:#x}"
+            );
             assert!(cs.is_satisfied().unwrap());
         }
     }
@@ -306,7 +327,13 @@ fn range_decompose_matches_native_on_adversarial_values() {
 // ===========================================================================
 
 const SHA256_IV: [u32; 8] = [
-    0x6a09_e667, 0xbb67_ae85, 0x3c6e_f372, 0xa54f_f53a, 0x510e_527f, 0x9b05_688c, 0x1f83_d9ab,
+    0x6a09_e667,
+    0xbb67_ae85,
+    0x3c6e_f372,
+    0xa54f_f53a,
+    0x510e_527f,
+    0x9b05_688c,
+    0x1f83_d9ab,
     0x5be0_cd19,
 ];
 
@@ -371,11 +398,16 @@ fn sha256_compression_matches_sha2_on_adversarial_blocks() {
         let (cs, map) = fresh_cs();
         let mut bld = R1csBuilder::new(cs.clone(), Some(&map));
         bld.finish_public_pass();
-        let input: [Word32; 16] = std::array::from_fn(|i| alloc_word32_bits(&mut bld, block_words[i]));
-        let state_in: [Word32; 8] = std::array::from_fn(|i| alloc_word32_bits(&mut bld, SHA256_IV[i]));
+        let input: [Word32; 16] =
+            std::array::from_fn(|i| alloc_word32_bits(&mut bld, block_words[i]));
+        let state_in: [Word32; 8] =
+            std::array::from_fn(|i| alloc_word32_bits(&mut bld, SHA256_IV[i]));
         let out = sha256_compression(&mut bld, &input, &state_in).unwrap();
 
-        assert!(cs.is_satisfied().unwrap(), "SHA-256 CS unsatisfied on {label}");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "SHA-256 CS unsatisfied on {label}"
+        );
         for i in 0..8 {
             assert_eq!(
                 out[i].value,
@@ -456,7 +488,8 @@ fn keccak_f1600_reference(state: &mut [u64; 25]) {
         // χ
         for y in 0..5 {
             for x in 0..5 {
-                state[x + 5 * y] = b[x + 5 * y] ^ ((!b[(x + 1) % 5 + 5 * y]) & b[(x + 2) % 5 + 5 * y]);
+                state[x + 5 * y] =
+                    b[x + 5 * y] ^ ((!b[(x + 1) % 5 + 5 * y]) & b[(x + 2) % 5 + 5 * y]);
             }
         }
         // ι
@@ -472,7 +505,11 @@ fn keccakf1600_matches_spec_reference_on_adversarial_states() {
         ("alternating_lanes", {
             let mut s = [0u64; 25];
             for (i, lane) in s.iter_mut().enumerate() {
-                *lane = if i % 2 == 0 { 0xAAAAAAAAAAAAAAAA } else { 0x5555555555555555 };
+                *lane = if i % 2 == 0 {
+                    0xAAAAAAAAAAAAAAAA
+                } else {
+                    0x5555555555555555
+                };
             }
             s
         }),
@@ -504,7 +541,10 @@ fn keccakf1600_matches_spec_reference_on_adversarial_states() {
             in_vals[i] = Some(fr);
         }
         let out_vars = keccakf1600_in_circuit(&mut bld, &in_vars, &in_vals).unwrap();
-        assert!(cs.is_satisfied().unwrap(), "keccak CS unsatisfied on {label}");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "keccak CS unsatisfied on {label}"
+        );
         for i in 0..25 {
             let got = fr_low_u64(cs.assigned_value(out_vars[i]).unwrap());
             assert_eq!(got, expected[i], "keccak lane {i} mismatch on {label}");
@@ -543,7 +583,12 @@ fn blake2s_matches_blake2_crate_on_adversarial_inputs() {
         ("single_ff_byte", vec![0xFFu8; 1]),
         ("zero_block", vec![0u8; 64]),
         ("ff_block", vec![0xFFu8; 64]),
-        ("alternating_block", (0..64).map(|i| if i % 2 == 0 { 0xAA } else { 0x55 }).collect()),
+        (
+            "alternating_block",
+            (0..64)
+                .map(|i| if i % 2 == 0 { 0xAA } else { 0x55 })
+                .collect(),
+        ),
         ("zero_block_plus_1", vec![0u8; 65]),
         ("ff_two_blocks", vec![0xFFu8; 128]),
         ("just_under_block", vec![0xCDu8; 63]),
@@ -556,7 +601,11 @@ fn blake2s_matches_blake2_crate_on_adversarial_inputs() {
         let want: [u8; 32] = hasher.finalize().into();
 
         // The gadget's own native helper is itself cross-checked.
-        assert_eq!(blake2s_native(input), want, "blake2s_native vs blake2 crate on {label}");
+        assert_eq!(
+            blake2s_native(input),
+            want,
+            "blake2s_native vs blake2 crate on {label}"
+        );
 
         let got = run_blake2s_gadget(input);
         assert_eq!(got, want, "blake2s gadget vs blake2 crate on {label}");
@@ -593,7 +642,12 @@ fn blake3_matches_blake3_crate_on_adversarial_inputs() {
         ("single_ff", vec![0xFFu8; 1]),
         ("zero_block64", vec![0u8; 64]),
         ("ff_block64", vec![0xFFu8; 64]),
-        ("alternating_64", (0..64).map(|i| if i % 2 == 0 { 0xAA } else { 0x55 }).collect()),
+        (
+            "alternating_64",
+            (0..64)
+                .map(|i| if i % 2 == 0 { 0xAA } else { 0x55 })
+                .collect(),
+        ),
         ("zero_block_plus_1", vec![0u8; 65]),
         ("ff_block_minus_1", vec![0xFFu8; 63]),
         ("zero_512", vec![0u8; 512]),
@@ -601,7 +655,11 @@ fn blake3_matches_blake3_crate_on_adversarial_inputs() {
     ];
     for (label, input) in &cases {
         let want: [u8; 32] = blake3::hash(input).into();
-        assert_eq!(blake3_native(input), want, "blake3_native vs blake3 crate on {label}");
+        assert_eq!(
+            blake3_native(input),
+            want,
+            "blake3_native vs blake3 crate on {label}"
+        );
         let got = run_blake3_gadget(input);
         assert_eq!(got, want, "blake3 gadget vs blake3 crate on {label}");
     }
@@ -617,9 +675,12 @@ fn run_aes_cbc_gadget(pt: &[u8], iv: &[u8; 16], key: &[u8; 16]) -> Vec<u8> {
     let (cs, map) = fresh_cs();
     let mut bld = R1csBuilder::new(cs.clone(), Some(&map));
     bld.finish_public_pass();
-    let pt_vars: Vec<(Variable, Option<Fr>)> = pt.iter().map(|&b| alloc_byte(&mut bld, b)).collect();
-    let iv_vars: [(Variable, Option<Fr>); 16] = std::array::from_fn(|i| alloc_byte(&mut bld, iv[i]));
-    let key_vars: [(Variable, Option<Fr>); 16] = std::array::from_fn(|i| alloc_byte(&mut bld, key[i]));
+    let pt_vars: Vec<(Variable, Option<Fr>)> =
+        pt.iter().map(|&b| alloc_byte(&mut bld, b)).collect();
+    let iv_vars: [(Variable, Option<Fr>); 16] =
+        std::array::from_fn(|i| alloc_byte(&mut bld, iv[i]));
+    let key_vars: [(Variable, Option<Fr>); 16] =
+        std::array::from_fn(|i| alloc_byte(&mut bld, key[i]));
     let out = aes128_encrypt_in_circuit(&mut bld, &pt_vars, &iv_vars, &key_vars).unwrap();
     assert!(cs.is_satisfied().unwrap(), "aes CS unsatisfied");
     out.iter().map(|v| byte_value(&cs, *v)).collect()
@@ -633,7 +694,11 @@ fn run_aes_cbc_gadget(pt: &[u8], iv: &[u8; 16], key: &[u8; 16]) -> Vec<u8> {
 fn aes_crate_cbc(pt: &[u8], iv: &[u8; 16], key: &[u8; 16]) -> Vec<u8> {
     use aes::Aes128;
     use aes::cipher::{Array, BlockCipherEncrypt, KeyInit};
-    assert_eq!(pt.len() % 16, 0, "aes_crate_cbc: input must be block-aligned");
+    assert_eq!(
+        pt.len() % 16,
+        0,
+        "aes_crate_cbc: input must be block-aligned"
+    );
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
     let mut out: Vec<u8> = Vec::with_capacity(pt.len());
@@ -658,23 +723,33 @@ fn aes128_cbc_matches_aes_crate_on_adversarial_inputs() {
         ("all_ff_pt_key_iv", [0xFF; 16], [0xFF; 16], [0xFF; 16]),
         ("ff_pt_zero_key", [0xFF; 16], [0u8; 16], [0u8; 16]),
         ("zero_pt_ff_key", [0u8; 16], [0u8; 16], [0xFF; 16]),
-        ("alternating_pt", {
-            let mut p = [0u8; 16];
-            for (i, b) in p.iter_mut().enumerate() {
-                *b = if i % 2 == 0 { 0xAA } else { 0x55 };
-            }
-            p
-        }, [0u8; 16], [0u8; 16]),
+        (
+            "alternating_pt",
+            {
+                let mut p = [0u8; 16];
+                for (i, b) in p.iter_mut().enumerate() {
+                    *b = if i % 2 == 0 { 0xAA } else { 0x55 };
+                }
+                p
+            },
+            [0u8; 16],
+            [0u8; 16],
+        ),
         // FIPS 197 §B Appendix KAT.
-        ("fips197_kat", {
-            let mut p = [0u8; 16];
-            p.copy_from_slice(&hex::decode("3243f6a8885a308d313198a2e0370734").unwrap());
-            p
-        }, [0u8; 16], {
-            let mut k = [0u8; 16];
-            k.copy_from_slice(&hex::decode("2b7e151628aed2a6abf7158809cf4f3c").unwrap());
-            k
-        }),
+        (
+            "fips197_kat",
+            {
+                let mut p = [0u8; 16];
+                p.copy_from_slice(&hex::decode("3243f6a8885a308d313198a2e0370734").unwrap());
+                p
+            },
+            [0u8; 16],
+            {
+                let mut k = [0u8; 16];
+                k.copy_from_slice(&hex::decode("2b7e151628aed2a6abf7158809cf4f3c").unwrap());
+                k
+            },
+        ),
     ];
 
     for (label, pt, iv, key) in cases {
@@ -698,7 +773,10 @@ fn aes128_cbc_matches_aes_crate_on_adversarial_inputs() {
 // curve — Grumpkin EC add adversarial cases
 // ===========================================================================
 
-fn alloc_grumpkin_point(builder: &mut R1csBuilder<'_>, p: GrumpkinAffine) -> xark_acir_r1cs::gadgets::curve::CurvePoint {
+fn alloc_grumpkin_point(
+    builder: &mut R1csBuilder<'_>,
+    p: GrumpkinAffine,
+) -> xark_acir_r1cs::gadgets::curve::CurvePoint {
     use ark_ec::AffineRepr;
     use xark_acir_r1cs::gadgets::curve::curve_point_from_vars;
     let (x, y, is_inf) = if p.is_zero() {
@@ -743,7 +821,10 @@ fn grumpkin_ec_add_matches_arkworks_on_adversarial_pairs() {
         let qv = alloc_grumpkin_point(&mut bld, *q);
         let sum = ec_add_in_circuit(&mut bld, &pv, &qv).unwrap();
         cs.finalize();
-        assert!(cs.is_satisfied().unwrap(), "curve CS unsatisfied on {label}");
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "curve CS unsatisfied on {label}"
+        );
         let cs_ref = cs.borrow().unwrap();
         let inf = cs_ref.assigned_value(sum.is_infinity).unwrap();
         if want.is_zero() {
@@ -751,8 +832,16 @@ fn grumpkin_ec_add_matches_arkworks_on_adversarial_pairs() {
         } else {
             assert_eq!(inf, Fr::zero(), "curve {label}: expected non-infinity");
             let (wx, wy) = want.xy().unwrap();
-            assert_eq!(cs_ref.assigned_value(sum.x).unwrap(), wx, "curve {label}: x");
-            assert_eq!(cs_ref.assigned_value(sum.y).unwrap(), wy, "curve {label}: y");
+            assert_eq!(
+                cs_ref.assigned_value(sum.x).unwrap(),
+                wx,
+                "curve {label}: x"
+            );
+            assert_eq!(
+                cs_ref.assigned_value(sum.y).unwrap(),
+                wy,
+                "curve {label}: y"
+            );
         }
     }
 }
@@ -844,9 +933,8 @@ fn run_poseidon_gadget(state: [Fr; POSEIDON_T]) -> [Fr; POSEIDON_T] {
     let (cs, map) = fresh_cs();
     let mut bld = R1csBuilder::new(cs.clone(), Some(&map));
     bld.finish_public_pass();
-    let in_vars: [Variable; POSEIDON_T] = std::array::from_fn(|i| {
-        bld.alloc_with_value(Some(state[i])).unwrap()
-    });
+    let in_vars: [Variable; POSEIDON_T] =
+        std::array::from_fn(|i| bld.alloc_with_value(Some(state[i])).unwrap());
     let in_vals: [Option<Fr>; POSEIDON_T] = std::array::from_fn(|i| Some(state[i]));
     let out_vars = poseidon2_permutation(&mut bld, &in_vars, &in_vals).unwrap();
     cs.finalize();
@@ -866,7 +954,10 @@ fn poseidon2_matches_native_on_adversarial_states() {
         ("all_one", [Fr::one(); POSEIDON_T]),
         ("near_modulus", [fr_max; POSEIDON_T]),
         ("counters", std::array::from_fn(|i| Fr::from(i as u64 + 1))),
-        ("alternating", std::array::from_fn(|i| if i % 2 == 0 { Fr::zero() } else { fr_max })),
+        (
+            "alternating",
+            std::array::from_fn(|i| if i % 2 == 0 { Fr::zero() } else { fr_max }),
+        ),
     ];
     for (label, state) in states {
         let got = run_poseidon_gadget(*state);
@@ -890,7 +981,7 @@ fn fr_truncation_helpers_are_consistent() {
         assert_eq!(fr_low_u32(fr), v, "fr_low_u32({v})");
     }
     // u64 round-trip up to 56 bits (above that we'd be > BN254 modulus low limbs).
-    for v in [0u64, 1, 0xCAFEBABE_DEADBEEF & u64::MAX, (1u64 << 56) - 1] {
+    for v in [0u64, 1, 0xCAFEBABE_DEADBEEF, (1u64 << 56) - 1] {
         let fr = u64_to_fr(v);
         assert_eq!(fr_low_u64(fr), v, "fr_low_u64({v})");
     }

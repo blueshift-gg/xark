@@ -10,7 +10,7 @@ import Mathlib
 set_option linter.style.header false
 
 /-!
-# xark elliptic-curve addition soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark elliptic-curve addition soundness — mechanised in Lean 4 / mathlib
 
 `crates/acir-r1cs/src/gadgets/curve.rs` adds points on the embedded short
 Weierstrass curve `y² = x³ + a·x + b` (Grumpkin, the BN254 embedded curve).
@@ -57,8 +57,8 @@ branches (lhs-at-infinity, rhs-at-infinity, inverse, generic/doubling):
   (`x3 = take_p2·x2 + take_p1·x1 + take_generic·xg`, etc.), one theorem per
   routing branch verifying that the mux outputs the intended value.
 
-Finally, the layer-B story is closed by tying these per-piece theorems into
-the end-to-end soundness story for the `ec_add_in_circuit` gadget:
+Finally, these per-piece theorems are tied into the end-to-end soundness story
+for the `ec_add_in_circuit` gadget:
 
 * `gated_on_curve_sound` / `gated_on_curve_trivial` /
   `enforce_on_curve_grumpkin_sound` — the gated curve-membership constraint
@@ -88,8 +88,7 @@ the end-to-end soundness story for the `ec_add_in_circuit` gadget:
   relation to the inputs, by case-split on `is_inf1, is_inf2, is_inverse`.
 
 Scope: the scalar-multiplication ladder in `ecdsa.rs` built on top of point
-addition is not covered here — see the Layer-B section of
-`docs/FORMAL_VERIFICATION_PLAN.md`.
+addition is not covered here.
 -/
 
 namespace Xark
@@ -159,13 +158,14 @@ theorem ec_double_on_curve {F : Type*} [Field F]
   -- cancellation is needed because the slope already pins `2·λ·y1`.
   linear_combination hE1 + (lam ^ 2 - 3 * x1) * hS
 
-/-- **Inverse-case recognition.** If `x1 = x2`, `y1 + y2 = 0`, and `y1 ≠ 0`
-(so we are *not* in the doubling sub-case `y1 = 0` that maps to itself), then
-the second input is exactly the negation of the first: `(x2, y2) = (x1, −y1)`.
+/-- **Inverse-case recognition.** If `x1 = x2` and `y1 + y2 = 0`, then the
+second input is exactly the negation of the first: `(x2, y2) = (x1, −y1)`.
 This documents the algebraic content of the gadget's `is_inverse` selector
-branch, which routes such pairs to the point at infinity. -/
+branch, which routes such pairs to the point at infinity. (Used in the
+non-degenerate sub-case `y1 ≠ 0`; the degenerate `y1 = 0` sub-case is the
+2-torsion point and maps to itself, handled by the doubling branch.) -/
 theorem ec_inverse_recognized {F : Type*} [Field F]
-    (x1 y1 x2 y2 : F) (_hy : y1 ≠ 0)
+    (x1 y1 x2 y2 : F)
     (hx : x1 = x2) (hy_sum : y1 + y2 = 0) :
     x2 = x1 ∧ y2 = -y1 := by
   refine ⟨hx.symm, ?_⟩
@@ -428,7 +428,6 @@ witness for `is_infinity` and the gated curve constraint, when
 `is_infinity = 0` we have `y² = x³ − 17`, i.e. `(x, y) ∈ Grumpkin`. -/
 theorem gated_on_curve_sound {F : Type*} [Field F]
     (x y is_inf : F)
-    (_hbool : is_inf * (is_inf - 1) = 0)
     (hgate : (1 - is_inf) * (y ^ 2 - x ^ 3 + 17) = 0)
     (hzero : is_inf = 0) :
     y ^ 2 = x ^ 3 - 17 := by
@@ -465,7 +464,7 @@ theorem enforce_on_curve_grumpkin_sound {F : Type*} [Field F]
     · exact Or.inl h
     · exact Or.inr (by linear_combination h)
   rcases hcases with h0 | h1
-  · exact Or.inr (gated_on_curve_sound x y is_inf hbool hgate h0)
+  · exact Or.inr (gated_on_curve_sound x y is_inf hgate h0)
   · exact Or.inl h1
 
 /-! ### End-to-end composition wrapper
@@ -630,9 +629,9 @@ theorem ec_add_in_circuit_generic_sound {F : Type*} [Field F]
   -- On-curve: discharge the input curve membership and feed into
   -- `ec_add_generic_on_curve` (specialized to `a = 0`, `b = −17`).
   have hC1 : y1 ^ 2 = x1 ^ 3 - 17 :=
-    gated_on_curve_sound x1 y1 0 h.is_inf1_bool h.on_curve1 rfl
+    gated_on_curve_sound x1 y1 0 h.on_curve1 rfl
   have hC2 : y2 ^ 2 = x2 ^ 3 - 17 :=
-    gated_on_curve_sound x2 y2 0 h.is_inf2_bool h.on_curve2 rfl
+    gated_on_curve_sound x2 y2 0 h.on_curve2 rfl
   -- Cast to the `y² = x³ + a·x + b` form used by `ec_add_generic_on_curve`.
   have hE1 : y1 ^ 2 = x1 ^ 3 + (0 : F) * x1 + (-17) := by linear_combination hC1
   have hE2 : y2 ^ 2 = x2 ^ 3 + (0 : F) * x2 + (-17) := by linear_combination hC2
@@ -750,9 +749,9 @@ theorem ec_add_in_circuit_sound {F : Type*} [Field F]
           -- so y1² = y2², i.e. (y1 − y2)(y1 + y2) = 0. Since y1 ≠ y2, we
           -- get y1 + y2 = 0.
           have hC1 : y1 ^ 2 = x1 ^ 3 - 17 :=
-            gated_on_curve_sound x1 y1 0 h.is_inf1_bool h.on_curve1 rfl
+            gated_on_curve_sound x1 y1 0 h.on_curve1 rfl
           have hC2 : y2 ^ 2 = x2 ^ 3 - 17 :=
-            gated_on_curve_sound x2 y2 0 h.is_inf2_bool h.on_curve2 rfl
+            gated_on_curve_sound x2 y2 0 h.on_curve2 rfl
           have hyy : y1 ^ 2 = y2 ^ 2 := by
             rw [hC1, hC2, hxeq]
           have hfact : (y1 - y2) * (y1 + y2) = 0 := by linear_combination hyy

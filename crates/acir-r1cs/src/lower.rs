@@ -91,7 +91,7 @@ impl LoweredAcirCircuit {
                         help: format!(
                             "BlackBoxFuncCall::{kind} with num_bits={n} is outside the supported \
  range [1, {WORDN_MAX_BITS}].\n\n\
- Noir 1.0.0-beta.21 emits AND/XOR only for u8/u16/u32/u64 operands; \
+ Noir 1.0.0-beta.22 emits AND/XOR only for u8/u16/u32/u64 operands; \
  wider integer types are decomposed at the source level before \
  reaching ACIR. If you have produced an artifact that violates this, \
  you are probably on a newer Noir version — file an issue with the \
@@ -834,7 +834,7 @@ mod tests {
             public_inputs,
             witness_count,
             metadata: ArtifactMetadata {
-                noir_version: "1.0.0-beta.21+test".into(),
+                noir_version: "1.0.0-beta.22+test".into(),
                 program_hash: "0".into(),
             },
         }
@@ -1014,8 +1014,11 @@ mod tests {
         let h2 = lowered.circuit_hash();
         assert_eq!(h1, h2, "circuit_hash must be deterministic");
         // Pinned from the first run on a clean checkout; bump only when the
-        // underlying ACIR serialization format intentionally changes.
-        const EXPECTED: &str = "7c9ba8846aa6fe8db3108c1ac9ecbe77930281e09f66b6c97f486d30b0f7ed20";
+        // underlying ACIR serialization format intentionally changes
+        // (e.g. on a Noir version bump that touches Program::serialize_program).
+        // Last bumped: Noir v1.0.0-beta.21 → v1.0.0-beta.22 (acir crate
+        // changes to `MemOp`, `EmbeddedCurveAdd`, `MultiScalarMul`).
+        const EXPECTED: &str = "d8923fd0e29aff79f9b7769b242524efb38f1228d32eb58494907cf7329538a8";
         assert_eq!(h1, EXPECTED, "circuit_hash drifted from pinned value");
     }
 
@@ -1144,7 +1147,7 @@ mod tests {
             public_inputs: vec![WitnessIndex(out_w)],
             witness_count: [a_w, b_w, out_w, pred_w].iter().max().copied().unwrap() as usize + 1,
             metadata: ArtifactMetadata {
-                noir_version: "1.0.0-beta.21+test".into(),
+                noir_version: "1.0.0-beta.22+test".into(),
                 program_hash: "0".into(),
             },
         }
@@ -1298,7 +1301,7 @@ mod tests {
             public_inputs: vec![],
             witness_count: input_w.max(pred_w) as usize + 1,
             metadata: ArtifactMetadata {
-                noir_version: "1.0.0-beta.21+test".into(),
+                noir_version: "1.0.0-beta.22+test".into(),
                 program_hash: "0".into(),
             },
         }
@@ -1369,10 +1372,7 @@ mod tests {
             // Read at index Witness(3) (= constant 0) into Witness(4).
             Opcode::MemoryOp {
                 block_id: acir::circuit::opcodes::BlockId(0),
-                op: acir::circuit::opcodes::MemOp::<FieldElement>::read_at_mem_index(
-                    Witness(3),
-                    Witness(4),
-                ),
+                op: acir::circuit::opcodes::MemOp::read_at_mem_index(Witness(3), Witness(4)),
             },
             // Assert Witness(4) == Witness(1) (i.e. read returned slot 0's value).
             Opcode::AssertZero(Expression {
@@ -1412,10 +1412,7 @@ mod tests {
             }),
             Opcode::MemoryOp {
                 block_id: acir::circuit::opcodes::BlockId(0),
-                op: acir::circuit::opcodes::MemOp::<FieldElement>::read_at_mem_index(
-                    Witness(3),
-                    Witness(4),
-                ),
+                op: acir::circuit::opcodes::MemOp::read_at_mem_index(Witness(3), Witness(4)),
             },
             Opcode::AssertZero(Expression {
                 mul_terms: vec![],

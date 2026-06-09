@@ -83,7 +83,7 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     let num_witness = cs.num_witness_variables();
     let qap_num_variables = (num_instance - 1) + num_witness;
 
-    let _ = check_ptau_covers_circuit(ptau, num_constraints, num_instance)?;
+    check_ptau_covers_circuit(ptau, num_constraints, num_instance)?;
 
     // arkworks 0.6: `to_matrices` returns a map keyed by predicate label; the
     // plain R1CS predicate's entry is `[A, B, C]`.

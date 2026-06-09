@@ -9,7 +9,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# `BrilligCall` trust-outputs lowering soundness (Layer B)
+# `BrilligCall` trust-outputs lowering soundness
 
 Mirrors `crates/acir-r1cs/src/opcodes/brillig.rs` (and the design note
 `docs/brillig.md`). The `BrilligCall` opcode is Noir's hint mechanism: an

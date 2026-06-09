@@ -33,5 +33,5 @@ the parsed ACIR + witness and returns a constraint system ready for
 ## Scope
 
 Supports the opcode and black-box-function subset exercised by the circuits in
-`crates/tests/circuits/` (pinned to `nargo 1.0.0-beta.21`). Unsupported opcodes fail loudly
+`crates/tests/circuits/` (pinned to `nargo 1.0.0-beta.22`). Unsupported opcodes fail loudly
 (`src/opcodes/unsupported.rs`) rather than silently producing a wrong circuit.

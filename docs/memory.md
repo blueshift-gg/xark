@@ -19,8 +19,8 @@ below. For the variable-index part, follow the "Variable-index plan" section.
 ## What Noir emits
 
 Noir lowers Rust-like array access into **two opcodes** (see
-`/tmp/noir-probe/acvm-repo/acir/src/circuit/opcodes.rs` and
-`/tmp/noir-probe/acvm-repo/acir/src/circuit/opcodes/memory_operation.rs`):
+`acvm-repo/acir/src/circuit/opcodes.rs` and
+`acvm-repo/acir/src/circuit/opcodes/memory_operation.rs` in `noir-lang/noir`):
 
 ```rust
 Opcode::MemoryInit {
@@ -321,5 +321,5 @@ time indices are dramatically cheaper.
 
 * Related lowering doc: `docs/architecture.md`.
 * Related ACIR types:
- `/tmp/noir-probe/acvm-repo/acir/src/circuit/opcodes.rs`,
- `/tmp/noir-probe/acvm-repo/acir/src/circuit/opcodes/memory_operation.rs`.
+ `acvm-repo/acir/src/circuit/opcodes.rs`,
+ `acvm-repo/acir/src/circuit/opcodes/memory_operation.rs` (both in `noir-lang/noir`).

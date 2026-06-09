@@ -1,5 +1,4 @@
-//! NIST / RFC official test-vector coverage for xark's hash + cipher gadgets
-//! (Gap 21 of `docs/FORMAL_VERIFICATION_PLAN.md`).
+//! NIST / RFC official test-vector coverage for xark's hash + cipher gadgets.
 //!
 //! For each of the five committed primitives — SHA-256 (FIPS 180-4),
 //! Keccak / SHA-3 (FIPS 202), BLAKE2s (RFC 7693), BLAKE3 (official spec) and
@@ -312,7 +311,8 @@ fn aes128_cbc_in_circuit(
         .map(|&byte| alloc_byte(&mut b, byte))
         .collect();
     let iv_vars: [(Variable, Option<Fr>); 16] = std::array::from_fn(|i| alloc_byte(&mut b, iv[i]));
-    let key_vars: [(Variable, Option<Fr>); 16] = std::array::from_fn(|i| alloc_byte(&mut b, key[i]));
+    let key_vars: [(Variable, Option<Fr>); 16] =
+        std::array::from_fn(|i| alloc_byte(&mut b, key[i]));
 
     let out = aes128_encrypt_in_circuit(&mut b, &pt_vars, &iv_vars, &key_vars)?;
     assert!(cs.is_satisfied().unwrap(), "AES-128 CS unsat");
@@ -350,7 +350,8 @@ mod sha256_vectors {
         let got = sha256_in_circuit(input);
         let want = ref_digest(input);
         assert_eq!(
-            got, want,
+            got,
+            want,
             "SHA-256 gadget mismatch on {label}: got {} want {}",
             hex::encode(got),
             hex::encode(want)
@@ -437,7 +438,8 @@ mod keccak_vectors {
         let got = sha3_256_in_circuit(input);
         let want = ref_digest(input);
         assert_eq!(
-            got, want,
+            got,
+            want,
             "SHA3-256 gadget mismatch on {label}: got {} want {}",
             hex::encode(got),
             hex::encode(want)
@@ -534,7 +536,8 @@ mod blake2s_vectors {
         let got = blake2s_in_circuit_bytes(input);
         let want = ref_digest(input);
         assert_eq!(
-            got, want,
+            got,
+            want,
             "BLAKE2s gadget mismatch on {label}: got {} want {}",
             hex::encode(got),
             hex::encode(want)
@@ -627,7 +630,8 @@ mod blake3_vectors {
         let got = blake3_in_circuit_bytes(&input);
         let want = ref_digest(&input);
         assert_eq!(
-            got, want,
+            got,
+            want,
             "BLAKE3 gadget mismatch on official vector len={len}: \
              got {} want {}",
             hex::encode(got),
@@ -748,7 +752,8 @@ mod aes128_vectors {
         key16.copy_from_slice(&key);
         let got = aes128_cbc_in_circuit(&pt16, &[0u8; 16], &key16).unwrap();
         assert_eq!(
-            got, ct,
+            got,
+            ct,
             "FIPS 197 §B KAT: got {} want {}",
             hex::encode(&got),
             hex::encode(&ct)
@@ -767,7 +772,8 @@ mod aes128_vectors {
         key16.copy_from_slice(&key);
         let got = aes128_cbc_in_circuit(&pt16, &[0u8; 16], &key16).unwrap();
         assert_eq!(
-            got, ct,
+            got,
+            ct,
             "FIPS 197 §C.1 KAT: got {} want {}",
             hex::encode(&got),
             hex::encode(&ct)
@@ -807,10 +813,7 @@ mod aes128_vectors {
         for &(label, key_hex) in &[
             ("VarKey COUNT=0", "80000000000000000000000000000000"),
             ("VarKey COUNT=7", "ff000000000000000000000000000000"),
-            (
-                "VarKey COUNT=127",
-                "ffffffffffffffffffffffffffffff80",
-            ),
+            ("VarKey COUNT=127", "ffffffffffffffffffffffffffffff80"),
         ] {
             let key_bytes = hex::decode(key_hex).unwrap();
             let mut key = [0u8; 16];
@@ -828,10 +831,7 @@ mod aes128_vectors {
         for &(label, pt_hex) in &[
             ("VarTxt COUNT=0", "80000000000000000000000000000000"),
             ("VarTxt COUNT=7", "ff000000000000000000000000000000"),
-            (
-                "VarTxt COUNT=127",
-                "ffffffffffffffffffffffffffffff80",
-            ),
+            ("VarTxt COUNT=127", "ffffffffffffffffffffffffffffff80"),
         ] {
             let pt_bytes = hex::decode(pt_hex).unwrap();
             let mut pt = [0u8; 16];

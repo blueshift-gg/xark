@@ -1,5 +1,4 @@
-//! Bitwuzla AES-128 bit-blasted equivalence harness — Layer B, track 2 of
-//! `docs/FORMAL_VERIFICATION_PLAN.md`.
+//! Bitwuzla AES-128 bit-blasted equivalence harness.
 //!
 //! Two QF_BV encodings of AES-128 single-block encrypt (FIPS 197). Both
 //! encodings share a single S-box and `xtime` `define-fun`; they differ
@@ -116,11 +115,7 @@ fn mix_columns_native(state: &mut [u8; 16]) {
 fn xtime_native(b: u8) -> u8 {
     let hi = b >> 7;
     let shifted = b << 1;
-    if hi == 1 {
-        shifted ^ 0x1b
-    } else {
-        shifted
-    }
+    if hi == 1 { shifted ^ 0x1b } else { shifted }
 }
 
 fn bv8_const(v: u8) -> String {
@@ -430,7 +425,7 @@ fn aes128_encrypt_gadget_equals_fips197_spec() {
     if !bitwuzla_available() && std::env::var_os("XARK_RUN_BITWUZLA").is_none() {
         eprintln!(
             "bitwuzla: not on PATH and XARK_RUN_BITWUZLA not set — skipping.\n  \
-             Install bitwuzla to run this Layer-B equivalence proof."
+             Install bitwuzla to run this equivalence proof."
         );
         return;
     }

@@ -1,45 +1,47 @@
-//! Submit an xark-exported Groth16 proof to the on-chain verifier program.
+//! Submit an xark-exported Groth16 proof to your on-chain verifier program.
 //!
-//! Workflow:
+//! Your program embeds the verifying key via the generated verifier crate
+//! (`<crate>::verify_instruction_data(...)`); the client just submits
+//! `instruction_data.bin` (= `proof_bytes || public_inputs`, no VK).
 //!
-//! 1. Embed `verifying_key.solana.bin` in your on-chain program crate
-//! via `xark_solana_verifier::xark_groth16_program! { vk: include_bytes!("vk.bin"), }`.
-//! 2. Deploy the program (one program ID per VK).
-//! 3. From the client, submit `instruction_data.bin` as the instruction
-//! data — just `proof_bytes || public_inputs`, no VK.
-//!
-//! Copy this file into a fresh Cargo project with:
+//! Uses Anza's broken-out client crates rather than the monolithic
+//! `solana-sdk`. Copy this file into a fresh Cargo project with:
 //!
 //! ```toml
 //! [dependencies]
-//! solana-client = "2"
-//! solana-sdk = "2"
 //! anyhow = "1"
+//! solana-address = "2"
+//! solana-client = "2"
+//! solana-commitment-config = "3"
+//! solana-instruction = "3"
+//! solana-keypair = "3"
+//! solana-message = "3"
+//! solana-signer = "3"
+//! solana-transaction = "3"
 //! ```
 
 use std::str::FromStr;
 
 use anyhow::Result;
+use solana_address::Address;
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
- commitment_config::CommitmentConfig,
- instruction::Instruction,
- pubkey::Pubkey,
- signature::{read_keypair_file, Signer},
- transaction::Transaction,
-};
+use solana_commitment_config::CommitmentConfig;
+use solana_instruction::Instruction;
+use solana_keypair::read_keypair_file;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 
 // ---- Fill these in ---------------------------------------------------------
 const PROGRAM_ID: &str = "REPLACE_WITH_DEPLOYED_PROGRAM_ID";
 const RPC_URL: &str = "https://api.devnet.solana.com";
-/// Absolute path to the `instruction_data.bin` produced by `xark export solana`.
+/// Absolute path to the `instruction_data.bin` produced by `xark export`.
 /// Contents: `proof_bytes (256 B) || public_inputs (N * 32 B)`.
 const INSTRUCTION_DATA_PATH: &str = "/absolute/path/to/instruction_data.bin";
 const PAYER_KEYPAIR_PATH: &str = "/absolute/path/to/payer.json";
 
 fn main() -> Result<()> {
  let instruction_data = std::fs::read(INSTRUCTION_DATA_PATH)?;
- let program_id = Pubkey::from_str(PROGRAM_ID)?;
+ let program_id = Address::from_str(PROGRAM_ID)?;
  let ix = Instruction {
  program_id,
  accounts: vec![],

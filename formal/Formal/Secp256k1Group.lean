@@ -12,7 +12,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# secp256k1 point group as a concrete `AddCommGroup` (Layer B closure)
+# secp256k1 point group as a concrete `AddCommGroup`
 
 `Formal.Secp256k1` proves the in-circuit ECDSA `ec_add` gadget faithfully
 implements the secp256k1 group law *at the algebraic level* — every gadget
@@ -55,10 +55,12 @@ allocations for naive `decide`). We therefore declare
 
 as a **trusted base addition**. This is a single, audit-checkable
 mathematical fact (verifiable in seconds outside Lean using any standard
-primality test, e.g. Miller–Rabin via `openssl prime` or sage), and is the
-only `axiom` in the Lean development. It supplies the `Fact p.Prime` needed
-to derive `Field (ZMod secp256k1_p)`, which in turn enables mathlib's
-`AddCommGroup` instance on the affine-point type.
+primality test, e.g. Miller–Rabin via `openssl prime` or sage). It and
+the matching primality axioms for `secp256r1_p` (`Formal.Secp256r1Group`)
+and BN254's `r` (`Formal.GrumpkinGroup`) are the only `axiom` declarations
+in the Lean development. It supplies the `Fact p.Prime` needed to derive
+`Field (ZMod secp256k1_p)`, which in turn enables mathlib's `AddCommGroup`
+instance on the affine-point type.
 
 ## Theorem / instance index
 
@@ -176,7 +178,7 @@ theorem ecdsa_verify_compose_secp256k1
     EcdsaVerifyRel n g Q xProj e r s :=
   ecdsa_verify_compose h_r_ne h_s_ne h_w h_u1_nat h_u2_nat h_acc1 h_acc2 h_R h_r_eq
 
-/-! ## Item 2b — Concrete secp256k1 endomorphism instantiation
+/-! ## Concrete secp256k1 endomorphism instantiation
 
 The secp256k1 endomorphism is `φ(x, y) = (β · x, y)` where `β` is a
 specific cube root of unity in `ZMod secp256k1_p`. We define `secp256k1_beta`
@@ -309,7 +311,7 @@ def secp256k1_phi : Secp256k1Point → Secp256k1Point := fun P =>
     WeierstrassCurve.Affine.Point.some (secp256k1_beta * x) y
       (secp256k1_phi_preserves_nonsingular x y h)
 
-/-- **Item 2b — End-to-end algebraic specialisation.** Direct
+/-- **End-to-end algebraic specialisation.** Direct
 specialisation of `glv_endomorphism_correct` from `Formal.Glv` at
 `G = Secp256k1Point`, `φ = secp256k1_phi`, `λ = secp256k1_lambda`.
 Reduces to: given `φ` is a group homomorphism (`h_hom`), preserves zero
@@ -337,7 +339,7 @@ theorem glv_endomorphism_correct_secp256k1
     ∀ k : ℕ, secp256k1_phi (k • G) = secp256k1_lambda • (k • G) :=
   glv_endomorphism_correct secp256k1_phi h_hom h_zero G secp256k1_lambda h_eig
 
-/-! ## Item 2b' — Discharging `h_hom`, `h_zero`, and `h_eig` for the
+/-! ## Discharging `h_hom`, `h_zero`, and `h_eig` for the
 concrete `secp256k1_phi`
 
 We now close out the three hypotheses required by

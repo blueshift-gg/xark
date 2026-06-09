@@ -15,11 +15,16 @@ use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
 use xark_backend::solana::{encode_g1, encode_g2, negate_g1};
 
-const VK_SOLANA_SHA256: &str = "099bb4408828730ff40a51738ff002b18366f2fa5f88c29352b6d54437aee9f1";
+// Last bumped: Noir v1.0.0-beta.21 → v1.0.0-beta.22 (regenerated
+// Groth16 fixtures). The pinned values are the test-computed sha256
+// over `encode_vk_solana(vk)` / `encode_proof_solana(proof)` — these
+// re-encode from the Arkworks verifying_key.bin / proof.bin files via
+// the test's helpers, not over the `.solana.bin` files directly.
+const VK_SOLANA_SHA256: &str = "822b76b129e52e2fbca61562e39260b7988474af66962a4a9ff6098c747e3963";
 const PROOF_SOLANA_SHA256: &str =
-    "f083fb2047ff5a8f354668a2bafe09abd75c839f5998c45a965c9d93461fcb71";
+    "246e7dd59354da00c0e7f50f9ea2c37befbe983700a5743ecafbbbd4e9463205";
 const PROOF_NEG_A_SOLANA_SHA256: &str =
-    "8617e4a7e90dabab4c315b2522f1094fc7d6c0267e58e28ebec546fca68f4336";
+    "ca676ad7c3194c393348b8ac16c56a841e6b20191f7cbb452be1f4c829ef9c68";
 
 fn fixture_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/tests; fixtures live alongside the crate at

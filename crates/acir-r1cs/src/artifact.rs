@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BackendError;
 
-/// Noir 1.0.0-beta.21 — the only supported Noir release for now.
-pub const SUPPORTED_NOIR_VERSION_PREFIX: &str = "1.0.0-beta.21";
+/// Noir 1.0.0-beta.22 — the only supported Noir release for now.
+pub const SUPPORTED_NOIR_VERSION_PREFIX: &str = "1.0.0-beta.22";
 
 /// Newtype around `u32` to keep ACIR witness indices distinct from R1CS
 /// variable indices throughout the lowering layer.

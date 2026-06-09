@@ -12,10 +12,10 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# ACIR → R1CS lowering soundness (Layer B′ meta-theorem)
+# ACIR → R1CS lowering soundness (meta-theorem)
 
 `crates/acir-r1cs/src/lower.rs` translates ACIR opcodes into R1CS rows.
-The headline meta-theorem (per `docs/FORMAL_VERIFICATION_PLAN.md` track 3):
+The headline meta-theorem:
 
 > For every ACIR opcode `op` and every public-input assignment, the R1CS
 > emitted by `lower(op)` is satisfiable by some witness `w` iff `op` is
@@ -31,42 +31,21 @@ hand-proven.
 
 ## What this file establishes
 
-* **A real Lean model** of ACIR's `AssertZero` opcode (linear shape) +
-  R1CS rows + lowering + satisfaction.
+* **A real Lean model** of ACIR's `AssertZero` opcode (linear and full
+  shapes) + R1CS rows + lowering + satisfaction.
 * **End-to-end soundness for `AssertZero` (linear)** — `lowerAssertZeroLinear_sound`
   proves the lowering is satisfaction-preserving in both directions
   (no over-constraint, no under-constraint) over *all* witness maps.
-* **Precisely-stated composition theorem** — `lower_circuit_sound_stub`
-  documents the meta-theorem for a sequence of opcodes. The composition
-  proof reduces to per-opcode soundness applied row-by-row + a list-fold
-  invariant.
+* **`AssertZero` with mul terms** — `lowerAcirOpcode_full_sound`, via
+  `full_satisfied_via_list_aux` + `full_satisfied_from_per_mul_rows`.
+* **Heterogeneous opcode dispatch** — the `AcirOpcode` inductive covers
+  every ACIR arm (`linear`, `full`, `linearShifted`, `brillig`,
+  `blackBox`, `memoryInit`, `memoryOpRead`, `memoryOpWrite`, `call`);
+  `lowerAcirOpcode_sound` is the total per-opcode theorem.
+* **List-fold composition** — `AcirCircuit.cons_satisfied_iff` reduces
+  whole-circuit satisfaction to per-opcode satisfaction over the
+  heterogeneous list.
 
-## What remains for the full meta-theorem
-
-The same shape of proof extends to:
-
-* **`AssertZero` with mul terms** — `c + Σᵢ cᵢ·wᵢ + Σⱼ cⱼ·wₐ·w_b = 0`.
-  Lowered by emitting a fresh aux `tⱼ = cⱼ·wₐ·w_b` per mul term (one R1CS
-  row each), then a single linear `AssertZero` over the linear shell.
-  Soundness composes from the linear case + a per-mul auxiliary lemma.
-* **`MemoryInit` / `MemoryOp` constant-index** — slot allocation +
-  read-as-copy / write-as-alias-update. Per-gadget proof already in
-  `Formal.MemoryVarIndex`; this layer just composes the constant-index
-  shortcut.
-* **`MemoryOp` variable-index** — done in `Formal.MemoryVarIndex`.
-* **`BlackBoxFuncCall`** — dispatches by opcode tag to the appropriate
-  gadget (sha256, keccak, blake, aes, poseidon2, ecdsa, embedded curve
-  add, MSM). Per-gadget soundness already proven in the per-gadget files;
-  this layer composes them via a single `match`-style theorem.
-* **`BrilligCall`** — done in `Formal.Brillig` (vacuous; surrounding
-  `AssertZero`s pin the outputs per the documented compiler invariant
-  `(SI)`).
-* **`Call`** (cross-circuit) — done in `Formal.Predication` (the e-aux
-  gating); the surrounding inliner's witness-index shift is mechanical.
-
-The per-opcode pieces are all in place; what remains is the **list-fold
-composition theorem** plus the `mul`-term handling. These are mechanical
-extensions of `lowerAssertZeroLinear_sound` below.
 -/
 
 namespace Xark
@@ -84,11 +63,11 @@ def AcirWitnessMap (F : Type*) : Type _ := ℕ → F
 combination `Σᵢ cᵢ · w iᵢ`. The opcode asserts `c + Σ cᵢ · w iᵢ = 0`.
 
 The full ACIR `AssertZero` also supports **mul terms**
-(`Σⱼ cⱼ · w aⱼ · w bⱼ`); we model the linear shape here as the headline
-end-to-end soundness instance. Mul terms compose via per-term auxiliary
-allocation (one R1CS row per mul term, then a single linear `AssertZero`
-over the aux + linear shell) — same shape of proof, mechanical
-extension. -/
+(`Σⱼ cⱼ · w aⱼ · w bⱼ`); this structure models the linear shape, and
+`AssertZeroFull` (below) models the full shape. Mul-term soundness
+composes the linear case with per-term auxiliary allocation (one R1CS
+row per mul term, then a single linear `AssertZero` over the aux +
+linear shell) via `lowerAcirOpcode_full_sound`. -/
 structure AssertZeroLinear (F : Type*) where
   constant : F
   terms : List (F × ℕ)
@@ -211,7 +190,7 @@ theorem lowerAssertZeroCircuit_sound {F : Type*} [Field F]
     rw [← heq]
     exact (lowerAssertZeroLinear_sound op w h_const).mpr (h op hop)
 
-/-! ## `AssertZero` with mul terms (Gap 1a)
+/-! ## `AssertZero` with mul terms
 
 ACIR's full `AssertZero` opcode is
 
@@ -255,7 +234,7 @@ theorem mul_row_iff_aux_consistent {F : Type*} [Field F]
   unfold R1csRow.Satisfied LinearComb.eval
   simp [eq_comm]
 
-/-- **Full-opcode soundness — composition skeleton.** Given the per-mul
+/-- **Full-opcode soundness — substitution lemma.** Given the per-mul
 rows are all satisfied (pinning each aux `w (aux_start + j) = dⱼ · w aⱼ ·
 w bⱼ` by `mul_row_iff_aux_consistent` applied per term) and the linear
 shell row is satisfied (`c + Σᵢ cᵢ·w iᵢ + Σⱼ w (aux_start + j) = 0` by
@@ -280,7 +259,7 @@ theorem full_satisfied_via_fin_aux {F : Type*} [Field F]
   rw [hrew] at h_shell
   exact h_shell
 
-/-- **Item 6 — `List`-indexed mirror of `full_satisfied_via_fin_aux`.**
+/-- **`List`-indexed mirror of `full_satisfied_via_fin_aux`.**
 The Rust lowering in `crates/acir-r1cs/src/lower.rs` carries mul terms as
 a `Vec` (which Lean models as `List`), and per-mul auxiliaries are
 allocated by walking the list in order. This theorem mirrors the
@@ -310,7 +289,7 @@ theorem full_satisfied_via_list_aux {F : Type*} [Field F]
   rw [← h_aux]
   exact h_shell
 
-/-- **Item 6b — `h_aux` discharged from per-mul row satisfaction.** Given
+/-- **`h_aux` discharged from per-mul row satisfaction.** Given
 the per-mul R1CS rows are all satisfied (pinning each aux
 `w (aux_start + j) = (op.muls.get ⟨j, ?⟩).1 * w (op.muls.get ⟨j, ?⟩).2.1
 * w (op.muls.get ⟨j, ?⟩).2.2` by `mul_row_iff_aux_consistent` applied
@@ -335,7 +314,7 @@ theorem list_aux_eq_of_per_mul_rows_sat {F : Type*} [Field F]
     simp only [List.getElem_map, List.getElem_finRange]
     exact h_per_mul ⟨j, hjlen⟩
 
-/-- **Item 6b — End-to-end closure.** Given per-mul rows are satisfied
+/-- **End-to-end closure for full `AssertZero`.** Given per-mul rows are satisfied
 *and* the linear shell is satisfied (under `buildInstance`-style aux
 selection from `w`), the full ACIR `AssertZero` opcode is satisfied.
 Composes `list_aux_eq_of_per_mul_rows_sat` with
@@ -375,7 +354,7 @@ shape as `lowerAssertZeroCircuit_sound` above: per-opcode lifts compose
 row-by-row, and the composite R1CS is satisfied iff every ACIR opcode is.
 -/
 
-/-! ## Gap 1b — `BlackBoxFuncCall` dispatch case-split
+/-! ## `BlackBoxFuncCall` dispatch case-split
 
 The xark `lower_opcode` matches on the `BlackBoxFuncCall` opcode tag and
 delegates to a per-gadget lowering. Each per-gadget lowering is already
@@ -510,7 +489,7 @@ def IsValidBlackBoxWitness {F : Type*} [Field F]
   | .EcdsaSecp256k1 .. => True
   | .EcdsaSecp256r1 .. => True
 
-/-- **Gap 1b — `BlackBoxFuncCall` dispatch soundness.** For every
+/-- **`BlackBoxFuncCall` dispatch soundness.** For every
 supported opcode tag, the gadget intermediate-state witness predicate
 together with the structural ECDSA hypotheses (carried by the opcode
 constructor) implies the spec relation. The proof case-splits on the tag
@@ -552,7 +531,7 @@ theorem lowerBlackBox_sound {F : Type*} [Field F]
       simp only [lowerBlackBox, IsValidBlackBoxWitness] at *
       exact lowerEcdsaSecp256r1_sound h_r_ne h_s_ne h_w h_u1 h_u2 h_a1 h_a2 h_R h_r
 
-/-! ## Gap 1d — Cross-circuit `Call` witness-index shift
+/-! ## Cross-circuit `Call` witness-index shift
 
 `crates/acir-r1cs/src/lower.rs::lower_call_at` inlines a callee circuit
 into the caller by allocating a fresh per-call witness-index `offset`
@@ -581,7 +560,7 @@ def AcirWitnessMap.shift {F : Type*} (w : AcirWitnessMap F) (offset : ℕ) :
     AcirWitnessMap F :=
   fun i => w (i + offset)
 
-/-- **Gap 1d — Witness-index shift commutes with `AssertZero`
+/-- **Witness-index shift commutes with `AssertZero`
 satisfaction.** The shifted opcode under `w` and the original opcode
 under the shifted witness map agree, term-by-term. -/
 theorem assertZeroLinear_shift_satisfied {F : Type*} [Field F]
@@ -591,7 +570,7 @@ theorem assertZeroLinear_shift_satisfied {F : Type*} [Field F]
   simp only [List.map_map]
   rfl
 
-/-- **Gap 1d (corollary) — Lowered shifted opcode is satisfied iff the
+/-- **Corollary: lowered shifted opcode is satisfied iff the
 unshifted opcode is satisfied under the relabelled witness map.**
 Composes `lowerAssertZeroLinear_sound` with
 `assertZeroLinear_shift_satisfied`. The caller (inliner) wires this with
@@ -605,7 +584,7 @@ theorem lowerAssertZeroLinear_shift_sound {F : Type*} [Field F]
   rw [lowerAssertZeroLinear_sound (op.shift offset) w h_const,
       assertZeroLinear_shift_satisfied]
 
-/-- **Gap 1d — Predicated cross-circuit `Call` soundness skeleton.**
+/-- **Predicated cross-circuit `Call` soundness — structural composition.**
 The inliner emits each relabelled callee linear `AssertZero` as a *gated*
 two-row e-aux constraint (per `Formal.Predication`). Combining
 `lowerAssertZeroLinear_shift_sound` with `enforce_gated_sound`:
@@ -625,35 +604,30 @@ theorem call_relabel_gated_sound {F : Type*} [Field F]
     (h_orig : a * b = c + e)
     (h_gate : p * e = 0)
     (h_pbool : p * (p - 1) = 0) :
-    (p = 1 → op.Satisfied (w.shift offset) ∧ a * b = c) ∧ (p = 0 → True) := by
+    p = 1 → op.Satisfied (w.shift offset) ∧ a * b = c := by
+  intro hp
   refine ⟨?_, ?_⟩
-  · intro hp
-    refine ⟨?_, ?_⟩
-    · exact (lowerAssertZeroLinear_shift_sound op w offset h_const).mp h_row
-    · exact ((enforce_gated_sound a b c p e h_orig h_gate h_pbool).1) hp
-  · intro _; trivial
+  · exact (lowerAssertZeroLinear_shift_sound op w offset h_const).mp h_row
+  · exact enforce_gated_sound a b c p e h_orig h_gate h_pbool hp
 
-/-! ## Item 9 — Heterogeneous opcode list-fold composition
+/-! ## Heterogeneous opcode list-fold composition
 
-The per-opcode soundness theorems are now all in place
+The per-opcode soundness theorems are all in place
 (`lowerAssertZeroLinear_sound`, `mul_row_iff_aux_consistent` +
 `full_satisfied_via_list_aux`, `lowerBlackBox_sound`,
 `Formal.MemoryVarIndex.read_value_correct` /
 `Formal.Bookkeeping.read/write_const_index_correct`,
 `Formal.CallInlining.lowerCall_inner_sound`,
-`Formal.Brillig.brillig_lowering_vacuous_sound`). What remains is the
-*composition* over a heterogeneous opcode list: given a `List Opcode`
-and the lowering applied opcode-by-opcode, the whole-circuit R1CS is
-satisfied iff every opcode is satisfied.
+`Formal.Brillig.brillig_lowering_vacuous_sound`). This section composes
+them over a heterogeneous opcode list: given a `List Opcode` and the
+lowering applied opcode-by-opcode, the whole-circuit R1CS is satisfied
+iff every opcode is satisfied.
 
 We model the heterogeneous list with a Lean inductive `AcirOpcode F`
-that pools the linear / full / blackBox / call / brillig cases (memory
-is covered by `Formal.MemoryVarIndex` / `Formal.Bookkeeping` and
-factors out of the row-level composition since memory rows are
-produced by the memory gadget, which itself reduces to linear /
-mul rows by `Formal.MemoryVarIndex`). The composition theorem is
-`lowerAcirCircuit_sound`: a `List.foldl`-style assembly of per-opcode
-satisfaction.
+that pools every ACIR arm (linear / full / linearShifted / brillig /
+blackBox / memoryInit / memoryOpRead / memoryOpWrite / call). The
+total per-opcode soundness theorem is `lowerAcirOpcode_sound`;
+`AcirCircuit.cons_satisfied_iff` lifts it to the list-fold.
 -/
 
 /-! ### Memory slot wire layout
@@ -738,7 +712,7 @@ def AcirOpcode.Satisfied {F : Type*} [Field F]
   | .call _ _ offset _ inner_opcodes _ =>
       ∀ op ∈ inner_opcodes, op.Satisfied (w.shift offset)
 
-/-- **Item 9 — Heterogeneous list-fold soundness.** The conjunction
+/-- **Heterogeneous list-fold soundness.** The conjunction
 `∀ op ∈ circ, op.Satisfied w` is the whole-circuit ACIR-satisfaction
 predicate. We expose it as a `Prop` that the per-opcode theorems above
 discharge case-by-case. This is the cross-cutting composition the FV
@@ -801,7 +775,7 @@ theorem AcirCircuit.linear_collapse {F : Type*} [Field F]
     subst heq
     exact h op hop
 
-/-! ### Item 9b — `lowerAcirOpcode` + row-level soundness
+/-! ### `lowerAcirOpcode` + row-level soundness
 
 The heterogeneous `AcirOpcode` lowering function emits an explicit
 `List (R1csRow F)` per opcode and threads the auxiliary witness counter.
@@ -919,7 +893,7 @@ def lowerAcirOpcode {F : Type*} [Field F]
   | .call _ _ offset _ inner_opcodes output_binding =>
       (lowerCallOpcode_rows offset inner_opcodes output_binding, aux_start)
 
-/-- **Item 9b — `.full` arm soundness packaging.** Given the
+/-- **`.full` arm soundness packaging.** Given the
 caller has already extracted full-opcode satisfaction from the row-list
 (via `full_satisfied_from_per_mul_rows` applied to the per-mul rows +
 shell row from `lowerAcirOpcode (AcirOpcode.full o)`), this lemma lifts
@@ -930,7 +904,7 @@ theorem lowerAcirOpcode_full_sound {F : Type*} [Field F]
     (h_sat : o.Satisfied w) :
     AcirOpcode.Satisfied (AcirOpcode.full (F := F) (G := G) (n := n) o) w := h_sat
 
-/-- **Item 9b-rowwalk — Per-mul row extraction from the `.full` lowering.**
+/-- **Per-mul row extraction from the `.full` lowering.**
 The headline step in closing the row-walk for the `.full` arm. Given the
 row list emitted by `lowerAcirOpcode (.full o) aux_start` is satisfied
 under `w`, the j-th per-mul row is satisfied and reduces (via
@@ -960,7 +934,7 @@ theorem lowerAcirOpcode_full_per_mul {F : Type*} [Field F]
   rw [mul_row_iff_aux_consistent] at hrow
   exact hrow
 
-/-- **Item 9b-rowwalk — Shell row extraction from the `.full` lowering.**
+/-- **Shell row extraction from the `.full` lowering.**
 The shell row appears as the last entry of the emitted list and is
 satisfied under `w`. -/
 theorem lowerAcirOpcode_full_shell_sat {F : Type*} [Field F]
@@ -978,7 +952,7 @@ theorem lowerAcirOpcode_full_shell_sat {F : Type*} [Field F]
   apply h_rows
   exact List.mem_append_right _ (List.mem_singleton.mpr rfl)
 
-/-- **Item 9b — Per-opcode row-level soundness (the four "easy" arms).**
+/-- **Per-opcode row-level soundness (the four "easy" arms).**
 Case-splits on the `AcirOpcode` tag and delegates for the `.linear`,
 `.linearShifted`, and `.brillig` arms. The `.full` arm is handled by the
 named theorem `lowerAcirOpcode_full_sound` above: invoke it after
@@ -1050,7 +1024,7 @@ theorem lowerAcirOpcode_sound_no_full {F : Type*} [Field F]
       exact List.mem_map_of_mem hop
     exact (lowerAssertZeroLinear_shift_sound op_inner w offset h_const).mp hrow
 
-/-! ### Step 3 — Total `lowerAcirOpcode_sound`
+/-! ### Total `lowerAcirOpcode_sound`
 
 The headline meta-theorem covering ALL `AcirOpcode` constructors. The
 proof case-splits on the opcode tag and delegates:
@@ -1072,7 +1046,7 @@ proof case-splits on the opcode tag and delegates:
   `gated_under_combined_predicate_sound`).
 -/
 
-/-- **Total `lowerAcirOpcode_sound` (Step 3 — headline meta-theorem).**
+/-- **Total `lowerAcirOpcode_sound` (headline meta-theorem).**
 For every `AcirOpcode` arm and every constant-wire-pinned witness map,
 if the lowering's row list is R1CS-satisfied, the opcode is
 ACIR-satisfied. This is the one statement closing the heterogeneous

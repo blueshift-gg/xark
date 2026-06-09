@@ -10,31 +10,27 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# ACIR ↔ R1CS allocation bookkeeping (Gaps 1c + 6 of `docs/FORMAL_VERIFICATION_PLAN.md`)
+# ACIR ↔ R1CS allocation bookkeeping
 
 Two small composition lemmas that tie the per-gadget soundness theorems
 to the surrounding allocation discipline of `R1csBuilder`:
 
-* **Gap 6 — `alloc_witness` is idempotent + injective.** The per-gadget
-  theorems all assume that the ACIR witness-index → R1CS witness-wire
-  bijection holds. This file models the `R1csBuilder::alloc_witness`
-  table as a partial map (`alloc_state`) and proves both properties over
-  any allocation sequence.
+* **`alloc_witness` is idempotent + injective.** The per-gadget theorems
+  all assume that the ACIR witness-index → R1CS witness-wire bijection
+  holds. This file models the `R1csBuilder::alloc_witness` table as a
+  partial map (`alloc_state`) and proves both properties over any
+  allocation sequence.
 
-* **Gap 1c — constant-index `MemoryOp` reduces to copy / alias.** The
-  variable-index proof in `Formal.MemoryVarIndex` already covers the
-  hardest case. The constant-index shortcut is a one-line wrapper: at a
-  literal index `k`, the gadget's selector partition collapses to the
-  singleton `s_k = 1, s_j = 0 (j ≠ k)`, so a `Read` is a witness copy and
-  a `Write` is a fresh alias of the input value.
-
-Together these close the two bookkeeping gaps that fall *outside* the
-per-gadget structural-soundness story.
+* **Constant-index `MemoryOp` reduces to copy / alias.** The variable-index
+  proof in `Formal.MemoryVarIndex` already covers the hardest case. The
+  constant-index shortcut: at a literal index `k`, the gadget's selector
+  partition collapses to `s_k = 1, s_j = 0 (j ≠ k)`, so a `Read` is a
+  witness copy and a `Write` is a fresh alias of the input value.
 -/
 
 namespace Xark
 
-/-! ## Gap 6 — `alloc_witness` allocation table -/
+/-! ## `alloc_witness` allocation table -/
 
 /-- Pure-Lean model of `R1csBuilder`'s witness-index → variable-index
 allocation table. `assigned i = some v` means the ACIR witness index `i`
@@ -94,7 +90,7 @@ theorem AllocState.alloc_preserves_invariant
       have hv := hm i v hassign
       omega
 
-/-- **Gap 6 — `alloc_witness` is idempotent on a per-index basis.**
+/-- **`alloc_witness` is idempotent on a per-index basis.**
 Allocating the same `idx` twice in succession returns the same variable
 and leaves the state unchanged after the first call. -/
 theorem alloc_witness_idempotent (m : AllocState) (idx : ℕ) :
@@ -109,7 +105,7 @@ theorem alloc_witness_idempotent (m : AllocState) (idx : ℕ) :
     -- Fresh: the first alloc binds idx → m.next; the second hits the `some` branch.
     simp [hcase]
 
-/-- **Gap 6 — `alloc_witness` is injective on distinct indices.** Two
+/-- **`alloc_witness` is injective on distinct indices.** Two
 distinct ACIR witness indices `idx₁ ≠ idx₂`, freshly allocated against the
 same starting state (both initially `none`), produce distinct R1CS
 variables. -/
@@ -126,7 +122,7 @@ theorem alloc_witness_injective
   simp only [h_fresh2']
   exact Nat.ne_of_lt (Nat.lt_succ_self _)
 
-/-! ## Gap 1c — constant-index `MemoryOp` wrapper
+/-! ## Constant-index `MemoryOp` wrapper
 
 At a literal index `k : Fin n`, the gadget's selector vector collapses
 to the one-hot vector `s_j = [j = k]`. `Formal.MemoryVarIndex` already

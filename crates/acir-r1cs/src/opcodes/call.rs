@@ -267,6 +267,9 @@ fn shift_blackbox(
             predicate,
             outputs,
         } => EmbeddedCurveAdd {
+            // Inputs are now 2-element `[FunctionInput; 2]` arrays
+            // (x, y) per point — `is_infinity` was removed in acir
+            // v1.0.0-beta.22.
             input1: Box::new(std::array::from_fn(|i| {
                 shift_function_input(&input1[i], offset)
             })),
@@ -277,7 +280,6 @@ fn shift_blackbox(
             outputs: (
                 shift_witness(outputs.0, offset),
                 shift_witness(outputs.1, offset),
-                shift_witness(outputs.2, offset),
             ),
         },
         MultiScalarMul {
@@ -298,7 +300,6 @@ fn shift_blackbox(
             outputs: (
                 shift_witness(outputs.0, offset),
                 shift_witness(outputs.1, offset),
-                shift_witness(outputs.2, offset),
             ),
         },
         // Variants we don't yet support: clone unchanged. The dispatch will

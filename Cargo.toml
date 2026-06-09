@@ -34,10 +34,10 @@ ark-serialize = { version = "0.6", default-features = false, features = ["derive
 ark-std = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-snark = { version = "0.6", default-features = false }
 
-# Pinned to nargo 1.0.0-beta.21 (commit 89a0f0faf3a5f1273c8ac4843b7877882437e277).
+# Pinned to nargo 1.0.0-beta.22.
 # `acir` re-exports the `acir_field` / `acvm` types and pulls them in at the
 # same pinned commit, so we only need to declare `acir` here.
-acir = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0-beta.21", default-features = false, features = ["bn254"] }
+acir = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0-beta.22", default-features = false, features = ["bn254"] }
 
 anyhow = "1"
 thiserror = "2"

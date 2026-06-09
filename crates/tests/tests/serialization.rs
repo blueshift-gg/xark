@@ -16,8 +16,11 @@ use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
 use xark_backend::serialization::PublicInputsJson;
 
-const VK_SHA256: &str = "f0fcf89acd7cacb3a06c0da0df8e43eac05b8e202224f66a778aee59d0d520fe";
-const PROOF_SHA256: &str = "cc1ddac1261461d3c29d369d88515374212409d28685692b829034cfc3cc7a80";
+// Last bumped: Noir v1.0.0-beta.21 → v1.0.0-beta.22 (acir crate changes
+// to `EmbeddedCurveAdd` / `MultiScalarMul` shift witness layout for every
+// circuit, so the regenerated VK + proof bytes change too).
+const VK_SHA256: &str = "0f197c9b98a5237e3d7d128d3653fe8f15f168f2046a16d7e978200f6d6eefbb";
+const PROOF_SHA256: &str = "fbe4f937d8b1a073a3b3e312dd25de904610a0d627b885e892a50f0b7b2a4b9f";
 const PUBLIC_INPUTS_SHA256: &str =
     "7a90fafeb777a27fbc7a3c9b6763b25476f359aa3ef23a7bb96ea99bdb0e40a9";
 

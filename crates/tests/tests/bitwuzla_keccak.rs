@@ -1,5 +1,4 @@
-//! Bitwuzla Keccak-f[1600] bit-blasted equivalence harness — Layer B,
-//! track 2 of `docs/FORMAL_VERIFICATION_PLAN.md`.
+//! Bitwuzla Keccak-f[1600] bit-blasted equivalence harness.
 //!
 //! Two independent QF_BV encodings of the FIPS 202 §3.2 Keccak-f[1600]
 //! permutation (24 rounds, 5×5×64-bit state): a clean spec (`ref_`,
@@ -8,6 +7,8 @@
 //! step-by-step (`gad_`, n-ary `xor_n_inputs` θ + scatter ρ+π + `(NOT
 //! B[x+1]) AND B[x+2]` χ). Asserts disagreement on any of 25 output lanes
 //! and feeds to Bitwuzla. UNSAT ⇒ bit-equivalent over all 1600-bit inputs.
+
+#![allow(clippy::needless_range_loop)]
 
 use std::process::{Command, Stdio};
 
@@ -106,7 +107,7 @@ fn emit_permutation(
 ) -> (String, [String; KECCAK_LANES]) {
     let mut body = String::new();
 
-    let mut lanes: Vec<String> = input_names.iter().cloned().collect();
+    let mut lanes: Vec<String> = input_names.to_vec();
 
     for round in 0..KECCAK_ROUNDS {
         // θ
@@ -163,9 +164,7 @@ fn emit_permutation(
                     let r = ROTATION_OFFSETS[x][y];
                     let expr = rotl(src, r);
                     let name = format!("{prefix}B_r{round}_x{nx}_y{ny}");
-                    body.push_str(&format!(
-                        "(define-fun {name} () (_ BitVec 64) {expr})\n"
-                    ));
+                    body.push_str(&format!("(define-fun {name} () (_ BitVec 64) {expr})\n"));
                     b_names[nx + 5 * ny] = name;
                 }
             }
@@ -178,9 +177,7 @@ fn emit_permutation(
                     let r = ROTATION_OFFSETS[x][y];
                     let expr = rotl(src, r);
                     let name = format!("{prefix}B_r{round}_x{big_x}_y{big_y}");
-                    body.push_str(&format!(
-                        "(define-fun {name} () (_ BitVec 64) {expr})\n"
-                    ));
+                    body.push_str(&format!("(define-fun {name} () (_ BitVec 64) {expr})\n"));
                     b_names[big_x + 5 * big_y] = name;
                 }
             }
@@ -301,7 +298,7 @@ fn keccak_f1600_gadget_equals_fips_spec() {
         eprintln!(
             "bitwuzla: not on PATH and XARK_RUN_BITWUZLA not set — skipping.\n  \
              Install bitwuzla (https://bitwuzla.github.io/docs/install.html) to run \
-             this Layer-B equivalence proof."
+             this equivalence proof."
         );
         return;
     }

@@ -276,9 +276,8 @@ fn g16_pairing(pairs: &[(G1Point, G2Point); 4]) -> Result<[u8; 32], AltBn128Erro
 
 /// Pure assembly of the Groth16 final-check operand array, in the canonical
 /// order `[(−A, B), (α, β), (vk_x, γ), (C, δ)]`. Split out so a Kani harness
-/// can verify the *order* (Layer-A #5, operand-assembly rewrite check) by
-/// inspecting the assembled array directly, without needing to stub the
-/// pairing itself.
+/// can verify the *order* (operand-assembly rewrite check) by inspecting the
+/// assembled array directly, without needing to stub the pairing itself.
 ///
 /// `a` is the *already-negated* proof A (the exporter pre-negates).
 #[inline(always)]
@@ -528,10 +527,10 @@ mod tests {
 }
 
 /// Formal-verification harnesses (Kani bounded model checker). Run with
-/// `cargo kani`. These discharge the Layer-A canonicality lemmas from
-/// `docs/FORMAL_VERIFICATION_PLAN.md` over **all** inputs — the all-input
-/// guarantee the finite-sample unit/fuzz tests can't give. Compiled only under
-/// `cfg(kani)`, so they're inert in normal builds.
+/// `cargo kani`. These discharge the canonicality lemmas over **all**
+/// inputs — the all-input guarantee the finite-sample unit / fuzz tests
+/// can't give. Compiled only under `cfg(kani)`, so they're inert in normal
+/// builds.
 #[cfg(kani)]
 mod proofs {
     use super::*;
@@ -589,8 +588,7 @@ mod proofs {
     }
 
     // -------------------------------------------------------------------------
-    // Layer-A items #2 (fail-closed), #4 (strict non-malleability), #5 (arity)
-    // from docs/FORMAL_VERIFICATION_PLAN.md.
+    // Fail-closed, strict non-malleability, arity.
     //
     // These harnesses exercise the parse path of `verify_groth16` /
     // `verify_groth16_strict` and rely on the fact that every structural error
@@ -598,15 +596,12 @@ mod proofs {
     // us prove them without stubbing the BN254 backend: the curve ops are
     // unreachable on the error paths these harnesses cover.
     //
-    // Layer-A #1 (totality over the *full* `verify_groth16` body, i.e. proving
+    // Totality over the *full* `verify_groth16` body (i.e. proving
     // no panic for an *accepted* input — where the curve ops *do* run) is
-    // deliberately *not* discharged here. Kani cannot symbolically execute the
-    // BN254 pairing/scalar-mul (the syscall path resolves to Arkworks
-    // fallback off-chain, and the cost blows up the bounded solver). Doing it
-    // would require `kani::stub` replacements for `G1Point::Mul`, `G1Point::Add`,
-    // and `pairing` — pending in a follow-up. The current set still rules out
-    // every structural-bug class (the production-attack surface) over all
-    // bounded inputs.
+    // discharged separately by the `verify_groth16_totality_n{0,1,2}` and
+    // `totality_verify_groth16` / `totality_verify_proof_only` harnesses
+    // below, which stub `g1_scalar_mul` / `g1_add` / `g16_pairing` so Kani
+    // doesn't have to symbolically execute the BN254 pairing/scalar-mul.
     //
     // All harnesses bound `N` (= public-input count) to a small concrete value
     // so Kani's enumeration stays tractable. The verifier code is uniform in
@@ -755,7 +750,7 @@ mod proofs {
     }
 
     // -------------------------------------------------------------------------
-    // Layer-A #1 — totality (no panic) over the FULL verify_groth16 body,
+    // Totality (no panic) over the FULL verify_groth16 body,
     // including the curve ops, with kani::stub replacing the BN254 operators.
     //
     // The curve ops (G1Point::Mul, G1Point::Add, pairing) resolve to the
@@ -781,10 +776,7 @@ mod proofs {
     /// Stub replacement for `g1_scalar_mul`. Returns an unconstrained Result:
     /// either an arbitrary-bytes G1 point or a backend error. Kani then
     /// explores both branches of the `?` operator at every call site.
-    fn stub_g1_scalar_mul(
-        _p: G1Point,
-        _s: &[u8; FR_BYTES],
-    ) -> Result<G1Point, AltBn128Error> {
+    fn stub_g1_scalar_mul(_p: G1Point, _s: &[u8; FR_BYTES]) -> Result<G1Point, AltBn128Error> {
         if kani::any() {
             let bytes: [u8; G1_BYTES] = kani::any();
             Ok(G1Point(bytes))
@@ -802,9 +794,7 @@ mod proofs {
         }
     }
 
-    fn stub_g16_pairing(
-        _pairs: &[(G1Point, G2Point); 4],
-    ) -> Result<[u8; 32], AltBn128Error> {
+    fn stub_g16_pairing(_pairs: &[(G1Point, G2Point); 4]) -> Result<[u8; 32], AltBn128Error> {
         if kani::any() {
             let bytes: [u8; 32] = kani::any();
             Ok(bytes)
@@ -886,7 +876,7 @@ mod proofs {
         let _ = verify_groth16_strict(&vk, &proof, &pi);
     }
 
-    /// **Layer-A #5 — pairing operand-assembly order.** Proves over all
+    /// **Pairing operand-assembly order.** Proves over all
     /// symbolic inputs that `g16_assemble_pairs` produces the canonical
     /// `[(−A, B), (α, β), (vk_x, γ), (C, δ)]` order. The exporter pre-negates
     /// A, so the "−A" slot literally receives the caller's `a` argument.
@@ -921,13 +911,12 @@ mod proofs {
     }
 
     // -------------------------------------------------------------------------
-    // Plan-named aliases for Layer-A #1 (totality) and operand assembly.
+    // Named aliases for totality and operand assembly.
     //
     // The N-parameterised totality harnesses above (verify_groth16_totality_n0/
-    // n1/n2 and the strict variants) discharge Layer-A #1 for verify_groth16
+    // n1/n2 and the strict variants) discharge totality for verify_groth16
     // and verify_groth16_strict. The three harnesses below provide the
-    // single-entry-point names called out in docs/FORMAL_VERIFICATION_PLAN.md
-    // (and the task spec):
+    // single-entry-point names:
     //
     //   * totality_verify_groth16     — totality of the public verify_groth16
     //                                   entry point on accepted-input shape.
@@ -942,7 +931,7 @@ mod proofs {
     // N-parameterised totality block above.
     // -------------------------------------------------------------------------
 
-    /// **Layer-A #1 — totality of `verify_groth16` over an accepted-input
+    /// **Totality of `verify_groth16` over an accepted-input
     /// shape.** The vk/proof/public-inputs are unconstrained 8-bit-symbolic
     /// arrays, sized so the structural checks accept them; the curve-op
     /// wrappers are stubbed so the harness exercises the *post-canonicality*
@@ -961,7 +950,7 @@ mod proofs {
         let _ = verify_groth16(&vk, &proof, &pi);
     }
 
-    /// **Layer-A #1 — totality of `verify_proof_only`.** Covers the split
+    /// **Totality of `verify_proof_only`.** Covers the split
     /// wrapper that peels off `PROOF_BYTES` from a single `instruction_data`
     /// blob, then delegates to `verify_groth16`. Same stubbing as
     /// `totality_verify_groth16`.
@@ -977,7 +966,7 @@ mod proofs {
         let _ = verify_proof_only(&vk, &instr);
     }
 
-    /// **Layer-A operand-assembly rewrite check.** The pairing syscall takes a
+    /// **Operand-assembly rewrite check.** The pairing syscall takes a
     /// contiguous `[G1 || G2]`-per-pair byte buffer (see the on-chain branch of
     /// `solana_nostd_alt_bn128::pairing`). This harness proves that the byte
     /// concatenation of the `g16_assemble_pairs` result equals the canonical
@@ -1020,18 +1009,16 @@ mod proofs {
         // (`a_bytes` is the pre-negated proof A; see the doc comment above.)
         let mut expected = [0u8; 4 * PAIRING_PAIR_BYTES];
         let mut off = 0;
-        let mut put_g1 = |dst: &mut [u8; 4 * PAIRING_PAIR_BYTES],
-                         off: &mut usize,
-                         src: &[u8; G1_BYTES]| {
-            dst[*off..*off + G1_BYTES].copy_from_slice(src);
-            *off += G1_BYTES;
-        };
-        let mut put_g2 = |dst: &mut [u8; 4 * PAIRING_PAIR_BYTES],
-                         off: &mut usize,
-                         src: &[u8; G2_BYTES]| {
-            dst[*off..*off + G2_BYTES].copy_from_slice(src);
-            *off += G2_BYTES;
-        };
+        let mut put_g1 =
+            |dst: &mut [u8; 4 * PAIRING_PAIR_BYTES], off: &mut usize, src: &[u8; G1_BYTES]| {
+                dst[*off..*off + G1_BYTES].copy_from_slice(src);
+                *off += G1_BYTES;
+            };
+        let mut put_g2 =
+            |dst: &mut [u8; 4 * PAIRING_PAIR_BYTES], off: &mut usize, src: &[u8; G2_BYTES]| {
+                dst[*off..*off + G2_BYTES].copy_from_slice(src);
+                *off += G2_BYTES;
+            };
         put_g1(&mut expected, &mut off, &a_bytes);
         put_g2(&mut expected, &mut off, &b_bytes);
         put_g1(&mut expected, &mut off, &alpha_bytes);

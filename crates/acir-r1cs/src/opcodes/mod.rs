@@ -16,7 +16,10 @@ use acir::circuit::Opcode;
 pub enum OpcodeClass {
     /// `AssertZero(Expression)` — supported.
     Arithmetic,
-    /// Black-box function call — not supported in MVP.
+    /// Black-box function call — supported for the gadgets enumerated in
+    /// `is_supported` (RANGE, AND, XOR, SHA-256, Keccak, BLAKE2s, BLAKE3,
+    /// AES-128, Poseidon2, EmbeddedCurveAdd, MultiScalarMul, ECDSA
+    /// secp256k1 / secp256r1).
     BlackBox(String),
     /// Memory init — supported by the constant-index lowering. See
     /// `docs/memory.md`.
@@ -107,7 +110,7 @@ impl OpcodeClass {
                     format!(
                         "BlackBoxFuncCall::{name} (non-native arbitrary-modulus bigint \
  arithmetic) is not implemented.\n\n\
- Noir 1.0.0-beta.21 — the pinned version this backend targets — does \
+ Noir 1.0.0-beta.22 — the pinned version this backend targets — does \
  not expose a `std::bigint` module and its compiler emits zero BigInt \
  opcodes from source. If you produced an artifact that contains one, \
  you are either:\n \

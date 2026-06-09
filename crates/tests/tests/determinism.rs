@@ -1,4 +1,4 @@
-//! Layer-B (track 1) R1CS under-constraint analysis via SMT.
+//! R1CS under-constraint analysis via SMT.
 //!
 //! For each committed circuit we lower it to R1CS, then ask z3 — over the BN254
 //! scalar field GF(r) — whether the witness is **uniquely determined by the
@@ -133,7 +133,9 @@ fn build_smt(r: &R1cs) -> String {
             let az = lc_term(&r.a[row], r.num_instance, &r.inst, prefix);
             let bz = lc_term(&r.b[row], r.num_instance, &r.inst, prefix);
             let cz = lc_term(&r.c[row], r.num_instance, &r.inst, prefix);
-            s.push_str(&format!("(assert (= (mod (* {az} {bz}) P) (mod {cz} P)))\n"));
+            s.push_str(&format!(
+                "(assert (= (mod (* {az} {bz}) P) (mod {cz} P)))\n"
+            ));
         }
     }
     let diffs: Vec<String> = (0..r.num_witness)
@@ -192,7 +194,7 @@ const MAX_NONZEROS: usize = 60_000;
 // Report-only research probe. Empirically, z3 cannot decide the GF(r) nonlinear
 // system even for a *single* `x²=y` constraint within tens of seconds — SMT does
 // not scale to prime-field R1CS (Gröbner-basis tools like Ecne are the right
-// approach; see docs/FORMAL_VERIFICATION_PLAN.md). Kept as a runnable artifact;
+// approach). Kept as a runnable artifact;
 // `#[ignore]`d so it stays out of the normal suite, and it never fails (a
 // `sat`/`timeout` is a finding, not a regression).
 #[ignore = "research probe: needs z3; SMT does not scale to GF(r) R1CS — run with --ignored"]

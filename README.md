@@ -76,8 +76,8 @@ Supported in this release:
 * `BlackBoxFuncCall`:
  * `RANGE` (with constant fast path).
  * `AND` / `XOR` bitwise.
- * `Sha256Compression` (~54k constraints), `Blake2s` (~33k), `Blake3`
- (~23k, single + multi-chunk), `Keccakf1600` (~251k).
+ * `Sha256Compression` (~53k constraints), `Blake2s` (~33k), `Blake3`
+ (~23k, single + multi-chunk), `Keccakf1600` (~250k).
  * `AES128Encrypt` (~46k per 16-byte block).
  * `Poseidon2Permutation`.
  * `EmbeddedCurveAdd`, `MultiScalarMul` (Grumpkin embedded curve) —

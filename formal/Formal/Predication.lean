@@ -9,7 +9,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# `e`-aux gating for predicated `Opcode::Call` (Layer B)
+# `e`-aux gating for predicated `Opcode::Call`
 
 Mirrors `crates/acir-r1cs/src/r1cs_builder.rs::R1csBuilder::enforce_gated`.
 
@@ -58,14 +58,12 @@ theorem enforce_gated_sound {F : Type*} [Field F]
     (h_orig : a * b = c + e)
     (h_gate : p * e = 0)
     (h_pbool : p * (p - 1) = 0) :
-    (p = 1 → a * b = c) ∧ (p = 0 → True) := by
-  refine ⟨?_, ?_⟩
-  · intro hp
-    -- p = 1, h_gate gives 1 · e = 0, so e = 0; then a·b = c + 0 = c.
-    rw [hp] at h_gate
-    have he : e = 0 := by linear_combination h_gate
-    linear_combination h_orig + he
-  · intro _; trivial
+    p = 1 → a * b = c := by
+  intro hp
+  -- p = 1, h_gate gives 1 · e = 0, so e = 0; then a·b = c + 0 = c.
+  rw [hp] at h_gate
+  have he : e = 0 := by linear_combination h_gate
+  linear_combination h_orig + he
 
 /-- **Predicate booleanness from the gated rows.** When the call-site emits
 the standard `p · (p − 1) = 0` boolean constraint alongside the gating, the
@@ -91,12 +89,10 @@ theorem enforce_gated_linear_collapse {F : Type*} [Field F]
     (c p : F)
     (h_pbool : p * (p - 1) = 0)
     (h_fast : p * c = 0) :
-    (p = 1 → c = 0) ∧ (p = 0 → True) := by
-  refine ⟨?_, ?_⟩
-  · intro hp
-    rw [hp] at h_fast
-    linear_combination h_fast
-  · intro _; trivial
+    p = 1 → c = 0 := by
+  intro hp
+  rw [hp] at h_fast
+  linear_combination h_fast
 
 /-- **Equivalence of the two-row e-aux form and the linear-collapse form,
 under the `a = b = 0` shape.** The fast path is not just an optimisation — it

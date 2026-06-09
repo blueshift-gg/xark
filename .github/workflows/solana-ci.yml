@@ -4,19 +4,31 @@ name: Solana E2E
 # `crates/tests/tests/sbpf.rs` are each compiled to their own SBF program
 # (svm-unit-test shells out to `cargo build-sbf`) and run in Mollusk on the
 # real `alt_bn128` syscalls — positive across every committed circuit, plus
-# negative tests that bad inputs are rejected on chain. This needs the Anza
-# Solana toolchain, so it lives in its own workflow gated to verifier changes.
+# negative tests that bad inputs are rejected on chain.
+#
+# Also runs the **`alt_bn128` ↔ Arkworks differential** in
+# `crates/tests/tests/differential_alt_bn128.rs`: the same fixed test
+# vectors are evaluated host-side (Arkworks fallback) and on-chain
+# (syscall path) and must produce byte-identical results — the only
+# out-of-Lean trust assumption flagged by name in the formal sources.
+#
+# This needs the Anza Solana toolchain, so it lives in its own workflow
+# gated to verifier changes.
 
 on:
   push:
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
+      - "crates/tests/tests/differential_alt_bn128.rs"
+      - "crates/tests/Cargo.toml"
       - ".github/workflows/solana-ci.yml"
   pull_request:
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
+      - "crates/tests/tests/differential_alt_bn128.rs"
+      - "crates/tests/Cargo.toml"
       - ".github/workflows/solana-ci.yml"
 
 jobs:
@@ -48,3 +60,9 @@ jobs:
         # svm-unit-test invokes `cargo build-sbf` per `#[svm_test]`; --release
         # because the bodies run real Groth16 verification.
         run: cargo test -p xark-tests --test sbpf --release
+
+      - name: Run alt_bn128 ↔ Arkworks differential
+        # Same fixed inputs evaluated host-side (Arkworks) and on-chain
+        # (syscalls); any disagreement fails CI. See file header for the
+        # trust-anchor rationale.
+        run: cargo test -p xark-tests --test differential_alt_bn128 --release

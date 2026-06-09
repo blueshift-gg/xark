@@ -10,7 +10,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# Variable-index memory-op soundness (Layer B)
+# Variable-index memory-op soundness
 
 Mirrors `crates/acir-r1cs/src/opcodes/memory.rs::lower_memory_op_variable_index`.
 For an `n`-slot block under a variable index the gadget allocates:

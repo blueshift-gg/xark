@@ -4,7 +4,7 @@
 //!
 //! * `arithmetic_square` — minimal AssertZero-only circuit (one mul + one
 //!   linear). Floor case for setup/prove cost.
-//! * `sha256_basic` — one SHA-256 compression call (~54k constraints).
+//! * `sha256_basic` — one SHA-256 compression call (~53k constraints).
 //!   Representative hash-heavy workload.
 //! * `ecdsa_basic` — one ECDSA secp256k1 verify (~3.6M constraints).
 //!   Representative crypto-heavy workload.
@@ -14,9 +14,9 @@
 //! 2. `prove` (assumes setup output is available).
 //! 3. `verify` (assumes setup + prove outputs are available).
 //!
-//! Run with `cargo bench -p xark-backend`. Use
-//! `cargo bench -p xark-backend -- --save-baseline before` and
-//! `cargo bench -p xark-backend -- --baseline before` to compare across
+//! Run with `cargo bench -p xark-tests`. Use
+//! `cargo bench -p xark-tests -- --save-baseline before` and
+//! `cargo bench -p xark-tests -- --baseline before` to compare across
 //! optimisation PRs.
 
 use std::path::{Path, PathBuf};

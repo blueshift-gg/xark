@@ -3,10 +3,13 @@
   "curve": "bn254",
   "setup_mode": "insecure-dev-mode",
   "production_safe": false,
-  "circuit_hash": "4fc6aeffdbe9cae62d4f9a07275960363694fe73959522239f957f818fd781ce",
+  "circuit_hash": "924e82f9bf841f5c29d62189794d1499c45394c885e48a96ca894a32eb781dd4",
   "backend_version": "0.1.0",
-  "noir_version": "1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277",
-  "created_at": "2026-06-03T07:14:34.029399+00:00",
+  "noir_version": "1.0.0-beta.22+c57152f91260ecdb9faad4efc20abb14b6d2ece7",
+  "created_at": "2026-06-09T11:07:34.641647+00:00",
   "num_public_inputs": 1,
-  "num_constraints": 1
+  "num_constraints": 1,
+  "deterministic_rng_seed": null,
+  "ptau_source": null,
+  "phase2_seed_hash": null
 }

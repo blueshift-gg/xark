@@ -37,10 +37,10 @@ use rand_chacha::ChaCha20Rng;
 
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::LoweredAcirCircuit;
-use xark_backend::ceremony::{contribute, verify_chain, CeremonyError, Contribution};
+use xark_backend::ceremony::{CeremonyError, Contribution, contribute, verify_chain};
 use xark_backend::circuit::NoirGroth16Circuit;
 use xark_backend::keys::{Groth16Keys, KeyMetadata};
-use xark_backend::ptau::{parse_ptau, setup_from_ptau, Phase2Error};
+use xark_backend::ptau::{Phase2Error, parse_ptau, setup_from_ptau};
 
 mod common;
 use common::{build_valid_ptau, fixture_dir};
@@ -180,8 +180,8 @@ fn broken_chain_link_is_rejected() {
     let c2 = contribute(&mut keys, "bob", &mut rng).expect("bob");
     // c1 now claims to chain off c2's *post* state — an impossible link.
     c1.prev_delta_g1 = c2.new_delta_g1;
-    let err = verify_chain(initial_delta_g1, &[c1, c2])
-        .expect_err("broken-chain transcript must reject");
+    let err =
+        verify_chain(initial_delta_g1, &[c1, c2]).expect_err("broken-chain transcript must reject");
     assert!(
         matches!(err, CeremonyError::ChainBreak { index: 0 }),
         "expected ChainBreak {{ index: 0 }}, got {err:?}"
@@ -200,8 +200,7 @@ fn reordered_chain_is_rejected() {
     let c1 = contribute(&mut keys, "alice", &mut rng).expect("alice");
     let c2 = contribute(&mut keys, "bob", &mut rng).expect("bob");
     // Swap the order. c2's prev_delta_g1 == c1's new_delta_g1 != baseline.
-    let err = verify_chain(initial_delta_g1, &[c2, c1])
-        .expect_err("reordered chain must reject");
+    let err = verify_chain(initial_delta_g1, &[c2, c1]).expect_err("reordered chain must reject");
     assert!(
         matches!(err, CeremonyError::ChainBreak { index: 0 }),
         "expected ChainBreak {{ index: 0 }}, got {err:?}"
@@ -230,8 +229,7 @@ fn tampered_g1_delta_is_rejected() {
     let mut adv_rng = ChaCha20Rng::seed_from_u64(8888);
     let bogus = (ark_bn254::G1Affine::generator() * Fr::rand(&mut adv_rng)).into_affine();
     c.new_delta_g1 = bogus;
-    let err = verify_chain(initial_delta_g1, &[c])
-        .expect_err("tampered G1 δ-update must reject");
+    let err = verify_chain(initial_delta_g1, &[c]).expect_err("tampered G1 δ-update must reject");
     assert!(
         matches!(
             err,
@@ -253,12 +251,7 @@ fn tampered_g1_delta_is_rejected() {
 /// `production_safe`. The ceremony driver never produces this metadata.
 #[test]
 fn insecure_dev_mode_metadata_is_flagged_unsafe() {
-    let meta = KeyMetadata::new_dev(
-        "dummy-circuit-hash".into(),
-        "1.0.0-beta.21".into(),
-        1,
-        128,
-    );
+    let meta = KeyMetadata::new_dev("dummy-circuit-hash".into(), "1.0.0-beta.22".into(), 1, 128);
     assert_eq!(meta.setup_mode, "insecure-dev-mode");
     assert!(
         !meta.production_safe,

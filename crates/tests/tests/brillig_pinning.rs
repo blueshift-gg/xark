@@ -1,5 +1,4 @@
-//! Integration tests for the Brillig output-pinning coverage check
-//! (Non-FV gap of `docs/FORMAL_VERIFICATION_PLAN.md`).
+//! Integration tests for the Brillig output-pinning coverage check.
 //!
 //! `xark_acir_r1cs::opcodes::brillig_check::check_brillig_outputs_pinned`
 //! walks an ACIR opcode stream and confirms every `BrilligCall` output is
@@ -98,7 +97,7 @@ fn brillig_basic_reports_at_least_one_pinned_output() {
     );
 }
 
-/// **Item 10 — Compose `check_brillig_outputs_pinned` with
+/// **Compose `check_brillig_outputs_pinned` with
 /// `Formal.Brillig.brillig_lowering_vacuous_sound`.**
 ///
 /// The Lean theorem `brillig_lowering_vacuous_sound` proves that the

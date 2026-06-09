@@ -10,7 +10,7 @@ import Mathlib
 set_option linter.style.header false
 
 /-!
-# xark Poseidon2 S-box and permutation soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark Poseidon2 S-box and permutation soundness — mechanised in Lean 4 / mathlib
 
 The Poseidon2 permutation (`crates/acir-r1cs/src/gadgets/poseidon.rs`) is built
 from two kinds of step: an `x⁵` S-box and linear (matrix) layers. The linear

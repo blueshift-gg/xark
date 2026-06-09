@@ -11,7 +11,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# secp256r1 point group as a concrete `AddCommGroup` (Layer B closure)
+# secp256r1 point group as a concrete `AddCommGroup`
 
 Mirrors `Formal.Secp256k1Group` for **secp256r1** (NIST P-256). Closes the
 end-to-end chain at `G = Secp256r1Point` so that `EcdsaVerifyRel` and

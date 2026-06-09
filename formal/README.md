@@ -1,14 +1,12 @@
-# `formal/` — Lean 4 proofs of gadget soundness (Layer B)
+# `formal/` — Lean 4 proofs of gadget soundness
 
 Machine-checked soundness proofs for the R1CS gadgets emitted by
 [`crates/acir-r1cs`](../crates/acir-r1cs), written in **Lean 4** against
-**mathlib**. This is the Layer-B / track-2 work in
-[`docs/FORMAL_VERIFICATION_PLAN.md`](../docs/FORMAL_VERIFICATION_PLAN.md): the
-field-arithmetic gadgets where SMT/bit-blasting blows up and a proof assistant
-is the right tool.
+**mathlib**. Covers the field-arithmetic gadgets where SMT / bit-blasting
+blows up and a proof assistant is the right tool.
 
-Where the Kani harnesses (in `crates/xark-solana-verifier`) discharge Layer A
-(the on-chain verifier's byte logic) by *bounded model checking*, these Lean
+Where the Kani harnesses (in `crates/verifier`) discharge the
+on-chain verifier's byte logic by *bounded model checking*, these Lean
 theorems are *deductive* proofs that hold over **all** field assignments —
 there is no input bound.
 
@@ -152,7 +150,9 @@ cap `n ≤ 253` is what keeps the field sum below the BN254 scalar modulus `r`
 (`two_pow_lt_r : 2^253 < r`) so it cannot wrap.
 
 The proofs use only the standard mathlib axioms (`propext`, `Classical.choice`,
-`Quot.sound`) — no `sorry`, no extra axioms. CI checks this with
+`Quot.sound`) plus three primality axioms for the secp256k1, secp256r1, and
+BN254 base-field moduli (Lean's kernel can't `decide` 254/256-bit primality;
+each is documented at its declaration site). No `sorry`. CI checks this with
 `#print axioms`.
 
 ## Building
@@ -173,9 +173,9 @@ CI runs this on every push via [`.github/workflows/lean.yml`](../.github/workflo
 verifier soundness wrapper.** Packages the per-primitive theorems
 (`mul_mod_via_Fr_limbwise_constraints` + `ladder_correct`) into one statement
 against the textbook ECDSA-verify predicate `EcdsaVerifyRel`. Parametric over
-the curve point group `G : Type*` `[AddCommGroup G]` — secp256k1 / secp256r1
-specialisation is deferred to a verified curve-group model (`Formal.Curve`
-covers Grumpkin today).
+the curve point group `G : Type*` `[AddCommGroup G]`; verified `AddCommGroup`
+instances for secp256k1 / secp256r1 live in `Formal.Secp256k1Group` /
+`Formal.Secp256r1Group` (Grumpkin is in `Formal.Curve`).
 
 | Theorem | Mirrors | Statement |
 |---------|---------|-----------|
@@ -187,9 +187,9 @@ covers Grumpkin today).
 | `ecdsa_verify_compose` | end-to-end | takes the seven per-primitive hypotheses (range, mod-inverse, the two `mul_mod` ℕ-identities, two `ladder_correct` outputs, ec_add, final eq) and concludes `EcdsaVerifyRel` directly |
 
 [`Formal/Sha256.lean`](Formal/Sha256.lean) — **structural** soundness layer
-for `crates/acir-r1cs/src/gadgets/hash.rs`. Per the Layer-B plan, full
-bit-equivalence of SHA-256 is left to SAT/SMT bit-blasting (faster, better fit
-than a proof assistant); this file builds the *compositional* story over the
+for `crates/acir-r1cs/src/gadgets/hash.rs`. Full bit-equivalence of SHA-256
+is left to SAT/SMT bit-blasting (faster, better fit than a proof assistant);
+this file builds the *compositional* story over the
 already-proven per-op gadgets in [`Formal/Bitwise.lean`](Formal/Bitwise.lean)
 and [`Formal/Arith.lean`](Formal/Arith.lean):
 
@@ -202,14 +202,15 @@ and [`Formal/Arith.lean`](Formal/Arith.lean):
 | `not32_sound` / `and32_sound` / `xor32_sound` | `bitwise.rs::not` / `::and` / `::xor` lifted to Word32 | per-bit constraints force the output to be the spec'd boolean op |
 | `Ch_bit_sound` / `Maj_bit_sound` | composition over `not32` / `and32` / `xor32` | per-bit constraints of the constituent gadget calls force the output to equal the FIPS Ch / Maj |
 | `bigSigma0_bit` / `bigSigma1_bit` / `smallSigma0_bit` / `smallSigma1_bit` | composition over `rotr` / `shr` / `xor32` | the structural defining identities for the four sigma functions |
-| `MessageScheduleStep` / `_iff` | `hash.rs` lines ~70-90 | predicate / equivalence capturing the message-schedule recurrence `W[t] = addMod32(W[t-16], σ₀(W[t-15]), W[t-7], σ₁(W[t-2]))` |
+| `MessageScheduleStep` / `_iff` | `hash.rs::sha256_compression` (message-schedule loop) | predicate / equivalence capturing the message-schedule recurrence `W[t] = addMod32(W[t-16], σ₀(W[t-15]), W[t-7], σ₁(W[t-2]))` |
 
 This is the **structural** layer — it shows the SHA-256 spec composes out of
 the proven primitives without bit-blasting any 2³² × 2³² Word32 search space.
 Full compression equivalence (the gadget's 64-round loop output equals the
-FIPS spec output) remains future work and is best discharged by an SMT-backed
-equivalence check between the constraint system and a reference SHA-256
-implementation, not by a Lean proof.
+FIPS spec output) is discharged by `Formal.Wrappers.sha256_iter_of_rel`
+composed with `Formal.BitwuzlaCompose.sha256_closed_chain`;
+`crates/tests/tests/bitwuzla_sha256.rs` provides an independent SMT-level
+cross-check over all 768-bit inputs.
 
 ## Scope / what's next
 
@@ -238,12 +239,10 @@ Proven, end-to-end:
   showing the FIPS 180-4 primitives (Ch, Maj, Σ₀, Σ₁, σ₀, σ₁) and the
   message-schedule step compose out of the already-proven per-bit gadgets.
 
-What remains in Layer-B is deliberately scoped out of Lean:
-* **Bit-equivalence proofs for the full SHA-256 / Keccak / BLAKE / AES
-  compression functions** — better discharged by an SMT-backed equivalence
-  check between the constraint system and a reference implementation than by
-  thousands of lines of bit-level Lean (see plan).
-* External audit, fuzzing-extension, and Layer-A Kani work on the on-chain
+What remains scoped out of Lean:
+* **External SMT cross-validation** for SHA-256, Keccak, BLAKE2s, BLAKE3,
+  and AES-128 round-step bit-equivalence — handled by the QF_BV harnesses
+  in `crates/tests/tests/bitwuzla_*.rs` (independent of the pure-Lean
+  `<gadget>_round_bit_equivalence` theorems in `Formal.BitwuzlaCompose`).
+* External audit, fuzzing-extension, and Kani work on the on-chain
   verifier — engineering, not FV.
-
-See the Layer-B section of [`../docs/FORMAL_VERIFICATION_PLAN.md`](../docs/FORMAL_VERIFICATION_PLAN.md).

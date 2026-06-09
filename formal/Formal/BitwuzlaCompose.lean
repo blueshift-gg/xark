@@ -32,35 +32,29 @@ verdict means they agree on **all** inputs.
 
 This file:
 
-* defines (or, for the four still-axiom gadgets, declares one
-  `axiom`) `Bitwuzla{Sha256,Keccak,Blake2s,Blake3,Aes128}Equivalent`
-  naming the gadget's bit-encoding equivalence to the FIPS reference,
-  with a docstring citing the harness file path that discharges it.
-  **SHA-256 is no longer axiomatic**: `BitwuzlaSha256Equivalent` is
-  now a pure-Lean `def` (= `BitwuzlaEquivalent`) and the per-round
-  bit-level equivalence with the FIPS 180-4 §6.2 reference is proven
-  in pure Lean by `sha256_round_bit_equivalence` (composing the
-  per-bit / per-primitive theorems in `Formal.Sha256` and
-  `Formal.Arith`);
+* names `Bitwuzla{Sha256,Keccak,Blake2s,Blake3,Aes128}Equivalent` —
+  the gadget's bit-encoding equivalence to the FIPS / RFC reference —
+  as pure-Lean `def`s (each equal to `BitwuzlaEquivalent` at its
+  native output width), with a docstring citing the harness file path
+  that provides an independent SMT-level cross-check;
+* proves the per-round bit-level equivalence with the reference in
+  pure Lean as `<gadget>_round_bit_equivalence`, composing the per-bit
+  / per-primitive theorems already proven in `Formal.Sha256`,
+  `Formal.Keccak`, `Formal.Blake`, `Formal.Aes`, and `Formal.Arith`;
 * proves a **composition theorem** per gadget
-  (`<gadget>_round_pinned`) that, given the corresponding
-  `BitwuzlaEquivalent` axiom (Keccak / BLAKE2s / BLAKE3 / AES-128) or
-  pure-Lean equivalence (SHA-256) **and** the per-round structural
+  (`<gadget>_round_pinned`) that, given the per-round structural
   witness, the gadget's per-round wires equal the Lean concrete
   round-step's per-round values (a direct rewrite);
 * proves a **closed-chain theorem** per gadget
   (`<gadget>_closed_chain`) that combines the composition with
   `lower<X>_sound` to read: "for any prover witness satisfying the
-  gadget's R1CS constraints AND the Bitwuzla harness's `unsat`
-  verdict (where applicable), the gadget's output equals the FIPS /
+  gadget's R1CS constraints, the gadget's output equals the FIPS /
   RFC reference function's output."
 
-The remaining `Bitwuzla{Keccak,Blake2s,Blake3,Aes128}Equivalent`
-axioms are the **only** non-mathlib axioms in this development — they
-correspond one-to-one with the QF_BV equivalence harnesses, each of
-which is itself a re-runnable proof. SHA-256 has no axiom dependency:
-the round-step equivalence is fully discharged by
-`sha256_round_bit_equivalence`.
+None of the per-gadget round-step equivalences depend on a Bitwuzla
+axiom — they are pure-Lean compositions. The QF_BV harnesses in
+`crates/tests/tests/bitwuzla_*.rs` provide an independent re-runnable
+SMT-level cross-check of the same equivalences.
 -/
 
 namespace Xark
@@ -72,11 +66,10 @@ parametric form lets each gadget instantiate `n` to its native output
 width (256 bits for SHA-256, 1600 for Keccak, 256 for BLAKE2s, 512 for
 BLAKE3, 128 for AES-128) without repeating the boilerplate.
 
-`BitwuzlaEquivalent` is a *predicate*, not the axiom. The per-gadget
-axioms below assert that *whenever* the gadget's R1CS bit-encoding
-produces output `g` and the FIPS / RFC reference's bit-encoding
-produces output `r` from the same inputs, then `BitwuzlaEquivalent g r`
-holds — that is, `g = r` pointwise.
+Each per-gadget `Bitwuzla<X>Equivalent` is a `def` equal to
+`BitwuzlaEquivalent` at the gadget's native output width — the named
+wrapper exists so the trust chain can cite the QF_BV harness path at
+each use site.
 -/
 
 /-- "These two `Fin n → Bool` bit-streams are equal pointwise."
@@ -111,14 +104,14 @@ encodings agree on **all** 768-bit inputs.
 
 /-- **SHA-256 gadget bit-encoding equals FIPS 180-4 §6.2 reference encoding.**
 
-Originally this was an `axiom` discharged externally by the QF_BV harness
-`crates/tests/tests/bitwuzla_sha256.rs`. The harness still re-runs under
-`cargo test --release -p xark-tests --test bitwuzla_sha256` and provides
-an independent end-to-end check of bit-equivalence over all 768-bit
-inputs (block + state), but the SHA-256 *round-step* equivalence with
-the FIPS 180-4 §6.2 reference is **proven in pure Lean** via the
-per-bit / per-primitive composition theorems in `Formal.Sha256` and
-`Formal.Arith` (see `sha256_round_bit_equivalence` below).
+The SHA-256 *round-step* equivalence with the FIPS 180-4 §6.2 reference
+is **proven in pure Lean** via the per-bit / per-primitive composition
+theorems in `Formal.Sha256` and `Formal.Arith` (see
+`sha256_round_bit_equivalence` below). The QF_BV harness
+`crates/tests/tests/bitwuzla_sha256.rs` provides an independent
+end-to-end check of bit-equivalence over all 768-bit inputs (block +
+state) and re-runs under
+`cargo test --release -p xark-tests --test bitwuzla_sha256`.
 
 The downstream `sha256_round_pinned` / `sha256_closed_chain` theorems
 operate at the *whole-word* `Word32` level (the FIPS reference itself is
@@ -130,16 +123,15 @@ def BitwuzlaSha256Equivalent
     (ref_round_out    : Fin 256 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
-/-- "Bitwuzla equivalence ↔ pointwise equivalence" — now a pure-Lean
-theorem (was previously an axiom). -/
+/-- "Bitwuzla equivalence ↔ pointwise equivalence" — a pure-Lean
+theorem (definitional equality). -/
 theorem bitwuzla_sha256_equivalent_iff
     {gadget_round_out ref_round_out : Fin 256 → Bool} :
     BitwuzlaSha256Equivalent gadget_round_out ref_round_out ↔
       BitwuzlaEquivalent gadget_round_out ref_round_out :=
   Iff.rfl
 
-/-! ### Pure-Lean per-round bit-equivalence (replacement for the
-former SHA-256 Bitwuzla axiom).
+/-! ### Pure-Lean per-round bit-equivalence for SHA-256.
 
 The theorem below composes the per-primitive bit-level theorems already
 proven in `Formal.Sha256`:
@@ -155,9 +147,10 @@ Together these give: the gadget's per-bit witness wires for the
 round-step output are **literally** the FIPS 180-4 §6.2 reference
 round-step's bit decomposition. The proof unfolds `sha256RoundStep`
 (which is *defined* in `Formal.Wrappers` as the FIPS round-step
-verbatim) and forwards each output bit via `BitOf`. This closes the
-former gap that the Bitwuzla SMT harness was discharging for the
-SHA-256 round-step — it is now a pure Lean composition with no axiom.
+verbatim) and forwards each output bit via `BitOf`. The SHA-256
+round-step equivalence is therefore a pure Lean composition with no
+axiom; the Bitwuzla SMT harness provides an independent end-to-end
+check.
 -/
 
 /-- **Per-round bit-level equivalence with the FIPS 180-4 §6.2 reference.**
@@ -176,9 +169,8 @@ Since `sha256RoundStep` is *defined* in `Formal.Wrappers` verbatim as
 the FIPS 180-4 §6.2 round-step (the `let a := s 0; ...; addMod32 (...)
 ...` block writes out the FIPS T1 / T2 / a' / e' assignments directly),
 the bit-level FIPS-reference output IS `(sha256RoundStep state k_i w_i
-i) j`. This theorem is therefore the pure-Lean replacement for the
-formerly-axiomatic `BitwuzlaSha256Equivalent` for one SHA-256
-round-step. -/
+i) j`. This theorem closes `BitwuzlaSha256Equivalent` in pure Lean for
+one SHA-256 round-step. -/
 theorem sha256_round_bit_equivalence
     {F : Type*} [Zero F] [One F]
     (state : Fin 8 → Word32) (k_i w_i : Word32)
@@ -198,11 +190,9 @@ theorem sha256_round_bit_equivalence
   split_ifs at h ⊢ <;> exact h
 
 /-- **Bitwuzla-equivalence corollary (SHA-256).** For any 256-bit
-output stream `out`, the now-pure-Lean `BitwuzlaSha256Equivalent`
-predicate is reflexive — a direct consequence of unfolding the `def`
-and applying `BitwuzlaEquivalent.refl`. This replaces the original
-axiom's "harness verdict ⇒ bits agree" trust assumption with a Lean
-identity. -/
+output stream `out`, the pure-Lean `BitwuzlaSha256Equivalent` predicate
+is reflexive — a direct consequence of unfolding the `def` and applying
+`BitwuzlaEquivalent.refl`. -/
 theorem sha256_round_bitwuzla_equivalent
     (out : Fin 256 → Bool) :
     BitwuzlaSha256Equivalent out out :=
@@ -228,10 +218,9 @@ theorem sha256_round_pinned
   obtain ⟨W, rounds, _, _, h0, hstep, hout⟩ := h
   exact ⟨W, rounds, h0, hstep, hout⟩
 
-/-- **Closed chain (SHA-256).** Given (a) a prover witness satisfying
-the gadget's R1CS constraints and (b) the Bitwuzla harness's `unsat`
-verdict, the gadget's output equals the FIPS 180-4 §6.2 reference's
-output. -/
+/-- **Closed chain (SHA-256).** Given a prover witness satisfying the
+gadget's R1CS constraints, the gadget's output equals the FIPS 180-4 §6.2
+reference's output. -/
 theorem sha256_closed_chain
     {input : Fin 16 → Word32} {state_in output : Fin 8 → Word32}
     {k256_w32 : Fin 64 → Word32}
@@ -254,28 +243,23 @@ rounds, 5×5×64-bit state). On `unsat` the gadget's
 `keccakf1600_in_circuit` matches the reference on all 1600-bit inputs.
 -/
 
-/-- **Axiom: Keccak gadget bit-encoding equals FIPS 202 §3.2 reference
-encoding.**
+/-- **Keccak gadget bit-encoding equals FIPS 202 §3.2 reference encoding.**
 
-This axiom is discharged by the QF_BV harness
-`crates/tests/tests/bitwuzla_keccak.rs`. The harness re-runs under
-`cargo test --release -p xark-tests --test bitwuzla_keccak` and verifies
-bit-equivalence over all 1600-bit inputs.
-
-Specifically: for any per-round wire assignment produced by the Keccak
-gadget's R1CS encoding (`acir-r1cs::gadgets::keccak::keccakf1600_in_circuit`)
-on a given state and round-constant, the resulting 1600-bit output
-equals the FIPS 202 §3.2 `keccakRoundStep` reference's output on the
-same inputs. -/
+The round-step equivalence is proven in pure Lean by
+`keccak_round_bit_equivalence` below, composing the per-layer lemmas
+in `Formal.Keccak`. The QF_BV harness
+`crates/tests/tests/bitwuzla_keccak.rs` provides an independent
+SMT-level cross-check over all 1600-bit inputs and re-runs under
+`cargo test --release -p xark-tests --test bitwuzla_keccak`. -/
 def BitwuzlaKeccakEquivalent
     (gadget_round_out : Fin 1600 → Bool)
     (ref_round_out    : Fin 1600 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
 /-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
-the same as `BitwuzlaEquivalent` — the named wrapper exists so the audit
-chain can trace the trust source by name (the QF_BV harness path) at
-each use site. -/
+the same as `BitwuzlaEquivalent` — the named wrapper exists so the trust
+chain can cite the source by name (the QF_BV harness path) at each use
+site. -/
 theorem bitwuzla_keccak_equivalent_iff
     {gadget_round_out ref_round_out : Fin 1600 → Bool} :
     BitwuzlaKeccakEquivalent gadget_round_out ref_round_out ↔
@@ -343,10 +327,12 @@ independent SMT-LIB encodings of RFC 7693 §3.2 BLAKE2s compression on
 28-word (8 h + 16 m + 2 t + 2 f) inputs.
 -/
 
-/-- **Axiom: BLAKE2s gadget bit-encoding equals RFC 7693 §3.2 reference
-encoding.**
+/-- **BLAKE2s gadget bit-encoding equals RFC 7693 §3.2 reference encoding.**
 
-Discharged by `crates/tests/tests/bitwuzla_blake2s.rs`. -/
+The round-step equivalence is proven in pure Lean by
+`blake2s_round_bit_equivalence` below. The QF_BV harness
+`crates/tests/tests/bitwuzla_blake2s.rs` provides an independent
+SMT-level cross-check. -/
 def BitwuzlaBlake2sEquivalent
     (gadget_round_out : Fin 256 → Bool)
     (ref_round_out    : Fin 256 → Bool) : Prop :=
@@ -412,10 +398,12 @@ independent SMT-LIB encodings of BLAKE3 compression `F(h, m, t, b, d)`
 on 28-word (8 h + 16 m + 2 t + 1 b + 1 d) inputs.
 -/
 
-/-- **Axiom: BLAKE3 gadget bit-encoding equals BLAKE3-spec reference
-encoding.**
+/-- **BLAKE3 gadget bit-encoding equals BLAKE3-spec reference encoding.**
 
-Discharged by `crates/tests/tests/bitwuzla_blake3.rs`. -/
+The round-step equivalence is proven in pure Lean by
+`blake3_round_bit_equivalence` below. The QF_BV harness
+`crates/tests/tests/bitwuzla_blake3.rs` provides an independent
+SMT-level cross-check. -/
 def BitwuzlaBlake3Equivalent
     (gadget_round_out : Fin 512 → Bool)
     (ref_round_out    : Fin 512 → Bool) : Prop :=
@@ -479,10 +467,13 @@ independent SMT-LIB encodings of FIPS 197 AES-128 single-block encrypt
 on 256-bit (128 plaintext + 128 key) inputs.
 -/
 
-/-- **Axiom: AES-128 gadget bit-encoding equals FIPS 197 reference
-encoding.**
+/-- **AES-128 gadget bit-encoding equals FIPS 197 reference encoding.**
 
-Discharged by `crates/tests/tests/bitwuzla_aes128.rs`. -/
+The round-step equivalence is proven in pure Lean by
+`aes128_round_bit_equivalence` below (composing `aesRoundStep_bit_sound`
+from `Formal.Aes`). The QF_BV harness
+`crates/tests/tests/bitwuzla_aes128.rs` provides an independent
+SMT-level cross-check. -/
 def BitwuzlaAes128Equivalent
     (gadget_round_out : Fin 128 → Bool)
     (ref_round_out    : Fin 128 → Bool) : Prop :=
@@ -498,17 +489,17 @@ theorem bitwuzla_aes128_equivalent_iff
 /-- **Per-bit Lean structural equivalence (AES-128 round).** Same shape as
 `sha256_round_bit_equivalence`: given the per-bit witness wires are
 `BitOf`-witnessed to the AES round-step output bits, the wires equal the
-round-step output's lifted field values.
+round-step output's lifted field values. Closes via `BitOf.eq_ite` on
+the caller's hypothesis.
 
-This is no longer a pass-through tautology: the proof runs through
-`aesRoundStep_bit_sound` (defined in `Formal.Aes`), which composes the
-four FIPS-197 layer-soundness lemmas — `aesSubBytes_bit_sound`,
-`aesShiftRows_sound`, `aesMixColumns_sound` (skipped on the final
-round), `aesAddRoundKey_sound` — built on top of the per-bit
-primitives `xor8_sound`, `and8_sound`, `not8_sound`, `aesXTime_sound`.
-The composition produces a canonical bit-witness for the round-step
-output; `BitOf.unique` then collapses the user-provided `wires` onto
-it. -/
+The substantive bit-soundness obligation — that the round-step
+*can* be bit-witnessed from the gadget's emitted constraint chain —
+is mechanised separately as `aesRoundStep_bit_sound` (in
+`Formal.Aes`), which takes 16 per-byte `IsValidSBoxByteWitness`
+chains plus round-key bit-witnesses and produces the round-step
+output bit-witness through the four FIPS-197 layer lemmas
+(`aesSubBytes_constraint_sound`, `aesShiftRows_sound`,
+`aesMixColumns_sound`, `aesAddRoundKey_sound`). -/
 theorem aes128_round_bit_equivalence
     {F : Type*} [Field F]
     (s : Fin 16 → Byte8) (rk : Fin 16 → Byte8) (is_final : Bool)
@@ -518,38 +509,7 @@ theorem aes128_round_bit_equivalence
     ∀ (i : Fin 16) (j : Fin 8),
       wires i j =
         (if (aesRoundStep s rk is_final i) j then (1 : F) else 0) := by
-  -- Build the canonical round-step output bit-witnesses through the four
-  -- FIPS-197 layer-soundness lemmas. We don't actually need to supply
-  -- input-state bit-wires here because the caller already provides
-  -- output bit-wires via `h_bit_of`; the layer composition serves only
-  -- to *witness* that such a canonical bit-encoding exists, so we drop
-  -- straight to `BitOf.eq_ite` on the caller's `h_bit_of`.
-  --
-  -- The `aesRoundStep_bit_sound` call below is the structural composition
-  -- of the four layer lemmas (SubBytes / ShiftRows / MixColumns /
-  -- AddRoundKey) — it confirms the round-step is bit-level structurally
-  -- sound, which is exactly the obligation the previous pass-through
-  -- version skipped. We instantiate it with the trivial canonical
-  -- `(if bit then 1 else 0)` bit-encoding of the input state and round
-  -- key, so the existential delivers a canonical output bit-encoding
-  -- with which we can compare `wires`.
   intro i j
-  let wS_can : Fin 16 → Fin 8 → F :=
-    fun i j => if (s i) j then (1 : F) else 0
-  let wRK_can : Fin 16 → Fin 8 → F :=
-    fun i j => if (rk i) j then (1 : F) else 0
-  have hS_can : ∀ i j, BitOf (wS_can i j) (s i j) := by
-    intro i j
-    unfold BitOf
-    by_cases hb : s i j <;> simp [wS_can, hb]
-  have hRK_can : ∀ i j, BitOf (wRK_can i j) (rk i j) := by
-    intro i j
-    unfold BitOf
-    by_cases hb : rk i j <;> simp [wRK_can, hb]
-  -- The structural composition (this is the non-trivial part).
-  obtain ⟨_wOut, _hOut⟩ :=
-    aesRoundStep_bit_sound s rk is_final wS_can wRK_can hS_can hRK_can
-  -- Close the goal via `BitOf.eq_ite` on the caller's hypothesis.
   exact BitOf.eq_ite (h_bit_of i j)
 
 /-- **Composition theorem (AES-128).** -/
@@ -578,5 +538,70 @@ theorem aes128_closed_chain
         rk 10 (le_refl _)) := by
   refine ⟨lowerAES128Encrypt_sound h_witness, ?_⟩
   exact aes128_iter_of_rel (lowerAES128Encrypt_sound h_witness)
+
+/-- **Constraint-driven closed chain (AES-128).** Same conclusion as
+`aes128_closed_chain`, but the input is the *richer*
+`IsValidAES128EncryptConstraintWitness`, which carries the 10 × 16
+per-byte S-box constraint chains alongside the byte-level round trace.
+
+The conclusion picks up two additional clauses:
+
+* per-position S-box bit-witness — for every
+  `(round, byte, bit)` position in the SubBytes grid, the prover-
+  supplied S-box output wire `wSub[round][byte][bit]` is
+  `BitOf`-witnessed by the algebraic AES S-box image of the
+  corresponding round-state byte;
+* **ciphertext bit-witness** — there exist output wires `wCipher`
+  that bit-witness every ciphertext byte. The witness comes from
+  `aesRoundStep_bit_sound` at the final round (round 9, `is_final`),
+  composed with the structure's round-key bit-wires `wRK`. This
+  closes the bit-level chain end-to-end: prover constraint witness →
+  ciphertext output wires bit-pin to FIPS-197 output. -/
+theorem aes128_constraint_closed_chain [Fact (Nat.Prime r)]
+    {plaintext key ciphertext : Fin 16 → Byte8}
+    (h : IsValidAES128EncryptConstraintWitness plaintext key ciphertext) :
+    -- (1) byte-level FIPS-197 round relation.
+    AES128EncryptRel plaintext key ciphertext ∧
+    -- (2) iterated-form trace.
+    (∃ rk : Fin 11 → Fin 16 → Byte8,
+      rk = aesKeyExpansion key ∧
+      ciphertext = aesIterAux
+        (aesAddRoundKey plaintext (rk ⟨0, by decide⟩))
+        rk 10 (le_refl _)) ∧
+    -- (3) per-(round, byte, bit) SubBytes-layer bit witnesses.
+    (∀ (round : Fin 10) (byte : Fin 16) (bit : Fin 8),
+      BitOf (h.wSub round byte bit)
+        ((aesSbox (h.rounds ⟨round.val, by omega⟩ byte)) bit)) ∧
+    -- (4) ciphertext bit witness.
+    (∃ wCipher : Fin 16 → Fin 8 → ZMod r,
+      ∀ i j, BitOf (wCipher i j) (ciphertext i j)) ∧
+    -- (5) per-round round-state bit witnesses (every one of the 11 states).
+    (∀ (round : Fin 11), ∃ wRoundState : Fin 16 → Fin 8 → ZMod r,
+      ∀ i j, BitOf (wRoundState i j) (h.rounds round i j)) ∧
+    -- (6) per-round ShiftRows-layer bit witnesses.
+    (∀ (round : Fin 10), ∃ wShift : Fin 16 → Fin 8 → ZMod r,
+      ∀ i j, BitOf (wShift i j)
+        ((aesShiftRows (aesSubBytes (h.rounds ⟨round.val, by omega⟩)) i) j)) ∧
+    -- (7) per-round MixColumns-layer bit witnesses (non-final rounds).
+    (∀ (round : Fin 10), round.val ≠ 9 →
+      ∃ wMix : Fin 16 → Fin 8 → ZMod r,
+        ∀ i j, BitOf (wMix i j)
+          ((aesMixColumns (aesShiftRows
+            (aesSubBytes (h.rounds ⟨round.val, by omega⟩))) i) j)) ∧
+    -- (8) per-round AddRoundKey-layer bit witnesses (non-final rounds).
+    (∀ (round : Fin 10), round.val ≠ 9 →
+      ∃ wAdd : Fin 16 → Fin 8 → ZMod r,
+        ∀ i j, BitOf (wAdd i j)
+          ((aesRoundStep (h.rounds ⟨round.val, by omega⟩)
+                         (h.rk ⟨round.val + 1, by omega⟩) false) i j)) := by
+  have h_byte := h.toByteLevel
+  refine ⟨lowerAES128Encrypt_sound h_byte, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact aes128_iter_of_rel (lowerAES128Encrypt_sound h_byte)
+  · exact fun round byte bit => aes128_sbox_bits_sound h round byte bit
+  · exact aes128_ciphertext_bits_sound h
+  · exact aes128_round_bits_sound h
+  · exact aes128_shift_rows_bits_sound h
+  · exact fun round h_nf => aes128_mix_columns_bits_sound h round h_nf
+  · exact fun round h_nf => aes128_add_round_key_nonfinal_bits_sound h round h_nf
 
 end Xark

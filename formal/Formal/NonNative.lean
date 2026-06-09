@@ -11,7 +11,7 @@ import Formal.Gadgets
 set_option linter.style.header false
 
 /-!
-# xark non-native modular-product soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark non-native modular-product soundness — mechanised in Lean 4 / mathlib
 
 The ECDSA verifier in `crates/acir-r1cs/src/gadgets/ecdsa.rs` evaluates the
 secp256k1 base- and scalar-field arithmetic *inside* a BN254 R1CS. Both
@@ -108,7 +108,7 @@ decomposition pins `c < m` (with `m` positive — vacuous for the secp256k1
 base / scalar moduli, which are large primes), then `c` is exactly the modular
 product `(a · b) % m`. This is the abstract content of what `mul_mod` in
 `gadgets/ecdsa.rs` enforces. -/
-theorem mul_mod_sound (a b q c m : ℕ) (_hm : 0 < m) (hc : c < m)
+theorem mul_mod_sound (a b q c m : ℕ) (hc : c < m)
     (h : a * b = q * m + c) :
     c = (a * b) % m := by
   rw [h, Nat.add_comm, Nat.add_mul_mod_self_right, Nat.mod_eq_of_lt hc]
@@ -173,7 +173,7 @@ theorem mul_mod_via_limbs {n : ℕ} (a b q c m : Fin n → ℕ) (β : ℕ)
     (h : valOfLimbs a β * valOfLimbs b β
           = valOfLimbs q β * valOfLimbs m β + valOfLimbs c β) :
     valOfLimbs c β = (valOfLimbs a β * valOfLimbs b β) % valOfLimbs m β :=
-  mul_mod_sound _ _ _ _ _ hm hc h
+  mul_mod_sound _ _ _ _ _ hc h
 
 /-! ## Carry-no-wrap: column sums and the schoolbook product identity -/
 
@@ -478,7 +478,7 @@ theorem mul_mod_via_limbwise_constraints {n : ℕ} (a b q c m : Fin n → ℕ)
       valOfLimbs_eq_valOfNatLimbs_ext b, valOfLimbs_eq_valOfNatLimbs_ext m]
   rw [valOfLimbs_eq_valOfNatLimbs_ext m] at hm
   rw [valOfLimbs_eq_valOfNatLimbs_ext c, valOfLimbs_eq_valOfNatLimbs_ext m] at hc_lt
-  exact mul_mod_sound _ _ _ _ _ hm hc_lt htele
+  exact mul_mod_sound _ _ _ _ _ hc_lt htele
 
 /-! ## `Fr` ↔ `ℕ` bridge: no-wrap value semantics -/
 

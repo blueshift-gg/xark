@@ -164,7 +164,7 @@ pub fn lower_memory_op(
     memory_blocks: &mut HashMap<BlockId, Vec<ShadowEntry>>,
     opcode_index: usize,
     block_id: BlockId,
-    op: &MemOp<FieldElement>,
+    op: &MemOp,
 ) -> Result<(), BackendError> {
     let shadow =
         memory_blocks
@@ -274,7 +274,7 @@ fn lower_memory_op_variable_index(
     opcode_index: usize,
     index_witness: WitnessIndex,
     value_witness: WitnessIndex,
-    op: &MemOp<FieldElement>,
+    op: &MemOp,
 ) -> Result<(), BackendError> {
     let n = shadow.len();
     if n == 0 {
@@ -520,7 +520,7 @@ mod tests {
             shadow_from_witness(&mut builder, WitnessIndex(100)),
             shadow_from_witness(&mut builder, WitnessIndex(101)),
         ];
-        let op = MemOp::<FieldElement>::read_at_mem_index(Witness(200), Witness(201));
+        let op = MemOp::read_at_mem_index(Witness(200), Witness(201));
         lower_memory_op_variable_index(
             &mut builder,
             &mut shadow,
@@ -554,7 +554,7 @@ mod tests {
             shadow_from_witness(&mut builder, WitnessIndex(100)),
             shadow_from_witness(&mut builder, WitnessIndex(101)),
         ];
-        let op = MemOp::<FieldElement>::read_at_mem_index(Witness(200), Witness(201));
+        let op = MemOp::read_at_mem_index(Witness(200), Witness(201));
         lower_memory_op_variable_index(
             &mut builder,
             &mut shadow,
@@ -596,7 +596,7 @@ mod tests {
             shadow_from_witness(&mut builder, WitnessIndex(101)),
             shadow_from_witness(&mut builder, WitnessIndex(102)),
         ];
-        let write_op = MemOp::<FieldElement>::write_to_mem_index(Witness(200), Witness(201));
+        let write_op = MemOp::write_to_mem_index(Witness(200), Witness(201));
         lower_memory_op_variable_index(
             &mut builder,
             &mut shadow,
@@ -607,7 +607,7 @@ mod tests {
         )
         .unwrap();
 
-        let read_op = MemOp::<FieldElement>::read_at_mem_index(Witness(202), Witness(203));
+        let read_op = MemOp::read_at_mem_index(Witness(202), Witness(203));
         lower_memory_op_variable_index(
             &mut builder,
             &mut shadow,
@@ -647,7 +647,7 @@ mod tests {
             shadow_from_witness(&mut builder, WitnessIndex(101)),
             shadow_from_witness(&mut builder, WitnessIndex(102)),
         ];
-        let write_op = MemOp::<FieldElement>::write_to_mem_index(Witness(200), Witness(201));
+        let write_op = MemOp::write_to_mem_index(Witness(200), Witness(201));
         lower_memory_op_variable_index(
             &mut builder,
             &mut shadow,
@@ -658,7 +658,7 @@ mod tests {
         )
         .unwrap();
 
-        let read_op = MemOp::<FieldElement>::read_at_mem_index(Witness(202), Witness(203));
+        let read_op = MemOp::read_at_mem_index(Witness(202), Witness(203));
         lower_memory_op_variable_index(
             &mut builder,
             &mut shadow,

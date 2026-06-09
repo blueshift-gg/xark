@@ -10,7 +10,7 @@ import Mathlib
 set_option linter.style.header false
 
 /-!
-# xark gadget soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark gadget soundness — mechanised in Lean 4 / mathlib
 
 Machine-checked soundness lemmas for the R1CS gadgets emitted by
 `crates/acir-r1cs`. Each theorem mirrors the *exact* constraints the Rust
@@ -27,9 +27,9 @@ builder enforces, so a proof here is a statement about the real circuit.
   the gadget is **functionally deterministic**: the bit-vector is *uniquely*
   determined by `value` — i.e. the R1CS has no under-constraint slack — as
   long as the width `n ≤ 253 < log₂ r`, so the field sum cannot wrap the
-  BN254 scalar modulus. Under-constraint is the precise bug class Layer B
-  targets (`docs/FORMAL_VERIFICATION_PLAN.md`), and this discharges it for
-  the range gadget over *all* field assignments.
+  BN254 scalar modulus. Under-constraint is the precise bug class these
+  proofs target, and this discharges it for the range gadget over *all* field
+  assignments.
 -/
 
 namespace Xark

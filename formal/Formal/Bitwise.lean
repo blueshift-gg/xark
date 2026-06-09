@@ -10,7 +10,7 @@ import Mathlib
 set_option linter.style.header false
 
 /-!
-# xark bitwise-gadget soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark bitwise-gadget soundness — mechanised in Lean 4 / mathlib
 
 Machine-checked soundness for the bitwise primitives in
 `crates/acir-r1cs/src/gadgets/bitwise.rs`. Each theorem mirrors the *exact*
@@ -24,7 +24,7 @@ things at once:
 
 Stated over any field (in particular `ark_bn254::Fr`), so they hold over *all*
 field assignments — no input bound. See `Formal/Gadgets.lean` for the boolean
-and range gadgets this builds on, and `docs/FORMAL_VERIFICATION_PLAN.md`.
+and range gadgets this builds on.
 -/
 
 namespace Xark

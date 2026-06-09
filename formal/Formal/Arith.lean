@@ -10,7 +10,7 @@ import Formal.Gadgets
 set_option linter.style.header false
 
 /-!
-# xark arithmetic-gadget soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark arithmetic-gadget soundness — mechanised in Lean 4 / mathlib
 
 Soundness for the two carry-based gadgets in
 `crates/acir-r1cs/src/gadgets/bitwise.rs`:
@@ -18,8 +18,8 @@ Soundness for the two carry-based gadgets in
 * `xor_n_inputs` — N-ary XOR via the parity constraint `Σⱼ bⱼ = out + 2·k`.
 * `add_mod_32`   — wrapping 32-bit addition via `Σ inputs = result + 2³²·carry`.
 
-Each emits a single linear R1CS constraint over `ZMod r`. The new content
-relative to `Gadgets.lean`/`Bitwise.lean` is the *carry arithmetic*: that a
+Each emits a single linear R1CS constraint over `ZMod r`. The content
+beyond `Gadgets.lean`/`Bitwise.lean` is the *carry arithmetic*: that a
 small range-checked carry, plus a bounded sum that cannot wrap the modulus `r`,
 forces the output to be the parity (resp. the low 32 bits) of the inputs and
 pins it uniquely. We prove the pure-`ℕ` core (where that arithmetic lives) and,

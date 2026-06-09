@@ -1,9 +1,10 @@
-//! Bitwuzla BLAKE3 compression bit-blasted equivalence harness — Layer B,
-//! track 2 of `docs/FORMAL_VERIFICATION_PLAN.md`.
+//! Bitwuzla BLAKE3 compression bit-blasted equivalence harness.
 //!
 //! Two independent QF_BV encodings of the BLAKE3 compression `F(h, m, t, b, d)`
 //! (BLAKE3 spec). Asserts disagreement on any of 16 output words; UNSAT ⇒
 //! bit-equivalent over all 28-word inputs (8 h + 16 m + 2 t + 1 b + 1 d).
+
+#![allow(clippy::needless_range_loop)]
 
 use std::process::{Command, Stdio};
 
@@ -134,14 +135,110 @@ fn emit_compression(
 
     for round in 0..ROUNDS {
         let s = &MSG_SCHEDULE[round];
-        emit_g(&mut body, prefix, round, 0, &mut v, 0, 4, 8, 12, &m_names[s[0]], &m_names[s[1]]);
-        emit_g(&mut body, prefix, round, 1, &mut v, 1, 5, 9, 13, &m_names[s[2]], &m_names[s[3]]);
-        emit_g(&mut body, prefix, round, 2, &mut v, 2, 6, 10, 14, &m_names[s[4]], &m_names[s[5]]);
-        emit_g(&mut body, prefix, round, 3, &mut v, 3, 7, 11, 15, &m_names[s[6]], &m_names[s[7]]);
-        emit_g(&mut body, prefix, round, 4, &mut v, 0, 5, 10, 15, &m_names[s[8]], &m_names[s[9]]);
-        emit_g(&mut body, prefix, round, 5, &mut v, 1, 6, 11, 12, &m_names[s[10]], &m_names[s[11]]);
-        emit_g(&mut body, prefix, round, 6, &mut v, 2, 7, 8, 13, &m_names[s[12]], &m_names[s[13]]);
-        emit_g(&mut body, prefix, round, 7, &mut v, 3, 4, 9, 14, &m_names[s[14]], &m_names[s[15]]);
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            0,
+            &mut v,
+            0,
+            4,
+            8,
+            12,
+            &m_names[s[0]],
+            &m_names[s[1]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            1,
+            &mut v,
+            1,
+            5,
+            9,
+            13,
+            &m_names[s[2]],
+            &m_names[s[3]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            2,
+            &mut v,
+            2,
+            6,
+            10,
+            14,
+            &m_names[s[4]],
+            &m_names[s[5]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            3,
+            &mut v,
+            3,
+            7,
+            11,
+            15,
+            &m_names[s[6]],
+            &m_names[s[7]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            4,
+            &mut v,
+            0,
+            5,
+            10,
+            15,
+            &m_names[s[8]],
+            &m_names[s[9]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            5,
+            &mut v,
+            1,
+            6,
+            11,
+            12,
+            &m_names[s[10]],
+            &m_names[s[11]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            6,
+            &mut v,
+            2,
+            7,
+            8,
+            13,
+            &m_names[s[12]],
+            &m_names[s[13]],
+        );
+        emit_g(
+            &mut body,
+            prefix,
+            round,
+            7,
+            &mut v,
+            3,
+            4,
+            9,
+            14,
+            &m_names[s[14]],
+            &m_names[s[15]],
+        );
     }
 
     // out[0..8]  = v[0..8] XOR v[8..16]
@@ -211,13 +308,11 @@ fn build_equivalence_smt() -> String {
         s.push_str(&format!("(declare-const {n} (_ BitVec 32))\n"));
     }
 
-    let (ref_body, ref_outs) = emit_compression(
-        "ref_", &h_names, &m_names, "TLOW", "THIGH", "BLEN", "FLAGS",
-    );
+    let (ref_body, ref_outs) =
+        emit_compression("ref_", &h_names, &m_names, "TLOW", "THIGH", "BLEN", "FLAGS");
     s.push_str(&ref_body);
-    let (gad_body, gad_outs) = emit_compression(
-        "gad_", &h_names, &m_names, "TLOW", "THIGH", "BLEN", "FLAGS",
-    );
+    let (gad_body, gad_outs) =
+        emit_compression("gad_", &h_names, &m_names, "TLOW", "THIGH", "BLEN", "FLAGS");
     s.push_str(&gad_body);
 
     let diffs: Vec<String> = (0..16)
@@ -233,7 +328,7 @@ fn blake3_compression_gadget_equals_spec() {
     if !bitwuzla_available() && std::env::var_os("XARK_RUN_BITWUZLA").is_none() {
         eprintln!(
             "bitwuzla: not on PATH and XARK_RUN_BITWUZLA not set — skipping.\n  \
-             Install bitwuzla to run this Layer-B equivalence proof."
+             Install bitwuzla to run this equivalence proof."
         );
         return;
     }

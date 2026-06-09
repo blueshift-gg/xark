@@ -11,7 +11,7 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# secp256k1 in-circuit point-addition soundness (Layer B)
+# secp256k1 in-circuit point-addition soundness
 
 `crates/acir-r1cs/src/gadgets/ecdsa.rs::ec_add_in_circuit` (specialised for the
 secp256k1 curve via `CurveParams::secp256k1()`) adds points on
@@ -78,7 +78,6 @@ witness for `is_infinity` and the gated curve constraint, when `is_infinity = 0`
 we have `y² = x³ + 7`, i.e. `(x, y) ∈ secp256k1`. -/
 theorem gated_on_curve_secp256k1_sound {F : Type*} [Field F]
     (x y is_inf : F)
-    (_hbool : is_inf * (is_inf - 1) = 0)
     (hgate : (1 - is_inf) * (y ^ 2 - x ^ 3 - 7) = 0)
     (hzero : is_inf = 0) :
     y ^ 2 = x ^ 3 + 7 := by
@@ -107,7 +106,7 @@ theorem enforce_on_curve_secp256k1_sound {F : Type*} [Field F]
     · exact Or.inl h
     · exact Or.inr (by linear_combination h)
   rcases hcases with h0 | h1
-  · exact Or.inr (gated_on_curve_secp256k1_sound x y is_inf hbool hgate h0)
+  · exact Or.inr (gated_on_curve_secp256k1_sound x y is_inf hgate h0)
   · exact Or.inl h1
 
 /-! ## Bundled witness predicate
@@ -207,9 +206,9 @@ theorem ec_add_in_circuit_secp256k1_generic_sound {F : Type*} [Field F]
     rw [hy3, h.yg_def, hx3, h.xg_def]
   -- discharge on-curve hypotheses for the two inputs (curve eqn y² = x³ + 7):
   have hC1 : y1 ^ 2 = x1 ^ 3 + 7 :=
-    gated_on_curve_secp256k1_sound x1 y1 0 h.is_inf1_bool h.on_curve1 rfl
+    gated_on_curve_secp256k1_sound x1 y1 0 h.on_curve1 rfl
   have hC2 : y2 ^ 2 = x2 ^ 3 + 7 :=
-    gated_on_curve_secp256k1_sound x2 y2 0 h.is_inf2_bool h.on_curve2 rfl
+    gated_on_curve_secp256k1_sound x2 y2 0 h.on_curve2 rfl
   -- recast to `y² = x³ + a·x + b` form (a = 0, b = 7):
   have hE1 : y1 ^ 2 = x1 ^ 3 + (0 : F) * x1 + 7 := by linear_combination hC1
   have hE2 : y2 ^ 2 = x2 ^ 3 + (0 : F) * x2 + 7 := by linear_combination hC2
@@ -296,9 +295,9 @@ theorem ec_add_in_circuit_secp256k1_sound {F : Type*} [Field F]
           -- need: y1 + y2 = 0. Same argument as Grumpkin but with curve eqn y² = x³ + 7:
           -- y1² = x1³ + 7, y2² = x2³ + 7 = x1³ + 7, so y1² = y2², factor.
           have hC1 : y1 ^ 2 = x1 ^ 3 + 7 :=
-            gated_on_curve_secp256k1_sound x1 y1 0 h.is_inf1_bool h.on_curve1 rfl
+            gated_on_curve_secp256k1_sound x1 y1 0 h.on_curve1 rfl
           have hC2 : y2 ^ 2 = x2 ^ 3 + 7 :=
-            gated_on_curve_secp256k1_sound x2 y2 0 h.is_inf2_bool h.on_curve2 rfl
+            gated_on_curve_secp256k1_sound x2 y2 0 h.on_curve2 rfl
           have hyy : y1 ^ 2 = y2 ^ 2 := by
             rw [hC1, hC2, hxeq]
           have hfact : (y1 - y2) * (y1 + y2) = 0 := by linear_combination hyy

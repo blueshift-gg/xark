@@ -18,6 +18,11 @@ publish = false
 
 [dependencies]
 xark-verifier = { path = "../verifier" }
+# Direct dep so the `#[svm_test]` cdylibs in `tests/differential_alt_bn128.rs`
+# can reach the BN254 group-op API. Already pulled in transitively via
+# `xark-verifier`; promoting to a top-level dep keeps the import path stable
+# and makes the SBF cdylib's resolver pick it up.
+solana-nostd-alt-bn128 = "0.1.0"
 
 [dev-dependencies]
 xark-backend = { path = "../backend", features = ["test-deterministic"] }

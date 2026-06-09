@@ -1,7 +1,5 @@
 name: Bitwuzla (SHA-256 + AES-128 equivalence)
 
-# Layer-B / track 2 of docs/FORMAL_VERIFICATION_PLAN.md.
-#
 # Runs the bit-blasted equivalence proofs in:
 #   * `crates/tests/tests/bitwuzla_sha256.rs` — two QF_BV encodings of the
 #     FIPS 180-4 §6.2 SHA-256 compression (gadget-structure vs clean spec),

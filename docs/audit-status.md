@@ -5,9 +5,7 @@
 This document is the canonical place to track what *has* been internally
 reviewed, what's known to be load-bearing for soundness, and what an
 external auditor should focus on first. Pairs with
-[`security.md`](security.md), which walks the per-gadget soundness claims,
-and [`FORMAL_VERIFICATION_PLAN.md`](FORMAL_VERIFICATION_PLAN.md), which
-tracks the formal-verification roadmap.
+[`security.md`](security.md), which walks the per-gadget soundness claims.
 
 ---
 
@@ -33,7 +31,8 @@ tracks the formal-verification roadmap.
   with a hash-verification step in CI.
 
 ### Test suite
-~250 unit + integration tests across `crates/tests/tests/` including:
+~170 integration tests in `crates/tests/tests/` plus ~120 unit tests across the
+other workspace crates (~290 total), including:
 
 * **KAT cross-checks** against `k256`, `p256`, `sha2`, `keccak`,
   `blake2`, `blake3`, `aes`, `ark-grumpkin`.
@@ -49,7 +48,7 @@ tracks the formal-verification roadmap.
   (AES-128).
 * **Determinism propagation** (`determinism_propagation.rs`,
   CI-gated by `.github/workflows/determinism-prop.yml`) — a Lean-style
-  R1CS under-constraint analyser over BN254 `Fr` (Layer-B / track 1).
+  R1CS under-constraint analyser over BN254 `Fr`.
 * **Lean ↔ R1CS bridge** (`lean_r1cs_bridge.rs`, 11/11 pass) — for
   each gadget, materialises the R1CS, walks every row, classifies it
   into one of five Lean-modeled shapes (Boolean / MulCSingle / MulCEmpty /
@@ -74,8 +73,8 @@ tracks the formal-verification roadmap.
 
 ### Lean 4 / mathlib formal proofs (`formal/`)
 
-Layer-B per-gadget soundness, plus a large fraction of Layer-A and the
-ACIR meta-theorem. CI-gated by `.github/workflows/lean.yml`; the
+Per-gadget soundness, plus a large fraction of the on-chain-verifier proofs
+and the ACIR meta-theorem. CI-gated by `.github/workflows/lean.yml`; the
 axiom check rejects any proof depending on `sorryAx`.
 
 Coverage (theorem names → modules):
@@ -130,10 +129,12 @@ Coverage (theorem names → modules):
   snapshot history into the spec relation by induction over rounds
   (`Formal.Wrappers`).
 * **Bitwuzla composition** — `<X>_round_pinned` and `<X>_closed_chain`
-  per hash/cipher: combines the substantive wrapper with the QF_BV
-  bit-equivalence axiom (one per gadget; each axiom's docstring cites
-  the specific Bitwuzla harness file) into a single audit-readable
-  chain (`Formal.BitwuzlaCompose`).
+  per hash/cipher: combine the substantive wrapper with the per-gadget
+  pure-Lean `<X>_round_bit_equivalence` (Keccak / BLAKE2s / BLAKE3 /
+  AES-128 / SHA-256) into a single auditable chain
+  (`Formal.BitwuzlaCompose`). Each gadget's QF_BV harness in
+  `crates/tests/tests/bitwuzla_*.rs` provides an independent SMT-level
+  cross-check.
 * **Allocation bookkeeping** — `AllocState`, `alloc_witness_idempotent`,
   `alloc_witness_injective`, `AllocState.alloc_preserves_invariant`,
   `read/write_const_index_correct` (`Formal.Bookkeeping`).
@@ -141,10 +142,10 @@ Coverage (theorem names → modules):
   `buildInstance_eq_w_on_pub` (canonical-construction discharge) +
   `alloc_state_pins_public_inputs` (bookkeeping bridge)
   (`Formal.AdvancedGadgets`).
-* **Verifier (Layer-A) — Kani** — canonicality, fail-closed (every
+* **Verifier — Kani** — canonicality, fail-closed (every
   structural error path returns `Err` ≠ `Ok(true)`), strict
-  non-malleability, arity, plus the recently-added totality with
-  curve-op stubs (`totality_verify_groth16`, `totality_verify_proof_only`)
+  non-malleability, arity, totality with curve-op stubs
+  (`totality_verify_groth16`, `totality_verify_proof_only`),
   and pairing operand-assembly (`pairing_operand_assembly`); see
   `#[cfg(kani)] mod proofs` in `crates/verifier/src/verifier.rs` and
   the CI workflow at `.github/workflows/kani.yml`.
@@ -155,7 +156,7 @@ axioms (`propext`, `Classical.choice`, `Quot.sound`) are allowed.
 
 ### Trusted base additions (axiomatised)
 
-Five axioms are declared in `formal/`, each documented at its
+Three axioms are declared in `formal/`, each documented at its
 declaration site:
 
 | Axiom | Scope | Why |
@@ -163,12 +164,81 @@ declaration site:
 | `secp256k1_p_prime : Fact (Nat.Prime secp256k1_p)` | 256-bit prime | Lean's kernel can't `decide` 256-bit primality; verifiable via `openssl prime`. |
 | `secp256r1_p_prime : Fact (Nat.Prime secp256r1_p)` | 256-bit prime | Same as above. |
 | `bn254_r_prime : Fact (Nat.Prime r)` | 254-bit prime | BN254 `Fr` modulus; used by `GrumpkinPoint` and the existing field instances. |
-| `secp256k1_phi_preserves_nonsingular` | curve automorphism | `φ(x,y) = (β·x, y)` preserves the secp256k1 nonsingularity predicate. Algebraically follows from `β³ = 1`; axiomatised so the concrete `secp256k1_phi` definition lands. |
-| `Bitwuzla<X>Equivalent` (5 axioms, one per hash/cipher) | bit-equivalence | Each is discharged by a specific `crates/tests/tests/bitwuzla_*.rs` harness via `unsat`. The axiom's docstring cites the harness path. |
 
 These are the only `axiom` declarations in `formal/`. No `sorry` /
 `sorryAx`. The `lean.yml` axiom check prints `#print axioms` for every
 load-bearing theorem and fails CI if any depends on `sorryAx`.
+
+### `native_decide` axioms
+
+The GF(2^8) algebraic infrastructure in `Formal.GF256` (used by the
+AES S-box reasoning) verifies key identities by exhaustive computation
+over the 256-element byte range — `gf256_mul_inv` (`x · x⁻¹ = 1` for
+255 nonzero bytes), `gf256_inv_unique` (`x · y = 1 → y = x⁻¹` over
+65 536 byte pairs), `aesSbox_algebraic_eq_table` (the algebraic
+`Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]` identity over all 256 bytes).
+These use `native_decide`, which adds `Lean.ofReduceBool`-style
+axioms to the trace — strictly weaker than the `axiom` form, since
+the propositions are pure computations that the compiled bytecode
+deterministically evaluates.
+
+### AES S-box bit-level soundness
+
+The AES S-box gadget uses a **GF(2^8) multiplicative-inverse trick +
+affine transform** (`s_box_in_circuit` in `gadgets/aes.rs`). The
+gadget allocates `x_inv` and `is_zero` boolean wires, enforces the
+multiplicative-inverse identity via cross-product/XOR constraints,
+and emits the FIPS-197 affine transform as a per-bit XOR chain.
+
+The algebraic identities the gadget relies on — that the
+cross-product/XOR chain *equals* GF(2^8) multiplication; that the
+constraint `gf256_mul x x_inv = 1` uniquely pins
+`x_inv = gf256_inv x`; that `Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]` —
+are **mechanically verified** in `Formal.GF256` by `native_decide`
+over the 256-element finite range (see above).
+
+The **per-row bridge** from the gadget's `Fr`-level constraint
+emission (the 64 cross-product linear constraints, the 8
+parity-decomposition carry chains, the 8 affine XOR-chains) to the
+GF(2^8) statements above is now mechanised in `Formal.Aes`:
+
+* **`IsValidSBoxByteWitness`** (structure) — encodes the gadget's
+  full per-byte constraint chain over `Fr` (booleanness of all wires,
+  `x · is_zero = 0`, `x_inv · is_zero = 0`, the 64 cross-products
+  `wP a b = wX a · wX_inv b`, the 8 parity-decomposition rows giving
+  `prod_bits[k]`, the constraints `prod_bits[0] = 1 − is_zero` and
+  `prod_bits[k] = 0` for `k ≠ 0`, and the 8 affine XOR-with-`0x63`
+  parity rows for the output bits).
+* **`aesSbox_byte_constraint_sound`** (theorem) — from
+  `IsValidSBoxByteWitness x …`, concludes
+  `∀ j, BitOf (wOut j) ((aesSbox x) j)`. The substantive proof body
+  routes through `byteWireToNat_wX_inv_eq_gf256_inv` (the gadget's
+  emitted constraints force the prover-supplied `x_inv` bits to
+  recompose to `gf256_inv (byteToNat x)`) and `gf256_bit_aesAffine_nat`
+  + `gf256_bit_xor_byte` (the affine + XOR identity at the bit
+  level), composed with `byteToNat_aesSbox` (the algebraic ↔ table
+  identity from `Formal.GF256`).
+* **`aesSubBytes_constraint_sound`** (theorem) — the 16-byte lift to
+  the full SubBytes layer.
+
+The `Fr → ℕ` no-wrap argument is the same shape as
+`Formal.Blake.addMod32_bit_sound` (BLAKE's `addMod32` carry-chain at
+the Word32 level), applied at the per-byte cross-product / parity
+chain level here.
+
+`aesRoundStep_bit_sound` consumes `IsValidSBoxByteWitness ×16`
+directly (via `aesSubBytes_constraint_sound`) — there is no
+canonical-lift / existential intermediate step in the AES round
+chain. The trust that the gadget's emitted R1CS *forces* the
+prover-supplied output wires to satisfy `IsValidSBoxByteWitness`
+(i.e., that the structure's fields match the constraint rows the
+Rust gadget actually emits) rests on:
+
+* the Rust exhaustive unit test `sbox_all_inputs_match_table` in
+  `gadgets/aes.rs::tests` (every input byte → gadget output equals
+  `SBOX[x]`);
+* the bitwuzla harness `crates/tests/tests/bitwuzla_aes128.rs`
+  (bit-blast over all inputs against FIPS-197).
 
 This is **not** an external audit. Until an external firm has reviewed
 the code, the README's "experimental — do not use in production" label
@@ -201,10 +271,10 @@ correctness of:
 * GLV decomposition (`glv_decompose_in_circuit`) — proves
   `k = k1 + λ·k2 (mod n)` with `|k1|, |k2| < 2^129`. Algebraic kernel
   proven (`Formal.Glv.glv_via_endomorphism` +
-  `glv_endomorphism_correct`); concrete `secp256k1_phi` definition
-  + eigenvalue computation are documented in
-  `Formal.Secp256k1Group` (the homomorphism + eigenvalue proofs are
-  the residual obligations for full discharge).
+  `glv_endomorphism_correct`); concrete `secp256k1_phi` definition,
+  homomorphism proof, and eigenvalue computation discharged in
+  `Formal.Secp256k1Group` (`secp256k1_phi_hom`,
+  `secp256k1_phi_eigenvalue_at_G`, `secp256k1_phi_acts_as_lambda`).
 * The fixed-base comb tables for `u1·G` — algebraic core proven
   (`Formal.AdvancedGadgets.windowed_scalar_mul_sound`); the comb-row-2
   doubling exception is in scope of the same proof.
@@ -258,12 +328,11 @@ axioms only) and combined with cross-circuit `Call` inlining in
   `Formal.Bookkeeping.read/write_const_index_correct`.
 * Heterogeneous opcode list-fold composition — the unified
   `AcirOpcode` inductive + `lowerAcirOpcode` + the per-arm soundness
-  theorems compose into row-by-row whole-circuit soundness over the
-  four heterogeneous arms (linear, full, linear-shifted, brillig).
-  BlackBox / MemoryOp / MemoryInit reduce within the lowering to these
-  arms via the per-gadget wrappers.
+  theorems compose into row-by-row whole-circuit soundness over all
+  nine heterogeneous arms (linear, full, linearShifted, brillig,
+  blackBox, memoryInit, memoryOpRead, memoryOpWrite, call).
 
-### 5. Trusted-setup ceremony (`xark-backend/src/setup_phase2.rs`, `ceremony.rs`, `ptau.rs`)
+### 5. Trusted-setup ceremony (`crates/backend/src/setup_phase2.rs`, `ceremony.rs`, `ptau.rs`)
 
 * `.ptau` admissibility checks — degree match, subgroup membership,
   pairing-consistency, etc.
@@ -277,7 +346,7 @@ All four enforcement paths (Schnorr-PoK, transcript chain, δ
 consistency, dev-mode guard) are pinned by
 `crates/tests/tests/ceremony_enforcement.rs` (10/10 pass).
 
-### 6. Serialisation boundaries (`xark-backend/src/{serialization,solana}.rs`)
+### 6. Serialisation boundaries (`crates/backend/src/{serialization,solana}.rs`)
 
 * Binary VK/proof format — pinned by
   [`serialization.md`](serialization.md) and snapshot-tested.
@@ -318,7 +387,7 @@ SHA-256 in `expected.sha256` verified in CI by
 | Component | Mitigation |
 |---|---|
 | `nargo` / ACVM correctness | Pin the version, document known limitations, fuzz the ACIR output. |
-| `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential fuzzing (run CPU-weeks under OSS-Fuzz). |
+| `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test: `crates/tests/tests/differential_alt_bn128.rs` evaluates the same fixed test vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change. Each new vector in either `G1_ADD_VECTORS` / `G1_MUL_VECTORS` / `G2_ADD_VECTORS` / `PAIRING_2_VECTORS` adds a differential anchor without changing the scaffolding. Extending to CPU-weeks of OSS-Fuzz is a follow-up. |
 | Arkworks Groth16 | Cite published Groth16 mechanisations (e.g. Microsoft's verified Groth16 in F*); no in-repo proof. |
 | Lean kernel + mathlib | Trusted base; replace via Coq cross-check if extreme confidence requires. |
 | `rustc` / `cargo` / `lake` / `bitwuzla` / `Kani` / CBMC | Toolchain trust. |

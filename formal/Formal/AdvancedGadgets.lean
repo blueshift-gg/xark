@@ -12,48 +12,33 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# Advanced scalar-multiplication gadgets + public-input flow (Gaps 5b, 5c, 7)
+# Advanced scalar-multiplication gadgets + public-input flow
 
-Three composition theorems that previously appeared as stubs in
-`Formal.Glv` (5b, 5c) and as informal remarks in
-`docs/FORMAL_VERIFICATION_PLAN.md` (7).
+Three composition theorems building on `Formal.Glv` + `Formal.Bookkeeping`:
 
-* **Gap 5b — `windowed_scalar_mul_sound`.** A fixed-base comb table
-  reconstructs `s • G`. Given a precomputed lookup table
-  `T : Fin (2 ^ w) → G` with `T i = i.val • G`, and a sequence of
-  `w`-bit windows `bits : Fin n → Fin (2 ^ w)`, the cumulative sum
-  `Σⱼ 2 ^ (w * j) • T (bits j)` equals `s • G` where
-  `s = Σⱼ 2 ^ (w * j) * (bits j).val`. The proof is a one-shot
-  `Finset.sum` manipulation: replace `T (bits j)` with the spec, pull
-  the `2 ^ (w * j)` factor inside, and combine the two `•` into one
-  via `mul_nsmul'`.
+* **`windowed_scalar_mul_sound`** — fixed-base comb table reconstructs `s • G`.
+  Given a precomputed lookup table `T : Fin (2 ^ w) → G` with `T i = i.val • G`,
+  and a sequence of `w`-bit windows `bits : Fin n → Fin (2 ^ w)`, the
+  cumulative sum `Σⱼ 2 ^ (w * j) • T (bits j)` equals `s • G` where
+  `s = Σⱼ 2 ^ (w * j) * (bits j).val`.
 
-* **Gap 5c — `joint_strauss_shamir_correct`.** The interleaved LSB-first
-  double-and-add ladder for `u₁ • P + u₂ • Q` is correct. State a 2-way
-  invariant analogous to `Formal.Ecdsa.ladder_step_correct`: each step
-  advances the accumulator by `b₁ • P + b₂ • Q` and doubles the running
-  base points; folding the step from `(0, P, Q)` over a list of bit
-  pairs yields `bitsToNat bs1 • P + bitsToNat bs2 • Q`. The savings vs
-  two independent ladders are a layer-A constant-folding optimisation
-  (sharing the doubling cost); the algebraic identity proved here is
-  the soundness statement.
+* **`joint_strauss_shamir_correct`** — interleaved LSB-first double-and-add
+  ladder for `u₁ • P + u₂ • Q`. A 2-way per-step invariant
+  `(acc, P, Q) ↦ (acc + b₁ • P + b₂ • Q, 2 • P, 2 • Q)` folds over a list of
+  bit pairs to yield `bitsToNat bs1 • P + bitsToNat bs2 • Q`.
 
-* **Gap 7 — public-input flow consistency
-  (`public_input_projection_consistent`).** Given an ACIR witness map
-  `w : ℕ → F` and a list `pub : List ℕ` of public-input indices, the
-  projection `pub.map w` equals the R1CS instance vector for the same
-  indices. This is the cross-cutting `List.map`-equality piece: the
-  witness-index bijection is already discharged by
-  `alloc_witness_idempotent` and `alloc_witness_injective` in
-  `Formal.Bookkeeping`, and what remains is the (trivial) statement
-  that two `List.map`s with the same function and list agree pointwise.
+* **`public_input_projection_consistent`** — the projection `pub.map w` equals
+  the R1CS instance vector when the witness map agrees with the instance at
+  every public-input slot. The witness-index bijection itself is discharged
+  by `alloc_witness_idempotent` and `alloc_witness_injective` in
+  `Formal.Bookkeeping`.
 -/
 
 namespace Xark
 
-/-! ## Gap 5b — windowed (comb-scan) scalar-mul soundness -/
+/-! ## Windowed (comb-scan) scalar-mul soundness -/
 
-/-- **Gap 5b — windowed comb-scan scalar-mult soundness.** Let `G` be an
+/-- **Windowed comb-scan scalar-mult soundness.** Let `G` be an
 additive commutative group, `P : G` a base point, `w n : ℕ` window width
 and window count, `bits : Fin n → Fin (2 ^ w)` the window digits of a
 scalar (each in `[0, 2 ^ w)`), and `T : Fin (2 ^ w) → G` a precomputed
@@ -87,7 +72,7 @@ theorem windowed_scalar_mul_sound {G : Type*} [AddCommGroup G]
   simp_rw [hstep]
   exact Finset.sum_nsmul_assoc _ _ _
 
-/-! ## Gap 5c — 2-way joint Strauss-Shamir ladder soundness -/
+/-! ## 2-way joint Strauss-Shamir ladder soundness -/
 
 /-- One step of the LSB-first 2-way joint Strauss-Shamir ladder, as a
 pure function on the ambient additive group `G`. Mirrors the per-bit
@@ -185,7 +170,7 @@ theorem joint_ladder_foldl_correct {G : Type*} [AddCommGroup G] :
       have h2Q : (Q + Q) = (2 : ℕ) • Q := by rw [two_nsmul]
       rw [h2Q, ← mul_nsmul', List.length_cons, pow_succ]
 
-/-- **Gap 5c — 2-way joint Strauss-Shamir ladder soundness.** Running the
+/-- **2-way joint Strauss-Shamir ladder soundness.** Running the
 joint ladder from the seed state `(0, P, Q)` over an LSB-first list of
 bit pairs yields the accumulator `bitsToNat bs1 • P + bitsToNat bs2 • Q`
 where `bs1 = bs.map Prod.fst` and `bs2 = bs.map Prod.snd`. In
@@ -209,9 +194,9 @@ theorem joint_strauss_shamir_correct {G : Type*} [AddCommGroup G]
   rw [zero_add] at h1
   exact h1
 
-/-! ## Gap 7 — public-input flow consistency -/
+/-! ## Public-input flow consistency -/
 
-/-- **Gap 7 — public-input projection consistency.** Given an ACIR
+/-- **Public-input projection consistency.** Given an ACIR
 witness map `w : ℕ → F` and a list `pub : List ℕ` of public-input
 witness indices, the projection `pub.map w` equals the R1CS instance
 vector built by reading the same indices from the same witness map.
@@ -230,7 +215,7 @@ theorem public_input_projection_consistent
     pub.map inst = pub.map w := by
   exact List.map_congr_left h_inst
 
-/-! ### Item 7 — `h_inst` derived from canonical allocation bookkeeping -/
+/-! ### `h_inst` derived from canonical allocation bookkeeping -/
 
 /-- **Canonical instance-vector construction.** Reads `w` at every
 public-input slot, defaults to zero outside. Mirrors what
@@ -247,7 +232,7 @@ theorem buildInstance_eq_w_on_pub {F : Type*} [Zero F]
   unfold buildInstance
   simp [hi]
 
-/-- **Item 7 — discharged form.** When the instance vector is
+/-- **Discharged form: canonical-construction consistency.** When the instance vector is
 `buildInstance w pub`, consistency holds without a separate hypothesis. -/
 theorem public_input_projection_consistent_canonical {F : Type*} [Zero F]
     (w : ℕ → F) (pub : List ℕ) :
@@ -255,17 +240,32 @@ theorem public_input_projection_consistent_canonical {F : Type*} [Zero F]
   public_input_projection_consistent w (buildInstance w pub) pub
     (buildInstance_eq_w_on_pub w pub)
 
-/-- **Bookkeeping bridge.** Given an `AllocState` where every
-public-input index has been allocated, the canonical instance vector
-agrees with the witness map on every slot. Links Item 7 to the
-`Formal.Bookkeeping` allocator. -/
-theorem alloc_state_pins_public_inputs {F : Type*} [Zero F]
-    (w : ℕ → F) (pub : List ℕ) (m : AllocState)
-    (_h_alloc : ∀ i ∈ pub, ∃ v, m.assigned i = some v) :
-    ∀ i ∈ pub, buildInstance w pub i = w i :=
-  buildInstance_eq_w_on_pub w pub
+/-- **Bookkeeping bridge.** The R1CS-side instance vector matches the
+canonical ACIR-side instance vector at every public-input slot.
 
-/-! ### Item 3(a) — bridge between `buildInstance` and `lower::synthesize`'s PI construction
+`w` is the ACIR witness map (`ℕ → F` over ACIR witness indices), `wR` is the
+R1CS witness map (`ℕ → F` over R1CS variable indices), and `m : AllocState`
+is the allocator from `Formal.Bookkeeping` that binds ACIR indices to R1CS
+variables (`m.assigned i = some k` means ACIR index `i` was allocated to
+R1CS variable `k`).
+
+Under (a) every public input is allocated and (b) the R1CS witness at each
+allocated variable equals the ACIR witness at the source index — the
+coherence condition the prover/verifier establish by construction — the
+R1CS-side instance vector (`wR ∘ varOf`) equals the canonical
+`buildInstance w pub` on every slot `i ∈ pub`. -/
+theorem alloc_state_pins_public_inputs {F : Type*} [Zero F]
+    (w wR : ℕ → F) (pub : List ℕ) (m : AllocState)
+    (h_alloc : ∀ i ∈ pub, ∃ k, m.assigned i = some k)
+    (h_coh : ∀ i k, m.assigned i = some k → wR k = w i)
+    (i : ℕ) (hi : i ∈ pub) :
+    ∃ k, m.assigned i = some k ∧ wR k = buildInstance w pub i := by
+  obtain ⟨k, hk⟩ := h_alloc i hi
+  refine ⟨k, hk, ?_⟩
+  rw [buildInstance_eq_w_on_pub w pub i hi]
+  exact h_coh i k hk
+
+/-! ### Bridge between `buildInstance` and `lower::synthesize`'s PI construction
 
 `lower::synthesize` (in `crates/acir-r1cs/src/lower.rs`) populates the
 constraint system's instance vector by walking the artifact's
@@ -298,10 +298,9 @@ def synthesizeInstance {F : Type*} [Zero F] (w : ℕ → F) (pub : List ℕ) : �
   fun i => if i ∈ pub then w i else 0
 
 /-- **`synthesizeInstance` equals `buildInstance`** by `rfl` — both
-functions encode the same construction, the only difference being the
-namespacing (the canonical Lean-side `buildInstance` is what we proved
-the consistency theorem about; `synthesizeInstance` is the audit-doc
-name that explicitly cites the Rust loop being mirrored). -/
+functions encode the same construction; the named wrapper exists so
+the trust chain can cite the Rust loop being mirrored at each use
+site. -/
 theorem synthesizeInstance_eq_buildInstance {F : Type*} [Zero F]
     (w : ℕ → F) (pub : List ℕ) :
     synthesizeInstance w pub = buildInstance w pub := rfl

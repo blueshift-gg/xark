@@ -21,7 +21,7 @@ set_option linter.flexible false
 set_option maxHeartbeats 400000
 
 /-!
-# Per-opcode end-to-end soundness wrappers (Gap 3 of `docs/FORMAL_VERIFICATION_PLAN.md`)
+# Per-opcode end-to-end soundness wrappers
 
 For each `BlackBoxFuncCall` opcode that xark lowers, this file packages
 the already-proven per-primitive theorems into a single top-level "the
@@ -94,7 +94,7 @@ def byteToNat (b : Byte8) : ℕ :=
 /-- `ℕ` → byte, taking the low 8 bits. -/
 def byteOfNat (n : ℕ) : Byte8 := fun i => (n / 2 ^ i.val) % 2 = 1
 
-/-! ## Gap 3a — SHA-256 compression wrapper
+/-! ## SHA-256 compression wrapper
 
 The witness predicate captures the direct fold-form computation: there
 exists a schedule `W` satisfying the FIPS recurrence and the output is
@@ -223,7 +223,7 @@ theorem sha256_iter_of_rel
   intro i
   rw [hout i, hsnap 64 (le_refl _)]
 
-/-! ## Gap 3b — Keccak-f[1600] permutation wrapper
+/-! ## Keccak-f[1600] permutation wrapper
 
 `keccakRoundStep` is the concrete FIPS 202 §3.2 round transformation
 `ι ∘ χ ∘ π ∘ ρ ∘ θ`, written as a pure function over `Fin 25 → Word64`.
@@ -371,7 +371,7 @@ theorem keccakf1600_iter_of_rel
   rw [hout, hsnap 24 (le_refl _)]
   rfl
 
-/-! ## Gap 3c — BLAKE2s wrapper
+/-! ## BLAKE2s wrapper
 
 RFC 7693 §3.1: the round structure is `G(a, b, c, d, x, y)` applied
 eight times per round per the σ permutation. We define the G mix and
@@ -537,7 +537,7 @@ theorem blake2s_iter_of_rel
   · intro i; right; trivial
   · exact hsnap 10 (le_refl _)
 
-/-! ## Gap 3d — BLAKE3 compression wrapper
+/-! ## BLAKE3 compression wrapper
 
 BLAKE3 spec §2.1: same G-mix as BLAKE2s but with a different message
 permutation, 7 rounds.
@@ -656,7 +656,7 @@ theorem blake3_iter_of_rel
       rw [ihn]
   exact ⟨rounds ⟨0, by decide⟩, rounds ⟨7, by decide⟩, hsnap 7 (le_refl _)⟩
 
-/-! ## Gap 3e — AES-128 single-block encrypt wrapper
+/-! ## AES-128 single-block encrypt wrapper
 
 FIPS 197: AES-128 has 10 rounds of `SubBytes → ShiftRows → MixColumns →
 AddRoundKey`, with MixColumns skipped on the final round, plus an
@@ -882,7 +882,7 @@ theorem aes128_iter_of_rel
   refine ⟨rk, hrk, ?_⟩
   rw [hout, hsnap 10 (le_refl _)]
 
-/-! ## Gap 3f — Poseidon2 permutation wrapper -/
+/-! ## Poseidon2 permutation wrapper -/
 
 /-- Poseidon2 permutation spec relation. -/
 def Poseidon2PermutationRel (state_in state_out : Fin 4 → Bn254Fr) : Prop :=
@@ -899,7 +899,7 @@ theorem lowerPoseidon2Permutation_sound
     (h : IsValidPoseidon2PermutationWitness state_in state_out) :
     Poseidon2PermutationRel state_in state_out := h
 
-/-! ## Gap 3g — EmbeddedCurveAdd + MultiScalarMul wrappers -/
+/-! ## EmbeddedCurveAdd + MultiScalarMul wrappers -/
 
 /-- EmbeddedCurveAdd spec relation. -/
 def EmbeddedCurveAddRel {F : Type*} [Field F]
@@ -943,7 +943,7 @@ theorem lowerMultiScalarMul_sound {G : Type*} [AddCommGroup G]
     (h : IsValidMultiScalarMulWitness points scalars output) :
     MultiScalarMulRel points scalars output := h
 
-/-! ## Gap 3h — ECDSA secp256k1 / secp256r1 wrappers -/
+/-! ## ECDSA secp256k1 / secp256r1 wrappers -/
 
 /-- **End-to-end soundness wrapper for ECDSA-secp256k1 verification.** -/
 theorem lowerEcdsaSecp256k1_sound

@@ -19,7 +19,7 @@ set_option linter.flexible false
 set_option maxHeartbeats 400000
 
 /-!
-# xark Keccak-f[1600] structural soundness — Layer B, mechanised in Lean 4 / mathlib
+# xark Keccak-f[1600] structural soundness — mechanised in Lean 4 / mathlib
 
 This file builds the **structural** soundness layer for the Keccak-f[1600]
 permutation in `crates/acir-r1cs/src/gadgets/keccak.rs`. It is the Keccak
@@ -35,9 +35,9 @@ The concrete `keccakRoundStep` is defined in `Formal/Wrappers.lean`; this
 file does *not* redefine it — `keccakRoundStep_bit_sound` operates over the
 existing definition.
 
-What this file does *not* do: it does **not** bit-blast Keccak-f[1600]. As
-per `docs/FORMAL_VERIFICATION_PLAN.md` the end-to-end bit-encoding equality
-between the gadget and the FIPS 202 reference (over all 1600-bit inputs) is
+What this file does *not* do: it does **not** bit-blast Keccak-f[1600].
+The end-to-end bit-encoding equality between the gadget and the FIPS 202
+reference (over all 1600-bit inputs) is
 discharged by the QF_BV harness `crates/tests/tests/bitwuzla_keccak.rs`.
 What this file adds is the per-round per-bit structural composition — the
 analogue of `sha256_round_bit_equivalence` for Keccak, but instead of being
@@ -45,8 +45,6 @@ a `split_ifs` pass-through the proof composes through the actual five
 layers, so the resulting axiom-trace mentions `xor64_sound`, `and64_sound`,
 `not64_sound`, etc.
 -/
-
--- (imports moved to top per Lean convention)
 
 namespace Xark
 

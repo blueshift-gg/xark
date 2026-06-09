@@ -5,7 +5,7 @@
 //! diagonal, S-box exponent (`x^5`), state width (`t = 4`), and round structure
 //! (`R_F = 8` full rounds, `R_P = 56` partial rounds) all match the canonical
 //! BN254 reference implementation from
-//! `acvm-repo/bn254_blackbox_solver/src/poseidon2.rs` in Noir v1.0.0-beta.21.
+//! `acvm-repo/bn254_blackbox_solver/src/poseidon2.rs` in Noir v1.0.0-beta.22.
 //!
 //! Round structure (mirrors Noir / Barretenberg):
 //!

@@ -149,13 +149,9 @@ pub fn lower_black_box(
 /// output witnesses.
 fn lower_embedded_curve_add(
     builder: &mut R1csBuilder<'_>,
-    input1: &[FunctionInput<FieldElement>; 3],
-    input2: &[FunctionInput<FieldElement>; 3],
-    outputs: &(
-        acir::native_types::Witness,
-        acir::native_types::Witness,
-        acir::native_types::Witness,
-    ),
+    input1: &[FunctionInput<FieldElement>; 2],
+    input2: &[FunctionInput<FieldElement>; 2],
+    outputs: &(acir::native_types::Witness, acir::native_types::Witness),
 ) -> Result<(), SynthesisError> {
     let p1 = resolve_curve_point(builder, input1)?;
     let p2 = resolve_curve_point(builder, input2)?;
@@ -170,26 +166,22 @@ fn lower_multi_scalar_mul(
     builder: &mut R1csBuilder<'_>,
     points: &[FunctionInput<FieldElement>],
     scalars: &[FunctionInput<FieldElement>],
-    outputs: &(
-        acir::native_types::Witness,
-        acir::native_types::Witness,
-        acir::native_types::Witness,
-    ),
+    outputs: &(acir::native_types::Witness, acir::native_types::Witness),
 ) -> Result<(), SynthesisError> {
-    if points.len() % 3 != 0 || scalars.len() % 2 != 0 {
+    if points.len() % 2 != 0 || scalars.len() % 2 != 0 {
         tracing::error!(
-            "MultiScalarMul: points.len() ({}) must be a multiple of 3 and scalars.len() ({}) \
- must be a multiple of 2",
+            "MultiScalarMul: points.len() ({}) and scalars.len() ({}) must both be \
+ multiples of 2 (each point is (x, y); each scalar is (lo, hi))",
             points.len(),
             scalars.len(),
         );
         return Err(SynthesisError::Unsatisfiable);
     }
-    let n_pts = points.len() / 3;
+    let n_pts = points.len() / 2;
     let n_sc = scalars.len() / 2;
     if n_pts != n_sc {
         tracing::error!(
-            "MultiScalarMul: points/3 ({}) != scalars/2 ({})",
+            "MultiScalarMul: points/2 ({}) != scalars/2 ({})",
             n_pts,
             n_sc,
         );
@@ -198,9 +190,8 @@ fn lower_multi_scalar_mul(
 
     let mut curve_points: Vec<CurvePoint> = Vec::with_capacity(n_pts);
     for i in 0..n_pts {
-        let triple: [&FunctionInput<FieldElement>; 3] =
-            [&points[3 * i], &points[3 * i + 1], &points[3 * i + 2]];
-        let p = resolve_curve_point_slice(builder, &triple)?;
+        let pair: [&FunctionInput<FieldElement>; 2] = [&points[2 * i], &points[2 * i + 1]];
+        let p = resolve_curve_point_slice(builder, &pair)?;
         curve_points.push(p);
     }
 
@@ -215,53 +206,53 @@ fn lower_multi_scalar_mul(
     bind_curve_point_outputs(builder, &result, outputs)
 }
 
-/// Resolve a fixed-size `[FunctionInput; 3]` array into a `CurvePoint`.
+/// Resolve a fixed-size `[FunctionInput; 2]` array into a `CurvePoint`.
+///
+/// As of `acir v1.0.0-beta.22`, `EmbeddedCurveAdd`/`MultiScalarMul` no
+/// longer carry an explicit `is_infinity` input — the opcode contract is
+/// that **neither input is the point at infinity** (encoded as `(0, 0)`
+/// in the witness-level convention). We allocate a constant-zero
+/// `is_infinity` witness internally so the `curve_point_from_vars`
+/// gadget (which still tracks `is_infinity` in its `CurvePoint`
+/// representation) can be re-used unchanged.
 fn resolve_curve_point(
     builder: &mut R1csBuilder<'_>,
-    triple: &[FunctionInput<FieldElement>; 3],
+    pair: &[FunctionInput<FieldElement>; 2],
 ) -> Result<CurvePoint, SynthesisError> {
-    let slice: [&FunctionInput<FieldElement>; 3] = [&triple[0], &triple[1], &triple[2]];
+    let slice: [&FunctionInput<FieldElement>; 2] = [&pair[0], &pair[1]];
     resolve_curve_point_slice(builder, &slice)
 }
 
-/// Resolve a borrowed-slice triple. The `is_infinity` flag is constrained to
-/// be boolean inside `curve_point_from_vars`.
+/// Resolve a borrowed-slice pair. Allocates a constant-zero `is_infinity`
+/// internally to match the gadget API.
 fn resolve_curve_point_slice(
     builder: &mut R1csBuilder<'_>,
-    triple: &[&FunctionInput<FieldElement>; 3],
+    pair: &[&FunctionInput<FieldElement>; 2],
 ) -> Result<CurvePoint, SynthesisError> {
-    let (xv, xval) = function_input_to_var(builder, triple[0])?;
-    let (yv, yval) = function_input_to_var(builder, triple[1])?;
-    let (iv, ival) = function_input_to_var(builder, triple[2])?;
-    let is_inf_val: Option<bool> = ival.map(|v| {
-        if v == Fr::one() {
-            true
-        } else if v.is_zero() {
-            false
-        } else {
-            // Noir's contract: is_infinity is boolean. We let the boolean
-            // enforcement constraint surface the violation downstream.
-            false
-        }
-    });
-    curve_point_from_vars(builder, xv, yv, iv, xval, yval, is_inf_val)
+    let (xv, xval) = function_input_to_var(builder, pair[0])?;
+    let (yv, yval) = function_input_to_var(builder, pair[1])?;
+    // Allocate a fresh witness pinned to 0 for the is_infinity flag.
+    let iv = builder.alloc_with_value(Some(Fr::zero()))?;
+    builder.enforce(
+        builder.zero_lc(),
+        builder.zero_lc(),
+        LinearCombination(vec![(Fr::one(), iv)]),
+    )?;
+    curve_point_from_vars(builder, xv, yv, iv, xval, yval, Some(false))
 }
 
-/// Bind the three output coordinates of a `CurvePoint` to three ACIR output
-/// witnesses. Each output is a single linear equality.
+/// Bind the two output coordinates of a `CurvePoint` to two ACIR output
+/// witnesses. Each output is a single linear equality. (The
+/// `is_infinity` flag is no longer an ACIR output as of beta.22 — it
+/// remains internal to the gadget.)
 fn bind_curve_point_outputs(
     builder: &mut R1csBuilder<'_>,
     point: &CurvePoint,
-    outputs: &(
-        acir::native_types::Witness,
-        acir::native_types::Witness,
-        acir::native_types::Witness,
-    ),
+    outputs: &(acir::native_types::Witness, acir::native_types::Witness),
 ) -> Result<(), SynthesisError> {
-    let (ox, oy, oi) = outputs;
+    let (ox, oy) = outputs;
     bind_var_to_witness(builder, point.x, *ox)?;
     bind_var_to_witness(builder, point.y, *oy)?;
-    bind_var_to_witness(builder, point.is_infinity, *oi)?;
     Ok(())
 }
 
@@ -702,11 +693,12 @@ fn fr_fits_in_bits(value: &Fr, num_bits: usize) -> bool {
 /// makes the constraint system unsatisfiable (proving fails). This matches
 /// the contract Noir users expect: `let valid = ecdsa_verify(...); assert(valid);`.
 ///
-/// **Cost warning**: a single ECDSA verification lowers to ~20M R1CS
-/// constraints (two 256-bit scalar muls with non-native limb arithmetic
-/// over BN254). Setup + prove on a circuit dominated by ECDSA may take
-/// tens of minutes; the components are correct but the uncached schoolbook
-/// lowering is intentionally un-optimised. See `gadgets::ecdsa` module docs.
+/// **Cost warning**: a single ECDSA verification lowers to ~3.6M R1CS
+/// constraints on secp256k1 (GLV + fixed-base comb on `G`) and ~5.4M on
+/// secp256r1 (comb on `G` + 4-bit windowed double-and-add on `Q`), with
+/// non-native limb arithmetic over BN254. Setup + prove on a circuit
+/// dominated by ECDSA may take many minutes. See `gadgets::ecdsa` module
+/// docs.
 #[allow(clippy::too_many_arguments)]
 fn lower_ecdsa_with_curve(
     builder: &mut R1csBuilder<'_>,
@@ -721,8 +713,8 @@ fn lower_ecdsa_with_curve(
     use crate::gadgets::ecdsa;
     tracing::warn!(
         "Lowering BlackBoxFuncCall::Ecdsa{} — this gadget emits roughly \
- 20M R1CS constraints per verification (schoolbook non-native arithmetic). \
- Expect very long setup + prove times on circuits dominated by ECDSA.",
+ 3.6M (secp256k1, GLV) or 5.4M (secp256r1) R1CS constraints per verification. \
+ Expect long setup + prove times on circuits dominated by ECDSA.",
         curve_name,
     );
 
