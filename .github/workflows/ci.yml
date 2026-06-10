@@ -40,14 +40,13 @@ jobs:
         # The `sbpf` and `differential_alt_bn128` integration tests under
         # `crates/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
         # they need the Anza toolchain and run in `solana-ci.yml`.
-        # `bitwuzla_*` tests need a Bitwuzla install and run in `bitwuzla.yml`.
         # Build one xark-tests test list excluding those, then test.
         run: |
           cargo test --workspace --release --exclude xark-tests
           cargo test -p xark-tests --release --lib
           tests_args=()
           for t in $(ls crates/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
-                      | grep -vE '^(sbpf|differential_alt_bn128|bitwuzla_)'); do
+                      | grep -vE '^(sbpf|differential_alt_bn128)'); do
             tests_args+=(--test "$t")
           done
           cargo test -p xark-tests --release "${tests_args[@]}"

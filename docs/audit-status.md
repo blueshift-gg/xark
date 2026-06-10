@@ -55,9 +55,6 @@ other workspace crates (~290 total), including:
   XorAux / Linear) and asserts zero unclassified rows. Pins total
   constraint counts (SHA-256 = 52 768, Keccak-f[1600] = 250 482, etc.)
   so any drift forces a Lean-side reload.
-* **Bitwuzla bit-equivalence** (CI-gated by `.github/workflows/bitwuzla.yml`)
-  — QF_BV equivalence proofs for SHA-256 compression, AES-128 block
-  encrypt, BLAKE3 compression, BLAKE2s compression, Keccak-f[1600].
 * **Brillig output-pinning** (`brillig_pinning.rs`, 3/3 pass) — runs
   `check_brillig_outputs_pinned` across every fixture; asserts the
   `(SI)` invariant holds and explicitly cites the Lean theorem
@@ -128,13 +125,12 @@ Coverage (theorem names → modules):
   substantive `<X>_iter_of_rel` composition theorem that collapses the
   snapshot history into the spec relation by induction over rounds
   (`Formal.Wrappers`).
-* **Bitwuzla composition** — `<X>_round_pinned` and `<X>_closed_chain`
-  per hash/cipher: combine the substantive wrapper with the per-gadget
-  pure-Lean `<X>_round_bit_equivalence` (Keccak / BLAKE2s / BLAKE3 /
-  AES-128 / SHA-256) into a single auditable chain
-  (`Formal.BitwuzlaCompose`). Each gadget's QF_BV harness in
-  `crates/tests/tests/bitwuzla_*.rs` provides an independent SMT-level
-  cross-check.
+* **Bit-equivalence composition** — `<X>_round_pinned` and
+  `<X>_closed_chain` per hash/cipher: combine the substantive wrapper
+  with the per-gadget pure-Lean `<X>_round_bit_equivalence` (Keccak /
+  BLAKE2s / BLAKE3 / AES-128 / SHA-256) into a single auditable chain
+  (`Formal.BitwuzlaCompose` — name is historical; the module is pure
+  Lean and depends on no external SMT solver).
 * **Allocation bookkeeping** — `AllocState`, `alloc_witness_idempotent`,
   `alloc_witness_injective`, `AllocState.alloc_preserves_invariant`,
   `read/write_const_index_correct` (`Formal.Bookkeeping`).
@@ -237,8 +233,12 @@ Rust gadget actually emits) rests on:
 * the Rust exhaustive unit test `sbox_all_inputs_match_table` in
   `gadgets/aes.rs::tests` (every input byte → gadget output equals
   `SBOX[x]`);
-* the bitwuzla harness `crates/tests/tests/bitwuzla_aes128.rs`
-  (bit-blast over all inputs against FIPS-197).
+* the pure-Lean per-bit composition theorems
+  `aes128_round_bit_equivalence` + `aes128_closed_chain`
+  (`Formal.BitwuzlaCompose`), discharged structurally against FIPS-197
+  through `aesSubBytes_constraint_sound`, `aesShiftRows_sound`,
+  `aesMixColumns_sound`, `aesAddRoundKey_sound`. Their `#print axioms`
+  output is gated by `.github/workflows/lean.yml`.
 
 This is **not** an external audit. Until an external firm has reviewed
 the code, the README's "experimental — do not use in production" label
@@ -390,7 +390,7 @@ SHA-256 in `expected.sha256` verified in CI by
 | `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test: `crates/tests/tests/differential_alt_bn128.rs` evaluates the same fixed test vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change. Each new vector in either `G1_ADD_VECTORS` / `G1_MUL_VECTORS` / `G2_ADD_VECTORS` / `PAIRING_2_VECTORS` adds a differential anchor without changing the scaffolding. Extending to CPU-weeks of OSS-Fuzz is a follow-up. |
 | Arkworks Groth16 | Cite published Groth16 mechanisations (e.g. Microsoft's verified Groth16 in F*); no in-repo proof. |
 | Lean kernel + mathlib | Trusted base; replace via Coq cross-check if extreme confidence requires. |
-| `rustc` / `cargo` / `lake` / `bitwuzla` / `Kani` / CBMC | Toolchain trust. |
+| `rustc` / `cargo` / `lake` / `Kani` / CBMC | Toolchain trust. |
 
 ---
 

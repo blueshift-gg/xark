@@ -208,9 +208,9 @@ This is the **structural** layer — it shows the SHA-256 spec composes out of
 the proven primitives without bit-blasting any 2³² × 2³² Word32 search space.
 Full compression equivalence (the gadget's 64-round loop output equals the
 FIPS spec output) is discharged by `Formal.Wrappers.sha256_iter_of_rel`
-composed with `Formal.BitwuzlaCompose.sha256_closed_chain`;
-`crates/tests/tests/bitwuzla_sha256.rs` provides an independent SMT-level
-cross-check over all 768-bit inputs.
+composed with `Formal.BitwuzlaCompose.sha256_closed_chain` — the latter
+is a pure-Lean structural proof through `sha256_round_bit_equivalence`
+(the file name is historical; no external SMT solver is involved).
 
 ## Scope / what's next
 
@@ -240,9 +240,5 @@ Proven, end-to-end:
   message-schedule step compose out of the already-proven per-bit gadgets.
 
 What remains scoped out of Lean:
-* **External SMT cross-validation** for SHA-256, Keccak, BLAKE2s, BLAKE3,
-  and AES-128 round-step bit-equivalence — handled by the QF_BV harnesses
-  in `crates/tests/tests/bitwuzla_*.rs` (independent of the pure-Lean
-  `<gadget>_round_bit_equivalence` theorems in `Formal.BitwuzlaCompose`).
 * External audit, fuzzing-extension, and Kani work on the on-chain
   verifier — engineering, not FV.

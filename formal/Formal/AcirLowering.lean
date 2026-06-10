@@ -796,9 +796,11 @@ delegates to:
 
 /-! ### Per-arm row emission helpers -/
 
-/-- Row emission for `.blackBox`. The actual bit-blasted equivalence of
-the gadget's structural rows is closed by `BitwuzlaCompose` axioms over
-the gadget's whole rendered-bit encoding (see `Formal.BitwuzlaCompose`).
+/-- Row emission for `.blackBox`. The actual bit-level equivalence of
+the gadget's structural rows is closed by the per-round
+`<X>_round_bit_equivalence` theorems in `Formal.BitwuzlaCompose`
+(historical file name; pure Lean) and their `<X>_closed_chain`
+compositions over the gadget's whole rendered-bit encoding.
 At the AcirLowering layer we model only the *interface*: when the
 prover supplies a valid intermediate-state witness (per
 `IsValidBlackBoxWitness`), the spec relation `lowerBlackBox op` holds

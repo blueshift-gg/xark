@@ -37,13 +37,15 @@ existing definition.
 
 What this file does *not* do: it does **not** bit-blast Keccak-f[1600].
 The end-to-end bit-encoding equality between the gadget and the FIPS 202
-reference (over all 1600-bit inputs) is
-discharged by the QF_BV harness `crates/tests/tests/bitwuzla_keccak.rs`.
-What this file adds is the per-round per-bit structural composition — the
-analogue of `sha256_round_bit_equivalence` for Keccak, but instead of being
-a `split_ifs` pass-through the proof composes through the actual five
-layers, so the resulting axiom-trace mentions `xor64_sound`, `and64_sound`,
-`not64_sound`, etc.
+reference (over all 1600-bit inputs) is `keccak_closed_chain` in
+`Formal.BitwuzlaCompose` (historical file name; pure Lean), composed
+from per-round `keccakRoundStep_bit_sound` invocations through
+`keccak_iter_of_rel` (`Formal.Wrappers`). What this file adds is the
+per-round per-bit structural composition — the analogue of
+`sha256_round_bit_equivalence` for Keccak, but instead of being a
+`split_ifs` pass-through the proof composes through the actual five
+layers, so the resulting axiom-trace mentions `xor64_sound`,
+`and64_sound`, `not64_sound`, etc.
 -/
 
 namespace Xark

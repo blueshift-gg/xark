@@ -14,7 +14,16 @@ set_option linter.flexible false
 set_option maxHeartbeats 400000
 
 /-!
-# Bitwuzla bit-equivalence composition (closing the chain)
+# Bit-equivalence composition (closing the chain)
+
+> **Historical note.** This module used to delegate the per-round
+> bit-level equivalence to an external SMT cross-check; the file name
+> and the `Bitwuzla*` identifiers preserve that history. As of the
+> current revision every equivalence theorem below is **pure Lean**,
+> structurally composed from the per-bit / per-primitive theorems in
+> `Formal.Sha256`, `Formal.Keccak`, `Formal.Blake`, `Formal.Aes`, and
+> `Formal.Arith`. No external SMT solver is involved at any point in
+> the trust chain.
 
 `Formal/Wrappers.lean` defines, for each bit-oriented gadget (SHA-256,
 Keccak-f[1600], BLAKE2s, BLAKE3, AES-128), a Lean transcription of the
@@ -22,21 +31,15 @@ FIPS / RFC round-step (`sha256RoundStep`, `keccakRoundStep`,
 `blake2sRoundStep`, `blake3RoundStep`, `aesRoundStep`) and proves
 `witness ⇒ spec-relation` purely structurally.
 
-The remaining link in the chain — that the **gadget's bit-encoding**
-actually computes the FIPS / RFC reference's bit-encoding — is
-discharged externally by the QF_BV harnesses
-`crates/tests/tests/bitwuzla_{sha256,aes128,blake2s,blake3,keccak}.rs`.
-Each harness emits two SMT-LIB encodings (the gadget's and the
-reference's) and asks Bitwuzla whether they can disagree; an `unsat`
-verdict means they agree on **all** inputs.
-
-This file:
+This file closes the remaining link in the chain — that the **gadget's
+bit-encoding** actually computes the FIPS / RFC reference's
+bit-encoding — entirely in Lean:
 
 * names `Bitwuzla{Sha256,Keccak,Blake2s,Blake3,Aes128}Equivalent` —
   the gadget's bit-encoding equivalence to the FIPS / RFC reference —
   as pure-Lean `def`s (each equal to `BitwuzlaEquivalent` at its
-  native output width), with a docstring citing the harness file path
-  that provides an independent SMT-level cross-check;
+  native output width). The historical `Bitwuzla` prefix is preserved
+  for axcheck stability;
 * proves the per-round bit-level equivalence with the reference in
   pure Lean as `<gadget>_round_bit_equivalence`, composing the per-bit
   / per-primitive theorems already proven in `Formal.Sha256`,
@@ -51,15 +54,14 @@ This file:
   gadget's R1CS constraints, the gadget's output equals the FIPS /
   RFC reference function's output."
 
-None of the per-gadget round-step equivalences depend on a Bitwuzla
-axiom — they are pure-Lean compositions. The QF_BV harnesses in
-`crates/tests/tests/bitwuzla_*.rs` provide an independent re-runnable
-SMT-level cross-check of the same equivalences.
+`#print axioms <gadget>_closed_chain` is gated by
+`.github/workflows/lean.yml` and confirms each closed-chain theorem
+depends only on the standard Lean axioms.
 -/
 
 namespace Xark
 
-/-! ## The Bitwuzla-verified predicate
+/-! ## The bit-equivalence predicate
 
 Generic shape: two `Fin n → Bool` bit-streams agree pointwise. The
 parametric form lets each gadget instantiate `n` to its native output
@@ -67,15 +69,14 @@ width (256 bits for SHA-256, 1600 for Keccak, 256 for BLAKE2s, 512 for
 BLAKE3, 128 for AES-128) without repeating the boilerplate.
 
 Each per-gadget `Bitwuzla<X>Equivalent` is a `def` equal to
-`BitwuzlaEquivalent` at the gadget's native output width — the named
-wrapper exists so the trust chain can cite the QF_BV harness path at
-each use site.
+`BitwuzlaEquivalent` at the gadget's native output width. The
+`Bitwuzla` prefix is historical; the predicate is pure-Lean and is
+proved structurally below.
 -/
 
 /-- "These two `Fin n → Bool` bit-streams are equal pointwise."
 
-This is the proposition discharged by each Bitwuzla QF_BV harness: the
-gadget's bit-encoded output equals the FIPS / RFC reference's
+The gadget's bit-encoded output equals the FIPS / RFC reference's
 bit-encoded output. -/
 def BitwuzlaEquivalent {n : ℕ} (gadget_output ref_output : Fin n → Bool) : Prop :=
   ∀ i : Fin n, gadget_output i = ref_output i
@@ -91,27 +92,14 @@ theorem BitwuzlaEquivalent.funext {n : ℕ}
 
 /-! ## SHA-256
 
-The QF_BV harness `crates/tests/tests/bitwuzla_sha256.rs` emits two
-independent SMT-LIB encodings of SHA-256 compression (768-bit
-plaintext = 512-bit block + 256-bit state):
-
-* `ref_` — the FIPS 180-4 §6.2 reference encoding,
-* `gad_` — the encoding mirroring `acir-r1cs::gadgets::hash::sha256_compression`.
-
-Asserts disagreement on any of the 8 output words; on `unsat`, the two
-encodings agree on **all** 768-bit inputs.
+The SHA-256 *round-step* equivalence between the gadget's bit-encoding
+(mirroring `acir-r1cs::gadgets::hash::sha256_compression`) and the
+FIPS 180-4 §6.2 reference is proved structurally below in
+`sha256_round_bit_equivalence`, composing the per-bit / per-primitive
+theorems in `Formal.Sha256` and `Formal.Arith`.
 -/
 
 /-- **SHA-256 gadget bit-encoding equals FIPS 180-4 §6.2 reference encoding.**
-
-The SHA-256 *round-step* equivalence with the FIPS 180-4 §6.2 reference
-is **proven in pure Lean** via the per-bit / per-primitive composition
-theorems in `Formal.Sha256` and `Formal.Arith` (see
-`sha256_round_bit_equivalence` below). The QF_BV harness
-`crates/tests/tests/bitwuzla_sha256.rs` provides an independent
-end-to-end check of bit-equivalence over all 768-bit inputs (block +
-state) and re-runs under
-`cargo test --release -p xark-tests --test bitwuzla_sha256`.
 
 The downstream `sha256_round_pinned` / `sha256_closed_chain` theorems
 operate at the *whole-word* `Word32` level (the FIPS reference itself is
@@ -237,29 +225,26 @@ theorem sha256_closed_chain
 
 /-! ## Keccak-f[1600]
 
-The QF_BV harness `crates/tests/tests/bitwuzla_keccak.rs` emits two
-independent SMT-LIB encodings of FIPS 202 §3.2 Keccak-f[1600] (24
-rounds, 5×5×64-bit state). On `unsat` the gadget's
-`keccakf1600_in_circuit` matches the reference on all 1600-bit inputs.
+The Keccak-f[1600] *round-step* equivalence between the gadget's
+bit-encoding (mirroring `acir-r1cs::gadgets::hash::keccakf1600`) and
+the FIPS 202 §3.2 reference is proved structurally below in
+`keccak_round_bit_equivalence`, composing the per-bit / per-primitive
+theorems in `Formal.Keccak`.
 -/
 
 /-- **Keccak gadget bit-encoding equals FIPS 202 §3.2 reference encoding.**
 
 The round-step equivalence is proven in pure Lean by
 `keccak_round_bit_equivalence` below, composing the per-layer lemmas
-in `Formal.Keccak`. The QF_BV harness
-`crates/tests/tests/bitwuzla_keccak.rs` provides an independent
-SMT-level cross-check over all 1600-bit inputs and re-runs under
-`cargo test --release -p xark-tests --test bitwuzla_keccak`. -/
+in `Formal.Keccak`. -/
 def BitwuzlaKeccakEquivalent
     (gadget_round_out : Fin 1600 → Bool)
     (ref_round_out : Fin 1600 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
-/-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
-the same as `BitwuzlaEquivalent` — the named wrapper exists so the trust
-chain can cite the source by name (the QF_BV harness path) at each use
-site. -/
+/-- "Bitwuzla equivalence ↔ pointwise equivalence" (Keccak). Definitionally
+the same as `BitwuzlaEquivalent`; the named wrapper is kept for axcheck
+stability. -/
 theorem bitwuzla_keccak_equivalent_iff
     {gadget_round_out ref_round_out : Fin 1600 → Bool} :
     BitwuzlaKeccakEquivalent gadget_round_out ref_round_out ↔
@@ -271,8 +256,7 @@ theorem bitwuzla_keccak_equivalent_iff
 the round-step output's lifted field values. Composes the per-bit lemmas
 in `Formal.Keccak` for the θ/ρ/π/χ/ι layers (via
 `keccakRoundStep_bit_sound`, which itself chains `keccakTheta_sound`,
-`keccakRhoPi_sound`, `keccakChi_sound`, `keccakIota_sound`). Pure Lean; no
-Bitwuzla dependency. -/
+`keccakRhoPi_sound`, `keccakChi_sound`, `keccakIota_sound`). Pure Lean. -/
 theorem keccak_round_bit_equivalence
     {F : Type*} [Field F]
     (state : Fin 25 → Word64) (rc : Word64)
@@ -322,24 +306,25 @@ theorem keccak_closed_chain
 
 /-! ## BLAKE2s
 
-The QF_BV harness `crates/tests/tests/bitwuzla_blake2s.rs` emits two
-independent SMT-LIB encodings of RFC 7693 §3.2 BLAKE2s compression on
-28-word (8 h + 16 m + 2 t + 2 f) inputs.
+The BLAKE2s *round-step* equivalence between the gadget's bit-encoding
+(mirroring `acir-r1cs::gadgets::hash::blake2s`) and the RFC 7693 §3.2
+reference is proved structurally below in
+`blake2s_round_bit_equivalence`, composing the per-bit / per-primitive
+theorems in `Formal.Blake`.
 -/
 
 /-- **BLAKE2s gadget bit-encoding equals RFC 7693 §3.2 reference encoding.**
 
 The round-step equivalence is proven in pure Lean by
-`blake2s_round_bit_equivalence` below. The QF_BV harness
-`crates/tests/tests/bitwuzla_blake2s.rs` provides an independent
-SMT-level cross-check. -/
+`blake2s_round_bit_equivalence` below. -/
 def BitwuzlaBlake2sEquivalent
     (gadget_round_out : Fin 256 → Bool)
     (ref_round_out : Fin 256 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
-/-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
-the same as `BitwuzlaEquivalent`; the named wrapper traces trust source. -/
+/-- "Bitwuzla equivalence ↔ pointwise equivalence" (BLAKE2s). Definitionally
+the same as `BitwuzlaEquivalent`; the named wrapper is kept for axcheck
+stability. -/
 theorem bitwuzla_blake2s_equivalent_iff
     {gadget_round_out ref_round_out : Fin 256 → Bool} :
     BitwuzlaBlake2sEquivalent gadget_round_out ref_round_out ↔
@@ -393,24 +378,25 @@ theorem blake2s_closed_chain
 
 /-! ## BLAKE3
 
-The QF_BV harness `crates/tests/tests/bitwuzla_blake3.rs` emits two
-independent SMT-LIB encodings of BLAKE3 compression `F(h, m, t, b, d)`
-on 28-word (8 h + 16 m + 2 t + 1 b + 1 d) inputs.
+The BLAKE3 *round-step* equivalence between the gadget's bit-encoding
+(mirroring `acir-r1cs::gadgets::hash::blake3`) and the BLAKE3-spec
+reference is proved structurally below in
+`blake3_round_bit_equivalence`, composing the per-bit / per-primitive
+theorems in `Formal.Blake`.
 -/
 
 /-- **BLAKE3 gadget bit-encoding equals BLAKE3-spec reference encoding.**
 
 The round-step equivalence is proven in pure Lean by
-`blake3_round_bit_equivalence` below. The QF_BV harness
-`crates/tests/tests/bitwuzla_blake3.rs` provides an independent
-SMT-level cross-check. -/
+`blake3_round_bit_equivalence` below. -/
 def BitwuzlaBlake3Equivalent
     (gadget_round_out : Fin 512 → Bool)
     (ref_round_out : Fin 512 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
-/-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
-the same as `BitwuzlaEquivalent`; the named wrapper traces trust source. -/
+/-- "Bitwuzla equivalence ↔ pointwise equivalence" (BLAKE3). Definitionally
+the same as `BitwuzlaEquivalent`; the named wrapper is kept for axcheck
+stability. -/
 theorem bitwuzla_blake3_equivalent_iff
     {gadget_round_out ref_round_out : Fin 512 → Bool} :
     BitwuzlaBlake3Equivalent gadget_round_out ref_round_out ↔
@@ -462,25 +448,26 @@ theorem blake3_closed_chain
 
 /-! ## AES-128
 
-The QF_BV harness `crates/tests/tests/bitwuzla_aes128.rs` emits two
-independent SMT-LIB encodings of FIPS 197 AES-128 single-block encrypt
-on 256-bit (128 plaintext + 128 key) inputs.
+The AES-128 *round-step* equivalence between the gadget's bit-encoding
+(mirroring `acir-r1cs::gadgets::aes::aes128_encrypt`) and the FIPS 197
+reference is proved structurally below in
+`aes128_round_bit_equivalence`, composing the per-bit / per-primitive
+theorems in `Formal.Aes`.
 -/
 
 /-- **AES-128 gadget bit-encoding equals FIPS 197 reference encoding.**
 
 The round-step equivalence is proven in pure Lean by
 `aes128_round_bit_equivalence` below (composing `aesRoundStep_bit_sound`
-from `Formal.Aes`). The QF_BV harness
-`crates/tests/tests/bitwuzla_aes128.rs` provides an independent
-SMT-level cross-check. -/
+from `Formal.Aes`). -/
 def BitwuzlaAes128Equivalent
     (gadget_round_out : Fin 128 → Bool)
     (ref_round_out : Fin 128 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
-/-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
-the same as `BitwuzlaEquivalent`; the named wrapper traces trust source. -/
+/-- "Bitwuzla equivalence ↔ pointwise equivalence" (AES-128). Definitionally
+the same as `BitwuzlaEquivalent`; the named wrapper is kept for axcheck
+stability. -/
 theorem bitwuzla_aes128_equivalent_iff
     {gadget_round_out ref_round_out : Fin 128 → Bool} :
     BitwuzlaAes128Equivalent gadget_round_out ref_round_out ↔

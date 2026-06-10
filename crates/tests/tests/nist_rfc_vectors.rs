@@ -20,7 +20,7 @@
 //!   function** (SHA-256: `sha256_compression`; Keccak: `keccakf1600_in_circuit`;
 //!   AES-128: `aes128_encrypt_in_circuit`) or its **full hash** wrapper
 //!   (BLAKE2s, BLAKE3: `blake2s_in_circuit` / `blake3_in_circuit`). Those are
-//!   what the FV plan's Bitwuzla / Lean proofs target — so the vector tests
+//!   what the FV plan's Lean proofs target — so the vector tests
 //!   below run at the same boundary.
 //!
 //! For SHA-256 specifically, the *compression* gadget exposes the FIPS 180-4

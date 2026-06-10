@@ -21,10 +21,8 @@ This file builds the **structural** soundness layer for one AES round-step
 (`SubBytes → ShiftRows → (MixColumns if not final) → AddRoundKey`) in
 `crates/acir-r1cs/src/gadgets/aes.rs`, in the spirit of
 `Formal/Sha256.lean`. Bit-level equivalence of *individual* per-bit gadgets
-(`and`, `xor`, `not`, S-box lookup) is discharged in `Formal/Bitwise.lean`,
-the Bitwuzla SMT harness
-(`crates/tests/tests/bitwuzla_aes128.rs`), and the S-box pinning lemmas
-in `Formal/Gadgets.lean`.
+(`and`, `xor`, `not`, S-box lookup) is discharged in `Formal/Bitwise.lean`
+and the S-box pinning lemmas in `Formal/Gadgets.lean`.
 
 What this file does:
 
@@ -39,15 +37,16 @@ What this file does:
   `aesShiftRows`, `aesMixColumns`, `aesAddRoundKey`;
 * gives **`aesRoundStep_bit_sound`**, the one-round structural
   composition that drives `aes128_round_bit_equivalence` in
-  `Formal.BitwuzlaCompose` — replacing the previous pass-through
-  tautology with a genuine four-layer composition.
+  `Formal.BitwuzlaCompose` (historical file name; pure Lean) —
+  replacing the previous pass-through tautology with a genuine
+  four-layer composition.
 
 What this file does *not* do: it does **not** bit-blast AES-128 in
 Lean. The "end-to-end" theorem (the gadget's R1CS encoding of the full
-10-round permutation equals the FIPS 197 reference) is discharged by
-`crates/tests/tests/bitwuzla_aes128.rs`; this file gives the Lean-level
-structural decomposition into per-layer pieces that the SMT harness
-checks.
+10-round permutation equals the FIPS 197 reference) is the
+`aes128_closed_chain` theorem in `Formal.BitwuzlaCompose`, composed
+from per-round `aesRoundStep_bit_sound` invocations through
+`aes128_iter_of_rel` (`Formal.Wrappers`).
 
 The S-box layer's bit-encoding ≡ `aesSboxTable` is **definitional** in
 the spec (`aesSbox = byteOfNat ∘ aesSboxTable[· byteToNat]`), and the
@@ -1405,10 +1404,7 @@ the structure's hypotheses). The trust anchor for that bridge is:
 * the Rust exhaustive unit test `sbox_all_inputs_match_table` in
   `gadgets/aes.rs::tests`, which instantiates the gadget on every
   input byte `x ∈ [0, 255]` and asserts the gadget output equals
-  `SBOX[x]`;
-* the bitwuzla harness `crates/tests/tests/bitwuzla_aes128.rs`, which
-  bit-blasts the full gadget AES-128 against the FIPS-197 reference
-  over all inputs.
+  `SBOX[x]`.
 
 Two Lean soundness statements are exposed:
 

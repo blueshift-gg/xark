@@ -251,13 +251,16 @@ jobs:
           #print axioms lowerMemoryOpWrite_row
           #print axioms lowerCallOpcode_rows
           #print axioms lowerAcirOpcode_sound
-          -- Bitwuzla bit-equivalence composition (Formal.BitwuzlaCompose).
+          -- Bit-equivalence composition (Formal.BitwuzlaCompose; file
+          -- name and `Bitwuzla<X>Equivalent` identifiers are historical).
           -- Each `Bitwuzla<X>Equivalent` is a pure-Lean `def`
           -- (= `BitwuzlaEquivalent` at the gadget's native output width); the
           -- per-round bit-level equivalence with the FIPS / RFC reference is
-          -- proven structurally in `<x>_round_bit_equivalence`. The QF_BV
-          -- harnesses in `crates/tests/tests/bitwuzla_<X>.rs` provide an
-          -- independent SMT-level cross-check of the same equivalences.
+          -- proven structurally in `<x>_round_bit_equivalence`. The
+          -- `BitwuzlaSha256Equivalent` filter below remains as a regression
+          -- guard: it asserts no SHA-256 downstream theorem axiomatises the
+          -- predicate (i.e. every downstream proof goes through the
+          -- structural per-bit composition, not a placeholder def).
           #print axioms BitwuzlaEquivalent
           #print axioms BitwuzlaSha256Equivalent
           #print axioms bitwuzla_sha256_equivalent_iff

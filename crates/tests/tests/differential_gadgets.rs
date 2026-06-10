@@ -12,8 +12,9 @@
 //!    that the constraint system is satisfied.
 //!
 //! The per-circuit `circuits.rs` tests already prove + verify Groth16 over
-//! fixed nargo witnesses; the bitwuzla harness pins algorithmic equivalence
-//! at the bit level. What was *missing* from the audit matrix (`docs/audit-status.md`)
+//! fixed nargo witnesses; the Lean `<x>_round_bit_equivalence` theorems in
+//! `Formal.BitwuzlaCompose` pin algorithmic equivalence at the bit level.
+//! What was *missing* from the audit matrix (`docs/audit-status.md`)
 //! was a single integration test that pumps **adversarial inputs** —
 //! all-zero, all-one, alternating, max-value, block-boundary lengths, and
 //! near-modulus scalars — through each gadget against a fresh reference

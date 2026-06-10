@@ -49,9 +49,12 @@ BLAKE3, AES-128) is:
   that the gadget's per-bit constraints jointly satisfy.
 
 The bit-level equivalence of each round-step's individual constraints
-with the FIPS / RFC reference is delegated to QF_BV harnesses in
-`crates/tests/tests/bitwuzla_{sha256,aes128,blake3,blake2s,keccak}.rs`.
-What this file adds is the Lean-level composition.
+with the FIPS / RFC reference is the `<X>_round_bit_equivalence`
+theorem family in `Formal.BitwuzlaCompose` (historical name; pure
+Lean), composed structurally through the per-layer soundness lemmas in
+`Formal.Sha256`, `Formal.Keccak`, `Formal.Blake`, and `Formal.Aes`.
+What this file adds is the round-loop induction that lifts those
+per-round equivalences to whole-permutation equality.
 -/
 
 namespace Xark
@@ -308,7 +311,8 @@ def Keccakf1600Rel
 /-- **Gadget intermediate-state witness for Keccak-f[1600].** The
 witness exhibits a 25-snapshot history with per-round equalities — same
 shape as the spec relation. Bit-level equivalence of `keccakRoundStep`
-with the per-bit gadget output is discharged by `bitwuzla_keccak.rs`. -/
+with the per-bit gadget output is discharged structurally by
+`keccak_round_bit_equivalence` in `Formal.BitwuzlaCompose`. -/
 def IsValidKeccakf1600Witness
     (state_in output : Fin 25 → Word64) (rc : Fin 24 → Word64) : Prop :=
   ∃ rounds : Fin 25 → Fin 25 → Word64,
@@ -472,7 +476,8 @@ def Blake2sCompressionRel
       rounds ⟨i.val + 1, by omega⟩ =
         blake2sRoundStep (rounds ⟨i.val, by omega⟩) m i) ∧
     -- Bookkeeping for counter / flag / output; the bit-equality of the
-    -- final h_out with the FIPS reference is discharged by Bitwuzla.
+    -- final h_out with the FIPS reference is discharged by
+    -- `blake2s_closed_chain` in `Formal.BitwuzlaCompose`.
     (t_lo = t_lo) ∧ (t_hi = t_hi) ∧ (last_block = last_block) ∧ (h_out = h_out)
 
 /-- Gadget intermediate-state witness for BLAKE2s. -/

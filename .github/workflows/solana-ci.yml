@@ -52,9 +52,21 @@ jobs:
           key: solana-${{ hashFiles('Cargo.lock') }}
 
       - name: Install Solana CLI (provides cargo-build-sbf)
+        # `release.anza.xyz` regularly returns "body error" mid-stream
+        # during business-hours US-East peak. Retry up to 5× with
+        # exponential backoff so a transient CDN hiccup doesn't fail the
+        # whole job; on persistent failure surface the original error.
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          for attempt in 1 2 3 4 5; do
+            if sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"; then
+              echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+            echo "Anza install attempt $attempt failed; retrying in $((attempt * 10))s..."
+            sleep $((attempt * 10))
+          done
+          echo "::error::Anza install failed after 5 attempts"
+          exit 1
 
       - name: Pre-install platform-tools (avoid parallel-download race)
         # Each `#[svm_test]` body shells out to `cargo build-sbf`, and on
