@@ -53,41 +53,50 @@ jobs:
         include:
           # Tier 1: canonicality + rejection paths + pairing operand
           # assembly. 16 cheap harnesses, ~3 min total.
+          #
+          # Use `--exact` with fully-qualified `verifier::proofs::<name>`
+          # paths: Kani 0.67's substring `--harness` filter empirically
+          # drops most of a wide pattern set (16 substring filters
+          # collapsed to 2 matched harnesses in one earlier run). Exact
+          # matching eliminates the ambiguity.
           - group: canonicality
             harnesses: >-
-              --harness le_lt_is_correct_u256_compare
-              --harness scalar_is_canonical_iff_lt_r
-              --harness fq_is_canonical_iff_lt_q
-              --harness coords_canonical_is_conjunction
-              --harness proof_wrong_length_rejected
-              --harness vk_truncated_rejected
-              --harness vk_ic_unaligned_rejected
-              --harness pi_unaligned_rejected
-              --harness arity_mismatch_rejected_ic2_pi0
-              --harness arity_mismatch_rejected_ic2_pi2
-              --harness noncanonical_pi_rejected
-              --harness strict_rejects_top_bit_set_in_vk
-              --harness strict_rejects_top_bit_set_in_proof
-              --harness proof_only_too_short_rejected
-              --harness pairing_operand_assembly_order
-              --harness pairing_operand_assembly
+              --exact
+              --harness verifier::proofs::le_lt_is_correct_u256_compare
+              --harness verifier::proofs::scalar_is_canonical_iff_lt_r
+              --harness verifier::proofs::fq_is_canonical_iff_lt_q
+              --harness verifier::proofs::coords_canonical_is_conjunction
+              --harness verifier::proofs::proof_wrong_length_rejected
+              --harness verifier::proofs::vk_truncated_rejected
+              --harness verifier::proofs::vk_ic_unaligned_rejected
+              --harness verifier::proofs::pi_unaligned_rejected
+              --harness verifier::proofs::arity_mismatch_rejected_ic2_pi0
+              --harness verifier::proofs::arity_mismatch_rejected_ic2_pi2
+              --harness verifier::proofs::noncanonical_pi_rejected
+              --harness verifier::proofs::strict_rejects_top_bit_set_in_vk
+              --harness verifier::proofs::strict_rejects_top_bit_set_in_proof
+              --harness verifier::proofs::proof_only_too_short_rejected
+              --harness verifier::proofs::pairing_operand_assembly_order
+              --harness verifier::proofs::pairing_operand_assembly
           # Tier 2: small-input totality (n=0, n=1). ~3 min, ~3 GB
           # resident at peak.
           - group: totality_small
             harnesses: >-
-              --harness verify_groth16_totality_n0
-              --harness verify_groth16_totality_n1
-              --harness verify_groth16_strict_totality_n0
-              --harness verify_groth16_strict_totality_n1
+              --exact
+              --harness verifier::proofs::verify_groth16_totality_n0
+              --harness verifier::proofs::verify_groth16_totality_n1
+              --harness verifier::proofs::verify_groth16_strict_totality_n0
+              --harness verifier::proofs::verify_groth16_strict_totality_n1
           # Tier 3: large-input totality (n=2 + full-body totality).
           # The heaviest CBMC bodies; isolating them on their own
           # runner is what stops the OOM cascade.
           - group: totality_large
             harnesses: >-
-              --harness verify_groth16_totality_n2
-              --harness verify_groth16_strict_totality_n2
-              --harness totality_verify_groth16
-              --harness totality_verify_proof_only
+              --exact
+              --harness verifier::proofs::verify_groth16_totality_n2
+              --harness verifier::proofs::verify_groth16_strict_totality_n2
+              --harness verifier::proofs::totality_verify_groth16
+              --harness verifier::proofs::totality_verify_proof_only
     steps:
       - name: Checkout
         uses: actions/checkout@v4
