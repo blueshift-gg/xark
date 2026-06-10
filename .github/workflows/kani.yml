@@ -31,15 +31,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Add 8 GB swap (CBMC working set spikes past 7 GB)
-        # `ubuntu-latest` has 7 GB RAM. The heavier rejection / totality
-        # harnesses symbolically execute the full `verify_groth16` body
-        # with the kani::stub'd curve ops, and CBMC's GOTO+SAT working
-        # set exceeds the cgroup limit (the runner gets a SIGTERM,
-        # surfaced as "received a shutdown signal" + exit 143). Swap
-        # absorbs the spike — slower but doesn't crash.
+      - name: Replace default 4 GB swap with 12 GB
+        # `ubuntu-latest` has 7 GB RAM + a pre-mounted 4 GB `/swapfile`
+        # — combined ~11 GB virtual. CBMC's GOTO+SAT working set on the
+        # heavier rejection / totality harnesses (symbolic
+        # `verify_groth16` with kani::stub'd curve ops) spikes past that
+        # and the runner gets SIGTERM ("received a shutdown signal" /
+        # exit 143). Disable the existing swap, replace with 12 GB so
+        # the spike pages out instead of crashing.
         run: |
-          sudo fallocate -l 8G /swapfile
+          sudo swapoff -a
+          sudo rm -f /swapfile /mnt/swapfile
+          sudo fallocate -l 12G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
