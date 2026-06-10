@@ -31,29 +31,36 @@ Noir source
 * `xark-verifier` (`crates/verifier`) — on-chain Groth16 verifier for
  Solana, using the `alt_bn128` syscalls.
 
+## Prerequisites
+
+Noir must be [installed separately](https://noir-lang.org/docs/installation).
+See [NOIR_VERSION.md](./NOIR_VERSION) for compatible versions.
+
 ## Quick start
 
 ```bash
+cargo install --path ./crates/cli
+
 cd crates/tests/circuits/arithmetic_square
 nargo execute
 
-xark inspect --artifact./target/arithmetic_square.json
+xark inspect --artifact ./target/arithmetic_square.json
 
 xark setup \
- --artifact./target/arithmetic_square.json \
- --out./target/groth16 \
+ --artifact ./target/arithmetic_square.json \
+ --out ./target/groth16 \
  --insecure-dev-mode
 
 xark prove \
- --artifact./target/arithmetic_square.json \
- --witness./target/arithmetic_square.gz \
- --proving-key./target/groth16/proving_key.bin \
- --out./target/groth16/proof.bin
+ --artifact ./target/arithmetic_square.json \
+ --witness ./target/arithmetic_square.gz \
+ --proving-key ./target/groth16/proving_key.bin \
+ --out ./target/groth16/proof.bin
 
 xark verify \
- --verifying-key./target/groth16/verifying_key.bin \
- --proof./target/groth16/proof.bin \
- --public-inputs./target/groth16/public_inputs.json
+ --verifying-key ./target/groth16/verifying_key.bin \
+ --proof ./target/groth16/proof.bin \
+ --public-inputs ./target/groth16/public_inputs.json
 ```
 
 Expected:
