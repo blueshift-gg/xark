@@ -34,7 +34,7 @@ Noir source
 ## Prerequisites
 
 Noir must be [installed separately](https://noir-lang.org/docs/installation).
-See [NOIR_VERSION.md](./NOIR_VERSION) for compatible versions.
+See [NOIR_VERSION.md](./NOIR_VERSION.md) for compatible versions.
 
 ## Quick start
 
