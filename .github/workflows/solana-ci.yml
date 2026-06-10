@@ -56,6 +56,22 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
+      - name: Pre-install platform-tools (avoid parallel-download race)
+        # Each `#[svm_test]` body shells out to `cargo build-sbf`, and on
+        # first invocation that downloads + unpacks platform-tools (the
+        # pinned SBF rustc + LLVM) into `~/.cache/solana/<ver>/`. When the
+        # test binary launches multiple `#[svm_test]`s in parallel the
+        # downloads race each other: "rename: NotFound",
+        # "Permission denied", and "could not remove downloaded archive"
+        # all fall out of two threads stomping on the same temp file. Use
+        # `--install-only --force-tools-install` to populate the cache
+        # once, sequentially, before any test thread touches it. The
+        # retry handles transient archive-download failures from the
+        # `release.anza.xyz` CDN.
+        run: |
+          cargo build-sbf --install-only --force-tools-install \
+            || cargo build-sbf --install-only --force-tools-install
+
       - name: Run on-chain verifier tests
         # svm-unit-test invokes `cargo build-sbf` per `#[svm_test]`; --release
         # because the bodies run real Groth16 verification.

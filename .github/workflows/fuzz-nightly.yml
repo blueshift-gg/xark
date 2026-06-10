@@ -71,7 +71,9 @@ jobs:
             ${{ runner.os }}-fuzz-corpus-
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # See fuzz.yml: `--locked` pins a too-old `rustix` that uses
+        # internal rustc attrs and fails to compile on current nightly.
+        run: cargo install cargo-fuzz
 
       - name: Ensure corpus + artifact dirs exist
         run: |

@@ -33,7 +33,12 @@ jobs:
           key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.toml') }}
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # `--locked` would force the vendored Cargo.lock from cargo-fuzz
+        # 0.13.x, which pins a `rustix` that uses `rustc_layout_*` attrs
+        # only available on internal rustc. Let cargo resolve transitive
+        # deps freely so the install builds on whatever the current
+        # nightly is.
+        run: cargo install cargo-fuzz
 
       - name: Run artifact-parser fuzz target (30 s)
         working-directory: fuzz

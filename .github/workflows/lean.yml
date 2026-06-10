@@ -304,17 +304,56 @@ jobs:
           #print axioms BitOf.unique
           #print axioms BitOf.eq_ite
           EOF
-          out=$(lake env lean axcheck.lean 2>&1); rm -f axcheck.lean
-          echo "$out"
-          if echo "$out" | grep -qi 'sorryAx'; then
-            echo "::error::a proof depends on sorryAx (incomplete proof)"; exit 1
+          # Capture stdout+stderr separately from the exit code; under bash -e
+          # `out=$(cmd)` exits the whole script if `cmd` returns non-zero,
+          # *before* we ever get to print `$out` — which buries any
+          # elaboration error from Lean. Run it explicitly with `set +e`.
+          set +e
+          lake env lean axcheck.lean > axout.txt 2>&1
+          status=$?
+          set -e
+          rm -f axcheck.lean
+          echo "===== axcheck output (lean exit status=$status) ====="
+          cat axout.txt
+          echo "===== end axcheck output ====="
+          if [ "$status" -ne 0 ]; then
+            echo "::error::lake env lean axcheck.lean failed (exit $status) — see axcheck output above"
+            exit "$status"
+          fi
+          if grep -qi 'sorryAx' axout.txt; then
+            echo "::error::a proof depends on sorryAx (incomplete proof)"
+            exit 1
           fi
           # Confirm `BitwuzlaSha256Equivalent` does not appear as a trusted
-          # axiom in any SHA-256 downstream theorem.
-          if echo "$out" | awk '
-            /^axioms (lowerSha256Compression_sound|sha256_round_pinned|sha256_closed_chain|sha256_round_bit_equivalence)$/ { flag=1; next }
-            /^axioms / { flag=0 }
-            flag { print }
-          ' | grep -q 'BitwuzlaSha256Equivalent'; then
-            echo "::error::a SHA-256 downstream theorem still depends on BitwuzlaSha256Equivalent as an axiom"; exit 1
-          fi
+          # axiom in any SHA-256 downstream theorem. Lean's `#print axioms`
+          # writes blocks of the form:
+          #   'Xark.<name>' depends on axioms: [a, b,
+          #     c, d]
+          #   'Xark.<name>' does not depend on any axioms
+          # Each block can span multiple lines when the axiom list is wide.
+          # `awk` walks block by block and flags any SHA-256 downstream
+          # theorem whose block contains the forbidden axiom.
+          python3 - <<'PY'
+          import re, sys
+          SHA256_THEOREMS = {
+            'lowerSha256Compression_sound',
+            'sha256_round_pinned',
+            'sha256_closed_chain',
+            'sha256_round_bit_equivalence',
+          }
+          with open('axout.txt') as f:
+            text = f.read()
+          blocks = re.split(r"(?=^'Xark\.)", text, flags=re.MULTILINE)
+          bad = []
+          for block in blocks:
+            m = re.match(r"^'Xark\.([A-Za-z0-9_]+)'", block)
+            if not m: continue
+            name = m.group(1)
+            if name not in SHA256_THEOREMS: continue
+            if 'BitwuzlaSha256Equivalent' in block:
+              bad.append(name)
+          for name in bad:
+            print(f"::error::SHA-256 downstream theorem {name} depends on BitwuzlaSha256Equivalent")
+          sys.exit(1 if bad else 0)
+          PY
+          rm -f axout.txt

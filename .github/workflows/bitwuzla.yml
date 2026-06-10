@@ -42,10 +42,13 @@ jobs:
           key: ${{ runner.os }}-cargo-bitwuzla-${{ hashFiles('Cargo.lock') }}
 
       - name: Install Bitwuzla build deps
+        # Bitwuzla 0.9.x's symfpu backend depends on mpfr; without
+        # libmpfr-dev the `./configure.py` invocation fails at the meson
+        # stage with "Dependency 'mpfr' not found".
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake meson ninja-build python3-pip libgmp-dev libgtest-dev
+            cmake meson ninja-build python3-pip libgmp-dev libmpfr-dev libgtest-dev
 
       - name: Build & install Bitwuzla
         run: |

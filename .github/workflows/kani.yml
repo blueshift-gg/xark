@@ -48,4 +48,8 @@ jobs:
       - name: Run Kani
         uses: model-checking/kani-github-action@v1
         with:
-          args: '-p xark-verifier'
+          # `kani::stub` is an unstable feature; without `--enable-unstable
+          # -Z stubbing` the proofs reject at codegen with
+          # "Using the stub attribute requires activating the unstable
+          # `stubbing` feature".
+          args: '-p xark-verifier --enable-unstable-options -Z stubbing'
