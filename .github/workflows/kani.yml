@@ -31,6 +31,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Add 8 GB swap (CBMC working set spikes past 7 GB)
+        # `ubuntu-latest` has 7 GB RAM. The heavier rejection / totality
+        # harnesses symbolically execute the full `verify_groth16` body
+        # with the kani::stub'd curve ops, and CBMC's GOTO+SAT working
+        # set exceeds the cgroup limit (the runner gets a SIGTERM,
+        # surfaced as "received a shutdown signal" + exit 143). Swap
+        # absorbs the spike — slower but doesn't crash.
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
