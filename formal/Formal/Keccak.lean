@@ -13,8 +13,8 @@ import Mathlib
 -- hard-codes the Apache license string (this is MIT); and the
 -- `style.setOption` linter flags top-level `set_option` declarations which
 -- we use deliberately.
-set_option linter.style.setOption false
 set_option linter.style.header false
+set_option linter.style.setOption false
 set_option linter.flexible false
 set_option maxHeartbeats 400000
 
@@ -171,7 +171,7 @@ theorem xor64_BitOf {F : Type*} [Field F]
     · show BitOf (wA k) (a k)
       have : wA k = (if (a k) then (1 : F) else 0) := by
         simp only [wA, if_neg hk]
-      rw [this]; unfold BitOf; split_ifs with hbit <;> simp [hbit]
+      rw [this]; unfold BitOf; split_ifs with hbit <;> simp
   have hB : ∀ k, BitOf (wB k) (b k) := by
     intro k
     by_cases hk : k = i
@@ -182,7 +182,7 @@ theorem xor64_BitOf {F : Type*} [Field F]
     · show BitOf (wB k) (b k)
       have : wB k = (if (b k) then (1 : F) else 0) := by
         simp only [wB, if_neg hk]
-      rw [this]; unfold BitOf; split_ifs with hbit <;> simp [hbit]
+      rw [this]; unfold BitOf; split_ifs with hbit <;> simp
   have hres := xor64_sound a b wA wB hA hB i
   have eA : wA i = wa := by simp only [wA, if_pos rfl]
   have eB : wB i = wb := by simp only [wB, if_pos rfl]
@@ -209,7 +209,7 @@ theorem and64_BitOf {F : Type*} [Field F]
     · show BitOf (wA k) (a k)
       have : wA k = (if (a k) then (1 : F) else 0) := by
         simp only [wA, if_neg hk]
-      rw [this]; unfold BitOf; split_ifs with hbit <;> simp [hbit]
+      rw [this]; unfold BitOf; split_ifs with hbit <;> simp
   have hB : ∀ k, BitOf (wB k) (b k) := by
     intro k
     by_cases hk : k = i
@@ -220,7 +220,7 @@ theorem and64_BitOf {F : Type*} [Field F]
     · show BitOf (wB k) (b k)
       have : wB k = (if (b k) then (1 : F) else 0) := by
         simp only [wB, if_neg hk]
-      rw [this]; unfold BitOf; split_ifs with hbit <;> simp [hbit]
+      rw [this]; unfold BitOf; split_ifs with hbit <;> simp
   have hres := and64_sound a b wA wB hA hB i
   have eA : wA i = wa := by simp only [wA, if_pos rfl]
   have eB : wB i = wb := by simp only [wB, if_pos rfl]
@@ -246,7 +246,7 @@ theorem not64_BitOf {F : Type*} [Ring F]
     · show BitOf (wA k) (a k)
       have : wA k = (if (a k) then (1 : F) else 0) := by
         simp only [wA, if_neg hk]
-      rw [this]; unfold BitOf; split_ifs with hbit <;> simp [hbit]
+      rw [this]; unfold BitOf; split_ifs with hbit <;> simp
   have hres := not64_sound a wA hA i
   have eA : wA i = wa := by simp only [wA, if_pos rfl]
   rw [eA] at hres

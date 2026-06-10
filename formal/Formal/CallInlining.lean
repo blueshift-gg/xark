@@ -57,7 +57,7 @@ binding and predicate combination. Mirrors the relevant fields of
   witness `callee_idx` after relabel (i.e. callee index `callee_idx`
   becomes wire `callee_idx + offset` in the combined R1CS). -/
 structure CallOpcode (F : Type*) where
-  inputs         : List ℕ
+  inputs : List ℕ
   outputs        : List ℕ
   inner_opcodes  : List (AssertZeroLinear F)
   offset         : ℕ
@@ -107,7 +107,7 @@ theorem copyRow_satisfied_iff {F : Type*} [Field F]
   -- `AssertZeroLinear.Satisfied { constant := 0, terms := [(1, caller), (-1, callee)] } w`
   -- expands by definition (List.map / List.sum on a 2-element list) to
   -- `0 + (1·w caller + (-1·w callee + 0)) = 0`, equivalent to `w caller = w callee`.
-  show ((0 : F) + ((1 : F) * w caller + ((-1 : F) * w callee + 0)) = 0) ↔
+  change ((0 : F) + ((1 : F) * w caller + ((-1 : F) * w callee + 0)) = 0) ↔
        w caller = w callee
   constructor
   · intro h; linear_combination h

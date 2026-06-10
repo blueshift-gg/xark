@@ -295,7 +295,7 @@ jobs:
           #print axioms not8_sound
           #print axioms aesXTime_sound
           #print axioms aesSubBytes_byte_sound
-          #print axioms aesSubBytes_bit_sound
+          #print axioms aesSubBytes_constraint_sound
           #print axioms aesShiftRows_sound
           #print axioms aesMixColumn_sound
           #print axioms aesMixColumns_sound

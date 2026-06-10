@@ -14,5 +14,5 @@ use xark_acir_r1cs::artifact::parse_artifact_bytes;
 fuzz_target!(|data: &[u8]| {
     // We only check totality (no panic). Errors are expected on most inputs;
     // the bug we're looking for is an unhandled panic or infinite loop.
-    let _ = parse_artifact_bytes(data);
+    let _ = parse_artifact_bytes(data, "fuzz".to_string());
 });

@@ -120,7 +120,7 @@ job of `sha256_round_bit_equivalence`. Both layers are pure Lean — no
 `sorry`, no `axiom`. -/
 def BitwuzlaSha256Equivalent
     (gadget_round_out : Fin 256 → Bool)
-    (ref_round_out    : Fin 256 → Bool) : Prop :=
+    (ref_round_out : Fin 256 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
 /-- "Bitwuzla equivalence ↔ pointwise equivalence" — a pure-Lean
@@ -253,7 +253,7 @@ SMT-level cross-check over all 1600-bit inputs and re-runs under
 `cargo test --release -p xark-tests --test bitwuzla_keccak`. -/
 def BitwuzlaKeccakEquivalent
     (gadget_round_out : Fin 1600 → Bool)
-    (ref_round_out    : Fin 1600 → Bool) : Prop :=
+    (ref_round_out : Fin 1600 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
 /-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
@@ -335,7 +335,7 @@ The round-step equivalence is proven in pure Lean by
 SMT-level cross-check. -/
 def BitwuzlaBlake2sEquivalent
     (gadget_round_out : Fin 256 → Bool)
-    (ref_round_out    : Fin 256 → Bool) : Prop :=
+    (ref_round_out : Fin 256 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
 /-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
@@ -406,7 +406,7 @@ The round-step equivalence is proven in pure Lean by
 SMT-level cross-check. -/
 def BitwuzlaBlake3Equivalent
     (gadget_round_out : Fin 512 → Bool)
-    (ref_round_out    : Fin 512 → Bool) : Prop :=
+    (ref_round_out : Fin 512 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
 /-- The text-form: "Bitwuzla verified gadget = reference." Definitionally
@@ -476,7 +476,7 @@ from `Formal.Aes`). The QF_BV harness
 SMT-level cross-check. -/
 def BitwuzlaAes128Equivalent
     (gadget_round_out : Fin 128 → Bool)
-    (ref_round_out    : Fin 128 → Bool) : Prop :=
+    (ref_round_out : Fin 128 → Bool) : Prop :=
   BitwuzlaEquivalent gadget_round_out ref_round_out
 
 /-- The text-form: "Bitwuzla verified gadget = reference." Definitionally

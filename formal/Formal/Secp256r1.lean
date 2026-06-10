@@ -51,7 +51,7 @@ Grumpkin/secp256k1) to support `a = −3` (secp256r1 / NIST P-256). -/
 theorem ec_double_on_curve_with_a {F : Type*} [Field F]
     (a b x1 y1 lam : F)
     (hE1 : y1 ^ 2 = x1 ^ 3 + a * x1 + b)
-    (hS  : lam * (2 * y1) = 3 * x1 ^ 2 + a) :
+    (hS : lam * (2 * y1) = 3 * x1 ^ 2 + a) :
     (lam * (x1 - (lam ^ 2 - 2 * x1)) - y1) ^ 2
       = (lam ^ 2 - 2 * x1) ^ 3 + a * (lam ^ 2 - 2 * x1) + b := by
   linear_combination hE1 + (lam ^ 2 - 3 * x1) * hS

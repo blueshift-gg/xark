@@ -181,10 +181,10 @@ private theorem wireBitsToNat_eq_toNat {a : Word32} {wa : Fin 32 → ZMod r}
     -- a i = false, h : wa i = 0
     -- Both sides should be 0
     have hwa_ne_one : wa i ≠ 1 := by rw [h]; exact zero_ne_one
-    simp [hwa_ne_one, hbi]
+    simp [hwa_ne_one]
   · simp [hbi] at h
     -- a i = true, h : wa i = 1
-    simp [h, hbi]
+    simp [h]
 
 /-- The Fr-level recomposition equals the cast of `wireBitsToNat` for boolean wires. -/
 private theorem bitsToFr_eq_wireBitsToNat_cast (w : Fin 32 → ZMod r)
@@ -310,7 +310,7 @@ theorem addMod32_bit_sound (a b : Word32)
     have h_prod : 2 ^ 32 * cNat ≤ 2 ^ 32 := by
       rcases (Nat.eq_or_lt_of_le h_cNat_le_one) with h | h
       · rw [h]; rfl
-      · interval_cases cNat <;> simp
+      · interval_cases cNat; simp
     omega
   -- Lift Fr equation to ℕ.
   have h_sum_nat : toNat a + toNat b = wireBitsToNat wsum + 2 ^ 32 * cNat :=
@@ -360,7 +360,7 @@ theorem addMod32_bit_sound (a b : Word32)
       · rw [hw1] at h_ind
         rw [hc0] at h_ind
         have h_neq : (1 : ZMod r) ≠ 0 := one_ne_zero
-        simp [h_neq] at h_ind
+        simp at h_ind
       · rw [hw1, hc1]
   -- Conclude BitOf per bit.
   intro i

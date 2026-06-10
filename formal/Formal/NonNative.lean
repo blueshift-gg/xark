@@ -169,7 +169,7 @@ designed to discharge — once those constraints are shown to sum to the integer
 identity (separate work, see the module docstring), this lemma closes the
 soundness story for the non-native multiplication primitive. -/
 theorem mul_mod_via_limbs {n : ℕ} (a b q c m : Fin n → ℕ) (β : ℕ)
-    (hm : 0 < valOfLimbs m β) (hc : valOfLimbs c β < valOfLimbs m β)
+    (_hm : 0 < valOfLimbs m β) (hc : valOfLimbs c β < valOfLimbs m β)
     (h : valOfLimbs a β * valOfLimbs b β
           = valOfLimbs q β * valOfLimbs m β + valOfLimbs c β) :
     valOfLimbs c β = (valOfLimbs a β * valOfLimbs b β) % valOfLimbs m β :=
@@ -429,7 +429,7 @@ theorem mul_mod_via_limbwise_constraints {n : ℕ} (a b q c m : Fin n → ℕ)
     (hcol : ∀ k ∈ Finset.range (2 * n),
         colSum (ext a) (ext b) k + carry k
           = colSum (ext q) (ext m) k + ext c k + β * carry (k + 1))
-    (hm : 0 < valOfLimbs m β) (hc_lt : valOfLimbs c β < valOfLimbs m β) :
+    (_hm : 0 < valOfLimbs m β) (hc_lt : valOfLimbs c β < valOfLimbs m β) :
     valOfLimbs c β = (valOfLimbs a β * valOfLimbs b β) % valOfLimbs m β := by
   -- Step 1: the carry telescope reduces the per-column equations to a polynomial identity.
   have htele :
@@ -473,10 +473,9 @@ theorem mul_mod_via_limbwise_constraints {n : ℕ} (a b q c m : Fin n → ℕ)
   -- Step 5: put together the integer identity at recomposed values.
   rw [hsplit, hc_sum] at htele
   rw [← h_a_b, ← h_q_m] at htele
-  -- Step 6: rewrite via the `Fin n → ℕ` ↔ `ℕ → ℕ` bridge in the goal and `hm`, `hc_lt`.
+  -- Step 6: rewrite via the `Fin n → ℕ` ↔ `ℕ → ℕ` bridge in the goal and `hc_lt`.
   rw [valOfLimbs_eq_valOfNatLimbs_ext c, valOfLimbs_eq_valOfNatLimbs_ext a,
       valOfLimbs_eq_valOfNatLimbs_ext b, valOfLimbs_eq_valOfNatLimbs_ext m]
-  rw [valOfLimbs_eq_valOfNatLimbs_ext m] at hm
   rw [valOfLimbs_eq_valOfNatLimbs_ext c, valOfLimbs_eq_valOfNatLimbs_ext m] at hc_lt
   exact mul_mod_sound _ _ _ _ _ hc_lt htele
 

@@ -46,7 +46,7 @@ in the routing layer is ruled out. -/
 theorem selector_partition_unique {F : Type*} [Field F] {n : ℕ}
     (s : Fin n → F) (index : Fin n)
     (h_bool : ∀ j, s j * (s j - 1) = 0)
-    (h_ind  : ∀ j : Fin n, s j * ((index.val : F) - (j.val : F)) = 0)
+    (h_ind : ∀ j : Fin n, s j * ((index.val : F) - (j.val : F)) = 0)
     (h_sum  : (∑ j : Fin n, s j) = 1)
     (h_inj  : ∀ a b : Fin n, (a.val : F) = (b.val : F) → a = b) :
     ∀ j, s j = if j = index then (1 : F) else 0 := by

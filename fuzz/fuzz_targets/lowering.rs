@@ -11,7 +11,7 @@ use libfuzzer_sys::fuzz_target;
 use xark_acir_r1cs::{artifact::parse_artifact_bytes, lower_program};
 
 fuzz_target!(|data: &[u8]| {
-    if let Ok(artifact) = parse_artifact_bytes(data) {
+    if let Ok(artifact) = parse_artifact_bytes(data, "fuzz".to_string()) {
         let _ = lower_program(artifact);
     }
 });

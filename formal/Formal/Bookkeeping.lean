@@ -73,12 +73,10 @@ theorem AllocState.alloc_preserves_invariant
   unfold AllocState.alloc
   cases hcase : m.assigned idx with
   | some v =>
-    simp only [hcase]
     exact hm
   | none =>
-    simp only [hcase]
     intro i v h
-    show v < m.next + 1
+    change v < m.next + 1
     -- The state assigned function is `fun i => if i = idx then some m.next else m.assigned i`.
     -- Unfold the projection and split on i = idx.
     have hassign : (if i = idx then some m.next else m.assigned i) = some v := h
@@ -103,7 +101,7 @@ theorem alloc_witness_idempotent (m : AllocState) (idx : ℕ) :
     simp [hcase]
   | none =>
     -- Fresh: the first alloc binds idx → m.next; the second hits the `some` branch.
-    simp [hcase]
+    simp
 
 /-- **`alloc_witness` is injective on distinct indices.** Two
 distinct ACIR witness indices `idx₁ ≠ idx₂`, freshly allocated against the
@@ -198,14 +196,12 @@ theorem AllocState.alloc_next_le (m : AllocState) (idx : ℕ) :
   unfold AllocState.alloc
   cases hcase : m.assigned idx with
   | some v =>
-    simp only [hcase]
     -- Goal: (v, m).2.next ≤ m.next + 1, i.e. m.next ≤ m.next + 1.
-    show m.next ≤ m.next + 1
+    change m.next ≤ m.next + 1
     omega
   | none =>
-    simp only [hcase]
     -- Goal: (m.next, ⟨..., m.next + 1⟩).2.next ≤ m.next + 1.
-    show m.next + 1 ≤ m.next + 1
+    change m.next + 1 ≤ m.next + 1
     omega
 
 /-- One step of `alloc` never *decreases* `next`. -/
@@ -214,12 +210,10 @@ theorem AllocState.alloc_next_ge (m : AllocState) (idx : ℕ) :
   unfold AllocState.alloc
   cases hcase : m.assigned idx with
   | some v =>
-    simp only [hcase]
-    show m.next ≤ m.next
+    change m.next ≤ m.next
     omega
   | none =>
-    simp only [hcase]
-    show m.next ≤ m.next + 1
+    change m.next ≤ m.next + 1
     omega
 
 /-- One step of `alloc` does not remove existing bindings: if `idx'` was
@@ -232,11 +226,9 @@ theorem AllocState.alloc_preserves_assigned
   unfold AllocState.alloc
   cases hcase : m.assigned idx with
   | some w =>
-    simp only [hcase]
     exact h
   | none =>
-    simp only [hcase]
-    show (if idx' = idx then some m.next else m.assigned idx') = some v
+    change (if idx' = idx then some m.next else m.assigned idx') = some v
     by_cases hi : idx' = idx
     · -- idx' = idx but m.assigned idx = none ≠ some v, contradiction.
       rw [hi] at h
@@ -258,7 +250,7 @@ theorem alloc_list_next_grows (m : AllocState) (idxs : List ℕ) :
     have h_combined : ((m.alloc i).2.allocList rest).next ≤ m.next + 1 + rest.length :=
       le_trans h_rec (by omega)
     -- (i :: rest).length = rest.length + 1, so m.next + (rest.length + 1) = m.next + 1 + rest.length.
-    show ((m.alloc i).2.allocList rest).next ≤ m.next + (i :: rest).length
+    change ((m.alloc i).2.allocList rest).next ≤ m.next + (i :: rest).length
     rw [List.length_cons]
     omega
 
@@ -332,12 +324,12 @@ theorem alloc_list_reaches_offset_eq
       -- the alloc takes the `none` branch and writes only at i).
       unfold AllocState.alloc
       simp only [h_i_fresh]
-      show (if j = i then some m.next else m.assigned j) = none
+      change (if j = i then some m.next else m.assigned j) = none
       rw [if_neg h_j_ne_i]
       exact h_j_fresh_in_m
     have h_rec : ((m.alloc i).2.allocList rest).next = (m.alloc i).2.next + rest.length :=
       ih (m.alloc i).2 h_nodup_rest h_rest_fresh
-    show ((m.alloc i).2.allocList rest).next = m.next + (i :: rest).length
+    change ((m.alloc i).2.allocList rest).next = m.next + (i :: rest).length
     rw [h_rec, h_step, List.length_cons]
     omega
 

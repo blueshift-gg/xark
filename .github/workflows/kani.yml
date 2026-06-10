@@ -52,4 +52,4 @@ jobs:
           # -Z stubbing` the proofs reject at codegen with
           # "Using the stub attribute requires activating the unstable
           # `stubbing` feature".
-          args: '-p xark-verifier --enable-unstable-options -Z stubbing'
+          args: '-p xark-verifier --enable-unstable -Z stubbing'

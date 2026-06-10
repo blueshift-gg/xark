@@ -141,7 +141,7 @@ theorem lowerAssertZeroLinear_sound {F : Type*} [Field F]
     (lowerAssertZeroLinear op).Satisfied w ↔ op.Satisfied w := by
   unfold R1csRow.Satisfied AssertZeroLinear.Satisfied lowerAssertZeroLinear
   unfold LinearComb.eval ConstantWirePinned at *
-  simp [h_const]
+  simp only [List.map_nil, List.sum_nil, mul_zero, List.map_cons, h_const, mul_one, List.sum_cons]
   exact eq_comm
 
 /-- **Completeness corollary** (LTR of the iff): honest provers always
@@ -1000,7 +1000,7 @@ theorem lowerAcirOpcode_sound_no_full {F : Type*} [Field F]
       simp [lowerAcirOpcode]
     unfold R1csRow.Satisfied LinearComb.eval lowerMemoryOpRead_row at h
     unfold ConstantWirePinned at h_const
-    show w value = w (memSlotWire block_id idx)
+    change w value = w (memSlotWire block_id idx)
     simp [h_const] at h
     linear_combination h
   | .memoryOpWrite block_id idx value =>
@@ -1009,14 +1009,14 @@ theorem lowerAcirOpcode_sound_no_full {F : Type*} [Field F]
       simp [lowerAcirOpcode]
     unfold R1csRow.Satisfied LinearComb.eval lowerMemoryOpWrite_row at h
     unfold ConstantWirePinned at h_const
-    show w value = w (memSlotWire block_id idx)
+    change w value = w (memSlotWire block_id idx)
     simp [h_const] at h
     linear_combination h
   | .call _ _ offset _ inner_opcodes output_binding =>
     intro op_inner hop
     have hrow : (lowerAssertZeroLinear (op_inner.shift offset)).Satisfied w := by
       apply h_rows
-      show lowerAssertZeroLinear (op_inner.shift offset)
+      change lowerAssertZeroLinear (op_inner.shift offset)
             ∈ lowerCallOpcode_rows (F := F) offset inner_opcodes output_binding
       unfold lowerCallOpcode_rows
       apply List.mem_append.mpr
@@ -1083,7 +1083,7 @@ theorem lowerAcirOpcode_sound {F : Type*} [Field F]
           terms := o.terms ++ aux_terms }
       -- `lowerAssertZeroLinear shell_op` equals the shell row by def.
       have h_shell_sat : (lowerAssertZeroLinear shell_op).Satisfied w := by
-        show R1csRow.Satisfied
+        change R1csRow.Satisfied
           ({ a := []
              b := []
              c := (o.constant, 0) :: o.terms ++ aux_terms } : R1csRow F) w
@@ -1104,7 +1104,7 @@ theorem lowerAcirOpcode_sound {F : Type*} [Field F]
           (aux_terms.map (fun ci => ci.1 * w ci.2)).sum =
           ((List.finRange o.muls.length).map
             (fun j => w (aux_start + j.val))).sum := by
-        show (((List.finRange o.muls.length).map
+        change (((List.finRange o.muls.length).map
                 (fun j => ((1 : F), aux_start + j.val))).map
                 (fun ci => ci.1 * w ci.2)).sum =
              ((List.finRange o.muls.length).map
@@ -1113,7 +1113,7 @@ theorem lowerAcirOpcode_sound {F : Type*} [Field F]
         congr 1
         apply List.map_congr_left
         intro j _
-        show (1 : F) * w (aux_start + j.val) = w (aux_start + j.val)
+        change (1 : F) * w (aux_start + j.val) = w (aux_start + j.val)
         ring
       rw [h_aux_eq] at hsat
       linear_combination hsat
@@ -1136,7 +1136,7 @@ theorem lowerAcirOpcode_sound {F : Type*} [Field F]
       simp [lowerAcirOpcode]
     unfold R1csRow.Satisfied LinearComb.eval lowerMemoryOpRead_row at h
     unfold ConstantWirePinned at h_const
-    show w value = w (memSlotWire block_id idx)
+    change w value = w (memSlotWire block_id idx)
     simp [h_const] at h
     linear_combination h
   | .memoryOpWrite block_id idx value =>
@@ -1145,14 +1145,14 @@ theorem lowerAcirOpcode_sound {F : Type*} [Field F]
       simp [lowerAcirOpcode]
     unfold R1csRow.Satisfied LinearComb.eval lowerMemoryOpWrite_row at h
     unfold ConstantWirePinned at h_const
-    show w value = w (memSlotWire block_id idx)
+    change w value = w (memSlotWire block_id idx)
     simp [h_const] at h
     linear_combination h
   | .call _ _ offset _ inner_opcodes output_binding =>
     intro op_inner hop
     have hrow : (lowerAssertZeroLinear (op_inner.shift offset)).Satisfied w := by
       apply h_rows
-      show lowerAssertZeroLinear (op_inner.shift offset)
+      change lowerAssertZeroLinear (op_inner.shift offset)
             ∈ lowerCallOpcode_rows (F := F) offset inner_opcodes output_binding
       unfold lowerCallOpcode_rows
       apply List.mem_append.mpr

@@ -140,7 +140,7 @@ theorem gf256_mul_zero_left (y : ℕ) : gf256_mul 0 y = 0 := by
   unfold gf256_mul
   apply Finset.sum_eq_zero
   intro k _
-  show gf256_prodBit 0 y k * 2 ^ k = 0
+  change gf256_prodBit 0 y k * 2 ^ k = 0
   apply mul_eq_zero.mpr; left
   unfold gf256_prodBit gf256_bit
   have h_inner_zero :

@@ -267,8 +267,7 @@ The following hold by `rfl` from the definition of `secp256k1Curve`. -/
 /-- For our curve, `negY x y = -y`. -/
 theorem secp256k1Curve_negY (x y : ZMod secp256k1_p) :
     secp256k1Curve.negY x y = -y := by
-  show -y - secp256k1Curve.a₁ * x - secp256k1Curve.a₃ = -y
-  simp
+  simp [WeierstrassCurve.Affine.negY]
 
 /-- **Nonsingularity preservation under the endomorphism.** `φ : (x, y) ↦
 (β · x, y)` maps nonsingular points to nonsingular points. Mechanically
@@ -417,16 +416,16 @@ theorem secp256k1_phi_hom : ∀ a b : Secp256k1Point,
   intro a b
   rcases a with _ | ⟨x₁, y₁, h₁⟩
   · -- arm 1: 0 + b
-    show secp256k1_phi (0 + b) = secp256k1_phi 0 + secp256k1_phi b
+    change secp256k1_phi (0 + b) = secp256k1_phi 0 + secp256k1_phi b
     rw [zero_add, secp256k1_phi_zero, zero_add]
   rcases b with _ | ⟨x₂, y₂, h₂⟩
   · -- arm 2: some + 0
-    show secp256k1_phi (_ + 0) = secp256k1_phi _ + secp256k1_phi 0
+    change secp256k1_phi (_ + 0) = secp256k1_phi _ + secp256k1_phi 0
     rw [add_zero, secp256k1_phi_zero, add_zero]
   by_cases hxy : x₁ = x₂ ∧ y₁ = secp256k1Curve.negY x₂ y₂
   · -- arm 3: inverse case (some + (-some) = 0)
     rw [WeierstrassCurve.Affine.Point.add_of_Y_eq hxy.1 hxy.2, secp256k1_phi_zero]
-    show (0 : Secp256k1Point) =
+    change (0 : Secp256k1Point) =
       WeierstrassCurve.Affine.Point.some (secp256k1_beta * x₁) y₁
         (secp256k1_phi_preserves_nonsingular x₁ y₁ h₁) +
       WeierstrassCurve.Affine.Point.some (secp256k1_beta * x₂) y₂
@@ -441,7 +440,7 @@ theorem secp256k1_phi_hom : ∀ a b : Secp256k1Point,
         ¬(secp256k1_beta * x₁ = secp256k1_beta * x₂ ∧
           y₁ = secp256k1Curve.negY (secp256k1_beta * x₂) y₂) :=
       secp256k1_phi_hom_aux_hxy hxy
-    show WeierstrassCurve.Affine.Point.some
+    change WeierstrassCurve.Affine.Point.some
         (secp256k1_beta * secp256k1Curve.addX x₁ x₂ (secp256k1Curve.slope x₁ x₂ y₁ y₂))
         (secp256k1Curve.addY x₁ x₂ y₁ (secp256k1Curve.slope x₁ x₂ y₁ y₂)) _ =
       WeierstrassCurve.Affine.Point.some (secp256k1_beta * x₁) y₁
@@ -466,7 +465,7 @@ theorem secp256k1_phi_hom : ∀ a b : Secp256k1Point,
       simp only [WeierstrassCurve.Affine.addY, WeierstrassCurve.Affine.negAddY,
         WeierstrassCurve.Affine.addX, secp256k1Curve_a₁, secp256k1Curve_a₂,
         secp256k1Curve_a₄, secp256k1Curve_negY,
-        zero_mul, mul_zero, sub_zero, add_zero, zero_add, zero_sub, sub_neg_eq_add]
+        zero_mul, mul_zero, sub_zero, add_zero, sub_neg_eq_add]
       have htwo : y₁ + y₁ = 2 * y₁ := by ring
       rw [htwo]
       refine ⟨?_, ?_⟩
@@ -484,7 +483,7 @@ theorem secp256k1_phi_hom : ∀ a b : Secp256k1Point,
       simp only [WeierstrassCurve.Affine.addY, WeierstrassCurve.Affine.negAddY,
         WeierstrassCurve.Affine.addX, secp256k1Curve_a₁, secp256k1Curve_a₂,
         secp256k1Curve_negY,
-        zero_mul, mul_zero, sub_zero, add_zero, zero_add]
+        zero_mul, sub_zero, add_zero]
       refine ⟨?_, ?_⟩
       · have hx_sub : x₁ - x₂ ≠ 0 := sub_ne_zero_of_ne hx
         have hβx_sub : secp256k1_beta * x₁ - secp256k1_beta * x₂ ≠ 0 :=

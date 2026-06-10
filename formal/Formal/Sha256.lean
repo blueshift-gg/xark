@@ -12,11 +12,11 @@ import Mathlib
 -- because the simp set is not pinned. The `style.header` linter hard-codes the
 -- Apache license string (this is an MIT project). The `style.setOption` linter
 -- flags top-level `set_option` declarations; we use them deliberately.
-set_option linter.style.setOption false
 set_option linter.style.header false
+set_option linter.style.setOption false
 set_option linter.flexible false
 
-/-!
+/-
 # xark SHA-256 structural soundness — mechanised in Lean 4 / mathlib
 
 This file builds the **structural** soundness layer for the SHA-256 compression

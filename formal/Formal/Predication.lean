@@ -57,7 +57,7 @@ theorem enforce_gated_sound {F : Type*} [Field F]
     (a b c p e : F)
     (h_orig : a * b = c + e)
     (h_gate : p * e = 0)
-    (h_pbool : p * (p - 1) = 0) :
+    (_h_pbool : p * (p - 1) = 0) :
     p = 1 → a * b = c := by
   intro hp
   -- p = 1, h_gate gives 1 · e = 0, so e = 0; then a·b = c + 0 = c.
@@ -87,7 +87,7 @@ The fast path saves one auxiliary witness + one R1CS constraint per linear
 gated assertion. -/
 theorem enforce_gated_linear_collapse {F : Type*} [Field F]
     (c p : F)
-    (h_pbool : p * (p - 1) = 0)
+    (_h_pbool : p * (p - 1) = 0)
     (h_fast : p * c = 0) :
     p = 1 → c = 0 := by
   intro hp
@@ -98,7 +98,7 @@ theorem enforce_gated_linear_collapse {F : Type*} [Field F]
 under the `a = b = 0` shape.** The fast path is not just an optimisation — it
 delivers the same gated semantics. -/
 theorem enforce_gated_two_row_eq_collapse {F : Type*} [Field F]
-    (c p : F) (h_pbool : p * (p - 1) = 0) :
+    (c p : F) (_h_pbool : p * (p - 1) = 0) :
     ((∃ e : F, (0 : F) * 0 = c + e ∧ p * e = 0)
       ↔ p * c = 0) := by
   constructor

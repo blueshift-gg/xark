@@ -206,27 +206,27 @@ private theorem byteOfNat_0x1b_bits :
 private theorem aesXTime_bit_0 (b : Byte8) : (aesXTime b) ⟨0, by decide⟩ = b ⟨7, by decide⟩ := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show byteOfNat 0x1b ⟨0, by decide⟩ = true
+  · simp
+  · simp
+    change byteOfNat 0x1b ⟨0, by decide⟩ = true
     decide
 
 private theorem aesXTime_bit_1 (b : Byte8) :
     (aesXTime b) ⟨1, by decide⟩ = xor (b ⟨0, by decide⟩) (b ⟨7, by decide⟩) := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨0, by decide⟩) (byteOfNat 0x1b ⟨1, by decide⟩) = !(b ⟨0, by decide⟩)
+  · simp
+  · simp
+    change xor (b ⟨0, by decide⟩) (byteOfNat 0x1b ⟨1, by decide⟩) = !(b ⟨0, by decide⟩)
     have : byteOfNat 0x1b ⟨1, by decide⟩ = true := by decide
     rw [this]; cases b ⟨0, by decide⟩ <;> rfl
 
 private theorem aesXTime_bit_2 (b : Byte8) : (aesXTime b) ⟨2, by decide⟩ = b ⟨1, by decide⟩ := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨1, by decide⟩) (byteOfNat 0x1b ⟨2, by decide⟩) = b ⟨1, by decide⟩
+  · simp
+  · simp
+    change xor (b ⟨1, by decide⟩) (byteOfNat 0x1b ⟨2, by decide⟩) = b ⟨1, by decide⟩
     have : byteOfNat 0x1b ⟨2, by decide⟩ = false := by decide
     rw [this]; cases b ⟨1, by decide⟩ <;> rfl
 
@@ -234,9 +234,9 @@ private theorem aesXTime_bit_3 (b : Byte8) :
     (aesXTime b) ⟨3, by decide⟩ = xor (b ⟨2, by decide⟩) (b ⟨7, by decide⟩) := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨2, by decide⟩) (byteOfNat 0x1b ⟨3, by decide⟩) = !(b ⟨2, by decide⟩)
+  · simp
+  · simp
+    change xor (b ⟨2, by decide⟩) (byteOfNat 0x1b ⟨3, by decide⟩) = !(b ⟨2, by decide⟩)
     have : byteOfNat 0x1b ⟨3, by decide⟩ = true := by decide
     rw [this]; cases b ⟨2, by decide⟩ <;> rfl
 
@@ -244,36 +244,36 @@ private theorem aesXTime_bit_4 (b : Byte8) :
     (aesXTime b) ⟨4, by decide⟩ = xor (b ⟨3, by decide⟩) (b ⟨7, by decide⟩) := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨3, by decide⟩) (byteOfNat 0x1b ⟨4, by decide⟩) = !(b ⟨3, by decide⟩)
+  · simp
+  · simp
+    change xor (b ⟨3, by decide⟩) (byteOfNat 0x1b ⟨4, by decide⟩) = !(b ⟨3, by decide⟩)
     have : byteOfNat 0x1b ⟨4, by decide⟩ = true := by decide
     rw [this]; cases b ⟨3, by decide⟩ <;> rfl
 
 private theorem aesXTime_bit_5 (b : Byte8) : (aesXTime b) ⟨5, by decide⟩ = b ⟨4, by decide⟩ := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨4, by decide⟩) (byteOfNat 0x1b ⟨5, by decide⟩) = b ⟨4, by decide⟩
+  · simp
+  · simp
+    change xor (b ⟨4, by decide⟩) (byteOfNat 0x1b ⟨5, by decide⟩) = b ⟨4, by decide⟩
     have : byteOfNat 0x1b ⟨5, by decide⟩ = false := by decide
     rw [this]; cases b ⟨4, by decide⟩ <;> rfl
 
 private theorem aesXTime_bit_6 (b : Byte8) : (aesXTime b) ⟨6, by decide⟩ = b ⟨5, by decide⟩ := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨5, by decide⟩) (byteOfNat 0x1b ⟨6, by decide⟩) = b ⟨5, by decide⟩
+  · simp
+  · simp
+    change xor (b ⟨5, by decide⟩) (byteOfNat 0x1b ⟨6, by decide⟩) = b ⟨5, by decide⟩
     have : byteOfNat 0x1b ⟨6, by decide⟩ = false := by decide
     rw [this]; cases b ⟨5, by decide⟩ <;> rfl
 
 private theorem aesXTime_bit_7 (b : Byte8) : (aesXTime b) ⟨7, by decide⟩ = b ⟨6, by decide⟩ := by
   unfold aesXTime
   cases hb7 : b ⟨7, by decide⟩
-  · simp [hb7]
-  · simp [hb7, xor8]
-    show xor (b ⟨6, by decide⟩) (byteOfNat 0x1b ⟨7, by decide⟩) = b ⟨6, by decide⟩
+  · simp
+  · simp
+    change xor (b ⟨6, by decide⟩) (byteOfNat 0x1b ⟨7, by decide⟩) = b ⟨6, by decide⟩
     have : byteOfNat 0x1b ⟨7, by decide⟩ = false := by decide
     rw [this]; cases b ⟨6, by decide⟩ <;> rfl
 
@@ -312,48 +312,48 @@ theorem aesXTime_sound {F : Type*} [Field F]
   -- n = 0: aesXTimeWire = wB 7; aesXTime b bit 0 = b 7
   · rw [aesXTime_bit_0]
     apply BitOf.of_eq_ite
-    show wB ⟨7, by decide⟩ = _
+    change wB ⟨7, by decide⟩ = _
     rw [e7]
   -- n = 1: aesXTimeWire = xor witness; aesXTime b bit 1 = xor b0 b7
   · rw [aesXTime_bit_1]
     apply BitOf.of_eq_ite
-    show wB ⟨0, by decide⟩ + wB ⟨7, by decide⟩
+    change wB ⟨0, by decide⟩ + wB ⟨7, by decide⟩
            - 2 * (wB ⟨0, by decide⟩ * wB ⟨7, by decide⟩) = _
     rw [e0, e7]
-    cases b ⟨0, by decide⟩ <;> cases b ⟨7, by decide⟩ <;> simp <;> ring
+    cases b ⟨0, by decide⟩ <;> cases b ⟨7, by decide⟩ <;> simp; ring
   -- n = 2
   · rw [aesXTime_bit_2]
     apply BitOf.of_eq_ite
-    show wB ⟨1, by decide⟩ = _
+    change wB ⟨1, by decide⟩ = _
     rw [e1]
   -- n = 3
   · rw [aesXTime_bit_3]
     apply BitOf.of_eq_ite
-    show wB ⟨2, by decide⟩ + wB ⟨7, by decide⟩
+    change wB ⟨2, by decide⟩ + wB ⟨7, by decide⟩
            - 2 * (wB ⟨2, by decide⟩ * wB ⟨7, by decide⟩) = _
     rw [e2, e7]
-    cases b ⟨2, by decide⟩ <;> cases b ⟨7, by decide⟩ <;> simp <;> ring
+    cases b ⟨2, by decide⟩ <;> cases b ⟨7, by decide⟩ <;> simp; ring
   -- n = 4
   · rw [aesXTime_bit_4]
     apply BitOf.of_eq_ite
-    show wB ⟨3, by decide⟩ + wB ⟨7, by decide⟩
+    change wB ⟨3, by decide⟩ + wB ⟨7, by decide⟩
            - 2 * (wB ⟨3, by decide⟩ * wB ⟨7, by decide⟩) = _
     rw [e3, e7]
-    cases b ⟨3, by decide⟩ <;> cases b ⟨7, by decide⟩ <;> simp <;> ring
+    cases b ⟨3, by decide⟩ <;> cases b ⟨7, by decide⟩ <;> simp; ring
   -- n = 5
   · rw [aesXTime_bit_5]
     apply BitOf.of_eq_ite
-    show wB ⟨4, by decide⟩ = _
+    change wB ⟨4, by decide⟩ = _
     rw [e4]
   -- n = 6
   · rw [aesXTime_bit_6]
     apply BitOf.of_eq_ite
-    show wB ⟨5, by decide⟩ = _
+    change wB ⟨5, by decide⟩ = _
     rw [e5]
   -- n = 7
   · rw [aesXTime_bit_7]
     apply BitOf.of_eq_ite
-    show wB ⟨6, by decide⟩ = _
+    change wB ⟨6, by decide⟩ = _
     rw [e6]
 
 /-! ## Layer soundness: SubBytes, ShiftRows, MixColumns, AddRoundKey
@@ -680,14 +680,14 @@ private theorem gf256_bit_byteToNat (x : Byte8) (i : Fin 8) :
   set β : Fin 8 → ℕ := fun i => (byteToNat x / 2 ^ i.val) % 2
   set γ : Fin 8 → ℕ := fun i => if x i then 1 else 0
   have hβ_le : ∀ i, β i ≤ 1 := fun i => by
-    show (byteToNat x / 2 ^ i.val) % 2 ≤ 1
+    change (byteToNat x / 2 ^ i.val) % 2 ≤ 1
     have : (byteToNat x / 2 ^ i.val) % 2 < 2 := Nat.mod_lt _ (by decide)
     omega
   have hγ_le : ∀ i, γ i ≤ 1 := fun i => by
-    show (if x i then 1 else 0) ≤ 1
+    change (if x i then 1 else 0) ≤ 1
     split <;> simp
   have h_sum_β : (∑ i : Fin 8, 2 ^ i.val * β i) = byteToNat x := by
-    show (∑ i : Fin 8, 2 ^ i.val * ((byteToNat x / 2 ^ i.val) % 2)) = byteToNat x
+    change (∑ i : Fin 8, 2 ^ i.val * ((byteToNat x / 2 ^ i.val) % 2)) = byteToNat x
     have : (∑ i : Fin 8, 2 ^ i.val * ((byteToNat x / 2 ^ i.val) % 2))
          = ∑ i : Fin 8, ((byteToNat x / 2 ^ i.val) % 2) * 2 ^ i.val := by
       apply Finset.sum_congr rfl; intros; ring
@@ -696,7 +696,7 @@ private theorem gf256_bit_byteToNat (x : Byte8) (i : Fin 8) :
     rw [bitRecomp_mod_pow (byteToNat x) 8]
     exact Nat.mod_eq_of_lt h_byteToNat_lt
   have h_sum_γ : (∑ i : Fin 8, 2 ^ i.val * γ i) = byteToNat x := by
-    show (∑ i : Fin 8, 2 ^ i.val * (if x i then 1 else 0)) = byteToNat x
+    change (∑ i : Fin 8, 2 ^ i.val * (if x i then 1 else 0)) = byteToNat x
     unfold byteToNat
     apply Finset.sum_congr rfl
     intros; ring
@@ -707,19 +707,19 @@ private theorem gf256_bit_byteToNat (x : Byte8) (i : Fin 8) :
 
 /-- For boolean wires, bit `i` of `byteWireToNat w` equals `wireBitNat (w i)`. -/
 private theorem gf256_bit_byteWireToNat
-    {w : Fin 8 → ZMod r} (h_bool : ∀ j, w j = 0 ∨ w j = 1) (i : Fin 8) :
+    {w : Fin 8 → ZMod r} (_h_bool : ∀ j, w j = 0 ∨ w j = 1) (i : Fin 8) :
     gf256_bit (byteWireToNat w) i.val = wireBitNat (w i) := by
   unfold gf256_bit
   have h_byteWireToNat_lt : byteWireToNat w < 256 := byteWireToNat_lt_256 w
   set β : Fin 8 → ℕ := fun i => (byteWireToNat w / 2 ^ i.val) % 2
   set γ : Fin 8 → ℕ := fun i => wireBitNat (w i)
   have hβ_le : ∀ i, β i ≤ 1 := fun i => by
-    show (byteWireToNat w / 2 ^ i.val) % 2 ≤ 1
+    change (byteWireToNat w / 2 ^ i.val) % 2 ≤ 1
     have : (byteWireToNat w / 2 ^ i.val) % 2 < 2 := Nat.mod_lt _ (by decide)
     omega
   have hγ_le : ∀ i, γ i ≤ 1 := fun i => wireBitNat_le_one (w i)
   have h_sum_β : (∑ i : Fin 8, 2 ^ i.val * β i) = byteWireToNat w := by
-    show (∑ i : Fin 8, 2 ^ i.val * ((byteWireToNat w / 2 ^ i.val) % 2)) = byteWireToNat w
+    change (∑ i : Fin 8, 2 ^ i.val * ((byteWireToNat w / 2 ^ i.val) % 2)) = byteWireToNat w
     have : (∑ i : Fin 8, 2 ^ i.val * ((byteWireToNat w / 2 ^ i.val) % 2))
          = ∑ i : Fin 8, ((byteWireToNat w / 2 ^ i.val) % 2) * 2 ^ i.val := by
       apply Finset.sum_congr rfl; intros; ring
@@ -728,7 +728,7 @@ private theorem gf256_bit_byteWireToNat
     rw [bitRecomp_mod_pow (byteWireToNat w) 8]
     exact Nat.mod_eq_of_lt h_byteWireToNat_lt
   have h_sum_γ : (∑ i : Fin 8, 2 ^ i.val * γ i) = byteWireToNat w := by
-    show (∑ i : Fin 8, 2 ^ i.val * wireBitNat (w i)) = byteWireToNat w
+    change (∑ i : Fin 8, 2 ^ i.val * wireBitNat (w i)) = byteWireToNat w
     unfold byteWireToNat
     apply Finset.sum_congr rfl
     intros; ring
@@ -772,7 +772,7 @@ private theorem wireBitNat_wProd_eq_gf256_prodBit
     {wP : Fin 8 → Fin 8 → ZMod r}
     (h_cross : ∀ a b : Fin 8, wP a b = wX a * wX_inv b)
     {wProd : Fin 8 → ZMod r}
-    (h_prod_bool : ∀ k, wProd k = 0 ∨ wProd k = 1)
+    (_h_prod_bool : ∀ k, wProd k = 0 ∨ wProd k = 1)
     (h_prod_parity : ∀ k : Fin 8,
       ∃ carry_k : ℕ,
         (∑ a : Fin 8, ∑ b : Fin 8,
@@ -865,7 +865,7 @@ private theorem byteWireToNat_wProd_eq_gf256_mul
     intro k
     rw [wireBitNat_wProd_eq_gf256_prodBit x hX hX_inv_bool h_cross h_prod_bool
           h_prod_parity k]
-  show (∑ k : Fin 8, wireBitNat (wProd k) * 2 ^ k.val)
+  change (∑ k : Fin 8, wireBitNat (wProd k) * 2 ^ k.val)
         = gf256_mul (byteToNat x) (byteWireToNat wX_inv)
   rw [Finset.sum_congr rfl (fun k _ => h_pointwise k)]
   unfold gf256_mul
@@ -938,7 +938,7 @@ private theorem byteWireToNat_lt_r (w : Fin 8 → ZMod r) : byteWireToNat w < r 
 the recomposed `wProd` byte equals `wireBitNat (1 − w_isz)`. -/
 private theorem byteWireToNat_wProd_eq_one_minus_isz
     {w_isz : ZMod r}
-    (h_isz_bool : w_isz = 0 ∨ w_isz = 1)
+    (_h_isz_bool : w_isz = 0 ∨ w_isz = 1)
     {wProd : Fin 8 → ZMod r}
     (h_prod_zero : wProd ⟨0, by decide⟩ = 1 - w_isz)
     (h_prod_high_zero : ∀ k : Fin 8, k.val ≠ 0 → wProd k = 0) :
@@ -1020,7 +1020,7 @@ private theorem byteWireToNat_wX_inv_eq_gf256_inv
     -- Need byteToNat x ≠ 0 to apply gf256_inv_unique.
     have h_x_pos : 0 < byteToNat x := by
       by_contra h_zero
-      push_neg at h_zero
+      push Not at h_zero
       interval_cases (byteToNat x)
       rw [gf256_mul_zero_left] at h_gf
       exact zero_ne_one h_gf
@@ -1107,7 +1107,7 @@ private theorem gf256_bit_aesAffine_nat (n : ℕ) (i : Fin 8) :
   have h_fk_le : ∀ k ∈ Finset.range 8, f k ≤ 1 := by
     intro k _
     rw [hf]
-    show ((n / 2 ^ k) % 2 + (n / 2 ^ ((k + 4) % 8)) % 2 + (n / 2 ^ ((k + 5) % 8)) % 2
+    change ((n / 2 ^ k) % 2 + (n / 2 ^ ((k + 4) % 8)) % 2 + (n / 2 ^ ((k + 5) % 8)) % 2
             + (n / 2 ^ ((k + 6) % 8)) % 2 + (n / 2 ^ ((k + 7) % 8)) % 2) % 2 ≤ 1
     have : ((n / 2 ^ k) % 2 + (n / 2 ^ ((k + 4) % 8)) % 2 + (n / 2 ^ ((k + 5) % 8)) % 2
             + (n / 2 ^ ((k + 6) % 8)) % 2 + (n / 2 ^ ((k + 7) % 8)) % 2) % 2 < 2 :=
@@ -1303,7 +1303,7 @@ theorem aesSbox_byte_constraint_sound
         + gf256_bit (byteWireToNat wX_inv) ((i.val + 6) % 8)
         + gf256_bit (byteWireToNat wX_inv) ((i.val + 7) % 8) with hS
     set Z : ℕ := (0x63 / 2 ^ i.val) % 2 with hZ
-    show (S + Z) % 2 = (S % 2 + Z) % 2
+    change (S + Z) % 2 = (S % 2 + Z) % 2
     omega
   -- Step 5: Nat.xor aesAffine 0x63 with byteWireToNat wX_inv = gf256_inv (byteToNat x)
   -- equals aesSbox_algebraic (byteToNat x), which equals byteToNat (aesSbox x).
@@ -1509,7 +1509,6 @@ theorem aesRoundStep_bit_sound [Fact (Nat.Prime r)]
                     (aesMixColumns (aesShiftRows (aesSubBytes s))) rk
                     wMix wRK hMixBit hRK i j
     unfold aesRoundStep
-    simp only [h_final, if_false]
     exact h_add
   · -- Final round: skip MixColumns.
     refine ⟨fun i j => wShift i j + wRK i j - 2 * (wShift i j * wRK i j), ?_⟩
@@ -1518,7 +1517,7 @@ theorem aesRoundStep_bit_sound [Fact (Nat.Prime r)]
                     (aesShiftRows (aesSubBytes s)) rk
                     wShift wRK hShiftBit hRK i j
     unfold aesRoundStep
-    simp only [h_final, if_true]
+    simp only [if_true]
     exact h_add
 
 /-! ## End-to-end constraint-chain witness for AES-128 (single block)
@@ -1797,7 +1796,7 @@ theorem IsValidKeyExpansionConstraintWitness.wordBytes_eq_proof
       · rw [h.hWord_init ⟨3, by decide⟩ b, aesKeyExpansionWord.eq_def]
         exact congrArg key (Fin.ext (by simp))
     · -- Inductive case: m ≥ 4.
-      push_neg at h_lt
+      push Not at h_lt
       obtain ⟨v, rfl⟩ : ∃ v, m = v + 4 := ⟨m - 4, by omega⟩
       have h_v_lt : v < v + 4 := by omega
       have h_v3_lt : v + 3 < v + 4 := by omega
@@ -1811,14 +1810,14 @@ theorem IsValidKeyExpansionConstraintWitness.wordBytes_eq_proof
         -- Rewrite (v+4) - 4 = v and (v+4) - 1 = v+3 in h_b.
         have fin_eq_4 : (⟨v + 4 - 4, by have := hm; omega⟩ : Fin 44) =
             ⟨v, h_v_lt_44⟩ := by
-          apply Fin.ext; show v + 4 - 4 = v; omega
+          apply Fin.ext; change v + 4 - 4 = v; omega
         have fin_eq_1 : (⟨v + 4 - 1, by have := hm; omega⟩ : Fin 44) =
             ⟨v + 3, h_v3_lt_44⟩ := by
-          apply Fin.ext; show v + 4 - 1 = v + 3; omega
+          apply Fin.ext; change v + 4 - 1 = v + 3; omega
         rw [fin_eq_4, fin_eq_1] at h_b
         rw [h_b, IH4, IH1]
         -- Now show the RHS form matches aesKeyExpansionWord's body.
-        show xor8 _ _ = aesKeyExpansionWord key ⟨v + 4, hm⟩ b
+        change xor8 _ _ = aesKeyExpansionWord key ⟨v + 4, hm⟩ b
         -- aesKeyExpansionWord ⟨v + 4, _⟩ pattern-matches the `n + 4` arm
         -- with n = v. We rely on definitional reduction here.
         conv_rhs => unfold aesKeyExpansionWord
@@ -1827,13 +1826,13 @@ theorem IsValidKeyExpansionConstraintWitness.wordBytes_eq_proof
         have h_nb := h.hWord_nonboundary ⟨v + 4, hm⟩ h_lt h_mod b
         have fin_eq_4 : (⟨v + 4 - 4, by have := hm; omega⟩ : Fin 44) =
             ⟨v, h_v_lt_44⟩ := by
-          apply Fin.ext; show v + 4 - 4 = v; omega
+          apply Fin.ext; change v + 4 - 4 = v; omega
         have fin_eq_1 : (⟨v + 4 - 1, by have := hm; omega⟩ : Fin 44) =
             ⟨v + 3, h_v3_lt_44⟩ := by
-          apply Fin.ext; show v + 4 - 1 = v + 3; omega
+          apply Fin.ext; change v + 4 - 1 = v + 3; omega
         rw [fin_eq_4, fin_eq_1] at h_nb
         rw [h_nb, IH4, IH1]
-        show xor8 _ _ = aesKeyExpansionWord key ⟨v + 4, hm⟩ b
+        change xor8 _ _ = aesKeyExpansionWord key ⟨v + 4, hm⟩ b
         conv_rhs => unfold aesKeyExpansionWord
         simp only [h_mod, ↓reduceIte]
 
@@ -2154,11 +2153,11 @@ theorem aes128_ciphertext_bits_sound [Fact (Nat.Prime r)]
   intro i j
   -- Tie ciphertext → rounds[10] → aesRoundStep(rounds[9], rk[10], true).
   have h_step := h.hstep ⟨9, by decide⟩
-  simp only [Fin.val_mk] at h_step
+  simp only at h_step
   have h_step' :
       h.rounds ⟨10, by decide⟩ =
         aesRoundStep (h.rounds ⟨9, by decide⟩) (h.rk ⟨10, by decide⟩) true := by
-    convert h_step using 2 <;> decide
+    convert h_step using 2
   rw [h.hout, h_step']
   exact hOut i j
 
