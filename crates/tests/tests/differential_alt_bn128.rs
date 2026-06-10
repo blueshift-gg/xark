@@ -44,8 +44,8 @@
 //! more vectors (each new vector is a const array entry; no other
 //! infrastructure changes).
 
-use solana_nostd_alt_bn128::{G1Point, G1Scalar, G2Point, pairing};
 use svm_unit_test::svm_test;
+use xark_tests::solana_nostd_alt_bn128::{G1Point, G1Scalar, G2Point, pairing};
 
 // 32 additional deterministically-generated vectors per op, computed
 // offline by the small generator at `/tmp/gen_vectors/` (committed

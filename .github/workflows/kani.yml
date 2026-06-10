@@ -38,9 +38,56 @@ on:
 
 jobs:
   kani:
-    name: prove (verifier canonicality)
+    # Sharded across three matrix legs so each runner gets a fresh 7 GB
+    # of RAM. Running all 24 harnesses in one `cargo-kani` invocation
+    # OOM-kills `ubuntu-latest` (exit code 143) — CBMC forks per
+    # harness, but the cargo-kani driver accumulates GOTO/AST state
+    # across iterations and crosses the cgroup limit somewhere around
+    # the 10th totality proof.
+    name: prove (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Tier 1: canonicality + rejection paths + pairing operand
+          # assembly. 16 cheap harnesses, ~3 min total.
+          - group: canonicality
+            harnesses: >-
+              --harness le_lt_is_correct_u256_compare
+              --harness scalar_is_canonical_iff_lt_r
+              --harness fq_is_canonical_iff_lt_q
+              --harness coords_canonical_is_conjunction
+              --harness proof_wrong_length_rejected
+              --harness vk_truncated_rejected
+              --harness vk_ic_unaligned_rejected
+              --harness pi_unaligned_rejected
+              --harness arity_mismatch_rejected_ic2_pi0
+              --harness arity_mismatch_rejected_ic2_pi2
+              --harness noncanonical_pi_rejected
+              --harness strict_rejects_top_bit_set_in_vk
+              --harness strict_rejects_top_bit_set_in_proof
+              --harness proof_only_too_short_rejected
+              --harness pairing_operand_assembly_order
+              --harness pairing_operand_assembly
+          # Tier 2: small-input totality (n=0, n=1). ~3 min, ~3 GB
+          # resident at peak.
+          - group: totality_small
+            harnesses: >-
+              --harness verify_groth16_totality_n0
+              --harness verify_groth16_totality_n1
+              --harness verify_groth16_strict_totality_n0
+              --harness verify_groth16_strict_totality_n1
+          # Tier 3: large-input totality (n=2 + full-body totality).
+          # The heaviest CBMC bodies; isolating them on their own
+          # runner is what stops the OOM cascade.
+          - group: totality_large
+            harnesses: >-
+              --harness verify_groth16_totality_n2
+              --harness verify_groth16_strict_totality_n2
+              --harness totality_verify_groth16
+              --harness totality_verify_proof_only
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,4 +100,4 @@ jobs:
           # directly; without `-Z stubbing` the proofs reject at codegen
           # with "Using the stub attribute requires activating the
           # unstable `stubbing` feature".
-          args: '-p xark-verifier -Z stubbing'
+          args: '-p xark-verifier -Z stubbing ${{ matrix.harnesses }}'

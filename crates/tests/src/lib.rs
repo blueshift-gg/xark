@@ -11,6 +11,15 @@
 
 pub use xark_verifier::*;
 
+// Re-export the BN254 group-op crate so the `#[svm_test]` cdylibs that
+// svm-unit-test generates can reach it as `xark_tests::solana_nostd_alt_bn128`.
+// Each generated cdylib's Cargo.toml only carries `xark-tests = { path = ... }`
+// as its direct dep — the inner crate's deps are not in scope under cargo's
+// resolver, so a bare `use solana_nostd_alt_bn128::...` in a #[svm_test] body
+// fails to link on the SBF target. Routing through this re-export is the
+// stable way to share the API.
+pub use solana_nostd_alt_bn128;
+
 /// Path to the built `xark` CLI binary, for the CLI integration tests.
 /// Locates it next to the running test binary; if it isn't there yet (e.g.
 /// `cargo test -p xark-tests` without a prior workspace build), builds it once.
