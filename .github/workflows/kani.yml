@@ -15,20 +15,6 @@ name: Kani (formal verification)
 #   * pairing operand-assembly: the byte buffer presented to the
 #     `alt_bn128_pairing` syscall equals the canonical
 #     `neg(A) || B || α || β || vk_x || γ || C || δ`.
-#
-# Kani auto-discovers every `#[kani::proof]` in the crate, so the harness list
-# below is informational only:
-#   le_lt_is_correct_u256_compare, scalar_is_canonical_iff_lt_r,
-#   fq_is_canonical_iff_lt_q, coords_canonical_is_conjunction,
-#   proof_wrong_length_rejected, vk_truncated_rejected,
-#   vk_ic_unaligned_rejected, pi_unaligned_rejected,
-#   arity_mismatch_rejected_ic2_pi0, arity_mismatch_rejected_ic2_pi2,
-#   noncanonical_pi_rejected, strict_rejects_top_bit_set_in_vk,
-#   strict_rejects_top_bit_set_in_proof, proof_only_too_short_rejected,
-#   verify_groth16_totality_n{0,1,2}, verify_groth16_strict_totality_n{0,1,2},
-#   pairing_operand_assembly_order,
-#   totality_verify_groth16, totality_verify_proof_only,
-#   pairing_operand_assembly.
 
 on:
   push:
@@ -38,81 +24,86 @@ on:
 
 jobs:
   kani:
-    # Sharded across three matrix legs so each runner gets a fresh 7 GB
-    # of RAM. Running all 24 harnesses in one `cargo-kani` invocation
-    # OOM-kills `ubuntu-latest` (exit code 143) — CBMC forks per
-    # harness, but the cargo-kani driver accumulates GOTO/AST state
-    # across iterations and crosses the cgroup limit somewhere around
-    # the 10th totality proof.
-    name: prove (${{ matrix.group }})
+    name: prove (verifier)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Shards are capped at 4 harnesses each. Kani 0.67's multi
-          # `--harness` filter empirically degrades with high counts —
-          # at 4 filters it matched 4/4, at 16 it matched only 2/16
-          # (the last one and its substring superset). `--exact` did
-          # not help. Until that's understood, stay in the working
-          # regime.
-          - group: canonicality_compare
-            harnesses: >-
-              --exact
-              --harness verifier::proofs::le_lt_is_correct_u256_compare
-              --harness verifier::proofs::scalar_is_canonical_iff_lt_r
-              --harness verifier::proofs::fq_is_canonical_iff_lt_q
-              --harness verifier::proofs::coords_canonical_is_conjunction
-          - group: canonicality_reject_structural
-            harnesses: >-
-              --exact
-              --harness verifier::proofs::proof_wrong_length_rejected
-              --harness verifier::proofs::vk_truncated_rejected
-              --harness verifier::proofs::vk_ic_unaligned_rejected
-              --harness verifier::proofs::pi_unaligned_rejected
-          - group: canonicality_reject_arity_pi
-            harnesses: >-
-              --exact
-              --harness verifier::proofs::arity_mismatch_rejected_ic2_pi0
-              --harness verifier::proofs::arity_mismatch_rejected_ic2_pi2
-              --harness verifier::proofs::noncanonical_pi_rejected
-              --harness verifier::proofs::proof_only_too_short_rejected
-          - group: canonicality_reject_strict_and_assembly
-            harnesses: >-
-              --exact
-              --harness verifier::proofs::strict_rejects_top_bit_set_in_vk
-              --harness verifier::proofs::strict_rejects_top_bit_set_in_proof
-              --harness verifier::proofs::pairing_operand_assembly_order
-              --harness verifier::proofs::pairing_operand_assembly
-          # Small-input totality (n=0, n=1). ~3 GB resident at peak.
-          - group: totality_small
-            harnesses: >-
-              --exact
-              --harness verifier::proofs::verify_groth16_totality_n0
-              --harness verifier::proofs::verify_groth16_totality_n1
-              --harness verifier::proofs::verify_groth16_strict_totality_n0
-              --harness verifier::proofs::verify_groth16_strict_totality_n1
-          # Large-input totality (n=2 + full-body totality). Heaviest
-          # CBMC bodies; isolating them on their own runner stops the
-          # OOM cascade.
-          - group: totality_large
-            harnesses: >-
-              --exact
-              --harness verifier::proofs::verify_groth16_totality_n2
-              --harness verifier::proofs::verify_groth16_strict_totality_n2
-              --harness verifier::proofs::totality_verify_groth16
-              --harness verifier::proofs::totality_verify_proof_only
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Kani
-        uses: model-checking/kani-github-action@v1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
         with:
-          # `kani::stub` is an unstable feature. Newer Kani versions
-          # dropped `--enable-unstable` and require the feature flag
-          # directly; without `-Z stubbing` the proofs reject at codegen
-          # with "Using the stub attribute requires activating the
-          # unstable `stubbing` feature".
-          args: '-p xark-verifier -Z stubbing ${{ matrix.harnesses }}'
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.kani
+            target
+          key: ${{ runner.os }}-kani-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install Kani
+        # The action wrapper does this for us, but we need direct control
+        # over cargo-kani invocations to run each harness in its own
+        # process. The cargo install is fast on a warm cache.
+        run: |
+          cargo install --locked kani-verifier
+          cargo kani setup
+
+      - name: Run each harness in its own cargo-kani process
+        # Why per-harness: passing all 24 harnesses to one cargo-kani
+        # invocation OOM-kills `ubuntu-latest` (7 GB) at ~10 harnesses
+        # because cargo-kani driver state grows monotonically. Sharding
+        # via `--harness` filters hit a Kani 0.67 bug where multi-flag
+        # invocations silently drop most filters — e.g. four `--exact
+        # --harness X --harness Y --harness Z --harness W` calls
+        # reproducibly matched only 0–2 of the four. One harness per
+        # cargo-kani call sidesteps both: memory is reclaimed between
+        # invocations and there's nothing for the filter logic to drop.
+        run: |
+          set -e
+          harnesses=(
+            verifier::proofs::le_lt_is_correct_u256_compare
+            verifier::proofs::scalar_is_canonical_iff_lt_r
+            verifier::proofs::fq_is_canonical_iff_lt_q
+            verifier::proofs::coords_canonical_is_conjunction
+            verifier::proofs::proof_wrong_length_rejected
+            verifier::proofs::vk_truncated_rejected
+            verifier::proofs::vk_ic_unaligned_rejected
+            verifier::proofs::pi_unaligned_rejected
+            verifier::proofs::arity_mismatch_rejected_ic2_pi0
+            verifier::proofs::arity_mismatch_rejected_ic2_pi2
+            verifier::proofs::noncanonical_pi_rejected
+            verifier::proofs::strict_rejects_top_bit_set_in_vk
+            verifier::proofs::strict_rejects_top_bit_set_in_proof
+            verifier::proofs::proof_only_too_short_rejected
+            verifier::proofs::pairing_operand_assembly_order
+            verifier::proofs::pairing_operand_assembly
+            verifier::proofs::verify_groth16_totality_n0
+            verifier::proofs::verify_groth16_totality_n1
+            verifier::proofs::verify_groth16_totality_n2
+            verifier::proofs::verify_groth16_strict_totality_n0
+            verifier::proofs::verify_groth16_strict_totality_n1
+            verifier::proofs::verify_groth16_strict_totality_n2
+            verifier::proofs::totality_verify_groth16
+            verifier::proofs::totality_verify_proof_only
+          )
+          failed=()
+          for h in "${harnesses[@]}"; do
+            echo "::group::Kani harness: $h"
+            if cargo-kani -p xark-verifier -Z stubbing --exact --harness "$h"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::Kani harness failed: $h"
+              failed+=("$h")
+            fi
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::${#failed[@]} harness(es) failed:"
+            printf '  - %s\n' "${failed[@]}"
+            exit 1
+          fi
+          echo "All ${#harnesses[@]} Kani harnesses verified."
