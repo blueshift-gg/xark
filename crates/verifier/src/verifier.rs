@@ -614,6 +614,9 @@ mod proofs {
     /// the `TruncatedVk` check does not fire first, so the failure is forced
     /// onto the `ProofLength` path.)
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn proof_wrong_length_rejected() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         let proof: [u8; 100] = kani::any(); // != PROOF_BYTES (256)
@@ -626,6 +629,9 @@ mod proofs {
     /// always returns `Err(TruncatedVk)`.** The function returns at the first
     /// length guard, before any byte decode.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn vk_truncated_rejected() {
         // Exactly one byte short of the minimum.
         let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES - 1] = kani::any();
@@ -640,6 +646,9 @@ mod proofs {
     /// `VK_FIXED_PREFIX_BYTES + G1_BYTES + 1` (one byte past two complete IC
     /// points → the IC slice has length `65`, not a multiple of `G1_BYTES`).
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn vk_ic_unaligned_rejected() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES + 1] = kani::any();
         let proof: [u8; PROOF_BYTES] = kani::any();
@@ -652,6 +661,9 @@ mod proofs {
     /// always returns `Err(PublicInputsLength)`.** vk and proof are chosen
     /// valid in shape so the failure is forced onto the PI-length path.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn pi_unaligned_rejected() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         let proof: [u8; PROOF_BYTES] = kani::any();
@@ -665,6 +677,9 @@ mod proofs {
     /// (`VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES`), so the verifier expects exactly
     /// `1` public input; we hand it `0` instead.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn arity_mismatch_rejected_ic2_pi0() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         let proof: [u8; PROOF_BYTES] = kani::any();
@@ -677,6 +692,9 @@ mod proofs {
     /// (one too many).** Together with the previous harness this exhausts the
     /// off-by-one neighbourhood of the accepted arity at `N = 1`.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn arity_mismatch_rejected_ic2_pi2() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         let proof: [u8; PROOF_BYTES] = kani::any();
@@ -691,6 +709,9 @@ mod proofs {
     /// panic, no curve op); the failure fires on the `scalar_is_canonical`
     /// check before the curve mul.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn noncanonical_pi_rejected() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         let proof: [u8; PROOF_BYTES] = kani::any();
@@ -715,6 +736,9 @@ mod proofs {
     /// silently accept this (the syscall masks the bit) — that is the
     /// malleability path the strict variant exists to close.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn strict_rejects_top_bit_set_in_vk() {
         let mut vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         // Set bit 255 of the first 32-byte coordinate (alpha.x).
@@ -729,6 +753,9 @@ mod proofs {
     /// `proof_bytes`.** Targets `proof.A.x` (the first 32 bytes of the proof);
     /// the strict path must reject before any curve op runs.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn strict_rejects_top_bit_set_in_proof() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
         let mut proof: [u8; PROOF_BYTES] = kani::any();
@@ -742,6 +769,9 @@ mod proofs {
     /// `verify_groth16`.** Specifically, a too-short `instruction_data`
     /// (less than `PROOF_BYTES`) must return `Err(ProofLength)`.
     #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing, stub_g16_pairing)]
     fn proof_only_too_short_rejected() {
         let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES] = kani::any();
         let data: [u8; PROOF_BYTES - 1] = kani::any();
