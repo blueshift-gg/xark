@@ -36,39 +36,93 @@ use xark_backend::solana::{
     assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le,
 };
 
+use super::conditional_args::bail_on_missing_args;
+
+use crate::noir_project::NoirProject;
+
 #[derive(Args, Debug)]
 pub struct ExportArgs {
+    /// Path to a Noir project directory (the one containing Nargo.toml).
+    /// Inferred when run from inside a Noir project.
+    #[arg(long)]
+    pub path: Option<std::path::PathBuf>,
+
     /// Path to the verifying key (canonical Arkworks binary format).
+    /// Inferred from a Noir project when omitted.
     #[arg(long)]
-    pub verifying_key: std::path::PathBuf,
-    /// Path to the proof (canonical Arkworks binary format). Bundled as the
-    /// generated crate's self-test vector.
+    pub verifying_key: Option<std::path::PathBuf>,
+    /// Path to the proof (canonical Arkworks binary format). Bundled as
+    /// the generated crate's self-test vector. Inferred from a Noir
+    /// project when omitted.
     #[arg(long)]
-    pub proof: std::path::PathBuf,
+    pub proof: Option<std::path::PathBuf>,
     /// Path to the public inputs JSON produced by `xark prove`.
+    /// Inferred from a Noir project when omitted.
     #[arg(long)]
-    pub public_inputs: std::path::PathBuf,
+    pub public_inputs: Option<std::path::PathBuf>,
     /// Output directory — the root of the generated verifier crate.
+    /// Inferred as `target/{name}-xark-verifier` when run from inside a
+    /// Noir project.
     #[arg(long)]
-    pub out: std::path::PathBuf,
+    pub out: Option<std::path::PathBuf>,
     /// Name for the generated crate. Defaults to the `--out` directory name.
     #[arg(long)]
     pub crate_name: Option<String>,
 }
 
 pub fn run(args: ExportArgs) -> Result<()> {
+    let path = match args.path {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+    let project = NoirProject::find_at(&path)?;
+
+    let vk_path = args
+        .verifying_key
+        .or_else(|| project.as_ref().map(|p| p.verifying_key_path()));
+    let proof_path = args
+        .proof
+        .or_else(|| project.as_ref().map(|p| p.proof_path()));
+    let public_inputs_path = args
+        .public_inputs
+        .or_else(|| project.as_ref().map(|p| p.public_inputs_path()));
+    let out_dir = args
+        .out
+        .or_else(|| project.as_ref().map(|p| p.export_dir()));
+
+    let (vk_path, proof_path, public_inputs_path, out_dir) =
+        match (vk_path, proof_path, public_inputs_path, out_dir) {
+            (Some(v), Some(p), Some(i), Some(o)) => (v, p, i, o),
+            (v, p, i, o) => {
+                let mut missing = Vec::new();
+                if v.is_none() {
+                    missing.push("--verifying-key <PATH>");
+                }
+                if p.is_none() {
+                    missing.push("--proof <PATH>");
+                }
+                if i.is_none() {
+                    missing.push("--public-inputs <PATH>");
+                }
+                if o.is_none() {
+                    missing.push("--out <DIR>");
+                }
+                bail_on_missing_args("export", &missing);
+            }
+        };
+
     // ---- Load inputs ------------------------------------------------------
-    let vk = Groth16Keys::read_verifying_key(&args.verifying_key)
-        .with_context(|| format!("reading verifying key {}", args.verifying_key.display()))?;
-    let proof = ProofBundle::read_proof(&args.proof)
-        .with_context(|| format!("reading proof {}", args.proof.display()))?;
-    let public_inputs_json_bytes = fs::read(&args.public_inputs)
-        .with_context(|| format!("reading public inputs {}", args.public_inputs.display()))?;
+    let vk = Groth16Keys::read_verifying_key(&vk_path)
+        .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
+    let proof = ProofBundle::read_proof(&proof_path)
+        .with_context(|| format!("reading proof {}", proof_path.display()))?;
+    let public_inputs_json_bytes = fs::read(&public_inputs_path)
+        .with_context(|| format!("reading public inputs {}", public_inputs_path.display()))?;
     let public_inputs_json: PublicInputsJson = serde_json::from_slice(&public_inputs_json_bytes)
-        .with_context(|| format!("parsing {}", args.public_inputs.display()))?;
+        .with_context(|| format!("parsing {}", public_inputs_path.display()))?;
     let public_inputs = public_inputs_json
         .into_fr()
-        .with_context(|| format!("decoding {}", args.public_inputs.display()))?;
+        .with_context(|| format!("decoding {}", public_inputs_path.display()))?;
 
     let num_public_inputs = public_inputs.len();
     let ic_len = vk.gamma_abc_g1.len();
@@ -89,14 +143,14 @@ pub fn run(args: ExportArgs) -> Result<()> {
     instruction_data.extend_from_slice(&public_inputs_bytes);
 
     let crate_name = sanitize_crate_name(args.crate_name.as_deref().unwrap_or_else(|| {
-        args.out
+        out_dir
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("groth16-verifier")
     }));
 
     // ---- Write the generated crate ---------------------------------------
-    let out = &args.out;
+    let out = &out_dir;
     fs::create_dir_all(out.join("src"))
         .with_context(|| format!("creating {}", out.join("src").display()))?;
 

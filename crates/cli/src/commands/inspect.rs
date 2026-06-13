@@ -4,16 +4,26 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
+use crate::noir_project::NoirProject;
+
+use super::conditional_args::bail_on_missing_args;
+
 use xark_acir_r1cs::artifact::parse_artifact_file;
-use xark_acir_r1cs::lower::{LoweredAcirCircuit, estimate_constraints, summarize_opcodes};
-use xark_acir_r1cs::opcodes::CoverageSummary;
+use xark_acir_r1cs::lower::{estimate_constraints, summarize_opcodes, LoweredAcirCircuit};
 use xark_acir_r1cs::opcodes::brillig_check::check_brillig_outputs_pinned;
+use xark_acir_r1cs::opcodes::CoverageSummary;
 
 #[derive(Args, Debug)]
 pub struct InspectArgs {
-    /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
+    /// Path to a Noir project directory (the one containing Nargo.toml).
+    /// Inferred when run from inside a Noir project.
     #[arg(long)]
-    pub artifact: PathBuf,
+    pub path: Option<PathBuf>,
+
+    /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
+    /// Inferred when run from inside a Noir project.
+    #[arg(long)]
+    pub artifact: Option<PathBuf>,
 
     /// Emit machine-readable JSON instead of human-readable text.
     #[arg(long, default_value_t = false)]
@@ -47,7 +57,21 @@ struct InspectReport {
 }
 
 pub fn run(args: InspectArgs) -> Result<()> {
-    let artifact = parse_artifact_file(&args.artifact)?;
+    let path = match args.path {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+    let project = NoirProject::find_at(&path)?;
+
+    let artifact_path = args
+        .artifact
+        .or_else(|| project.as_ref().map(|p| p.artifact_path()));
+
+    let Some(artifact_path) = artifact_path else {
+        bail_on_missing_args("inspect", &["--artifact <PATH>"]);
+    };
+
+    let artifact = parse_artifact_file(&artifact_path)?;
     let opcodes = artifact.opcodes();
 
     let CoverageSummary {

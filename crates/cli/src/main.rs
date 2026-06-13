@@ -3,6 +3,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 mod commands;
+mod noir_project;
 
 use commands::Cli;
 

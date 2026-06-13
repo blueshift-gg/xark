@@ -9,12 +9,12 @@ pub fn synth_err(e: ark_relations::gr1cs::SynthesisError) -> anyhow::Error {
 }
 
 pub mod ceremony;
+pub mod conditional_args;
 pub mod export;
 pub mod inspect;
 pub mod prove;
 pub mod setup;
 pub mod verify;
-pub mod write_vk;
 
 /// `xark` — a Rust Groth16 backend for Noir on BN254.
 #[derive(Parser, Debug)]
@@ -36,7 +36,6 @@ pub enum Command {
     Setup(setup::SetupArgs),
     Prove(prove::ProveArgs),
     Verify(verify::VerifyArgs),
-    WriteVk(write_vk::WriteVkArgs),
     Export(export::ExportArgs),
     Ceremony(ceremony::CeremonyArgs),
 }
@@ -48,7 +47,6 @@ impl Cli {
             Command::Setup(args) => setup::run(args),
             Command::Prove(args) => prove::run(args),
             Command::Verify(args) => verify::run(args),
-            Command::WriteVk(args) => write_vk::run(args),
             Command::Export(args) => export::run(args),
             Command::Ceremony(args) => ceremony::run(args),
         }

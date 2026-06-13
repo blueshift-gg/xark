@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::Args;
 use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
@@ -10,16 +10,28 @@ use rand_chacha::ChaCha20Rng;
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::LoweredAcirCircuit;
 
-use xark_backend::{NoirGroth16Circuit, keys::KeyMetadata, setup};
+use xark_backend::{keys::KeyMetadata, setup, NoirGroth16Circuit};
 
+use super::conditional_args::bail_on_missing_args;
 use super::synth_err;
+
+use crate::noir_project::NoirProject;
 
 #[derive(Args, Debug)]
 pub struct SetupArgs {
+    /// Path to a Noir project directory (the one containing Nargo.toml).
+    /// Inferred when run from inside a Noir project.
     #[arg(long)]
-    pub artifact: PathBuf,
+    pub path: Option<PathBuf>,
+
+    /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
+    /// Inferred when run from inside a Noir project.
     #[arg(long)]
-    pub out: PathBuf,
+    pub artifact: Option<PathBuf>,
+    /// Output directory for proving/verifying keys and metadata.
+    /// Inferred as `./target/groth16` when run from inside a Noir project.
+    #[arg(long)]
+    pub out: Option<PathBuf>,
     /// Required to run Groth16 setup with locally generated randomness.
     /// By default, the OS RNG (`/dev/urandom` on Unix, BCryptGenRandom on
     /// Windows) drives the trapdoor sampling — the resulting parameters
@@ -103,6 +115,33 @@ impl RngCore for SetupRng {
 impl CryptoRng for SetupRng {}
 
 pub fn run(args: SetupArgs) -> Result<()> {
+    let path = match args.path {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+    let project = NoirProject::find_at(&path)?;
+
+    let artifact_path = args
+        .artifact
+        .or_else(|| project.as_ref().map(|p| p.artifact_path()));
+    let out_dir = args
+        .out
+        .or_else(|| project.as_ref().map(|p| p.groth16_dir()));
+
+    let (artifact_path, out_dir) = match (artifact_path, out_dir) {
+        (Some(a), Some(o)) => (a, o),
+        (a, o) => {
+            let mut missing = Vec::new();
+            if a.is_none() {
+                missing.push("--artifact <PATH>");
+            }
+            if o.is_none() {
+                missing.push("--out <DIR>");
+            }
+            bail_on_missing_args("setup", &missing);
+        }
+    };
+
     // Mutual exclusion: --ptau-file and --insecure-dev-mode are different
     // setup pathways with different trust assumptions.
     if args.ptau_file.is_some() && args.insecure_dev_mode {
@@ -117,12 +156,12 @@ pub fn run(args: SetupArgs) -> Result<()> {
         );
     }
 
-    let artifact = parse_artifact_file(&args.artifact)
-        .with_context(|| format!("parsing artifact {}", args.artifact.display()))?;
+    let artifact = parse_artifact_file(&artifact_path)
+        .with_context(|| format!("parsing artifact {}", artifact_path.display()))?;
     let lowered = LoweredAcirCircuit::new(artifact.clone())?;
 
-    fs::create_dir_all(&args.out)
-        .with_context(|| format!("creating output dir {}", args.out.display()))?;
+    fs::create_dir_all(&out_dir)
+        .with_context(|| format!("creating output dir {}", out_dir.display()))?;
 
     // --- Production phase-2 path -----------------------------------------
     if let Some(ptau_path) = args.ptau_file.as_ref() {
@@ -150,9 +189,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let keys = xark_backend::ptau::setup_from_ptau(circuit, &ptau, &seed_arr)
             .map_err(|e| anyhow::anyhow!("phase-2 setup failed: {e}"))?;
 
-        let pk_path = args.out.join("proving_key.bin");
-        let vk_path = args.out.join("verifying_key.bin");
-        let meta_path = args.out.join("metadata.json");
+        let pk_path = out_dir.join("proving_key.bin");
+        let vk_path = out_dir.join("verifying_key.bin");
+        let meta_path = out_dir.join("metadata.json");
 
         keys.write_proving_key(&pk_path)?;
         keys.write_verifying_key(&vk_path)?;
@@ -206,9 +245,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     };
     let keys = setup(circuit, &mut rng).map_err(synth_err)?;
 
-    let pk_path = args.out.join("proving_key.bin");
-    let vk_path = args.out.join("verifying_key.bin");
-    let meta_path = args.out.join("metadata.json");
+    let pk_path = out_dir.join("proving_key.bin");
+    let vk_path = out_dir.join("verifying_key.bin");
+    let meta_path = out_dir.join("metadata.json");
 
     keys.write_proving_key(&pk_path)?;
     keys.write_verifying_key(&vk_path)?;

@@ -28,6 +28,16 @@ pub fn xark_bin() -> std::path::PathBuf {
     use std::sync::OnceLock;
     static BIN: OnceLock<std::path::PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
+        let mut cmd = std::process::Command::new(env!("CARGO"));
+        cmd.args(["build", "-p", "xark-cli"]);
+        if !cfg!(debug_assertions) {
+            cmd.arg("--release");
+        }
+        assert!(
+            cmd.status().expect("spawn cargo build").success(),
+            "failed to build the `xark` binary"
+        );
+
         // current_exe is target/<profile>/deps/<test>-<hash>; the binary sits
         // at target/<profile>/xark.
         let mut dir = std::env::current_exe().expect("current_exe");
@@ -36,17 +46,6 @@ pub fn xark_bin() -> std::path::PathBuf {
             dir.pop();
         }
         let bin = dir.join(if cfg!(windows) { "xark.exe" } else { "xark" });
-        if !bin.exists() {
-            let mut cmd = std::process::Command::new(env!("CARGO"));
-            cmd.args(["build", "-p", "xark-cli"]);
-            if !cfg!(debug_assertions) {
-                cmd.arg("--release");
-            }
-            assert!(
-                cmd.status().expect("spawn cargo build").success(),
-                "failed to build the `xark` binary"
-            );
-        }
         bin
     })
     .clone()
