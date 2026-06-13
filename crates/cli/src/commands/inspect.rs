@@ -9,9 +9,9 @@ use crate::noir_project::NoirProject;
 use super::conditional_args::bail_on_missing_args;
 
 use xark_acir_r1cs::artifact::parse_artifact_file;
-use xark_acir_r1cs::lower::{estimate_constraints, summarize_opcodes, LoweredAcirCircuit};
-use xark_acir_r1cs::opcodes::brillig_check::check_brillig_outputs_pinned;
+use xark_acir_r1cs::lower::{LoweredAcirCircuit, estimate_constraints, summarize_opcodes};
 use xark_acir_r1cs::opcodes::CoverageSummary;
+use xark_acir_r1cs::opcodes::brillig_check::check_brillig_outputs_pinned;
 
 #[derive(Args, Debug)]
 pub struct InspectArgs {

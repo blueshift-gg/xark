@@ -13,7 +13,7 @@ use xark_acir_r1cs::public_inputs::extract_public_inputs;
 use xark_acir_r1cs::witness::parse_witness_file;
 
 use xark_backend::serialization::{ProofJson, PublicInputsJson};
-use xark_backend::{keys::Groth16Keys, proof::ProofBundle, prove, NoirGroth16Circuit};
+use xark_backend::{NoirGroth16Circuit, keys::Groth16Keys, proof::ProofBundle, prove};
 
 use super::conditional_args::bail_on_missing_args;
 use super::synth_err;

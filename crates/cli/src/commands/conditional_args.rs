@@ -2,8 +2,8 @@
 //! throughout `xark`: some flags are only required when running outside a
 //! Noir project (i.e. when paths cannot be inferred from `Noir.toml`).
 
-use clap::error::ErrorKind;
 use clap::CommandFactory;
+use clap::error::ErrorKind;
 
 use crate::commands::Cli;
 

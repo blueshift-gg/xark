@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
@@ -10,7 +10,7 @@ use rand_chacha::ChaCha20Rng;
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::LoweredAcirCircuit;
 
-use xark_backend::{keys::KeyMetadata, setup, NoirGroth16Circuit};
+use xark_backend::{NoirGroth16Circuit, keys::KeyMetadata, setup};
 
 use super::conditional_args::bail_on_missing_args;
 use super::synth_err;
