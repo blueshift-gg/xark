@@ -45,8 +45,7 @@ pub fn xark_bin() -> std::path::PathBuf {
         if dir.ends_with("deps") {
             dir.pop();
         }
-        let bin = dir.join(if cfg!(windows) { "xark.exe" } else { "xark" });
-        bin
+        dir.join("xark")
     })
     .clone()
 }
