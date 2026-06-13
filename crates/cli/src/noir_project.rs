@@ -29,8 +29,26 @@ impl NoirProject {
     }
 
     /// Parse from an explicit `Nargo.toml` path.
-    pub fn from_manifest(manifest: PathBuf) -> Result<Self> {
-        manifest.try_into()
+    #[inline]
+    fn from_manifest(manifest: PathBuf) -> Result<Self> {
+        let root = manifest
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| anyhow::anyhow!("Invalid Nargo.toml path"))?;
+
+        let content = std::fs::read_to_string(&manifest)
+            .with_context(|| format!("Failed to read {}", manifest.display()))?;
+
+        let parsed: NargoManifest = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", manifest.display()))?;
+
+        let package_name = parsed
+            .package
+            .and_then(|p| p.name)
+            .filter(|n| !n.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("Missing [package].name in {}", manifest.display()))?;
+
+        Ok(Self { root, package_name })
     }
 
     pub fn artifact_path(&self) -> PathBuf {
@@ -71,39 +89,6 @@ impl NoirProject {
 
     pub fn groth16_dir(&self) -> PathBuf {
         self.target_dir().join("groth16")
-    }
-}
-
-impl TryFrom<PathBuf> for NoirProject {
-    type Error = anyhow::Error;
-
-    fn try_from(manifest: PathBuf) -> Result<Self> {
-        let root = manifest
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| anyhow::anyhow!("Invalid Nargo.toml path"))?;
-
-        let content = std::fs::read_to_string(&manifest)
-            .with_context(|| format!("Failed to read {}", manifest.display()))?;
-
-        let parsed: NargoManifest = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", manifest.display()))?;
-
-        let package_name = parsed
-            .package
-            .and_then(|p| p.name)
-            .filter(|n| !n.trim().is_empty())
-            .ok_or_else(|| anyhow::anyhow!("Missing [package].name in {}", manifest.display()))?;
-
-        Ok(Self { root, package_name })
-    }
-}
-
-impl TryFrom<&Path> for NoirProject {
-    type Error = anyhow::Error;
-
-    fn try_from(manifest: &Path) -> Result<Self> {
-        Self::try_from(manifest.to_path_buf())
     }
 }
 

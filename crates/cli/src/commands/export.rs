@@ -36,8 +36,7 @@ use xark_backend::solana::{
     assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le,
 };
 
-use super::conditional_args::bail_on_missing_args;
-
+use super::noir_inferred_args::bail_on_missing_args;
 use crate::noir_project::NoirProject;
 
 #[derive(Args, Debug)]

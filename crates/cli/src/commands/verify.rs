@@ -8,9 +8,8 @@ use xark_backend::{
     keys::Groth16Keys, proof::ProofBundle, serialization::PublicInputsJson, verify,
 };
 
-use super::conditional_args::bail_on_missing_args;
+use super::noir_inferred_args::bail_on_missing_args;
 use super::synth_err;
-
 use crate::noir_project::NoirProject;
 
 #[derive(Args, Debug)]

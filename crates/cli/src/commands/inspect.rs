@@ -4,9 +4,8 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
+use super::noir_inferred_args::bail_on_missing_args;
 use crate::noir_project::NoirProject;
-
-use super::conditional_args::bail_on_missing_args;
 
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::{LoweredAcirCircuit, estimate_constraints, summarize_opcodes};

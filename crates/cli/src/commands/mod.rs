@@ -9,9 +9,9 @@ pub fn synth_err(e: ark_relations::gr1cs::SynthesisError) -> anyhow::Error {
 }
 
 pub mod ceremony;
-pub mod conditional_args;
 pub mod export;
 pub mod inspect;
+pub mod noir_inferred_args;
 pub mod prove;
 pub mod setup;
 pub mod verify;

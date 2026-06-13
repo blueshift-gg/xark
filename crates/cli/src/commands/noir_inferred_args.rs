@@ -1,6 +1,5 @@
-//! Helpers for the "conditionally required" argument pattern used
-//! throughout `xark`: some flags are only required when running outside a
-//! Noir project (i.e. when paths cannot be inferred from `Noir.toml`).
+//! Helpers for arguments that are inferred from a Noir project when
+//! running inside one, but required explicitly otherwise.
 
 use clap::CommandFactory;
 use clap::error::ErrorKind;

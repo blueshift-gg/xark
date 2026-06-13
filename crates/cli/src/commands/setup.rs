@@ -12,9 +12,8 @@ use xark_acir_r1cs::lower::LoweredAcirCircuit;
 
 use xark_backend::{NoirGroth16Circuit, keys::KeyMetadata, setup};
 
-use super::conditional_args::bail_on_missing_args;
+use super::noir_inferred_args::bail_on_missing_args;
 use super::synth_err;
-
 use crate::noir_project::NoirProject;
 
 #[derive(Args, Debug)]
