@@ -16,20 +16,20 @@ use crate::noir_project::NoirProject;
 pub struct VerifyArgs {
     /// Path to a Noir project directory (the one containing Nargo.toml).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
     /// Verifying key. Inferred as `./target/groth16/verifying_key.bin` when
     /// run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
     /// Proof file. Inferred as `./target/groth16/proof.bin` when run from
     /// inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
     /// Public inputs JSON. Inferred as `./target/groth16/public_inputs.json`
     /// when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
 }
 

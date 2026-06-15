@@ -1069,6 +1069,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0a7a9bfdb35811f9e59832f0f05975114d2251b415fb534108e6f34060fd772"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5139,6 +5148,7 @@ dependencies = [
  "ark-relations",
  "ark-serialize 0.6.0",
  "clap",
+ "clap_complete",
  "hex",
  "rand 0.8.6",
  "rand_chacha 0.3.1",

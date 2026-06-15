@@ -23,24 +23,24 @@ use crate::noir_project::NoirProject;
 pub struct ProveArgs {
     /// Path to a Noir project directory (the one containing Nargo.toml).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
     /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub artifact: Option<PathBuf>,
     /// Witness file (gzipped). Inferred as `./target/{name}.gz` when run
     /// from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub witness: Option<PathBuf>,
     /// Proving key. Inferred as `./target/groth16/proving_key.bin` when
     /// run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proving_key: Option<PathBuf>,
     /// Output path for the proof. Inferred as `./target/groth16/proof.bin`
     /// when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub out: Option<PathBuf>,
     /// Reproducible-randomness escape hatch for test fixtures **only**.
     /// When set, drives the Groth16 prover blinders with

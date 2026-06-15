@@ -43,26 +43,26 @@ use crate::noir_project::NoirProject;
 pub struct ExportArgs {
     /// Path to a Noir project directory (the one containing Nargo.toml).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub path: Option<std::path::PathBuf>,
 
     /// Path to the verifying key (canonical Arkworks binary format).
     /// Inferred from a Noir project when omitted.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<std::path::PathBuf>,
     /// Path to the proof (canonical Arkworks binary format). Bundled as
     /// the generated crate's self-test vector. Inferred from a Noir
     /// project when omitted.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<std::path::PathBuf>,
     /// Path to the public inputs JSON produced by `xark prove`.
     /// Inferred from a Noir project when omitted.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<std::path::PathBuf>,
     /// Output directory — the root of the generated verifier crate.
     /// Inferred as `target/{name}-xark-verifier` when run from inside a
     /// Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<std::path::PathBuf>,
     /// Name for the generated crate. Defaults to the `--out` directory name.
     #[arg(long)]

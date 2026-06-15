@@ -20,16 +20,16 @@ use crate::noir_project::NoirProject;
 pub struct SetupArgs {
     /// Path to a Noir project directory (the one containing Nargo.toml).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
     /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub artifact: Option<PathBuf>,
     /// Output directory for proving/verifying keys and metadata.
     /// Inferred as `./target/groth16` when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Required to run Groth16 setup with locally generated randomness.
     /// By default, the OS RNG (`/dev/urandom` on Unix, BCryptGenRandom on
@@ -57,7 +57,7 @@ pub struct SetupArgs {
     /// When neither `--ptau-file` nor `--insecure-dev-mode` is supplied,
     /// `setup` auto-detects a `.ptau` file from `<project>/ptau/`,
     /// `<project>/ceremony/`, or the project root.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub ptau_file: Option<PathBuf>,
     /// 32-byte randomness seed (as hex) for the phase-2 `(γ, δ)` derivation.
     /// Optional — auto-generated via OS RNG when not supplied. Pass this to

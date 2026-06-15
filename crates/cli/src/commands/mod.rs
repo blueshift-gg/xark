@@ -9,6 +9,7 @@ pub fn synth_err(e: ark_relations::gr1cs::SynthesisError) -> anyhow::Error {
 }
 
 pub mod ceremony;
+pub mod completions;
 pub mod export;
 pub mod inspect;
 pub mod noir_inferred_args;
@@ -38,6 +39,7 @@ pub enum Command {
     Verify(verify::VerifyArgs),
     Export(export::ExportArgs),
     Ceremony(ceremony::CeremonyArgs),
+    Completions(completions::CompletionsArgs),
 }
 
 impl Cli {
@@ -49,6 +51,7 @@ impl Cli {
             Command::Verify(args) => verify::run(args),
             Command::Export(args) => export::run(args),
             Command::Ceremony(args) => ceremony::run(args),
+            Command::Completions(args) => completions::run(args),
         }
     }
 }

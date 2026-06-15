@@ -16,12 +16,12 @@ use xark_acir_r1cs::opcodes::brillig_check::check_brillig_outputs_pinned;
 pub struct InspectArgs {
     /// Path to a Noir project directory (the one containing Nargo.toml).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
     /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
     /// Inferred when run from inside a Noir project.
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub artifact: Option<PathBuf>,
 
     /// Emit machine-readable JSON instead of human-readable text.

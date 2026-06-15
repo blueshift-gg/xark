@@ -48,22 +48,22 @@ pub enum CeremonyCommand {
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub artifact: PathBuf,
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub ptau_file: PathBuf,
     /// Optional — auto-generated via OS RNG when not supplied. Pass this
     /// to reproduce byte-identical initial keys from the same circuit +
     /// `.ptau`.
     #[arg(long, value_name = "HEX")]
     pub phase2_seed: Option<String>,
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: PathBuf,
 }
 
 #[derive(Args, Debug)]
 pub struct ContributeArgs {
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub ceremony_dir: PathBuf,
     /// Human-readable label recorded in the contribution attestation.
     #[arg(long, default_value = "anonymous")]
@@ -72,13 +72,13 @@ pub struct ContributeArgs {
 
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub ceremony_dir: PathBuf,
 }
 
 #[derive(Args, Debug)]
 pub struct FinalizeArgs {
-    #[arg(long)]
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub ceremony_dir: PathBuf,
 }
 
