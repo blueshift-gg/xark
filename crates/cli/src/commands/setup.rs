@@ -53,11 +53,15 @@ pub struct SetupArgs {
     /// supplied transcript and `--phase2-seed`, producing keys that are
     /// usable in production iff the `.ptau` came from an audited ceremony.
     /// Mutually exclusive with `--insecure-dev-mode`.
+    ///
+    /// When neither `--ptau-file` nor `--insecure-dev-mode` is supplied,
+    /// `setup` auto-detects a `.ptau` file from `<project>/ptau/`,
+    /// `<project>/ceremony/`, or the project root.
     #[arg(long, value_name = "PATH")]
     pub ptau_file: Option<PathBuf>,
     /// 32-byte randomness seed (as hex) for the phase-2 `(γ, δ)` derivation.
-    /// Required when `--ptau-file` is set. Generated via OS RNG and
-    /// discarded after use in real deployments.
+    /// Optional — auto-generated via OS RNG when not supplied. Pass this to
+    /// reproduce byte-identical keys from the same circuit + `.ptau`.
     #[arg(long, value_name = "HEX")]
     pub phase2_seed: Option<String>,
 }
@@ -141,15 +145,28 @@ pub fn run(args: SetupArgs) -> Result<()> {
         }
     };
 
+    // --- Resolve the ptau path: explicit flag, or auto-detected from the
+    //     Noir project when neither --ptau-file nor --insecure-dev-mode
+    //     is supplied.
+    let ptau_path: Option<PathBuf> = if args.ptau_file.is_some() {
+        args.ptau_file.clone()
+    } else if !args.insecure_dev_mode {
+        project.as_ref().and_then(|p| p.find_ptau())
+    } else {
+        None
+    };
+
     // Mutual exclusion: --ptau-file and --insecure-dev-mode are different
     // setup pathways with different trust assumptions.
-    if args.ptau_file.is_some() && args.insecure_dev_mode {
-        bail!("--ptau-file and --insecure-dev-mode are mutually exclusive");
+    if ptau_path.is_some() && args.insecure_dev_mode {
+        bail!(
+            "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
+        );
     }
-    if args.ptau_file.is_none() && !args.insecure_dev_mode {
+    if ptau_path.is_none() && !args.insecure_dev_mode {
         bail!(
             "Groth16 setup requires trusted randomness.\n\n\
- For production: pass --ptau-file <path> --phase2-seed <hex>.\n\
+ For production: pass --ptau-file <path>.\n\
  For local testing: pass --insecure-dev-mode.\n\
  Do not use insecure dev parameters in production."
         );
@@ -163,11 +180,15 @@ pub fn run(args: SetupArgs) -> Result<()> {
         .with_context(|| format!("creating output dir {}", out_dir.display()))?;
 
     // --- Production phase-2 path -----------------------------------------
-    if let Some(ptau_path) = args.ptau_file.as_ref() {
-        let phase2_seed_hex = args
-            .phase2_seed
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("--ptau-file requires --phase2-seed <hex32>"))?;
+    if let Some(ref ptau_file) = ptau_path {
+        let phase2_seed_hex = match &args.phase2_seed {
+            Some(s) => s.clone(),
+            None => {
+                let mut bytes = [0u8; 32];
+                OsRng.fill_bytes(&mut bytes);
+                hex::encode(bytes)
+            }
+        };
         let seed_bytes = hex::decode(phase2_seed_hex.trim_start_matches("0x"))
             .with_context(|| "decoding --phase2-seed as hex")?;
         if seed_bytes.len() != 32 {
@@ -180,7 +201,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         seed_arr.copy_from_slice(&seed_bytes);
 
         let ptau_bytes =
-            fs::read(ptau_path).with_context(|| format!("reading {}", ptau_path.display()))?;
+            fs::read(ptau_file).with_context(|| format!("reading {}", ptau_file.display()))?;
         let ptau =
             xark_backend::ptau::parse_ptau(&ptau_bytes).with_context(|| "parsing.ptau file")?;
 

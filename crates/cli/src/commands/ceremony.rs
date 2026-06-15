@@ -52,8 +52,11 @@ pub struct InitArgs {
     pub artifact: PathBuf,
     #[arg(long)]
     pub ptau_file: PathBuf,
+    /// Optional — auto-generated via OS RNG when not supplied. Pass this
+    /// to reproduce byte-identical initial keys from the same circuit +
+    /// `.ptau`.
     #[arg(long, value_name = "HEX")]
-    pub phase2_seed: String,
+    pub phase2_seed: Option<String>,
     #[arg(long)]
     pub out: PathBuf,
 }
@@ -98,16 +101,21 @@ fn run_init(args: InitArgs) -> Result<()> {
     let lowered = LoweredAcirCircuit::new(artifact.clone())?;
     let circuit = NoirGroth16Circuit::for_setup(lowered.clone());
 
-    let seed_bytes = hex::decode(args.phase2_seed.trim_start_matches("0x"))
-        .with_context(|| "decoding --phase2-seed as hex")?;
-    if seed_bytes.len() != 32 {
-        bail!(
-            "--phase2-seed must be exactly 32 bytes (got {} bytes)",
-            seed_bytes.len()
-        );
-    }
     let mut seed_arr = [0u8; 32];
-    seed_arr.copy_from_slice(&seed_bytes);
+    if let Some(ref seed_hex) = args.phase2_seed {
+        let seed_bytes = hex::decode(seed_hex.trim_start_matches("0x"))
+            .with_context(|| "decoding --phase2-seed as hex")?;
+        if seed_bytes.len() != 32 {
+            bail!(
+                "--phase2-seed must be exactly 32 bytes (got {} bytes)",
+                seed_bytes.len()
+            );
+        }
+        seed_arr.copy_from_slice(&seed_bytes);
+    } else {
+        use rand::RngCore;
+        OsRng.fill_bytes(&mut seed_arr);
+    }
 
     let ptau_bytes = fs::read(&args.ptau_file)
         .with_context(|| format!("reading {}", args.ptau_file.display()))?;

@@ -90,6 +90,29 @@ impl NoirProject {
     pub fn groth16_dir(&self) -> PathBuf {
         self.target_dir().join("groth16")
     }
+
+    /// Look for a `.ptau` file in standard project locations.
+    ///
+    /// Searches `<root>/ptau/*.ptau`, `<root>/ceremony/*.ptau`, then
+    /// `<root>/*.ptau`. Returns the first match found, or `None` if no
+    /// `.ptau` is present.
+    pub fn find_ptau(&self) -> Option<PathBuf> {
+        for dir in [
+            self.root.join("ptau"),
+            self.root.join("ceremony"),
+            self.root.clone(),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "ptau") {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Deserialize)]
