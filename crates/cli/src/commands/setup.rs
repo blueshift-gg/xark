@@ -244,7 +244,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         println!("Wrote {}", meta_path.display());
         println!(
             "\nphase2-from-ptau setup complete. Production safety depends on \
- the.ptau ceremony you used."
+ the .ptau ceremony you used."
         );
         return Ok(());
     }
