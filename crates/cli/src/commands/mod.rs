@@ -33,12 +33,19 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Inspect a Noir ACIR artifact.
     Inspect(inspect::InspectArgs),
+    /// Generate Groth16 proving and verifying keys.
     Setup(setup::SetupArgs),
+    /// Generate a Groth16 proof from a witness.
     Prove(prove::ProveArgs),
+    /// Verify a Groth16 proof against public inputs.
     Verify(verify::VerifyArgs),
+    /// Export a self-contained Solana verifier crate.
     Export(export::ExportArgs),
+    /// Phase-2 MPC ceremony for trusted setup.
     Ceremony(ceremony::CeremonyArgs),
+    /// Generate shell completion scripts.
     Completions(completions::CompletionsArgs),
 }
 
