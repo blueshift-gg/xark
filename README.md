@@ -39,36 +39,94 @@ See [NOIR_VERSION.md](./NOIR_VERSION.md) for compatible versions.
 ## Quick start
 
 ```bash
-# 1. Install the CLI
+# 1. Install xark CLI
 cargo install --path ./crates/cli
 
 # 2. Compile a circuit with Noir
 cd crates/tests/circuits/arithmetic_square
 nargo execute
+#    Produces: target/arithmetic_square.json  (compiled ACIR artifact)
+#              target/arithmetic_square.gz    (witness generated from Prover.toml)
 
 # 3. Inspect the compiled ACIR artifact
 xark inspect
 
 # 4. Generate proving and verifying keys (dev mode — see warning below)
 xark setup --insecure-dev-mode
-#    Writes proving_key.bin, verifying_key.bin, metadata.json to target/groth16/.
+#    Produces: target/groth16/proving_key.bin
+#              target/groth16/verifying_key.bin
+#              target/groth16/metadata.json
 
-# 5. Generate a proof against the compiled witness
+# 5. Generate a proof against the witness from step 2
 xark prove
-#    Writes proof.bin + proof.json + public_inputs.json
-#    to target/groth16/.
+#    Produces: target/groth16/proof.bin
+#              target/groth16/proof.json
+#              target/groth16/public_inputs.json
 
 # 6. Verify the proof
 xark verify
-#    Checks the proof against the verifying key and public
-#    inputs. Exits with 0 on success, non-zero on failure.
+#    Checks the proof against the verifying key and public inputs.
+#    Output: `Proof verified: true`
+
+# 7. Export a verifier crate for Solana program
+xark export
+#    Produces: target/arithmetic_square-xark-verifier/
 ```
 
-Expected:
+## Solana on-chain verifier
 
+`xark export` generates a self-contained Rust crate that embeds your circuit's
+verifying key. The simplest way to verify a proof is to use the
+`verify_instruction_data` function.
+
+### Pinocchio example
+```rust
+use arithmetic_square_xark_verifier as verifier;
+use pinocchio::{
+    account::AccountView,
+    address::Address,
+    entrypoint,
+    ProgramResult,
+};
+use solana_program_error::ProgramError;
+
+entrypoint!(process_instruction);
+
+fn process_instruction(
+    _program_id: &Address,
+    _accounts: &mut [AccountView],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    // instruction_data = proof (256 B) || public_inputs (N × 32 B)
+    if verifier::verify_instruction_data(instruction_data) {
+        Ok(())
+    } else {
+        Err(ProgramError::InvalidInstructionData)
+    }
+}
 ```
-Proof verified: true
+
+The key points:
+
+* The generated crate embeds the verifying key at compile time.
+* `verify_instruction_data` takes the raw instruction data
+  (`proof || public_inputs`) and verifies it against the embedded verifying key.
+* When the circuit changes, re-run `xark export`; the generated crate is the
+  **only thing** you update — your program code stays the same.
+* See [`client_call_example.rs`](crates/tests/fixtures/groth16/arithmetic_square/client_call_example.rs)
+  for an example of submitting the proof to an onchain program.
+
+If you need a single program to serve multiple circuits with verifying keys
+loaded from accounts, use the `verify_proof_only` API:
+
+```rust
+use xark_verifier::verify_proof_only;
+
+let vk_bytes = /* loaded from an authenticated account */;
+let ok = verify_proof_only(vk_bytes, instruction_data).unwrap_or(false);
 ```
+
+It is important that the program authenticates the verifying keys in this approach.
 
 ## Status
 
@@ -106,8 +164,9 @@ Supported in this release:
 
 Verifier:
 
-* **Solana** on-chain verifier — `xark export` emits the wire bytes; the
- `xark-verifier` crate verifies them on chain via the `alt_bn128` syscalls.
+* **Solana** on-chain verifier — `xark export` generates a self-contained
+  verifier crate and proof (see "Solana on-chain verifier" above). The
+  `xark-verifier` crate provides the underlying `alt_bn128` syscall verifier.
 
 Trusted setup:
 
