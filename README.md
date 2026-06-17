@@ -27,7 +27,7 @@ Noir source
  JSON); `.ptau` phase-1 parsing and phase-2 contribution; multi-contributor
  MPC ceremony driver; Solana wire-format export.
 * `xark-cli` (`crates/cli`) — the `xark` command-line tool (`inspect`,
- `setup`, `prove`, `verify`, `export`, `ceremony`, `write-vk`).
+ `setup`, `prove`, `verify`, `export`, `ceremony`).
 * `xark-verifier` (`crates/verifier`) — on-chain Groth16 verifier for
  Solana, using the `alt_bn128` syscalls.
 
@@ -39,28 +39,29 @@ See [NOIR_VERSION.md](./NOIR_VERSION.md) for compatible versions.
 ## Quick start
 
 ```bash
+# 1. Install the CLI
 cargo install --path ./crates/cli
 
+# 2. Compile a circuit with Noir
 cd crates/tests/circuits/arithmetic_square
 nargo execute
 
-xark inspect --artifact ./target/arithmetic_square.json
+# 3. Inspect the compiled ACIR artifact
+xark inspect
 
-xark setup \
- --artifact ./target/arithmetic_square.json \
- --out ./target/groth16 \
- --insecure-dev-mode
+# 4. Generate proving and verifying keys (dev mode — see warning below)
+xark setup --insecure-dev-mode
+#    Writes proving_key.bin, verifying_key.bin, metadata.json to target/groth16/.
 
-xark prove \
- --artifact ./target/arithmetic_square.json \
- --witness ./target/arithmetic_square.gz \
- --proving-key ./target/groth16/proving_key.bin \
- --out ./target/groth16/proof.bin
+# 5. Generate a proof against the compiled witness
+xark prove
+#    Writes proof.bin + proof.json + public_inputs.json
+#    to target/groth16/.
 
-xark verify \
- --verifying-key ./target/groth16/verifying_key.bin \
- --proof ./target/groth16/proof.bin \
- --public-inputs ./target/groth16/public_inputs.json
+# 6. Verify the proof
+xark verify
+#    Checks the proof against the verifying key and public
+#    inputs. Exits with 0 on success, non-zero on failure.
 ```
 
 Expected:

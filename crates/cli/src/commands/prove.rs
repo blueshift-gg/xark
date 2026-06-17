@@ -15,18 +15,33 @@ use xark_acir_r1cs::witness::parse_witness_file;
 use xark_backend::serialization::{ProofJson, PublicInputsJson};
 use xark_backend::{NoirGroth16Circuit, keys::Groth16Keys, proof::ProofBundle, prove};
 
+use super::noir_inferred_args::bail_on_missing_args;
 use super::synth_err;
+use crate::noir_project::NoirProject;
 
 #[derive(Args, Debug)]
 pub struct ProveArgs {
-    #[arg(long)]
-    pub artifact: PathBuf,
-    #[arg(long)]
-    pub witness: PathBuf,
-    #[arg(long)]
-    pub proving_key: PathBuf,
-    #[arg(long)]
-    pub out: PathBuf,
+    /// Path to a Noir project directory (the one containing Nargo.toml).
+    /// Inferred when run from inside a Noir project.
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
+    pub path: Option<PathBuf>,
+
+    /// Path to a Noir artifact JSON (the file at `target/<name>.json`).
+    /// Inferred when run from inside a Noir project.
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
+    pub artifact: Option<PathBuf>,
+    /// Witness file (gzipped). Inferred as `./target/{name}.gz` when run
+    /// from inside a Noir project.
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
+    pub witness: Option<PathBuf>,
+    /// Proving key. Inferred as `./target/groth16/proving_key.bin` when
+    /// run from inside a Noir project.
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
+    pub proving_key: Option<PathBuf>,
+    /// Output path for the proof. Inferred as `./target/groth16/proof.bin`
+    /// when run from inside a Noir project.
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
+    pub out: Option<PathBuf>,
     /// Reproducible-randomness escape hatch for test fixtures **only**.
     /// When set, drives the Groth16 prover blinders with
     /// `ChaCha20Rng::seed_from_u64(<seed>)` instead of the OS RNG, so two
@@ -80,15 +95,55 @@ impl RngCore for ProveRng {
 impl CryptoRng for ProveRng {}
 
 pub fn run(args: ProveArgs) -> Result<()> {
-    let artifact = parse_artifact_file(&args.artifact)
-        .with_context(|| format!("parsing artifact {}", args.artifact.display()))?;
+    let path = match args.path {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+    let project = NoirProject::find_at(&path)?;
+
+    let artifact_path = args
+        .artifact
+        .or_else(|| project.as_ref().map(|p| p.artifact_path()));
+    let witness_path = args
+        .witness
+        .or_else(|| project.as_ref().map(|p| p.witness_path()));
+    let pk_path = args
+        .proving_key
+        .or_else(|| project.as_ref().map(|p| p.proving_key_path()));
+    let out_path = args
+        .out
+        .or_else(|| project.as_ref().map(|p| p.proof_path()));
+
+    let (artifact_path, witness_path, pk_path, out_path) =
+        match (artifact_path, witness_path, pk_path, out_path) {
+            (Some(a), Some(w), Some(k), Some(o)) => (a, w, k, o),
+            (a, w, k, o) => {
+                let mut missing = Vec::new();
+                if a.is_none() {
+                    missing.push("--artifact <PATH>");
+                }
+                if w.is_none() {
+                    missing.push("--witness <PATH>");
+                }
+                if k.is_none() {
+                    missing.push("--proving-key <PATH>");
+                }
+                if o.is_none() {
+                    missing.push("--out <PATH>");
+                }
+                bail_on_missing_args("prove", &missing);
+            }
+        };
+
+    let artifact = parse_artifact_file(&artifact_path)
+        .with_context(|| format!("parsing artifact {}", artifact_path.display()))?;
     let lowered = LoweredAcirCircuit::new(artifact.clone())?;
-    let witness = parse_witness_file(&args.witness)
-        .with_context(|| format!("parsing witness {}", args.witness.display()))?;
+    let witness = parse_witness_file(&witness_path)
+        .with_context(|| format!("parsing witness {}", witness_path.display()))?;
     let public_inputs = extract_public_inputs(&artifact, &witness)?;
 
-    let pk = Groth16Keys::read_proving_key(&args.proving_key)
-        .with_context(|| format!("reading proving key {}", args.proving_key.display()))?;
+    let pk = Groth16Keys::read_proving_key(&pk_path)
+        .with_context(|| format!("reading proving key {}", pk_path.display()))?;
 
     let circuit = NoirGroth16Circuit::for_proving(lowered, witness);
 
@@ -109,17 +164,16 @@ pub fn run(args: ProveArgs) -> Result<()> {
         public_inputs: public_inputs.clone(),
     };
 
-    let out_dir = args
-        .out
+    let out_dir = out_path
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating output dir {}", out_dir.display()))?;
 
-    bundle.write_proof(&args.out)?;
+    bundle.write_proof(&out_path)?;
     let proof_json = ProofJson::from_proof(&bundle.proof);
-    let proof_json_path = with_extension(&args.out, "json");
+    let proof_json_path = with_extension(&out_path, "json");
     fs::write(&proof_json_path, serde_json::to_string_pretty(&proof_json)?)?;
 
     let public_path = out_dir.join("public_inputs.json");
@@ -129,7 +183,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         serde_json::to_string_pretty(&public_inputs_json)?,
     )?;
 
-    println!("Wrote {}", args.out.display());
+    println!("Wrote {}", out_path.display());
     println!("Wrote {}", proof_json_path.display());
     println!("Wrote {}", public_path.display());
     Ok(())

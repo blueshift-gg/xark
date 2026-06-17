@@ -9,12 +9,13 @@ pub fn synth_err(e: ark_relations::gr1cs::SynthesisError) -> anyhow::Error {
 }
 
 pub mod ceremony;
+pub mod completions;
 pub mod export;
 pub mod inspect;
+pub mod noir_inferred_args;
 pub mod prove;
 pub mod setup;
 pub mod verify;
-pub mod write_vk;
 
 /// `xark` — a Rust Groth16 backend for Noir on BN254.
 #[derive(Parser, Debug)]
@@ -32,13 +33,20 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Inspect a Noir ACIR artifact.
     Inspect(inspect::InspectArgs),
+    /// Generate Groth16 proving and verifying keys.
     Setup(setup::SetupArgs),
+    /// Generate a Groth16 proof from a witness.
     Prove(prove::ProveArgs),
+    /// Verify a Groth16 proof against public inputs.
     Verify(verify::VerifyArgs),
-    WriteVk(write_vk::WriteVkArgs),
+    /// Export a self-contained Solana verifier crate.
     Export(export::ExportArgs),
+    /// Phase-2 MPC ceremony for trusted setup.
     Ceremony(ceremony::CeremonyArgs),
+    /// Generate shell completion scripts.
+    Completions(completions::CompletionsArgs),
 }
 
 impl Cli {
@@ -48,9 +56,9 @@ impl Cli {
             Command::Setup(args) => setup::run(args),
             Command::Prove(args) => prove::run(args),
             Command::Verify(args) => verify::run(args),
-            Command::WriteVk(args) => write_vk::run(args),
             Command::Export(args) => export::run(args),
             Command::Ceremony(args) => ceremony::run(args),
+            Command::Completions(args) => completions::run(args),
         }
     }
 }
