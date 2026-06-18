@@ -7,7 +7,7 @@ on:
 jobs:
   check:
     name: fmt + clippy + test
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && 'blueshift-runners' || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
