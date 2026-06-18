@@ -25,7 +25,7 @@ on:
 jobs:
   kani:
     name: prove (verifier)
-    runs-on: ubuntu-latest
+    runs-on: blueshift-runners
     timeout-minutes: 45
     steps:
       - name: Checkout

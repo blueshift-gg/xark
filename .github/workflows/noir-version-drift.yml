@@ -21,7 +21,7 @@ on:
 jobs:
   drift:
     name: bump-and-test
-    runs-on: ubuntu-latest
+    runs-on: blueshift-runners
     timeout-minutes: 60
     permissions:
       contents: read
