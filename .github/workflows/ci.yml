@@ -7,7 +7,7 @@ on:
 jobs:
   check:
     name: fmt + clippy + test
-    runs-on: blueshift-runners
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4

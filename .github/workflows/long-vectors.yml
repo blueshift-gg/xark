@@ -23,7 +23,7 @@ on:
 jobs:
   long-vectors:
     name: BLAKE3 long-input KAT batch (--ignored)
-    runs-on: blueshift-runners
+    runs-on: ubuntu-latest
     # Generous ceiling: the ignored batch is ~30–60 minutes in release; allow
     # headroom for runner cold-start, dep compile, and noisy-neighbour drift.
     timeout-minutes: 120

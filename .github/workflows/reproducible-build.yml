@@ -25,7 +25,7 @@ on:
 jobs:
   reproducible-build:
     name: Build verifier reference program + check hash
-    runs-on: blueshift-runners
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4

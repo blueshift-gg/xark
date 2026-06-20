@@ -16,7 +16,7 @@ on:
 jobs:
   propagation:
     name: probe (R1CS determinism — linear propagation)
-    runs-on: blueshift-runners
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout

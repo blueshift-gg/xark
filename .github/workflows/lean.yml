@@ -14,7 +14,7 @@ on:
 jobs:
   lean:
     name: prove (gadget soundness)
-    runs-on: blueshift-runners
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:

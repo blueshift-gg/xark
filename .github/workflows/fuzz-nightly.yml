@@ -21,7 +21,7 @@ on:
 jobs:
   fuzz-nightly:
     name: nightly (artifact / witness / lowering parsers, 60 min each)
-    runs-on: blueshift-runners
+    runs-on: ubuntu-latest
     # 3 × 60 min fuzz + dep compile + cargo-fuzz install + corpus upload.
     timeout-minutes: 240
     steps:
