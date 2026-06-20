@@ -41,6 +41,13 @@ const PAYER_KEYPAIR_PATH: &str = "/absolute/path/to/payer.json";
 
 fn main() -> Result<()> {
  let instruction_data = std::fs::read(INSTRUCTION_DATA_PATH)?;
+ // If your program uses a discriminator, prefix the instruction data with it:
+ //
+ //   let mut data = Vec::with_capacity(1 + instruction_data.len());
+ //   data.push(0x00);
+ //   data.extend_from_slice(&instruction_data);
+ //   let instruction_data = data;
+ //
  let program_id = Address::from_str(PROGRAM_ID)?;
  let ix = Instruction {
  program_id,
