@@ -56,12 +56,14 @@ xark setup --insecure-dev-mode
 #    Produces: target/groth16/proving_key.bin
 #              target/groth16/verifying_key.bin
 #              target/groth16/metadata.json
+#              target/groth16/snarkjs-verification_key.json
 
 # 5. Generate a proof against the witness from step 2
 xark prove
 #    Produces: target/groth16/proof.bin
-#              target/groth16/proof.json
-#              target/groth16/public_inputs.json
+#              target/groth16/public_inputs.bin
+#              target/groth16/snarkjs-proof.json
+#              target/groth16/snarkjs-public.json
 
 # 6. Verify the proof
 xark verify
@@ -72,6 +74,26 @@ xark verify
 xark export
 #    Produces: target/arithmetic_square-xark-verifier/
 ```
+
+## snarkjs compatibility
+
+`xark setup` and `xark prove` emit snarkjs-compatible JSON alongside the
+native binary artifacts:
+
+* `snarkjs-verification_key.json` — from `xark setup`
+* `snarkjs-proof.json` and `snarkjs-public.json` — from `xark prove`
+
+These can be verified directly with snarkjs:
+
+```bash
+snarkjs groth16 verify \
+  target/groth16/snarkjs-verification_key.json \
+  target/groth16/snarkjs-public.json \
+  target/groth16/snarkjs-proof.json
+```
+
+This enables verification in JavaScript environments (browser, Node.js, etc.)
+and compatibility with the snarkjs/circom ecosystem.
 
 ## Solana on-chain verifier
 

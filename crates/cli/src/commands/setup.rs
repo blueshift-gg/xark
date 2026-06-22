@@ -10,7 +10,7 @@ use rand_chacha::ChaCha20Rng;
 use xark_acir_r1cs::artifact::parse_artifact_file;
 use xark_acir_r1cs::lower::LoweredAcirCircuit;
 
-use xark_backend::{NoirGroth16Circuit, keys::KeyMetadata, setup};
+use xark_backend::{NoirGroth16Circuit, keys::KeyMetadata, serialization::vk_to_snarkjs, setup};
 
 use super::noir_inferred_args::bail_on_missing_args;
 use super::synth_err;
@@ -239,8 +239,13 @@ pub fn run(args: SetupArgs) -> Result<()> {
         fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)
             .with_context(|| format!("writing {}", meta_path.display()))?;
 
+        let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, lowered.num_public_inputs());
+        let snarkjs_vk_path = out_dir.join("snarkjs-verification_key.json");
+        fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
+
         println!("Wrote {}", pk_path.display());
         println!("Wrote {}", vk_path.display());
+        println!("Wrote {}", snarkjs_vk_path.display());
         println!("Wrote {}", meta_path.display());
         println!(
             "\nphase2-from-ptau setup complete. Production safety depends on \
@@ -272,6 +277,10 @@ pub fn run(args: SetupArgs) -> Result<()> {
     keys.write_proving_key(&pk_path)?;
     keys.write_verifying_key(&vk_path)?;
 
+    let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, lowered.num_public_inputs());
+    let snarkjs_vk_path = out_dir.join("snarkjs-verification_key.json");
+    fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
+
     // Re-synthesize once more (in Setup mode, so the value closures are not
     // invoked) to capture the exact constraint count for metadata.
     let cs = ark_relations::gr1cs::ConstraintSystem::<ark_bn254::Fr>::new_ref();
@@ -297,6 +306,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
 
     println!("Wrote {}", pk_path.display());
     println!("Wrote {}", vk_path.display());
+    println!("Wrote {}", snarkjs_vk_path.display());
     println!("Wrote {}", meta_path.display());
     println!("\nWARNING: setup_mode = insecure-dev-mode. Do not use in production.");
     Ok(())

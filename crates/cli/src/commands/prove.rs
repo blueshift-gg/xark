@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -12,8 +12,13 @@ use xark_acir_r1cs::lower::LoweredAcirCircuit;
 use xark_acir_r1cs::public_inputs::extract_public_inputs;
 use xark_acir_r1cs::witness::parse_witness_file;
 
-use xark_backend::serialization::{ProofJson, PublicInputsJson};
-use xark_backend::{NoirGroth16Circuit, keys::Groth16Keys, proof::ProofBundle, prove};
+use xark_backend::{
+    NoirGroth16Circuit,
+    keys::Groth16Keys,
+    proof::ProofBundle,
+    prove,
+    serialization::{proof_to_snarkjs, public_inputs_to_snarkjs, write_public_inputs},
+};
 
 use super::noir_inferred_args::bail_on_missing_args;
 use super::synth_err;
@@ -172,25 +177,29 @@ pub fn run(args: ProveArgs) -> Result<()> {
         .with_context(|| format!("creating output dir {}", out_dir.display()))?;
 
     bundle.write_proof(&out_path)?;
-    let proof_json = ProofJson::from_proof(&bundle.proof);
-    let proof_json_path = with_extension(&out_path, "json");
-    fs::write(&proof_json_path, serde_json::to_string_pretty(&proof_json)?)?;
 
-    let public_path = out_dir.join("public_inputs.json");
-    let public_inputs_json = PublicInputsJson::from_fr(&public_inputs);
+    // snarkjs-compatible proof
+    let snarkjs_proof = proof_to_snarkjs(&bundle.proof);
+    let snarkjs_proof_path = out_dir.join("snarkjs-proof.json");
     fs::write(
-        &public_path,
-        serde_json::to_string_pretty(&public_inputs_json)?,
+        &snarkjs_proof_path,
+        serde_json::to_string_pretty(&snarkjs_proof)?,
     )?;
 
+    // snarkjs-compatible public inputs
+    let snarkjs_public = public_inputs_to_snarkjs(&public_inputs);
+    let snarkjs_public_path = out_dir.join("snarkjs-public.json");
+    fs::write(
+        &snarkjs_public_path,
+        serde_json::to_string_pretty(&snarkjs_public)?,
+    )?;
+
+    let public_path = out_dir.join("public_inputs.bin");
+    write_public_inputs(&public_inputs, &public_path)?;
+
     println!("Wrote {}", out_path.display());
-    println!("Wrote {}", proof_json_path.display());
+    println!("Wrote {}", snarkjs_proof_path.display());
+    println!("Wrote {}", snarkjs_public_path.display());
     println!("Wrote {}", public_path.display());
     Ok(())
-}
-
-fn with_extension(path: &Path, ext: &str) -> PathBuf {
-    let mut p = path.to_path_buf();
-    p.set_extension(ext);
-    p
 }

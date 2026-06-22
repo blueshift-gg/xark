@@ -1,11 +1,10 @@
-use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Args;
 
 use xark_backend::{
-    keys::Groth16Keys, proof::ProofBundle, serialization::PublicInputsJson, verify,
+    keys::Groth16Keys, proof::ProofBundle, serialization::read_public_inputs, verify,
 };
 
 use super::noir_inferred_args::bail_on_missing_args;
@@ -27,7 +26,7 @@ pub struct VerifyArgs {
     /// inside a Noir project.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
-    /// Public inputs JSON. Inferred as `./target/groth16/public_inputs.json`
+    /// Public inputs file. Inferred as `./target/groth16/public_inputs.bin`
     /// when run from inside a Noir project.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
@@ -72,10 +71,8 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
-    let public_inputs_bytes = fs::read(&public_inputs_path)
+    let public_inputs = read_public_inputs(&public_inputs_path)
         .with_context(|| format!("reading {}", public_inputs_path.display()))?;
-    let public_inputs_json: PublicInputsJson = serde_json::from_slice(&public_inputs_bytes)?;
-    let public_inputs = public_inputs_json.into_fr()?;
 
     let ok = verify(&vk, &proof, &public_inputs).map_err(synth_err)?;
     println!("Proof verified: {ok}");

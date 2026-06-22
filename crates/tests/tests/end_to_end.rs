@@ -4,7 +4,11 @@
 //! can verify the same artifact-vs-witness pair that comes out of nargo.
 
 mod common;
+use ark_bn254::Fr;
+use ark_ff::PrimeField;
 use common::{fixture_dir, run, tempdir};
+use num_bigint::BigUint;
+use xark_backend::serialization::{read_public_inputs, write_public_inputs};
 
 #[test]
 fn happy_path_arithmetic_square() {
@@ -48,8 +52,9 @@ fn happy_path_arithmetic_square() {
     ]);
     assert!(ok, "prove failed: {err}");
     assert!(proof_path.exists());
-    assert!(groth_dir.join("proof.json").exists());
-    assert!(groth_dir.join("public_inputs.json").exists());
+    assert!(groth_dir.join("snarkjs-proof.json").exists());
+    assert!(groth_dir.join("snarkjs-public.json").exists());
+    assert!(groth_dir.join("public_inputs.bin").exists());
 
     // verify (happy path)
     let (ok, out, err) = run(&[
@@ -59,7 +64,7 @@ fn happy_path_arithmetic_square() {
         "--proof",
         proof_path.to_str().unwrap(),
         "--public-inputs",
-        groth_dir.join("public_inputs.json").to_str().unwrap(),
+        groth_dir.join("public_inputs.bin").to_str().unwrap(),
     ]);
     assert!(ok, "verify failed: out={out} err={err}");
     assert!(out.contains("Proof verified: true"));
@@ -100,11 +105,12 @@ fn tampered_public_input_fails_verification() {
     );
 
     // Mutate the public input.
-    let pi_path = groth_dir.join("public_inputs.json");
-    let pi = std::fs::read_to_string(&pi_path).unwrap();
-    let bad = pi.replace("\"81\"", "\"82\"");
-    assert_ne!(pi, bad, "fixture changed: update test");
-    std::fs::write(&pi_path, bad).unwrap();
+    // arithmetic_square: x=9, y=81 => public input is 81.
+    let pi_path = groth_dir.join("public_inputs.bin");
+    let mut pi = read_public_inputs(&pi_path).unwrap();
+    assert_eq!(pi[0], Fr::from(81u64), "fixture changed: update test");
+    pi[0] += Fr::from(1u64);
+    write_public_inputs(&pi, &pi_path).unwrap();
 
     let (ok, out, _) = run(&[
         "verify",
@@ -205,7 +211,7 @@ fn range_basic_happy_path() {
         "--proof",
         proof_path.to_str().unwrap(),
         "--public-inputs",
-        groth_dir.join("public_inputs.json").to_str().unwrap(),
+        groth_dir.join("public_inputs.bin").to_str().unwrap(),
     ]);
     assert!(ok);
     assert!(out.contains("Proof verified: true"));
@@ -251,7 +257,7 @@ fn sha256_compression_happy_path() {
         "--proof",
         proof_path.to_str().unwrap(),
         "--public-inputs",
-        groth_dir.join("public_inputs.json").to_str().unwrap(),
+        groth_dir.join("public_inputs.bin").to_str().unwrap(),
     ]);
     assert!(ok, "verify failed: {out}");
     assert!(out.contains("Proof verified: true"));
@@ -291,21 +297,12 @@ fn sha256_tampered_public_digest_fails() {
         .0
     );
 
-    // Flip a bit in the first public-input word of the digest.
-    let pi_path = groth_dir.join("public_inputs.json");
-    let pi: serde_json::Value = serde_json::from_slice(&std::fs::read(&pi_path).unwrap()).unwrap();
-    let mut inputs: Vec<String> = pi["inputs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
-    let orig: u64 = inputs[0].parse().unwrap();
-    inputs[0] = (orig ^ 1).to_string();
-    let mut tampered = pi.clone();
-    tampered["inputs"] =
-        serde_json::Value::Array(inputs.into_iter().map(serde_json::Value::String).collect());
-    std::fs::write(&pi_path, serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+    // Flip a bit in the first public input.
+    let pi_path = groth_dir.join("public_inputs.bin");
+    let mut pi = read_public_inputs(&pi_path).unwrap();
+    let orig: BigUint = pi[0].into();
+    pi[0] = Fr::from_le_bytes_mod_order(&(orig ^ BigUint::from(1u64)).to_bytes_le());
+    write_public_inputs(&pi, &pi_path).unwrap();
 
     let (ok, out, _) = run(&[
         "verify",

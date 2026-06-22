@@ -8,7 +8,6 @@ use ark_ec::AffineRepr;
 use ark_groth16::{Proof, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
 use num_bigint::BigUint;
-use serde::{Deserialize, Serialize};
 
 pub fn canonical_write_to_file<T: CanonicalSerialize>(
     value: &T,
@@ -27,144 +26,83 @@ pub fn canonical_read_from_file<T: CanonicalDeserialize>(path: &Path) -> std::io
         .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
-// -- JSON ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct G1Json {
-    pub x: String,
-    pub y: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct G2Json {
-    pub x: [String; 2],
-    pub y: [String; 2],
-}
+// -- snarkjs-compatible JSON --------------------------------------------------
 
 fn fq_to_decimal(value: &Fq) -> String {
     let big: BigUint = (*value).into();
     big.to_str_radix(10)
 }
 
-fn g1_to_json(p: &G1Affine) -> G1Json {
+/// `[x, y, "1"]` — G1 affine point. `["0", "0", "0"]` at infinity.
+fn g1_snarkjs(p: &G1Affine) -> serde_json::Value {
     if p.is_zero() {
-        G1Json {
-            x: "0".into(),
-            y: "0".into(),
-        }
+        serde_json::json!(["0", "0", "0"])
     } else {
         let (x, y) = p.xy().expect("g1 not at infinity");
-        G1Json {
-            x: fq_to_decimal(&x),
-            y: fq_to_decimal(&y),
-        }
+        serde_json::json!([fq_to_decimal(&x), fq_to_decimal(&y), "1"])
     }
 }
 
-fn g2_to_json(p: &G2Affine) -> G2Json {
+/// `[[x0, x1], [y0, y1], ["1", "0"]]` — G2 affine point.
+/// Each coordinate is a pair because G2 lives in a field extension.
+/// All zeros at infinity.
+fn g2_snarkjs(p: &G2Affine) -> serde_json::Value {
     if p.is_zero() {
-        G2Json {
-            x: ["0".into(), "0".into()],
-            y: ["0".into(), "0".into()],
-        }
+        serde_json::json!([["0", "0"], ["0", "0"], ["0", "0"]])
     } else {
         let (x, y) = p.xy().expect("g2 not at infinity");
         let (Fq2 { c0: x0, c1: x1 }, Fq2 { c0: y0, c1: y1 }) = (x, y);
-        G2Json {
-            x: [fq_to_decimal(&x0), fq_to_decimal(&x1)],
-            y: [fq_to_decimal(&y0), fq_to_decimal(&y1)],
-        }
+        serde_json::json!([
+            [fq_to_decimal(&x0), fq_to_decimal(&x1)],
+            [fq_to_decimal(&y0), fq_to_decimal(&y1)],
+            ["1", "0"],
+        ])
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProofJson {
-    pub curve: String,
-    pub protocol: String,
-    pub a: G1Json,
-    pub b: G2Json,
-    pub c: G1Json,
+pub fn proof_to_snarkjs(proof: &Proof<Bn254>) -> serde_json::Value {
+    serde_json::json!({
+        "pi_a": g1_snarkjs(&proof.a),
+        "pi_b": g2_snarkjs(&proof.b),
+        "pi_c": g1_snarkjs(&proof.c),
+        "protocol": "groth16",
+        "curve": "bn128",
+    })
 }
 
-impl ProofJson {
-    pub fn from_proof(proof: &Proof<Bn254>) -> Self {
-        Self {
-            curve: "bn254".into(),
-            protocol: "groth16".into(),
-            a: g1_to_json(&proof.a),
-            b: g2_to_json(&proof.b),
-            c: g1_to_json(&proof.c),
-        }
-    }
+pub fn vk_to_snarkjs(vk: &VerifyingKey<Bn254>, n_public: usize) -> serde_json::Value {
+    serde_json::json!({
+        "protocol": "groth16",
+        "curve": "bn128",
+        "nPublic": n_public,
+        "vk_alpha_1": g1_snarkjs(&vk.alpha_g1),
+        "vk_beta_2": g2_snarkjs(&vk.beta_g2),
+        "vk_gamma_2": g2_snarkjs(&vk.gamma_g2),
+        "vk_delta_2": g2_snarkjs(&vk.delta_g2),
+        "IC": vk.gamma_abc_g1.iter().map(g1_snarkjs).collect::<Vec<_>>(),
+    })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifyingKeyJson {
-    pub curve: String,
-    pub protocol: String,
-    pub alpha_g1: G1Json,
-    pub beta_g2: G2Json,
-    pub gamma_g2: G2Json,
-    pub delta_g2: G2Json,
-    pub gamma_abc_g1: Vec<G1Json>,
+pub fn public_inputs_to_snarkjs(inputs: &[Fr]) -> serde_json::Value {
+    serde_json::Value::Array(
+        inputs
+            .iter()
+            .map(|f| {
+                let big: BigUint = (*f).into();
+                serde_json::Value::String(big.to_str_radix(10))
+            })
+            .collect(),
+    )
 }
 
-impl VerifyingKeyJson {
-    pub fn from_vk(vk: &VerifyingKey<Bn254>) -> Self {
-        Self {
-            curve: "bn254".into(),
-            protocol: "groth16".into(),
-            alpha_g1: g1_to_json(&vk.alpha_g1),
-            beta_g2: g2_to_json(&vk.beta_g2),
-            gamma_g2: g2_to_json(&vk.gamma_g2),
-            delta_g2: g2_to_json(&vk.delta_g2),
-            gamma_abc_g1: vk.gamma_abc_g1.iter().map(g1_to_json).collect(),
-        }
-    }
+// -- Public input binary ------------------------------------------------------
+
+/// Read public inputs from canonical binary.
+pub fn read_public_inputs(path: &Path) -> std::io::Result<Vec<Fr>> {
+    canonical_read_from_file(path)
 }
 
-// -- Public input JSON --------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PublicInputsJson {
-    pub curve: String,
-    pub field: String,
-    pub encoding: String,
-    pub inputs: Vec<String>,
-}
-
-impl PublicInputsJson {
-    pub fn from_fr(inputs: &[Fr]) -> Self {
-        Self {
-            curve: "bn254".into(),
-            field: "fr".into(),
-            encoding: "decimal-string".into(),
-            inputs: inputs
-                .iter()
-                .map(|f| {
-                    let big: BigUint = (*f).into();
-                    big.to_str_radix(10)
-                })
-                .collect(),
-        }
-    }
-
-    pub fn into_fr(&self) -> Result<Vec<Fr>, std::io::Error> {
-        if self.encoding != "decimal-string" {
-            return Err(std::io::Error::other(format!(
-                "unsupported public input encoding `{}`",
-                self.encoding
-            )));
-        }
-        let mut out = Vec::with_capacity(self.inputs.len());
-        for s in &self.inputs {
-            let big: BigUint = s
-                .trim()
-                .parse()
-                .map_err(|e: num_bigint::ParseBigIntError| std::io::Error::other(e.to_string()))?;
-            use ark_ff::PrimeField;
-            out.push(Fr::from_be_bytes_mod_order(&big.to_bytes_be()));
-        }
-        Ok(out)
-    }
+/// Write public inputs as canonical binary.
+pub fn write_public_inputs(inputs: &[Fr], path: &Path) -> std::io::Result<()> {
+    canonical_write_to_file(&inputs.to_vec(), path)
 }

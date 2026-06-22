@@ -18,7 +18,7 @@ use std::path::Path;
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::PublicInputsJson;
+use xark_backend::serialization::read_public_inputs;
 
 mod common;
 use common::{fixture_dir, run, tempdir};
@@ -162,9 +162,8 @@ fn prove_default_rng_is_non_deterministic() {
 
     // Both proofs must still verify against the shared VK + public inputs.
     let vk = Groth16Keys::read_verifying_key(&vk_path).expect("parse vk");
-    let pi_bytes = std::fs::read(tmp.path().join("public_inputs.json")).expect("read pi");
-    let pi_json: PublicInputsJson = serde_json::from_slice(&pi_bytes).expect("parse pi");
-    let public_inputs = pi_json.into_fr().expect("decode pi");
+    let public_inputs =
+        read_public_inputs(&tmp.path().join("public_inputs.bin")).expect("read public inputs");
 
     for proof_path in [&proof_a, &proof_b] {
         let proof = ProofBundle::read_proof(proof_path).expect("parse proof");

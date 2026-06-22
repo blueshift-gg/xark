@@ -1,5 +1,5 @@
 //! Convert an xark/arkworks Groth16 fixture (verifying_key.bin, proof.bin,
-//! public_inputs.json) into snarkjs's JSON formats so an *independent*
+//! public_inputs.bin) into snarkjs's JSON formats so an *independent*
 //! implementation can verify our proofs:
 //!
 //! cargo run -p xark-backend --example to_snarkjs -- <fixture_dir> <out_dir>
@@ -16,7 +16,7 @@ use ark_groth16::VerifyingKey;
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::PublicInputsJson;
+use xark_backend::serialization::read_public_inputs;
 
 fn fq(x: &Fq) -> String {
     // Arkworks `Fp` Display is the canonical decimal integer (not Montgomery).
@@ -51,10 +51,7 @@ fn main() {
     let vk: VerifyingKey<Bn254> =
         Groth16Keys::read_verifying_key(&dir.join("verifying_key.bin")).expect("read vk");
     let proof = ProofBundle::read_proof(&dir.join("proof.bin")).expect("read proof");
-    let pi_json: PublicInputsJson =
-        serde_json::from_slice(&std::fs::read(dir.join("public_inputs.json")).expect("read pi"))
-            .expect("parse pi");
-    let public = pi_json.into_fr().expect("decode pi");
+    let public = read_public_inputs(&dir.join("public_inputs.bin")).expect("read public inputs");
 
     let vkey = serde_json::json!({
     "protocol": "groth16",

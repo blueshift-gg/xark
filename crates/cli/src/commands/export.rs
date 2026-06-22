@@ -31,7 +31,7 @@ use clap::Args;
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::PublicInputsJson;
+use xark_backend::serialization::read_public_inputs;
 use xark_backend::solana::{
     assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le,
 };
@@ -115,13 +115,8 @@ pub fn run(args: ExportArgs) -> Result<()> {
         .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
-    let public_inputs_json_bytes = fs::read(&public_inputs_path)
+    let public_inputs = read_public_inputs(&public_inputs_path)
         .with_context(|| format!("reading public inputs {}", public_inputs_path.display()))?;
-    let public_inputs_json: PublicInputsJson = serde_json::from_slice(&public_inputs_json_bytes)
-        .with_context(|| format!("parsing {}", public_inputs_path.display()))?;
-    let public_inputs = public_inputs_json
-        .into_fr()
-        .with_context(|| format!("decoding {}", public_inputs_path.display()))?;
 
     let num_public_inputs = public_inputs.len();
     let ic_len = vk.gamma_abc_g1.len();

@@ -78,7 +78,7 @@ impl NoirProject {
     }
 
     pub fn public_inputs_path(&self) -> PathBuf {
-        self.groth16_dir().join("public_inputs.json")
+        self.groth16_dir().join("public_inputs.bin")
     }
 
     // --- Private helpers ---
