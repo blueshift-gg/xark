@@ -64,6 +64,11 @@ pub struct ExportArgs {
     /// Name for the generated crate. Defaults to the `--out` directory name.
     #[arg(long)]
     pub crate_name: Option<String>,
+    /// Permit exporting an on-chain verifier for a non-production (dev-mode)
+    /// key. Without this flag, export refuses an insecure key. For local
+    /// testing only — never deploy a verifier built this way.
+    #[arg(long)]
+    pub allow_insecure: bool,
 }
 
 pub fn run(args: ExportArgs) -> Result<()> {
@@ -82,10 +87,10 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // ---- Load inputs ------------------------------------------------------
     let vk = Groth16Keys::read_verifying_key(&vk_path)
         .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
-    // Loudly warn before baking a key into an on-chain verifier crate if the
-    // metadata says it is not production-safe. Exporting a dev-mode key is
-    // legitimate for local testing, but must never be silent.
-    warn_if_dev_mode_key(&vk_path);
+    // Refuse to bake a non-production (dev-mode) key into an on-chain verifier
+    // crate unless `--allow-insecure` is passed. Exporting a dev-mode key is
+    // legitimate for local testing, but must be an explicit, loud opt-in.
+    check_key_safe_for_export(&vk_path, args.allow_insecure)?;
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
     let public_inputs_str = fs::read_to_string(&public_inputs_path)
@@ -154,35 +159,36 @@ pub fn run(args: ExportArgs) -> Result<()> {
 /// `production_safe`; a `false` value (or a missing/unreadable sidecar) means
 /// the embedded trapdoor is not protected by a trusted-setup ceremony and the
 /// generated on-chain verifier must not be deployed.
-fn warn_if_dev_mode_key(vk_path: &Path) {
-    let Some(dir) = vk_path.parent() else { return };
-    let meta_path = dir.join("metadata.json");
-    match fs::read_to_string(&meta_path) {
-        Ok(s) => {
-            let production_safe = serde_json::from_str::<serde_json::Value>(&s)
-                .ok()
-                .and_then(|v| v.get("production_safe").and_then(|b| b.as_bool()))
-                .unwrap_or(false);
-            if !production_safe {
-                eprintln!(
-                    "{}",
-                    crate::style::warn(
-                        "⚠️  WARNING: exporting an on-chain verifier for an INSECURE dev-mode key \
-                         (metadata.production_safe = false). Its trapdoor is not protected by a \
-                         trusted-setup ceremony — do NOT deploy this VK. Re-run \
-                         `xark setup --ptau-file …` (or the `xark ceremony` flow) first."
-                    )
-                );
-            }
-        }
-        Err(_) => eprintln!(
+fn check_key_safe_for_export(vk_path: &Path, allow_insecure: bool) -> Result<()> {
+    // production_safe only when a metadata.json beside the key says so; a
+    // missing/unreadable/false sidecar counts as insecure.
+    let production_safe = vk_path
+        .parent()
+        .and_then(|dir| fs::read_to_string(dir.join("metadata.json")).ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("production_safe").and_then(|b| b.as_bool()))
+        .unwrap_or(false);
+
+    if production_safe {
+        return Ok(());
+    }
+    if allow_insecure {
+        eprintln!(
             "{}",
             crate::style::warn(
-                "⚠️  WARNING: no metadata.json beside the verifying key — cannot confirm it came \
-                 from a production (ptau/ceremony) setup. Do NOT deploy a dev-mode key."
+                "⚠️  Exporting an on-chain verifier for an INSECURE dev-mode key \
+                 (--allow-insecure). Its trapdoor is not protected by a trusted-setup \
+                 ceremony — do NOT deploy this VK."
             )
-        ),
+        );
+        return Ok(());
     }
+    anyhow::bail!(
+        "refusing to export an on-chain verifier for a non-production key: no \
+         metadata.json marks it production_safe. Run `xark setup --ptau-file …` (or the \
+         `xark ceremony` flow) first, or pass --allow-insecure for a local-testing verifier \
+         you will not deploy."
+    )
 }
 
 /// Sanitize an arbitrary string into a valid Cargo crate name

@@ -32,12 +32,14 @@
 //!
 //! # Soundness
 //!
-//! `τ, α, β` come from the phase-1 transcript; `γ, δ` are derived from the
-//! caller's seed. The trapdoors `τ, α, β` are not recoverable unless the
-//! phase-1 transcript was malformed (a chain of independent contributors
-//! is the standard assumption). `γ, δ` are public to anyone with the seed;
-//! they're not part of the trapdoor (they randomise the witness blinders
-//! but don't compromise τ).
+//! `τ, α, β` come from the phase-1 transcript; `γ, δ` are drawn from the
+//! caller's seed. `τ, α, β` are not recoverable unless the phase-1 transcript
+//! was malformed (a chain of independent contributors is the standard
+//! assumption). `γ, δ` are **also trapdoor components**: anyone who knows `δ`
+//! (i.e. anyone with the phase-2 seed) can forge proofs for this circuit — a
+//! single-party phase-2 is only safe once that seed is discarded, and a fully
+//! trustless phase-2 requires a multi-party contribution. This is why the seed
+//! must never be retained.
 //!
 //! **The output keys are valid for production use only if (a) the phase-1
 //! `.ptau` transcript came from an audited ceremony and (b) the

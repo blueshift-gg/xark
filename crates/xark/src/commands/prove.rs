@@ -165,6 +165,16 @@ pub fn run(args: ProveArgs) -> Result<()> {
         )
     })?;
 
+    // A production key must not be proven with reproducible randomness:
+    // deterministic Groth16 blinders break zero-knowledge. Refuse rather than warn.
+    if args.deterministic_rng.is_some() && key_is_production_safe(&pk_path) {
+        anyhow::bail!(
+            "--deterministic-rng cannot be used with a production key \
+             (metadata.production_safe = true): reproducible prover randomness breaks \
+             zero-knowledge. Remove the flag to prove with OS randomness."
+        );
+    }
+
     let mut rng = match args.deterministic_rng {
         Some(seed) => {
             eprintln!(
@@ -209,4 +219,17 @@ pub fn run(args: ProveArgs) -> Result<()> {
         ))
     );
     Ok(())
+}
+
+/// Whether the `metadata.json` beside a proving key marks it production-safe.
+/// A missing, unreadable, or `false` sidecar is treated as not production-safe.
+fn key_is_production_safe(pk_path: &std::path::Path) -> bool {
+    let Some(dir) = pk_path.parent() else {
+        return false;
+    };
+    fs::read_to_string(dir.join("metadata.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("production_safe").and_then(|b| b.as_bool()))
+        .unwrap_or(false)
 }

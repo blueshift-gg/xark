@@ -179,6 +179,10 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
         metadata.setup_mode = "phase2-from-ptau".into();
         metadata.production_safe = true;
+        // Record a commitment to the phase-2 seed so an auditor can bind these
+        // keys to a specific (later-discarded) seed. The seed itself must not be
+        // kept — whoever holds it knows the γ/δ trapdoor.
+        metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
         metadata.ptau_source = ptau_file
             .file_name()
             .and_then(|s| s.to_str())
@@ -194,8 +198,15 @@ pub fn run(args: SetupArgs) -> Result<()> {
         println!("Wrote {}", snarkjs_vk_path.display());
         println!("Wrote {}", meta_path.display());
         println!(
-            "\nphase2-from-ptau setup complete. Production safety depends on the \
-             .ptau ceremony you used."
+            "{}",
+            crate::style::warn(
+                "\nphase2-from-ptau setup complete — but this was a SINGLE-PARTY phase-2 \
+                 contribution. Whoever holds the phase-2 seed knows the γ/δ trapdoor and can \
+                 forge proofs for this circuit. For production you MUST now securely DISCARD the \
+                 seed (only its hash is recorded, in metadata.phase2_seed_hash), and the .ptau \
+                 must itself come from a real multi-party phase-1 ceremony. For a fully \
+                 trustless phase-2, use the multi-party `xark ceremony` flow instead."
+            )
         );
         return Ok(());
     }
