@@ -463,4 +463,23 @@ mod tests {
         bad_link.tau_g1[1] = (G1Projective::generator() * Fr::from(99u64)).into_affine();
         assert!(verify_powers_consistency(&bad_link).is_err(), "non-ladder tau_g1[1] must reject");
     }
+
+    #[test]
+    fn powers_consistency_rejects_degenerate_toxic_waste() {
+        // A transcript with a trivially-known trapdoor (τ ∈ {0,1}, α = 0, β = 0)
+        // satisfies every pairing ladder yet is fully backdoored, so it must be
+        // rejected up front.
+        use crate::ptau::verify_powers_consistency;
+        let mut rng = ChaCha20Rng::seed_from_u64(0xD00D);
+        let (t, a, b) = (Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng));
+        let zero = Fr::from(0u64);
+        let one = Fr::from(1u64);
+
+        assert!(verify_powers_consistency(&fake_ptau(4, zero, a, b)).is_err(), "τ=0 must reject");
+        assert!(verify_powers_consistency(&fake_ptau(4, one, a, b)).is_err(), "τ=1 must reject");
+        assert!(verify_powers_consistency(&fake_ptau(4, t, zero, b)).is_err(), "α=0 must reject");
+        assert!(verify_powers_consistency(&fake_ptau(4, t, a, zero)).is_err(), "β=0 must reject");
+        // The same nonzero (τ, α, β) still passes.
+        verify_powers_consistency(&fake_ptau(4, t, a, b)).expect("nonzero toxic waste passes");
+    }
 }

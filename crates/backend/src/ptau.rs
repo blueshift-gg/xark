@@ -221,6 +221,26 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
         return Err(fail("generators"));
     }
 
+    // (1b) Reject a transcript whose toxic waste is trivially known. τ ∈ {0,1},
+    // α = 0 or β = 0 all satisfy every pairing ladder below (with τ = 0 each
+    // check reduces to 1_GT == 1_GT), yet the setup would be fully backdoored —
+    // so they must be rejected here, before the ladders "pass" them.
+    if ptau.alpha_tau_g1.is_empty() || ptau.beta_tau_g1.is_empty() {
+        return Err(fail("missing-alpha-beta"));
+    }
+    // τ ∉ {0, 1}: τ·g1 is neither the identity (τ=0) nor the generator (τ=1).
+    if ptau.tau_g1[1] == G1Affine::zero() || ptau.tau_g1[1] == g1 {
+        return Err(fail("degenerate-tau"));
+    }
+    // α ≠ 0: α·g1 is not the identity.
+    if ptau.alpha_tau_g1[0] == G1Affine::zero() {
+        return Err(fail("degenerate-alpha"));
+    }
+    // β ≠ 0: β·g1 and β·g2 are not the identity.
+    if ptau.beta_tau_g1[0] == G1Affine::zero() || ptau.beta_g2 == G2Affine::zero() {
+        return Err(fail("degenerate-beta"));
+    }
+
     // (2) τ links G1 and G2: e(τ·g1, g2) == e(g1, τ·g2).
     if Bn254::pairing(ptau.tau_g1[1], g2) != Bn254::pairing(g1, ptau.tau_g2[1]) {
         return Err(fail("tau-link"));
