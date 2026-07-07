@@ -47,11 +47,33 @@ pub fn cmd_build(args: &[String]) -> i32 {
     // nightly xark-as-rustc build. Isolating the cargo target keeps the nightly /
     // MIR-encoded rlibs from thrashing the crate's normal `target/` — the one your
     // own `cargo` and rust-analyzer use.
+    //
+    // The cargo build cache stays at the shared `target/xark/` (so all circuits in
+    // a workspace share compiled deps), but each circuit's *artifacts* land in a
+    // name-scoped subdir `target/xark/<pkg-name>/` for per-circuit isolation. The
+    // package name comes from the crate's `Cargo.toml` (`[package] name`), falling
+    // back to the directory name.
     let xark_dir = crate_abs.join("target/xark");
-    let out_abs = out.map(|o| cwd.join(o)).unwrap_or_else(|| xark_dir.clone());
+    let pkg_name = crate::xark_project::read_pkg_name(&crate_abs).unwrap_or_else(|| name.clone());
+    let out_abs = out
+        .map(|o| cwd.join(o))
+        .unwrap_or_else(|| xark_dir.join(&pkg_name));
 
     let self_exe = std::env::current_exe().expect("current_exe");
     let toolchain = option_env!("XARK_TOOLCHAIN").unwrap_or("nightly");
+
+    // The emitted artifacts (circuit.json / r1cs.json / graph.dot) are a
+    // side-effect of compilation. If they were deleted but the source is
+    // unchanged, cargo cache-hits and never re-runs the extractor, so they never
+    // come back. Bump the source mtime to force the primary crate to recompile
+    // when the output looks incomplete — but only then, so an unchanged large
+    // circuit (whose r1cs.json/graph.dot are legitimately gated off) is not
+    // needlessly recompiled.
+    let regen_needed = !out_abs.join("circuit.json").exists()
+        || (out_abs.join("r1cs.json").exists() && !out_abs.join("graph.dot").exists());
+    if regen_needed {
+        touch_sources(&crate_abs);
+    }
 
     eprintln!("xark: building circuit `{name}` (toolchain {toolchain})");
     let status = Command::new("cargo")
@@ -83,6 +105,120 @@ pub fn cmd_build(args: &[String]) -> i32 {
         }
         Err(e) => {
             eprintln!("xark: failed to run cargo: {e}");
+            1
+        }
+    }
+}
+
+/// Bump the mtime of the crate's `src/*.rs` files so cargo recompiles the primary
+/// crate on the next build (forcing the extractor to re-emit artifacts).
+/// Best-effort: per-file failures are ignored. Content is never modified.
+fn touch_sources(crate_dir: &std::path::Path) {
+    fn walk(dir: &std::path::Path, now: std::time::SystemTime) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, now);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                if let Ok(f) = std::fs::File::options().write(true).open(&path) {
+                    let _ = f.set_modified(now);
+                }
+            }
+        }
+    }
+    walk(&crate_dir.join("src"), std::time::SystemTime::now());
+}
+
+/// `xark clean` — remove **every** xark output tree under the current directory:
+/// each circuit crate's `target/xark/` (emitted artifacts, keys, proofs, and the
+/// isolated cargo target). Takes no arguments.
+pub fn cmd_clean(_args: &[String]) -> i32 {
+    fn walk(dir: &std::path::Path, removed: &mut u32, errors: &mut u32) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            match path.file_name().and_then(|s| s.to_str()) {
+                // Remove `target/xark` here; don't descend into `target/` itself.
+                Some("target") => {
+                    let xark = path.join("xark");
+                    if xark.is_dir() {
+                        match std::fs::remove_dir_all(&xark) {
+                            Ok(()) => {
+                                eprintln!("xark: removed {}", xark.display());
+                                *removed += 1;
+                            }
+                            Err(e) => {
+                                eprintln!("xark: failed to remove {}: {e}", xark.display());
+                                *errors += 1;
+                            }
+                        }
+                    }
+                }
+                Some(".git") => {} // skip VCS noise
+                _ => walk(&path, removed, errors),
+            }
+        }
+    }
+    let root = std::env::current_dir().expect("cwd");
+    let (mut removed, mut errors) = (0u32, 0u32);
+    walk(&root, &mut removed, &mut errors);
+    if removed == 0 && errors == 0 {
+        eprintln!(
+            "xark: nothing to clean (no target/xark under {})",
+            root.display()
+        );
+    } else {
+        eprintln!(
+            "xark: cleaned {removed} target/xark director{}",
+            if removed == 1 { "y" } else { "ies" }
+        );
+    }
+    (errors > 0) as i32
+}
+
+/// `xark test [crate-dir] [-- <cargo test args>]`
+///
+/// One-shot circuit testing: build the crate (`xark build`) so its
+/// `target/xark/<pkg>/` artifacts exist, then run `cargo test` in the crate so
+/// the in-crate `xark_prover::circuit(..).prove(..)` tests can load them.
+pub fn cmd_test(args: &[String]) -> i32 {
+    // Split at `--`: everything before is ours (the crate dir); everything
+    // after is forwarded verbatim to `cargo test`.
+    let (ours, forwarded): (&[String], &[String]) = match args.iter().position(|a| a == "--") {
+        Some(i) => (&args[..i], &args[i + 1..]),
+        None => (args, &[]),
+    };
+    let crate_dir = ours
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .cloned()
+        .unwrap_or_else(|| ".".to_string());
+
+    // Build first so the artifacts the tests load are present + up to date.
+    let code = cmd_build(&[crate_dir.clone()]);
+    if code != 0 {
+        eprintln!("xark: build failed; skipping tests");
+        return code;
+    }
+
+    eprintln!("xark: running `cargo test` in {crate_dir}");
+    let status = Command::new("cargo")
+        .arg("test")
+        .args(forwarded)
+        .current_dir(&crate_dir)
+        .status();
+    match status {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("xark: failed to run cargo test: {e}");
             1
         }
     }
@@ -175,14 +311,21 @@ pub fn cmd_init(args: &[String]) -> i32 {
          # Once xark is published:  xark = \"0.1\"\n\
          # From git:                xark = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\", default-features = false }}\n\
          # From a local checkout:   xark = {{ path = \"../xark/crates/xark\", default-features = false }}\n\
-         xark = \"0.1\"\n"
+         xark = \"0.1\"\n\n\
+         # `xark-prover` powers the in-crate `cargo test` circuit tests below.\n\
+         [dev-dependencies]\n\
+         # Once xark is published:  xark-prover = \"0.1\"\n\
+         # From git:                xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\" }}\n\
+         # From a local checkout:   xark-prover = {{ path = \"../xark/crates/xark-prover\" }}\n\
+         xark-prover = \"0.1\"\n"
     );
+    let lib_rs = format!("{LIB_TEMPLATE}{}", tests_template(&name));
     // Both files set the same rust-analyzer override: `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code specifically.
     let ra_cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\"]";
     let files: [(&str, String); 5] = [
         ("Cargo.toml", cargo_toml),
-        ("src/lib.rs", LIB_TEMPLATE.to_string()),
+        ("src/lib.rs", lib_rs),
         (
             "rust-analyzer.toml",
             format!(
@@ -232,9 +375,14 @@ pub fn cmd_init(args: &[String]) -> i32 {
     0
 }
 
-/// The starter circuit written by `xark init`.
+/// The starter circuit written by `xark init`. The `#[cfg(test)] mod tests`
+/// block ([`tests_template`]) is appended with the crate's own name filled in.
+///
+/// `no_std` applies to the real circuit build (via `xark build`) but is dropped
+/// under `cargo test` so the `xark-prover` test harness (which uses `std`) can
+/// link.
 const LIB_TEMPLATE: &str = "\
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 use xark::prelude::*;
 
 /// A circuit proves a statement about its inputs without revealing the private
@@ -249,3 +397,32 @@ pub fn circuit(secret: Private<Field>, result: Public<Field>) {
     assert_eq(secret * secret, result);
 }
 ";
+
+/// The `#[cfg(test)] mod tests` appended to the scaffolded `src/lib.rs`.
+///
+/// Inputs map **positionally** onto the circuit's params in declaration order:
+/// here `[secret, result]`. These tests load the built artifacts, so they need
+/// `xark build .` to have run first.
+fn tests_template(name: &str) -> String {
+    format!(
+        "\n\
+         #[cfg(test)]\n\
+         mod tests {{\n\
+         \x20   // These tests load the built circuit — run `xark build .` first\n\
+         \x20   // (or `xark test`, which builds then runs `cargo test`).\n\
+         \x20   // Inputs are positional: [secret, result].\n\
+         \n\
+         \x20   #[test]\n\
+         \x20   fn prove_valid() {{\n\
+         \x20       let c = xark_prover::circuit(\"{name}\");\n\
+         \x20       assert!(c.prove([2, 4])); // 2 * 2 == 4\n\
+         \x20   }}\n\
+         \n\
+         \x20   #[test]\n\
+         \x20   fn prove_invalid() {{\n\
+         \x20       let c = xark_prover::circuit(\"{name}\");\n\
+         \x20       assert!(!c.prove([3, 4])); // 3 * 3 != 4\n\
+         \x20   }}\n\
+         }}\n"
+    )
+}

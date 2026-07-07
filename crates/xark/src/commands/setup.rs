@@ -119,19 +119,20 @@ pub fn run(args: SetupArgs) -> Result<()> {
         None
     };
 
+    // Only an *explicit* `--ptau-file` conflicts with `--insecure-dev-mode`
+    // (auto-detection is skipped when `--insecure-dev-mode` is set, so any
+    // `ptau_path` here under that flag came from `--ptau-file`).
     if ptau_path.is_some() && args.insecure_dev_mode {
         bail!(
             "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
         );
     }
-    if ptau_path.is_none() && !args.insecure_dev_mode {
-        bail!(
-            "Groth16 setup requires trusted randomness.\n\n\
-             For production: pass --ptau-file <path> (or place a .ptau under target/xark/).\n\
-             For local testing: pass --insecure-dev-mode.\n\
-             Do not use insecure dev parameters in production."
-        );
-    }
+    // No `.ptau` and no explicit `--insecure-dev-mode`: rather than block, fall
+    // back to insecure dev-mode with a hardcoded deterministic seed (1) so the
+    // common `xark build && xark setup && xark prove` loop just works. A real
+    // `--ptau-file` still runs production phase-2; a user-supplied
+    // `--deterministic-rng <n>` still overrides the seed.
+    let dev_fallback = ptau_path.is_none() && !args.insecure_dev_mode;
 
     fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating output dir {}", out_dir.display()))?;
@@ -198,12 +199,20 @@ pub fn run(args: SetupArgs) -> Result<()> {
 
     // --- Dev-mode path ---------------------------------------------------
     let circuit = XarkCircuit::for_setup(prog.clone());
-    let mut rng = match args.deterministic_rng {
+    // A user-supplied `--deterministic-rng <n>` wins; otherwise, when we fell
+    // back here for lack of a `.ptau`, use the hardcoded dev seed (1); an
+    // explicit `--insecure-dev-mode` with no seed keeps using the OS RNG.
+    let effective_seed = args
+        .deterministic_rng
+        .or(if dev_fallback { Some(1) } else { None });
+    let mut rng = match effective_seed {
         Some(seed) => {
-            eprintln!(
-                "WARN: --deterministic-rng makes the Groth16 trapdoor recoverable from the \
-                 seed; do not reuse the resulting keys outside test fixtures."
-            );
+            if args.deterministic_rng.is_some() {
+                eprintln!(
+                    "WARN: --deterministic-rng makes the Groth16 trapdoor recoverable from the \
+                     seed; do not reuse the resulting keys outside test fixtures."
+                );
+            }
             SetupRng::Det(ChaCha20Rng::seed_from_u64(seed))
         }
         None => SetupRng::Os(OsRng),
@@ -217,7 +226,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
     fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
 
     let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
-    metadata.deterministic_rng_seed = args.deterministic_rng;
+    metadata.deterministic_rng_seed = effective_seed;
     fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("writing {}", meta_path.display()))?;
 
@@ -226,5 +235,11 @@ pub fn run(args: SetupArgs) -> Result<()> {
     println!("Wrote {}", snarkjs_vk_path.display());
     println!("Wrote {}", meta_path.display());
     println!("\nWARNING: setup_mode = insecure-dev-mode. Do not use in production.");
+    if dev_fallback {
+        println!(
+            "note: no .ptau found — using an insecure hardcoded dev key (seed 1); \
+             supply --ptau-file for production."
+        );
+    }
     Ok(())
 }

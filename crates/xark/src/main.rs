@@ -44,6 +44,8 @@ const CLI_SUBCOMMANDS: &[&str] = &[
     "new",
     "build",
     "check",
+    "test",
+    "clean",
     "setup",
     "prove",
     "verify",

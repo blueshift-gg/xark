@@ -63,6 +63,10 @@ pub enum Command {
     Build(BuildArgs),
     /// Validate a circuit crate and report subset rejections as diagnostics.
     Check(CheckArgs),
+    /// Build the circuit, then run its `cargo test` circuit tests.
+    Test(TestArgs),
+    /// Remove all xark build output (every `target/xark/` under the current dir).
+    Clean(CleanArgs),
     /// Generate Groth16 proving and verifying keys.
     Setup(setup::SetupArgs),
     /// Solve the witness from --input values and produce a Groth16 proof.
@@ -106,6 +110,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
         Command::Build(a) => exit_code("build", crate::cli::cmd_build(&a.to_argv())),
         Command::Check(a) => exit_code("check", crate::cli::cmd_check(&a.to_argv())),
+        Command::Test(a) => exit_code("test", crate::cli::cmd_test(&a.to_argv())),
+        Command::Clean(a) => exit_code("clean", crate::cli::cmd_clean(&a.to_argv())),
         // Backend commands are `anyhow`-based.
         Command::Setup(a) => setup::run(a),
         Command::Prove(a) => prove::run(a),
@@ -169,6 +175,15 @@ impl BuildArgs {
 }
 
 #[derive(clap::Args, Debug)]
+pub struct CleanArgs {}
+
+impl CleanArgs {
+    fn to_argv(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[derive(clap::Args, Debug)]
 pub struct CheckArgs {
     /// Circuit crate directory to validate.
     #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
@@ -183,6 +198,27 @@ impl CheckArgs {
         let mut v = vec![self.crate_dir.clone()];
         if self.message_format.as_deref() == Some("json") {
             v.push("--message-format=json".into());
+        }
+        v
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TestArgs {
+    /// Circuit crate directory to build and test.
+    #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
+    pub crate_dir: String,
+    /// Extra arguments forwarded verbatim to `cargo test` (after `--`).
+    #[arg(last = true)]
+    pub cargo_args: Vec<String>,
+}
+
+impl TestArgs {
+    fn to_argv(&self) -> Vec<String> {
+        let mut v = vec![self.crate_dir.clone()];
+        if !self.cargo_args.is_empty() {
+            v.push("--".into());
+            v.extend(self.cargo_args.iter().cloned());
         }
         v
     }

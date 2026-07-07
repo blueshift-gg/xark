@@ -18,7 +18,7 @@ use ark_relations::gr1cs::{
 use ark_snark::SNARK;
 use num_bigint::{BigInt, Sign};
 
-use xark_ir::primitive::PrimitiveProgram;
+use xark_ir::primitive::{PrimitiveProgram, Var, VarRole};
 use xark_ir::solver;
 use xark_ir::{LinearCombination as IrLc, R1csProgram, VarId, Visibility};
 
@@ -69,7 +69,10 @@ impl XarkCircuit {
     /// For Groth16 setup: only the constraint *shape* is needed (Arkworks calls
     /// the value closures only in proving mode), so the assignment is empty.
     pub fn for_setup(prog: R1csProgram) -> Self {
-        Self { prog, assign: BTreeMap::new() }
+        Self {
+            prog,
+            assign: BTreeMap::new(),
+        }
     }
 
     /// For proving: the constraints plus the full solved witness (`VarId → Fr`).
@@ -175,7 +178,8 @@ pub fn prove_only(
     // Reject a malformed R1CS program (bad decimal constant) up front with a
     // descriptive error, rather than panicking inside Groth16 synthesis.
     validate_program_constants(r1cs)?;
-    let assign_fp = solver::solve_and_check(circuit, inputs).map_err(|e| format!("witness does not satisfy the circuit: {e:?}"))?;
+    let assign_fp = solver::solve_and_check(circuit, inputs)
+        .map_err(|e| format!("witness does not satisfy the circuit: {e:?}"))?;
     let assign: BTreeMap<VarId, Fr> = assign_fp
         .iter()
         .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
@@ -188,7 +192,8 @@ pub fn prove_only(
     let mut rng = rand::rngs::StdRng::seed_from_u64(0);
     let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circ.clone(), &mut rng)
         .map_err(|e| format!("setup: {e:?}"))?;
-    let proof = Groth16::<Bn254>::prove(&pk, circ, &mut rng).map_err(|e| format!("prove: {e:?}"))?;
+    let proof =
+        Groth16::<Bn254>::prove(&pk, circ, &mut rng).map_err(|e| format!("prove: {e:?}"))?;
     Ok((vk, proof, public))
 }
 
@@ -203,6 +208,118 @@ pub fn prove_and_verify(
     Groth16::<Bn254>::verify(&vk, &public, &proof).map_err(|e| format!("verify: {e:?}"))
 }
 
+// ===========================================================================
+// In-crate testing API.
+//
+// Lets a circuit author unit-test their circuit with plain `cargo test` (via
+// the `xark init` scaffold): load the built artifacts, feed positional inputs,
+// and get back whether a dev-mode Groth16 proof verifies.
+// ===========================================================================
+
+/// A built circuit loaded from `target/xark/<name>/`, ready to prove against.
+///
+/// Obtain one with [`circuit`]; drive it with [`Circuit::prove`].
+pub struct Circuit {
+    r1cs: R1csProgram,
+    prim: PrimitiveProgram,
+}
+
+/// Load a circuit built by `xark build` from `target/xark/<name>/`, relative to
+/// the current directory (where `cargo test` runs, i.e. the crate root).
+///
+/// Panics with a clear message if the artifacts are missing — run `xark build`
+/// first.
+pub fn circuit(name: &str) -> Circuit {
+    let dir = std::path::Path::new("target/xark").join(name);
+    let circuit_path = dir.join("circuit.json");
+    let r1cs_path = dir.join("r1cs.json");
+    let cj = std::fs::read_to_string(&circuit_path).unwrap_or_else(|_| {
+        panic!(
+            "circuit `{name}` not built — run `xark build` first \
+             (expected target/xark/{name}/circuit.json)"
+        )
+    });
+    let rj = std::fs::read_to_string(&r1cs_path).unwrap_or_else(|_| {
+        panic!(
+            "circuit `{name}` not built — run `xark build` first \
+             (expected target/xark/{name}/circuit.json)"
+        )
+    });
+    let prim = xark_ir::primitive::from_json(&cj)
+        .unwrap_or_else(|e| panic!("parsing {}: {e}", circuit_path.display()));
+    let r1cs = xark_ir::json::from_json(&rj)
+        .unwrap_or_else(|e| panic!("parsing {}: {e}", r1cs_path.display()));
+    Circuit { r1cs, prim }
+}
+
+impl Circuit {
+    /// Prove the circuit against `inputs`, mapped **positionally** onto the
+    /// circuit's declared inputs (its `Private`/`Public` params, in declaration
+    /// / variable-id order — derived internals are excluded).
+    ///
+    /// Each integer is reduced into the field (negatives wrap mod p). The
+    /// witness is solved and checked; if it is unsatisfiable, this returns
+    /// `false`. Otherwise a dev-mode Groth16 (seed 1) setup + prove + verify
+    /// runs and its verification result is returned — so a valid witness yields
+    /// `true`, an invalid one `false`.
+    ///
+    /// Panics on a length mismatch (wrong number of inputs).
+    pub fn prove<T: Into<i128> + Copy>(&self, inputs: impl AsRef<[T]>) -> bool {
+        let inputs = inputs.as_ref();
+
+        // Declared inputs in variable-id (declaration) order.
+        let mut input_vars: Vec<&Var> = self
+            .prim
+            .vars
+            .iter()
+            .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
+            .collect();
+        input_vars.sort_by_key(|v| v.id);
+
+        if inputs.len() != input_vars.len() {
+            let names: Vec<&str> = input_vars.iter().map(|v| v.name.as_str()).collect();
+            panic!(
+                "circuit expects {} input(s) {:?}, got {}",
+                input_vars.len(),
+                names,
+                inputs.len()
+            );
+        }
+
+        let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
+        for (v, val) in input_vars.iter().zip(inputs) {
+            let n: i128 = (*val).into();
+            id_inputs.insert(v.id, n.to_string());
+        }
+
+        // Solve the witness; an unsatisfiable witness means the statement is
+        // false → the proof would not verify, so report `false` directly.
+        let assign_fp = match solver::solve_and_check(&self.prim, &id_inputs) {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let assign: BTreeMap<VarId, Fr> = assign_fp
+            .iter()
+            .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
+            .collect();
+
+        let public = public_inputs(&self.r1cs, &assign);
+        let circ = XarkCircuit::for_proving(self.r1cs.clone(), assign);
+
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let (pk, vk) = match Groth16::<Bn254>::circuit_specific_setup(circ.clone(), &mut rng) {
+            Ok(x) => x,
+            Err(_) => return false,
+        };
+        let proof = match Groth16::<Bn254>::prove(&pk, circ, &mut rng) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        Groth16::<Bn254>::verify(&vk, &public, &proof).unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,10 +331,26 @@ mod tests {
     // Derived `t = a*b` (witness-gen Product), pinned by `a·b = t` and `t = out`.
     fn demo() -> (R1csProgram, PrimitiveProgram) {
         let vars_r = vec![
-            IrVar { id: 0, name: "a".into(), visibility: Visibility::Private },
-            IrVar { id: 1, name: "b".into(), visibility: Visibility::Private },
-            IrVar { id: 2, name: "out".into(), visibility: Visibility::Public },
-            IrVar { id: 3, name: "t".into(), visibility: Visibility::Internal },
+            IrVar {
+                id: 0,
+                name: "a".into(),
+                visibility: Visibility::Private,
+            },
+            IrVar {
+                id: 1,
+                name: "b".into(),
+                visibility: Visibility::Private,
+            },
+            IrVar {
+                id: 2,
+                name: "out".into(),
+                visibility: Visibility::Public,
+            },
+            IrVar {
+                id: 3,
+                name: "t".into(),
+                visibility: Visibility::Internal,
+            },
         ];
         let one = FieldConst::from_i64(1);
         let neg1 = FieldConst::from_i64(-1);
@@ -233,46 +366,91 @@ mod tests {
             // (t - out) * 1 = 0
             R1csConstraint {
                 id: 1,
-                a: Lc { constant: FieldConst::from_i64(0), terms: vec![
-                    xark_ir::Term { coeff: one.clone(), var: 3 },
-                    xark_ir::Term { coeff: neg1.clone(), var: 2 },
-                ] },
+                a: Lc {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![
+                        xark_ir::Term {
+                            coeff: one.clone(),
+                            var: 3,
+                        },
+                        xark_ir::Term {
+                            coeff: neg1.clone(),
+                            var: 2,
+                        },
+                    ],
+                },
                 b: Lc::one(),
                 c: Lc::zero(),
                 debug: None::<DebugInfo>,
             },
         ];
         let r1cs = R1csProgram {
-            field: xark_ir::FieldSpec { name: "bn254".into(), modulus_decimal: Some(String::from_utf8(BN254_MODULUS.to_vec()).unwrap()) },
+            field: xark_ir::FieldSpec {
+                name: "bn254".into(),
+                modulus_decimal: Some(String::from_utf8(BN254_MODULUS.to_vec()).unwrap()),
+            },
             variables: vars_r,
             constraints,
         };
         let prim = PrimitiveProgram {
             field: xark_ir::primitive::FieldSpec::bn254(),
             vars: vec![
-                Var { id: 0, name: "a".into(), role: VarRole::PrivateInput },
-                Var { id: 1, name: "b".into(), role: VarRole::PrivateInput },
-                Var { id: 2, name: "out".into(), role: VarRole::PublicInput },
-                Var { id: 3, name: "t".into(), role: VarRole::Derived },
+                Var {
+                    id: 0,
+                    name: "a".into(),
+                    role: VarRole::PrivateInput,
+                },
+                Var {
+                    id: 1,
+                    name: "b".into(),
+                    role: VarRole::PrivateInput,
+                },
+                Var {
+                    id: 2,
+                    name: "out".into(),
+                    role: VarRole::PublicInput,
+                },
+                Var {
+                    id: 3,
+                    name: "t".into(),
+                    role: VarRole::Derived,
+                },
             ],
             constraints: vec![
                 Expression {
-                    mul_terms: vec![MulTerm { coeff: FieldConst::from_i64(1), left: 0, right: 1 }],
-                    linear_terms: vec![xark_ir::primitive::LinearTerm { coeff: FieldConst::from_i64(-1), var: 3 }],
+                    mul_terms: vec![MulTerm {
+                        coeff: FieldConst::from_i64(1),
+                        left: 0,
+                        right: 1,
+                    }],
+                    linear_terms: vec![xark_ir::primitive::LinearTerm {
+                        coeff: FieldConst::from_i64(-1),
+                        var: 3,
+                    }],
                     constant: FieldConst::from_i64(0),
                     note: None,
                 },
                 Expression {
                     mul_terms: vec![],
                     linear_terms: vec![
-                        xark_ir::primitive::LinearTerm { coeff: FieldConst::from_i64(1), var: 3 },
-                        xark_ir::primitive::LinearTerm { coeff: FieldConst::from_i64(-1), var: 2 },
+                        xark_ir::primitive::LinearTerm {
+                            coeff: FieldConst::from_i64(1),
+                            var: 3,
+                        },
+                        xark_ir::primitive::LinearTerm {
+                            coeff: FieldConst::from_i64(-1),
+                            var: 2,
+                        },
                     ],
                     constant: FieldConst::from_i64(0),
                     note: None,
                 },
             ],
-            witness_gen: vec![WitnessGen::Product { out: 3, left: Lc::var(0), right: Lc::var(1) }],
+            witness_gen: vec![WitnessGen::Product {
+                out: 3,
+                left: Lc::var(0),
+                right: Lc::var(1),
+            }],
         };
         (r1cs, prim)
     }
@@ -318,7 +496,9 @@ mod tests {
         // rejected with an Err from the public prove path, not a panic.
         let (mut r1cs, prim) = demo();
         // Corrupt the first constraint's `c` linear combination constant.
-        r1cs.constraints[0].c.constant = FieldConst { decimal: "garbage".into() };
+        r1cs.constraints[0].c.constant = FieldConst {
+            decimal: "garbage".into(),
+        };
         let mut inputs = BTreeMap::new();
         inputs.insert(0u32, "3".to_string());
         inputs.insert(1u32, "4".to_string());
