@@ -48,27 +48,69 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
 /// hash itself is not constrained here). Fails (unsatisfiable) if the equation
 /// does not hold.
 pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [Field; 256]) {
-    // SOUNDNESS: the public-key coordinates are untrusted witnesses that feed the
+    // SOUNDNESS: the point coordinates are untrusted witnesses that feed the
     // non-native `mod_mul` in the group law. `mod_mul` only range-checks its
     // *outputs*; its no-wrap correctness assumes every operand limb is < 2^86.
-    // Without pinning `a_pub`'s limbs a malicious prover can supply out-of-range
-    // limbs so the schoolbook column products wrap `Fr`, break `a·b = q·m + r`,
-    // and forge acceptance. Check here — BEFORE the `0 - a_pub.x` negation below,
-    // which is itself a non-native op with the same precondition, so checking a
-    // derived value later would be too late. `r_sig` needs no check: it is pinned
-    // canonical by the final limb-wise `assert_eq(t, r_sig)`.
+    // Without pinning them a malicious prover can supply out-of-range limbs so
+    // the schoolbook column products wrap `Fr`, break `a·b = q·m + r`, and forge
+    // acceptance. Check `a_pub` BEFORE the `0 - a_pub.x` negation below (itself a
+    // non-native op with the same precondition); `r_sig` now feeds the cofactor
+    // doublings, so it must be range-checked too.
     a_pub.x.range_check();
     a_pub.y.range_check();
+    r_sig.x.range_check();
+    r_sig.y.range_check();
+
+    // Canonical scalar: `S < L`. The signature scalar must be a canonical
+    // element of the order-`L` scalar field, else `S`, `S + L`, `S + 2L`, … all
+    // verify — EdDSA signature malleability. `s_bits` are boolean-constrained by
+    // the windowed multiplication's point selects, so recomposing them into the
+    // scalar field's 3×86-bit limbs and asserting canonicity (`< L`) is sound.
+    assert_scalar_below_order(s_bits);
+
     // Rewrite `[S]·B == R + [k]·A` as `[S]·B + [k]·(−A) == R`, so the two scalar
     // multiplications share one windowed Strauss–Shamir pass. Twisted-Edwards
     // negation is `(−x, y)`.
     let neg_a = Point::new(fp(0, 0, 0) - a_pub.x, a_pub.y);
     let t = double_scalar_mul(s_bits, base(), k_bits, neg_a);
-    // Assert t == R, coordinate-wise, limb-by-limb.
+
+    // Cofactored verification: assert `[8]·t == [8]·R`, not `t == R`. Multiplying
+    // by the cofactor 8 clears any small-order (8-torsion) component of `A` or
+    // `R`, so a public key or `R` outside the prime-order subgroup cannot be
+    // exploited — this is the RFC 8032 cofactored equation. Three doublings per
+    // side, far cheaper than an in-circuit `[L]·A == O` subgroup check.
+    let t8 = t.double().double().double();
+    let r8 = r_sig.double().double().double();
     let mut i = 0usize;
     while i < 3usize {
-        assert_eq(t.x.limbs[i], r_sig.x.limbs[i]);
-        assert_eq(t.y.limbs[i], r_sig.y.limbs[i]);
+        assert_eq(t8.x.limbs[i], r8.x.limbs[i]);
+        assert_eq(t8.y.limbs[i], r8.y.limbs[i]);
         i += 1;
     }
+}
+
+/// Assert `Σ bits[i]·2^i < L` (the ed25519 group order) by recomposing the
+/// little-endian scalar bits into the scalar field's `3 × 86`-bit limbs
+/// (86 + 86 + 84 = 256) and asserting the element is canonical. `bits` must be
+/// boolean-constrained by the caller — they are, via the windowed
+/// multiplication's point selects.
+fn assert_scalar_below_order(bits: [Field; 256]) {
+    let mut limbs = [Field::from(0u8); 3];
+    let mut idx = 0usize;
+    let mut l = 0usize;
+    while l < 3usize {
+        let width = if l == 2 { 84usize } else { 86usize };
+        let mut acc = Field::from(0u8);
+        let mut pow = Field::from(1u8);
+        let mut j = 0usize;
+        while j < width {
+            acc = acc + bits[idx] * pow;
+            pow = pow + pow;
+            idx += 1;
+            j += 1;
+        }
+        limbs[l] = acc;
+        l += 1;
+    }
+    Fq::new(limbs).assert_canonical();
 }
