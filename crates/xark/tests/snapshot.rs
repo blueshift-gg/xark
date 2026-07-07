@@ -1822,3 +1822,39 @@ fn uint_const_comparison_boundaries_solve() {
     // lt_const::<0> is a hard false; claiming true must reject.
     assert!(solver::solve_and_check(&program, &case("7", "1", "1", "1", "1")).is_err(), "lt_const::<0> is false");
 }
+
+/// The `U<N>` width guards: a bare `U::<253>::new` range proof is allowed, but a
+/// comparison or checked add/sub at N=253 is rejected at compile time (the
+/// `2^(N+1)` intermediate would exceed the BN254 order and could wrap).
+#[test]
+fn uint_width_guards_reject_unsound_widths() {
+    // N=253 comparison: must fail to compile with the CMP_ARITH_WIDTH_OK message.
+    let cmp = write_case(
+        "u253_cmp",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ua = U::<253>::new(a);\n\
+         \x20   let ub = U::<253>::new(b);\n\
+         \x20   assert_eq(ua.lt(ub).value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&cmp, "u253_cmp", "bn254");
+    assert!(!c.status_success, "U<253> comparison must be rejected");
+    assert!(
+        c.stderr.contains("N ≤ 252") || c.stderr.contains("N <= 252") || c.stderr.contains("CMP_ARITH_WIDTH_OK"),
+        "expected the width-guard message; got: {}",
+        c.stderr
+    );
+
+    // N=253 bare range proof stays legal (pure `2^N ≤ r`).
+    let ok = write_case(
+        "u253_new",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ua = U::<253>::new(a);\n\
+         \x20   assert_eq(ua.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&ok, "u253_new", "bn254");
+    assert!(c.status_success, "U<253>::new should still compile: {}", c.stderr);
+}

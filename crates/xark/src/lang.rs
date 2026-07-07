@@ -142,6 +142,9 @@ impl Field {
     /// (`Σ bitᵢ·2ⁱ == self`) — which also proves `self < 2^N`. Composed entirely
     /// from `Field` primitives (`hint_bit` + arithmetic + `assert_eq`).
     pub fn to_bits<const N: usize>(self) -> [Field; N] {
+        // A 254-bit (or wider) decomposition is not injective mod the BN254 order
+        // `r` (< 2^254): the recomposition could wrap, so it would not pin `self`.
+        const { assert!(N <= 253, "to_bits::<N>: N must be <= 253 (BN254 field capacity)") };
         let mut bits = [Field::from(0u8); N];
         let mut i = 0usize;
         while i < N {
@@ -169,6 +172,9 @@ impl Field {
     /// forms the linear combination; the caller must have pinned the bits boolean
     /// (e.g. via [`Field::to_bits`]).
     pub fn from_bits<const N: usize>(bits: [Field; N]) -> Field {
+        // Beyond 253 bits the weighted sum can exceed `r` and wrap, so the
+        // recomposition would not equal the intended integer.
+        const { assert!(N <= 253, "from_bits::<N>: N must be <= 253 (BN254 field capacity)") };
         let mut acc = Field::from(0u8);
         let mut pow = Field::from(1u8);
         let mut i = 0usize;

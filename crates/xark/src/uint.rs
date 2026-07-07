@@ -52,6 +52,15 @@ impl<const N: usize> U<N> {
     );
     /// Compile-time guard for `mul`: the `2N`-bit product must not wrap `Fr`.
     const MUL_WIDTH_OK: () = assert!(N <= 126, "U<N>::mul requires 2N ≤ 252 to avoid field wrap");
+    /// Compile-time guard for comparison and checked add/sub. These form an
+    /// intermediate up to `2^(N+1)` (a borrow term `lt·2^N` added to a difference,
+    /// or a two-operand sum), which must stay below the BN254 order `r < 2^254`
+    /// for the range proof to bind over the integers — so `2^(N+1) ≤ r`, i.e.
+    /// `N ≤ 252`. A bare `U::new` range proof needs only `2^N ≤ r` (`N ≤ 253`).
+    const CMP_ARITH_WIDTH_OK: () = assert!(
+        N <= 252,
+        "U<N>: comparison and checked add/sub require N ≤ 252 so 2^(N+1) ≤ BN254 field order"
+    );
 
     /// Build a `U<N>` from a field value, **proving in-circuit** that it lies in
     /// `[0, 2^N)` (an `N`-bit range proof). Use this for private witnesses.
@@ -85,8 +94,10 @@ impl<const N: usize> U<N> {
         self.value.is_eq(other.value)
     }
 
-    /// True iff `self < other`.
+    /// True iff `self < other`. `le`/`gt`/`ge` route through this, so the width
+    /// guard here covers them too.
     pub fn lt(self, other: U<N>) -> Bool {
+        let () = Self::CMP_ARITH_WIDTH_OK;
         less_than::<N>(self.value, other.value)
     }
 
@@ -168,21 +179,25 @@ impl<const N: usize> U<N> {
 /// Fixed-width arithmetic uses the standard operators (`a + b`, `a - b`,
 /// `a * b`) and is *checked*: each operation re-range-proves its result to `N`
 /// bits, so overflow/underflow makes the circuit unsatisfiable rather than
-/// silently wrapping the field. `Mul` additionally requires `2N ≤ 252` (a
-/// compile-time guard) so the product cannot wrap `Fr` before the range check
-/// sees it.
+/// silently wrapping the field. `Add`/`Sub` require `N ≤ 252` (`CMP_ARITH_WIDTH_OK`):
+/// the two-operand sum, and the wrapped value of an underflowing difference, reach
+/// `~2^(N+1)`, which must stay below `r` or an out-of-range result could wrap back
+/// under `2^N` and pass the range proof. `Mul` requires the stricter `2N ≤ 252`
+/// so the product cannot wrap `Fr` before the range check sees it.
 ///
 /// Ordering is deliberately *not* an operator: `<`/`>` must return `bool`, but a
 /// circuit comparison yields a [`Bool`] wire, so use `lt`/`le`/`gt`/`ge`.
 impl<const N: usize> Add for U<N> {
     type Output = U<N>;
     fn add(self, other: U<N>) -> U<N> {
+        let () = Self::CMP_ARITH_WIDTH_OK;
         U::new(self.value + other.value)
     }
 }
 impl<const N: usize> Sub for U<N> {
     type Output = U<N>;
     fn sub(self, other: U<N>) -> U<N> {
+        let () = Self::CMP_ARITH_WIDTH_OK;
         U::new(self.value - other.value)
     }
 }
@@ -214,9 +229,10 @@ impl<const N: usize> MulAssign for U<N> {
 /// `lt ∈ {0,1}` with an `N`-bit remainder `r` and the linear identity
 /// `a - b + lt·2^N == r`, `r ∈ [0, 2^N)`. The range proof on `r` uniquely
 /// forces `lt`: if `a >= b`, only `lt = 0` keeps `r = a - b` in range; if
-/// `a < b`, only `lt = 1` keeps `r = a - b + 2^N` in range. `2^N < 2^254 < p`
-/// (guaranteed by `N <= 253`), so the identity holds over the integers, not
-/// just mod p.
+/// `a < b`, only `lt = 1` keeps `r = a - b + 2^N` in range. The intermediate
+/// `d = a - b + 2^N` reaches `2^(N+1)`, which must stay below the BN254 order
+/// `r` (note `r < 2^254`) for the identity to hold over the integers rather than
+/// mod `r` — hence `2^(N+1) ≤ r`, i.e. `N ≤ 252` (enforced by `CMP_ARITH_WIDTH_OK`).
 ///
 /// The honest prover needs a *value* for `lt`, so it is derived from a hint:
 /// bit `N` of `d = a - b + 2^N` is `1` iff `a >= b` (since `d ∈ [2^N, 2^{N+1})`
