@@ -182,8 +182,8 @@ struct LoweringEnv<'tcx> {
     /// `a·b = out` and restore its `Product` — IF the var turns out to be
     /// referenced again after the merge. Without this, reusing a product after
     /// asserting it (`let t = a*b; assert_eq(t, c); assert_eq(t, d);`) leaves `t`
-    /// a free witness detached from `a·b` — a silent under-constraint (audit
-    /// finding #02).
+    /// a free witness detached from `a·b` — a silent under-constraint that a
+    /// malicious prover could exploit.
     merged: BTreeMap<VarId, (LinearCombination, LinearCombination, usize)>,
     /// The witness-generation ("hint") program, in dependency order. `None`
     /// entries are ops whose output var was merged away (dropped at finish).
@@ -1141,9 +1141,7 @@ pub fn lower<'tcx>(
 
 /// Build-time structural soundness gate.
 ///
-/// Rejects two "author forgot to constrain X" footguns that no other check
-/// caught before (audit findings #01/#07/#16; `docs/audit-status.md` previously
-/// *claimed* this was enforced during lowering — now it is):
+/// Rejects two "author forgot to constrain X" footguns:
 ///
 /// * a **hint/advice output** (`Field::advice()`, `hint_inverse`, `hint_bit`,
 ///   `hint_div_rem`, `hint_mulmod_divmod`, `hint_mod_inverse`, `hint_sub2` — all
@@ -1439,7 +1437,7 @@ fn lower_statement<'tcx>(
                 // derive an index or loop bound). Truncate to the target type's
                 // width per Rust `as` semantics: storing the source value verbatim
                 // miscompiles any narrowing cast whose value exceeds the target
-                // width (e.g. `(i * K) as u8` with `i*K >= 256`) — audit finding #07.
+                // width (e.g. `(i * K) as u8` with `i*K >= 256` would truncate).
                 Rvalue::Cast(_, operand, ty) => {
                     if let Some(v) = env.operand_to_int(operand) {
                         env.set_int_at(dest, &dest_path, truncate_int_cast(v, *ty));
@@ -1889,10 +1887,10 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
     // `a·b = out` row repurposed to `a·b = target`, `Product` dropped) but is
     // still referenced by a later constraint — i.e. the product was *reused*
     // after being asserted. Re-pin `a·b = out` and restore its `Product` at its
-    // original witness-gen position, so the later use stays bound to `a·b`
-    // (audit finding #02). A merged-and-not-reused output is unreferenced and
-    // pruned below, so the single-use fast path — and every existing snapshot
-    // gate count — is unchanged.
+    // original witness-gen position, so the later use stays bound to `a·b`.
+    // A merged-and-not-reused output is unreferenced and pruned below, so the
+    // single-use fast path — and every existing snapshot gate count — is
+    // unchanged.
     {
         let mut ref_now: BTreeSet<VarId> = BTreeSet::new();
         for c in &env.constraints {

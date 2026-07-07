@@ -1212,10 +1212,10 @@ fn blake3_varlen_matches_real_vector() {
     assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong digest must reject");
 }
 
-/// Regression for audit finding #02: a multiplication result reused across two
-/// `assert_eq`s must be bound to `a*b` in BOTH. The first `assert_eq` folds the
-/// product's defining row (the compaction optimization); the second must not be
-/// left pinning a detached free witness. Compiling `examples/mul_reuse` and
+/// A multiplication result reused across two `assert_eq`s must stay bound to
+/// `a*b` in BOTH. The first `assert_eq` folds the product's defining row (the
+/// compaction optimization); the second must not be left pinning a detached
+/// free witness. Compiling `examples/mul_reuse` and
 /// solving it confirms the product is revived: the honest `a*b == c == d`
 /// witness verifies, and a `c != d` witness is rejected.
 #[test]
@@ -1413,10 +1413,10 @@ fn uint_comparisons_solve() {
     assert!(solver::solve_and_check(&program, &case("300", "5", "0", "0")).is_err(), "a=300 exceeds U<8>");
 }
 
-/// ECDSA scalar-range checks (audit #08): a secp256k1 scalar must be canonical
-/// (`< n`) and nonzero. Solving `scalar_range` proves `s ∈ [1, n-1]`; a
-/// non-canonical `s` (all limbs `2^86-1`, value `≈ 2^258 >> n`) and `s = 0` are
-/// both rejected.
+/// A secp256k1 scalar must be canonical (`< n`) and nonzero — `s ∈ [1, n-1]` —
+/// which is what makes ECDSA signatures non-malleable. Solving `scalar_range`
+/// proves such an `s`; a non-canonical `s` (all limbs `2^86-1`, value
+/// `≈ 2^258 >> n`) and `s = 0` are both rejected.
 #[test]
 fn ecdsa_scalar_range_checks() {
     use std::collections::BTreeMap;

@@ -83,8 +83,8 @@ pub fn run(args: ExportArgs) -> Result<()> {
     let vk = Groth16Keys::read_verifying_key(&vk_path)
         .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
     // Loudly warn before baking a key into an on-chain verifier crate if the
-    // metadata says it is not production-safe (audit finding #05). Exporting a
-    // dev-mode key is legitimate for local testing, but must never be silent.
+    // metadata says it is not production-safe. Exporting a dev-mode key is
+    // legitimate for local testing, but must never be silent.
     warn_if_dev_mode_key(&vk_path);
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;

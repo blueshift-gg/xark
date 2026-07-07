@@ -96,12 +96,12 @@ impl R1csCallbacks {
             .unwrap_or_else(|e| panic!("failed to write {circuit_path:?}: {e}"));
 
         // Fully-lowered R1CS. `xark setup` / `xark prove` build the Groth16
-        // constraint system from r1cs.json, so it MUST always be written (the
-        // previous code skipped it above a size threshold, which silently made
-        // circuits with >1M constraints impossible to set up or prove — audit
-        // finding #09). For very large circuits we skip only the *pretty-print*
-        // (which is multi-gigabyte) and the human-oriented DOT graph, emitting
-        // compact JSON that the backend consumes identically.
+        // constraint system from r1cs.json, so it MUST always be written —
+        // skipping it above a size threshold would make circuits with >1M
+        // constraints impossible to set up or prove. For very large circuits we
+        // skip only the *pretty-print* (which is multi-gigabyte) and the
+        // human-oriented DOT graph, emitting compact JSON that the backend
+        // consumes identically.
         const DEBUG_R1CS_MAX_CONSTRAINTS: usize = 1_000_000;
         let n_r1cs = output.r1cs.constraints.len();
         let json_path = self.output_dir.join("r1cs.json");

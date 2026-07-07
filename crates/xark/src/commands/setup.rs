@@ -201,10 +201,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     let circuit = XarkCircuit::for_setup(prog.clone());
     // Only an explicit `--deterministic-rng <n>` makes the key reproducible
     // (and its trapdoor recoverable from the seed). The no-`.ptau` dev fallback
-    // now uses OsRng — still insecure (single party, no ceremony, no transcript)
-    // but NOT a globally-shared, publicly-known trapdoor the way the old
-    // hardcoded seed `1` was: previously every user's dev key for a given circuit
-    // was byte-identical with a seed anyone could reproduce (audit finding #05).
+    // uses OsRng — still insecure (single party, no ceremony, no transcript),
+    // but a fixed seed would be worse: every user's dev key for a given circuit
+    // would then be byte-identical with a publicly-known, reproducible trapdoor.
     let effective_seed = args.deterministic_rng;
     let mut rng = match effective_seed {
         Some(seed) => {
