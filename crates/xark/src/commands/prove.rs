@@ -151,6 +151,11 @@ pub fn run(args: ProveArgs) -> Result<()> {
         .collect();
 
     let circuit = XarkCircuit::for_proving(prog, assign);
+    // Reject a malformed `r1cs.json` (bad constant, dangling variable id) before
+    // synthesis, so it is a clean error rather than a panic in the backend.
+    circuit
+        .validate()
+        .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
     let public = circuit.public_inputs();
 
     let pk = Groth16Keys::read_proving_key(&pk_path).with_context(|| {

@@ -167,6 +167,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let ptau = xark_backend::ptau::parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
 
         let circuit = XarkCircuit::for_setup(prog.clone());
+        circuit
+            .validate()
+            .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
         let keys = xark_backend::ptau::setup_from_ptau(circuit, &ptau, &seed_arr)
             .map_err(|e| anyhow::anyhow!("phase-2 setup failed: {e}"))?;
 
@@ -199,6 +202,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
 
     // --- Dev-mode path ---------------------------------------------------
     let circuit = XarkCircuit::for_setup(prog.clone());
+    circuit
+        .validate()
+        .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
     // Only an explicit `--deterministic-rng <n>` makes the key reproducible
     // (and its trapdoor recoverable from the seed). The no-`.ptau` dev fallback
     // uses OsRng — still insecure (single party, no ceremony, no transcript),

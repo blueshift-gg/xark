@@ -120,6 +120,10 @@ pub enum SolveError {
     MissingInput(VarId),
     DivisionByZero,
     NonInvertible,
+    /// A hint's inputs were out of the range it assumes (e.g. limbs that do not
+    /// satisfy `< modulus`), so its witness computation would underflow. Returned
+    /// instead of panicking, so adversarial `--input` cannot crash the prover.
+    MalformedHint(&'static str),
     /// A constraint (by index) was not satisfied.
     ConstraintFailed(usize),
 }
@@ -283,6 +287,11 @@ pub fn solve(
                     acc
                 };
                 let m_big = recompose(m);
+                // Adversarial limbs could recompose to a degenerate modulus; guard
+                // before the `%` (division by zero) and the `M-2` (underflow) below.
+                if m_big < BigUint::from(2u32) {
+                    return Err(SolveError::MalformedHint("mod_inverse: modulus < 2"));
+                }
                 let a_big = recompose(a) % &m_big;
                 if a_big.is_zero() {
                     return Err(SolveError::DivisionByZero);
@@ -322,9 +331,22 @@ pub fn solve(
                 }
                 // s = a + 2m - b - c ∈ [2, 3m) (positive; a,b,c < m). Then r = s mod m,
                 // and qabs = 2 - (s / m) ∈ {0,1,2} so that a + qabs·m = b + c + r.
-                let s = ((&a_big + &m_big + &m_big) - &b_big) - &c_big;
+                // With honest, range-checked limbs a,b,c < m these never underflow;
+                // adversarial `--input` might, so guard each subtraction rather
+                // than let BigUint underflow-panic.
+                let lhs = &a_big + &m_big + &m_big;
+                let rhs = &b_big + &c_big;
+                if lhs < rhs {
+                    return Err(SolveError::MalformedHint("sub2: a + 2m < b + c"));
+                }
+                let s = lhs - rhs;
                 let remainder = &s % &m_big;
                 let q_s = &s / &m_big;
+                if q_s > BigUint::from(2u32) {
+                    return Err(SolveError::MalformedHint(
+                        "sub2: quotient out of range (inputs >= modulus)",
+                    ));
+                }
                 let q_abs = BigUint::from(2u32) - &q_s;
                 assign.insert(*qabs, Fp::new(q_abs, &modulus));
                 let mask = (BigUint::one() << *limb_bits as usize) - BigUint::one();
