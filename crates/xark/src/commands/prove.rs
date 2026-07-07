@@ -121,6 +121,13 @@ pub fn run(args: ProveArgs) -> Result<()> {
     for (k, v) in &inputs {
         match by_name.get(k.as_str()) {
             Some(&id) => {
+                // Validate the value with the same strict decimal parser the
+                // `verify` path uses. Without this, the witness solver's lenient
+                // parse silently turns a malformed value (`0x1b`, `abc`, ``,
+                // `3.5`) into 0 — which can "prove" a trivial statement and makes
+                // `prove` and `verify` disagree on what a valid input is.
+                xark_prover::try_fr_from_decimal(v)
+                    .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
                 id_inputs.insert(id, v.clone());
             }
             None => {
