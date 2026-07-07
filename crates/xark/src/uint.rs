@@ -105,6 +105,64 @@ impl<const N: usize> U<N> {
         self.lt(other).not()
     }
 
+    // --- comparison against a compile-time constant --------------------------
+    //
+    // Comparing against a literal via `self.gt(U::new(C))` would first *construct*
+    // a `U<N>` for `C` — paying an `N`-bit range proof for a value already known
+    // to be in range — and then compare (another ~`N`). These `*_const` methods
+    // take `C` as a const generic instead: they never range-prove the constant,
+    // and the boundary cases fold to a cheap gadget or a constant. In particular
+    // `gt_const::<0>()` is `is_positive` (~2 constraints), not an `N`-bit compare.
+    // `C` is a `u128`, so constants must fit in 128 bits (as with `Field::from`).
+
+    /// True iff `self == C`. Cheap (~2 constraints) for every `C`: `self − C == 0`.
+    pub fn eq_const<const C: u128>(self) -> Bool {
+        (self.value - Field::from(C)).is_zero()
+    }
+
+    /// True iff `self < C`.
+    pub fn lt_const<const C: u128>(self) -> Bool {
+        if C == 0 {
+            Bool::constant(false) // no unsigned value is below 0
+        } else if N < 128 && C >= (1u128 << N) {
+            Bool::constant(true) // every value in `[0, 2^N)` is below `C`
+        } else {
+            less_than::<N>(self.value, Field::from(C))
+        }
+    }
+
+    /// True iff `self <= C`.
+    pub fn le_const<const C: u128>(self) -> Bool {
+        if N < 128 && C >= (1u128 << N) {
+            Bool::constant(true)
+        } else if C == 0 {
+            self.value.is_zero() // `self <= 0` ⟺ `self == 0`
+        } else {
+            less_than::<N>(Field::from(C), self.value).not() // !(C < self)
+        }
+    }
+
+    /// True iff `self > C`.
+    pub fn gt_const<const C: u128>(self) -> Bool {
+        if C == 0 {
+            self.is_positive() // `self > 0` ⟺ `self ≠ 0` — the cheap path
+        } else if N < 128 && C >= (1u128 << N) {
+            Bool::constant(false) // nothing in `[0, 2^N)` exceeds `C`
+        } else {
+            less_than::<N>(Field::from(C), self.value) // C < self
+        }
+    }
+
+    /// True iff `self >= C`.
+    pub fn ge_const<const C: u128>(self) -> Bool {
+        if C == 0 {
+            Bool::constant(true) // every unsigned value is `>= 0`
+        } else if N < 128 && C >= (1u128 << N) {
+            Bool::constant(false)
+        } else {
+            less_than::<N>(self.value, Field::from(C)).not() // !(self < C)
+        }
+    }
 }
 
 /// Fixed-width arithmetic uses the standard operators (`a + b`, `a - b`,

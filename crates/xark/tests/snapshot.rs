@@ -1735,3 +1735,90 @@ fn signed_int_input_is_rejected() {
         c.stderr
     );
 }
+
+/// Constant comparisons fold: `gt_const::<0>` lowers to the ~2-constraint
+/// `is_positive` path, not an N-bit decomposition — and never range-proves a
+/// constructed constant. Verified against the naive `gt(U::new(0))` form.
+#[test]
+fn uint_const_comparisons_fold_and_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let load = |src: &str, name: &str| {
+        let full = format!("#![no_std]\nuse xark::prelude::*;\n{src}");
+        let c = compile_with_field(&write_case(name, &full), name, "bn254");
+        assert!(c.status_success, "{name} failed: {}", c.stderr);
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap()
+    };
+
+    // Folded form: `x > 0` via the const method.
+    let folded = load(
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+         \x20   let u = U::<32>::new(x);\n\
+         \x20   assert_eq(u.gt_const::<0>().value(), out);\n\
+         }\n",
+        "cmp_gt0_folded",
+    );
+    // Naive form: construct a `U<32>` for the constant 0 and compare.
+    let naive = load(
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+         \x20   let u = U::<32>::new(x);\n\
+         \x20   assert_eq(u.gt(U::<32>::new(Field::from(0u8))).value(), out);\n\
+         }\n",
+        "cmp_gt0_naive",
+    );
+    // The fold removes a full 32-bit range proof + comparison (~60 constraints).
+    assert!(
+        folded.constraints.len() + 30 < naive.constraints.len(),
+        "gt_const::<0> should be far cheaper: folded={}, naive={}",
+        folded.constraints.len(),
+        naive.constraints.len()
+    );
+
+    // Correctness of the folded circuit.
+    let id = |n: &str| folded.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    solver::solve_and_check(&folded, &case("5", "1")).expect("5 > 0");
+    solver::solve_and_check(&folded, &case("0", "0")).expect("0 > 0 is false");
+    assert!(solver::solve_and_check(&folded, &case("5", "0")).is_err(), "5 > 0 must be 1");
+}
+
+/// The remaining constant-comparison folds solve: `lt_const::<0>`≡false,
+/// `ge_const::<0>`≡true, `eq_const`, and a general `lt_const::<C>`.
+#[test]
+fn uint_const_comparison_boundaries_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "cmp_const_bounds",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, lt0: Public<Field>, ge0: Public<Field>, eq7: Public<Field>, lt100: Public<Field>) {\n\
+         \x20   let u = U::<16>::new(x);\n\
+         \x20   assert_eq(u.lt_const::<0>().value(), lt0);\n\
+         \x20   assert_eq(u.ge_const::<0>().value(), ge0);\n\
+         \x20   assert_eq(u.eq_const::<7>().value(), eq7);\n\
+         \x20   assert_eq(u.lt_const::<100>().value(), lt100);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "cmp_const_bounds", "bn254");
+    assert!(c.status_success, "cmp_const_bounds failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, lt0: &str, ge0: &str, eq7: &str, lt100: &str| {
+        let mut m = BTreeMap::new();
+        for (k, v) in [("x", x), ("lt0", lt0), ("ge0", ge0), ("eq7", eq7), ("lt100", lt100)] {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    // x=7:  lt0=0 (never), ge0=1 (always), eq7=1, lt100=1 (7<100).
+    solver::solve_and_check(&program, &case("7", "0", "1", "1", "1")).expect("x=7");
+    // x=200: lt0=0, ge0=1, eq7=0, lt100=0 (200>=100).
+    solver::solve_and_check(&program, &case("200", "0", "1", "0", "0")).expect("x=200");
+    // lt_const::<0> is a hard false; claiming true must reject.
+    assert!(solver::solve_and_check(&program, &case("7", "1", "1", "1", "1")).is_err(), "lt_const::<0> is false");
+}
