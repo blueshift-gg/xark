@@ -46,9 +46,9 @@ pub mod uint;
 
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
-    pub use crate::lang::{assert_eq, Field, Private, Public};
+    pub use crate::lang::{assert_eq, select, Bool, Field, Private, Public};
     pub use crate::uint::U;
 }
 
-pub use crate::lang::{assert_eq, Field, Private, Public};
+pub use crate::lang::{assert_eq, select, Bool, Field, Private, Public};
 pub use crate::uint::U;

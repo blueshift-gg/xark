@@ -1321,7 +1321,7 @@ fn is_zero_gadget_solves() {
         "is_zero",
         "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
          pub fn circuit(x: Private<Field>, want: Public<Field>) {\n\
-         \x20   assert_eq(x.is_zero(), want);\n\
+         \x20   assert_eq(x.is_zero().value(), want);\n\
          }\n",
     );
     let c = compile_with_field(&src, "is_zero", "bn254");
@@ -1353,7 +1353,7 @@ fn is_eq_gadget_solves() {
         "is_eq",
         "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
-         \x20   assert_eq(a.is_eq(b), want);\n\
+         \x20   assert_eq(a.is_eq(b).value(), want);\n\
          }\n",
     );
     let c = compile_with_field(&src, "is_eq", "bn254");
@@ -1386,8 +1386,8 @@ fn uint_comparisons_solve() {
          pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, le: Public<Field>) {\n\
          \x20   let ua = U::<8>::new(a);\n\
          \x20   let ub = U::<8>::new(b);\n\
-         \x20   assert_eq(ua.lt(ub), lt);\n\
-         \x20   assert_eq(ua.le(ub), le);\n\
+         \x20   assert_eq(ua.lt(ub).value(), lt);\n\
+         \x20   assert_eq(ua.le(ub).value(), le);\n\
          }\n",
     );
     let c = compile_with_field(&src, "uint_cmp", "bn254");
@@ -1442,4 +1442,71 @@ fn ecdsa_scalar_range_checks() {
         solver::solve_and_check(&program, &case(max_limb, max_limb, max_limb)).is_err(),
         "a non-canonical scalar (>= n) must be rejected"
     );
+}
+
+/// `Bool` + `select`: branchless conditional pick, with a non-boolean condition
+/// rejected by `Bool::new`.
+#[test]
+fn select_and_bool_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "bool_select",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(cond: Private<Field>, a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let c = Bool::new(cond);\n\
+         \x20   assert_eq(select(c, a, b), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "bool_select", "bn254");
+    assert!(c.status_success, "bool_select failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |cond: &str, a: &str, b: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("cond"), cond.to_string());
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    solver::solve_and_check(&program, &case("1", "7", "9", "7")).expect("cond=true selects a");
+    solver::solve_and_check(&program, &case("0", "7", "9", "9")).expect("cond=false selects b");
+    assert!(solver::solve_and_check(&program, &case("1", "7", "9", "9")).is_err(), "wrong select must reject");
+    assert!(solver::solve_and_check(&program, &case("2", "7", "9", "7")).is_err(), "non-boolean cond must reject");
+}
+
+/// `U<N>` checked arithmetic: `add`/`sub`/`mul` compose and solve; a wrong
+/// claimed result is rejected.
+#[test]
+fn uint_checked_arithmetic_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "uint_arith",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, diff: Public<Field>, prod: Public<Field>) {\n\
+         \x20   let ua = U::<8>::new(a);\n\
+         \x20   let ub = U::<8>::new(b);\n\
+         \x20   assert_eq(ua.add(ub).value(), sum);\n\
+         \x20   assert_eq(ua.sub(ub).value(), diff);\n\
+         \x20   assert_eq(ua.mul(ub).value(), prod);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "uint_arith", "bn254");
+    assert!(c.status_success, "uint_arith failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, sum: &str, diff: &str, prod: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("sum"), sum.to_string());
+        m.insert(id("diff"), diff.to_string());
+        m.insert(id("prod"), prod.to_string());
+        m
+    };
+    // a=5, b=3: 5+3=8, 5-3=2, 5*3=15 (all fit in 8 bits).
+    solver::solve_and_check(&program, &case("5", "3", "8", "2", "15")).expect("5,3 arithmetic");
+    assert!(solver::solve_and_check(&program, &case("5", "3", "8", "2", "16")).is_err(), "wrong product must reject");
 }

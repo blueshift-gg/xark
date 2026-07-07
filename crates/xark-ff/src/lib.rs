@@ -17,6 +17,7 @@
 #![no_std]
 
 use xark::assert_eq;
+use xark::Bool;
 /// Re-exported so the [`fp!`] macro can name `$crate::Field` without the caller
 /// importing `xark`.
 pub use xark::Field;
@@ -572,18 +573,18 @@ pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
 }
 
 /// Assert the limb-vector encodes a *nonzero* value, i.e. not every limb is
-/// zero: `Π isZero(limbᵢ) == 0`. Assumes the limbs are range-checked. Used to
-/// enforce `r, s ∈ [1, n-1]` for ECDSA (a zero scalar has no meaning there).
+/// zero. Assumes the limbs are range-checked. Used to enforce `r, s ∈ [1, n-1]`
+/// for ECDSA (a zero scalar has no meaning there).
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
-    let mut all_zero = Field::from(1u8);
+    // `all_zero` is the AND of `isZero(limbᵢ)`: true iff every limb is zero.
+    // Asserting it false forbids the all-zero (value 0) case.
+    let mut all_zero = Bool::constant(true);
     let mut i = 0usize;
     while i < LIMBS {
-        // `isZero(limbᵢ)` is a pinned boolean; the product is 1 iff every limb
-        // is zero, so asserting it is 0 forbids the all-zero (value 0) case.
-        all_zero = all_zero * limbs[i].is_zero();
+        all_zero = all_zero.and(limbs[i].is_zero());
         i += 1;
     }
-    assert_eq(all_zero, Field::from(0u8));
+    all_zero.assert_false();
 }
 
 /// Shared column/carry identity `a·b == q·m + r`. `q`, `r` are the caller-supplied

@@ -26,7 +26,7 @@
 //! in-circuit proof on the explicit contract that the program enforces the
 //! bound before calling `verify`.
 
-use crate::lang::Field;
+use crate::lang::{Bool, Field};
 
 /// An unsigned `N`-bit integer: a [`Field`] whose value is guaranteed to lie in
 /// `[0, 2^N)`. `N` must be in `1..=253` (the BN254 scalar field holds values
@@ -43,6 +43,8 @@ impl<const N: usize> U<N> {
         N >= 1 && N <= 253,
         "U<N>: N must be in 1..=253 (BN254 field capacity)"
     );
+    /// Compile-time guard for `mul`: the `2N`-bit product must not wrap `Fr`.
+    const MUL_WIDTH_OK: () = assert!(N <= 126, "U<N>::mul requires 2N ≤ 252 to avoid field wrap");
 
     /// Build a `U<N>` from a field value, **proving in-circuit** that it lies in
     /// `[0, 2^N)` (an `N`-bit range proof). Use this for private witnesses.
@@ -72,40 +74,62 @@ impl<const N: usize> U<N> {
         self.value
     }
 
-    /// `1` if the value is `0`, else `0` — the cheap inverse-hint path.
-    pub fn is_zero(self) -> Field {
+    /// True iff the value is `0` — the cheap inverse-hint path (~2–3
+    /// constraints), not an `N`-bit decomposition.
+    pub fn is_zero(self) -> Bool {
         self.value.is_zero()
     }
 
-    /// `1` if the value is nonzero (i.e. `> 0` for an unsigned integer), else
-    /// `0`. Two-to-three constraints, not an `N`-bit decomposition.
-    pub fn is_positive(self) -> Field {
-        Field::from(1u8) - self.value.is_zero()
+    /// True iff the value is nonzero (i.e. `> 0` for an unsigned integer).
+    pub fn is_positive(self) -> Bool {
+        self.value.is_zero().not()
     }
 
-    /// `1` if `self == other`, else `0`.
-    pub fn is_eq(self, other: U<N>) -> Field {
+    /// True iff `self == other`.
+    pub fn is_eq(self, other: U<N>) -> Bool {
         self.value.is_eq(other.value)
     }
 
-    /// `1` if `self < other`, else `0`.
-    pub fn lt(self, other: U<N>) -> Field {
+    /// True iff `self < other`.
+    pub fn lt(self, other: U<N>) -> Bool {
         less_than::<N>(self.value, other.value)
     }
 
-    /// `1` if `self <= other`, else `0` (i.e. `!(other < self)`).
-    pub fn le(self, other: U<N>) -> Field {
-        Field::from(1u8) - other.lt(self)
+    /// True iff `self <= other` (i.e. `!(other < self)`).
+    pub fn le(self, other: U<N>) -> Bool {
+        other.lt(self).not()
     }
 
-    /// `1` if `self > other`, else `0`.
-    pub fn gt(self, other: U<N>) -> Field {
+    /// True iff `self > other`.
+    pub fn gt(self, other: U<N>) -> Bool {
         other.lt(self)
     }
 
-    /// `1` if `self >= other`, else `0`.
-    pub fn ge(self, other: U<N>) -> Field {
-        Field::from(1u8) - self.lt(other)
+    /// True iff `self >= other`.
+    pub fn ge(self, other: U<N>) -> Bool {
+        self.lt(other).not()
+    }
+
+    /// Checked addition: `self + other`, proving the sum fits in `N` bits.
+    /// The circuit is unsatisfiable on overflow (`self + other >= 2^N`) — the
+    /// sum `< 2^(N+1)` is re-range-proved to `N` bits, which forbids the carry.
+    pub fn add(self, other: U<N>) -> U<N> {
+        U::new(self.value + other.value)
+    }
+
+    /// Checked subtraction: `self − other`, proving `self >= other`. The circuit
+    /// is unsatisfiable on underflow (`other > self`): the field difference then
+    /// wraps to `~p`, far above `2^N`, and the range proof rejects it.
+    pub fn sub(self, other: U<N>) -> U<N> {
+        U::new(self.value - other.value)
+    }
+
+    /// Checked multiplication: `self · other`, proving the product fits in `N`
+    /// bits. Requires `2N ≤ 252` so the product cannot wrap the field before the
+    /// range check sees it.
+    pub fn mul(self, other: U<N>) -> U<N> {
+        let () = Self::MUL_WIDTH_OK;
+        U::new(self.value * other.value)
     }
 }
 
@@ -123,15 +147,15 @@ impl<const N: usize> U<N> {
 /// there) and `0` iff `a < b` (`d ∈ (0, 2^N)`). That hint only supplies a
 /// candidate — its correctness is enforced by the remainder range proof, so a
 /// wrong hint merely makes the circuit unsatisfiable, never unsound.
-fn less_than<const N: usize>(a: Field, b: Field) -> Field {
+fn less_than<const N: usize>(a: Field, b: Field) -> Bool {
     let two_pow_n = pow2::<N>();
     let top = Field::hint_bit(a - b + two_pow_n, N);
     top.assert_bool();
     let lt = Field::from(1u8) - top;
     let r = a - b + lt * two_pow_n;
-    // Range-prove `r ∈ [0, 2^N)`; this is what pins `lt`.
+    // Range-prove `r ∈ [0, 2^N)`; this is what pins `lt` to `{0,1}` and correct.
     let _bits = r.to_bits::<N>();
-    lt
+    Bool::from_pinned(lt)
 }
 
 /// `2^N` as a `Field` constant. Built by `N` doublings of `1`; every step folds

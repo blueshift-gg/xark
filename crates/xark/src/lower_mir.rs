@@ -104,7 +104,7 @@ pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Optio
         Some(KnownCall::FieldConstantU128)
     } else if s.contains("constant_u64") {
         Some(KnownCall::FieldConstantU64)
-    } else if s.ends_with("::constant") {
+    } else if s.contains("Field") && s.ends_with("::constant") {
         Some(KnownCall::FieldConstantDecimal)
     } else if s.contains("__xark_hint_inverse_or_zero") || s.ends_with("::hint_inverse_or_zero") {
         // Must precede the `hint_inverse` arm: `__xark_hint_inverse` is a prefix

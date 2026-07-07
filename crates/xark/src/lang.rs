@@ -227,17 +227,17 @@ impl Field {
     /// `out = (self == 0)`. For `self ≠ 0` the constraint forces `inv = self⁻¹`
     /// so `out = 0`; for `self = 0`, `out = 1` (and `inv`, multiplied by `0`, is
     /// irrelevant). The output is uniquely determined and boolean.
-    pub fn is_zero(self) -> Field {
+    pub fn is_zero(self) -> Bool {
         let inv = Field::hint_inverse_or_zero(self);
         let out = Field::from(1u8) - self * inv;
         assert_eq(self * out, Field::from(0u8));
-        out
+        Bool::from_pinned(out)
     }
 
-    /// Circuit equality test: returns `1` if `self == other`, else `0`, as a
-    /// constrained boolean `Field` wire. Equal to `(self − other).is_zero()`.
-    /// (For an equality *constraint* — "require `a == b`" — use `assert_eq`.)
-    pub fn is_eq(self, other: Field) -> Field {
+    /// Circuit equality test: a [`Bool`] that is true iff `self == other`. Equal
+    /// to `(self − other).is_zero()`. (For an equality *constraint* — "require
+    /// `a == b`" — use `assert_eq`.)
+    pub fn is_eq(self, other: Field) -> Bool {
         (self - other).is_zero()
     }
 
@@ -284,6 +284,77 @@ impl Field {
     ) -> (Field, [Field; N]) {
         __xark_hint_sub2(a, b, c, m, bits)
     }
+}
+
+/// A circuit boolean: a [`Field`] wire constrained to `{0, 1}`. It is what the
+/// comparison gadgets (`is_zero`, `is_eq`, `U<N>::lt`, …) return, and what
+/// [`select`] and the logical combinators consume — carrying booleanity in the
+/// type lets callers `&`/`|`/`!`/`select` without re-proving it. `Bool` is a
+/// zero-cost wrapper: it introduces no constraint of its own (the wire it wraps
+/// is already pinned), so using it never costs more than the raw `Field` form.
+#[derive(Clone, Copy)]
+pub struct Bool(Field);
+
+impl Bool {
+    /// Wrap an arbitrary field wire as a boolean, *proving* `f ∈ {0, 1}`.
+    pub fn new(f: Field) -> Bool {
+        f.assert_bool();
+        Bool(f)
+    }
+
+    /// A compile-time-constant boolean. `b as u8` is `1`/`0`, a pinned constant
+    /// wire, so this introduces no constraint.
+    pub fn constant(b: bool) -> Bool {
+        Bool(Field::from(b as u8))
+    }
+
+    /// Wrap a wire already pinned to `{0, 1}` by its producer, with no extra
+    /// booleanity constraint. Crate-internal: only sound where the caller has
+    /// already constrained the wire boolean (e.g. an `is_zero` output).
+    pub(crate) fn from_pinned(f: Field) -> Bool {
+        Bool(f)
+    }
+
+    /// The underlying `{0, 1}` field wire.
+    pub fn value(self) -> Field {
+        self.0
+    }
+
+    /// Logical NOT (`1 − self`).
+    pub fn not(self) -> Bool {
+        Bool::from_pinned(self.0.not())
+    }
+
+    /// Logical AND (`self · other`).
+    pub fn and(self, other: Bool) -> Bool {
+        Bool::from_pinned(self.0.and(other.0))
+    }
+
+    /// Logical OR (`self + other − self·other`).
+    pub fn or(self, other: Bool) -> Bool {
+        Bool::from_pinned(self.0.or(other.0))
+    }
+
+    /// Logical XOR.
+    pub fn xor(self, other: Bool) -> Bool {
+        Bool::from_pinned(self.0.xor(other.0))
+    }
+
+    /// Constrain this boolean to be true / false.
+    pub fn assert_true(self) {
+        assert_eq(self.0, Field::from(1u8));
+    }
+    pub fn assert_false(self) {
+        assert_eq(self.0, Field::from(0u8));
+    }
+}
+
+/// Branchless select: `if_true` when `cond` is true, else `if_false`, computed
+/// as `if_false + cond·(if_true − if_false)` (one multiplication). The circuit
+/// analog of `if cond { … } else { … }` — there is no control flow, both values
+/// are always present and `cond` binds which one is the result.
+pub fn select(cond: Bool, if_true: Field, if_false: Field) -> Field {
+    if_false + cond.value() * (if_true - if_false)
 }
 
 /// Canonical conversions from unsigned integer types (`u8`..`u128`) to in-circuit
