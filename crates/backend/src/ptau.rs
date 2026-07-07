@@ -448,8 +448,11 @@ pub fn parse_ptau(bytes: &[u8]) -> Result<PtauFile, PtauError> {
 
     // First pass: index sections by type so we can read them out of order.
     // snarkjs writes them in numeric order, but we don't want to depend on
-    // that.
-    let mut sections: Vec<(u32, &[u8])> = Vec::with_capacity(num_sections as usize);
+    // that. Do NOT pre-allocate to `num_sections` (an attacker-controlled u32
+    // from the header): a 12-byte file could request ~100 GB. The loop is
+    // bounded by the file's real content — `read_u32`/`read_slice` fail on a
+    // truncated file long before `num_sections` iterations if it's inflated.
+    let mut sections: Vec<(u32, &[u8])> = Vec::new();
     for _ in 0..num_sections {
         let ty = cursor.read_u32()?;
         let size = cursor.read_u64()? as usize;
