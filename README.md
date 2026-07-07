@@ -11,6 +11,16 @@ backend: **gadgets are ordinary Rust libraries** that lower to a small
 primitive constraint set, so the backend stays lean and the frontend stays
 expressive.
 
+## Installation
+
+First, make sure you have this version of Rust nightly installed:
+
+`rustup toolchain install nightly-2026-05-03 --profile minimal --component rust-src --component rustc-dev --component llvm-tools`
+
+Then install `xark` with the following command:
+
+`cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark --branch=lang xark --force --features=cli`
+
 ## Two faces: a language *and* a toolchain
 
 ### As a language (library)

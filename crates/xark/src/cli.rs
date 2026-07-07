@@ -316,15 +316,17 @@ pub fn cmd_init(args: &[String]) -> i32 {
          crate-type = [\"lib\"]\n\n\
          [dependencies]\n\
          # Once xark is published:  xark = \"0.1\"\n\
-         # From git:                xark = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\", default-features = false }}\n\
+         # From git:                
+         xark = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\", default-features = false }}\n\
          # From a local checkout:   xark = {{ path = \"../xark/crates/xark\", default-features = false }}\n\
-         xark = \"0.1\"\n\n\
+         # xark = \"0.1\"\n\n\
          # `xark-prover` powers the in-crate `cargo test` circuit tests below.\n\
          [dev-dependencies]\n\
          # Once xark is published:  xark-prover = \"0.1\"\n\
-         # From git:                xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\" }}\n\
+         # From git:                
+         xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\" }}\n\
          # From a local checkout:   xark-prover = {{ path = \"../xark/crates/xark-prover\" }}\n\
-         xark-prover = \"0.1\"\n"
+         # xark-prover = \"0.1\"\n"
     );
     let lib_rs = format!("{LIB_TEMPLATE}{}", tests_template(&name));
     // Both files set the same rust-analyzer override: `rust-analyzer.toml` is the
