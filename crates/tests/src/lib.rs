@@ -35,7 +35,7 @@ pub fn xark_bin() -> std::path::PathBuf {
         let xark_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("xark");
-        let exe = if cfg!(windows) { "xark.exe" } else { "xark" };
+        let exe = "xark";
         for profile in ["release", "debug"] {
             let p = xark_crate.join("target").join(profile).join(exe);
             if p.exists() {
