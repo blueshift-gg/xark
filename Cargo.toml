@@ -38,7 +38,7 @@ exclude = [
 version = "0.0.1"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/blueshift/xark"
+repository = "https://github.com/blueshift-gg/xark"
 rust-version = "1.85"
 
 [workspace.dependencies]
