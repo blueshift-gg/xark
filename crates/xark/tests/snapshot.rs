@@ -1883,3 +1883,73 @@ fn uint_width_guards_reject_unsound_widths() {
     let c = compile_with_field(&icmp, "i253_cmp", "bn254");
     assert!(!c.status_success, "I<253> comparison must be rejected");
 }
+
+/// The secp256k1 on-curve gadget (now run on every ECDSA public key) accepts a
+/// real on-curve pubkey and rejects a perturbed coordinate — validating the
+/// b = 7 curve constant and the non-native `y² = x³ + 7` equation.
+#[test]
+fn secp256k1_on_curve_accepts_real_rejects_perturbed() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("on_curve_k1"), "on_curve_k1", "bn254");
+    assert!(c.status_success, "on_curve_k1 failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    // Real secp256k1 pubkey (86-bit limbs), on y² = x³ + 7.
+    let kat = [
+        ("qx0", "36791928440626258064573199"),
+        ("qx1", "61528703143672418979960783"),
+        ("qx2", "14747486129163242114008648"),
+        ("qy0", "76282327881385977091575450"),
+        ("qy1", "51294842334813218325050598"),
+        ("qy2", "6439864854718902709630533"),
+    ];
+    let base = || {
+        let mut m = BTreeMap::new();
+        for (k, v) in kat.iter() {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    solver::solve_and_check(&program, &base()).expect("on-curve pubkey must be accepted");
+    let mut bad = base();
+    bad.insert(id("qy0"), "1".to_string());
+    assert!(
+        solver::solve_and_check(&program, &bad).is_err(),
+        "an off-curve pubkey must be rejected by enforce_on_curve"
+    );
+}
+
+/// The secp256r1 (a = −3) on-curve gadget: real pubkey accepted, perturbed
+/// rejected — validating the b constant and the `x³ − 3x + b` equation.
+#[test]
+fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("on_curve_r1"), "on_curve_r1", "bn254");
+    assert!(c.status_success, "on_curve_r1 failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let kat = [
+        ("qx0", "67266088408721815440178629"),
+        ("qx1", "32122441355340553600857496"),
+        ("qx2", "8254854985909125326758352"),
+        ("qy0", "20513967152570891030533053"),
+        ("qy1", "70247732038174899916449580"),
+        ("qy2", "15284152633358001387265917"),
+    ];
+    let base = || {
+        let mut m = BTreeMap::new();
+        for (k, v) in kat.iter() {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    solver::solve_and_check(&program, &base()).expect("on-curve P-256 pubkey must be accepted");
+    let mut bad = base();
+    bad.insert(id("qy0"), "1".to_string());
+    assert!(
+        solver::solve_and_check(&program, &bad).is_err(),
+        "an off-curve P-256 pubkey must be rejected"
+    );
+}

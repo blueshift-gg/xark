@@ -35,6 +35,7 @@ macro_rules! weierstrass {
         base = $base:literal,
         scalar = $scalar:literal,
         a = 0,
+        b = [ $b0:literal, $b1:literal, $b2:literal ],
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* $(,)? ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal $(,)? ] $(,)?
     ) => {
@@ -43,6 +44,9 @@ macro_rules! weierstrass {
             scalar = $scalar,
             // a = 0: numerator is exactly `3x²` (NO subtraction).
             numerator_sub = { },
+            // On-curve RHS is `x³ + a·x + b` with `a = 0`.
+            curve_b = [ $b0, $b1, $b2 ],
+            curve_a_coeff = { Fp::new([xark::Field::from(0u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
             generators = [ $( [ $gx0, $gx1, $gx2, $gy0, $gy1, $gy2 ] ),* ],
             correction = [ $cx0, $cx1, $cx2, $cy0, $cy1, $cy2 ]
         }
@@ -52,6 +56,7 @@ macro_rules! weierstrass {
         base = $base:literal,
         scalar = $scalar:literal,
         a = -3,
+        b = [ $b0:literal, $b1:literal, $b2:literal ],
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* $(,)? ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal $(,)? ] $(,)?
     ) => {
@@ -61,6 +66,9 @@ macro_rules! weierstrass {
             // a = -3: numerator is `3x² - 3` (`Fp` resolves to the type generated
             // below — items are non-hygienic, so this splices in cleanly).
             numerator_sub = { - Fp::new([xark::Field::from(3u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
+            // On-curve RHS is `x³ + a·x + b` with `a = −3` (`−3 = p − 3` via Neg).
+            curve_b = [ $b0, $b1, $b2 ],
+            curve_a_coeff = { - Fp::new([xark::Field::from(3u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
             generators = [ $( [ $gx0, $gx1, $gx2, $gy0, $gy1, $gy2 ] ),* ],
             correction = [ $cx0, $cx1, $cx2, $cy0, $cy1, $cy2 ]
         }
@@ -71,6 +79,8 @@ macro_rules! weierstrass {
         base = $base:literal,
         scalar = $scalar:literal,
         numerator_sub = { $($nsub:tt)* },
+        curve_b = [ $b0:literal, $b1:literal, $b2:literal ],
+        curve_a_coeff = { $($acoeff:tt)* },
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal ]
     ) => {
@@ -110,6 +120,28 @@ macro_rules! weierstrass {
         /// Build an `Fp` coordinate from three little-endian 86-bit limbs.
         fn fp(a: u128, b: u128, c: u128) -> Fp {
             Fp::new([xark::Field::from(a), xark::Field::from(b), xark::Field::from(c)])
+        }
+
+        /// Assert the affine point `p` lies on the curve `y² = x³ + a·x + b (mod p)`.
+        /// The incomplete group-law formulas below are only meaningful for on-curve
+        /// points, so every gadget consuming a witness/public point must pin it
+        /// first (range-checks the limbs, then checks the curve equation).
+        pub fn enforce_on_curve(p: Point) {
+            p.x.range_check();
+            p.y.range_check();
+            let b = fp($b0, $b1, $b2);
+            let a_coeff = $($acoeff)*;
+            // lhs = y² ; rhs = x³ + a·x + b, reduced to canonical form so the
+            // per-limb comparison below is exact. (For `a = 0` the `a·x` term is
+            // a multiply-by-zero — a couple of wasted constraints, kept for a
+            // single uniform on-curve equation across curves.)
+            let lhs = (p.y * p.y).reduce();
+            let rhs = (p.x * p.x * p.x + a_coeff * p.x + b).reduce();
+            let mut i = 0usize;
+            while i < 3usize {
+                xark::assert_eq(lhs.limbs[i], rhs.limbs[i]);
+                i += 1;
+            }
         }
 
         /// Incomplete affine addition, 3-limb (slope-based, `a`-independent).
@@ -160,8 +192,9 @@ macro_rules! weierstrass {
 
         /// Strauss–Shamir `u1·G + u2·Q`, incomplete-affine offset accumulator, 3-limb.
         pub fn double_scalar_mul_incomplete(u1_bits: [xark::Field; 256], u2_bits: [xark::Field; 256], q: Point) -> Point {
-            q.x.range_check();
-            q.y.range_check();
+            // Pin `q` to the curve (this also range-checks its limbs) — the
+            // incomplete group law is only valid for on-curve points.
+            enforce_on_curve(q);
             let ig1 = ig1();
             let q2 = q.double_incomplete();
             let jq = [q, q2, q2.add_incomplete(q)];
