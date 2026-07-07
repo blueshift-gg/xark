@@ -126,11 +126,24 @@ pub enum SolveError {
     MalformedHint(&'static str),
     /// A constraint (by index) was not satisfied.
     ConstraintFailed(usize),
+    /// The program's field modulus is missing, unparseable, or `< 2` — the
+    /// arithmetic (`% modulus`) would panic. Returned instead of panicking so a
+    /// malformed artifact cannot crash the prover.
+    MalformedModulus,
 }
 
-fn modulus_of(program: &PrimitiveProgram) -> BigUint {
-    BigUint::parse_bytes(program.field.modulus_decimal.as_bytes(), 10)
-        .expect("valid modulus decimal")
+/// Largest `limb_bits` a hint may declare. Non-native limbs are 86 bits; this
+/// bound stops an adversarial artifact from requesting a multi-gigabyte
+/// BigUint shift (`1 << limb_bits`) and OOM-ing the prover.
+const MAX_LIMB_BITS: u32 = 128;
+
+fn modulus_of(program: &PrimitiveProgram) -> Result<BigUint, SolveError> {
+    let m = BigUint::parse_bytes(program.field.modulus_decimal.as_bytes(), 10)
+        .ok_or(SolveError::MalformedModulus)?;
+    if m < BigUint::from(2u32) {
+        return Err(SolveError::MalformedModulus);
+    }
+    Ok(m)
 }
 
 fn eval_lc(lc: &LinearCombination, assign: &BTreeMap<VarId, Fp>, modulus: &BigUint) -> Fp {
@@ -167,7 +180,7 @@ pub fn solve(
     program: &PrimitiveProgram,
     inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>, SolveError> {
-    let modulus = modulus_of(program);
+    let modulus = modulus_of(program)?;
     let mut assign: BTreeMap<VarId, Fp> = BTreeMap::new();
 
     // Seed inputs.
@@ -245,6 +258,9 @@ pub fn solve(
                 modulus: m,
                 limb_bits,
             } => {
+                if *limb_bits > MAX_LIMB_BITS {
+                    return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
+                }
                 let recompose = |limbs: &[LinearCombination]| -> BigUint {
                     let mut acc = BigUint::zero();
                     for (i, lc) in limbs.iter().enumerate() {
@@ -278,6 +294,9 @@ pub fn solve(
                 modulus: m,
                 limb_bits,
             } => {
+                if *limb_bits > MAX_LIMB_BITS {
+                    return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
+                }
                 let recompose = |limbs: &[LinearCombination]| -> BigUint {
                     let mut acc = BigUint::zero();
                     for (i, lc) in limbs.iter().enumerate() {
@@ -314,6 +333,9 @@ pub fn solve(
                 modulus: m,
                 limb_bits,
             } => {
+                if *limb_bits > MAX_LIMB_BITS {
+                    return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
+                }
                 let recompose = |limbs: &[LinearCombination]| -> BigUint {
                     let mut acc = BigUint::zero();
                     for (i, lc) in limbs.iter().enumerate() {
@@ -364,12 +386,12 @@ pub fn solve(
 /// Construct a field element from a decimal string against a program's field
 /// (for tests / tooling that need to inject specific witness values).
 pub fn fp_from_decimal(s: &str, program: &PrimitiveProgram) -> Fp {
-    Fp::from_decimal(s, &modulus_of(program))
+    Fp::from_decimal(s, &modulus_of(program).expect("valid field modulus"))
 }
 
 /// Check that every constraint evaluates to zero under `assign`.
 pub fn check(program: &PrimitiveProgram, assign: &BTreeMap<VarId, Fp>) -> Result<(), SolveError> {
-    let modulus = modulus_of(program);
+    let modulus = modulus_of(program)?;
     for (i, c) in program.constraints.iter().enumerate() {
         if !eval_expression(c, assign, &modulus).is_zero() {
             return Err(SolveError::ConstraintFailed(i));
@@ -449,7 +471,7 @@ pub fn analyze_underconstrained(
     assign: &BTreeMap<VarId, Fp>,
 ) -> Vec<UnderConstrained> {
     use crate::primitive::VarRole;
-    let modulus = modulus_of(program);
+    let modulus = modulus_of(program).expect("valid field modulus");
 
     // Index: variable -> indices of constraints that reference it.
     let mut refs: BTreeMap<VarId, Vec<usize>> = BTreeMap::new();
@@ -533,4 +555,39 @@ pub fn analyze_underconstrained(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitive::{FieldSpec, PrimitiveProgram};
+
+    fn program_with_modulus(modulus_decimal: &str) -> PrimitiveProgram {
+        PrimitiveProgram {
+            field: FieldSpec {
+                name: "test".into(),
+                modulus_decimal: modulus_decimal.into(),
+            },
+            vars: vec![],
+            constraints: vec![],
+            witness_gen: vec![],
+        }
+    }
+
+    /// A malformed field modulus (`0`, `1`, or unparseable) is a clean
+    /// `MalformedModulus` error, not a `% 0` / `.expect` panic — adversarial
+    /// artifacts must not crash the prover.
+    #[test]
+    fn malformed_modulus_is_rejected_not_panicked() {
+        for m in ["0", "1", "", "not-a-number"] {
+            let program = program_with_modulus(m);
+            assert!(
+                matches!(solve(&program, &BTreeMap::new()), Err(SolveError::MalformedModulus)),
+                "modulus {m:?} must be rejected"
+            );
+        }
+        // A valid modulus still solves the (trivial) program.
+        let ok = program_with_modulus("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+        assert!(solve(&ok, &BTreeMap::new()).is_ok());
+    }
 }

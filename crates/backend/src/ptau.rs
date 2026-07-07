@@ -611,13 +611,20 @@ fn modulus_matches_bn254(modulus_le: &[u8]) -> bool {
 /// [`Fp::new_unchecked`] which trusts the input is already in Montgomery
 /// form; calling [`PrimeField::from_bigint`] here would apply a *second*
 /// Montgomery reduction and silently scale every coordinate by `R⁻¹`.
-fn fq_from_le_mont(bytes: &[u8]) -> Fq {
+fn fq_from_le_mont(bytes: &[u8]) -> Option<Fq> {
     debug_assert_eq!(bytes.len(), BN254_FQ_BYTES);
     let n = BigUint::from_bytes_le(bytes);
-    // BN254 Fq fits in BigInt<4>; any overflow would mean the producer wrote
-    // a value `>= 2^256` which is malformed.
-    let bigint: BigInt<4> = BigInt::try_from(n).unwrap_or(BigInt::<4>::from(0u64));
-    Fp::new_unchecked(bigint)
+    // A canonical Fq element's Montgomery representation is `< p`. Reject a
+    // non-canonical encoding (including any value `>= 2^256`) rather than
+    // trusting `new_unchecked` or silently mapping overflow to 0 — otherwise a
+    // non-canonical encoding of the generator/identity slips past the downstream
+    // equality and degeneracy checks (which compare representations).
+    let modulus: BigUint = Fq::MODULUS.into();
+    if n >= modulus {
+        return None;
+    }
+    let bigint: BigInt<4> = BigInt::try_from(n).ok()?;
+    Some(Fp::new_unchecked(bigint))
 }
 
 fn read_g1_section(
@@ -639,8 +646,9 @@ fn read_g1_section(
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let off = i * point_size;
-        let x = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]);
-        let y = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + point_size]);
+        let nc = || PtauError::InvalidPoint { section: name, index: i, detail: "non-canonical coordinate" };
+        let x = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let y = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
         let p = if x.is_zero() && y.is_zero() {
             G1Affine::zero()
         } else {
@@ -679,10 +687,11 @@ fn read_g2_section(
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let off = i * point_size;
-        let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]);
-        let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES]);
-        let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES]);
-        let y_c1 = fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size]);
+        let nc = || PtauError::InvalidPoint { section: name, index: i, detail: "non-canonical coordinate" };
+        let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let y_c1 = fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
         let x = Fq2::new(x_c0, x_c1);
         let y = Fq2::new(y_c0, y_c1);
         let p = if x.is_zero() && y.is_zero() {
@@ -752,11 +761,11 @@ mod tests {
     #[test]
     fn fq_mont_roundtrip_zero_one() {
         let zero_bytes = [0u8; BN254_FQ_BYTES];
-        assert_eq!(fq_from_le_mont(&zero_bytes), Fq::from(0u64));
+        assert_eq!(fq_from_le_mont(&zero_bytes), Some(Fq::from(0u64)));
 
         let one = Fq::from(1u64);
         let one_bytes = __fq_to_le_mont_bytes_for_tests(one);
-        assert_eq!(fq_from_le_mont(&one_bytes), one);
+        assert_eq!(fq_from_le_mont(&one_bytes), Some(one));
     }
 
     #[test]
@@ -765,7 +774,15 @@ mod tests {
         for _ in 0..16 {
             let f = Fq::rand(&mut rng);
             let bytes = __fq_to_le_mont_bytes_for_tests(f);
-            assert_eq!(fq_from_le_mont(&bytes), f);
+            assert_eq!(fq_from_le_mont(&bytes), Some(f));
         }
+    }
+
+    #[test]
+    fn fq_mont_rejects_non_canonical() {
+        // The all-ones 32-byte encoding is `2^256 − 1 ≥ p`: a non-canonical
+        // Montgomery representation, which must be rejected rather than trusted.
+        let all_ones = [0xFFu8; BN254_FQ_BYTES];
+        assert_eq!(fq_from_le_mont(&all_ones), None);
     }
 }
