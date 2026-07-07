@@ -274,6 +274,19 @@ macro_rules! fp {
             pub fn reduce(self) -> Self {
                 Self::new($crate::reduce_once::<{ $limbs }, { $bits }>(self.limbs, Self::M))
             }
+            /// Assert this element is *canonical*: every limb `∈ [0, 2^BITS)` AND
+            /// the value `< m`. Rejects a non-canonical encoding (a value in
+            /// `[m, 2^(LIMBS·BITS))`), which is how ECDSA signature malleability
+            /// (`s ∈ [n, 2^258)`) gets in.
+            pub fn assert_canonical(self) {
+                $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs);
+                $crate::assert_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
+            }
+            /// Assert this element is nonzero. Assumes the limbs are
+            /// range-checked (e.g. via [`Self::assert_canonical`]).
+            pub fn assert_nonzero(self) {
+                $crate::assert_nonzero_limbs::<{ $limbs }>(self.limbs);
+            }
         }
         impl ::core::ops::Add for $name {
             type Output = Self;
@@ -539,8 +552,9 @@ pub fn reduce_once<const LIMBS: usize, const BITS: usize>(
     out
 }
 
-/// Enforce `x < m` (`(m-1) - x` produces no final borrow).
-fn assert_lt<const LIMBS: usize, const BITS: usize>(
+/// Enforce `x < m` (`(m-1) - x` produces no final borrow). `x`'s limbs must be
+/// range-checked to `[0, 2^BITS)` first.
+pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
     x: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
 ) {
@@ -555,6 +569,21 @@ fn assert_lt<const LIMBS: usize, const BITS: usize>(
         i += 1;
     }
     assert_eq(borrow, Field::from(0u8));
+}
+
+/// Assert the limb-vector encodes a *nonzero* value, i.e. not every limb is
+/// zero: `Π isZero(limbᵢ) == 0`. Assumes the limbs are range-checked. Used to
+/// enforce `r, s ∈ [1, n-1]` for ECDSA (a zero scalar has no meaning there).
+pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
+    let mut all_zero = Field::from(1u8);
+    let mut i = 0usize;
+    while i < LIMBS {
+        // `isZero(limbᵢ)` is a pinned boolean; the product is 1 iff every limb
+        // is zero, so asserting it is 0 forbids the all-zero (value 0) case.
+        all_zero = all_zero * limbs[i].is_zero();
+        i += 1;
+    }
+    assert_eq(all_zero, Field::from(0u8));
 }
 
 /// Shared column/carry identity `a·b == q·m + r`. `q`, `r` are the caller-supplied

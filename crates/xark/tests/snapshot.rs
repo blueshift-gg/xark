@@ -1412,3 +1412,34 @@ fn uint_comparisons_solve() {
     // An out-of-range input (300 >= 2^8) fails the construction range proof.
     assert!(solver::solve_and_check(&program, &case("300", "5", "0", "0")).is_err(), "a=300 exceeds U<8>");
 }
+
+/// ECDSA scalar-range checks (audit #08): a secp256k1 scalar must be canonical
+/// (`< n`) and nonzero. Solving `scalar_range` proves `s ∈ [1, n-1]`; a
+/// non-canonical `s` (all limbs `2^86-1`, value `≈ 2^258 >> n`) and `s = 0` are
+/// both rejected.
+#[test]
+fn ecdsa_scalar_range_checks() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("scalar_range"), "scalar_range", "bn254");
+    assert!(c.status_success, "scalar_range failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |s0: &str, s1: &str, s2: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("s0"), s0.to_string());
+        m.insert(id("s1"), s1.to_string());
+        m.insert(id("s2"), s2.to_string());
+        m
+    };
+    // s = 1 (canonical, nonzero) → satisfiable.
+    solver::solve_and_check(&program, &case("1", "0", "0")).expect("s = 1 must be a valid scalar");
+    // s = 0 → rejected by assert_nonzero.
+    assert!(solver::solve_and_check(&program, &case("0", "0", "0")).is_err(), "s = 0 must be rejected");
+    // Every limb at 2^86-1 → value ≈ 2^258, far above n → rejected by assert_canonical.
+    let max_limb = "77371252455336267181195263"; // 2^86 - 1
+    assert!(
+        solver::solve_and_check(&program, &case(max_limb, max_limb, max_limb)).is_err(),
+        "a non-canonical scalar (>= n) must be rejected"
+    );
+}

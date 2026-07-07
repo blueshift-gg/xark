@@ -190,9 +190,15 @@ macro_rules! weierstrass {
 
         /// ECDSA verification, 3-limb (86-bit) path.
         pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
-            r.range_check();
-            s.range_check();
-            e.range_check();
+            // Canonical `< n` (not merely limb-bounded `< 2^258`): a non-canonical
+            // `s ∈ [n, 2^258)` with `s mod n ≠ 0` used to verify — signature
+            // malleability. `assert_canonical` = per-limb range check + value < n.
+            r.assert_canonical();
+            s.assert_canonical();
+            e.assert_canonical();
+            // r ∈ [1, n-1]. s ≠ 0 is already enforced by `s.inverse()` below
+            // (a modular inverse of 0 is unsatisfiable).
+            r.assert_nonzero();
             let s_inv = s.inverse();
             let u1 = e * s_inv;
             let u2 = r * s_inv;
