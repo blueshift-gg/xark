@@ -94,8 +94,7 @@ Caveats when regenerating committed vectors:
  fixture dir from the same keys, not a mix of dev-mode + ceremony bytes.
 - Update the hash pin in `crates/tests/tests/solana_format.rs`
  (`VK_SOLANA_SHA256` etc.), which intentionally locks the committed VK bytes.
-- Re-run `cargo test -p xark-tests` (host + `--test sbpf`) and
- `scripts/differential_snarkjs.sh`.
+- Re-run `cargo test -p xark-tests` (host + `--test sbpf`).
 
 ## For a real production ceremony
 

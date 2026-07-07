@@ -60,10 +60,10 @@ tests across the workspace crates, including:
 * **Ceremony enforcement** — the `CeremonyError` rejection paths
   (Schnorr-PoK, transcript hash chain, δ-consistency between G1/G2,
   dev-mode guards) are exercised by the ptau/setup test paths.
-* **cargo-fuzz smoke** (`fuzz`, CI-gated by
-  `.github/workflows/fuzz.yml`) — short-interval fuzz over the
-  artifact parser, witness parser, and the xark-IR→R1CS lowering.
-  Production fuzzing campaigns are CPU-weeks; CI is a regression guard.
+* **cargo-fuzz smoke** (`crates/tests/tests/fuzz.rs`) — fuzz over the
+  artifact parser, witness parser, and the xark-IR→R1CS lowering. Run
+  manually; there is no CI workflow gating it yet. Production fuzzing
+  campaigns are CPU-weeks.
 
 ### Lean 4 / mathlib formal proofs (`formal/`)
 

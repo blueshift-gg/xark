@@ -468,15 +468,10 @@ Arkworks R1CS sees public-input variables in the same order the verifier
 expects. The circuit hash folds the public-input variable indices into the
 hash, so any reordering changes the circuit identity.
 
-**Tests.** `lower::tests::circuit_hash_changes_with_public_input_order` and
-the end-to-end matrix in
-`crates/tests/tests/public_inputs_matrix.rs`:
-
-* `return_values_only_verifies`
-* `mixed_pi_verifies`
-* `reorder_pi_verifies`
-* `large_pi_verifies`
-* `reorder_pi_tampered_first_input_fails`
+**Tests.** `lower::tests::circuit_hash_changes_with_public_input_order` pins
+the public-input ordering into the circuit hash. (A prior end-to-end
+public-input tamper matrix was removed on this branch; restoring it is tracked
+as a follow-up — see the audit notes.)
 
 ### 2.15 Hint outputs (advice)
 
@@ -566,18 +561,25 @@ See [`docs/trusted-setup.md`](trusted-setup.md).
 
 Working list; update as work lands.
 
-* **No formal verification of the lowering layer.** Every gadget has unit
- tests, KAT cross-checks against established reference crates (`sha2`,
+* **`xark build` / `xark test` execute the target circuit crate's code.**
+ Compiling a circuit runs its `build.rs`, any proc-macros, and (for `xark
+ test`) its test harness with the host toolchain — i.e. arbitrary code
+ execution, exactly like a plain `cargo build`. Treat a circuit crate as
+ trusted source; do not run `xark build`/`test` on an untrusted crate.
+
+* **Lowering pipeline not formally verified end to end.** Gadget *relations*
+ are mechanised in Lean (`formal/` — non-native field arithmetic, the curve
+ laws, ECDSA/EdDSA soundness, on-curve membership), and a cargo-fuzz harness
+ (`crates/tests/tests/fuzz.rs`) covers the parsers and the IR→R1CS lowering.
+ But the MIR→xark-IR→R1CS *pipeline itself* is not proof-assistant-verified;
+ it rests on unit tests, KAT cross-checks against reference crates (`sha2`,
  `keccak`, `blake2`, `blake3`, `aes`, arkworks Grumpkin), and adversarial
- tests rejecting forged witnesses. **No proof-assistant verification, no
- fuzzing harness.**
+ forged-witness tests.
 
 * **Solana on-chain verifier.** `crates/verifier/` is tested in Mollusk
  on the real `alt_bn128` syscalls (`crates/tests/tests/sbpf.rs` — positive
- across every committed circuit plus on-chain negative tests), with
- public-input binding (`crates/tests/tests/binding.rs`), adversarial fuzzing
- (`crates/tests/tests/fuzz.rs`), and an independent snarkjs differential
- (`scripts/differential_snarkjs.sh`).
+ across every committed circuit plus on-chain negative tests) and with
+ adversarial fuzzing (`crates/tests/tests/fuzz.rs`).
  **Never deployed to mainnet**; not externally audited.
 
 * **Poseidon2 parameters.** Vendored verbatim from the standard reference
@@ -591,9 +593,14 @@ Working list; update as work lands.
  `gf256_inv_roundtrips`, `sbox_zero_input_special_case`) but the algebraic
  uniqueness argument has **not been independently audited**.
 
-* **Grumpkin selector polynomial.** `same_x` / `same_y` / `is_double` /
- `is_inverse` logic in `ec_add_in_circuit` is tested against doubling,
- identity, inverse-point (§2.12 KAT list) but **not formally verified**.
+* **Grumpkin embedded-curve arithmetic.** The shipped `scalar_mul` /
+ `multi_scalar_mul` use an **offset double-and-add** accumulator over the
+ incomplete affine `ec_add` / `ec_double` (`crates/xark-grumpkin`) — sidestepping
+ the exceptional cases rather than a complete-addition selector polynomial. The
+ curve algebra and on-curve membership are mechanised in `formal/Formal/Curve.lean`
+ (`enforce_on_curve_grumpkin_sound`), and inputs are now range-/on-curve-checked
+ (`enforce_on_curve`); the offset construction itself is tested against reference
+ vectors but not separately proven.
 
 * **Trusted-setup ceremony.** Implemented end-to-end (ptau ingest,
  phase-2 derivation, MPC driver) and cross-checked against snarkjs, but the
@@ -642,8 +649,7 @@ before tagging a production release of a circuit deployed via xark.
  an artifact regression.
 * [ ] **Tampered-input integration tests cover every public input.** For
  each public input `p_i`, an integration test flips `p_i` and asserts
- the verifier returns false. See
- `crates/tests/tests/public_inputs_matrix.rs` for the template.
+ the verifier returns false.
 * [ ] **Solana verifier program ID matches the deployed `.so`.** Re-build
  the verifier with `cargo build-sbf` and confirm the program ID hash
  matches the deployed program's on-chain hash.
