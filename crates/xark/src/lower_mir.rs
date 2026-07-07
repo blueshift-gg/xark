@@ -170,6 +170,16 @@ struct LoweringEnv<'tcx> {
     /// witness-gen index)`, while it is still eligible for merging into a
     /// following `assert_eq`.
     pending_mul: BTreeMap<VarId, (usize, usize)>,
+    /// Multiplication outputs whose defining row was folded into a following
+    /// `assert_eq` (the merge dropped their `Product` witness-gen and repurposed
+    /// their `a·b = out` row into `a·b = target`). Maps the output var to
+    /// `(a, b, witness_gen_index)` so `finish` can *revive* it — re-pin
+    /// `a·b = out` and restore its `Product` — IF the var turns out to be
+    /// referenced again after the merge. Without this, reusing a product after
+    /// asserting it (`let t = a*b; assert_eq(t, c); assert_eq(t, d);`) leaves `t`
+    /// a free witness detached from `a·b` — a silent under-constraint (audit
+    /// finding #02).
+    merged: BTreeMap<VarId, (LinearCombination, LinearCombination, usize)>,
     /// The witness-generation ("hint") program, in dependency order. `None`
     /// entries are ops whose output var was merged away (dropped at finish).
     witness_gen: Vec<Option<WitnessGen>>,
@@ -204,6 +214,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             advice_counter: 0,
             next_constraint_id: 0,
             pending_mul: BTreeMap::new(),
+            merged: BTreeMap::new(),
             witness_gen: Vec::new(),
             inlining: Vec::new(),
             inline_substs: Vec::new(),
@@ -996,6 +1007,17 @@ impl<'tcx> LoweringEnv<'tcx> {
             .pending_mul
             .remove(&var)
             .expect("caller guarantees var is pending");
+        // Record enough to revive this product if it is referenced again after
+        // the merge (see the `merged` field). `.a`/`.b` are the mul's operands
+        // and are unchanged by the merge — only `.c` becomes `target` below.
+        self.merged.insert(
+            var,
+            (
+                self.constraints[idx].a.clone(),
+                self.constraints[idx].b.clone(),
+                wg_idx,
+            ),
+        );
         // The merged multiplication `a * b = target` is now a check, not a
         // definition — its output var is gone, so drop its witness-gen Product.
         self.witness_gen[wg_idx] = None;
@@ -1105,7 +1127,118 @@ pub fn lower<'tcx>(
     walk_body(&mut env, body)?;
 
     let program = finish(env, field, num_inputs);
+    // Machine-checked soundness gate (runs on every `xark build`/`xark check`):
+    // reject a circuit that leaves a hint/advice output or a public input
+    // unpinned by any constraint. See `check_pinning`.
+    check_pinning(&program, num_inputs)?;
     Ok(program)
+}
+
+/// Build-time structural soundness gate.
+///
+/// Rejects two "author forgot to constrain X" footguns that no other check
+/// caught before (audit findings #01/#07/#16; `docs/audit-status.md` previously
+/// *claimed* this was enforced during lowering — now it is):
+///
+/// * a **hint/advice output** (`Field::advice()`, `hint_inverse`, `hint_bit`,
+///   `hint_div_rem`, `hint_mulmod_divmod`, `hint_mod_inverse`, `hint_sub2` — all
+///   allocated as `Private` witnesses with id ≥ `n_inputs`) that appears in **no**
+///   constraint. Such a witness is free: a malicious prover chooses it at will.
+/// * a declared **public input** (`Public` visibility) that appears in **no**
+///   constraint. The verifier's supplied value for it would then be unconstrained
+///   — the proof "verifies" for any value.
+///
+/// This is a *necessary* structural check (every such value must be referenced by
+/// at least one constraint), not a full under-constraint proof — the deeper
+/// "referenced but two-valued" analysis is `solver::analyze_underconstrained`,
+/// run over the honest witness in the gadget test suites. Together they close the
+/// pinning gap from both ends.
+fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
+    let mut referenced: BTreeSet<VarId> = BTreeSet::new();
+    for c in &out.r1cs.constraints {
+        for lc in [&c.a, &c.b, &c.c] {
+            for term in &lc.terms {
+                referenced.insert(term.var);
+            }
+        }
+    }
+    for v in &out.r1cs.variables {
+        if referenced.contains(&v.id) {
+            continue;
+        }
+        let is_input = (v.id as usize) < n_inputs;
+        match v.visibility {
+            Visibility::Public => {
+                return Err(CompileError::new(format!(
+                    "public input `{}` is declared but no constraint references it — \
+                     the verifier's value for it would be unconstrained",
+                    v.name
+                ))
+                .with_note(
+                    "bind every public input/output with an `assert_eq` (or remove it \
+                     from the signature)",
+                ));
+            }
+            // A `Private` var allocated after the inputs is a hint/advice output.
+            Visibility::Private if !is_input => {
+                return Err(CompileError::new(format!(
+                    "hint/advice output `{}` is not pinned by any constraint — \
+                     a malicious prover could choose it freely",
+                    v.name
+                ))
+                .with_note(
+                    "constrain every hint output, e.g. `assert_eq(x * hint_inverse(x), 1)`",
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Apply Rust `as`-cast truncation to a compile-time integer narrowed to `ty`
+/// (an int/uint type): keep only the low `bits` of `v` and, for a signed target,
+/// sign-extend — matching `v as iN` / `v as uN`. A non-integer target (rejected
+/// for circuit code by the validator) passes the value through unchanged.
+fn truncate_int_cast(v: i128, ty: rustc_middle::ty::Ty<'_>) -> u128 {
+    use rustc_middle::ty::{IntTy, TyKind, UintTy};
+    let (bits, signed) = match ty.kind() {
+        TyKind::Uint(u) => (
+            match u {
+                UintTy::U8 => 8,
+                UintTy::U16 => 16,
+                UintTy::U32 => 32,
+                UintTy::U64 => 64,
+                UintTy::U128 => 128,
+                UintTy::Usize => 64,
+            },
+            false,
+        ),
+        TyKind::Int(i) => (
+            match i {
+                IntTy::I8 => 8,
+                IntTy::I16 => 16,
+                IntTy::I32 => 32,
+                IntTy::I64 => 64,
+                IntTy::I128 => 128,
+                IntTy::Isize => 64,
+            },
+            true,
+        ),
+        _ => return v as u128,
+    };
+    if bits >= 128 {
+        return v as u128;
+    }
+    let mask = (1u128 << bits) - 1;
+    let low = (v as u128) & mask;
+    // Sign-extend a negative value in a signed target so the stored u128 is the
+    // two's-complement of the narrowed `iN`.
+    if signed && (low >> (bits - 1)) & 1 == 1 {
+        low | !mask
+    } else {
+        low
+    }
 }
 
 /// Maximum number of basic-block visits per body walk. Loops are unrolled by
@@ -1288,11 +1421,14 @@ fn lower_statement<'tcx>(
                     Ok(())
                 }
                 // Compile-time integer cast (`v as u64` in the `From<uN> for
-                // Field` conversions). The validator only lets int→int casts
-                // through; evaluate the source int into the dest slot.
-                Rvalue::Cast(_, operand, _) => {
+                // Field` conversions, or a narrowing `as u8`/`as u16`/… used to
+                // derive an index or loop bound). Truncate to the target type's
+                // width per Rust `as` semantics: storing the source value verbatim
+                // miscompiles any narrowing cast whose value exceeds the target
+                // width (e.g. `(i * K) as u8` with `i*K >= 256`) — audit finding #07.
+                Rvalue::Cast(_, operand, ty) => {
                     if let Some(v) = env.operand_to_int(operand) {
-                        env.set_int_at(dest, &dest_path, v as u128);
+                        env.set_int_at(dest, &dest_path, truncate_int_cast(v, *ty));
                     }
                     Ok(())
                 }
@@ -1727,7 +1863,39 @@ fn inline_call<'tcx>(
 }
 
 /// Finalize: drop unreferenced internal variables and assemble both programs.
-fn finish(env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerOutput {
+fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerOutput {
+    // Revive any multiplication output that was folded into an `assert_eq` (its
+    // `a·b = out` row repurposed to `a·b = target`, `Product` dropped) but is
+    // still referenced by a later constraint — i.e. the product was *reused*
+    // after being asserted. Re-pin `a·b = out` and restore its `Product` at its
+    // original witness-gen position, so the later use stays bound to `a·b`
+    // (audit finding #02). A merged-and-not-reused output is unreferenced and
+    // pruned below, so the single-use fast path — and every existing snapshot
+    // gate count — is unchanged.
+    {
+        let mut ref_now: BTreeSet<VarId> = BTreeSet::new();
+        for c in &env.constraints {
+            for lc in [&c.a, &c.b, &c.c] {
+                for term in &lc.terms {
+                    ref_now.insert(term.var);
+                }
+            }
+        }
+        for (out, (a, b, wg_idx)) in std::mem::take(&mut env.merged) {
+            if ref_now.contains(&out) {
+                let id = env.fresh_constraint_id();
+                env.constraints.push(R1csConstraint::mul(
+                    id,
+                    a.clone(),
+                    b.clone(),
+                    out,
+                    "revived a*b = out (product reused after assert_eq merge)",
+                ));
+                env.witness_gen[wg_idx] = Some(WitnessGen::Product { out, left: a, right: b });
+            }
+        }
+    }
+
     let mut referenced: BTreeSet<VarId> = BTreeSet::new();
     for c in &env.constraints {
         for lc in [&c.a, &c.b, &c.c] {

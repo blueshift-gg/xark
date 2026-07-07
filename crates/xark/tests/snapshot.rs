@@ -1211,3 +1211,40 @@ fn blake3_varlen_matches_real_vector() {
     inputs.insert(id("d[0]"), "42".to_string());
     assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong digest must reject");
 }
+
+/// Regression for audit finding #02: a multiplication result reused across two
+/// `assert_eq`s must be bound to `a*b` in BOTH. The first `assert_eq` folds the
+/// product's defining row (the compaction optimization); the second must not be
+/// left pinning a detached free witness. Compiling `examples/mul_reuse` and
+/// solving it confirms the product is revived: the honest `a*b == c == d`
+/// witness verifies, and a `c != d` witness is rejected.
+#[test]
+fn mul_reuse_binds_product_in_both_asserts() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+
+    let c = compile_with_field(&example("mul_reuse"), "mul_reuse", "bn254");
+    assert!(c.status_success, "mul_reuse failed: {}", c.stderr);
+    let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
+    let program = primitive::from_json(&json).unwrap();
+    let id = |name: &str| program.vars.iter().find(|v| v.name == name).map(|v| v.id).unwrap();
+
+    // Honest: a*b = c = d (3*4 = 12). Pre-fix this FAILED to solve — the reused
+    // product `t` had no witness-gen op after the merge dropped it.
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "4".to_string());
+    inputs.insert(id("c"), "12".to_string());
+    inputs.insert(id("d"), "12".to_string());
+    let assign = solver::solve_and_check(&program, &inputs).expect("a*b == c == d must verify");
+    let holes = solver::analyze_underconstrained(&program, &assign);
+    assert!(holes.is_empty(), "mul_reuse under-constrained: {holes:?}");
+
+    // Soundness: c != d must be rejected — the product is bound to both asserts,
+    // so `d = 13` with `a*b = c = 12` cannot satisfy the circuit.
+    inputs.insert(id("d"), "13".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "c != d must be rejected"
+    );
+}
