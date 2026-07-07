@@ -1,6 +1,6 @@
 # xark — write, compile, prove and verify zero-knowledge circuits in Rust
 
-[![CI](https://github.com/blueshift/xark/actions/workflows/ci.yml/badge.svg)](https://github.com/blueshift/xark/actions/workflows/ci.yml)
+[![CI](https://github.com/blueshift-gg/xark/actions/workflows/ci.yml/badge.svg)](https://github.com/blueshift-gg/xark/actions/workflows/ci.yml)
 
 xark is a single, cohesive tool that takes a circuit written as ordinary Rust
 all the way to an on-chain proof. You express the circuit in a small, explicitly
