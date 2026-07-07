@@ -120,8 +120,8 @@ impl R1csCallbacks {
         }
 
         eprintln!(
-            "xark: wrote {} ({} vars, {} constraints, {} witness-gen ops)",
-            circuit_path.display(),
+            "{} {} vars, {} constraints, {} witness-gen ops",
+            crate::style::tag(),
             output.primitive.vars.len(),
             output.primitive.constraints.len(),
             output.primitive.witness_gen.len(),

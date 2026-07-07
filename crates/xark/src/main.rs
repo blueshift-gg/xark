@@ -28,6 +28,7 @@ mod diagnostics;
 mod driver;
 mod find_entry;
 mod lower_mir;
+mod style;
 mod validate;
 mod xark_project;
 

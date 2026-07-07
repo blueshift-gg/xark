@@ -234,11 +234,19 @@ pub fn run(args: SetupArgs) -> Result<()> {
     println!("Wrote {}", vk_path.display());
     println!("Wrote {}", snarkjs_vk_path.display());
     println!("Wrote {}", meta_path.display());
-    println!("\nWARNING: setup_mode = insecure-dev-mode. Do not use in production.");
+    println!(
+        "\n{}",
+        crate::style::warn(
+            "⚠️  WARNING: setup_mode = insecure-dev-mode. Do not use in production."
+        )
+    );
     if dev_fallback {
         println!(
-            "note: no .ptau found — using an insecure hardcoded dev key (seed 1); \
-             supply --ptau-file for production."
+            "{}",
+            crate::style::warn(
+                "note: no .ptau found — using an insecure hardcoded dev key (seed 1); \
+                 supply --ptau-file for production."
+            )
         );
     }
     Ok(())

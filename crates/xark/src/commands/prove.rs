@@ -190,8 +190,11 @@ pub fn run(args: ProveArgs) -> Result<()> {
     println!("Wrote {}", public_path.display());
     println!("Wrote {}", snarkjs_proof_path.display());
     println!(
-        "Proof produced and self-checked ({} public input(s)).",
-        public.len()
+        "{}",
+        crate::style::brand(&format!(
+            "✅ Proof produced and self-checked ({} public input(s)).",
+            public.len()
+        ))
     );
     Ok(())
 }

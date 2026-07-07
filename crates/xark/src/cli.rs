@@ -75,7 +75,10 @@ pub fn cmd_build(args: &[String]) -> i32 {
         touch_sources(&crate_abs);
     }
 
-    eprintln!("xark: building circuit `{name}` (toolchain {toolchain})");
+    eprintln!(
+        "{} building circuit `{name}` (toolchain {toolchain})",
+        crate::style::tag()
+    );
     let status = Command::new("cargo")
         .arg("build")
         .current_dir(&crate_dir)
@@ -92,7 +95,11 @@ pub fn cmd_build(args: &[String]) -> i32 {
 
     match status {
         Ok(_) if out_abs.join("circuit.json").exists() => {
-            eprintln!("xark: wrote {}", out_abs.display());
+            eprintln!(
+                "{} wrote {}",
+                crate::style::tag(),
+                crate::style::brand(&out_abs.display().to_string())
+            );
             0
         }
         Ok(s) => {

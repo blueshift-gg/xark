@@ -42,6 +42,7 @@ pub fn synth_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
 #[command(
     name = "xark",
     version,
+    styles = crate::style::clap_styles(),
     about = "Write, compile, prove and verify zero-knowledge circuits in Rust",
     long_about = "xark compiles a restricted Rust circuit (via rustc MIR) into \
 xark-IR + R1CS, then proves and verifies it with an Arkworks Groth16 backend \
@@ -96,7 +97,7 @@ pub fn main() {
     let code = match run(cli) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("error: {e:#}");
+            eprintln!("{} {e:#}", crate::style::err("error:"));
             1
         }
     };

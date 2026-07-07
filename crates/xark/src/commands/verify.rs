@@ -84,7 +84,14 @@ pub fn run(args: VerifyArgs) -> Result<()> {
     };
 
     let ok = verify(&vk, &proof, &public).map_err(super::synth_err)?;
-    println!("Proof verified: {ok}");
+    println!(
+        "{}",
+        if ok {
+            crate::style::brand("✅ Proof verified")
+        } else {
+            crate::style::err("❌ Proof verification failed")
+        }
+    );
     if !ok {
         std::process::exit(2);
     }
