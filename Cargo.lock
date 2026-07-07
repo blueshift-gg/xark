@@ -3370,9 +3370,9 @@ dependencies = [
 
 [[package]]
 name = "solana-nostd-alt-bn128"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "351aebf3dfc882836de35867889d7929996b8a30071724da2bfa4355edfe25f5"
+checksum = "b881117c294543b5ab41c6996bc3f122d3796a557589e3486d3e728ac806dc4a"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",

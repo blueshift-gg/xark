@@ -15,7 +15,7 @@ exclude = ["tests", "benches"]
 crate-type = ["lib"]
 
 [dependencies]
-solana-nostd-alt-bn128 = { version = "0.1.0" }
+solana-nostd-alt-bn128 = { version = "0.1.1" }
 solana-program-error = { version = "3", default-features = false }
 
 [lints]
