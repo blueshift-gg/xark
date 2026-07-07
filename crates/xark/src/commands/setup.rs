@@ -127,6 +127,12 @@ pub fn run(args: SetupArgs) -> Result<()> {
             "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
         );
     }
+    // `--deterministic-rng` leaks the Groth16 trapdoor (reproducible from the
+    // seed); its doc requires `--insecure-dev-mode`, so enforce that rather than
+    // silently honoring it on the dev-fallback path.
+    if args.deterministic_rng.is_some() && !args.insecure_dev_mode {
+        bail!("--deterministic-rng requires --insecure-dev-mode");
+    }
     // No `.ptau` and no explicit `--insecure-dev-mode`: rather than block, fall
     // back to insecure dev-mode with a hardcoded deterministic seed (1) so the
     // common `xark build && xark setup && xark prove` loop just works. A real
@@ -224,12 +230,10 @@ pub fn run(args: SetupArgs) -> Result<()> {
     let effective_seed = args.deterministic_rng;
     let mut rng = match effective_seed {
         Some(seed) => {
-            if args.deterministic_rng.is_some() {
-                eprintln!(
-                    "WARN: --deterministic-rng makes the Groth16 trapdoor recoverable from the \
-                     seed; do not reuse the resulting keys outside test fixtures."
-                );
-            }
+            eprintln!(
+                "WARN: --deterministic-rng makes the Groth16 trapdoor recoverable from the \
+                 seed; do not reuse the resulting keys outside test fixtures."
+            );
             SetupRng::Det(ChaCha20Rng::seed_from_u64(seed))
         }
         None => SetupRng::Os(OsRng),

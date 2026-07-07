@@ -180,6 +180,12 @@ fn public_inputs(prog: &R1csProgram, assign: &BTreeMap<VarId, Fr>) -> Vec<Fr> {
 /// Solve the witness, run Groth16 setup + prove, and return the verifying key,
 /// proof, and public inputs (so the caller can verify — possibly against
 /// tampered public inputs).
+///
+/// **TEST / DEV ONLY.** Setup here uses a *fixed* RNG seed (`0`), so the Groth16
+/// trapdoor is publicly known and any proof this produces is forgeable. It
+/// exists for in-crate round-trip / differential tests. Never use it — or any
+/// key it generates — in production; the CLI `xark setup` (ptau / ceremony) and
+/// `xark prove` (`OsRng`) path is the real one.
 pub fn prove_only(
     r1cs: &R1csProgram,
     circuit: &PrimitiveProgram,
