@@ -109,6 +109,11 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     // error instead of panicking on an out-of-bounds access.
     check_ptau_section_lengths(ptau, n)?;
 
+    // Verify the transcript is a consistent (τ, α, β) powers ladder before we
+    // derive any key material from it. A structurally-valid but malicious
+    // transcript would otherwise yield keys with a known trapdoor.
+    crate::ptau::verify_powers_consistency(ptau)?;
+
     // -------------------------------------------------------------------
     // 3) Compute Lagrange evaluations in the group.
     // -------------------------------------------------------------------
@@ -427,5 +432,35 @@ mod tests {
             result,
             Err(Phase2Error::PtauSectionTooShort { section: "tau_g1", .. })
         ));
+    }
+
+    #[test]
+    fn powers_consistency_accepts_valid_and_rejects_tampered() {
+        use crate::ptau::verify_powers_consistency;
+        let mut rng = ChaCha20Rng::seed_from_u64(0x1234);
+        let ptau = fake_ptau(
+            4,
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+        );
+        // A genuine (τ, α, β) ladder passes.
+        verify_powers_consistency(&ptau).expect("consistent ladder must pass");
+
+        // One G1 power bumped off the ladder → rejected.
+        let mut bad = ptau.clone();
+        bad.tau_g1[3] = (bad.tau_g1[3].into_group() + G1Projective::generator()).into_affine();
+        assert!(verify_powers_consistency(&bad).is_err(), "tampered tau_g1 power must reject");
+
+        // `beta_g2` no longer sharing β with `beta_tau_g1[0]` → rejected.
+        let mut bad_beta = ptau.clone();
+        bad_beta.beta_g2 =
+            (bad_beta.beta_g2.into_group() + G2Projective::generator()).into_affine();
+        assert!(verify_powers_consistency(&bad_beta).is_err(), "tampered beta_g2 must reject");
+
+        // An arbitrary (non-ladder) `tau_g1[1]` → rejected at the τ-link.
+        let mut bad_link = ptau.clone();
+        bad_link.tau_g1[1] = (G1Projective::generator() * Fr::from(99u64)).into_affine();
+        assert!(verify_powers_consistency(&bad_link).is_err(), "non-ladder tau_g1[1] must reject");
     }
 }

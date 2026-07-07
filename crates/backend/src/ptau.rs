@@ -57,10 +57,11 @@
 
 use std::convert::TryFrom;
 
-use ark_bn254::{Fq, Fq2, G1Affine, G2Affine};
-use ark_ec::AffineRepr;
-use ark_ff::{BigInt, BigInteger, Fp, PrimeField, Zero};
+use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, VariableBaseMSM};
+use ark_ff::{BigInt, BigInteger, Fp, One, PrimeField, Zero};
 use num_bigint::BigUint;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// The number of bytes used to encode a single Fq element in a BN254 ptau.
@@ -134,6 +135,16 @@ pub enum Phase2Error {
         needed: usize,
         actual: usize,
     },
+
+    /// The powers-of-tau transcript is not internally consistent: the G1/G2
+    /// powers do not form a single geometric τ-ladder, or the α/β powers are not
+    /// consistent multiples of it. A transcript that fails this check would
+    /// yield keys with a trapdoor the transcript's author knows.
+    #[error(
+        "phase-2 setup: powers-of-tau transcript failed the consistency check \
+ (`{stage}`) — it is not a valid geometric ladder; do not use it"
+    )]
+    InconsistentPowers { stage: &'static str },
 }
 
 /// Verify that `ptau` covers a circuit with the given constraint count.
@@ -179,6 +190,142 @@ pub fn setup_from_ptau<C: ark_relations::gr1cs::ConstraintSynthesizer<ark_bn254:
     randomness_seed: &[u8; 32],
 ) -> Result<crate::keys::Groth16Keys, Phase2Error> {
     crate::setup_phase2::setup_from_ptau(circuit, ptau, randomness_seed)
+}
+
+/// Verify the powers-of-tau transcript is internally consistent: the G1 and G2
+/// powers form a single geometric τ-ladder, and the α/β powers are consistent
+/// multiples of it (`beta_g2` sharing β with `beta_tau_g1`). `parse_ptau` only
+/// checks each point is on-curve / in-subgroup, so without this a structurally
+/// valid but *malicious* transcript (arbitrary or backdoored points) would be
+/// turned into keys with a trapdoor its author knows.
+///
+/// This is the standard powers-of-tau verification (à la snarkjs
+/// `powersOfTau verify`), batching each ladder with a Fiat-Shamir challenge
+/// `ρ = H(all points)` and its powers, so the cost is a few MSMs + pairings
+/// rather than `O(n)` pairings. It does **not** verify the contribution chain —
+/// that is a separate concern handled by `xark ceremony`.
+///
+/// Called by the phase-2 setup, so every transcript actually used to derive
+/// keys is verified. `parse_ptau` stays a pure structural parser.
+pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Error> {
+    let fail = |stage: &'static str| Phase2Error::InconsistentPowers { stage };
+
+    let g1 = G1Affine::generator();
+    let g2 = G2Affine::generator();
+
+    // (1) Normalization: both ladders start at the generators.
+    if ptau.tau_g1.len() < 2 || ptau.tau_g2.len() < 2 {
+        return Err(fail("too-short"));
+    }
+    if ptau.tau_g1[0] != g1 || ptau.tau_g2[0] != g2 {
+        return Err(fail("generators"));
+    }
+
+    // (2) τ links G1 and G2: e(τ·g1, g2) == e(g1, τ·g2).
+    if Bn254::pairing(ptau.tau_g1[1], g2) != Bn254::pairing(g1, ptau.tau_g2[1]) {
+        return Err(fail("tau-link"));
+    }
+
+    // Fiat-Shamir challenge and its powers, used to batch each ladder.
+    let rho = fiat_shamir_challenge(ptau);
+    let tau_lo = ptau.tau_g2[0]; // g2
+    let tau_hi = ptau.tau_g2[1]; // τ·g2
+
+    // A G1 τ-ladder check: with A = Σρⁱ Pᵢ, B = Σρⁱ Pᵢ₊₁, verify
+    // e(B, g2) == e(A, τ·g2)  ⇔  B = τ·A  ⇔  every step multiplies by τ.
+    let g1_ladder_ok = |points: &[G1Affine]| -> bool {
+        let m = points.len();
+        if m < 2 {
+            return true;
+        }
+        let scalars = powers_of(rho, m - 1);
+        let a = match G1Projective::msm(&points[..m - 1], &scalars) {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let b = match G1Projective::msm(&points[1..], &scalars) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        Bn254::pairing(b.into_affine(), tau_lo) == Bn254::pairing(a.into_affine(), tau_hi)
+    };
+
+    // (3) G1 τ-ladder; (5) α and β ladders share the same τ.
+    if !g1_ladder_ok(&ptau.tau_g1) {
+        return Err(fail("tau-g1-ladder"));
+    }
+    if !g1_ladder_ok(&ptau.alpha_tau_g1) {
+        return Err(fail("alpha-ladder"));
+    }
+    if !g1_ladder_ok(&ptau.beta_tau_g1) {
+        return Err(fail("beta-ladder"));
+    }
+
+    // (4) G2 τ-ladder: with C = Σρⁱ Qᵢ, D = Σρⁱ Qᵢ₊₁, verify
+    // e(g1, D) == e(τ·g1, C)  ⇔  D = τ·C.
+    {
+        let m = ptau.tau_g2.len();
+        let scalars = powers_of(rho, m - 1);
+        let c = G2Projective::msm(&ptau.tau_g2[..m - 1], &scalars).map_err(|_| fail("g2-msm"))?;
+        let d = G2Projective::msm(&ptau.tau_g2[1..], &scalars).map_err(|_| fail("g2-msm"))?;
+        if Bn254::pairing(ptau.tau_g1[0], d.into_affine())
+            != Bn254::pairing(ptau.tau_g1[1], c.into_affine())
+        {
+            return Err(fail("tau-g2-ladder"));
+        }
+    }
+
+    // (6) β links G1 and G2: e(β·g1, g2) == e(g1, β·g2).
+    if Bn254::pairing(ptau.beta_tau_g1[0], g2) != Bn254::pairing(g1, ptau.beta_g2) {
+        return Err(fail("beta-link"));
+    }
+
+    Ok(())
+}
+
+/// Derive the Fiat-Shamir batching challenge from every transcript point, so a
+/// transcript cannot be crafted for a known challenge. Hashed incrementally
+/// (bounded memory even for a `2^28` transcript).
+fn fiat_shamir_challenge(ptau: &PtauFile) -> Fr {
+    use ark_serialize::CanonicalSerialize;
+    let mut h = Sha256::new();
+    h.update(b"xark-ptau-consistency-v1");
+    let mut buf = Vec::new();
+    for p in &ptau.tau_g1 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g1");
+        h.update(&buf);
+    }
+    for p in &ptau.alpha_tau_g1 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g1");
+        h.update(&buf);
+    }
+    for p in &ptau.beta_tau_g1 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g1");
+        h.update(&buf);
+    }
+    for p in &ptau.tau_g2 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g2");
+        h.update(&buf);
+    }
+    buf.clear();
+    ptau.beta_g2.serialize_compressed(&mut buf).expect("serialize g2");
+    h.update(&buf);
+    Fr::from_be_bytes_mod_order(&h.finalize())
+}
+
+/// `[ρ⁰, ρ¹, …, ρ^(n-1)]`.
+fn powers_of(rho: Fr, n: usize) -> Vec<Fr> {
+    let mut out = Vec::with_capacity(n);
+    let mut cur = Fr::one();
+    for _ in 0..n {
+        out.push(cur);
+        cur *= rho;
+    }
+    out
 }
 
 /// An in-memory representation of a parsed Powers-of-Tau transcript.
