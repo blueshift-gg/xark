@@ -9,3 +9,7 @@ Cargo.lock.bak
 /*.rlib
 /target/test-out/
 examples/*/Cargo.lock
+
+# Python bytecode (reference scripts)
+__pycache__/
+*.pyc

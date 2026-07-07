@@ -132,6 +132,23 @@ pub enum SolveError {
     MalformedModulus,
 }
 
+impl core::fmt::Display for SolveError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SolveError::MissingInput(v) => write!(f, "missing input for variable {v}"),
+            SolveError::DivisionByZero => write!(f, "division by zero"),
+            SolveError::NonInvertible => write!(f, "value is not invertible"),
+            SolveError::MalformedHint(m) => write!(f, "malformed hint: {m}"),
+            SolveError::ConstraintFailed(i) => write!(f, "constraint {i} is not satisfied"),
+            SolveError::MalformedModulus => {
+                write!(f, "field modulus is missing, unparseable, or < 2")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SolveError {}
+
 /// Largest `limb_bits` a hint may declare. Non-native limbs are 86 bits; this
 /// bound stops an adversarial artifact from requesting a multi-gigabyte
 /// BigUint shift (`1 << limb_bits`) and OOM-ing the prover.

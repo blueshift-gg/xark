@@ -55,7 +55,7 @@ pub enum KnownCall {
 /// as the generic `core::convert::From::from` (no MIR); resolving with the
 /// call's generic args points them at the impl (which has MIR and whose def
 /// path still ends in the recognized suffix). Falls back to the original id.
-pub fn resolve_call_instance<'tcx>(
+pub(crate) fn resolve_call_instance<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     generic_args: rustc_middle::ty::GenericArgsRef<'tcx>,
@@ -66,7 +66,7 @@ pub fn resolve_call_instance<'tcx>(
         .flatten()
 }
 
-pub fn resolve_call_def_id<'tcx>(
+pub(crate) fn resolve_call_def_id<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     generic_args: rustc_middle::ty::GenericArgsRef<'tcx>,
@@ -76,7 +76,7 @@ pub fn resolve_call_def_id<'tcx>(
         .unwrap_or(def_id)
 }
 
-pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Option<KnownCall> {
+pub(crate) fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Option<KnownCall> {
     let s = tcx.def_path_str(def_id);
     if s.ends_with("::assert_eq") {
         Some(KnownCall::ConstrainEq)
