@@ -91,7 +91,10 @@ fn smul_5b_crosscheck_and_analyzer_clean() {
     // doubling (curve identity `d·x²y² = y²−x²−1`, 5 muls + 2 inv) set this count.
     let n = program.constraints.len();
     eprintln!("ed25519 scalar_mul: {n} constraints");
-    assert_eq!(n, 3_731_054, "ed25519 scalar_mul constraint count changed");
+    // +522 vs the pre-audit count: `scalar_mul` now range-checks its input point
+    // coordinates (2 coords × 3 × 86-bit limbs) before the non-native group law,
+    // closing the unchecked-operand wrap-forgery hole (audit finding #03).
+    assert_eq!(n, 3_731_576, "ed25519 scalar_mul constraint count changed");
 
     // (1) [5]·B == the hard-coded 5B vector — pins limb order + bit order.
     let inputs = smul_inputs(&program, K5, BX, BY, R5X, R5Y);
@@ -123,7 +126,11 @@ fn eddsa_verify_honest_and_tamper() {
     // (`eddsa_verify_sound`, `eddsa_verify_compose`).
     let n = program.constraints.len();
     eprintln!("ed25519 eddsa_verify: {n} constraints");
-    assert_eq!(n, 4_584_776, "ed25519 eddsa_verify constraint count changed");
+    // +1566 vs the pre-audit count: `eddsa_verify` now range-checks the public
+    // key `a_pub` (before the `0 - a_pub.x` negation), and `double_scalar_mul`
+    // range-checks its two input points — 3 points × 2 coords × 3 × 86-bit limbs
+    // — pinning every operand of the non-native group law < 2^86 (finding #03).
+    assert_eq!(n, 4_586_342, "ed25519 eddsa_verify constraint count changed");
 
     let mut inputs = BTreeMap::new();
     put3(&mut inputs, &program, "a.x.limbs", AX);

@@ -359,6 +359,13 @@ macro_rules! edwards {
         /// The complete law means the running `acc` (starting at the identity) is
         /// always valid — no offset accumulator needed.
         pub fn scalar_mul(bits: [xark::Field; 256], p: Point) -> Point {
+            // Untrusted point coordinates must be pinned to < 2^BITS before
+            // entering the non-native group law: `mod_mul` range-checks only its
+            // outputs and assumes in-range operand limbs, so an unchecked point
+            // lets the column products wrap `Fr`. Mirrors the secp
+            // `double_scalar_mul_incomplete` guard.
+            p.x.range_check();
+            p.y.range_check();
             let mut table = [identity(); 16];
             let mut i = 1usize;
             while i < 16usize {
@@ -383,6 +390,12 @@ macro_rules! edwards {
         /// identity), then per window does 2 doublings and one 16-way select+add.
         /// Complete law → offset-free (no correction term).
         pub fn double_scalar_mul(bits1: [xark::Field; 256], p1: Point, bits2: [xark::Field; 256], p2: Point) -> Point {
+            // Pin untrusted point coordinates to < 2^BITS before the non-native
+            // group law (see `scalar_mul`).
+            p1.x.range_check();
+            p1.y.range_check();
+            p2.x.range_check();
+            p2.y.range_check();
             let jp1 = [p1, p1.double(), p1.double().add(p1)];
             let jp2 = [p2, p2.double(), p2.double().add(p2)];
             let mut table = [identity(); 16];

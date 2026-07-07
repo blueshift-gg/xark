@@ -48,6 +48,17 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
 /// hash itself is not constrained here). Fails (unsatisfiable) if the equation
 /// does not hold.
 pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [Field; 256]) {
+    // SOUNDNESS: the public-key coordinates are untrusted witnesses that feed the
+    // non-native `mod_mul` in the group law. `mod_mul` only range-checks its
+    // *outputs*; its no-wrap correctness assumes every operand limb is < 2^86.
+    // Without pinning `a_pub`'s limbs a malicious prover can supply out-of-range
+    // limbs so the schoolbook column products wrap `Fr`, break `a·b = q·m + r`,
+    // and forge acceptance. Check here — BEFORE the `0 - a_pub.x` negation below,
+    // which is itself a non-native op with the same precondition, so checking a
+    // derived value later would be too late. `r_sig` needs no check: it is pinned
+    // canonical by the final limb-wise `assert_eq(t, r_sig)`.
+    a_pub.x.range_check();
+    a_pub.y.range_check();
     // Rewrite `[S]·B == R + [k]·A` as `[S]·B + [k]·(−A) == R`, so the two scalar
     // multiplications share one windowed Strauss–Shamir pass. Twisted-Edwards
     // negation is `(−x, y)`.
