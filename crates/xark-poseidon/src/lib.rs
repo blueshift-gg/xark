@@ -147,7 +147,8 @@ pub fn permute(state: [Field; T]) -> [Field; T] {
 /// 2-to-1 compression: absorb `a` and `b` alongside a capacity element `0`, run
 /// the permutation once, and squeeze the first state element.
 ///
-/// `hash2(a, b) = permute([0, a, b])[0]`.
+/// ⚠️ **NON-CRYPTOGRAPHIC** — toy parameters (see the crate-level warning). Use
+/// `xark-poseidon2` for a real Poseidon2-BN254 hash. `hash2(a, b) = permute([0, a, b])[0]`.
 pub fn hash2(a: Field, b: Field) -> Field {
     let out = permute([Field::from(0u8), a, b]);
     out[0]
@@ -156,6 +157,9 @@ pub fn hash2(a: Field, b: Field) -> Field {
 /// Variable-length hash of `N` field elements via a Poseidon **sponge** (rate 2,
 /// capacity 1). `N` is a compile-time constant (a circuit is fixed-size), so the
 /// absorb loop unrolls.
+///
+/// ⚠️ **NON-CRYPTOGRAPHIC** — toy parameters (see the crate-level warning); use
+/// `xark-poseidon2` for a real hash.
 ///
 /// Capacity lane is `state[0]` (seeded with the length `N` for domain
 /// separation); the rate lanes are `state[1..3]`. Inputs are absorbed two at a
