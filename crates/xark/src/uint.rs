@@ -165,7 +165,7 @@ impl<const N: usize> MulAssign for U<N> {
 /// there) and `0` iff `a < b` (`d ∈ (0, 2^N)`). That hint only supplies a
 /// candidate — its correctness is enforced by the remainder range proof, so a
 /// wrong hint merely makes the circuit unsatisfiable, never unsound.
-fn less_than<const N: usize>(a: Field, b: Field) -> Bool {
+pub(crate) fn less_than<const N: usize>(a: Field, b: Field) -> Bool {
     let two_pow_n = pow2::<N>();
     let top = Field::hint_bit(a - b + two_pow_n, N);
     top.assert_bool();
@@ -183,6 +183,21 @@ fn pow2<const N: usize>() -> Field {
     let mut p = Field::from(1u8);
     let mut i = 0usize;
     while i < N {
+        p = p + p;
+        i += 1;
+    }
+    p
+}
+
+/// `2^n` as a `Field` constant for a runtime (but compile-time-constant) `n` —
+/// the value-argument twin of [`pow2`], for widths like `N-1` that can't be
+/// written as a const-generic without `generic_const_exprs`. `n` is always
+/// const-propagated at a call site, so the loop unrolls and folds to the
+/// constant `2^n` — zero constraints.
+pub(crate) fn pow2_val(n: usize) -> Field {
+    let mut p = Field::from(1u8);
+    let mut i = 0usize;
+    while i < n {
         p = p + p;
         i += 1;
     }

@@ -44,11 +44,17 @@ pub mod lang;
 /// ordering comparisons, which a bare [`lang::Field`] intentionally cannot.
 pub mod uint;
 
+/// Fixed-width signed integers (`I<N>`) — the unsigned `U<N>` story extended to
+/// negatives, with a cached sign so `is_negative`/`> 0` stay cheap.
+pub mod int;
+
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
+    pub use crate::int::I;
     pub use crate::lang::{assert_eq, select, Bool, Field, Private, Public};
     pub use crate::uint::U;
 }
 
+pub use crate::int::I;
 pub use crate::lang::{assert_eq, select, Bool, Field, Private, Public};
 pub use crate::uint::U;

@@ -1641,3 +1641,97 @@ fn rejections_carry_actionable_help() {
     assert!(!c.status_success, "U<300> input should be rejected");
     assert!(c.stderr.contains("1..=253"), "width error should state the valid range; got: {}", c.stderr);
 }
+
+/// Signed `I<N>`: construction, sign predicates, signed comparison and checked
+/// add all solve — for positive and (field-encoded) negative values alike.
+#[test]
+fn signed_int_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "signed_int",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, lt: Public<Field>, a_pos: Public<Field>) {\n\
+         \x20   let ia = I::<8>::new(a);\n\
+         \x20   let ib = I::<8>::new(b);\n\
+         \x20   assert_eq((ia + ib).value(), sum);\n\
+         \x20   assert_eq(ia.lt(ib).value(), lt);\n\
+         \x20   assert_eq(ia.is_positive().value(), a_pos);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "signed_int", "bn254");
+    assert!(c.status_success, "signed_int failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, sum: &str, lt: &str, a_pos: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("sum"), sum.to_string());
+        m.insert(id("lt"), lt.to_string());
+        m.insert(id("a_pos"), a_pos.to_string());
+        m
+    };
+    // r-k is the field encoding of -k.
+    let neg2 = "21888242871839275222246405745257275088548364400416034343698204186575808495615";
+    let neg5 = "21888242871839275222246405745257275088548364400416034343698204186575808495612";
+    // a=3, b=5: 3+5=8; 3<5 -> 1; 3>0 -> 1.
+    let assign = solver::solve_and_check(&program, &case("3", "5", "8", "1", "1")).expect("3,5 signed");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "I<8> under-constrained");
+    // a=-5, b=3: -5+3 = -2 (=r-2); -5<3 -> 1; -5>0 -> 0.
+    solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "0")).expect("-5,3 signed");
+    // A wrong sign claim is rejected.
+    assert!(solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "1")).is_err(), "-5 is not positive");
+}
+
+/// Signed arithmetic is checked: a sum outside `[-2^(N-1), 2^(N-1))`, and the
+/// classic `-I::MIN`, both make the circuit unsatisfiable.
+#[test]
+fn signed_int_overflow_rejected() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "signed_overflow",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ia = I::<8>::new(a);\n\
+         \x20   let ib = I::<8>::new(b);\n\
+         \x20   assert_eq((ia + ib).value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "signed_overflow", "bn254");
+    assert!(c.status_success, "signed_overflow failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    // 100 + 100 = 200, outside [-128, 128): overflow -> unsatisfiable.
+    assert!(solver::solve_and_check(&program, &case("100", "100", "200")).is_err(), "signed add overflow must reject");
+    // Sanity: 100 + 20 = 120 is in range and solves.
+    solver::solve_and_check(&program, &case("100", "20", "120")).expect("100+20 in range");
+}
+
+/// `I<N>` as a raw input is rejected (a two-field struct would flatten into
+/// unconstrained leaves) — the guard steers to `I::new`.
+#[test]
+fn signed_int_input_is_rejected() {
+    let src = write_case(
+        "signed_input",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<I<8>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "signed_input", "bn254");
+    assert!(!c.status_success, "I<8> input must be rejected");
+    assert!(
+        c.stderr.contains("I::") && c.stderr.contains("help:"),
+        "rejection should steer to I::new; got: {}",
+        c.stderr
+    );
+}

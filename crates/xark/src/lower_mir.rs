@@ -1167,6 +1167,18 @@ fn flatten_field_leaves<'tcx>(
             path.pop();
             return Ok(());
         }
+        // `I<N>` is a two-field struct (value + cached sign) whose fields must be
+        // kept consistent — it cannot be accepted as a raw input yet (flattening
+        // it would produce two unconstrained leaves). Reject with guidance.
+        if p == "xark::I" || p.ends_with("::int::I") {
+            return Err(CompileError::new(
+                "signed `I<N>` is not yet supported as a circuit input",
+            )
+            .with_help(
+                "take a `Private<Field>`/`Public<Field>` and construct it in-circuit with \
+                 `I::<N>::new(x)`",
+            ));
+        }
     }
     match ty.kind() {
         rustc_middle::ty::TyKind::Array(elem, len) => {
