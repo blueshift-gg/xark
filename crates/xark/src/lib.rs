@@ -42,7 +42,13 @@ pub mod lang;
 
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
-    pub use crate::lang::{assert_eq, Field, Private, Public};
+    pub use crate::lang::{
+        assert_eq, require, require_ne, require_gt, require_gte, require_lt, require_lte, Field,
+        Private, Public,
+    };
 }
 
-pub use crate::lang::{assert_eq, Field, Private, Public};
+pub use crate::lang::{
+    assert_eq, require, require_ne, require_gt, require_gte, require_lt, require_lte, Field, Private,
+    Public,
+};

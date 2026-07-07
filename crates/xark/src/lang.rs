@@ -191,6 +191,72 @@ impl Field {
         w
     }
 
+    /// 1 if `self == 0`, else 0. Hint-based is-zero: `inv = self⁻¹` (or 0), and
+    /// the two constraints pin `out` to the correct boolean.
+    pub fn is_zero(self) -> Field {
+        let inv = Field::hint_inverse(self);
+        let out = Field::from(1u8) - self * inv;
+        assert_eq(self * out, Field::from(0u8)); // self != 0 ⇒ out == 0; self == 0 ⇒ out == 1
+        out
+    }
+
+    /// 1 if `self == rhs`, else 0.
+    pub fn eq(self, rhs: Field) -> Field {
+        (self - rhs).is_zero()
+    }
+
+    /// 1 if `self != rhs`, else 0.
+    pub fn ne(self, rhs: Field) -> Field {
+        Field::from(1u8) - self.eq(rhs)
+    }
+
+    /// 1 if `self < rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
+    pub fn lt<const N: usize>(self, rhs: Field) -> Field {
+        let _ = self.to_bits::<N>();
+        let _ = rhs.to_bits::<N>();
+        // 2^N
+        let mut two_n = Field::from(1u8);
+        let mut i = 0usize;
+        while i < N {
+            two_n = two_n + two_n;
+            i += 1;
+        }
+        // diff = self + 2^N - rhs ∈ (0, 2^{N+1}); its bit N is [self >= rhs].
+        let diff = self + two_n - rhs;
+        let mut acc = Field::from(0u8);
+        let mut pow = Field::from(1u8);
+        let mut sign = Field::from(0u8);
+        let mut i = 0usize;
+        while i <= N {
+            // N+1 bits (0..=N)
+            let bit = Field::hint_bit(diff, i);
+            bit.assert_bool();
+            acc = acc + bit * pow;
+            if i == N {
+                sign = bit;
+            } // `i`,`N` are const ⇒ resolved at compile time
+            pow = pow + pow;
+            i += 1;
+        }
+        assert_eq(acc, diff); // recomposition pins diff < 2^{N+1}
+        Field::from(1u8) - sign // self < rhs ⟺ bit N == 0
+    }
+
+    /// 1 if `self > rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
+    pub fn gt<const N: usize>(self, rhs: Field) -> Field {
+        rhs.lt::<N>(self)
+    }
+
+    /// 1 if `self <= rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
+    pub fn lte<const N: usize>(self, rhs: Field) -> Field {
+        Field::from(1u8) - self.gt::<N>(rhs)
+    }
+
+    /// 1 if `self >= rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
+    pub fn gte<const N: usize>(self, rhs: Field) -> Field {
+        Field::from(1u8) - self.lt::<N>(rhs)
+    }
+
     /// Advice hint: integer division of `a` by `b` on the canonical
     /// representatives. Returns `[q, r]` with `a = b*q + r`, `0 <= r < b`.
     /// Allocates two private witnesses; pin them with `b*q + r == a` and
@@ -349,6 +415,36 @@ impl_field_int_ops!(u8, u16, u32, u64, u128);
 #[inline(never)]
 pub fn assert_eq(_lhs: Field, _rhs: Field) {
     loop {}
+}
+
+/// Constrain `cond` to be true (the boolean field element `1`).
+pub fn require(cond: Field) {
+    assert_eq(cond, Field::from(1u8));
+}
+
+/// Constrain `a != b` (that `a - b` is invertible).
+pub fn require_ne(a: Field, b: Field) {
+    let _ = (a - b).inv();
+}
+
+/// Constrain `a < b`, range-checking both to `[0, 2^N)`.
+pub fn require_lt<const N: usize>(a: Field, b: Field) {
+    require(a.lt::<N>(b));
+}
+
+/// Constrain `a <= b`, range-checking both to `[0, 2^N)`.
+pub fn require_lte<const N: usize>(a: Field, b: Field) {
+    require(a.lte::<N>(b));
+}
+
+/// Constrain `a > b`, range-checking both to `[0, 2^N)`.
+pub fn require_gt<const N: usize>(a: Field, b: Field) {
+    require(a.gt::<N>(b));
+}
+
+/// Constrain `a >= b`, range-checking both to `[0, 2^N)`.
+pub fn require_gte<const N: usize>(a: Field, b: Field) {
+    require(a.gte::<N>(b));
 }
 
 #[inline(never)]
