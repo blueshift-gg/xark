@@ -1855,4 +1855,31 @@ fn uint_width_guards_reject_unsound_widths() {
     );
     let c = compile_with_field(&ok, "u253_new", "bn254");
     assert!(c.status_success, "U<253>::new should still compile: {}", c.stderr);
+
+    // The `*_const` path calls less_than directly (bypassing U::lt), so it must
+    // be guarded at the source too.
+    let cmp_const = write_case(
+        "u253_cmp_const",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ua = U::<253>::new(a);\n\
+         \x20   assert_eq(ua.lt_const::<1>().value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&cmp_const, "u253_cmp_const", "bn254");
+    assert!(!c.status_success, "U<253> lt_const must be rejected");
+
+    // Signed comparison routes through the same less_than, so I<253> ordering is
+    // rejected as well (construction at 253 stays legal).
+    let icmp = write_case(
+        "i253_cmp",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ia = I::<253>::new(a);\n\
+         \x20   let ib = I::<253>::new(b);\n\
+         \x20   assert_eq(ia.lt(ib).value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&icmp, "i253_cmp", "bn254");
+    assert!(!c.status_success, "I<253> comparison must be rejected");
 }

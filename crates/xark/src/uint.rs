@@ -93,10 +93,9 @@ impl<const N: usize> U<N> {
         self.value.is_eq(other.value)
     }
 
-    /// True iff `self < other`. `le`/`gt`/`ge` route through this, so the width
-    /// guard here covers them too.
+    /// True iff `self < other`. `le`/`gt`/`ge` route through this; the `N ≤ 252`
+    /// width guard lives inside `less_than`, covering every comparison path.
     pub fn lt(self, other: U<N>) -> Bool {
-        let () = Self::CMP_ARITH_WIDTH_OK;
         less_than::<N>(self.value, other.value)
     }
 
@@ -239,6 +238,12 @@ impl<const N: usize> MulAssign for U<N> {
 /// candidate — its correctness is enforced by the remainder range proof, so a
 /// wrong hint merely makes the circuit unsatisfiable, never unsound.
 pub(crate) fn less_than<const N: usize>(a: Field, b: Field) -> Bool {
+    // The intermediate `d = a - b + 2^N` reaches `2^(N+1)`, which must stay below
+    // the BN254 order `r` (< 2^254) or the remainder range proof no longer pins
+    // `lt` — a false ordering could be proven. Guard here, at the single choke
+    // point, so every caller (`lt`/`le`/`gt`/`ge`, the `*_const` methods, and the
+    // `I<N>` comparisons) is covered.
+    const { assert!(N <= 252, "comparison requires N <= 252 so 2^(N+1) <= BN254 order") };
     let two_pow_n = pow2::<N>();
     let top = Field::hint_bit(a - b + two_pow_n, N);
     top.assert_bool();
