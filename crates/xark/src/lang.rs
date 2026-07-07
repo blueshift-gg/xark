@@ -26,12 +26,16 @@ use core::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub
 /// unit tests).
 ///
 /// **Comparison operators are not circuit operations.** A native `bool` from
-/// `a == b` / `a < b` on witnesses would require witness-dependent control flow,
-/// which a circuit cannot express soundly, so the compiler *rejects*
-/// `== != < <= > >=` inside a circuit and points you at `assert_eq` (equality as
-/// a constraint) or a `to_bits`/range gadget (magnitude comparison as
-/// constraints). The `core::cmp` impls exist for host/const use only.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// `a == b` on witnesses would require witness-dependent control flow, which a
+/// circuit cannot express soundly, so the compiler *rejects* `== != < <= > >=`
+/// inside a circuit and points you at `assert_eq` / `Field::is_eq` / `is_zero`
+/// (equality) or [`U<N>`](crate::uint::U) (ordering, which needs a bit width).
+///
+/// `PartialEq`/`Eq`/`Hash` are derived for host/const use (field-element
+/// equality is meaningful, and lets `Field` be a `HashMap` key). `Ord` is
+/// deliberately **not** derived: a field element is a residue mod p with no
+/// semantic order — ordering belongs on the width-carrying [`U<N>`](crate::uint::U).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
     /// Meaningful only for constants (`Field::from`/`Field::constant`, which are

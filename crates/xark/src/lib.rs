@@ -40,9 +40,15 @@
 /// programs and gadgets depend on a single crate (`xark`).
 pub mod lang;
 
+/// Fixed-width unsigned integers (`U<N>`) — the circuit-native way to do
+/// ordering comparisons, which a bare [`lang::Field`] intentionally cannot.
+pub mod uint;
+
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{assert_eq, Field, Private, Public};
+    pub use crate::uint::U;
 }
 
 pub use crate::lang::{assert_eq, Field, Private, Public};
+pub use crate::uint::U;

@@ -1372,3 +1372,43 @@ fn is_eq_gadget_solves() {
     assert!(solver::solve_and_check(&program, &case("5", "6", "1")).is_err(), "is_eq(5,6) != 1 must reject");
     assert!(solver::solve_and_check(&program, &case("5", "5", "0")).is_err(), "is_eq(5,5) != 0 must reject");
 }
+
+/// `U<N>` fixed-width unsigned integers: range-proved construction + ordering
+/// comparisons (`lt`/`le`) that solve correctly and reject false claims and
+/// out-of-range inputs.
+#[test]
+fn uint_comparisons_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "uint_cmp",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public, U};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, le: Public<Field>) {\n\
+         \x20   let ua = U::<8>::new(a);\n\
+         \x20   let ub = U::<8>::new(b);\n\
+         \x20   assert_eq(ua.lt(ub), lt);\n\
+         \x20   assert_eq(ua.le(ub), le);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "uint_cmp", "bn254");
+    assert!(c.status_success, "uint_cmp failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, lt: &str, le: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("lt"), lt.to_string());
+        m.insert(id("le"), le.to_string());
+        m
+    };
+    // 3 < 5 (lt=1, le=1); 5 vs 3 (lt=0, le=0); 5 == 5 (lt=0, le=1).
+    solver::solve_and_check(&program, &case("3", "5", "1", "1")).expect("3 < 5");
+    solver::solve_and_check(&program, &case("5", "3", "0", "0")).expect("5 > 3");
+    let assign = solver::solve_and_check(&program, &case("5", "5", "0", "1")).expect("5 == 5");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "U<8> cmp under-constrained");
+    // A false ordering claim is rejected.
+    assert!(solver::solve_and_check(&program, &case("3", "5", "0", "1")).is_err(), "3<5 but lt=0 must reject");
+    // An out-of-range input (300 >= 2^8) fails the construction range proof.
+    assert!(solver::solve_and_check(&program, &case("300", "5", "0", "0")).is_err(), "a=300 exceeds U<8>");
+}
