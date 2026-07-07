@@ -20,7 +20,9 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate
 use clap::{Args, Subcommand};
 use rand::rngs::OsRng;
 
-use xark_backend::ceremony::{contribute, verify_chain, Contribution};
+use xark_backend::ceremony::{
+    contribute, verify_chain, verify_keys_consistent_with_chain, Contribution,
+};
 use xark_backend::keys::{Groth16Keys, KeyMetadata};
 use xark_backend::ptau::parse_ptau;
 use xark_prover::XarkCircuit;
@@ -186,7 +188,19 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
         contributions.push(c);
     }
     verify_chain(baseline, &contributions).map_err(|e| anyhow!("verify failed: {e}"))?;
-    println!("Verified {count} contribution(s); chain anchored to baseline_delta_g1.");
+    // The Schnorr/δ-consistency chain proves a valid randomness sequence over
+    // the baseline δ·G1, but on its own says NOTHING about the keys this
+    // ceremony ships. Bind them: confirm proving_key.bin/verifying_key.bin are
+    // the keys the chain actually produced, so a coordinator can't run an
+    // honest-looking transcript yet ship a verifying key whose δ they know.
+    let keys = load_keys(&dir.join("proving_key.bin"), &dir.join("verifying_key.bin"))
+        .context("loading ceremony keys to bind them to the transcript")?;
+    verify_keys_consistent_with_chain(&keys, baseline, &contributions)
+        .map_err(|e| anyhow!("verify failed: {e}"))?;
+    println!(
+        "Verified {count} contribution(s); chain anchored to baseline_delta_g1 \
+         and bound to the shipped keys."
+    );
     for (i, c) in contributions.iter().enumerate() {
         println!("  contribution {:04}: {}", i + 1, c.contributor_label);
     }

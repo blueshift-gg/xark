@@ -199,12 +199,13 @@ pub fn run(args: SetupArgs) -> Result<()> {
 
     // --- Dev-mode path ---------------------------------------------------
     let circuit = XarkCircuit::for_setup(prog.clone());
-    // A user-supplied `--deterministic-rng <n>` wins; otherwise, when we fell
-    // back here for lack of a `.ptau`, use the hardcoded dev seed (1); an
-    // explicit `--insecure-dev-mode` with no seed keeps using the OS RNG.
-    let effective_seed = args
-        .deterministic_rng
-        .or(if dev_fallback { Some(1) } else { None });
+    // Only an explicit `--deterministic-rng <n>` makes the key reproducible
+    // (and its trapdoor recoverable from the seed). The no-`.ptau` dev fallback
+    // now uses OsRng — still insecure (single party, no ceremony, no transcript)
+    // but NOT a globally-shared, publicly-known trapdoor the way the old
+    // hardcoded seed `1` was: previously every user's dev key for a given circuit
+    // was byte-identical with a seed anyone could reproduce (audit finding #05).
+    let effective_seed = args.deterministic_rng;
     let mut rng = match effective_seed {
         Some(seed) => {
             if args.deterministic_rng.is_some() {
@@ -244,7 +245,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         println!(
             "{}",
             crate::style::warn(
-                "note: no .ptau found — using an insecure hardcoded dev key (seed 1); \
+                "note: no .ptau found — generated an insecure single-party OsRng dev key; \
                  supply --ptau-file for production."
             )
         );
