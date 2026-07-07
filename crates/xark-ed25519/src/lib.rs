@@ -55,11 +55,11 @@ pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [F
     // the schoolbook column products wrap `Fr`, break `a·b = q·m + r`, and forge
     // acceptance. Check `a_pub` BEFORE the `0 - a_pub.x` negation below (itself a
     // non-native op with the same precondition); `r_sig` now feeds the cofactor
-    // doublings, so it must be range-checked too.
-    a_pub.x.range_check();
-    a_pub.y.range_check();
-    r_sig.x.range_check();
-    r_sig.y.range_check();
+    // doublings, so it must be pinned too. `enforce_on_curve` range-checks the
+    // limbs AND binds the point to the curve — an off-curve `A`/`R` makes the
+    // complete-addition group law (and its Lean proofs) meaningless.
+    enforce_on_curve(a_pub);
+    enforce_on_curve(r_sig);
 
     // Canonical scalar: `S < L`. The signature scalar must be a canonical
     // element of the order-`L` scalar field, else `S`, `S + L`, `S + 2L`, … all

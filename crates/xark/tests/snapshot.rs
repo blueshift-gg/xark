@@ -1953,3 +1953,39 @@ fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
         "an off-curve P-256 pubkey must be rejected"
     );
 }
+
+/// The Ed25519 twisted-Edwards on-curve gadget (now run on `eddsa_verify`'s A/R
+/// inputs) accepts a real on-curve point (the base point B) and rejects a
+/// perturbed coordinate — validating the `−x² + y² = 1 + d·x²·y²` equation.
+#[test]
+fn ed25519_on_curve_accepts_real_rejects_perturbed() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("on_curve_ed25519"), "on_curve_ed25519", "bn254");
+    assert!(c.status_success, "on_curve_ed25519 failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    // Ed25519 base point B, as 86-bit limbs (from xark_ed25519::base()).
+    let kat = [
+        ("qx0", "45522188556658772877366554"),
+        ("qx1", "10615720421966981067801172"),
+        ("qx2", "2524463244633754693274190"),
+        ("qy0", "46422751473201760308717144"),
+        ("qy1", "30948500982134506872478105"),
+        ("qy2", "7737125245533626718119526"),
+    ];
+    let base = || {
+        let mut m = BTreeMap::new();
+        for (k, v) in kat.iter() {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    solver::solve_and_check(&program, &base()).expect("on-curve Ed25519 point must be accepted");
+    let mut bad = base();
+    bad.insert(id("qy0"), "1".to_string());
+    assert!(
+        solver::solve_and_check(&program, &bad).is_err(),
+        "an off-curve Ed25519 point must be rejected"
+    );
+}

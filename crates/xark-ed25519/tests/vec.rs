@@ -128,12 +128,13 @@ fn eddsa_verify_honest_and_tamper() {
     let n = program.constraints.len();
     eprintln!("ed25519 eddsa_verify: {n} constraints");
     // This count reflects the full verification relation:
-    //  * range-check `a_pub` and `r_sig` coordinates before the non-native law;
+    //  * `enforce_on_curve` on `a_pub` and `r_sig` (range-checks the coordinates
+    //    AND binds each point to `−x² + y² = 1 + d·x²·y²`) before the group law;
     //  * `double_scalar_mul` range-checks its two input points;
     //  * `S < L` canonical-scalar check (recompose bits → Fq limbs, assert < L);
     //  * cofactored equation `[8]·t == [8]·R` (6 `ec_double`s) clearing any
     //    small-order component of `A`/`R`.
-    assert_eq!(n, 4_649_856, "ed25519 eddsa_verify constraint count changed");
+    assert_eq!(n, 4_662_466, "ed25519 eddsa_verify constraint count changed");
 
     let mut inputs = BTreeMap::new();
     put3(&mut inputs, &program, "a.x.limbs", AX);

@@ -329,6 +329,25 @@ macro_rules! edwards {
             Fp::new(D_LIMBS)
         }
 
+        /// Assert the affine point `p` lies on the twisted-Edwards curve
+        /// `−x² + y² = 1 + d·x²·y²` (`a = −1`). The complete addition law is only
+        /// meaningful on-curve, so every gadget consuming a witness/public point
+        /// must pin it first (range-checks the limbs, then checks the equation).
+        pub fn enforce_on_curve(p: Point) {
+            p.x.range_check();
+            p.y.range_check();
+            let x2 = p.x * p.x;
+            let y2 = p.y * p.y;
+            // y² − x² == 1 + d·x²·y², reduced so the per-limb comparison is exact.
+            let lhs = (y2 - x2).reduce();
+            let rhs = (fp(1, 0, 0) + d_const() * (x2 * y2)).reduce();
+            let mut i = 0usize;
+            while i < 3usize {
+                xark::assert_eq(lhs.limbs[i], rhs.limbs[i]);
+                i += 1;
+            }
+        }
+
         /// The identity element `(0, 1)`.
         pub fn identity() -> Point {
             Point::new(fp(0, 0, 0), fp(1, 0, 0))
