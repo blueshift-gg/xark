@@ -309,4 +309,27 @@ theorem ec_add_in_circuit_secp256r1_sound {F : Type*} [Field F]
     rw [hx3, hy3, hi3]
     exact EcAddSemantics_secp256r1.lhs_inf
 
+/-- **secp256r1 (P-256) incomplete-affine addition soundness (base-field level).**
+Same flag-free 3-limb `ec_add_incomplete` shape as secp256k1, but over the P-256
+curve `y² = x³ − 3·x + b` (`a = −3`). The gadget enforces `dxinv·(x2−x1) = 1`,
+`λ·(x2−x1) = y2−y1`, `x3 = λ²−x1−x2`, `y3 = λ·(x1−x3)−y1`; given both inputs on the
+curve, the output is on the curve and the slope is unique. Proved from the generic
+`Curve` algebra at `a = −3` (the `−3·x` term flows through unchanged). -/
+theorem ec_add_incomplete_secp256r1_sound {F : Type*} [Field F] (b : F)
+    (x1 y1 x2 y2 x3 y3 lam dxinv : F)
+    (hdx : dxinv * (x2 - x1) = 1)
+    (hE1 : y1 ^ 2 = x1 ^ 3 + (-3) * x1 + b) (hE2 : y2 ^ 2 = x2 ^ 3 + (-3) * x2 + b)
+    (hS : lam * (x2 - x1) = y2 - y1)
+    (hx3 : x3 = lam ^ 2 - x1 - x2) (hy3 : y3 = lam * (x1 - x3) - y1) :
+    y3 ^ 2 = x3 ^ 3 + (-3) * x3 + b ∧ ∀ lam', lam' * (x2 - x1) = y2 - y1 → lam' = lam := by
+  have hx : x1 ≠ x2 := by
+    intro e
+    rw [e, sub_self, mul_zero] at hdx
+    exact zero_ne_one hdx
+  refine ⟨?_, fun lam' hS' => ec_add_generic_slope_unique x1 y1 x2 y2 lam' lam hx hS' hS⟩
+  have hoc := ec_add_generic_on_curve (-3) b x1 y1 x2 y2 lam hx hE1 hE2 hS
+  subst hx3
+  subst hy3
+  linear_combination hoc
+
 end Xark

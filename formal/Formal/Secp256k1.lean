@@ -13,8 +13,8 @@ set_option linter.style.longLine false
 /-!
 # secp256k1 in-circuit point-addition soundness
 
-`crates/acir-r1cs/src/gadgets/ecdsa.rs::ec_add_in_circuit` (specialised for the
-secp256k1 curve via `CurveParams::secp256k1()`) adds points on
+The secp256k1 point-addition gadget (`crates/xark-secp256k1/src/lib.rs`)
+adds points on
 
     y² = x³ + 7
 
@@ -340,5 +340,33 @@ theorem ec_add_in_circuit_secp256k1_sound {F : Type*} [Field F]
     obtain ⟨hx3, hy3, hi3⟩ := output_mux_lhs_inf h.mux
     rw [hx3, hy3, hi3]
     exact EcAddSemantics_secp256k1.lhs_inf
+
+/-- **secp256k1 incomplete-affine addition soundness (base-field level).** The
+flag-free 3-limb `ec_add_incomplete` gadget enforces `dxinv·(x2−x1) = 1`
+(so `x1 ≠ x2`), the slope `λ·(x2−x1) = y2−y1`, and the output
+`x3 = λ²−x1−x2`, `y3 = λ·(x1−x3)−y1` — exactly the chord-addition formulas the
+Rust computes (`fp_sub`/`fp_mul`/`fp_inverse`/`sub2` in `xark-secp256k1`).
+Given both inputs on `y² = x³ + 7`, the output lies on the curve and the slope —
+hence the whole output — is unique (no prover freedom). Proved from the generic
+`Curve` algebra at `(a, b) = (0, 7)`; the non-native limb constraints reduce to
+these field equations via `mul_mod_via_Fr_limbwise_constraints`. -/
+theorem ec_add_incomplete_secp256k1_sound {F : Type*} [Field F]
+    (x1 y1 x2 y2 x3 y3 lam dxinv : F)
+    (hdx : dxinv * (x2 - x1) = 1)
+    (hE1 : y1 ^ 2 = x1 ^ 3 + 7) (hE2 : y2 ^ 2 = x2 ^ 3 + 7)
+    (hS : lam * (x2 - x1) = y2 - y1)
+    (hx3 : x3 = lam ^ 2 - x1 - x2) (hy3 : y3 = lam * (x1 - x3) - y1) :
+    y3 ^ 2 = x3 ^ 3 + 7 ∧ ∀ lam', lam' * (x2 - x1) = y2 - y1 → lam' = lam := by
+  have hx : x1 ≠ x2 := by
+    intro e
+    rw [e, sub_self, mul_zero] at hdx
+    exact zero_ne_one hdx
+  have hE1' : y1 ^ 2 = x1 ^ 3 + 0 * x1 + 7 := by rw [hE1]; ring
+  have hE2' : y2 ^ 2 = x2 ^ 3 + 0 * x2 + 7 := by rw [hE2]; ring
+  refine ⟨?_, fun lam' hS' => ec_add_generic_slope_unique x1 y1 x2 y2 lam' lam hx hS' hS⟩
+  have hoc := ec_add_generic_on_curve 0 7 x1 y1 x2 y2 lam hx hE1' hE2' hS
+  subst hx3
+  subst hy3
+  linear_combination hoc
 
 end Xark

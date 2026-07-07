@@ -80,7 +80,7 @@ each ceremony-keyed proof with snarkjs.
 
 | power | covers (committed circuits) |
 |------:|-----------------------------|
-| 12 (4 096) | arithmetic_*, range, memory_*, multi_function, nested_calls, return_values_only, brillig, mixed_pi, reorder_pi, bitwise, poseidon, large_pi |
+| 12 (4 096) | cube, difference_of_squares, linear, inverse, range, bitwise, poseidon, mimc |
 | 15 (32 768) | + curve (21 568), blake3 (23 014) |
 | 16 (65 536) | + blake2s (33 174), sha256 (54 632) |
 | 17 (131 072) | + aes128 (82 704) |

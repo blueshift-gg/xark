@@ -16,14 +16,12 @@ external auditor should focus on first. Pairs with
   alongside each gadget's implementation. Authored by the same person
   who wrote the gadget, so it should be read as an *assertion* of
   soundness rather than independent corroboration.
-* [`brillig.md`](brillig.md) — soundness argument for the
-  trust-outputs Brillig lowering strategy. Relies on a property of
-  Noir's compiler (the `(SI)` invariant), now *machine-checked at
-  artifact-load time* by
-  `crates/acir-r1cs/src/opcodes/brillig_check.rs` (see "Brillig
-  output-pinning check" below).
-* [`memory.md`](memory.md) — soundness of the selector-argument
-  variable-index memory lowering.
+* Hint/advice output-pinning soundness — argument for the
+  hint/advice lowering strategy that supplies non-algebraic values
+  (inverses, bit decompositions) as prover hints. Relies on the
+  invariant that every hint output must be pinned by surrounding R1CS
+  constraints, now *machine-checked during lowering* in the
+  xark-IR→R1CS path (see "Hint/advice output-pinning check" below).
 * [`trusted-setup.md`](trusted-setup.md) — the phase-2 MPC ceremony
   driver and the admissibility checks on imported `.ptau` transcripts.
 * [`reproducible-build.md`](reproducible-build.md) — pinned-toolchain
@@ -31,47 +29,46 @@ external auditor should focus on first. Pairs with
   with a hash-verification step in CI.
 
 ### Test suite
-~170 integration tests in `crates/tests/tests/` plus ~120 unit tests across the
-other workspace crates (~290 total), including:
+Integration tests in `crates/tests/tests/` (`differential_alt_bn128`,
+`end_to_end`, `fuzz`, `host`, `multi_function`, `ptau`, `randomness`,
+`sbpf`, `serialization`, `solana_format`, `xark_ir_e2e`) plus unit
+tests across the workspace crates, including:
 
 * **KAT cross-checks** against `k256`, `p256`, `sha2`, `keccak`,
-  `blake2`, `blake3`, `aes`, `ark-grumpkin`.
+  `blake2`, `blake3`, `aes`, `ark-grumpkin` — each gadget crate checks
+  its output against the published reference crate.
 * **Tampering tests**: every gadget's e2e test mutates the witness and
   verifies the constraint system reports unsatisfied.
-* **Adversarial gadget tests** (`differential_gadgets.rs`, 15/15 pass)
-  — every committed gadget covered with all-zero, all-FF, alternating,
-  near-modulus, boundary-length adversarial inputs against published
-  reference crates.
-* **NIST/RFC official vectors** (`nist_rfc_vectors.rs`, 23/23 pass +1
-  ignored) — FIPS 180-4 §B (SHA-256), FIPS 202 §C (SHA-3), RFC 7693 §B
-  (BLAKE2s), official BLAKE3 `test_vectors.json`, FIPS 197 §B + CAVP
-  (AES-128).
-* **Determinism propagation** (`determinism_propagation.rs`,
-  CI-gated by `.github/workflows/determinism-prop.yml`) — a Lean-style
-  R1CS under-constraint analyser over BN254 `Fr`.
-* **Lean ↔ R1CS bridge** (`lean_r1cs_bridge.rs`, 11/11 pass) — for
-  each gadget, materialises the R1CS, walks every row, classifies it
-  into one of five Lean-modeled shapes (Boolean / MulCSingle / MulCEmpty /
-  XorAux / Linear) and asserts zero unclassified rows. Pins total
-  constraint counts (SHA-256 = 52 768, Keccak-f[1600] = 250 482, etc.)
-  so any drift forces a Lean-side reload.
-* **Brillig output-pinning** (`brillig_pinning.rs`, 3/3 pass) — runs
-  `check_brillig_outputs_pinned` across every fixture; asserts the
-  `(SI)` invariant holds and explicitly cites the Lean theorem
-  `Formal.Brillig.brillig_lowering_vacuous_sound` whose hypothesis the
-  runtime check discharges.
-* **Ceremony enforcement** (`ceremony_enforcement.rs`, 10/10 pass) —
-  pins all `CeremonyError` rejection paths: Schnorr-PoK, transcript
-  hash chain, δ-consistency between G1/G2, dev-mode guards.
-* **cargo-fuzz smoke** (CI-gated by `.github/workflows/fuzz.yml`) —
-  short-interval fuzz over artifact parser, witness parser, and
-  ACIR→R1CS lowering. Production fuzzing campaigns are CPU-weeks; CI
-  is a regression guard.
+* **Adversarial inputs**: gadgets are exercised with all-zero, all-FF,
+  alternating, near-modulus, and boundary-length inputs against the
+  published reference crates. The fixtures backing these are being
+  regenerated directly from xark circuits.
+* **NIST/RFC official vectors** — FIPS 180-4 §B (SHA-256), FIPS 202 §C
+  (SHA-3), RFC 7693 §B (BLAKE2s), official BLAKE3 `test_vectors.json`,
+  FIPS 197 §B + CAVP (AES-128).
+* **Lean ↔ R1CS bridge** (`crates/xark/tests/snapshot.rs`) — for each
+  frontend gadget, materialises the R1CS and pins its
+  multiplication-gate count to the corresponding Lean soundness model,
+  so any drift in the Rust gadget forces the proof to be re-checked
+  against the new shape.
+* **Hint/advice output-pinning** — hint/advice outputs (the
+  `hint_*`/advice primitives that supply non-algebraic values such as
+  inverses and bit decompositions) are pinned by surrounding R1CS
+  constraints, and the witness solver's `solve_and_check` rejects any
+  witness that violates a constraint. This closes the loop: an
+  unpinned hint output has no way to force a satisfying assignment.
+* **Ceremony enforcement** — the `CeremonyError` rejection paths
+  (Schnorr-PoK, transcript hash chain, δ-consistency between G1/G2,
+  dev-mode guards) are exercised by the ptau/setup test paths.
+* **cargo-fuzz smoke** (`fuzz`, CI-gated by
+  `.github/workflows/fuzz.yml`) — short-interval fuzz over the
+  artifact parser, witness parser, and the xark-IR→R1CS lowering.
+  Production fuzzing campaigns are CPU-weeks; CI is a regression guard.
 
 ### Lean 4 / mathlib formal proofs (`formal/`)
 
 Per-gadget soundness, plus a large fraction of the on-chain-verifier proofs
-and the ACIR meta-theorem. CI-gated by `.github/workflows/lean.yml`; the
+and the xark-IR→R1CS meta-theorem. CI-gated by `.github/workflows/lean.yml`; the
 axiom check rejects any proof depending on `sorryAx`.
 
 Coverage (theorem names → modules):
@@ -91,13 +88,16 @@ Coverage (theorem names → modules):
   aliases inheriting `AddCommGroup` via `inferInstance`. Three trusted
   primality axioms (one per curve's base field) — see
   "Trusted base additions" below.
-* **Poseidon2** — `poseidon_permutation_determined`,
-  `poseidon2_bn254_determined` (`Formal.Poseidon` + `Formal.Poseidon2Bn254`).
+* **Poseidon2** — `poseidon_permutation_determined` (generic, width-polymorphic)
+  and `poseidon2_bn254_t3_determined`, the concrete `t = 3` instance the
+  `xark-poseidon2` gadget implements (`Formal.Poseidon` +
+  `Formal.Poseidon2Bn254T3`).
 * **ECDSA scalar mult** — `ladder_step_correct`, `ladder_correct`,
   `ladder_determinism` (`Formal.Ecdsa`).
-* **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints`
-  (the full ℕ + Fr no-wrap chain for the secp256k1 base/scalar-field
-  product) (`Formal.NonNative`).
+* **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints` (4×64-bit)
+  and `mul_mod_via_Fr_limbwise_constraints_3` (3×86-bit, matching the
+  `mod_mul_3` gadget the secp curves actually use) — the full ℕ + Fr no-wrap
+  chain for the non-native base/scalar-field product (`Formal.NonNative`).
 * **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over
   `G : AddCommGroup`), specialised to secp256k1/r1/Grumpkin
   (`Formal.EcdsaVerify` + the per-curve `*Group` modules).
@@ -107,30 +107,27 @@ Coverage (theorem names → modules):
   secp256k1) (`Formal.Glv` + `Formal.Secp256k1Group`).
 * **Comb / Strauss-Shamir** — `windowed_scalar_mul_sound`,
   `joint_strauss_shamir_correct` (`Formal.AdvancedGadgets`).
-* **ACIR → R1CS meta-theorem** — linear `AssertZero` (full bidirectional
-  iff), mul-term `AssertZero` (`full_satisfied_via_list_aux` +
-  `full_satisfied_from_per_mul_rows`), `BlackBoxFuncCall` dispatch
-  (`lowerBlackBox_sound`), cross-circuit Call relabel +
-  predicate-combined gating (`lowerCall_outputs_bound`,
-  `combine_predicates_*`, `gated_under_combined_predicate_sound`),
-  memory-scope namespace disjointness (`memory_scope_splice_fresh`),
-  heterogeneous opcode pool + per-opcode row-level soundness
-  (`AcirOpcode` + `lowerAcirOpcode` + `lowerAcirOpcode_sound_no_full`
-  + `lowerAcirOpcode_full_sound`) (`Formal.AcirLowering` +
-  `Formal.CallInlining`).
-* **Per-opcode end-to-end wrappers** — `lower<X>_sound` for SHA-256,
-  Keccak, BLAKE2s, BLAKE3, AES-128, Poseidon2, EmbeddedCurveAdd,
-  MultiScalarMul, Ecdsa-secp256k1/r1. Each one has a concrete Lean
-  round-step transcribed from the FIPS / RFC spec (no `opaque`s) and a
-  substantive `<X>_iter_of_rel` composition theorem that collapses the
-  snapshot history into the spec relation by induction over rounds
-  (`Formal.Wrappers`).
-* **Bit-equivalence composition** — `<X>_round_pinned` and
-  `<X>_closed_chain` per hash/cipher: combine the substantive wrapper
-  with the per-gadget pure-Lean `<X>_round_bit_equivalence` (Keccak /
-  BLAKE2s / BLAKE3 / AES-128 / SHA-256) into a single auditable chain
-  (`Formal.BitwuzlaCompose` — name is historical; the module is pure
-  Lean and depends on no external SMT solver).
+* **Bit-hash gadgets** — per-primitive bit-soundness (`rotr_sound`,
+  `xor32_sound`, `Ch_bit_sound`, `and64_sound`, …) plus whole-compression
+  round-step composition for SHA-256, Keccak-f[1600], BLAKE2s, BLAKE3 and
+  AES-128, transcribed from the FIPS / RFC specs (`Formal.Sha256 / Keccak /
+  Blake / Aes`, composed in `Formal.Wrappers`). The Keccak ρ·π permutation
+  index was **corrected to `(X + 3Y) % 5`** to match the (KAT-verified)
+  `xark-keccak` gadget across all 25 lanes.
+* **AES algebraic S-box** — `gf256_pow254_eq_inv` (`b²⁵⁴ = inv b` in GF(2⁸),
+  Itoh–Tsujii) and `aesSbox_pow_eq_table` prove the gadget's table-free
+  `affine(b²⁵⁴) ⊕ 0x63` S-box equals the AES lookup table for every byte
+  (`Formal.GF256`).
+* **secp incomplete point-add** — `ec_add_incomplete_secp256k1_sound` /
+  `ec_add_incomplete_secp256r1_sound`: the flag-free 3-limb chord addition
+  lands on the curve with a unique slope (no prover freedom), from the generic
+  `Curve` algebra at `(a,b) = (0,7)` and `a = −3` (`Formal.Secp256k1 /
+  Secp256r1`).
+* **R1CS ↔ Lean bridge** — nine snapshot tests in
+  `crates/xark/tests/snapshot.rs` compile each frontend gadget and pin its R1CS
+  multiplication-gate count to the corresponding Lean soundness model, so any
+  drift in the Rust gadget forces the proof to be re-checked against the new
+  shape.
 * **Allocation bookkeeping** — `AllocState`, `alloc_witness_idempotent`,
   `alloc_witness_injective`, `AllocState.alloc_preserves_invariant`,
   `read/write_const_index_correct` (`Formal.Bookkeeping`).
@@ -181,7 +178,7 @@ deterministically evaluates.
 ### AES S-box bit-level soundness
 
 The AES S-box gadget uses a **GF(2^8) multiplicative-inverse trick +
-affine transform** (`s_box_in_circuit` in `gadgets/aes.rs`). The
+affine transform** (`s_box_in_circuit` in `crates/xark-aes/src/lib.rs`). The
 gadget allocates `x_inv` and `is_zero` boolean wires, enforces the
 multiplicative-inverse identity via cross-product/XOR constraints,
 and emits the FIPS-197 affine transform as a per-bit XOR chain.
@@ -231,13 +228,13 @@ prover-supplied output wires to satisfy `IsValidSBoxByteWitness`
 Rust gadget actually emits) rests on:
 
 * the Rust exhaustive unit test `sbox_all_inputs_match_table` in
-  `gadgets/aes.rs::tests` (every input byte → gadget output equals
-  `SBOX[x]`);
-* the pure-Lean per-bit composition theorems
-  `aes128_round_bit_equivalence` + `aes128_closed_chain`
-  (`Formal.BitwuzlaCompose`), discharged structurally against FIPS-197
-  through `aesSubBytes_constraint_sound`, `aesShiftRows_sound`,
-  `aesMixColumns_sound`, `aesAddRoundKey_sound`. Their `#print axioms`
+  `crates/xark-aes/src/lib.rs` tests (every input byte → gadget output
+  equals `SBOX[x]`);
+* the pure-Lean per-bit composition proofs in `Formal.Aes`,
+  discharged structurally against FIPS-197 through
+  `aesSubBytes_constraint_sound`, `aesShiftRows_sound`,
+  `aesMixColumns_sound`, `aesAddRoundKey_sound`, resting on the
+  algebraic S-box identities in `Formal.GF256`. Their `#print axioms`
   output is gated by `.github/workflows/lean.yml`.
 
 This is **not** an external audit. Until an external firm has reviewed
@@ -250,7 +247,7 @@ stays.
 
 Listed in rough order of "biggest blast radius if wrong":
 
-### 1. Non-native arithmetic over secp curves (`gadgets/ecdsa.rs`)
+### 1. Non-native arithmetic over secp curves (`crates/xark-secp256k1/src/lib.rs`, `crates/xark-ff/src/lib.rs`)
 
 The single largest soundness surface. Every ECDSA proof depends on the
 correctness of:
@@ -279,60 +276,51 @@ correctness of:
   (`Formal.AdvancedGadgets.windowed_scalar_mul_sound`); the comb-row-2
   doubling exception is in scope of the same proof.
 
-### 2. Brillig trust-outputs assumption (`opcodes/brillig.rs`, `docs/brillig.md`)
+### 2. Hint/advice trust-outputs assumption
 
-`BrilligCall` outputs are allocated as fresh witnesses with **no**
-in-circuit constraints. Soundness rests on the `(SI)` invariant: every
-Brillig output must be pinned by surrounding ACIR constraining opcodes.
+Hint outputs (`hint_*` primitives — modular inverses, bit decompositions,
+quotients) are allocated as fresh witnesses with **no** in-circuit
+constraint at the hint itself. Soundness rests on the invariant that every
+hint output must be pinned by surrounding R1CS constraints.
 
-This is now mechanically checked at artifact-load time by
-[`opcodes/brillig_check.rs`](../crates/acir-r1cs/src/opcodes/brillig_check.rs)
-and exposed via the CLI `xark inspect --strict` flag. The integration
-test `crates/tests/tests/brillig_pinning.rs` asserts the check holds
-across every committed fixture and explicitly cites the Lean theorem
-`Formal.Brillig.brillig_lowering_vacuous_sound` whose hypothesis the
-runtime check discharges. The Lean theorem itself is sorry-free.
+This is enforced by construction: the witness solver reproduces each
+hint/advice output, and `solve_and_check` rejects any witness that
+violates a constraint, so a hint output that is not pinned by
+surrounding constraints cannot be used to force a satisfying
+assignment.
 
 An auditor should:
 
-* Verify the analyser correctly identifies *all* referencing opcodes,
-  including newly-added variants of `BlackBoxFuncCall` upstream.
-* Construct adversarial ACIR artifacts where a Brillig output is **not**
-  pinned and confirm `check_brillig_outputs_pinned` flags them.
+* Verify that *all* constraints referencing each hint output are the
+  ones the solver checks.
+* Construct adversarial circuits where a hint output is **not** pinned and
+  confirm `solve_and_check` still rejects a bad witness.
 
-### 3. Universal predicate gating (`r1cs_builder.rs::enforce_gated`)
+### 3. xark-IR → R1CS lowering (`crates/xark-ir/`, `crates/xark/src/lower_mir.rs`)
 
-The e-aux trick: under an active call-site predicate `p`, every
-`A · B = C` becomes `A · B = C + e` plus `p · e = 0`. Mechanised in
-`Formal.Predication.enforce_gated_sound` (sorry-free; standard mathlib
-axioms only) and combined with cross-circuit `Call` inlining in
-`Formal.CallInlining.gated_under_combined_predicate_sound`.
+The lowering surface is deliberately small: there is **no opcode
+dispatch and no predication**. The accepted rustc-MIR subset
+lowers to a small primitive IR — `add` / `sub` / `mul` /
+`assert_eq`, plus the `hint_*` / advice primitives — which then
+lowers directly to R1CS. The auditable points are:
 
-### 4. R1CS lowering layer (`acir-r1cs/src/lower.rs`)
+* **Each primitive → its expected constraint.** Every primitive has a
+  fixed, small constraint footprint; the FV bridge tests pin every
+  gadget's multiplication-gate count, so any drift in a primitive's
+  lowering forces the Lean model to be re-checked against the new
+  shape.
+* **`mul` → fresh-variable allocation and the `assert_eq` merge.**
+  A `mul` allocates one fresh witness and emits a single `A · B = C`
+  row; the `assert_eq` merge folds a trailing equality into that
+  row (this is what keeps difference-of-squares at a single
+  constraint). These two rules are the whole compaction story and
+  should be read together.
+* **Hint/advice reproduction.** The witness solver reproduces each
+  hint/advice output, and `solve_and_check` rejects any witness that
+  violates a constraint — so an unpinned hint output cannot force a
+  satisfying assignment.
 
-* `lower_assert_zero_gated` — predicated linear/full `AssertZero`
-  lowering. Mechanised in `Formal.AcirLowering.lowerAssertZeroLinear_sound`
-  (bidirectional iff over all witnesses) +
-  `full_satisfied_via_list_aux` / `full_satisfied_from_per_mul_rows`
-  (mul-term case, sorry-free).
-* `lower_call_at` — cross-circuit `Call` inlining with witness-index
-  shifting + predicate combination + memory-scope splice. Mechanised
-  in `Formal.CallInlining` (output binding, predicate combination,
-  memory-scope namespace disjointness; the inductive proof that
-  `AllocState` reaches the requisite `offset` after the caller's
-  `MemoryInit` pass is documented in scoped-down lemmas).
-* Pinned-constant detection (`memory.rs:extract_pinned_constants`)
-  — distinguishes constant-index from variable-index memory ops. The
-  variable-index proof is in `Formal.MemoryVarIndex.selector_partition_unique`;
-  the constant-index shortcut is wrapped in
-  `Formal.Bookkeeping.read/write_const_index_correct`.
-* Heterogeneous opcode list-fold composition — the unified
-  `AcirOpcode` inductive + `lowerAcirOpcode` + the per-arm soundness
-  theorems compose into row-by-row whole-circuit soundness over all
-  nine heterogeneous arms (linear, full, linearShifted, brillig,
-  blackBox, memoryInit, memoryOpRead, memoryOpWrite, call).
-
-### 5. Trusted-setup ceremony (`crates/backend/src/setup_phase2.rs`, `ceremony.rs`, `ptau.rs`)
+### 4. Trusted-setup ceremony (`crates/backend/src/setup_phase2.rs`, `ceremony.rs`, `ptau.rs`)
 
 * `.ptau` admissibility checks — degree match, subgroup membership,
   pairing-consistency, etc.
@@ -343,10 +331,10 @@ axioms only) and combined with cross-circuit `Call` inlining in
   CLI guards prevent its use outside dev mode.
 
 All four enforcement paths (Schnorr-PoK, transcript chain, δ
-consistency, dev-mode guard) are pinned by
-`crates/tests/tests/ceremony_enforcement.rs` (10/10 pass).
+consistency, dev-mode guard) are exercised by the ptau/setup test
+paths in `crates/tests/tests/`.
 
-### 6. Serialisation boundaries (`crates/backend/src/{serialization,solana}.rs`)
+### 5. Serialisation boundaries (`crates/backend/src/{serialization,solana}.rs`)
 
 * Binary VK/proof format — pinned by
   [`serialization.md`](serialization.md) and snapshot-tested.
@@ -356,7 +344,7 @@ consistency, dev-mode guard) are pinned by
   syscalls; `assemble_{vk,proof,public_inputs}_bytes_le` in `solana.rs`
   is the canonical encoder.
 
-### 7. On-chain verifier (`crates/verifier/src/verifier.rs`)
+### 6. On-chain verifier (`crates/verifier/src/verifier.rs`)
 
 Now fully Kani-proven for canonicality, fail-closed, strict
 non-malleability, arity, totality (over the full body, with stubs for
@@ -386,7 +374,7 @@ SHA-256 in `expected.sha256` verified in CI by
 
 | Component | Mitigation |
 |---|---|
-| `nargo` / ACVM correctness | Pin the version, document known limitations, fuzz the ACIR output. |
+| `rustc` MIR shape (nightly) | Pin the nightly toolchain, validate the accepted MIR subset and reject everything else, fuzz the lowering. |
 | `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test: `crates/tests/tests/differential_alt_bn128.rs` evaluates the same fixed test vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change. Each new vector in either `G1_ADD_VECTORS` / `G1_MUL_VECTORS` / `G2_ADD_VECTORS` / `PAIRING_2_VECTORS` adds a differential anchor without changing the scaffolding. Extending to CPU-weeks of OSS-Fuzz is a follow-up. |
 | Arkworks Groth16 | Cite published Groth16 mechanisations (e.g. Microsoft's verified Groth16 in F*); no in-repo proof. |
 | Lean kernel + mathlib | Trusted base; replace via Coq cross-check if extreme confidence requires. |

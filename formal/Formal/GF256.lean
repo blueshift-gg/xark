@@ -38,7 +38,7 @@ namespace Xark
 is the byte representative of `t^k mod m(t)` for `m(t) = t^8 + t^4 +
 t^3 + t + 1`. Used to reduce `t^k` for `k ∈ [8, 15)` (the range of
 cross-product exponents `i + j` for `i, j < 8`). Matches
-`gadgets/aes.rs::gf256_xk_bits` line-for-line. -/
+`gf256_xk_bits` in `crates/xark-aes/src/lib.rs` line-for-line. -/
 def gf256_xk_bits : Fin 15 → ℕ
   | ⟨0, _⟩  => 0x01
   | ⟨1, _⟩  => 0x02
@@ -81,7 +81,7 @@ def gf256_mul (x y : ℕ) : ℕ :=
 
 /-- **AES GF(2^8) multiplicative-inverse table** (the standard table
 used in the AES S-box; matches `gf256_inv` in
-`gadgets/aes.rs::gf256_inv`). Entry `i` is the multiplicative inverse
+`crates/xark-aes/src/lib.rs`). Entry `i` is the multiplicative inverse
 of byte `i`; entry `0` is `0` by convention. Verified at the byte
 level by `gf256_mul_inv` below. -/
 def gf256_inv_table : List ℕ :=
@@ -190,6 +190,24 @@ theorem gf256_inv_unique (x y : Fin 256) (hx : 0 < x.val)
     (h : gf256_mul x.val y.val = 1) : y.val = gf256_inv x.val :=
   gf256_inv_unique_all x y hx h
 
+/-- GF(2^8) exponentiation by repeated `gf256_mul` (the operation the AES gadget
+computes via the Itoh–Tsujii chain, here in its naive folded form). -/
+def gf256_pow (x : ℕ) : ℕ → ℕ
+  | 0 => 1
+  | n + 1 => gf256_mul (gf256_pow x n) x
+
+/-- **Itoh–Tsujii inverse.** For every byte `x ∈ [0, 256)`, `x^254` in GF(2^8)
+equals the multiplicative inverse `gf256_inv x` (`x^254 = x^(-1)` since `x^255 = 1`
+for `x ≠ 0`, and `0^254 = 0 = gf256_inv 0`). This grounds the gadget's algebraic,
+table-free S-box (`affine(b^254)`) in the proven inverse. Verified over all 256
+bytes by `native_decide` (compiled bytecode — the fold, unlike an unrolled
+definition, keeps the bytecode small). -/
+theorem gf256_pow254_eq_inv_all : ∀ x : Fin 256, gf256_pow x.val 254 = gf256_inv x.val := by
+  native_decide
+
+theorem gf256_pow254_eq_inv (x : Fin 256) : gf256_pow x.val 254 = gf256_inv x.val :=
+  gf256_pow254_eq_inv_all x
+
 /-! ## AES affine transform
 
 Affine transform applied to a byte: each output bit `i` is
@@ -219,6 +237,17 @@ theorem aesSbox_algebraic_eq_table_all :
 theorem aesSbox_algebraic_eq_table (x : Fin 256) :
     aesSbox_algebraic x.val = (aesSboxTable[x.val]?).getD 0 :=
   aesSbox_algebraic_eq_table_all x
+
+/-- **Frontend AES S-box soundness.** Our gadget computes the S-box *without a
+table*: `affine(b²⁵⁴) ⊕ 0x63`, where `b²⁵⁴` is the Itoh–Tsujii inverse. This
+theorem proves that value equals the AES lookup-table S-box for every byte,
+composing `gf256_pow254_eq_inv` (`b²⁵⁴ = inv b`) with `aesSbox_algebraic_eq_table`
+(`affine(inv b) ⊕ 0x63 = table[b]`). It grounds the `xark-aes` algebraic S-box in
+the same table the rest of `Aes.lean` reasons over. -/
+theorem aesSbox_pow_eq_table (x : Fin 256) :
+    Nat.xor (aesAffine_nat (gf256_pow x.val 254)) 0x63 = (aesSboxTable[x.val]?).getD 0 := by
+  rw [gf256_pow254_eq_inv x]
+  exact aesSbox_algebraic_eq_table x
 
 /-! ## Byte8 ↔ ℕ recomposition over `ZMod r`-valued wires
 

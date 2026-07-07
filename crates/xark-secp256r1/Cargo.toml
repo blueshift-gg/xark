@@ -1,0 +1,14 @@
+[package]
+name = "xark-secp256r1"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+xark-bits = { path = "../xark-bits" }
+xark-ff = { path = "../xark-ff" }
+xark-curve = { path = "../xark-curve" }

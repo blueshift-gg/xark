@@ -63,5 +63,6 @@ G2 coordinates use the `Fq2 = c0 + c1*u` convention. The `x` array stores
 }
 ```
 
-The `inputs` array is in exactly the same order as
-`NoirArtifact::public_inputs`. The verifier consumes this order verbatim.
+The `inputs` array is in exactly the same order as the circuit's
+`Public<Field>` parameters (public-input declaration order). The verifier
+consumes this order verbatim.

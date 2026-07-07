@@ -20,34 +20,35 @@ pub use xark_verifier::*;
 // stable way to share the API.
 pub use solana_nostd_alt_bn128;
 
-/// Path to the built `xark` CLI binary, for the CLI integration tests.
-/// Locates it next to the running test binary; if it isn't there yet (e.g.
-/// `cargo test -p xark-tests` without a prior workspace build), builds it once.
+/// Path to the built `xark` toolchain/CLI binary, for the CLI integration tests.
+///
+/// The `xark` crate (`crates/xark`) is *excluded* from the workspace (it is the
+/// nightly rustc-driver toolchain), so it is not built by a normal workspace
+/// `cargo build`. Locate its compiled binary under `crates/xark/target/{release,
+/// debug}/xark`, building it once with `--features cli` if it isn't present.
 #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
 pub fn xark_bin() -> std::path::PathBuf {
     use std::sync::OnceLock;
     static BIN: OnceLock<std::path::PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        // current_exe is target/<profile>/deps/<test>-<hash>; the binary sits
-        // at target/<profile>/xark.
-        let mut dir = std::env::current_exe().expect("current_exe");
-        dir.pop();
-        if dir.ends_with("deps") {
-            dir.pop();
-        }
-        let bin = dir.join(if cfg!(windows) { "xark.exe" } else { "xark" });
-        if !bin.exists() {
-            let mut cmd = std::process::Command::new(env!("CARGO"));
-            cmd.args(["build", "-p", "xark-cli"]);
-            if !cfg!(debug_assertions) {
-                cmd.arg("--release");
+        // CARGO_MANIFEST_DIR is crates/tests; the xark crate is a sibling.
+        let xark_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("xark");
+        let exe = if cfg!(windows) { "xark.exe" } else { "xark" };
+        for profile in ["release", "debug"] {
+            let p = xark_crate.join("target").join(profile).join(exe);
+            if p.exists() {
+                return p;
             }
-            assert!(
-                cmd.status().expect("spawn cargo build").success(),
-                "failed to build the `xark` binary"
-            );
         }
-        bin
+        let status = std::process::Command::new(env!("CARGO"))
+            .args(["build", "--release", "--features", "cli", "--bin", "xark"])
+            .current_dir(&xark_crate)
+            .status()
+            .expect("spawn cargo build for the xark binary");
+        assert!(status.success(), "failed to build the `xark` binary");
+        xark_crate.join("target").join("release").join(exe)
     })
     .clone()
 }
@@ -105,7 +106,7 @@ pub mod fixtures {
         AES128_BASIC_VK,
         AES128_BASIC_PROOF,
         AES128_BASIC_INPUTS,
-        32,
+        16,
         "aes128_basic"
     );
     typed_fixture!(
@@ -126,28 +127,21 @@ pub mod fixtures {
         BLAKE2S_BASIC_VK,
         BLAKE2S_BASIC_PROOF,
         BLAKE2S_BASIC_INPUTS,
-        32,
+        9,
         "blake2s_basic"
     );
     typed_fixture!(
         BLAKE3_BASIC_VK,
         BLAKE3_BASIC_PROOF,
         BLAKE3_BASIC_INPUTS,
-        32,
+        9,
         "blake3_basic"
-    );
-    typed_fixture!(
-        BRILLIG_BASIC_VK,
-        BRILLIG_BASIC_PROOF,
-        BRILLIG_BASIC_INPUTS,
-        1,
-        "brillig_basic"
     );
     typed_fixture!(
         CURVE_BASIC_VK,
         CURVE_BASIC_PROOF,
         CURVE_BASIC_INPUTS,
-        2,
+        12,
         "curve_basic"
     );
     typed_fixture!(
@@ -168,7 +162,7 @@ pub mod fixtures {
         KECCAK_BASIC_VK,
         KECCAK_BASIC_PROOF,
         KECCAK_BASIC_INPUTS,
-        25,
+        4,
         "keccak_basic"
     );
     typed_fixture!(LARGE_PI_VK, LARGE_PI_PROOF, LARGE_PI_INPUTS, 16, "large_pi");
@@ -205,7 +199,7 @@ pub mod fixtures {
         POSEIDON_BASIC_VK,
         POSEIDON_BASIC_PROOF,
         POSEIDON_BASIC_INPUTS,
-        4,
+        3,
         "poseidon_basic"
     );
     typed_fixture!(

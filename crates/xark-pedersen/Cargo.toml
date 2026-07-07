@@ -1,0 +1,17 @@
+[package]
+name = "xark-pedersen"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "xark_pedersen"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+xark-bits = { path = "../xark-bits" }
+
+[dev-dependencies]
+xark-test-harness = { path = "../xark-test-harness" }
+xark-ir = { path = "../xark-ir" }

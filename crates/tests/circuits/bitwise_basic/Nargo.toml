@@ -1,6 +1,0 @@
-[package]
-name = "bitwise_basic"
-type = "bin"
-authors = [""]
-
-[dependencies]

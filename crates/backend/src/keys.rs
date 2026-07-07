@@ -42,7 +42,6 @@ pub struct KeyMetadata {
     pub production_safe: bool,
     pub circuit_hash: String,
     pub backend_version: String,
-    pub noir_version: String,
     pub created_at: String,
     pub num_public_inputs: usize,
     pub num_constraints: usize,
@@ -71,7 +70,6 @@ pub struct KeyMetadata {
 impl KeyMetadata {
     pub fn new_dev(
         circuit_hash: String,
-        noir_version: String,
         num_public_inputs: usize,
         num_constraints: usize,
     ) -> Self {
@@ -82,7 +80,6 @@ impl KeyMetadata {
             production_safe: false,
             circuit_hash,
             backend_version: env!("CARGO_PKG_VERSION").into(),
-            noir_version,
             created_at: chrono::Utc::now().to_rfc3339(),
             num_public_inputs,
             num_constraints,

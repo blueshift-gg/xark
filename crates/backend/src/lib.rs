@@ -1,7 +1,7 @@
-//! Arkworks Groth16 (BN254) backend driving the lowered ACIR circuit.
+//! Arkworks Groth16 (BN254) backend — frontend-agnostic (proves any
+//! `ConstraintSynthesizer`; the xark-IR `XarkCircuit` or otherwise).
 
 pub mod ceremony;
-pub mod circuit;
 pub mod keys;
 pub mod proof;
 pub mod prove;
@@ -12,7 +12,6 @@ pub mod setup_phase2;
 pub mod solana;
 pub mod verify;
 
-pub use circuit::NoirGroth16Circuit;
 pub use keys::{Groth16Keys, KeyMetadata};
 pub use proof::ProofBundle;
 pub use prove::prove;

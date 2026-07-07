@@ -1,0 +1,2718 @@
+{
+  "field": {
+    "name": "bn254",
+    "modulus_decimal": "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+  },
+  "variables": [
+    {
+      "id": 0,
+      "name": "a",
+      "visibility": "Private"
+    },
+    {
+      "id": 1,
+      "name": "b",
+      "visibility": "Private"
+    },
+    {
+      "id": 2,
+      "name": "out",
+      "visibility": "Public"
+    },
+    {
+      "id": 3,
+      "name": "t0",
+      "visibility": "Internal"
+    },
+    {
+      "id": 4,
+      "name": "t1",
+      "visibility": "Internal"
+    },
+    {
+      "id": 5,
+      "name": "t2",
+      "visibility": "Internal"
+    },
+    {
+      "id": 6,
+      "name": "t3",
+      "visibility": "Internal"
+    },
+    {
+      "id": 7,
+      "name": "t4",
+      "visibility": "Internal"
+    },
+    {
+      "id": 8,
+      "name": "t5",
+      "visibility": "Internal"
+    },
+    {
+      "id": 9,
+      "name": "t6",
+      "visibility": "Internal"
+    },
+    {
+      "id": 10,
+      "name": "t7",
+      "visibility": "Internal"
+    },
+    {
+      "id": 11,
+      "name": "t8",
+      "visibility": "Internal"
+    },
+    {
+      "id": 12,
+      "name": "t9",
+      "visibility": "Internal"
+    },
+    {
+      "id": 13,
+      "name": "t10",
+      "visibility": "Internal"
+    },
+    {
+      "id": 14,
+      "name": "t11",
+      "visibility": "Internal"
+    },
+    {
+      "id": 15,
+      "name": "t12",
+      "visibility": "Internal"
+    },
+    {
+      "id": 16,
+      "name": "t13",
+      "visibility": "Internal"
+    },
+    {
+      "id": 17,
+      "name": "t14",
+      "visibility": "Internal"
+    },
+    {
+      "id": 18,
+      "name": "t15",
+      "visibility": "Internal"
+    },
+    {
+      "id": 19,
+      "name": "t16",
+      "visibility": "Internal"
+    },
+    {
+      "id": 20,
+      "name": "t17",
+      "visibility": "Internal"
+    },
+    {
+      "id": 21,
+      "name": "t18",
+      "visibility": "Internal"
+    },
+    {
+      "id": 22,
+      "name": "t19",
+      "visibility": "Internal"
+    },
+    {
+      "id": 23,
+      "name": "t20",
+      "visibility": "Internal"
+    },
+    {
+      "id": 24,
+      "name": "t21",
+      "visibility": "Internal"
+    },
+    {
+      "id": 25,
+      "name": "t22",
+      "visibility": "Internal"
+    },
+    {
+      "id": 26,
+      "name": "t23",
+      "visibility": "Internal"
+    },
+    {
+      "id": 27,
+      "name": "t24",
+      "visibility": "Internal"
+    },
+    {
+      "id": 28,
+      "name": "t25",
+      "visibility": "Internal"
+    },
+    {
+      "id": 29,
+      "name": "t26",
+      "visibility": "Internal"
+    },
+    {
+      "id": 30,
+      "name": "t27",
+      "visibility": "Internal"
+    },
+    {
+      "id": 31,
+      "name": "t28",
+      "visibility": "Internal"
+    },
+    {
+      "id": 32,
+      "name": "t29",
+      "visibility": "Internal"
+    },
+    {
+      "id": 33,
+      "name": "t30",
+      "visibility": "Internal"
+    },
+    {
+      "id": 34,
+      "name": "t31",
+      "visibility": "Internal"
+    },
+    {
+      "id": 35,
+      "name": "t32",
+      "visibility": "Internal"
+    },
+    {
+      "id": 36,
+      "name": "t33",
+      "visibility": "Internal"
+    },
+    {
+      "id": 37,
+      "name": "t34",
+      "visibility": "Internal"
+    },
+    {
+      "id": 38,
+      "name": "t35",
+      "visibility": "Internal"
+    },
+    {
+      "id": 39,
+      "name": "t36",
+      "visibility": "Internal"
+    },
+    {
+      "id": 40,
+      "name": "t37",
+      "visibility": "Internal"
+    },
+    {
+      "id": 41,
+      "name": "t38",
+      "visibility": "Internal"
+    },
+    {
+      "id": 42,
+      "name": "t39",
+      "visibility": "Internal"
+    },
+    {
+      "id": 43,
+      "name": "t40",
+      "visibility": "Internal"
+    },
+    {
+      "id": 44,
+      "name": "t41",
+      "visibility": "Internal"
+    }
+  ],
+  "constraints": [
+    {
+      "id": 0,
+      "a": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "1 * 1 = t0"
+      }
+    },
+    {
+      "id": 1,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t0 * t0 = t1"
+      }
+    },
+    {
+      "id": 2,
+      "a": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "1 * t1 = t2"
+      }
+    },
+    {
+      "id": 3,
+      "a": {
+        "constant": {
+          "decimal": "2"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "2"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(a + 2) * (a + 2) = t3"
+      }
+    },
+    {
+      "id": 4,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t3 * t3 = t4"
+      }
+    },
+    {
+      "id": 5,
+      "a": {
+        "constant": {
+          "decimal": "2"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(a + 2) * t4 = t5"
+      }
+    },
+    {
+      "id": 6,
+      "a": {
+        "constant": {
+          "decimal": "3"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "3"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 9
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(b + 3) * (b + 3) = t6"
+      }
+    },
+    {
+      "id": 7,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 9
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 9
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t6 * t6 = t7"
+      }
+    },
+    {
+      "id": 8,
+      "a": {
+        "constant": {
+          "decimal": "3"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(b + 3) * t7 = t8"
+      }
+    },
+    {
+      "id": 9,
+      "a": {
+        "constant": {
+          "decimal": "4"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "4"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 12
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(2*t2 + 3*t5 + t8 + 4) * (2*t2 + 3*t5 + t8 + 4) = t9"
+      }
+    },
+    {
+      "id": 10,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 12
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 12
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 13
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t9 * t9 = t10"
+      }
+    },
+    {
+      "id": 11,
+      "a": {
+        "constant": {
+          "decimal": "4"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 13
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 14
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(2*t2 + 3*t5 + t8 + 4) * t10 = t11"
+      }
+    },
+    {
+      "id": 12,
+      "a": {
+        "constant": {
+          "decimal": "5"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "5"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 15
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(t2 + 2*t5 + 3*t8 + 5) * (t2 + 2*t5 + 3*t8 + 5) = t12"
+      }
+    },
+    {
+      "id": 13,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 15
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 15
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 16
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t12 * t12 = t13"
+      }
+    },
+    {
+      "id": 14,
+      "a": {
+        "constant": {
+          "decimal": "5"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 16
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 17
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(t2 + 2*t5 + 3*t8 + 5) * t13 = t14"
+      }
+    },
+    {
+      "id": 15,
+      "a": {
+        "constant": {
+          "decimal": "6"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "6"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 18
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(3*t2 + t5 + 2*t8 + 6) * (3*t2 + t5 + 2*t8 + 6) = t15"
+      }
+    },
+    {
+      "id": 16,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 18
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 18
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 19
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t15 * t15 = t16"
+      }
+    },
+    {
+      "id": 17,
+      "a": {
+        "constant": {
+          "decimal": "6"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 11
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 19
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 20
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(3*t2 + t5 + 2*t8 + 6) * t16 = t17"
+      }
+    },
+    {
+      "id": 18,
+      "a": {
+        "constant": {
+          "decimal": "7"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 20
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "7"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 20
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 21
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(2*t11 + 3*t14 + t17 + 7) * (2*t11 + 3*t14 + t17 + 7) = t18"
+      }
+    },
+    {
+      "id": 19,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 21
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 21
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 22
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t18 * t18 = t19"
+      }
+    },
+    {
+      "id": 20,
+      "a": {
+        "constant": {
+          "decimal": "7"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 20
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 22
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 23
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(2*t11 + 3*t14 + t17 + 7) * t19 = t20"
+      }
+    },
+    {
+      "id": 21,
+      "a": {
+        "constant": {
+          "decimal": "43"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "6"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "7"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "11"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 23
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "43"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "6"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "7"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "11"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 23
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 24
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(6*t11 + 7*t14 + 11*t17 + 2*t20 + 43) * (6*t11 + 7*t14 + 11*t17 + 2*t20 + 43) = t21"
+      }
+    },
+    {
+      "id": 22,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 24
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 24
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 25
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t21 * t21 = t22"
+      }
+    },
+    {
+      "id": 23,
+      "a": {
+        "constant": {
+          "decimal": "43"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "6"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "7"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "11"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 23
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 25
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(6*t11 + 7*t14 + 11*t17 + 2*t20 + 43) * t22 = t23"
+      }
+    },
+    {
+      "id": 24,
+      "a": {
+        "constant": {
+          "decimal": "213"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "40"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "25"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "43"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "6"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "213"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "40"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "25"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "43"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "6"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 27
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(40*t11 + 25*t14 + 43*t17 + 6*t20 + 2*t23 + 213) * (40*t11 + 25*t14 + 43*t17 + 6*t20 + 2*t23 + 213) = t24"
+      }
+    },
+    {
+      "id": 25,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 27
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 27
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 28
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t24 * t24 = t25"
+      }
+    },
+    {
+      "id": 26,
+      "a": {
+        "constant": {
+          "decimal": "213"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "40"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "25"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "43"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "6"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 28
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 29
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(40*t11 + 25*t14 + 43*t17 + 6*t20 + 2*t23 + 213) * t25 = t26"
+      }
+    },
+    {
+      "id": 27,
+      "a": {
+        "constant": {
+          "decimal": "236"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "43"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "26"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "45"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "11"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "236"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "43"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "26"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "45"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "11"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 30
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(43*t11 + 26*t14 + 45*t17 + 11*t20 + t23 + 236) * (43*t11 + 26*t14 + 45*t17 + 11*t20 + t23 + 236) = t27"
+      }
+    },
+    {
+      "id": 28,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 30
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 30
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 31
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t27 * t27 = t28"
+      }
+    },
+    {
+      "id": 29,
+      "a": {
+        "constant": {
+          "decimal": "236"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "43"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "26"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "45"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "11"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 31
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 32
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(43*t11 + 26*t14 + 45*t17 + 11*t20 + t23 + 236) * t28 = t29"
+      }
+    },
+    {
+      "id": 30,
+      "a": {
+        "constant": {
+          "decimal": "145"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "25"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "15"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "26"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "7"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "145"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "25"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "15"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "26"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "7"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 33
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(25*t11 + 15*t14 + 26*t17 + 7*t20 + 3*t23 + 145) * (25*t11 + 15*t14 + 26*t17 + 7*t20 + 3*t23 + 145) = t30"
+      }
+    },
+    {
+      "id": 31,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 33
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 33
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 34
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t30 * t30 = t31"
+      }
+    },
+    {
+      "id": 32,
+      "a": {
+        "constant": {
+          "decimal": "145"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "25"
+            },
+            "var": 14
+          },
+          {
+            "coeff": {
+              "decimal": "15"
+            },
+            "var": 17
+          },
+          {
+            "coeff": {
+              "decimal": "26"
+            },
+            "var": 20
+          },
+          {
+            "coeff": {
+              "decimal": "7"
+            },
+            "var": 23
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 26
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 34
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(25*t11 + 15*t14 + 26*t17 + 7*t20 + 3*t23 + 145) * t31 = t32"
+      }
+    },
+    {
+      "id": 33,
+      "a": {
+        "constant": {
+          "decimal": "16"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "16"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 36
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(2*t26 + 3*t29 + t32 + 16) * (2*t26 + 3*t29 + t32 + 16) = t33"
+      }
+    },
+    {
+      "id": 34,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 36
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 36
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 37
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t33 * t33 = t34"
+      }
+    },
+    {
+      "id": 35,
+      "a": {
+        "constant": {
+          "decimal": "16"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 37
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 38
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(2*t26 + 3*t29 + t32 + 16) * t34 = t35"
+      }
+    },
+    {
+      "id": 36,
+      "a": {
+        "constant": {
+          "decimal": "17"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "17"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 39
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(t26 + 2*t29 + 3*t32 + 17) * (t26 + 2*t29 + 3*t32 + 17) = t36"
+      }
+    },
+    {
+      "id": 37,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 39
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 39
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 40
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t36 * t36 = t37"
+      }
+    },
+    {
+      "id": 38,
+      "a": {
+        "constant": {
+          "decimal": "17"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 40
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 41
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(t26 + 2*t29 + 3*t32 + 17) * t37 = t38"
+      }
+    },
+    {
+      "id": 39,
+      "a": {
+        "constant": {
+          "decimal": "18"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "18"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 42
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(3*t26 + t29 + 2*t32 + 18) * (3*t26 + t29 + 2*t32 + 18) = t39"
+      }
+    },
+    {
+      "id": 40,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 42
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 42
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 43
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t39 * t39 = t40"
+      }
+    },
+    {
+      "id": 41,
+      "a": {
+        "constant": {
+          "decimal": "18"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 29
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 32
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 35
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 43
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 44
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(3*t26 + t29 + 2*t32 + 18) * t40 = t41"
+      }
+    },
+    {
+      "id": 42,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "-1"
+            },
+            "var": 2
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 38
+          },
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 41
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 44
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": []
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(-out + 2*t35 + 3*t38 + t41) * 1 = 0"
+      }
+    }
+  ]
+}

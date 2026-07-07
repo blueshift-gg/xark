@@ -19,7 +19,7 @@ set_option maxHeartbeats 800000
 
 This file builds the **structural** soundness layer for one AES round-step
 (`SubBytes → ShiftRows → (MixColumns if not final) → AddRoundKey`) in
-`crates/acir-r1cs/src/gadgets/aes.rs`, in the spirit of
+`crates/xark-aes/src/lib.rs`, in the spirit of
 `Formal/Sha256.lean`. Bit-level equivalence of *individual* per-bit gadgets
 (`and`, `xor`, `not`, S-box lookup) is discharged in `Formal/Bitwise.lean`
 and the S-box pinning lemmas in `Formal/Gadgets.lean`.
@@ -51,7 +51,7 @@ from per-round `aesRoundStep_bit_sound` invocations through
 The S-box layer's bit-encoding ≡ `aesSboxTable` is **definitional** in
 the spec (`aesSbox = byteOfNat ∘ aesSboxTable[· byteToNat]`), and the
 gadget materialises it via the 256-entry table lookup
-(`s_box_in_circuit` in `aes.rs`). The gadget's per-row lookup soundness
+(`s_box_in_circuit` in `crates/xark-aes/src/lib.rs`). The gadget's per-row lookup soundness
 is `sbox_sound` / `sbox_unique` in `Formal.Gadgets`; here we only need
 the structural statement "the SubBytes layer's output byte is the spec
 S-box of the input byte".
@@ -402,7 +402,7 @@ matrix multiplication composes `aesXTime_sound` and `xor8_sound` over
 the 4-row state. We expose a witness function `aesMixColumnWire`
 per (row, bit) pair, equal to the field-level chain of XORs and
 `xtime` doublings that the gadget materialises (see
-`mix_columns` in `aes.rs`). -/
+`mix_columns` in `crates/xark-aes/src/lib.rs`). -/
 theorem aesMixColumn_sound {F : Type*} [Field F]
     (c0 c1 c2 c3 : Byte8) (wC0 wC1 wC2 wC3 : Fin 8 → F)
     (h0 : ∀ j, BitOf (wC0 j) (c0 j))
@@ -1398,11 +1398,11 @@ mechanised in Lean** via `IsValidSBoxByteWitness` and
 What remains *outside* Lean is the **Rust-side claim** that the
 gadget's emitted R1CS rows actually instantiate
 `IsValidSBoxByteWitness` (i.e., that the constraints written by
-`s_box_in_circuit` in `gadgets/aes.rs` correspond field-for-field to
+the S-box gadget in `crates/xark-aes/src/lib.rs` correspond field-for-field to
 the structure's hypotheses). The trust anchor for that bridge is:
 
 * the Rust exhaustive unit test `sbox_all_inputs_match_table` in
-  `gadgets/aes.rs::tests`, which instantiates the gadget on every
+  `crates/xark-aes/src/lib.rs`, which instantiates the gadget on every
   input byte `x ∈ [0, 255]` and asserts the gadget output equals
   `SBOX[x]`.
 

@@ -1,6 +1,0 @@
-[package]
-name = "multi_function"
-type = "bin"
-authors = [""]
-
-[dependencies]

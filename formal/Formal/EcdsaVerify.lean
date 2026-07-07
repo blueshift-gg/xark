@@ -14,11 +14,11 @@ set_option linter.style.longLine false
 # ECDSA verification end-to-end soundness
 
 Top-level soundness statement for the in-circuit ECDSA verifier in
-`crates/acir-r1cs/src/gadgets/ecdsa.rs::ecdsa_verify_with_curve`, packaging the
+the secp256k1 gadget (`crates/xark-secp256k1/src/lib.rs`), packaging the
 per-primitive theorems already proved in `formal/`:
 
 * `Formal.NonNative.mul_mod_via_Fr_limbwise_constraints` — the non-native
-  modular product (`a · b mod m`) over 4 × 64-bit BN254 `Fr` limbs is sound.
+  modular product (`a · b mod m`) over 3 × 86-bit BN254 `Fr` limbs is sound.
 * `Formal.Ecdsa.ladder_correct` — the LSB-first double-and-add scalar ladder
   computes `scalar • P` in any additive commutative group.
 
@@ -48,7 +48,7 @@ What it does **not** close:
 * secp256k1 / secp256r1 point-addition closure (`Formal.Curve` is Grumpkin).
 * The on-curve check for the public key — meaningful only once `G` is a
   concrete curve group.
-* The 4-limb `range`-gadget bridge from prover-supplied limbs in
+* The 3-limb `range`-gadget bridge from prover-supplied limbs in
   `Fin 4 → ZMod r` to the `.val` of the corresponding `ZMod n` element. That
   is layered separately in `Formal.NonNative` and feeds the `_val` hypotheses
   here as `valOfLimbs` equalities.
@@ -91,7 +91,7 @@ def EcdsaVerifyRel {G : Type*} [AddCommGroup G]
 /-! ## Gadget intermediate-state witness -/
 
 /-- **Gadget intermediate-state predicate.** Mirrors the witness allocations
-in `gadgets/ecdsa.rs::ecdsa_verify_with_curve` one-to-one:
+in the secp256k1 ECDSA-verify gadget (`crates/xark-secp256k1/src/lib.rs`) one-to-one:
 
 | Field            | Gadget constraint                                                |
 |------------------|------------------------------------------------------------------|
@@ -104,7 +104,7 @@ in `gadgets/ecdsa.rs::ecdsa_verify_with_curve` one-to-one:
 | `r_eq_xR`        | `enforce_bigint_eq(Rpt.x mod n, r)`                              |
 
 Notice: every field is an algebraic equality (or non-zero predicate) in
-`ZMod n` / `G`. The lift from prover-supplied 4-limb `Fr` witnesses to these
+`ZMod n` / `G`. The lift from prover-supplied 3-limb `Fr` witnesses to these
 `ZMod n` equalities is exactly what `mul_mod_via_Fr_limbwise_constraints`
 (arithmetic) and `ladder_correct` + `range_unique` (scalar mul) discharge —
 see `mul_mod_lifts_to_ZMod` and `ladder_gives_R_def` below. -/

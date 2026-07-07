@@ -10,13 +10,13 @@ set_option linter.style.header false
 set_option linter.style.longLine false
 
 /-!
-# ACIR ↔ R1CS allocation bookkeeping
+# witness ↔ R1CS allocation bookkeeping
 
 Two small composition lemmas that tie the per-gadget soundness theorems
 to the surrounding allocation discipline of `R1csBuilder`:
 
 * **`alloc_witness` is idempotent + injective.** The per-gadget theorems
-  all assume that the ACIR witness-index → R1CS witness-wire bijection
+  all assume that the source witness-index → R1CS witness-wire bijection
   holds. This file models the `R1csBuilder::alloc_witness` table as a
   partial map (`alloc_state`) and proves both properties over any
   allocation sequence.
@@ -33,7 +33,7 @@ namespace Xark
 /-! ## `alloc_witness` allocation table -/
 
 /-- Pure-Lean model of `R1csBuilder`'s witness-index → variable-index
-allocation table. `assigned i = some v` means the ACIR witness index `i`
+allocation table. `assigned i = some v` means the source witness index `i`
 has been allocated to R1CS variable `v`; `assigned i = none` means it has
 not yet been allocated. `next` is the next variable index to hand out. -/
 structure AllocState where
@@ -104,7 +104,7 @@ theorem alloc_witness_idempotent (m : AllocState) (idx : ℕ) :
     simp
 
 /-- **`alloc_witness` is injective on distinct indices.** Two
-distinct ACIR witness indices `idx₁ ≠ idx₂`, freshly allocated against the
+distinct source witness indices `idx₁ ≠ idx₂`, freshly allocated against the
 same starting state (both initially `none`), produce distinct R1CS
 variables. -/
 theorem alloc_witness_injective
@@ -131,7 +131,8 @@ emits.
 For `Read`: the gadget emits `value = arr_pre[k]`, a direct copy.
 For `Write`: the gadget emits `arr_post[k] = new_value`, and
 `arr_post[j] = arr_pre[j]` for `j ≠ k`. Both reduce to one R1CS row each
-under the constant-index path in `acir-r1cs/src/opcodes/memory.rs`. -/
+under the constant-index path in the xark compiler's array-indexing
+lowering (`crates/xark/src/lower_mir.rs`). -/
 
 /-- **Const-index `MemoryOp::Read` soundness.** When the index `k` is a
 literal, the gadget skips the selector layer and emits `value = arr[k]`

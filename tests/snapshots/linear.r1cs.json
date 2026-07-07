@@ -1,0 +1,69 @@
+{
+  "field": {
+    "name": "unknown",
+    "modulus_decimal": null
+  },
+  "variables": [
+    {
+      "id": 0,
+      "name": "x",
+      "visibility": "Private"
+    },
+    {
+      "id": 1,
+      "name": "y",
+      "visibility": "Private"
+    },
+    {
+      "id": 2,
+      "name": "z",
+      "visibility": "Public"
+    }
+  ],
+  "constraints": [
+    {
+      "id": 0,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "3"
+            },
+            "var": 0
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "-1"
+            },
+            "var": 2
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": []
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(3*x + 2*y - z) * 1 = 0"
+      }
+    }
+  ]
+}

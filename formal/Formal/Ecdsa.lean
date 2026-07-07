@@ -12,9 +12,9 @@ set_option linter.style.header false
 /-!
 # xark double-and-add ladder soundness — mechanised in Lean 4 / mathlib
 
-`crates/acir-r1cs/src/gadgets/curve.rs::scalar_mul_in_circuit` (and the
-`msm_in_circuit` that calls it, plus the ECDSA verifier in
-`crates/acir-r1cs/src/gadgets/ecdsa.rs`) computes `s · P` in-circuit by the
+The scalar-mul gadget (`crates/xark-grumpkin/src/lib.rs`) (and the
+MSM gadget that calls it, plus the ECDSA verifier in
+`crates/xark-secp256k1/src/lib.rs`) computes `s · P` in-circuit by the
 standard LSB-first **double-and-add** ladder:
 
     acc      := 0                       -- point at infinity

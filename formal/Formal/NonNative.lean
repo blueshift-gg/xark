@@ -13,7 +13,7 @@ set_option linter.style.header false
 /-!
 # xark non-native modular-product soundness — mechanised in Lean 4 / mathlib
 
-The ECDSA verifier in `crates/acir-r1cs/src/gadgets/ecdsa.rs` evaluates the
+The ECDSA verifier in `crates/xark-secp256k1/src/lib.rs` evaluates the
 secp256k1 base- and scalar-field arithmetic *inside* a BN254 R1CS. Both
 secp256k1 moduli are 256 bits wide and do not fit in BN254 `Fr` (~254 bits),
 so every non-native multiplication `c = a · b mod m` is lowered via the
@@ -22,7 +22,7 @@ remainder `c`, and the circuit checks the *integer* identity
 
     a · b = q · m + c
 
-limb-by-limb (`β = 2^64`, four limbs per 256-bit value) while a separate
+limb-by-limb (`β = 2^86`, three limbs per 256-bit value) while a separate
 range gadget pins `0 ≤ c < m` by bit-decomposing `c`. This pattern is reused
 verbatim by `inv_mod` (`a · a⁻¹ = 1 mod m`) and by every affine point-add /
 point-double / scalar-mul step that feeds into the ECDSA verifier.
@@ -70,7 +70,8 @@ limb-by-limb `Fr` constraints emitted by `mul_mod` to the integer identity over
   `a, b, q, c, m : Fin n → ℕ` and a carry function `carry : ℕ → ℕ` satisfying the
   per-column equations together with `valOfLimbs c β < valOfLimbs m β` and
   `0 < valOfLimbs m β`, then `valOfLimbs c β = (valOfLimbs a β · valOfLimbs b β) % valOfLimbs m β`.
-  This is the **full soundness chain** for `ecdsa.rs::mul_mod`: limb-by-limb
+  This is the **full soundness chain** for the non-native `mod_mul` gadget
+  (`crates/xark-ff/src/lib.rs`): limb-by-limb
   constraints + carry-no-wrap ⇒ modular product is correct.
 
 The "no carry wrap" hypothesis is captured by the carries being natural numbers
@@ -90,12 +91,11 @@ discharges the gap between the `ℕ`-valued statement above and the actual
 * `carry_le` — the carry-budget bound: assuming the per-column ℕ-equation, the
   `k`-th carry stays below `(k + 1) · n · (β − 1)²`.
 * `mul_mod_via_Fr_limbwise_constraints` — the headline theorem for the
-  secp256k1 concrete shape (`n = 4`, `β = 2 ^ 64`): from the per-column
+  secp256k1 concrete shape (`n = 3`, `β = 2 ^ 86`): from the per-column
   equations holding in `Fr` together with the limb / carry value bounds
   (the in-circuit range obligation), the integer-level conclusion of
-  `mul_mod_via_limbwise_constraints` follows. The closing budget chain is
-  `4 · (2^64 − 1)² + carry ≤ 2 ^ 137 < 2 ^ 253 < r` — well below the BN254
-  modulus, so no field wrap occurs in any column equation.
+  `mul_mod_via_limbwise_constraints` follows. The budget chain keeps every
+  column expression far below the BN254 modulus `r`, so no field wrap occurs.
 -/
 
 namespace Xark
@@ -106,8 +106,8 @@ namespace Xark
 satisfying the *integer* identity `a · b = q · m + c` and the gadget's bit
 decomposition pins `c < m` (with `m` positive — vacuous for the secp256k1
 base / scalar moduli, which are large primes), then `c` is exactly the modular
-product `(a · b) % m`. This is the abstract content of what `mul_mod` in
-`gadgets/ecdsa.rs` enforces. -/
+product `(a · b) % m`. This is the abstract content of what the non-native
+`mod_mul` gadget (`crates/xark-ff/src/lib.rs`) enforces. -/
 theorem mul_mod_sound (a b q c m : ℕ) (hc : c < m)
     (h : a * b = q * m + c) :
     c = (a * b) % m := by
@@ -128,9 +128,9 @@ theorem mul_mod_complete (a b m : ℕ) (hm : 0 < m) :
 
 /-- The integer value of an `n`-limb little-endian vector with limb base `β`:
 `valOfLimbs ls β = Σᵢ ls i · β^i`. Models the in-circuit reconstruction
-`Σᵢ β^i · limbᵢ` emitted by `Limbs256::recompose` in `gadgets/ecdsa.rs`, but
+`Σᵢ β^i · limbᵢ` emitted by the limb recomposition in `crates/xark-ff/src/lib.rs`, but
 phrased generically over the number of limbs and over an arbitrary base.
-The secp256k1 lowering instantiates `n = 4`, `β = 2 ^ 64`. -/
+The secp256k1 lowering instantiates `n = 3`, `β = 2 ^ 86`. -/
 def valOfLimbs {n : ℕ} (ls : Fin n → ℕ) (β : ℕ) : ℕ :=
   ∑ i : Fin n, ls i * β ^ (i : ℕ)
 
@@ -144,7 +144,7 @@ theorem valOfLimbs_zero (ls : Fin 0 → ℕ) (β : ℕ) :
 /-- **Cons-style recomposition identity.** A length-`n+1` limb vector splits
 into its `0`-th limb plus `β` times the recomposition of the tail. This is the
 single inductive step you need to fold any limbwise statement into a whole-value
-statement (e.g. for the `n = 4` secp256k1 case). -/
+statement (e.g. for the `n = 3` secp256k1 case). -/
 theorem valOfLimbs_succ {n : ℕ} (ls : Fin (n + 1) → ℕ) (β : ℕ) :
     valOfLimbs ls β
       = ls 0 + β * valOfLimbs (fun i : Fin n => ls i.succ) β := by
@@ -405,7 +405,7 @@ theorem valOfLimbs_eq_valOfNatLimbs_ext {n : ℕ} (ls : Fin n → ℕ) (β : ℕ
 
 /-- **Limbwise constraints + carry-no-wrap ⇒ modular product (gluing).**
 
-This is the full soundness chain for `crates/acir-r1cs/src/gadgets/ecdsa.rs::mul_mod`:
+This is the full soundness chain for the non-native `mod_mul` gadget (`crates/xark-ff/src/lib.rs`):
 the limb-by-limb `Fr` column constraints, modeled as plain-ℕ equations on the
 extended limbs (which is sound provided the in-circuit carry range gadget
 ensures no carry wraps in `Fr`), force the recomposed value of `c` to be the
@@ -595,7 +595,7 @@ theorem carry_le {n : ℕ} (a b q c m : Fin n → ℕ)
 
 /-! ## Headline theorem: Fr-level limbwise constraints ⇒ modular product
 
-The constraints emitted by `ecdsa.rs::mul_mod` live in `Fr = ZMod r`. The
+The constraints emitted by the non-native `mod_mul` gadget (`crates/xark-ff/src/lib.rs`) live in `Fr = ZMod r`. The
 column equation we prove sound here is
 
   `(∑ i ∈ [0, k+1), aᵢ · b_{k-i}) + carry k`
@@ -603,11 +603,11 @@ column equation we prove sound here is
 
 where every quantity is `Fr`-valued. The "no field wrap" obligation is the
 prover-side circuit range gadget on each `carry k`. For the secp256k1
-instantiation `n = 4`, `β = 2 ^ 64`, the budget chain
+instantiation `n = 3`, `β = 2 ^ 86`, the budget chain
 
-  `colSum ≤ 4 · (2^64 - 1)²  <  2^130`
-  `carry k ≤ (k + 1) · (β - 1)²  <  2^133`        (`carry_le` with `k < 2n = 8`)
-  `colSum + carry k + β · carry (k+1) < 2^137 < 2^253 < r`
+  `colSum ≤ 3 · (2^86 - 1)²  <  2^175`
+  `carry k  <  2^92`                              (in-circuit range check, `k < 2n = 6`)
+  `colSum + carry k + β · carry (k+1) < 2^179 < 2^253 < r`
 
 shows that no column-equation expression overflows `Fr`, so the `Fr`-equation
 can be read off as an `ℕ`-equation via `.val`. The conclusion is then exactly
@@ -628,50 +628,38 @@ theorem val_extFr {n : ℕ} (ls : Fin n → ZMod r) (i : ℕ) :
   · simp only [hi, dite_false]
     exact ZMod.val_zero
 
-/-- **Headline: Fr-level no-wrap soundness for the limbwise modular product.**
-
-Specialised to the secp256k1 shape `n = 4`, `β = 2 ^ 64`. The prover supplies:
-* `a, b, q, c, m : Fin 4 → ZMod r` — limb-decompositions of the input, the
-  quotient, the remainder, and the modulus, with every limb's natural-number
-  value strictly bounded by `β = 2 ^ 64` (the `MAX_BITS = 64` per-limb range
-  gadget);
-* `carry : ℕ → ZMod r` — the propagating column carry, pinned to `0 : ZMod r`
-  at both endpoints (`carry 0 = carry 8 = 0`).
-
-Together with the per-column `Fr`-equation `hcol_Fr` enforced by `mul_mod` and
-the standard remainder range obligation `hc_lt` plus modulus positivity `hm`,
-the limb-recomposed remainder `(c i).val` is the unique modular product of
-the limb-recomposed inputs.
-
-The budget chain `4 · (2^64 − 1)² + (2 · 4) · (2^64)² < 2 ^ 137 < 2 ^ 253 < r`
-shows no column expression wraps in `Fr`, so the `Fr`-equation is sound as a
-`ℕ`-equation on limb `.val`s, and the conclusion follows from
-`mul_mod_via_limbwise_constraints`. -/
+set_option maxRecDepth 8000 in
+/-- **Fr-level no-wrap soundness for the limbwise modular product (3-limb).**
+Non-native modular-product soundness at `n = 3`, `β = 2^86`, matching the
+`mod_mul` gadget in `xark-ff` (5 product columns; carries range-checked to
+`< 2^92`). The budget chain keeps every column expression far below `r`, so the
+`Fr`-equation is sound as a `ℕ`-equation on limb `.val`s and the conclusion
+follows from `mul_mod_via_limbwise_constraints`. -/
 theorem mul_mod_via_Fr_limbwise_constraints
-    (a b q c m : Fin 4 → ZMod r)
+    (a b q c m : Fin 3 → ZMod r)
     (carry : ℕ → ZMod r)
-    (ha : ∀ i, (a i).val < 2 ^ 64) (hb : ∀ i, (b i).val < 2 ^ 64)
-    (hq : ∀ i, (q i).val < 2 ^ 64) (hc : ∀ i, (c i).val < 2 ^ 64)
-    (hmL : ∀ i, (m i).val < 2 ^ 64)
-    (hcarry : ∀ k, (carry k).val < 2 ^ 140)
-    (h0 : carry 0 = 0) (h2n : carry 8 = 0)
-    (hcol_Fr : ∀ k ∈ Finset.range 8,
+    (ha : ∀ i, (a i).val < 2 ^ 86) (hb : ∀ i, (b i).val < 2 ^ 86)
+    (hq : ∀ i, (q i).val < 2 ^ 86) (hc : ∀ i, (c i).val < 2 ^ 86)
+    (hmL : ∀ i, (m i).val < 2 ^ 86)
+    (hcarry : ∀ k, (carry k).val < 2 ^ 92)
+    (h0 : carry 0 = 0) (h2n : carry 6 = 0)
+    (hcol_Fr : ∀ k ∈ Finset.range 6,
         (∑ i ∈ Finset.range (k + 1), extFr a i * extFr b (k - i)) + carry k
           = (∑ i ∈ Finset.range (k + 1), extFr q i * extFr m (k - i))
-              + extFr c k + (2 ^ 64 : ZMod r) * carry (k + 1))
-    (hm_pos : 0 < valOfLimbs (fun i => (m i).val) (2 ^ 64))
-    (hc_lt : valOfLimbs (fun i => (c i).val) (2 ^ 64)
-              < valOfLimbs (fun i => (m i).val) (2 ^ 64)) :
-    valOfLimbs (fun i => (c i).val) (2 ^ 64)
-      = (valOfLimbs (fun i => (a i).val) (2 ^ 64)
-          * valOfLimbs (fun i => (b i).val) (2 ^ 64))
-          % valOfLimbs (fun i => (m i).val) (2 ^ 64) := by
+              + extFr c k + (2 ^ 86 : ZMod r) * carry (k + 1))
+    (hm_pos : 0 < valOfLimbs (fun i => (m i).val) (2 ^ 86))
+    (hc_lt : valOfLimbs (fun i => (c i).val) (2 ^ 86)
+              < valOfLimbs (fun i => (m i).val) (2 ^ 86)) :
+    valOfLimbs (fun i => (c i).val) (2 ^ 86)
+      = (valOfLimbs (fun i => (a i).val) (2 ^ 86)
+          * valOfLimbs (fun i => (b i).val) (2 ^ 86))
+          % valOfLimbs (fun i => (m i).val) (2 ^ 86) := by
   -- Abbreviations for the ℕ-side limbs.
-  set aN : Fin 4 → ℕ := fun i => (a i).val
-  set bN : Fin 4 → ℕ := fun i => (b i).val
-  set qN : Fin 4 → ℕ := fun i => (q i).val
-  set cN : Fin 4 → ℕ := fun i => (c i).val
-  set mN : Fin 4 → ℕ := fun i => (m i).val
+  set aN : Fin 3 → ℕ := fun i => (a i).val
+  set bN : Fin 3 → ℕ := fun i => (b i).val
+  set qN : Fin 3 → ℕ := fun i => (q i).val
+  set cN : Fin 3 → ℕ := fun i => (c i).val
+  set mN : Fin 3 → ℕ := fun i => (m i).val
   set carryN : ℕ → ℕ := fun k => (carry k).val
   -- Bound on each `extFr · extFr` product (≤ (β-1)² < 2^128 < r).
   have rgt : 2 ^ 253 < r := two_pow_lt_r
@@ -680,32 +668,32 @@ theorem mul_mod_via_Fr_limbwise_constraints
     exact Nat.pos_iff_ne_zero.mp hrpos
   -- Boundary carry values are 0 in ℕ.
   have h0N : carryN 0 = 0 := by simp [carryN, h0, ZMod.val_zero]
-  have h2nN : carryN 8 = 0 := by simp [carryN, h2n, ZMod.val_zero]
+  have h2nN : carryN 6 = 0 := by simp [carryN, h2n, ZMod.val_zero]
   -- Bound on aN, bN, qN, cN, mN.
-  have haN : ∀ i, aN i < 2 ^ 64 := ha
-  have hbN : ∀ i, bN i < 2 ^ 64 := hb
-  have hqN : ∀ i, qN i < 2 ^ 64 := hq
-  have hcN : ∀ i, cN i < 2 ^ 64 := hc
-  have hmN : ∀ i, mN i < 2 ^ 64 := hmL
+  have haN : ∀ i, aN i < 2 ^ 86 := ha
+  have hbN : ∀ i, bN i < 2 ^ 86 := hb
+  have hqN : ∀ i, qN i < 2 ^ 86 := hq
+  have hcN : ∀ i, cN i < 2 ^ 86 := hc
+  have hmN : ∀ i, mN i < 2 ^ 86 := hmL
   -- ext bounds for the column-sum bound lemma.
-  have ha_ext : ∀ i, ext aN i < 2 ^ 64 := by
+  have ha_ext : ∀ i, ext aN i < 2 ^ 86 := by
     intro i; unfold ext
-    by_cases hi : i < 4
+    by_cases hi : i < 3
     · simp only [hi, dite_true]; exact haN _
     · simp only [hi, dite_false]; positivity
-  have hb_ext : ∀ i, ext bN i < 2 ^ 64 := by
+  have hb_ext : ∀ i, ext bN i < 2 ^ 86 := by
     intro i; unfold ext
-    by_cases hi : i < 4
+    by_cases hi : i < 3
     · simp only [hi, dite_true]; exact hbN _
     · simp only [hi, dite_false]; positivity
-  have hq_ext : ∀ i, ext qN i < 2 ^ 64 := by
+  have hq_ext : ∀ i, ext qN i < 2 ^ 86 := by
     intro i; unfold ext
-    by_cases hi : i < 4
+    by_cases hi : i < 3
     · simp only [hi, dite_true]; exact hqN _
     · simp only [hi, dite_false]; positivity
-  have hm_ext : ∀ i, ext mN i < 2 ^ 64 := by
+  have hm_ext : ∀ i, ext mN i < 2 ^ 86 := by
     intro i; unfold ext
-    by_cases hi : i < 4
+    by_cases hi : i < 3
     · simp only [hi, dite_true]; exact hmN _
     · simp only [hi, dite_false]; positivity
   -- Cast helper: for any natural n, (n : ZMod r) cast back equals n.val if n < r.
@@ -713,12 +701,12 @@ theorem mul_mod_via_Fr_limbwise_constraints
   -- Strategy: from hcol_Fr, derive ℕ-equation `colSum aN bN k + carryN k = ...`
   -- using that all relevant quantities have .val < r and computations don't wrap.
   -- Define the natural-number bound that bounds every expression in a column equation.
-  -- The bound `(2*8) * (2^64)² = 2^132 + (2^140) (carry) + 2^64 * 2^140` — these
+  -- The bound `(2*3) * (2^86)² ≈ 2^175 + 2^92 (carry) + 2^86 * 2^92` — these
   -- need to be < r ≈ 2^254. We need to be careful.
   -- Step 1: convert the per-column Fr equation to a per-column ℕ equation.
-  have hcolN : ∀ k ∈ Finset.range 8,
+  have hcolN : ∀ k ∈ Finset.range 6,
       colSum (ext aN) (ext bN) k + carryN k
-        = colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 64 * carryN (k + 1) := by
+        = colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 86 * carryN (k + 1) := by
     intro k hk
     -- ℕ-side quantities for column k.
     -- Cast `extFr ls i` and `(ls j).val` between sides.
@@ -739,13 +727,13 @@ theorem mul_mod_via_Fr_limbwise_constraints
         -- ↑(ext aN i) = extFr a i
         have h1 : ((ext aN i : ℕ) : ZMod r) = extFr a i := by
           unfold ext extFr aN
-          by_cases hi : i < 4
+          by_cases hi : i < 3
           · simp only [hi, dite_true]
             exact ZMod.natCast_zmod_val _
           · simp only [hi, dite_false, Nat.cast_zero]
         have h2 : ((ext bN (k - i) : ℕ) : ZMod r) = extFr b (k - i) := by
           unfold ext extFr bN
-          by_cases hi : k - i < 4
+          by_cases hi : k - i < 3
           · simp only [hi, dite_true]
             exact ZMod.natCast_zmod_val _
           · simp only [hi, dite_false, Nat.cast_zero]
@@ -754,10 +742,10 @@ theorem mul_mod_via_Fr_limbwise_constraints
         unfold carryN
         exact ZMod.natCast_zmod_val _
     have h_rhs_nat :
-        ((colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 64 * carryN (k + 1) : ℕ)
+        ((colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 86 * carryN (k + 1) : ℕ)
             : ZMod r)
           = (∑ i ∈ Finset.range (k + 1), extFr q i * extFr m (k - i))
-              + extFr c k + (2 ^ 64 : ZMod r) * carry (k + 1) := by
+              + extFr c k + (2 ^ 86 : ZMod r) * carry (k + 1) := by
       push_cast
       unfold colSum
       congr 1
@@ -768,20 +756,20 @@ theorem mul_mod_via_Fr_limbwise_constraints
           rw [Nat.cast_mul]
           have h1 : ((ext qN i : ℕ) : ZMod r) = extFr q i := by
             unfold ext extFr qN
-            by_cases hi : i < 4
+            by_cases hi : i < 3
             · simp only [hi, dite_true]
               exact ZMod.natCast_zmod_val _
             · simp only [hi, dite_false, Nat.cast_zero]
           have h2 : ((ext mN (k - i) : ℕ) : ZMod r) = extFr m (k - i) := by
             unfold ext extFr mN
-            by_cases hi : k - i < 4
+            by_cases hi : k - i < 3
             · simp only [hi, dite_true]
               exact ZMod.natCast_zmod_val _
             · simp only [hi, dite_false, Nat.cast_zero]
           rw [h1, h2]
         · -- ↑(ext cN k) = extFr c k
           unfold ext extFr cN
-          by_cases hi : k < 4
+          by_cases hi : k < 3
           · simp only [hi, dite_true]
             exact ZMod.natCast_zmod_val _
           · simp only [hi, dite_false, Nat.cast_zero]
@@ -792,61 +780,61 @@ theorem mul_mod_via_Fr_limbwise_constraints
     -- Combine: ↑LHS_ℕ = ↑RHS_ℕ in ZMod r.
     have hcastEq :
         ((colSum (ext aN) (ext bN) k + carryN k : ℕ) : ZMod r)
-          = ((colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 64 * carryN (k + 1) : ℕ)
+          = ((colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 86 * carryN (k + 1) : ℕ)
               : ZMod r) := by
       rw [h_lhs_nat, h_rhs_nat]
       exact hcol_Fr k hk
     -- Convert to MOD r congruence.
     have hmod : (colSum (ext aN) (ext bN) k + carryN k)
-                  ≡ (colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 64 * carryN (k + 1))
+                  ≡ (colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 86 * carryN (k + 1))
                   [MOD r] :=
       (ZMod.natCast_eq_natCast_iff _ _ _).mp hcastEq
     -- Bound both sides < r to drop the mod.
-    -- LHS bound: colSum ≤ (k+1)·(β-1)² ≤ 8·(2^64-1)² < 2^131, + carryN k < 2^140.
-    -- Total < 2^141 < 2^253 < r.
-    have h_colSum_ab := colSum_le (ext aN) (ext bN) (2 ^ 64) k ha_ext hb_ext
-    have h_colSum_qm := colSum_le (ext qN) (ext mN) (2 ^ 64) k hq_ext hm_ext
-    have hk_lt8 : k < 8 := Finset.mem_range.mp hk
-    have h_carryNk : carryN k < 2 ^ 140 := hcarry k
-    have h_carryNk1 : carryN (k + 1) < 2 ^ 140 := hcarry (k + 1)
-    have h_extcN : ext cN k < 2 ^ 64 := by
+    -- LHS bound: colSum ≤ (k+1)·(β-1)² ≤ 6·(2^86-1)² < 2^175, + carryN k < 2^92.
+    -- Total < 2^176 < 2^253 < r.
+    have h_colSum_ab := colSum_le (ext aN) (ext bN) (2 ^ 86) k ha_ext hb_ext
+    have h_colSum_qm := colSum_le (ext qN) (ext mN) (2 ^ 86) k hq_ext hm_ext
+    have hk_lt8 : k < 6 := Finset.mem_range.mp hk
+    have h_carryNk : carryN k < 2 ^ 92 := hcarry k
+    have h_carryNk1 : carryN (k + 1) < 2 ^ 92 := hcarry (k + 1)
+    have h_extcN : ext cN k < 2 ^ 86 := by
       unfold ext
-      by_cases hi : k < 4
+      by_cases hi : k < 3
       · simp only [hi, dite_true]; exact hcN _
       · simp only [hi, dite_false]; positivity
     -- Pack everything into a numeric bound that fits below 2^253.
-    have hβm1 : (2 ^ 64 : ℕ) - 1 < 2 ^ 64 := by norm_num
-    -- (k+1) ≤ 8 so colSum ≤ 8 · (2^64-1)².
-    have h_kplus1 : k + 1 ≤ 8 := by omega
+    have hβm1 : (2 ^ 86 : ℕ) - 1 < 2 ^ 86 := by norm_num
+    -- (k+1) ≤ 6 so colSum ≤ 6 · (2^86-1)².
+    have h_kplus1 : k + 1 ≤ 6 := by omega
     have h_colSum_ab' : colSum (ext aN) (ext bN) k
-                          ≤ 8 * ((2 ^ 64 - 1) * (2 ^ 64 - 1)) := by
+                          ≤ 6 * ((2 ^ 86 - 1) * (2 ^ 86 - 1)) := by
       apply le_trans h_colSum_ab
       apply Nat.mul_le_mul_right
       exact h_kplus1
     have h_colSum_qm' : colSum (ext qN) (ext mN) k
-                          ≤ 8 * ((2 ^ 64 - 1) * (2 ^ 64 - 1)) := by
+                          ≤ 6 * ((2 ^ 86 - 1) * (2 ^ 86 - 1)) := by
       apply le_trans h_colSum_qm
       apply Nat.mul_le_mul_right
       exact h_kplus1
-    -- The numeric bounds: 8 * (2^64-1)² < 2^131; carry < 2^140; β · carry < 2^204.
+    -- The numeric bounds: 6 * (2^86-1)² < 2^175; carry < 2^92; β · carry < 2^178.
     have h_lhs_lt_r : colSum (ext aN) (ext bN) k + carryN k < r := by
       have : colSum (ext aN) (ext bN) k + carryN k
-              ≤ 8 * ((2 ^ 64 - 1) * (2 ^ 64 - 1)) + 2 ^ 140 := by
+              ≤ 6 * ((2 ^ 86 - 1) * (2 ^ 86 - 1)) + 2 ^ 92 := by
         exact Nat.add_le_add h_colSum_ab' (le_of_lt h_carryNk)
       apply lt_of_le_of_lt this
-      have hr : 8 * ((2 ^ 64 - 1) * (2 ^ 64 - 1)) + 2 ^ 140 < 2 ^ 253 := by norm_num
+      have hr : 6 * ((2 ^ 86 - 1) * (2 ^ 86 - 1)) + 2 ^ 92 < 2 ^ 253 := by norm_num
       exact lt_trans hr rgt
     have h_rhs_lt_r :
-        colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 64 * carryN (k + 1) < r := by
-      have hβ_carry : 2 ^ 64 * carryN (k + 1) ≤ 2 ^ 64 * 2 ^ 140 :=
+        colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 86 * carryN (k + 1) < r := by
+      have hβ_carry : 2 ^ 86 * carryN (k + 1) ≤ 2 ^ 86 * 2 ^ 92 :=
         Nat.mul_le_mul_left _ (le_of_lt h_carryNk1)
       have hbound :
-          colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 64 * carryN (k + 1)
-            ≤ 8 * ((2 ^ 64 - 1) * (2 ^ 64 - 1)) + 2 ^ 64 + 2 ^ 64 * 2 ^ 140 := by
+          colSum (ext qN) (ext mN) k + ext cN k + 2 ^ 86 * carryN (k + 1)
+            ≤ 6 * ((2 ^ 86 - 1) * (2 ^ 86 - 1)) + 2 ^ 86 + 2 ^ 86 * 2 ^ 92 := by
         refine Nat.add_le_add (Nat.add_le_add h_colSum_qm' (le_of_lt h_extcN)) hβ_carry
       apply lt_of_le_of_lt hbound
       have hr :
-          8 * ((2 ^ 64 - 1) * (2 ^ 64 - 1)) + 2 ^ 64 + 2 ^ 64 * 2 ^ 140 < 2 ^ 253 := by
+          6 * ((2 ^ 86 - 1) * (2 ^ 86 - 1)) + 2 ^ 86 + 2 ^ 86 * 2 ^ 92 < 2 ^ 253 := by
         norm_num
       exact lt_trans hr rgt
     -- Drop the congruence to equality.
@@ -854,9 +842,10 @@ theorem mul_mod_via_Fr_limbwise_constraints
     rw [Nat.mod_eq_of_lt h_lhs_lt_r, Nat.mod_eq_of_lt h_rhs_lt_r] at hmod
     exact hmod
   -- Step 2: apply `mul_mod_via_limbwise_constraints` to the ℕ-equation.
-  have hm_pos' : 0 < valOfLimbs mN (2 ^ 64) := hm_pos
-  have hc_lt' : valOfLimbs cN (2 ^ 64) < valOfLimbs mN (2 ^ 64) := hc_lt
-  exact mul_mod_via_limbwise_constraints aN bN qN cN mN carryN (2 ^ 64) h0N h2nN
+  have hm_pos' : 0 < valOfLimbs mN (2 ^ 86) := hm_pos
+  have hc_lt' : valOfLimbs cN (2 ^ 86) < valOfLimbs mN (2 ^ 86) := hc_lt
+  exact mul_mod_via_limbwise_constraints aN bN qN cN mN carryN (2 ^ 86) h0N h2nN
     (fun k hk => hcolN k hk) hm_pos' hc_lt'
+
 
 end Xark

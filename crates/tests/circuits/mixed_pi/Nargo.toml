@@ -1,6 +1,0 @@
-[package]
-name = "mixed_pi"
-type = "bin"
-authors = [""]
-
-[dependencies]

@@ -2,3 +2,10 @@
 **/target/
 Cargo.lock.bak
 .DS_Store
+
+# xark build artifacts
+/out/
+# build artifacts from circuit compilation / snapshot tests
+/*.rlib
+/target/test-out/
+examples/*/Cargo.lock

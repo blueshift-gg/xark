@@ -15,8 +15,8 @@ use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
 use xark_backend::solana::{encode_g1, encode_g2, negate_g1};
 
-// Last bumped: Noir v1.0.0-beta.21 → v1.0.0-beta.22 (regenerated
-// Groth16 fixtures). The pinned values are the test-computed sha256
+// Bump when the Solana wire layout changes (regenerating the Groth16
+// fixtures moves these digests). The pinned values are the test-computed sha256
 // over `encode_vk_solana(vk)` / `encode_proof_solana(proof)` — these
 // re-encode from the Arkworks verifying_key.bin / proof.bin files via
 // the test's helpers, not over the `.solana.bin` files directly.

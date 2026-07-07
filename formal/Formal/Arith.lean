@@ -13,7 +13,7 @@ set_option linter.style.header false
 # xark arithmetic-gadget soundness — mechanised in Lean 4 / mathlib
 
 Soundness for the two carry-based gadgets in
-`crates/acir-r1cs/src/gadgets/bitwise.rs`:
+`crates/xark-bits/src/lib.rs`:
 
 * `xor_n_inputs` — N-ary XOR via the parity constraint `Σⱼ bⱼ = out + 2·k`.
 * `add_mod_32`   — wrapping 32-bit addition via `Σ inputs = result + 2³²·carry`.

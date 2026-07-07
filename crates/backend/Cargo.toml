@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Arkworks Groth16 (BN254) prover/verifier driven by a lowered ACIR circuit."
+description = "Arkworks Groth16 (BN254) prover/verifier, frontend-agnostic (proves any gr1cs ConstraintSynthesizer)."
 exclude = ["tests", "benches", "examples"]
 
 [dependencies]
@@ -19,7 +19,6 @@ ark-serialize.workspace = true
 ark-snark.workspace = true
 ark-std.workspace = true
 
-xark-acir-r1cs = { path = "../acir-r1cs" }
 
 anyhow.workspace = true
 thiserror.workspace = true

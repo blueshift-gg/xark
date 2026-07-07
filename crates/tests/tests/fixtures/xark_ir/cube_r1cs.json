@@ -1,0 +1,117 @@
+{
+  "field": {
+    "name": "unknown",
+    "modulus_decimal": null
+  },
+  "variables": [
+    {
+      "id": 0,
+      "name": "secret",
+      "visibility": "Private"
+    },
+    {
+      "id": 1,
+      "name": "result",
+      "visibility": "Public"
+    },
+    {
+      "id": 2,
+      "name": "t0",
+      "visibility": "Internal"
+    }
+  ],
+  "constraints": [
+    {
+      "id": 0,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 2
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "secret * secret = t0"
+      }
+    },
+    {
+      "id": 1,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 2
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t0 * secret = result"
+      }
+    }
+  ]
+}

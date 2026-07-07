@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned after first successful implementation.
+# Resolves to the locally installed nightly (rustc 1.97.0-nightly, 2026-05-02),
+# which has `rustc-dev` and `llvm-tools-preview` installed.
+channel = "nightly"
+components = ["rustc-dev", "llvm-tools-preview"]

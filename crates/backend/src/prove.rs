@@ -2,19 +2,17 @@
 
 use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Groth16, Proof, ProvingKey};
-use ark_relations::gr1cs::SynthesisError;
+use ark_relations::gr1cs::{ConstraintSynthesizer, SynthesisError};
 use ark_snark::SNARK;
 use rand::{CryptoRng, RngCore};
 
-use crate::circuit::NoirGroth16Circuit;
 
 /// Prove `circuit`, then self-check the result against `public_inputs`.
 ///
-/// `public_inputs` must be the public portion of the circuit's witness (as
-/// produced by [`extract_public_inputs`](xark_acir_r1cs::public_inputs::extract_public_inputs)).
-pub fn prove<R: RngCore + CryptoRng>(
+/// `public_inputs` must be the public portion of the circuit's witness.
+pub fn prove<C: ConstraintSynthesizer<Fr>, R: RngCore + CryptoRng>(
     pk: &ProvingKey<Bn254>,
-    circuit: NoirGroth16Circuit,
+    circuit: C,
     public_inputs: &[Fr],
     rng: &mut R,
 ) -> Result<Proof<Bn254>, SynthesisError> {

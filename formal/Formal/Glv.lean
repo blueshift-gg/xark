@@ -12,7 +12,8 @@ set_option linter.style.longLine false
 /-!
 # GLV + fixed-base comb + 2-way joint Strauss-Shamir
 
-`crates/acir-r1cs/src/gadgets/ecdsa.rs::scalar_mul_2p_secp256k1_comb_glv`
+The secp256k1 fixed-base comb/GLV scalar-mul gadget
+(`crates/xark-secp256k1/src/lib.rs`)
 computes `u₁ · G + u₂ · Q` for ECDSA verification on secp256k1 via three
 combined optimisations: (1) GLV decomposition for the variable-base term,
 (2) a fixed-base comb table for `u₁ · G`, and (3) 2-way joint
@@ -142,7 +143,7 @@ the `Secp256k1Point` `AddCommGroup` instance. -/
 /-- **secp256k1 GLV-relation soundness (algebraic).** The prover supplies
 `(k₁, k₂)` such that `k₁ + λ · k₂ ≡ k (mod n)` over ℤ where `n` is the
 secp256k1 scalar order. This integer identity is exactly what
-`ecdsa.rs::glv_decompose_native` enforces (via the non-native modular
+the GLV decomposition gadget (`crates/xark-secp256k1/src/lib.rs`) enforces (via the non-native modular
 constraint chain `Formal.NonNative.mul_mod_via_Fr_limbwise_constraints`).
 
 Given the integer identity and a group `G` with `n • P = 0` (curve group

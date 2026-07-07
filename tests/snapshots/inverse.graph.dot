@@ -1,0 +1,15 @@
+digraph R1CS {
+  rankdir=LR;
+
+  v0 [label="x\nPrivate"];
+  v1 [label="x_inv\nPublic"];
+  v2 [label="w0\nPrivate"];
+
+  constraint0 [shape=box, label="C0: x * w0 = 1"];
+  constraint1 [shape=box, label="C1: (-x_inv + w0) * 1 = 0"];
+
+  v0 -> constraint0;
+  v2 -> constraint0;
+  v1 -> constraint1;
+  v2 -> constraint1;
+}

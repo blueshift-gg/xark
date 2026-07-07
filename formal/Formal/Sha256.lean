@@ -20,7 +20,7 @@ set_option linter.flexible false
 # xark SHA-256 structural soundness — mechanised in Lean 4 / mathlib
 
 This file builds the **structural** soundness layer for the SHA-256 compression
-gadget in `crates/acir-r1cs/src/gadgets/hash.rs`. Bit-level equivalence of
+gadget in `crates/xark-sha256/src/lib.rs`. Bit-level equivalence of
 *individual* per-bit gadgets (`and`, `xor`, `not`, boolean range checks,
 parity carry,
 wrapping-add carry) is discharged elsewhere — see `Formal/Bitwise.lean` and
@@ -48,7 +48,7 @@ better suited to SMT bit-blasting than to a proof assistant, so the
 "end-to-end" theorem (output of the R1CS circuit equals 256-bit SHA-256 hash
 of the input) is deferred to the SMT layer. The job here is the *structural*
 assembly: show that the composite operations decompose into proven per-bit
-pieces in the way `hash.rs` claims.
+pieces in the way `crates/xark-sha256/src/lib.rs` claims.
 
 `Word32` is represented as `Fin 32 → Bool` rather than `BitVec 32`. The Rust
 gadget stores 32 ordered bit-wires (LSB first); `rotr` and `shr` are index
@@ -63,18 +63,18 @@ namespace Xark
 
 /-- A 32-bit word, LSB-first: `w i` is the bit at position `i` (index `0`
 matches the Rust `bits[0]`). This mirrors the storage of `Word32.bits` in
-`crates/acir-r1cs/src/gadgets/bitwise.rs`. -/
+`crates/xark-bits/src/lib.rs`. -/
 abbrev Word32 : Type := Fin 32 → Bool
 
 /-! ## Pure-Lean specs of the primitives -/
 
 /-- Right rotation by `k` positions: `out i = a ((i + k) mod 32)`. Matches the
-Rust `rotr` in `bitwise.rs`, which produces `bits[(i + k) % 32].clone()`. -/
+Rust `rotr` in `crates/xark-bits/src/lib.rs`, which produces `bits[(i + k) % 32].clone()`. -/
 def rotr (a : Word32) (k : ℕ) : Word32 :=
   fun i => a ⟨(i.val + k) % 32, Nat.mod_lt _ (by decide)⟩
 
 /-- Right shift by `k` positions: `out i = a (i + k)` if `i + k < 32`, else
-`false`. Matches the Rust `shr` in `bitwise.rs`. -/
+`false`. Matches the Rust `shr` in `crates/xark-bits/src/lib.rs`. -/
 def shr (a : Word32) (k : ℕ) : Word32 :=
   fun i =>
     if h : i.val + k < 32 then a ⟨i.val + k, h⟩ else false
@@ -114,7 +114,7 @@ def smallSigma1 (x : Word32) : Word32 :=
 
 /-! ## Bit-level soundness primitives (the "modulo" assumptions)
 
-The Rust gadgets in `bitwise.rs` emit per-bit constraints already proven sound
+The Rust gadgets in `crates/xark-bits/src/lib.rs` emit per-bit constraints already proven sound
 in `Formal/Bitwise.lean`:
 
 * `and_sound`  : `a*b = out` ⇒ `out = a ∧ b`,
@@ -144,7 +144,7 @@ theorem BitOf.isBool {F : Type*} [Zero F] [One F] {w : F} {bit : Bool}
 
 /-! ## Soundness for the index-permutation gadgets (`rotr`, `shr`)
 
-These cost **zero constraints** in `bitwise.rs` — they relabel the bit-LCs.
+These cost **zero constraints** in `crates/xark-bits/src/lib.rs` — they relabel the bit-LCs.
 Soundness is therefore trivial *given* the input bits are already pinned to
 their boolean values: the output bit-wire for position `i` is simply the
 input bit-wire for the permuted index, no field-level reasoning required.
@@ -244,7 +244,7 @@ of the non-permutation composites (`Ch`, `Maj`) that chains the per-bit
 witness arithmetic together. -/
 
 /-- **Structural definition of `Ch`** matches its gadget implementation in
-`hash.rs`. The Rust loop builds
+`crates/xark-sha256/src/lib.rs`. The Rust loop builds
 
 ```
 let e_and_f      = and(builder, &e, &f)?;
@@ -443,7 +443,7 @@ def MessageScheduleStep (W : Fin 64 → Word32) (t : Fin 64) (ht : 16 ≤ t.val)
 `iff`-trivial form, useful when rewriting: knowing the gadget materialises
 the four-term `add_mod_32` over the *same* four words as `MessageScheduleStep`
 gives `W t = ...`, immediately. (The point is anchoring: this is the shape the
-gadget reproduces — see `hash.rs` lines for `i in 16..64`.) -/
+gadget reproduces — see `crates/xark-sha256/src/lib.rs` lines for `i in 16..64`.) -/
 theorem MessageScheduleStep_iff (W : Fin 64 → Word32) (t : Fin 64) (ht : 16 ≤ t.val) :
     MessageScheduleStep W t ht ↔
       W t = addMod32

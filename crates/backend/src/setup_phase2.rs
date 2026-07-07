@@ -101,6 +101,14 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
         .ok_or(Phase2Error::DomainConstruction(domain_size))?;
     let n = domain.size();
 
+    // Bounds guard: a transcript from `parse_ptau` always has consistent
+    // section lengths, but `setup_from_ptau` is public and `PtauFile`'s fields
+    // are `pub`, so a hand-built or malformed transcript could have vectors
+    // shorter than the QAP domain requires. Check up front so the slicing /
+    // indexing below (`tau_g1[n + k]`, `tau_g2[..n]`, …) returns a graceful
+    // error instead of panicking on an out-of-bounds access.
+    check_ptau_section_lengths(ptau, n)?;
+
     // -------------------------------------------------------------------
     // 3) Compute Lagrange evaluations in the group.
     // -------------------------------------------------------------------
@@ -240,6 +248,31 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     })
 }
 
+/// Verify the ptau vectors are long enough for a QAP domain of size `n`.
+///
+/// The setup below reads `tau_g1[0..2n-1]` (Lagrange table `[..n]` plus the
+/// `h_query` diffs `tau_g1[n + k]` for `k < n-1`), and `[..n]` of each of
+/// `tau_g2`, `alpha_tau_g1`, `beta_tau_g1`. A malformed transcript with shorter
+/// vectors would otherwise panic on an out-of-bounds index.
+fn check_ptau_section_lengths(ptau: &PtauFile, n: usize) -> Result<(), Phase2Error> {
+    let checks: [(&'static str, usize, usize); 4] = [
+        ("tau_g1", 2 * n - 1, ptau.tau_g1.len()),
+        ("tau_g2", n, ptau.tau_g2.len()),
+        ("alpha_tau_g1", n, ptau.alpha_tau_g1.len()),
+        ("beta_tau_g1", n, ptau.beta_tau_g1.len()),
+    ];
+    for (section, needed, actual) in checks {
+        if actual < needed {
+            return Err(Phase2Error::PtauSectionTooShort {
+                section,
+                needed,
+                actual,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Inverse-FFT a slice of G1 affine points into a `Vec<G1Projective>`.
 fn ifft_g1_affine(domain: &GeneralEvaluationDomain<Fr>, points: &[G1Affine]) -> Vec<G1Projective> {
     let mut buf: Vec<G1Projective> = points.iter().map(|p| p.into_group()).collect();
@@ -372,5 +405,27 @@ mod tests {
         let seed = [0u8; 32];
         let result = setup_from_ptau(Square { x: None, y: None }, &ptau, &seed);
         assert!(matches!(result, Err(Phase2Error::PtauTooSmall { .. })));
+    }
+
+    #[test]
+    fn phase2_rejects_malformed_ptau_with_short_sections() {
+        // A transcript whose `power` claims coverage but whose point vectors
+        // have been truncated must be rejected gracefully, not panic on an
+        // out-of-bounds index in the QAP loop.
+        let mut rng = ChaCha20Rng::seed_from_u64(7);
+        let mut ptau = fake_ptau(
+            4,
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+        );
+        // Truncate tau_g1 to a single point while leaving `power` at 4.
+        ptau.tau_g1.truncate(1);
+        let seed = [0u8; 32];
+        let result = setup_from_ptau(Square { x: None, y: None }, &ptau, &seed);
+        assert!(matches!(
+            result,
+            Err(Phase2Error::PtauSectionTooShort { section: "tau_g1", .. })
+        ));
     }
 }

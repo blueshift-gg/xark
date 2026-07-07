@@ -59,7 +59,7 @@ fn flag_bit_mutation_onchain() {
 }
 
 // Typed path: `const VK: Verifier<N>` → `VK.verify(&PROOF, &INPUTS)`,
-// one per circuit. `N` spans 0 (ecdsa) to 32 (aes128, blake2s, blake3).
+// one per circuit. `N` spans 0 (ecdsa) to 16 (aes128, large_pi).
 
 #[svm_test]
 fn arithmetic_square() {
@@ -106,14 +106,6 @@ fn blake3_basic() {
     assert!(fixtures::BLAKE3_BASIC_VK.verify(
         &fixtures::BLAKE3_BASIC_PROOF,
         &fixtures::BLAKE3_BASIC_INPUTS
-    ));
-}
-
-#[svm_test]
-fn brillig_basic() {
-    assert!(fixtures::BRILLIG_BASIC_VK.verify(
-        &fixtures::BRILLIG_BASIC_PROOF,
-        &fixtures::BRILLIG_BASIC_INPUTS
     ));
 }
 

@@ -48,7 +48,8 @@ lookup table with `T i = i.val • P`. Then the comb-scan output
 decomposition of the scalar.
 
 This is the algebraic kernel of
-`crates/acir-r1cs/src/gadgets/ecdsa.rs::scalar_mul_2p_secp256k1_comb_glv`'s
+the secp256k1 fixed-base comb/GLV scalar-mul gadget
+(`crates/xark-secp256k1/src/lib.rs`)'s
 fixed-base half: the gadget reads `T (bits j)` from the table (one
 constraint per window) and accumulates with a per-window weight
 `2 ^ (w * j)`. The proof exposes both layers explicitly:
@@ -179,7 +180,7 @@ encoded by the two bit-lists, while sharing the doubling cost between
 the two scalar mults.
 
 This is the algebraic content of the interleaved variant in
-`crates/acir-r1cs/src/gadgets/ecdsa.rs`: the per-step joint invariant
+the secp256k1 gadget (`crates/xark-secp256k1/src/lib.rs`): the per-step joint invariant
 is `acc ↦ acc + b₁ • P + b₂ • Q`, which folded over the bit list gives
 the two-term sum at the end. -/
 theorem joint_strauss_shamir_correct {G : Type*} [AddCommGroup G]
@@ -196,7 +197,7 @@ theorem joint_strauss_shamir_correct {G : Type*} [AddCommGroup G]
 
 /-! ## Public-input flow consistency -/
 
-/-- **Public-input projection consistency.** Given an ACIR
+/-- **Public-input projection consistency.** Given a source
 witness map `w : ℕ → F` and a list `pub : List ℕ` of public-input
 witness indices, the projection `pub.map w` equals the R1CS instance
 vector built by reading the same indices from the same witness map.
@@ -206,7 +207,7 @@ both lists produce `w i`.
 The witness-index bijection (allocations are idempotent and injective)
 is discharged elsewhere by `Formal.Bookkeeping.alloc_witness_idempotent`
 and `alloc_witness_injective`, so this theorem is what remains to wire
-the ACIR public-input slot list to the R1CS instance vector. The
+the source public-input slot list to the R1CS instance vector. The
 hypothesis `h_inst i hi : inst i = w i` encodes the per-index equality
 that the `alloc_witness` bookkeeping establishes for each `i ∈ pub`. -/
 theorem public_input_projection_consistent
@@ -241,16 +242,16 @@ theorem public_input_projection_consistent_canonical {F : Type*} [Zero F]
     (buildInstance_eq_w_on_pub w pub)
 
 /-- **Bookkeeping bridge.** The R1CS-side instance vector matches the
-canonical ACIR-side instance vector at every public-input slot.
+canonical source-side instance vector at every public-input slot.
 
-`w` is the ACIR witness map (`ℕ → F` over ACIR witness indices), `wR` is the
+`w` is the source witness map (`ℕ → F` over source witness indices), `wR` is the
 R1CS witness map (`ℕ → F` over R1CS variable indices), and `m : AllocState`
-is the allocator from `Formal.Bookkeeping` that binds ACIR indices to R1CS
-variables (`m.assigned i = some k` means ACIR index `i` was allocated to
+is the allocator from `Formal.Bookkeeping` that binds source indices to R1CS
+variables (`m.assigned i = some k` means source index `i` was allocated to
 R1CS variable `k`).
 
 Under (a) every public input is allocated and (b) the R1CS witness at each
-allocated variable equals the ACIR witness at the source index — the
+allocated variable equals the source witness at the source index — the
 coherence condition the prover/verifier establish by construction — the
 R1CS-side instance vector (`wR ∘ varOf`) equals the canonical
 `buildInstance w pub` on every slot `i ∈ pub`. -/
@@ -265,9 +266,9 @@ theorem alloc_state_pins_public_inputs {F : Type*} [Zero F]
   rw [buildInstance_eq_w_on_pub w pub i hi]
   exact h_coh i k hk
 
-/-! ### Bridge between `buildInstance` and `lower::synthesize`'s PI construction
+/-! ### Bridge between `buildInstance` and the xark lowering's PI construction
 
-`lower::synthesize` (in `crates/acir-r1cs/src/lower.rs`) populates the
+The xark compiler's lowering (`crates/xark/src/lower_mir.rs`) populates the
 constraint system's instance vector by walking the artifact's
 `public_inputs` list and reading the witness map at each slot. This is
 captured at the Lean level by `synthesizeInstance` below, which mirrors

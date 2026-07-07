@@ -1,0 +1,17 @@
+[package]
+name = "xark-poseidon2"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "xark_poseidon2"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+
+[dev-dependencies]
+xark-test-harness = { path = "../xark-test-harness" }
+xark-ir = { path = "../xark-ir" }
+

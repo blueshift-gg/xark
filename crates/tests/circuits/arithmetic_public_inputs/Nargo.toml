@@ -1,6 +1,0 @@
-[package]
-name = "arithmetic_public_inputs"
-type = "bin"
-authors = [""]
-
-[dependencies]

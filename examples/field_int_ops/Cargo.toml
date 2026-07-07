@@ -1,0 +1,9 @@
+[package]
+name = "field_int_ops"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[lib]
+[dependencies]
+xark = { path = "../../crates/xark", default-features = false }
+xark-ff = { path = "../../crates/xark-ff" }

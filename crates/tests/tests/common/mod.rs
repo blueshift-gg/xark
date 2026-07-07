@@ -19,10 +19,6 @@ use ark_ff::{BigInteger, Field, PrimeField, UniformRand};
 use ark_std::rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
-use xark_acir_r1cs::artifact::parse_artifact_file;
-use xark_acir_r1cs::lower::LoweredAcirCircuit;
-use xark_acir_r1cs::witness::parse_witness_file;
-use xark_backend::circuit::NoirGroth16Circuit;
 use xark_backend::ptau::__fq_to_le_mont_bytes_for_tests as fq_to_mont;
 
 /// Build a programmatic ptau file by sampling a τ, α, β ∈ Fr, computing the
@@ -180,6 +176,44 @@ pub fn xark_bin() -> PathBuf {
     xark_tests::xark_bin()
 }
 
+/// A purpose-built circuit crate under `crates/tests/examples/<name>`.
+pub fn circuit_crate(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples").join(name)
+}
+
+/// `xark build <circuit-crate> --out <out>` with an isolated `CARGO_TARGET_DIR`
+/// (so cargo can't replay a cached, non-extracting compile). Returns
+/// `(success, stderr)`.
+pub fn xark_build(name: &str, out: &Path, target: &Path) -> (bool, String) {
+    let o = Command::new(xark_bin())
+        .arg("build")
+        .arg(circuit_crate(name))
+        .arg("--out")
+        .arg(out)
+        .env("CARGO_TARGET_DIR", target)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn xark build");
+    (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+
+/// `xark prove <out-dir> --input k=v ...` (solve witness + Groth16 prove/verify).
+/// Returns `(success, stderr)`.
+pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
+    let mut c = Command::new(xark_bin());
+    c.arg("prove").arg(out);
+    for (k, v) in inputs {
+        c.arg("--input").arg(format!("{k}={v}"));
+    }
+    let o = c
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn xark prove");
+    (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+
 /// Run the `xark` binary with `args`, returning `(success, stdout, stderr)`.
 pub fn run(args: &[&str]) -> (bool, String, String) {
     let output = Command::new(xark_bin())
@@ -221,66 +255,4 @@ pub fn tempdir() -> TempDir {
     let path = std::env::temp_dir().join(format!("xark-test-{pid}-{n}"));
     std::fs::create_dir_all(&path).expect("mkdir tempdir");
     TempDir { path }
-}
-
-// ----------------------------------------------------------------------------
-// In-process Groth16 pipeline (replaces shelling out to the `xark` binary for
-// the per-circuit "does it prove and verify" tests).
-// ----------------------------------------------------------------------------
-
-/// Lower the committed `<name>` artifact + witness, run Groth16 setup → prove →
-/// verify entirely in-process, and assert that:
-///   * lowering succeeds — i.e. every opcode is supported (the old
-///     `inspect: Unsupported opcode count: 0` check),
-///   * the circuit has exactly `expected_pi` public inputs,
-///   * the proof verifies, and
-///   * every public input is bound: flipping any single one fails verification
-///     (the old `tampered_*_fails` check, generalized to *all* inputs).
-pub fn assert_circuit_proves(name: &str, expected_pi: usize) {
-    let dir = fixture_dir();
-    let artifact = parse_artifact_file(&dir.join(format!("{name}.json")))
-        .unwrap_or_else(|e| panic!("{name}: parse artifact: {e}"));
-    let witness = parse_witness_file(&dir.join(format!("{name}.gz")))
-        .unwrap_or_else(|e| panic!("{name}: parse witness: {e}"));
-    // Lowering only succeeds when every opcode is supported.
-    let lowered = LoweredAcirCircuit::new(artifact)
-        .unwrap_or_else(|e| panic!("{name}: lower (unsupported opcode?): {e}"));
-
-    let pi: Vec<Fr> = lowered
-        .artifact
-        .public_inputs
-        .iter()
-        .map(|idx| *witness.get(idx).expect("public input present in witness"))
-        .collect();
-    assert_eq!(
-        pi.len(),
-        expected_pi,
-        "{name}: expected {expected_pi} public input(s)"
-    );
-
-    let mut rng = ChaCha20Rng::seed_from_u64(0x5EED_5EED);
-    let keys = xark_backend::setup(NoirGroth16Circuit::for_setup(lowered.clone()), &mut rng)
-        .unwrap_or_else(|e| panic!("{name}: setup: {e}"));
-    let proof = xark_backend::prove(
-        &keys.proving_key,
-        NoirGroth16Circuit::for_proving(lowered.clone(), witness.clone()),
-        &pi,
-        &mut rng,
-    )
-    .unwrap_or_else(|e| panic!("{name}: prove: {e}"));
-
-    assert!(
-        xark_backend::verify(&keys.verifying_key, &proof, &pi).expect("verify"),
-        "{name}: proof must verify"
-    );
-
-    // Binding: flipping any single public input must invalidate the proof.
-    for i in 0..pi.len() {
-        let mut bad = pi.clone();
-        bad[i] += Fr::from(1u64);
-        assert!(
-            !xark_backend::verify(&keys.verifying_key, &proof, &bad).expect("verify (tampered)"),
-            "{name}: tampering public input #{i} must invalidate the proof"
-        );
-    }
 }

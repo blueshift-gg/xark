@@ -15,7 +15,7 @@ set_option linter.style.longLine false
 # Grumpkin point group as a concrete `AddCommGroup`
 
 Mirrors `Formal.Secp256k1Group` for **Grumpkin** (the BN254 embedded curve
-used by Noir's circuit-level scalar mul). Closes the end-to-end chain at
+used by the xark scalar-mul gadget). Closes the end-to-end chain at
 `G = GrumpkinPoint` so that `EcdsaVerifyRel` and `ecdsa_verify_compose`
 specialise to a fully concrete statement at the actual Grumpkin point group
 `{(x, y) : ZMod r × ZMod r // y² = x³ − 17} ∪ {∞}`.

@@ -1,0 +1,589 @@
+{
+  "field": {
+    "name": "bn254",
+    "modulus_decimal": "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+  },
+  "variables": [
+    {
+      "id": 0,
+      "name": "x",
+      "visibility": "Private"
+    },
+    {
+      "id": 1,
+      "name": "bit0",
+      "visibility": "Public"
+    },
+    {
+      "id": 2,
+      "name": "bit7",
+      "visibility": "Public"
+    },
+    {
+      "id": 3,
+      "name": "w0",
+      "visibility": "Private"
+    },
+    {
+      "id": 4,
+      "name": "w1",
+      "visibility": "Private"
+    },
+    {
+      "id": 5,
+      "name": "w2",
+      "visibility": "Private"
+    },
+    {
+      "id": 6,
+      "name": "w3",
+      "visibility": "Private"
+    },
+    {
+      "id": 7,
+      "name": "w4",
+      "visibility": "Private"
+    },
+    {
+      "id": 8,
+      "name": "w5",
+      "visibility": "Private"
+    },
+    {
+      "id": 9,
+      "name": "w6",
+      "visibility": "Private"
+    },
+    {
+      "id": 10,
+      "name": "w7",
+      "visibility": "Private"
+    }
+  ],
+  "constraints": [
+    {
+      "id": 0,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w0 * w0 = w0"
+      }
+    },
+    {
+      "id": 1,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w1 * w1 = w1"
+      }
+    },
+    {
+      "id": 2,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w2 * w2 = w2"
+      }
+    },
+    {
+      "id": 3,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w3 * w3 = w3"
+      }
+    },
+    {
+      "id": 4,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w4 * w4 = w4"
+      }
+    },
+    {
+      "id": 5,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w5 * w5 = w5"
+      }
+    },
+    {
+      "id": 6,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 9
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 9
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 9
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w6 * w6 = w6"
+      }
+    },
+    {
+      "id": 7,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "w7 * w7 = w7"
+      }
+    },
+    {
+      "id": 8,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "-1"
+            },
+            "var": 0
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          },
+          {
+            "coeff": {
+              "decimal": "2"
+            },
+            "var": 4
+          },
+          {
+            "coeff": {
+              "decimal": "4"
+            },
+            "var": 5
+          },
+          {
+            "coeff": {
+              "decimal": "8"
+            },
+            "var": 6
+          },
+          {
+            "coeff": {
+              "decimal": "16"
+            },
+            "var": 7
+          },
+          {
+            "coeff": {
+              "decimal": "32"
+            },
+            "var": 8
+          },
+          {
+            "coeff": {
+              "decimal": "64"
+            },
+            "var": 9
+          },
+          {
+            "coeff": {
+              "decimal": "128"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": []
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(-x + w0 + 2*w1 + 4*w2 + 8*w3 + 16*w4 + 32*w5 + 64*w6 + 128*w7) * 1 = 0"
+      }
+    },
+    {
+      "id": 9,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "-1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": []
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(-bit0 + w0) * 1 = 0"
+      }
+    },
+    {
+      "id": 10,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "-1"
+            },
+            "var": 2
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 10
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": []
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(-bit7 + w7) * 1 = 0"
+      }
+    }
+  ]
+}

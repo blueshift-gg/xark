@@ -1,94 +1,89 @@
-//! End-to-end Groth16 benchmarks: setup, prove, verify.
+//! End-to-end Groth16 benchmarks for xark's own pipeline: setup, prove, verify.
 //!
-//! Covers three representative circuits committed under `crates/tests/fixtures/`:
+//! This measures the *current* xark → xark-IR → R1CS → Groth16 path. Each
+//! circuit is loaded from a committed fixture under
+//! `crates/tests/tests/fixtures/xark_ir/` as an [`R1csProgram`] plus its
+//! witness-gen [`primitive::PrimitiveProgram`]; the witness is solved once with
+//! xark's own solver, then fed to xark's production backend circuit
+//! [`XarkCircuit`].
 //!
-//! * `arithmetic_square` — minimal AssertZero-only circuit (one mul + one
-//!   linear). Floor case for setup/prove cost.
-//! * `sha256_basic` — one SHA-256 compression call (~53k constraints).
-//!   Representative hash-heavy workload.
-//! * `ecdsa_basic` — one ECDSA secp256k1 verify (~3.6M constraints).
-//!   Representative crypto-heavy workload.
+//! Covered circuit(s):
+//!
+//! * `cube` — prove knowledge of `a` with `a^3 = c`. Minimal floor case for
+//!   setup/prove/verify cost.
 //!
 //! Each circuit measures three operations:
-//! 1. `setup` (parameter generation, insecure dev mode).
+//! 1. `setup` (Groth16 circuit-specific parameter generation, dev mode).
 //! 2. `prove` (assumes setup output is available).
 //! 3. `verify` (assumes setup + prove outputs are available).
+//!
+//! The one-time work (fixture load, witness solve) happens outside the timed
+//! closures so per-iteration cost is only the measured phase.
 //!
 //! Run with `cargo bench -p xark-tests`. Use
 //! `cargo bench -p xark-tests -- --save-baseline before` and
 //! `cargo bench -p xark-tests -- --baseline before` to compare across
 //! optimisation PRs.
 
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::collections::BTreeMap;
 
 use ark_bn254::{Bn254, Fr};
-use ark_groth16::{Groth16, Proof, ProvingKey, VerifyingKey};
+use ark_groth16::{Groth16, Proof};
 use ark_snark::SNARK;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
 
-use xark_acir_r1cs::artifact::{NoirArtifact, parse_artifact_file};
-use xark_acir_r1cs::lower::LoweredAcirCircuit;
-use xark_acir_r1cs::witness::parse_witness_file;
-use xark_backend::{circuit::NoirGroth16Circuit, setup::setup, verify::verify};
+use xark_backend::setup::setup;
+use xark_backend::{Groth16Keys, test_rng, verify};
+use xark_ir::{R1csProgram, VarId, primitive};
+use xark_ir::solver;
+use xark_prover::{XarkCircuit, fr_from_decimal};
 
-/// Resolve `crates/tests/fixtures/<name>.{json,gz}` under the crate.
-/// Criterion runs benches from the crate's `Cargo.toml` directory, so we
-/// walk up to find the workspace fixtures.
-fn fixture_dir() -> PathBuf {
-    let mut here: PathBuf = std::env::current_dir().expect("cwd");
-    loop {
-        let candidate = here.join("crates").join("tests").join("fixtures");
-        if candidate.is_dir() {
-            return candidate;
-        }
-        if !here.pop() {
-            panic!(
-                "could not locate crates/tests/fixtures/ relative to {:?}",
-                std::env::current_dir()
-            );
-        }
+/// Read `crates/tests/tests/fixtures/xark_ir/<name>` (mirrors the e2e test).
+fn fixture(name: &str) -> String {
+    let p = format!("{}/tests/fixtures/xark_ir/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {p}: {e}"))
+}
+
+/// Load an IR fixture (`<name>_r1cs.json` + `<name>_circuit.json`) and solve its
+/// witness once, returning the R1CS program plus the field assignment.
+///
+/// `inputs` maps circuit variable *names* to decimal input values.
+fn load_and_solve(name: &str, inputs: &[(&str, &str)]) -> (R1csProgram, BTreeMap<VarId, Fr>) {
+    let r1cs = xark_ir::json::from_json(&fixture(&format!("{name}_r1cs.json")))
+        .expect("parse r1cs.json");
+    let prim = primitive::from_json(&fixture(&format!("{name}_circuit.json")))
+        .expect("parse circuit.json");
+
+    let id = |name: &str| {
+        prim.vars
+            .iter()
+            .find(|v| v.name == name)
+            .unwrap_or_else(|| panic!("var {name}"))
+            .id
+    };
+    let mut named: BTreeMap<VarId, String> = BTreeMap::new();
+    for (k, v) in inputs {
+        named.insert(id(k), (*v).to_string());
     }
+
+    let assign_fp = solver::solve(&prim, &named).expect("solve witness");
+    let assign: BTreeMap<VarId, Fr> = assign_fp
+        .iter()
+        .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
+        .collect();
+
+    (r1cs, assign)
 }
 
-/// Load + lower a fixture, returning the artifact, witness, and lowered
-/// circuit. Done once per benchmark group so the per-iteration cost is
-/// only the operation we're measuring.
-fn load_fixture(
-    name: &str,
-) -> (
-    NoirArtifact,
-    xark_acir_r1cs::witness::WitnessMap<Fr>,
-    LoweredAcirCircuit,
-) {
-    let dir = fixture_dir();
-    let artifact_path = dir.join(format!("{name}.json"));
-    let witness_path = dir.join(format!("{name}.gz"));
-    let artifact = parse_artifact_file(&artifact_path).expect("parse artifact");
-    let witness = parse_witness_file(&witness_path).expect("parse witness");
-    let lowered = LoweredAcirCircuit::new(artifact.clone()).expect("lower");
-    (artifact, witness, lowered)
-}
-
-fn bench_circuit(c: &mut Criterion, name: &str) {
-    let (_artifact, witness, lowered) = load_fixture(name);
+fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
+    let (r1cs, assign) = load_and_solve(name, inputs);
 
     let mut group = c.benchmark_group(name);
-    // The full ECDSA prove can take >10 seconds; relax criterion defaults.
-    group.sample_size(10);
-    group.measurement_time(Duration::from_secs(20));
 
     // Setup ---------------------------------------------------------------
     group.bench_function("setup", |b| {
         b.iter_batched(
-            || {
-                (
-                    NoirGroth16Circuit::for_setup(lowered.clone()),
-                    ChaCha20Rng::seed_from_u64(0xAA55_CAFE),
-                )
-            },
+            || (XarkCircuit::for_setup(r1cs.clone()), test_rng()),
             |(circuit, mut rng)| {
                 let keys = setup(circuit, &mut rng).expect("setup");
                 criterion::black_box(keys);
@@ -97,30 +92,21 @@ fn bench_circuit(c: &mut Criterion, name: &str) {
         );
     });
 
-    // Cache setup output once for prove / verify benches.
-    let keys = {
-        let mut rng = ChaCha20Rng::seed_from_u64(0xAA55_CAFE);
-        let circuit = NoirGroth16Circuit::for_setup(lowered.clone());
-        setup(circuit, &mut rng).expect("setup")
+    // Cache setup output once for the prove / verify benches.
+    let keys: Groth16Keys = {
+        let mut rng = test_rng();
+        setup(XarkCircuit::for_setup(r1cs.clone()), &mut rng).expect("setup")
     };
-    let pk: ProvingKey<Bn254> = keys.proving_key.clone();
-    let vk: VerifyingKey<Bn254> = keys.verifying_key.clone();
-
-    // Public input vector for the verifier.
-    let public_inputs: Vec<Fr> = lowered
-        .artifact
-        .public_inputs
-        .iter()
-        .map(|idx| *witness.get(idx).expect("public input not found in witness"))
-        .collect();
+    let pk = keys.proving_key.clone();
+    let vk = keys.verifying_key.clone();
 
     // Prove ---------------------------------------------------------------
     group.bench_function("prove", |b| {
         b.iter_batched(
             || {
                 (
-                    NoirGroth16Circuit::for_proving(lowered.clone(), witness.clone()),
-                    ChaCha20Rng::seed_from_u64(0x9B7E_CAFE),
+                    XarkCircuit::for_proving(r1cs.clone(), assign.clone()),
+                    test_rng(),
                 )
             },
             |(circuit, mut rng)| {
@@ -132,9 +118,10 @@ fn bench_circuit(c: &mut Criterion, name: &str) {
     });
 
     // Verify --------------------------------------------------------------
+    let public_inputs: Vec<Fr> = XarkCircuit::for_proving(r1cs.clone(), assign.clone()).public_inputs();
     let proof: Proof<Bn254> = {
-        let mut rng = ChaCha20Rng::seed_from_u64(0x9B7E_CAFE);
-        let circuit = NoirGroth16Circuit::for_proving(lowered.clone(), witness.clone());
+        let mut rng = test_rng();
+        let circuit = XarkCircuit::for_proving(r1cs.clone(), assign.clone());
         Groth16::<Bn254>::prove(&pk, circuit, &mut rng).expect("prove")
     };
     group.bench_function("verify", |b| {
@@ -147,28 +134,10 @@ fn bench_circuit(c: &mut Criterion, name: &str) {
     group.finish();
 }
 
-fn bench_arithmetic_square(c: &mut Criterion) {
-    bench_circuit(c, "arithmetic_square");
+fn bench_cube(c: &mut Criterion) {
+    // cube: a^3 = c. Prove knowledge of a = 3 binding the public c = 27.
+    bench_circuit(c, "cube", &[("secret", "3"), ("result", "27")]);
 }
 
-fn bench_sha256_basic(c: &mut Criterion) {
-    bench_circuit(c, "sha256_basic");
-}
-
-fn bench_ecdsa_basic(c: &mut Criterion) {
-    bench_circuit(c, "ecdsa_basic");
-}
-
-criterion_group!(
-    benches,
-    bench_arithmetic_square,
-    bench_sha256_basic,
-    bench_ecdsa_basic,
-);
+criterion_group!(benches, bench_cube);
 criterion_main!(benches);
-
-// Local helper to suppress unused-path warnings on the import.
-#[allow(dead_code)]
-fn _silence(p: &Path) {
-    let _ = p;
-}

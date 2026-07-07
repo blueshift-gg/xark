@@ -1,118 +1,122 @@
 # Architecture
 
-xark is split into focused crates with strict layering, so that:
+xark is one tool with two faces — a **language** (write a circuit as ordinary
+`#![no_std]` Rust) and a **toolchain** (`xark build` / `xark prove`) — split
+into focused crates with strict layering, so that:
 
-* ACIR artifact parsing and R1CS lowering can be tested without depending on a
- proving system,
-* the Groth16 layer can be swapped or extended without touching ACIR parsing,
+* the circuit-author surface (`xark`'s prelude: `Field`, `assert_eq`,
+  `Private`/`Public`, `bits`) stays small and stable,
+* the MIR → xark-IR → R1CS lowering can be tested without a proving system,
+* the Groth16 layer can be swapped or extended without touching lowering,
 * the on-chain verifier stays tiny, `no_std`, and dependency-light, and
-* the CLI is a thin wrapper that owns file paths and user-facing text only.
+* gadgets are ordinary Rust library crates, not per-gadget backend opcodes.
 
 ```text
-xark-cli ──▶ xark-backend ──▶ xark-acir-r1cs ──▶ (acir, acvm crates, Arkworks)
-
-xark-verifier (standalone, no_std on Solana) ──▶ solana-nostd-alt-bn128
- ▲
- └── the crate `xark export` generates depends on this, and so does any
- Solana program that verifies a proof on chain.
-
-xark-tests (publish = false) ── all integration tests, benches, and fixtures
+Rust circuit source (uses `xark::prelude::*` + gadget crates)
+  │  rustc frontend (nightly): parse, type-check, borrow-check, monomorphize
+  ▼
+rustc MIR  ──(-Zalways-encode-mir inlines cross-crate gadget calls)
+  │  extract the `circuit` fn's MIR, sanitize + validate the accepted subset
+  ▼
+xark-IR (primitive constraint / hint program)
+  │  lower to rank-1 constraints
+  ▼
+R1CS
+  │  Groth16 setup / prove / verify (BN254)
+  ▼
+proof + verifying key ──▶ on-chain Solana verifier (alt_bn128 syscalls)
 ```
 
-The prove-side stack (`xark-cli` → `xark-backend` → `xark-acir-r1cs`) runs
-off-chain on the host. The verify-side crate (`xark-verifier`) is independent:
-it consumes only the exported wire bytes and runs both on the host (Arkworks
-fallback) and on chain (the `alt_bn128` syscalls).
+The backend never grows a per-gadget opcode to special-case: gadgets (hashes,
+curves, ECDSA, …) are plain Rust crates that lower to the *same* small primitive
+constraint set, so the backend stays lean and the frontend stays expressive.
 
-## `xark-acir-r1cs`
+## How MIR is used
 
-Owns the boundary between the Noir/ACIR world and the Arkworks world.
+The `xark` binary is both the friendly CLI and, when `cargo` invokes it as
+`RUSTC` during `xark build`, a `rustc_driver` (nightly, `#![feature(rustc_private)]`).
+`xark build` runs `cargo build` on the circuit crate with itself as the
+compiler under one pinned nightly, so every dependency (the `xark` lib and any
+gadget crates) is built with matching MIR-encoded rlibs. Only the primary crate
+(`CARGO_PRIMARY_PACKAGE`) is extracted; the rest compile normally so their MIR
+is available for cross-crate inlining.
 
-* `artifact.rs` — parses the JSON wrapper that `nargo` writes
- (`target/<name>.json`), base64-decodes the ACIR `Program` bytecode blob, and
- hands it to `acir::circuit::Program::deserialize_program`. The supported
- ACIR/nargo version
- is pinned in `SUPPORTED_NOIR_VERSION_PREFIX` and any other is refused. (xark
- lowers ACIR, not Noir source — see `NOIR_VERSION.md`.)
-* `witness.rs` — reads the gzip-compressed `WitnessStack` file and converts
- every Noir field element to `ark_bn254::Fr`.
-* `field.rs` — single source of truth for `FieldElement <-> Fr`. The two types
- are isomorphic for the `bn254` feature, but we always convert via canonical
- big-endian bytes to keep the boundary explicit and testable.
-* `opcodes/` — opcode classification and dispatch: `AssertZero`, memory
- (init/read/write, constant- and variable-index), Brillig (unconstrained)
- blocks, and multi-function `Call`. Genuinely unsupported opcodes fail loudly
- (`opcodes/unsupported.rs`) with the opcode index and a remediation hint.
-* `gadgets/` — the black-box function implementations: range, boolean, bitwise,
- the hashes (SHA-256, Keccak, Blake2s, Blake3, Poseidon), AES, ECDSA
- (secp256k1 / secp256r1), and elliptic-curve ops. Each has KAT tests in
- `xark-tests`.
-* `lower.rs` — the heart of the project. Allocates all public-input variables
- first (ordering fixed by the parsed artifact and asserted here), then lowers
- each opcode to Arkworks R1CS constraints. `AssertZero` expressions with
- multiple mul-terms decompose into `t_i = a_i * b_i` auxiliaries plus one
- summing linear constraint; black-box opcodes dispatch into `gadgets/`.
-* `r1cs_builder.rs` — bookkeeping wrapper around `ConstraintSystemRef<Fr>` that
- tracks the `WitnessIndex → Variable` map, reused for both setup-mode and
- proving-mode synthesis so circuit shape stays identical between the two.
-* `public_inputs.rs` — extracts the public portion of the witness in the order
- the prover and verifier both agree on.
+For the primary crate the driver, in `after_analysis`, obtains the `TyCtxt`,
+finds `pub fn circuit(..)`, reads its signature to recover `Private`/`Public`
+visibility, pulls its MIR body (with gadget calls inlined via
+`-Zalways-encode-mir`), validates that only the accepted MIR subset is present
+(rejecting arbitrary control flow, references, aggregates, unknown calls, …),
+lowers it to xark-IR and then R1CS, and writes the output. Signalling
+intrinsics recognised in MIR are named `__xark_*` (`__xark_add`, `__xark_mul`,
+`__xark_hint_bit`, …).
 
-## `xark-backend`
+Nightly is required only because there is no stable API for MIR access. It is
+hidden inside the tool: **circuit authors write stable Rust**; only the tool
+touches nightly (pinned in `crates/xark/rust-toolchain.toml`). The pin, its
+fragility, and the bump procedure are documented in
+[`docs/toolchain.md`](toolchain.md).
 
-Wraps `xark-acir-r1cs` for `ark-groth16`:
+## Crates
 
-* `circuit.rs` — implements `ConstraintSynthesizer<Fr>` over a
- `LoweredAcirCircuit` plus an optional witness. Setup mode passes `None`;
- proving passes `Some(witness)`.
-* `setup.rs` / `prove.rs` / `verify.rs` — the Groth16 entry points.
- `setup`/`prove` take explicit `CryptoRng + RngCore` bounds so callers can't
- pass a non-cryptographic source; `prove` self-verifies its output before
- returning (a witness/lowering bug fails fast as `Unsatisfiable` rather than
- shipping a broken proof).
+### `xark` (the language + CLI)
+
+`crates/xark`. The library defines the marker primitives — `Field`, `assert_eq`,
+`Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics the compiler
+recognises in MIR — in its `lang` module, re-exported via its `prelude`, so a
+circuit author only needs `use xark::prelude::*`. (The marker function bodies
+never run; the tool stops after MIR extraction.) The binary (feature-gated
+behind `cli`) is the `xark` command — `build`, `prove`/`verify` — and doubles as
+the `rustc_driver` that extracts each circuit's R1CS. Compiler internals live in
+`crates/xark/src/{driver,find_entry,validate,lower_mir,diagnostics}.rs`.
+
+### `xark-bits`, `xark-ir`
+
+* `xark-bits` — bit / word building blocks (`to_bits32`, `xor32`, `rotr32`,
+  `add32`, …) usable to hand-write gadgets.
+* `xark-ir` — the xark-IR data structures (variables, linear
+  combinations, R1CS constraints, the primitive/hint program) plus JSON
+  serialization.
+
+### Gadget crates (add individually)
+
+Specialized building blocks are *separate crates* you depend on only when you
+need them: `xark-ff` (non-native / foreign-field arithmetic, used by the EC
+gadgets) and the gadgets `xark-poseidon`, `xark-poseidon2`, `xark-sha256`,
+`xark-keccak`, `xark-mimc`, `xark-blake3`, `xark-blake2s`, `xark-aes`,
+`xark-pedersen`, `xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`. Each is
+ordinary Rust that lowers to primitive constraints, with KAT tests.
+
+### `xark-prover`
+
+`crates/xark-prover`. Solves the witness from `--input` values, synthesizes
+the R1CS as an Arkworks `ConstraintSynthesizer`, and runs Groth16 `prove` /
+`verify` — a *verified* proof, straight from xark's own constraint system.
+
+### `xark-backend`
+
+`crates/backend`. Frontend-agnostic Groth16 over BN254:
+
+* Groth16 setup / prove / verify. `setup`/`prove` take explicit
+  `CryptoRng + RngCore` bounds; `prove` self-verifies before returning.
 * `ptau.rs` / `setup_phase2.rs` / `ceremony.rs` — the real trusted-setup path:
- ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup,
- and run a multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency
- pairing checks. See `docs/trusted-setup.md`.
-* `keys.rs`, `proof.rs` — binary I/O using Arkworks' `CanonicalSerialize`.
-* `serialization.rs` — JSON encodings for proofs, verifying keys, and public
- inputs (decimal-string coordinates; `encoding` recorded explicitly).
-* `solana.rs` — the little-endian wire encoder for the on-chain verifier
- (`assemble_{vk,proof,public_inputs}_bytes_le`). See `docs/serialization.md`.
+  ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup,
+  run a multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency
+  pairing checks (see `docs/trusted-setup.md`).
+* `keys.rs`, `proof.rs`, `serialization.rs` — binary (`CanonicalSerialize`) and
+  JSON encodings (see `docs/serialization.md`).
+* `solana.rs` — the little-endian wire encoder for the on-chain verifier.
 
-## `xark-verifier`
+### `xark-verifier`
 
-The on-chain Groth16 verifier (see its own `README.md`). Consumes the LE wire
-bytes, runs the pairing check via `solana-nostd-alt-bn128`, and is `#![no_std]`
-on the Solana target so it links into the cdylibs `svm-unit-test` generates. The
-typed `Verifier<N>` bakes the VK in at compile time. `xark export` generates a
-small self-contained crate per circuit that depends on this one.
-
-## `xark-cli`
-
-* `commands/` — one module per subcommand (`setup`, `prove`, `verify`,
- `export`, `inspect`, `write-vk`, `ceremony`). Each owns its own argument
- parsing, file I/O, and human/JSON output; there is no shared state between
- commands. The binary is named `xark`.
-
-## `xark-tests`
-
-`publish = false` aggregator holding every crate's integration tests, all
-benches, and the committed circuit fixtures (see its `README.md` for why it has
-to be one crate — the `svm-unit-test` cdylibs depend on its lib).
+`crates/verifier`. The on-chain Groth16 verifier: consumes the LE wire bytes,
+runs the pairing check via `solana-nostd-alt-bn128`, and is `#![no_std]` on the
+Solana target. The typed `Verifier<N>` bakes the VK in at compile time.
 
 ## Determinism and circuit hashing
 
-`LoweredAcirCircuit::circuit_hash` covers:
-
-* `LOWERING_VERSION` (bump it whenever the lowering algorithm changes).
-* The curve and proving system identifiers.
-* The pinned nargo/ACIR version string (the ACIR format the artifact was
- compiled with — not the Noir source language).
-* The number and identity of public inputs.
-* The `Display` form of every opcode (which bakes in coefficients and witness
- indices).
-
-Setup writes that hash into `metadata.json` alongside the backend version,
-timestamp, and constraint count. Any change to lowering or to the circuit
-itself produces a different hash.
+The circuit hash covers a lowering-version tag (bump it whenever the lowering
+algorithm changes), the curve and proving-system identifiers, the number and
+identity of public inputs, and the constraints themselves (coefficients and
+variable indices). Setup writes that hash into metadata alongside the backend
+version and constraint count, so any change to lowering or to the circuit
+produces a different hash.

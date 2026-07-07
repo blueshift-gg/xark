@@ -9,7 +9,6 @@ import Formal.Curve
 import Formal.Ecdsa
 import Formal.EcdsaVerify
 import Formal.Poseidon
-import Formal.Poseidon2Bn254
 import Formal.Secp256k1
 import Formal.Secp256r1
 import Mathlib
@@ -21,11 +20,11 @@ set_option linter.flexible false
 set_option maxHeartbeats 400000
 
 /-!
-# Per-opcode end-to-end soundness wrappers
+# Per-gadget end-to-end soundness wrappers
 
-For each `BlackBoxFuncCall` opcode that xark lowers, this file packages
+For each cryptographic gadget that xark compiles, this file packages
 the already-proven per-primitive theorems into a single top-level "the
-entire opcode is sound" statement.
+entire gadget is sound" statement.
 
 The shape for the bit-oriented gadgets (SHA-256, Keccak-f[1600], BLAKE2s,
 BLAKE3, AES-128) is:
@@ -168,7 +167,8 @@ def IsValidSha256CompressionWitness
         sha256RoundStep (rounds ⟨i.val, by omega⟩) (k256_w32 i) (W i)) ∧
     (∀ i : Fin 8, output i = addMod32 (state_in i) (rounds ⟨64, by decide⟩ i))
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::Sha256Compression`.**
+/-- **End-to-end soundness wrapper for the SHA-256 compression gadget
+(`crates/xark-sha256/src/lib.rs`).**
 The witness's per-round structural equalities are precisely those the
 gadget enforces (one `add_mod_32`/`Ch`/`Maj`/`Σ` per round). The
 wrapper packages them into the spec relation's existential. -/
@@ -273,7 +273,7 @@ def keccakRhoPi (s : Fin 25 → Word64) : Fin 25 → Word64 :=
     let Y : Fin 5 := ⟨i.val / 5, by
       have := i.isLt
       omega⟩
-    let x : Fin 5 := ⟨(3 * X.val + 2 * Y.val) % 5, Nat.mod_lt _ (by decide)⟩
+    let x : Fin 5 := ⟨(X.val + 3 * Y.val) % 5, Nat.mod_lt _ (by decide)⟩
     let y : Fin 5 := X
     rotl64 (s (keccakLaneIdx x y)) (keccakRhoOffset x y)
 
@@ -322,7 +322,8 @@ def IsValidKeccakf1600Witness
         keccakRoundStep (rounds ⟨i.val, by omega⟩) (rc i)) ∧
     output = rounds ⟨24, by decide⟩
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::Keccakf1600`.** -/
+/-- **End-to-end soundness wrapper for the Keccak-f[1600] gadget
+(`crates/xark-keccak/src/lib.rs`).** -/
 theorem lowerKeccakf1600_sound
     {state_in output : Fin 25 → Word64} {rc : Fin 24 → Word64}
     (h : IsValidKeccakf1600Witness state_in output rc) :
@@ -492,7 +493,8 @@ def IsValidBlake2sWitness
         blake2sRoundStep (rounds ⟨i.val, by omega⟩) m i) ∧
     (t_lo = t_lo) ∧ (t_hi = t_hi) ∧ (last_block = last_block) ∧ (h_out = h_out)
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::Blake2s`.** -/
+/-- **End-to-end soundness wrapper for the Blake2s gadget
+(`crates/xark-blake2s/src/lib.rs`).** -/
 theorem lowerBlake2s_sound
     {h_in : Fin 8 → Word32} {m : Fin 16 → Word32}
     {t_lo t_hi : Word32} {last_block : Bool}
@@ -617,7 +619,8 @@ def IsValidBlake3CompressionWitness
     (counter_lo = counter_lo) ∧ (counter_hi = counter_hi) ∧
     (block_len = block_len) ∧ (flags = flags)
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::Blake3`.** -/
+/-- **End-to-end soundness wrapper for the Blake3 gadget
+(`crates/xark-blake3/src/lib.rs`).** -/
 theorem lowerBlake3_sound
     {cv : Fin 8 → Word32} {block : Fin 16 → Word32}
     {counter_lo counter_hi block_len flags : Word32}
@@ -841,8 +844,8 @@ def IsValidAES128EncryptWitness
           (rk ⟨i.val + 1, by omega⟩) (decide (i.val = 9))) ∧
     ciphertext = rounds ⟨10, by decide⟩
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::AES128Encrypt`
-(single block).** -/
+/-- **End-to-end soundness wrapper for the AES-128 encryption gadget
+(`crates/xark-aes/src/lib.rs`) (single block).** -/
 theorem lowerAES128Encrypt_sound
     {plaintext key ciphertext : Fin 16 → Byte8}
     (h : IsValidAES128EncryptWitness plaintext key ciphertext) :
@@ -887,23 +890,6 @@ theorem aes128_iter_of_rel
   refine ⟨rk, hrk, ?_⟩
   rw [hout, hsnap 10 (le_refl _)]
 
-/-! ## Poseidon2 permutation wrapper -/
-
-/-- Poseidon2 permutation spec relation. -/
-def Poseidon2PermutationRel (state_in state_out : Fin 4 → Bn254Fr) : Prop :=
-  state_out = poseidon2Bn254 state_in
-
-/-- Gadget intermediate-state witness for Poseidon2. -/
-def IsValidPoseidon2PermutationWitness
-    (state_in state_out : Fin 4 → Bn254Fr) : Prop :=
-  state_out = poseidon2Bn254 state_in
-
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::Poseidon2Permutation`.** -/
-theorem lowerPoseidon2Permutation_sound
-    {state_in state_out : Fin 4 → Bn254Fr}
-    (h : IsValidPoseidon2PermutationWitness state_in state_out) :
-    Poseidon2PermutationRel state_in state_out := h
-
 /-! ## EmbeddedCurveAdd + MultiScalarMul wrappers -/
 
 /-- EmbeddedCurveAdd spec relation. -/
@@ -921,7 +907,8 @@ def IsValidEmbeddedCurveAddWitness {F : Type*} [Field F]
     xg yg x3 y3 is_inf3 ∧
   (is_inf1 = 0 → is_inf2 = 0 → x1 = x2 → y1 = y2 → (2 : F) * y1 ≠ 0)
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::EmbeddedCurveAdd`.** -/
+/-- **End-to-end soundness wrapper for the embedded-curve point-addition gadget
+(`crates/xark-grumpkin/src/lib.rs`).** -/
 theorem lowerEmbeddedCurveAdd_sound {F : Type*} [Field F]
     {x1 y1 is_inf1 x2 y2 is_inf2 lambda
      same_x same_y is_double is_inverse inv_dx inv_dy
@@ -942,7 +929,8 @@ def IsValidMultiScalarMulWitness {G : Type*} [AddCommGroup G]
     {N : ℕ} (points : Fin N → G) (scalars : Fin N → ℕ) (output : G) : Prop :=
   output = ∑ i : Fin N, (scalars i) • (points i)
 
-/-- **End-to-end soundness wrapper for `BlackBoxFuncCall::MultiScalarMul`.** -/
+/-- **End-to-end soundness wrapper for the multi-scalar-multiplication gadget
+(`crates/xark-grumpkin/src/lib.rs`).** -/
 theorem lowerMultiScalarMul_sound {G : Type*} [AddCommGroup G]
     {N : ℕ} {points : Fin N → G} {scalars : Fin N → ℕ} {output : G}
     (h : IsValidMultiScalarMulWitness points scalars output) :

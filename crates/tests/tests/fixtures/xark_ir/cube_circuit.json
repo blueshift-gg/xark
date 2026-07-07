@@ -1,0 +1,103 @@
+{
+  "field": {
+    "name": "bn254",
+    "modulus_decimal": "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+  },
+  "vars": [
+    {
+      "id": 0,
+      "name": "secret",
+      "role": "private_input"
+    },
+    {
+      "id": 1,
+      "name": "result",
+      "role": "public_input"
+    },
+    {
+      "id": 2,
+      "name": "t0",
+      "role": "derived"
+    }
+  ],
+  "constraints": [
+    {
+      "mul_terms": [
+        {
+          "coeff": {
+            "decimal": "1"
+          },
+          "left": 0,
+          "right": 0
+        }
+      ],
+      "linear_terms": [
+        {
+          "coeff": {
+            "decimal": "-1"
+          },
+          "var": 2
+        }
+      ],
+      "constant": {
+        "decimal": "0"
+      },
+      "note": "secret * secret = t0"
+    },
+    {
+      "mul_terms": [
+        {
+          "coeff": {
+            "decimal": "1"
+          },
+          "left": 2,
+          "right": 0
+        }
+      ],
+      "linear_terms": [
+        {
+          "coeff": {
+            "decimal": "-1"
+          },
+          "var": 1
+        }
+      ],
+      "constant": {
+        "decimal": "0"
+      },
+      "note": "t0 * secret = result"
+    }
+  ],
+  "witness_gen": [
+    {
+      "op": "product",
+      "out": 2,
+      "left": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      },
+      "right": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          }
+        ]
+      }
+    }
+  ]
+}

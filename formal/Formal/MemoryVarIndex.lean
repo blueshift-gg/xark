@@ -12,7 +12,7 @@ set_option linter.style.longLine false
 /-!
 # Variable-index memory-op soundness
 
-Mirrors `crates/acir-r1cs/src/opcodes/memory.rs::lower_memory_op_variable_index`.
+Mirrors the xark compiler's array-indexing lowering (`crates/xark/src/lower_mir.rs`).
 For an `n`-slot block under a variable index the gadget allocates:
 
 * booleans `s_j ∈ {0, 1}` for `j ∈ [0, n)`,

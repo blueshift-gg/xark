@@ -8,7 +8,6 @@ auditor reading [§2](#2-per-gadget-soundness-sketches) to find load-bearing
 claims to attack. Every claim has a pointer into the codebase; when the
 implementation drifts, *this document is the canonical place to update*.
 Supporting design notes: [`architecture.md`](architecture.md),
-[`brillig.md`](brillig.md), [`memory.md`](memory.md),
 [`serialization.md`](serialization.md), [`trusted-setup.md`](trusted-setup.md).
 
 ---
@@ -19,9 +18,9 @@ Supporting design notes: [`architecture.md`](architecture.md),
 
 The prover is fully adversarial:
 
-* may construct any `WitnessMap` (any assignment to private witnesses).
-* may lie about Brillig hint outputs (modular inverses, bit decompositions,
- quotients/remainders).
+* may construct any witness assignment (any assignment to private witnesses).
+* may lie about hint/advice outputs (modular inverses, bit decompositions,
+ quotients/remainders) supplied via the `hint_*` primitives.
 * may craft public inputs that do not match the circuit's intended semantics.
 * may attempt to produce a proof for a statement the verifier rejects.
 
@@ -62,10 +61,11 @@ the current state of xark's setup modes.
 
 We are explicitly *not* defending against:
 
-* **A Noir compiler bug producing under-constrained witnesses for Brillig
- outputs.** Our `BrilligCall` handling assumes the Noir compiler's
- hint-then-check invariant; see [`docs/brillig.md`](brillig.md) and
- [§2.15](#215-brilligcall-trust-outputs) below.
+* **A circuit or gadget that leaves a hint/advice output unconstrained.**
+ Our hint model assumes every `hint_*` output witness is pinned by
+ surrounding R1CS constraints; see
+ [§2.15](#215-hint-outputs-advice) below. It is the circuit author's and
+ gadget's responsibility to constrain every hint value.
 * **A future Arkworks Groth16 implementation regression.** We pin via
  Cargo.lock; bumping `ark-groth16` requires re-verifying the byte-level
  serialization round-trip test
@@ -82,13 +82,13 @@ We are explicitly *not* defending against:
 
 ## 2. Per-gadget soundness sketches
 
-Every gadget below lives in `crates/acir-r1cs/src/gadgets/`. Each subsection
+Every gadget below lives in its own `xark-*` gadget crate. Each subsection
 states the relation the gadget claims to enforce, the R1CS rows it emits, and
 the argument that the rows imply the relation over `Fr = BN254 scalar field`.
 
 ### 2.1 `enforce_boolean`
 
-**File.** `crates/acir-r1cs/src/gadgets/boolean.rs`.
+**File.** `crates/xark-bits/src/lib.rs`.
 
 **Relation.** For input variable `x`, after this gadget runs, any satisfying
 assignment has `x ∈ {0, 1}` as field elements.
@@ -107,7 +107,7 @@ divisors). The polynomial `X * (X - 1) ∈ Fr[X]` has degree 2 and roots exactly
 
 ### 2.2 `decompose_into_bits` (range gadget)
 
-**File.** `crates/acir-r1cs/src/gadgets/range.rs`. Constant
+**File.** `crates/xark-bits/src/lib.rs`. Constant
 `MAX_BITS = 253`.
 
 **Relation.** For input variable `value_var` and width `n ≤ MAX_BITS`,
@@ -147,7 +147,7 @@ constant is therefore load-bearing; do not raise it.
 
 ### 2.3 32-bit XOR (`xor`)
 
-**File.** `crates/acir-r1cs/src/gadgets/bitwise.rs`.
+**File.** `crates/xark-bits/src/lib.rs`.
 
 **Relation.** Inputs `a, b: Word32` (each `Word32` is 32 LCs, each LC's value
 in `{0, 1}` by prior bit-decomposition). Output `out: Word32` such that
@@ -180,7 +180,7 @@ because composability is cheaper than re-auditing.
 
 ### 2.4 32-bit AND (`and`)
 
-**File.** `crates/acir-r1cs/src/gadgets/bitwise.rs`.
+**File.** `crates/xark-bits/src/lib.rs`.
 
 **Relation.** Same shape as XOR: `out.bits[i] = a.bits[i] AND b.bits[i]`.
 
@@ -197,7 +197,7 @@ boolean (so we save a redundant boolean check that XOR has to pay).
 
 ### 2.5 32-bit ADD mod 2^32 (`add_mod_32`)
 
-**File.** `crates/acir-r1cs/src/gadgets/bitwise.rs`.
+**File.** `crates/xark-bits/src/lib.rs`.
 
 **Relation.** Given up to `MAX_TERMS = 8` 32-bit input words, returns a
 `Word32` equal to the `mod 2^32` sum of the inputs.
@@ -227,7 +227,7 @@ adversarial counterpart `add_mod_32_constraint_fails_on_bad_witness`.
 
 ### 2.6 SHA-256 compression
 
-**File.** `crates/acir-r1cs/src/gadgets/hash.rs`. Round constants
+**File.** `crates/xark-sha256/src/lib.rs`. Round constants
 `K256[0..64]` and the schedule mirror NIST FIPS 180-4 §6.2.
 
 **Relation.** Given a 16-word message block and 8-word state, returns the
@@ -263,7 +263,7 @@ against the `sha2` crate's `compress256`.
 
 ### 2.7 Keccak-f[1600]
 
-**File.** `crates/acir-r1cs/src/gadgets/keccak.rs`.
+**File.** `crates/xark-keccak/src/lib.rs`.
 
 **Relation.** Implements the Keccak-f[1600] permutation as 24 rounds over a
 5×5 array of 64-bit lanes. Each lane is held as a `WordN` of width 64; each
@@ -282,10 +282,10 @@ the `keccak` crate on the all-zeros block) and
 
 ### 2.8 Blake2s
 
-**File.** `crates/acir-r1cs/src/gadgets/blake2s.rs`.
+**File.** `crates/xark-blake2s/src/lib.rs`.
 
 **Relation.** Implements the Blake2s compression (10 rounds, 32-bit lanes,
-G mixing function) plus the streaming wrapper Noir expects (variable-length
+G mixing function) plus the streaming wrapper (variable-length
 input → 32 output bytes).
 
 **Argument.** Same recipe as SHA-256: G's mixing reduces to `xor`, `add_mod_32`,
@@ -299,7 +299,7 @@ plus `blake2s_in_circuit_matches_native_on_abc`,
 
 ### 2.9 Blake3
 
-**File.** `crates/acir-r1cs/src/gadgets/blake3.rs`. Supports both single-chunk
+**File.** `crates/xark-blake3/src/lib.rs`. Supports both single-chunk
 (`inputs.len() ≤ CHUNK_BYTES = 1024`) and multi-chunk inputs via the standard
 binary-tree CV combination.
 
@@ -316,9 +316,9 @@ and combines them via a binary tree per the BLAKE3 spec.
 
 ### 2.10 Poseidon2 permutation
 
-**File.** `crates/acir-r1cs/src/gadgets/poseidon.rs`. Constants taken
-verbatim from `acvm-repo/bn254_blackbox_solver/src/poseidon2.rs` in Noir
-**v1.0.0-beta.22** (the version pinned in `NOIR_VERSION.md`).
+**File.** `crates/xark-poseidon2/src/lib.rs`. Constants match the standard
+reference Poseidon2-BN254 parameter set; they are vendored verbatim into the
+crate rather than re-derived.
 
 **Relation.** State width `T = 4`, `R_F = 8` full rounds, `R_P = 56` partial
 rounds, S-box `x^5`, external matrix `M_E` (the standard 4×4 partner of the
@@ -333,19 +333,19 @@ the only soundness-relevant arithmetic is field multiplication and
 addition, both of which are R1CS-native and bit-exact.
 
 The parameter set is the load-bearing claim here: we re-derive nothing, we
-copy the constants. If Noir's `bn254_blackbox_solver` ships a soundness bug
-in its parameter table, we ship the same bug.
+copy the constants. If the upstream reference parameter table has a
+soundness bug, we inherit the same bug.
 
 **KAT.** `gadgets::poseidon::tests::native_matches_external_kat_all_zeros`
-(matches Barretenberg's published `Poseidon2(0, 0, 0, 0)` output) and
+(matches the reference Poseidon2-BN254 `Poseidon2(0, 0, 0, 0)` output) and
 `in_circuit_matches_external_kat_all_zeros` /
 `in_circuit_matches_native_on_1_2_3_4`.
 
 ### 2.11 AES-128 encryption
 
-**File.** `crates/acir-r1cs/src/gadgets/aes.rs`. CBC mode, no padding —
-input length must be a positive multiple of 16, Noir's stdlib handles PKCS#7
-before emitting the opcode.
+**File.** `crates/xark-aes/src/lib.rs`. CBC mode, no padding —
+input length must be a positive multiple of 16; PKCS#7 padding (if needed)
+is the caller's responsibility before invoking the gadget.
 
 **Relation.** Per-block: 10-round AES-128 over GF(2^8).
 
@@ -380,9 +380,9 @@ plus the full-table cross-check `sbox_all_inputs_match_table` and
 `gf256_inv_roundtrips` (256-input exhaustive cross-checks of the S-box
 and the GF(2^8) inverse helper).
 
-### 2.12 Grumpkin curve (EmbeddedCurveAdd + MSM)
+### 2.12 Grumpkin curve (point add + MSM)
 
-**File.** `crates/acir-r1cs/src/gadgets/curve.rs`.
+**File.** `crates/xark-grumpkin/src/lib.rs`.
 
 **Relation.** Affine `(x, y, is_infinity)` points on Grumpkin (whose base
 field is BN254 `Fr`). `ec_add_in_circuit` enforces affine addition with
@@ -424,16 +424,17 @@ MSM uses double-and-add over the bit decomposition of each scalar limb pair
 `msm_in_circuit_two_points`,
 `random_scalars_match_native`.
 
-### 2.13 ACIR `AssertZero` lowering
+### 2.13 xark-IR arithmetic → R1CS lowering
 
-**File.** `crates/acir-r1cs/src/lower.rs`,
-function `lower_assert_zero_gated`.
+**Files.** `crates/xark-ir/` (the xark-IR arithmetic ops the MIR
+lowering emits) and `crates/xark-prover/` (R1CS synthesis).
 
-**Relation.** Each `AssertZero(Expression)` opcode asserts
-`q_c + Σ_k coef_k * w_k + Σ_i q_M_i * a_i * b_i = 0` for the witness map
-referenced by the expression.
+**Relation.** Each arithmetic assertion asserts
+`q_c + Σ_k coef_k * w_k + Σ_i q_M_i * a_i * b_i = 0` for the linear
+combinations referenced by the expression. `assert_eq(x, y)` lowers to
+the `x - y = 0` form of this.
 
-**Constraints emitted.** Three cases based on `mul_terms.len()`:
+**Constraints emitted.** Three cases based on the number of mul terms:
 
 * **0 mul terms (linear-only).** Emit one row `0 * 0 = -(linear + q_c)`,
  which forces `linear + q_c = 0`.
@@ -444,38 +445,28 @@ referenced by the expression.
  `Σ_i q_M_i * t_i + linear + q_c = 0`.
 
 **Argument.** In all three cases, the emitted rows are equivalent to the
-original `Expression = 0`. For the multi-mul case, the `t_i = a_i * b_i`
+original `expression = 0`. For the multi-mul case, the `t_i = a_i * b_i`
 constraints uniquely determine each `t_i` from the witness assignment, so
 the final linear row evaluates to the original expression. Because R1CS
 rows are evaluated as field-element identities, satisfaction of the rows is
 equivalent to satisfaction of the original expression over `Fr`.
 
-**Tests.** `lower::tests::{x_plus_y_equals_z_satisfied, x_times_y_equals_z_satisfied,
-mul_plus_linear_satisfied, two_mul_terms_satisfied,
-negative_coefficient_constant_term}` and the matching `_unsatisfied`
-variants.
-
 ### 2.14 Public input ordering
 
-**Files.** `crates/acir-r1cs/src/lower.rs`
-(`LoweredAcirCircuit::synthesize`),
-`crates/acir-r1cs/src/public_inputs.rs`,
-`crates/acir-r1cs/src/artifact.rs`
-(`NoirArtifact::public_inputs`).
+**Files.** `crates/xark-prover/` (R1CS synthesis) and
+`crates/xark-ir/` (the variable table, where each `Public` variable is
+recorded in declaration order).
 
 **Relation.** The verifier consumes public inputs in the *exact same order*
 the prover provided them to the constraint system. Mismatches would result
 in the verifier silently accepting a proof for a different statement.
 
-**Argument.** `LoweredAcirCircuit::synthesize` walks
-`self.artifact.public_inputs` and calls
-`builder.alloc_public(idx)` for each entry **before any opcode is lowered**.
-This guarantees the Arkworks R1CS sees public-input variables in the same
-order as `public_inputs.json`. The verifier in
-`xark_backend::verify::verify` consumes `&[Fr]` slices ordered the same
-way. The `circuit_hash` (see `lower.rs:circuit_hash`) folds the public-input
-witness indices into the hash, so any reordering changes the circuit
-identity.
+**Argument.** The prover allocates public-input variables in the order the
+`circuit` function's `Public<Field>` parameters appear in its signature,
+**before any arithmetic constraint is lowered**. This guarantees the
+Arkworks R1CS sees public-input variables in the same order the verifier
+expects. The circuit hash folds the public-input variable indices into the
+hash, so any reordering changes the circuit identity.
 
 **Tests.** `lower::tests::circuit_hash_changes_with_public_input_order` and
 the end-to-end matrix in
@@ -487,33 +478,29 @@ the end-to-end matrix in
 * `large_pi_verifies`
 * `reorder_pi_tampered_first_input_fails`
 
-### 2.15 BrilligCall (trust-outputs)
+### 2.15 Hint outputs (advice)
 
-**Files.** `crates/acir-r1cs/src/opcodes/brillig.rs` and
-[`docs/brillig.md`](brillig.md).
+**Where.** The `hint_*` primitives (e.g. `Field::hint_inverse`,
+`hint_bits`) in `crates/xark/` (the `lang` module) and their witness-solver
+counterparts in `crates/xark-prover/`.
 
-**Relation.** The gadget allocates every `BrilligOutputs::{Simple, Array}`
-witness in the constraint system but emits **no constraints** for the call
-itself.
+**Relation.** A hint allocates a fresh witness that the prover fills during
+witness generation but for which the circuit emits **no constraint at the
+hint itself**.
 
-**Argument.** Soundness reduces to a Noir compiler invariant: every Brillig
-output witness is also referenced by at least one surrounding
-`Opcode::AssertZero` that pins its value relative to other constrained
-witnesses. The classic example is "compute modular inverse via Brillig, then
-assert `x * supplied_inverse = 1` via AssertZero". The check-half is what we
-lower; the hint-half (Brillig) we trust to produce *a* value but rely on the
-check to pin it to the *right* value.
+**Argument.** Soundness relies on a gadget-authoring invariant: every hint
+output witness must also be referenced by at least one surrounding R1CS
+constraint that pins its value relative to other constrained witnesses. The
+canonical example is "supply `w = x⁻¹` as advice, then assert `x * w = 1`".
+The check-half is what the R1CS enforces; the hint-half we trust to produce
+*a* value but rely on the check to pin it to the *right* value (see the
+`inverse` example).
 
-If the Noir compiler ever ships a Brillig output that is not subsequently
-constrained, the corresponding witness is free to be anything the prover
-chooses, and the proof is unsound. This is an explicit out-of-scope
-assumption per [§1](#1-threat-model).
-
-**Compiler-bug fence.** `R1csBuilder::alloc_witness` is idempotent and the
-gadget itself emits no constraints, so a violation of the hint/check
-invariant cannot be detected at lowering time. Detection would require
-re-executing the Brillig VM (see `docs/brillig.md` "re-execute" strategy
-which we explicitly *did not* choose).
+If a gadget ever emits a hint output that is not subsequently constrained,
+the corresponding witness is free to be anything the prover chooses, and the
+proof is unsound. This is an explicit out-of-scope assumption per
+[§1](#1-threat-model): it is the circuit author's and gadget's
+responsibility to constrain every hint value.
 
 ---
 
@@ -593,10 +580,10 @@ Working list; update as work lands.
  (`scripts/differential_snarkjs.sh`).
  **Never deployed to mainnet**; not externally audited.
 
-* **Poseidon2 parameters.** Inherit Noir's
- `bn254_blackbox_solver::poseidon2_constants` (v1.0.0-beta.22) verbatim.
- **Not independently re-derived.** A regression in Noir's table ships here
- unchanged.
+* **Poseidon2 parameters.** Vendored verbatim from the standard reference
+ Poseidon2-BN254 parameter set into `crates/xark-poseidon2`.
+ **Not independently re-derived.** A regression in the upstream reference
+ table ships here unchanged.
 
 * **AES S-box decomposition.** Algebraic `x * x_inv = 1 - is_zero`, not the
  Boyer-Peralta straight-line program. Exhaustively cross-checked against
@@ -629,13 +616,13 @@ Working list; update as work lands.
 This is the literal checklist a release engineer should walk through
 before tagging a production release of a circuit deployed via xark.
 
-* [ ] **nargo/ACIR version pinned.** `NOIR_VERSION.md` records the `nargo`
- version (and thus the ACIR artifact format) the circuit was compiled
- with, and it matches the deployment target. The pin is on the ACIR
- format xark lowers, not the Noir source language.
-* [ ] **All gadgets used by the target circuit have a KAT test.** Run
- `xark inspect <artifact>` to enumerate the black-box opcodes used and
- cross-reference each against [§2](#2-per-gadget-soundness-sketches).
+* [ ] **Toolchain pinned.** The nightly toolchain the `xark` tool builds
+ circuits with is pinned (`rust-toolchain.toml`) and matches the one used
+ to produce the deployed circuit — MIR extraction is nightly-only and its
+ shape can drift across nightlies.
+* [ ] **All gadgets used by the target circuit have a KAT test.** Enumerate
+ the gadget crates the circuit depends on and cross-reference each against
+ [§2](#2-per-gadget-soundness-sketches).
 * [ ] **`circuit_hash` is recorded in deployed metadata** and matches what
  the verifier (both the host-side `verify` command and the on-chain
  programs) expects.
@@ -669,16 +656,16 @@ before tagging a production release of a circuit deployed via xark.
 
 External auditors should focus first on:
 
-1. **The lowering layer** — `crates/acir-r1cs/src/lower.rs` plus
- `crates/acir-r1cs/src/opcodes/blackbox.rs` plus every file under
- `crates/acir-r1cs/src/gadgets/`. This is the layer that turns Noir
+1. **The lowering layer** — `crates/xark-ir/` and
+ `crates/xark-prover/` (MIR → xark-IR → R1CS) plus every gadget crate
+ (`crates/xark-*`). This is the layer that turns circuit
  semantics into R1CS rows; a bug here is a soundness break in every
  downstream circuit. The load-bearing sub-claims are
  [§2.2](#22-decompose_into_bits-range-gadget) (the 253-bit boundary),
  [§2.11](#211-aes-128-encryption) (the algebraic S-box decomposition),
- [§2.12](#212-grumpkin-curve-embeddedcurveadd--msm) (the selector
+ [§2.12](#212-grumpkin-curve-point-add--msm) (the selector
  polynomial), and [§2.10](#210-poseidon2-permutation) (parameter-set
- inheritance from Noir).
+ inheritance from the reference spec).
 2. **The serialization layer** — `crates/backend/src/serialization.rs`
  and `crates/backend/src/solana.rs`. Any byte-layout drift here would
  silently cause the on-chain verifier to read a different proof than the

@@ -12,17 +12,20 @@ set_option linter.style.header false
 /-!
 # xark gadget soundness — mechanised in Lean 4 / mathlib
 
-Machine-checked soundness lemmas for the R1CS gadgets emitted by
-`crates/acir-r1cs`. Each theorem mirrors the *exact* constraints the Rust
-builder enforces, so a proof here is a statement about the real circuit.
+Machine-checked soundness lemmas for the R1CS gadgets emitted by the xark
+frontend gadget crates (`crates/xark-*/src/lib.rs`). Each theorem mirrors the
+*exact* constraints the Rust builder enforces, so a proof here is a statement
+about the real circuit.
 
-* `boolean_sound` — mirrors `gadgets/boolean.rs::enforce_boolean`, which
+* `boolean_sound` — mirrors the boolean-enforcement gadget in
+  `crates/xark-bits/src/lib.rs`, which
   enforces `b * (b - 1) = 0`. We prove that this holds **iff** `b ∈ {0, 1}`,
   in any field (more generally any ring with no zero divisors). This is the
   primitive every other gadget builds on (range, bitwise, the hashes all
   pin their wires to {0,1} this way).
 
-* `range_unique` — mirrors `gadgets/range.rs::decompose_into_bits`, which
+* `range_unique` — mirrors the bit-decomposition gadget in
+  `crates/xark-bits/src/lib.rs`, which
   allocates `n` boolean wires `bᵢ` and enforces `Σᵢ 2ⁱ·bᵢ = value`. We prove
   the gadget is **functionally deterministic**: the bit-vector is *uniquely*
   determined by `value` — i.e. the R1CS has no under-constraint slack — as
@@ -35,7 +38,8 @@ builder enforces, so a proof here is a statement about the real circuit.
 namespace Xark
 
 /-- **`enforce_boolean` soundness.** The single constraint
-`b * (b - 1) = 0` emitted by `gadgets/boolean.rs` holds exactly when `b` is a
+`b * (b - 1) = 0` emitted by the boolean gadget (`crates/xark-bits/src/lib.rs`)
+holds exactly when `b` is a
 boolean field element. Stated for any ring with no zero divisors (every field,
 in particular `ark_bn254::Fr`). -/
 theorem boolean_sound {F : Type*} [Ring F] [NoZeroDivisors F] (b : F) :
@@ -49,7 +53,8 @@ def r : ℕ :=
 instance : NeZero r := ⟨by unfold r; norm_num⟩
 instance : Fact (1 < r) := ⟨by unfold r; norm_num⟩
 
-/-- `2^253 < r`: the width cap `MAX_BITS = 253` in `gadgets/range.rs` keeps an
+/-- `2^253 < r`: the width cap `MAX_BITS = 253` in the range gadget
+(`crates/xark-bits/src/lib.rs`) keeps an
 `n`-bit recomposition (`n ≤ 253`) strictly below the modulus, so it cannot wrap. -/
 theorem two_pow_lt_r : (2 : ℕ) ^ 253 < r := by unfold r; norm_num
 

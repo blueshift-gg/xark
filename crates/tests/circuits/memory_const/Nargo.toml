@@ -1,6 +1,0 @@
-[package]
-name = "memory_const"
-type = "bin"
-authors = [""]
-
-[dependencies]

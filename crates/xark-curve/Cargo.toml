@@ -1,0 +1,9 @@
+[package]
+name = "xark-curve"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "xark_curve"
+path = "src/lib.rs"

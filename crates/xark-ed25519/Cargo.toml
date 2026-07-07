@@ -1,0 +1,18 @@
+[package]
+name = "xark-ed25519"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "xark_ed25519"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+xark-ff = { path = "../xark-ff" }
+xark-curve = { path = "../xark-curve" }
+
+[dev-dependencies]
+xark-ir = { path = "../xark-ir" }
+xark-test-harness = { path = "../xark-test-harness" }

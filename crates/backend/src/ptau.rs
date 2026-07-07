@@ -119,6 +119,21 @@ pub enum Phase2Error {
     /// has no appropriate radix-2 sub-group in BN254 Fr.
     #[error("phase-2 setup: FFT domain construction failed for requested size {0}")]
     DomainConstruction(usize),
+
+    /// A ptau section holds fewer points than the QAP domain size `n` requires.
+    /// A transcript from [`parse_ptau`](crate::parse_ptau) always has
+    /// consistent section lengths; this fires only on a hand-built or otherwise
+    /// malformed [`PtauFile`] whose vectors are too short — caught here so the
+    /// per-variable QAP loop cannot index out of bounds and panic.
+    #[error(
+        "phase-2 setup: ptau section `{section}` holds {actual} points but the circuit's \
+ QAP domain requires at least {needed}"
+    )]
+    PtauSectionTooShort {
+        section: &'static str,
+        needed: usize,
+        actual: usize,
+    },
 }
 
 /// Verify that `ptau` covers a circuit with the given constraint count.

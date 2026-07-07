@@ -1,0 +1,9 @@
+[package]
+name = "poseidon_sponge"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[lib]
+[dependencies]
+xark = { path = "../../crates/xark", default-features = false }
+xark-poseidon = { path = "../../crates/xark-poseidon" }

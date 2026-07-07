@@ -1,7 +1,7 @@
 # xark-backend
 
 The Groth16 (BN254) proving backend for xark. Given a circuit lowered to R1CS
-by [`xark-acir-r1cs`], it runs the full Arkworks Groth16 pipeline — trusted
+it runs the full Arkworks Groth16 pipeline — trusted
 setup, prove, verify — and serializes keys, proofs, and public inputs into the
 little-endian Solana wire format that [`xark-verifier`] consumes on chain.
 
@@ -39,5 +39,4 @@ fixtures and differential tests reproduce byte-for-byte. **Do not** enable it in
 production — a real deployment needs a genuine trusted-setup ceremony (see
 `xark ceremony` and `docs/trusted-setup.md`).
 
-[`xark-acir-r1cs`]:../acir-r1cs
 [`xark-verifier`]:../verifier

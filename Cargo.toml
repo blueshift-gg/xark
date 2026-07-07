@@ -1,22 +1,41 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/acir-r1cs",
     "crates/backend",
-    "crates/cli",
     "crates/verifier",
     "crates/tests",
+    "crates/xark-aes",
+    "crates/xark-bits",
+    "crates/xark-blake2s",
+    "crates/xark-blake3",
+    "crates/xark-ed25519",
+    "crates/xark-ff",
+    "crates/xark-grumpkin",
+    "crates/xark-keccak",
+    "crates/xark-ir",
+    "crates/xark-prover",
+    "crates/xark-mimc",
+    "crates/xark-pedersen",
+    "crates/xark-poseidon",
+    "crates/xark-poseidon2",
+    "crates/xark-secp256k1",
+    "crates/xark-secp256r1",
+    "crates/xark-sha256",
+    "crates/xark-test-harness",
+    "crates/xark-curve",
 ]
 # The reference Solana program lives under `crates/verifier/reference-program/`
 # but is *intentionally* kept out of the workspace: it's only built via
 # `cargo-build-sbf` (with its own pinned `Cargo.lock`) as the
 # reproducible-build target. See `docs/reproducible-build.md`.
 exclude = [
+    "crates/xark",
+    "examples",
     "crates/verifier/reference-program",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/blueshift/xark"
@@ -34,14 +53,11 @@ ark-serialize = { version = "0.6", default-features = false, features = ["derive
 ark-std = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-snark = { version = "0.6", default-features = false }
 
-# Pinned to nargo 1.0.0-beta.22.
-# `acir` re-exports the `acir_field` / `acvm` types and pulls them in at the
-# same pinned commit, so we only need to declare `acir` here.
-acir = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0-beta.22", default-features = false, features = ["bn254"] }
 
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

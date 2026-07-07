@@ -1,0 +1,8 @@
+[package]
+name = "const_generic"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[lib]
+[dependencies]
+xark = { path = "../../crates/xark", default-features = false }
