@@ -198,8 +198,25 @@ pub fn xark_build(name: &str, out: &Path, target: &Path) -> (bool, String) {
     (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned())
 }
 
-/// `xark prove <out-dir> --input k=v ...` (solve witness + Groth16 prove/verify).
+/// `xark setup <out-dir> --insecure-dev-mode` (generate proving & verifying keys).
+/// Uses the dev-mode setup with deterministic seed (1) for reproducibility.
 /// Returns `(success, stderr)`.
+pub fn xark_setup(out: &Path) -> (bool, String) {
+    let o = Command::new(xark_bin())
+        .arg("setup")
+        .arg(out)
+        .arg("--insecure-dev-mode")
+        .arg("--deterministic-rng")
+        .arg("1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn xark setup");
+    (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+
+/// `xark prove <out-dir> --input k=v ...` (solve witness + Groth16 prove/verify).
+/// Returns `(success, combined stdout+stderr)`.
 pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
     let mut c = Command::new(xark_bin());
     c.arg("prove").arg(out);
@@ -211,7 +228,12 @@ pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
         .stderr(Stdio::piped())
         .output()
         .expect("spawn xark prove");
-    (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned())
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr),
+    );
+    (o.status.success(), combined)
 }
 
 /// Run the `xark` binary with `args`, returning `(success, stdout, stderr)`.

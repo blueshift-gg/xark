@@ -6,9 +6,9 @@ version = 4
 name = "arithmetic_square"
 version = "0.1.0"
 dependencies = [
- "xark-lang",
+ "xark",
 ]
 
 [[package]]
-name = "xark-lang"
-version = "0.1.0"
+name = "xark"
+version = "0.0.1"
