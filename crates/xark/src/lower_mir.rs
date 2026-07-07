@@ -1007,6 +1007,47 @@ impl<'tcx> LoweringEnv<'tcx> {
             .push(R1csConstraint::equal(id, diff, LinearCombination::zero(), &note));
     }
 
+    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)`: `n` boolean bit
+    /// witnesses whose weighted sum recomposes `value`. This is the same
+    /// decomposition `Field::to_bits::<N>` produces, injected at the input
+    /// boundary for a `Private<U<N>>` parameter — whose value the prover chooses,
+    /// so the bound must be proven rather than assumed.
+    fn emit_range_proof(&mut self, value: VarId, n: usize) {
+        let value_lc = LinearCombination::var(value);
+        let two = xark_ir::FieldConst::from_i64(2);
+        let mut pow = xark_ir::FieldConst::from_i64(1);
+        let mut recomp = LinearCombination::zero();
+        for i in 0..n {
+            let b = self.alloc_advice();
+            // Witness-gen: bit `i` of the input value.
+            self.witness_gen.push(Some(WitnessGen::Bit {
+                out: b,
+                input: value_lc.clone(),
+                index: i as u32,
+            }));
+            // Booleanity: `b * b = b` (⟺ `b ∈ {0, 1}`).
+            let id = self.fresh_constraint_id();
+            let note = format!("{} in {{0,1}}", self.var_names[b as usize]);
+            self.constraints.push(R1csConstraint::general(
+                id,
+                LinearCombination::var(b),
+                LinearCombination::var(b),
+                LinearCombination::var(b),
+                &note,
+            ));
+            recomp = recomp.add(LinearCombination::var(b).scale(&pow));
+            pow = pow.mul(&two);
+        }
+        // Recomposition pins the bits to `value` (⇒ `value < 2^n`).
+        let id = self.fresh_constraint_id();
+        let note = format!(
+            "{}-bit range: recompose == {}",
+            n, self.var_names[value as usize]
+        );
+        self.constraints
+            .push(R1csConstraint::equal(id, recomp, value_lc, &note));
+    }
+
     fn merge_mul(&mut self, var: VarId, target: LinearCombination) {
         let (idx, wg_idx) = self
             .pending_mul
@@ -1051,20 +1092,47 @@ pub struct LowerOutput {
 
 /// Flatten a circuit parameter type into its `Field` leaves, pairing each with
 /// the MIR projection path (encoded exactly as [`LoweringEnv::resolve_place`]:
-/// array/const index, or struct-field index) and a human-readable name. A scalar
-/// `Field` is one leaf at path `[]`; an array/tuple/struct of `Field` collapses
-/// to `n` leaves (`g[0][1]`, `pubkey.x[0]`, …). Any non-`Field` leaf is rejected.
+/// array/const index, or struct-field index), a human-readable name, and an
+/// optional fixed-width bound. A scalar `Field` is one leaf at path `[]`; an
+/// array/tuple/struct of `Field` collapses to `n` leaves (`g[0][1]`,
+/// `pubkey.x[0]`, …). A `U<N>` is one leaf carrying `Some(N)`: its value must be
+/// proven `< 2^N` (in-circuit for a private input, by the verifier for a public
+/// one). Any other leaf is rejected.
 fn flatten_field_leaves<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
     path: &mut Vec<u64>,
     name: &str,
-    out: &mut Vec<(Vec<u64>, String)>,
+    out: &mut Vec<(Vec<u64>, String, Option<usize>)>,
 ) -> CompileResult<()> {
     // `Field` is the opaque leaf — never recurse into its private limbs.
     if let Some(d) = ty.ty_adt_def() {
         if tcx.item_name(d.did()).as_str() == "Field" {
-            out.push((path.clone(), name.to_string()));
+            out.push((path.clone(), name.to_string(), None));
+            return Ok(());
+        }
+    }
+    // `U<N>` is a fixed-width leaf: one `Field` value carrying the bit width, so
+    // the input path can range-prove it (private) or delegate to the verifier
+    // (public). Its single `value` field sits at projection index 0.
+    if let rustc_middle::ty::TyKind::Adt(def, args) = ty.kind() {
+        // `def_path_str` renders the re-exported path (`xark::U`); accept that and
+        // the definition path (`…::uint::U`). Matches xark's `U`, not a user type.
+        let p = tcx.def_path_str(def.did());
+        if p == "xark::U" || p.ends_with("::uint::U") {
+            let n = args
+                .const_at(0)
+                .try_to_target_usize(tcx)
+                .ok_or_else(|| CompileError::new("U<N>: width `N` must be a constant"))?
+                as usize;
+            if n < 1 || n > 253 {
+                return Err(CompileError::new(format!(
+                    "U<{n}> circuit input: width must be in 1..=253 (BN254 field capacity)"
+                )));
+            }
+            path.push(0);
+            out.push((path.clone(), name.to_string(), Some(n)));
+            path.pop();
             return Ok(());
         }
     }
@@ -1116,17 +1184,31 @@ pub fn lower<'tcx>(
     // scalar `Field` is one input var; an array/tuple/struct of `Field` collapses
     // to `n` vars, each bound to the leaf's projection path so body reads resolve.
     let mut num_inputs = 0usize;
+    // Private `U<N>` inputs whose `< 2^N` bound must be proven in-circuit,
+    // collected here and emitted after the input id range is fixed.
+    let mut private_range_inputs: Vec<(VarId, usize)> = Vec::new();
     for (i, input) in entry.inputs.iter().enumerate() {
         let local = rustc_middle::mir::Local::from_usize(i + 1);
         let ty = body.local_decls[local].ty;
         let mut leaves = Vec::new();
         let mut path = Vec::new();
         flatten_field_leaves(tcx, ty, &mut path, &input.name, &mut leaves)?;
-        for (leaf_path, leaf_name) in leaves {
+        for (leaf_path, leaf_name, range_bits) in leaves {
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
+            // A `U<N>` input carries a width. A *private* one is prover-chosen,
+            // so the circuit must prove `value < 2^N`. A *public* one is checked
+            // by the verifier before `verify` — the circuit trusts the bound.
+            if let Some(n) = range_bits {
+                if matches!(input.visibility, Visibility::Private) {
+                    private_range_inputs.push((id, n));
+                }
+            }
         }
+    }
+    for (id, n) in private_range_inputs {
+        env.emit_range_proof(id, n);
     }
 
     walk_body(&mut env, body)?;

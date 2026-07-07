@@ -1510,3 +1510,66 @@ fn uint_checked_arithmetic_solves() {
     solver::solve_and_check(&program, &case("5", "3", "8", "2", "15")).expect("5,3 arithmetic");
     assert!(solver::solve_and_check(&program, &case("5", "3", "8", "2", "16")).is_err(), "wrong product must reject");
 }
+
+/// A `Private<U<N>>` input is prover-chosen, so the compiler injects an N-bit
+/// range proof at the input boundary: an honest in-range value solves, and an
+/// out-of-range value is unsatisfiable.
+#[test]
+fn private_uint_input_is_range_proved() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "priv_uint_input",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<U<8>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "priv_uint_input", "bn254");
+    assert!(c.status_success, "priv_uint_input failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    // In range (< 2^8): solves and is fully constrained.
+    let assign = solver::solve_and_check(&program, &case("200", "200")).expect("x=200 in range");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "private U<8> input under-constrained");
+    // Out of range (>= 2^8): the injected range proof makes it unsatisfiable.
+    assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "x=300 exceeds U<8> and must reject");
+}
+
+/// A `Public<U<N>>` input carries no in-circuit range proof — the verifier
+/// checks the bound before `verify` — so the circuit accepts any field value
+/// for it. (The soundness rests on the on-chain program's own check.)
+#[test]
+fn public_uint_input_delegates_range_to_verifier() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "pub_uint_input",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Public<U<8>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "pub_uint_input", "bn254");
+    assert!(c.status_success, "pub_uint_input failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    // No in-circuit range proof: an out-of-range value still solves in-circuit,
+    // which is exactly the contract (the program range-checks it externally).
+    solver::solve_and_check(&program, &case("300", "300")).expect("public U<8> input is not range-proved in-circuit");
+    // A count check pins the "no injected proof" property: only the single
+    // `x == out` row, no bit-decomposition constraints.
+    assert!(program.constraints.len() <= 2, "public U<N> must not emit a range proof (got {} constraints)", program.constraints.len());
+}
