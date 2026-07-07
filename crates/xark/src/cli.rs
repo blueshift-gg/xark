@@ -375,7 +375,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
     );
     eprintln!("  1. set the `xark` dependency in Cargo.toml (see its comments)");
     eprintln!("  2. install the CLI so editors can find it:");
-    eprintln!("       cargo install --path <xark-repo>/crates/xark --features cli");
+    eprintln!("       cargo +nightly-2026-05-03 install --path <xark-repo>/crates/xark --features cli");
     eprintln!(
         "  3. open the folder for live diagnostics, then: xark build . && xark prove target/xark"
     );

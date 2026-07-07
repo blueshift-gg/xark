@@ -62,7 +62,7 @@ toolchain fork required.
 `xark init` writes this wiring for you. To add it to an existing crate, point
 `rust-analyzer`'s check command at `xark` via a `rust-analyzer.toml` at the crate
 root (or the equivalent `.vscode/settings.json`) — `xark` must be on `PATH`
-(`cargo install --path crates/xark --features cli`):
+(`cargo +nightly-2026-05-03 install --path crates/xark --features cli`):
 
 ```toml
 # rust-analyzer.toml
@@ -188,7 +188,7 @@ audit has been performed; the "experimental" label stays until that changes.
 ```bash
 # Install the CLI (puts `xark` on PATH — needed for `xark init`/`build`/`prove`
 # and the rust-analyzer integration):
-cargo install --path crates/xark --features cli
+cargo +nightly-2026-05-03 install --path crates/xark --features cli
 
 cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
