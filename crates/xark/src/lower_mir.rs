@@ -1228,9 +1228,9 @@ pub fn lower<'tcx>(
     // scalar `Field` is one input var; an array/tuple/struct of `Field` collapses
     // to `n` vars, each bound to the leaf's projection path so body reads resolve.
     let mut num_inputs = 0usize;
-    // Private `U<N>` inputs whose `< 2^N` bound must be proven in-circuit,
-    // collected here and emitted after the input id range is fixed.
-    let mut private_range_inputs: Vec<(VarId, usize)> = Vec::new();
+    // `U<N>` inputs whose `< 2^N` bound must be proven in-circuit, collected here
+    // and emitted after the input id range is fixed.
+    let mut uint_range_inputs: Vec<(VarId, usize)> = Vec::new();
     for (i, input) in entry.inputs.iter().enumerate() {
         let local = rustc_middle::mir::Local::from_usize(i + 1);
         let ty = body.local_decls[local].ty;
@@ -1241,17 +1241,18 @@ pub fn lower<'tcx>(
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
-            // A `U<N>` input carries a width. A *private* one is prover-chosen,
-            // so the circuit must prove `value < 2^N`. A *public* one is checked
-            // by the verifier before `verify` — the circuit trusts the bound.
+            // Every `U<N>` input is range-proven in-circuit — public ones too.
+            // A `< 2^N` bound is *not* implied by Groth16's `< r` public-input
+            // check, and the comparison gadget assumes it; an unchecked public
+            // `U<N>` fed to `lt`/`gt` would let a prover force a wrong result.
+            // (A verifier-side check could reclaim the cost for public inputs,
+            // but only once the width is exported and enforced downstream.)
             if let Some(n) = range_bits {
-                if matches!(input.visibility, Visibility::Private) {
-                    private_range_inputs.push((id, n));
-                }
+                uint_range_inputs.push((id, n));
             }
         }
     }
-    for (id, n) in private_range_inputs {
+    for (id, n) in uint_range_inputs {
         env.emit_range_proof(id, n);
     }
 

@@ -21,16 +21,15 @@
 //! Proving `x ∈ [0, 2^N)` costs ~`N` constraints in-circuit. Where that proof
 //! lives is decided by how the value enters the circuit:
 //!
-//! * A **private** value is prover-chosen and the verifier never sees it, so the
-//!   bound must be proven in-circuit. Declare a `Private<U<N>>` parameter — the
-//!   compiler injects the range proof at the input boundary — or call [`U::new`]
-//!   on a `Field` computed inside the circuit.
-//! * A **public** value is bound into the proof and re-checked by the verifier.
-//!   Declare a `Public<U<N>>` parameter: the on-chain program range-checks it (a
-//!   native `u64` compare is far cheaper than `N` R1CS rows) before calling
-//!   `verify`, so the circuit trusts the bound and pays nothing for it. This is
-//!   sound by construction — the verifier-trusting path is reachable *only*
-//!   through a public parameter, never for a prover-chosen value.
+//! Every `U<N>` *input* — `Private<U<N>>` or `Public<U<N>>` — is range-proved
+//! in-circuit: the compiler injects the `N`-bit proof at the input boundary.
+//! Public inputs are proved too, because `< 2^N` is **not** implied by Groth16's
+//! `< r` public-input check, and the comparison gadget relies on the bound — an
+//! unchecked public `U<N>` fed to `lt`/`gt` would let a prover force a wrong
+//! result. (A verifier-side range check could reclaim the ~`N` rows for public
+//! inputs, but only once the width is exported and enforced downstream; until
+//! then, in-circuit is the sound default.) [`U::new`] is the same proof for a
+//! `Field` computed inside the circuit.
 
 use crate::lang::{Bool, Field};
 use core::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};

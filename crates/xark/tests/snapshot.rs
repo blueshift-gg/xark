@@ -1542,11 +1542,12 @@ fn private_uint_input_is_range_proved() {
     assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "x=300 exceeds U<8> and must reject");
 }
 
-/// A `Public<U<N>>` input carries no in-circuit range proof — the verifier
-/// checks the bound before `verify` — so the circuit accepts any field value
-/// for it. (The soundness rests on the on-chain program's own check.)
+/// A `Public<U<N>>` input is range-proved in-circuit too: `< 2^N` is *not*
+/// implied by Groth16's `< r` public-input check, and the comparison gadget
+/// relies on it, so an out-of-range public value must be rejected — otherwise a
+/// prover could feed `x ≥ 2^N` into `lt`/`gt` and force a wrong result.
 #[test]
-fn public_uint_input_delegates_range_to_verifier() {
+fn public_uint_input_is_range_proved() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
@@ -1566,12 +1567,9 @@ fn public_uint_input_delegates_range_to_verifier() {
         m.insert(id("out"), out.to_string());
         m
     };
-    // No in-circuit range proof: an out-of-range value still solves in-circuit,
-    // which is exactly the contract (the program range-checks it externally).
-    solver::solve_and_check(&program, &case("300", "300")).expect("public U<8> input is not range-proved in-circuit");
-    // A count check pins the "no injected proof" property: only the single
-    // `x == out` row, no bit-decomposition constraints.
-    assert!(program.constraints.len() <= 2, "public U<N> must not emit a range proof (got {} constraints)", program.constraints.len());
+    // In range solves; out of range (>= 2^8) is rejected by the injected proof.
+    solver::solve_and_check(&program, &case("200", "200")).expect("public U<8> in range");
+    assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "public U<8> >= 2^8 must reject");
 }
 
 /// `Bool` supports the standard boolean operators (`&`, `|`, `!`) as core-trait
