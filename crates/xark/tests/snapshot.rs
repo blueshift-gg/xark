@@ -1606,3 +1606,38 @@ fn bool_operators_solve() {
     // Non-boolean input is rejected by Bool::new.
     assert!(solver::solve_and_check(&program, &case("2", "0", "0")).is_err(), "non-boolean input must reject");
 }
+
+/// Rejections carry an actionable `help:` line, not just a terse error — this is
+/// what `xark check` surfaces in rust-analyzer. Guards that the diagnostic
+/// contract doesn't silently regress.
+#[test]
+fn rejections_carry_actionable_help() {
+    // A bare `Field` parameter (must be wrapped in a visibility marker).
+    let bare = write_case(
+        "diag_bare_field",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Field, out: Public<Field>) {\n\
+         \x20   assert_eq(x, out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&bare, "diag_bare_field", "bn254");
+    assert!(!c.status_success, "bare Field param should be rejected");
+    assert!(c.stderr.contains("help:"), "rejection must include a help line; got: {}", c.stderr);
+    assert!(
+        c.stderr.contains("Private<Field>") || c.stderr.contains("Public<Field>"),
+        "help should point at the visibility markers; got: {}",
+        c.stderr
+    );
+
+    // An out-of-range fixed-width input width.
+    let wide = write_case(
+        "diag_wide_uint",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Public<U<300>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&wide, "diag_wide_uint", "bn254");
+    assert!(!c.status_success, "U<300> input should be rejected");
+    assert!(c.stderr.contains("1..=253"), "width error should state the valid range; got: {}", c.stderr);
+}

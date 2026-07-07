@@ -274,6 +274,10 @@ impl<'tcx> LoweringEnv<'tcx> {
                     let idx = self.get_int(idx_local).ok_or_else(|| {
                         CompileError::new("array index must be a compile-time constant")
                             .with_note("witness-dependent indexing is not supported")
+                            .with_help(
+                                "use a literal index or a loop variable the unroller can fold to a \
+                                 constant; for a data-dependent choice, use `select`",
+                            )
                     })?;
                     path.push(idx as u64);
                 }
@@ -441,6 +445,11 @@ impl<'tcx> LoweringEnv<'tcx> {
                 let (local, path) = self.resolve_place(place)?;
                 self.get_field_at(local, &path).ok_or_else(|| {
                     CompileError::new("use of a value that is not a supported field expression")
+                        .with_help(
+                            "this position needs a `Field` (or `Bool`/`U<N>` wrapping one); a host \
+                             `bool`/integer, or a value from an operation the circuit can't lower, \
+                             can't be used here",
+                        )
                 })
             }
             // A `Field`-typed constant used directly as an operand — e.g.
@@ -654,16 +663,22 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Read a compile-time unsigned integer operand (constant or tracked int
     /// slot). The slot model is `u128`, so this preserves the full width.
     fn operand_to_u128(&self, operand: &Operand<'tcx>) -> CompileResult<u128> {
+        // An integer position (loop bound, `^` exponent, array length, `U<N>`
+        // width, bit index) must be known at compile time — it shapes the
+        // constraint system, which is fixed before any witness exists.
+        let want_const = || {
+            CompileError::new("expected a constant integer").with_help(
+                "this must be a compile-time constant (loop bound, `^` exponent, array length, \
+                 `U<N>` width, …), not a witness or runtime value",
+            )
+        };
         match operand {
-            Operand::Constant(c) => self
-                .const_to_u128(c)
-                .ok_or_else(|| CompileError::new("expected a constant integer")),
+            Operand::Constant(c) => self.const_to_u128(c).ok_or_else(want_const),
             Operand::Copy(place) | Operand::Move(place) => {
                 let local = Self::place_local(place)?;
-                self.get_int(local)
-                    .ok_or_else(|| CompileError::new("expected a constant integer"))
+                self.get_int(local).ok_or_else(want_const)
             }
-            Operand::RuntimeChecks(_) => Err(CompileError::new("expected a constant integer")),
+            Operand::RuntimeChecks(_) => Err(want_const()),
         }
     }
 
@@ -675,18 +690,18 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Read a `&str` literal operand (for `Field::constant("...")`), resolving
     /// through the `_a = const "..."; _b = &(*_a)` reborrow chain if needed.
     fn operand_to_str(&self, operand: &Operand<'tcx>) -> CompileResult<String> {
+        let want_literal = || {
+            CompileError::new("`Field::constant` expects a string literal argument").with_help(
+                "pass a decimal string literal, e.g. `Field::constant(\"12345\")`; for values that \
+                 fit in `u128` prefer `Field::from(n)`",
+            )
+        };
         let c = match operand {
             Operand::Constant(c) => c,
             Operand::Copy(place) | Operand::Move(place) => {
-                return self.get_str(place.local).ok_or_else(|| {
-                    CompileError::new("`Field::constant` expects a string literal argument")
-                })
+                return self.get_str(place.local).ok_or_else(want_literal)
             }
-            Operand::RuntimeChecks(_) => {
-                return Err(CompileError::new(
-                    "`Field::constant` expects a string literal argument",
-                ))
-            }
+            Operand::RuntimeChecks(_) => return Err(want_literal()),
         };
         Self::const_to_str(self.tcx, c)
     }
@@ -1141,7 +1156,11 @@ fn flatten_field_leaves<'tcx>(
             if n < 1 || n > 253 {
                 return Err(CompileError::new(format!(
                     "U<{n}> circuit input: width must be in 1..=253 (BN254 field capacity)"
-                )));
+                ))
+                .with_help(
+                    "choose `N` in 1..=253; a wider value is not uniquely representable in the \
+                     scalar field",
+                ));
             }
             path.push(0);
             out.push((path.clone(), name.to_string(), Some(n)));
@@ -1383,6 +1402,10 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                             .with_note(
                                 "branch conditions must be compile-time constants (e.g. loop bounds)",
                             )
+                            .with_help(
+                                "a circuit has no runtime control flow: for a data-dependent \
+                                 choice use `select(cond, a, b)`; loops must have constant bounds",
+                            )
                     })
                     .map_err(|e| e.or_span(term_span))?;
                 bb = targets
@@ -1542,7 +1565,11 @@ fn lower_statement<'tcx>(
                 other => Err(CompileError::new(format!(
                     "unsupported rvalue `{}` inside circuit",
                     rvalue_name(other)
-                ))),
+                ))
+                .with_help(
+                    "a circuit supports field arithmetic (`+ - * ^`), comparisons, and the \
+                     provided gadget calls; references, closures, and heap ops are not lowerable",
+                )),
             }
         }
         // A fresh allocation of a local: wipe any stale slots from a previous
@@ -1681,7 +1708,10 @@ fn lower_call<'tcx>(
     destination: &Place<'tcx>,
 ) -> CompileResult<()> {
     let (def_id, generic_args) = func.const_fn_def().ok_or_else(|| {
-        CompileError::new("indirect / dynamic calls are not supported inside a circuit")
+        CompileError::new("indirect / dynamic calls are not supported inside a circuit").with_help(
+            "call functions directly by name; function pointers, closures, and `dyn` dispatch \
+             have no compile-time-known target to inline",
+        )
     })?;
 
     // Monomorphize the call's generic args in the current inlining context (a
