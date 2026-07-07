@@ -9,7 +9,9 @@
 
 
 use core::marker::PhantomData;
-use core::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::ops::{
+    Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign,
+};
 
 /// The opaque circuit field element.
 ///
@@ -346,6 +348,35 @@ impl Bool {
     }
     pub fn assert_false(self) {
         assert_eq(self.0, Field::from(0u8));
+    }
+}
+
+/// `Bool` mirrors the standard `bool` operators so circuits read naturally:
+/// `a & b`, `a | b`, `a ^ b`, `!a`. (Note `^` on `Bool` is boolean xor, matching
+/// `bool`; `^` on [`Field`] is exponentiation — the two never overlap because
+/// they act on different types.) Each forwards to the constraint-free combinator.
+impl BitAnd for Bool {
+    type Output = Bool;
+    fn bitand(self, rhs: Bool) -> Bool {
+        self.and(rhs)
+    }
+}
+impl BitOr for Bool {
+    type Output = Bool;
+    fn bitor(self, rhs: Bool) -> Bool {
+        self.or(rhs)
+    }
+}
+impl BitXor for Bool {
+    type Output = Bool;
+    fn bitxor(self, rhs: Bool) -> Bool {
+        self.xor(rhs)
+    }
+}
+impl Not for Bool {
+    type Output = Bool;
+    fn not(self) -> Bool {
+        Bool::from_pinned(self.value().not())
     }
 }
 

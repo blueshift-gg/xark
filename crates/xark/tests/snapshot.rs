@@ -1488,9 +1488,9 @@ fn uint_checked_arithmetic_solves() {
          pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, diff: Public<Field>, prod: Public<Field>) {\n\
          \x20   let ua = U::<8>::new(a);\n\
          \x20   let ub = U::<8>::new(b);\n\
-         \x20   assert_eq(ua.add(ub).value(), sum);\n\
-         \x20   assert_eq(ua.sub(ub).value(), diff);\n\
-         \x20   assert_eq(ua.mul(ub).value(), prod);\n\
+         \x20   assert_eq((ua + ub).value(), sum);\n\
+         \x20   assert_eq((ua - ub).value(), diff);\n\
+         \x20   assert_eq((ua * ub).value(), prod);\n\
          }\n",
     );
     let c = compile_with_field(&src, "uint_arith", "bn254");
@@ -1572,4 +1572,37 @@ fn public_uint_input_delegates_range_to_verifier() {
     // A count check pins the "no injected proof" property: only the single
     // `x == out` row, no bit-decomposition constraints.
     assert!(program.constraints.len() <= 2, "public U<N> must not emit a range proof (got {} constraints)", program.constraints.len());
+}
+
+/// `Bool` supports the standard boolean operators (`&`, `|`, `!`) as core-trait
+/// impls, so circuits read like ordinary Rust. Verifies they lower and solve.
+#[test]
+fn bool_operators_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "bool_ops",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
+         \x20   let x = Bool::new(a);\n\
+         \x20   let y = Bool::new(b);\n\
+         \x20   assert_eq(((x & y) | !x).value(), want);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "bool_ops", "bn254");
+    assert!(c.status_success, "bool_ops failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, want: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("want"), want.to_string());
+        m
+    };
+    // (x & y) | !x : a=1,b=0 -> (1&0)|!1 = 0 ; a=0,b=1 -> (0&1)|!0 = 1.
+    solver::solve_and_check(&program, &case("1", "0", "0")).expect("(1&0)|!1 == 0");
+    solver::solve_and_check(&program, &case("0", "1", "1")).expect("(0&1)|!0 == 1");
+    // Non-boolean input is rejected by Bool::new.
+    assert!(solver::solve_and_check(&program, &case("2", "0", "0")).is_err(), "non-boolean input must reject");
 }

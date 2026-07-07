@@ -33,6 +33,7 @@
 //!   through a public parameter, never for a prover-chosen value.
 
 use crate::lang::{Bool, Field};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 /// An unsigned `N`-bit integer: a [`Field`] whose value is guaranteed to lie in
 /// `[0, 2^N)`. `N` must be in `1..=253` (the BN254 scalar field holds values
@@ -104,26 +105,49 @@ impl<const N: usize> U<N> {
         self.lt(other).not()
     }
 
-    /// Checked addition: `self + other`, proving the sum fits in `N` bits.
-    /// The circuit is unsatisfiable on overflow (`self + other >= 2^N`) — the
-    /// sum `< 2^(N+1)` is re-range-proved to `N` bits, which forbids the carry.
-    pub fn add(self, other: U<N>) -> U<N> {
+}
+
+/// Fixed-width arithmetic uses the standard operators (`a + b`, `a - b`,
+/// `a * b`) and is *checked*: each operation re-range-proves its result to `N`
+/// bits, so overflow/underflow makes the circuit unsatisfiable rather than
+/// silently wrapping the field. `Mul` additionally requires `2N ≤ 252` (a
+/// compile-time guard) so the product cannot wrap `Fr` before the range check
+/// sees it.
+///
+/// Ordering is deliberately *not* an operator: `<`/`>` must return `bool`, but a
+/// circuit comparison yields a [`Bool`] wire, so use `lt`/`le`/`gt`/`ge`.
+impl<const N: usize> Add for U<N> {
+    type Output = U<N>;
+    fn add(self, other: U<N>) -> U<N> {
         U::new(self.value + other.value)
     }
-
-    /// Checked subtraction: `self − other`, proving `self >= other`. The circuit
-    /// is unsatisfiable on underflow (`other > self`): the field difference then
-    /// wraps to `~p`, far above `2^N`, and the range proof rejects it.
-    pub fn sub(self, other: U<N>) -> U<N> {
+}
+impl<const N: usize> Sub for U<N> {
+    type Output = U<N>;
+    fn sub(self, other: U<N>) -> U<N> {
         U::new(self.value - other.value)
     }
-
-    /// Checked multiplication: `self · other`, proving the product fits in `N`
-    /// bits. Requires `2N ≤ 252` so the product cannot wrap the field before the
-    /// range check sees it.
-    pub fn mul(self, other: U<N>) -> U<N> {
+}
+impl<const N: usize> Mul for U<N> {
+    type Output = U<N>;
+    fn mul(self, other: U<N>) -> U<N> {
         let () = Self::MUL_WIDTH_OK;
         U::new(self.value * other.value)
+    }
+}
+impl<const N: usize> AddAssign for U<N> {
+    fn add_assign(&mut self, other: U<N>) {
+        *self = *self + other;
+    }
+}
+impl<const N: usize> SubAssign for U<N> {
+    fn sub_assign(&mut self, other: U<N>) {
+        *self = *self - other;
+    }
+}
+impl<const N: usize> MulAssign for U<N> {
+    fn mul_assign(&mut self, other: U<N>) {
+        *self = *self * other;
     }
 }
 

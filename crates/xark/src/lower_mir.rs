@@ -80,10 +80,11 @@ pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Optio
     let s = tcx.def_path_str(def_id);
     if s.ends_with("::assert_eq") {
         Some(KnownCall::ConstrainEq)
-    // The operator methods are matched by trait-impl suffix, but ONLY on
-    // `Field` — otherwise an inherent method named `mul`/`add`/… on another type
-    // (e.g. `Bignum::mul`) would be misclassified as the field-arithmetic
-    // intrinsic. The `__xark_*` intrinsics remain unconditional.
+    // Every `Field`-method match below is gated on the path containing `Field`:
+    // a same-named method on another type (`Bool::or`, `Bool::xor`,
+    // `Bignum::mul`, …) must NOT be misclassified as the field intrinsic. The
+    // `__xark_*` free-function intrinsics remain unconditional, and `assert_eq`
+    // above is a free function so it is matched by suffix alone.
     } else if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
         Some(KnownCall::PowU64)
     } else if s.contains("__xark_add")
@@ -106,27 +107,39 @@ pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Optio
         Some(KnownCall::FieldConstantU64)
     } else if s.contains("Field") && s.ends_with("::constant") {
         Some(KnownCall::FieldConstantDecimal)
-    } else if s.contains("__xark_hint_inverse_or_zero") || s.ends_with("::hint_inverse_or_zero") {
+    } else if s.contains("__xark_hint_inverse_or_zero")
+        || (s.contains("Field") && s.ends_with("::hint_inverse_or_zero"))
+    {
         // Must precede the `hint_inverse` arm: `__xark_hint_inverse` is a prefix
         // of `__xark_hint_inverse_or_zero`, so `contains` would misclassify it.
         Some(KnownCall::HintInverseOrZero)
-    } else if s.contains("__xark_hint_inverse") || s.ends_with("::hint_inverse") {
+    } else if s.contains("__xark_hint_inverse")
+        || (s.contains("Field") && s.ends_with("::hint_inverse"))
+    {
         Some(KnownCall::HintInverse)
-    } else if s.contains("__xark_hint_bit") || s.ends_with("::hint_bit") {
+    } else if s.contains("__xark_hint_bit") || (s.contains("Field") && s.ends_with("::hint_bit")) {
         Some(KnownCall::HintBit)
-    } else if s.contains("__xark_hint_div_rem") || s.ends_with("::hint_div_rem") {
+    } else if s.contains("__xark_hint_div_rem")
+        || (s.contains("Field") && s.ends_with("::hint_div_rem"))
+    {
         Some(KnownCall::HintDivRem)
-    } else if s.contains("__xark_hint_mulmod_divmod") || s.ends_with("::hint_mulmod_divmod") {
+    } else if s.contains("__xark_hint_mulmod_divmod")
+        || (s.contains("Field") && s.ends_with("::hint_mulmod_divmod"))
+    {
         Some(KnownCall::HintMulModDivMod)
-    } else if s.contains("__xark_hint_sub2") || s.ends_with("::hint_sub2") {
+    } else if s.contains("__xark_hint_sub2")
+        || (s.contains("Field") && s.ends_with("::hint_sub2"))
+    {
         Some(KnownCall::HintSub2)
-    } else if s.contains("__xark_hint_mod_inverse") || s.ends_with("::hint_mod_inverse") {
+    } else if s.contains("__xark_hint_mod_inverse")
+        || (s.contains("Field") && s.ends_with("::hint_mod_inverse"))
+    {
         Some(KnownCall::HintModInverse)
-    } else if s.contains("__xark_xor") || s.ends_with("::xor") {
+    } else if s.contains("__xark_xor") || (s.contains("Field") && s.ends_with("::xor")) {
         Some(KnownCall::Xor)
-    } else if s.contains("__xark_or") || s.ends_with("::or") {
+    } else if s.contains("__xark_or") || (s.contains("Field") && s.ends_with("::or")) {
         Some(KnownCall::Or)
-    } else if s.contains("__xark_advice") || s.ends_with("::advice") {
+    } else if s.contains("__xark_advice") || (s.contains("Field") && s.ends_with("::advice")) {
         Some(KnownCall::Advice)
     } else {
         None
