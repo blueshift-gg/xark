@@ -174,11 +174,25 @@ pub fn decompose(x: Field) -> [Field; N_BITS] {
     bits
 }
 
+/// Assert the affine point `p = (x, y)` lies on the Grumpkin curve
+/// `y² = x³ − 17`. Grumpkin is defined over `xark`'s native field, so this is
+/// three native multiplications and one equality — cheap, and required for any
+/// gadget that consumes a witness point.
+pub fn enforce_on_curve(p: [Field; 2]) {
+    let x = p[0];
+    let y = p[1];
+    assert_eq(y * y, x * x * x - Field::from(17u8));
+}
+
 /// **Variable-base** scalar multiplication `m · p` via the offset
 /// (double-and-add) accumulator. `bits` is the little-endian decomposition of
 /// `m`; processed MSB-first. `p` is a *witness* Grumpkin point. Returns the
 /// affine point `m · p`. Requires `m ≠ 0`.
 pub fn scalar_mul(bits: [Field; N_BITS], p: [Field; 2]) -> [Field; 2] {
+    // A witness point that is not on the curve makes the group-law formulas
+    // (and the Lean proofs backing them) meaningless — the accumulator would
+    // wander off-curve and the result would prove nothing. Pin it first.
+    enforce_on_curve(p);
     let mut acc = offset();
     let mut i = 0usize;
     while i < 128usize {
