@@ -37,6 +37,7 @@ pub enum KnownCall {
     FieldConstantDecimal,
     Advice,
     HintInverse,
+    HintInverseOrZero,
     HintBit,
     HintDivRem,
     // Width-generic (`Bignum`) hints: `N` limbs inferred from the array arg,
@@ -105,6 +106,10 @@ pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Optio
         Some(KnownCall::FieldConstantU64)
     } else if s.ends_with("::constant") {
         Some(KnownCall::FieldConstantDecimal)
+    } else if s.contains("__xark_hint_inverse_or_zero") || s.ends_with("::hint_inverse_or_zero") {
+        // Must precede the `hint_inverse` arm: `__xark_hint_inverse` is a prefix
+        // of `__xark_hint_inverse_or_zero`, so `contains` would misclassify it.
+        Some(KnownCall::HintInverseOrZero)
     } else if s.contains("__xark_hint_inverse") || s.ends_with("::hint_inverse") {
         Some(KnownCall::HintInverse)
     } else if s.contains("__xark_hint_bit") || s.ends_with("::hint_bit") {
@@ -1334,14 +1339,23 @@ fn lower_statement<'tcx>(
             match rvalue {
                 Rvalue::Use(operand, _) => bind_use(env, dest, &dest_path, operand),
                 // `_b = &(*_a)` reborrow: only supported to carry a `&str`
-                // literal into `Field::constant`.
+                // literal into `Field::constant`. Taking a reference to a `Field`
+                // value is otherwise unsupported — the circuit lowering is
+                // deliberately reference-free — which is what rejects `==`/`<`
+                // (need `&self`) and `+=`/`-=`/… (need `&mut self`).
                 Rvalue::Ref(_, _, src) | Rvalue::CopyForDeref(src) => {
                     if let Some(s) = env.get_str(src.local) {
                         env.set_str(dest, s);
                         Ok(())
                     } else {
                         Err(CompileError::new(
-                            "references are only supported for `Field::constant` string literals",
+                            "references to a `Field` value are not supported inside a circuit",
+                        )
+                        .with_note(
+                            "comparisons (`==` `!=` `<` `<=` `>` `>=`) and compound assignments \
+                             (`+=` `-=` `*=` `/=`) are not circuit operations — use `assert_eq(a, b)` \
+                             to constrain equality or `a.is_eq(b)`/`a.is_zero()` for a boolean result, \
+                             and write `a = a + b` instead of `a += b`",
                         ))
                     }
                 }
@@ -1696,6 +1710,13 @@ fn lower_call<'tcx>(
                 .push(Some(WitnessGen::Inverse { out: v, input: x }));
             env.set_field(dest, LinearCombination::var(v));
         }
+        KnownCall::HintInverseOrZero => {
+            let x = env.operand_to_lc(arg(0)?)?;
+            let v = env.alloc_advice();
+            env.witness_gen
+                .push(Some(WitnessGen::InverseOrZero { out: v, input: x }));
+            env.set_field(dest, LinearCombination::var(v));
+        }
         KnownCall::HintBit => {
             let x = env.operand_to_lc(arg(0)?)?;
             let index = env.operand_to_u64(arg(1)?)? as u32;
@@ -1973,6 +1994,7 @@ fn witness_gen_out(op: &WitnessGen) -> VarId {
         | WitnessGen::Xor { out, .. }
         | WitnessGen::Or { out, .. }
         | WitnessGen::Inverse { out, .. }
+        | WitnessGen::InverseOrZero { out, .. }
         | WitnessGen::Bit { out, .. } => *out,
         WitnessGen::DivRem { q, .. } => *q,
         // Multi-output; represented by its first output for the "is any output

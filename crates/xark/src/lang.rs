@@ -9,7 +9,7 @@
 
 
 use core::marker::PhantomData;
-use core::ops::{Add, BitXor, Mul, Neg, Sub};
+use core::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// The opaque circuit field element.
 ///
@@ -17,7 +17,21 @@ use core::ops::{Add, BitXor, Mul, Neg, Sub};
 /// constructed by circuit authors except through the recognized intrinsics, and
 /// (b) MIR optimization cannot collapse `Field` values to a single constant ZST
 /// (which would erase the data-flow the compiler tracks).
-#[derive(Clone, Copy)]
+///
+/// `Field` implements the standard `core::ops` arithmetic (`+ - * /`, unary `-`,
+/// their `*Assign` forms, and `^` for exponentiation) — all of which lower to
+/// R1CS — plus the `core::cmp` traits (`PartialEq`, `Eq`, `PartialOrd`, `Ord`,
+/// `Hash`) over the constant payload, so a `Field` is usable as an ordinary
+/// value in `const`/host/tooling code (map keys, `derive`d struct comparisons,
+/// unit tests).
+///
+/// **Comparison operators are not circuit operations.** A native `bool` from
+/// `a == b` / `a < b` on witnesses would require witness-dependent control flow,
+/// which a circuit cannot express soundly, so the compiler *rejects*
+/// `== != < <= > >=` inside a circuit and points you at `assert_eq` (equality as
+/// a constraint) or a `to_bits`/range gadget (magnitude comparison as
+/// constraints). The `core::cmp` impls exist for host/const use only.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
     /// Meaningful only for constants (`Field::from`/`Field::constant`, which are
@@ -99,6 +113,14 @@ impl Field {
     #[inline(never)]
     pub fn hint_inverse(x: Field) -> Field {
         __xark_hint_inverse(x)
+    }
+
+    /// Advice hint: `1 / x` if `x != 0`, else `0`. Unlike [`Field::hint_inverse`]
+    /// it never fails on a zero input; the value is unconstrained there and is
+    /// multiplied out by the [`Field::is_zero`] gadget that consumes it.
+    #[inline(never)]
+    pub fn hint_inverse_or_zero(x: Field) -> Field {
+        __xark_hint_inverse_or_zero(x)
     }
 
     /// Advice hint: the `index`-th least-significant bit of `x`. Allocates a
@@ -189,6 +211,30 @@ impl Field {
         let w = Field::hint_inverse(self);
         assert_eq(self * w, Field::from(1u8));
         w
+    }
+
+    /// Circuit equality-to-zero: returns `1` if `self == 0`, else `0`, as a
+    /// constrained boolean `Field` wire.
+    ///
+    /// This is the circuit-native way to *test* equality (native `==` returns a
+    /// Rust `bool` and is not a circuit operation). Standard inverse-or-zero
+    /// construction: with `inv = self⁻¹ or 0` supplied as advice,
+    /// `out = 1 − self·inv` and the constraint `self·out == 0` together pin
+    /// `out = (self == 0)`. For `self ≠ 0` the constraint forces `inv = self⁻¹`
+    /// so `out = 0`; for `self = 0`, `out = 1` (and `inv`, multiplied by `0`, is
+    /// irrelevant). The output is uniquely determined and boolean.
+    pub fn is_zero(self) -> Field {
+        let inv = Field::hint_inverse_or_zero(self);
+        let out = Field::from(1u8) - self * inv;
+        assert_eq(self * out, Field::from(0u8));
+        out
+    }
+
+    /// Circuit equality test: returns `1` if `self == other`, else `0`, as a
+    /// constrained boolean `Field` wire. Equal to `(self − other).is_zero()`.
+    /// (For an equality *constraint* — "require `a == b`" — use `assert_eq`.)
+    pub fn is_eq(self, other: Field) -> Field {
+        (self - other).is_zero()
     }
 
     /// Advice hint: integer division of `a` by `b` on the canonical
@@ -310,6 +356,37 @@ impl Neg for Field {
     }
 }
 
+/// Field division `a / b = a · b⁻¹`. Lowers to a modular-inverse advice pinned
+/// by `b · b⁻¹ == 1` (so `b` must be nonzero — a zero divisor makes the circuit
+/// unsatisfiable, matching field semantics) followed by one multiplication.
+impl Div for Field {
+    type Output = Field;
+    fn div(self, rhs: Field) -> Field {
+        self * rhs.inv()
+    }
+}
+
+impl AddAssign for Field {
+    fn add_assign(&mut self, rhs: Field) {
+        *self = *self + rhs;
+    }
+}
+impl SubAssign for Field {
+    fn sub_assign(&mut self, rhs: Field) {
+        *self = *self - rhs;
+    }
+}
+impl MulAssign for Field {
+    fn mul_assign(&mut self, rhs: Field) {
+        *self = *self * rhs;
+    }
+}
+impl DivAssign for Field {
+    fn div_assign(&mut self, rhs: Field) {
+        *self = *self / rhs;
+    }
+}
+
 impl BitXor<u64> for Field {
     type Output = Field;
 
@@ -337,6 +414,22 @@ macro_rules! impl_field_int_ops {
         impl Mul<$t> for Field {
             type Output = Field;
             fn mul(self, rhs: $t) -> Field { self * Field::from(rhs) }
+        }
+        impl Div<$t> for Field {
+            type Output = Field;
+            fn div(self, rhs: $t) -> Field { self / Field::from(rhs) }
+        }
+        impl AddAssign<$t> for Field {
+            fn add_assign(&mut self, rhs: $t) { *self = *self + rhs; }
+        }
+        impl SubAssign<$t> for Field {
+            fn sub_assign(&mut self, rhs: $t) { *self = *self - rhs; }
+        }
+        impl MulAssign<$t> for Field {
+            fn mul_assign(&mut self, rhs: $t) { *self = *self * rhs; }
+        }
+        impl DivAssign<$t> for Field {
+            fn div_assign(&mut self, rhs: $t) { *self = *self / rhs; }
         }
     )+};
 }
@@ -383,6 +476,11 @@ pub fn __xark_advice() -> Field {
 
 #[inline(never)]
 pub fn __xark_hint_inverse(_x: Field) -> Field {
+    loop {}
+}
+
+#[inline(never)]
+pub fn __xark_hint_inverse_or_zero(_x: Field) -> Field {
     loop {}
 }
 

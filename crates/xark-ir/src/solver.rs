@@ -210,6 +210,14 @@ pub fn solve(
                 let inv = v.inverse().ok_or(SolveError::NonInvertible)?;
                 assign.insert(*out, inv);
             }
+            WitnessGen::InverseOrZero { out, input } => {
+                // `x⁻¹` when `x ≠ 0`, else `0`. The zero case is fine: the
+                // is_zero gadget multiplies this value by `x`, so it is
+                // unconstrained (and irrelevant) exactly when `x = 0`.
+                let v = eval_lc(input, &assign, &modulus);
+                let inv = v.inverse().unwrap_or_else(|| Fp::zero(&modulus));
+                assign.insert(*out, inv);
+            }
             WitnessGen::Bit { out, input, index } => {
                 let v = eval_lc(input, &assign, &modulus);
                 assign.insert(*out, v.bit(*index as usize));

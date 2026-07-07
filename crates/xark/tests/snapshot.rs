@@ -1248,3 +1248,127 @@ fn mul_reuse_binds_product_in_both_asserts() {
         "c != d must be rejected"
     );
 }
+
+/// Field division (`/`) lowers to an inverse-pinned multiplication and solves.
+#[test]
+fn field_div_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "field_div",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, q: Public<Field>) {\n\
+         \x20   assert_eq(a / b, q);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "field_div", "bn254");
+    assert!(c.status_success, "field_div failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "6".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    inputs.insert(id("q"), "2".to_string()); // 6 / 3 == 2
+    let assign = solver::solve_and_check(&program, &inputs).expect("a/b == q must verify");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "field_div under-constrained");
+    inputs.insert(id("q"), "3".to_string());
+    assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong quotient must reject");
+}
+
+/// Compound assignment (`+=`, `*=`, …) needs `&mut self`; taking a reference to
+/// a `Field` is not a circuit operation, so the compiler rejects it in-circuit
+/// (write `acc = acc + b`). The `AddAssign`/… traits still exist for host/const
+/// use — this only asserts the *circuit* rejection.
+#[test]
+fn rejects_compound_assign() {
+    let src = write_case(
+        "field_assign",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
+         \x20   let mut acc = a;\n\
+         \x20   acc += b;\n\
+         \x20   assert_eq(acc, b);\n\
+         }\n",
+    );
+    let c = compile(&src, "reject_assign");
+    assert!(!c.status_success, "compound assignment should be rejected in a circuit");
+    assert!(c.stderr.contains("not supported inside a circuit"), "unexpected error: {}", c.stderr);
+}
+
+/// `==` (and the other comparisons) on `Field` need `&self`; a native `bool`
+/// from comparing witnesses is not a circuit operation, so the compiler rejects
+/// it in-circuit. The `PartialEq`/… impls still exist for host/const use.
+#[test]
+fn rejects_field_comparison() {
+    let src = write_case(
+        "field_cmp",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
+         \x20   if a == b { assert_eq(a, b); }\n\
+         }\n",
+    );
+    let c = compile(&src, "reject_cmp");
+    assert!(!c.status_success, "comparison circuit should have been rejected");
+    assert!(c.stderr.contains("not supported inside a circuit"), "unexpected error: {}", c.stderr);
+}
+
+/// `is_zero` gadget: returns 1 iff the input is 0, as a pinned boolean wire.
+#[test]
+fn is_zero_gadget_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "is_zero",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(x: Private<Field>, want: Public<Field>) {\n\
+         \x20   assert_eq(x.is_zero(), want);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "is_zero", "bn254");
+    assert!(c.status_success, "is_zero failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, want: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("want"), want.to_string());
+        m
+    };
+    // is_zero(0) == 1, is_zero(7) == 0.
+    solver::solve_and_check(&program, &case("0", "1")).expect("is_zero(0) == 1");
+    let assign = solver::solve_and_check(&program, &case("7", "0")).expect("is_zero(7) == 0");
+    // For a nonzero input the inverse advice is pinned ⇒ fully determined.
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "is_zero(x!=0) under-constrained");
+    // Lying either way is rejected.
+    assert!(solver::solve_and_check(&program, &case("7", "1")).is_err(), "is_zero(7) != 1 must reject");
+    assert!(solver::solve_and_check(&program, &case("0", "0")).is_err(), "is_zero(0) != 0 must reject");
+}
+
+/// `is_eq` gadget: returns 1 iff the two inputs are equal, as a boolean wire.
+#[test]
+fn is_eq_gadget_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "is_eq",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
+         \x20   assert_eq(a.is_eq(b), want);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "is_eq", "bn254");
+    assert!(c.status_success, "is_eq failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, want: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("want"), want.to_string());
+        m
+    };
+    solver::solve_and_check(&program, &case("5", "5", "1")).expect("is_eq(5,5) == 1");
+    solver::solve_and_check(&program, &case("5", "6", "0")).expect("is_eq(5,6) == 0");
+    assert!(solver::solve_and_check(&program, &case("5", "6", "1")).is_err(), "is_eq(5,6) != 1 must reject");
+    assert!(solver::solve_and_check(&program, &case("5", "5", "0")).is_err(), "is_eq(5,5) != 0 must reject");
+}
