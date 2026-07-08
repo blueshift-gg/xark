@@ -164,10 +164,8 @@ impl PublicInputsJson {
                 .trim()
                 .parse()
                 .map_err(|e: num_bigint::ParseBigIntError| std::io::Error::other(e.to_string()))?;
-            // Reject a non-canonical public input (>= field modulus) rather than
-            // silently reducing it mod r. `prove --input` already rejects
-            // out-of-range values; verify/export must agree, or a proof for `x`
-            // would "verify" against the public input `x + r`.
+            // Reject non-canonical (>= modulus) rather than silently reducing —
+            // matching `prove --input`, so a proof for `x` can't verify at `x + r`.
             if big >= modulus {
                 return Err(std::io::Error::other(format!(
                     "public input `{big}` is not canonical (>= field modulus)"

@@ -120,15 +120,13 @@ pub enum SolveError {
     MissingInput(VarId),
     DivisionByZero,
     NonInvertible,
-    /// A hint's inputs were out of the range it assumes (e.g. limbs that do not
-    /// satisfy `< modulus`), so its witness computation would underflow. Returned
-    /// instead of panicking, so adversarial `--input` cannot crash the prover.
+    /// A hint's inputs are outside the range it assumes (its computation would
+    /// underflow) — returned rather than panicking on adversarial input.
     MalformedHint(&'static str),
     /// A constraint (by index) was not satisfied.
     ConstraintFailed(usize),
-    /// The program's field modulus is missing, unparseable, or `< 2` — the
-    /// arithmetic (`% modulus`) would panic. Returned instead of panicking so a
-    /// malformed artifact cannot crash the prover.
+    /// Field modulus is missing, unparseable, or `< 2` (would make `% modulus`
+    /// panic).
     MalformedModulus,
 }
 
@@ -149,9 +147,8 @@ impl core::fmt::Display for SolveError {
 
 impl std::error::Error for SolveError {}
 
-/// Largest `limb_bits` a hint may declare. Non-native limbs are 86 bits; this
-/// bound stops an adversarial artifact from requesting a multi-gigabyte
-/// BigUint shift (`1 << limb_bits`) and OOM-ing the prover.
+/// Cap on a hint's `limb_bits` (real limbs are 86-bit); stops an adversarial
+/// artifact from forcing a huge `1 << limb_bits` allocation.
 const MAX_LIMB_BITS: u32 = 128;
 
 fn modulus_of(program: &PrimitiveProgram) -> Result<BigUint, SolveError> {
@@ -323,8 +320,7 @@ pub fn solve(
                     acc
                 };
                 let m_big = recompose(m);
-                // Adversarial limbs could recompose to a degenerate modulus; guard
-                // before the `%` (division by zero) and the `M-2` (underflow) below.
+                // Guard the `%` (÷0) and `M-2` (underflow) below.
                 if m_big < BigUint::from(2u32) {
                     return Err(SolveError::MalformedHint("mod_inverse: modulus < 2"));
                 }
@@ -368,11 +364,9 @@ pub fn solve(
                 if m_big.is_zero() {
                     return Err(SolveError::DivisionByZero);
                 }
-                // s = a + 2m - b - c ∈ [2, 3m) (positive; a,b,c < m). Then r = s mod m,
-                // and qabs = 2 - (s / m) ∈ {0,1,2} so that a + qabs·m = b + c + r.
-                // With honest, range-checked limbs a,b,c < m these never underflow;
-                // adversarial `--input` might, so guard each subtraction rather
-                // than let BigUint underflow-panic.
+                // s = a + 2m - b - c ∈ [2, 3m); r = s mod m; qabs = 2 - s/m ∈ {0,1,2}
+                // so a + qabs·m = b + c + r. Guard the subtractions: honest limbs
+                // (a,b,c < m) never underflow, adversarial ones could.
                 let lhs = &a_big + &m_big + &m_big;
                 let rhs = &b_big + &c_big;
                 if lhs < rhs {

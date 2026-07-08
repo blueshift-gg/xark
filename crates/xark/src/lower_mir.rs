@@ -80,11 +80,9 @@ pub(crate) fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -
     let s = tcx.def_path_str(def_id);
     if s.ends_with("::assert_eq") {
         Some(KnownCall::ConstrainEq)
-    // Every `Field`-method match below is gated on the path containing `Field`:
-    // a same-named method on another type (`Bool::or`, `Bool::xor`,
-    // `Bignum::mul`, …) must NOT be misclassified as the field intrinsic. The
-    // `__xark_*` free-function intrinsics remain unconditional, and `assert_eq`
-    // above is a free function so it is matched by suffix alone.
+    // Every `Field`-method arm is gated on the path containing `Field`, so a
+    // same-named method on another type (`Bool::or`, `Bignum::mul`) isn't
+    // misclassified as the intrinsic; the `__xark_*` names stay unconditional.
     } else if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
         Some(KnownCall::PowU64)
     } else if s.contains("__xark_add")
@@ -1035,11 +1033,9 @@ impl<'tcx> LoweringEnv<'tcx> {
             .push(R1csConstraint::equal(id, diff, LinearCombination::zero(), &note));
     }
 
-    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)`: `n` boolean bit
-    /// witnesses whose weighted sum recomposes `value`. This is the same
-    /// decomposition `Field::to_bits::<N>` produces, injected at the input
-    /// boundary for a `Private<U<N>>` parameter — whose value the prover chooses,
-    /// so the bound must be proven rather than assumed.
+    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)` — the same
+    /// decomposition as `Field::to_bits::<N>`, injected at the input boundary for
+    /// a `U<N>` parameter.
     fn emit_range_proof(&mut self, value: VarId, n: usize) {
         let value_lc = LinearCombination::var(value);
         let two = xark_ir::FieldConst::from_i64(2);
@@ -1241,12 +1237,9 @@ pub fn lower<'tcx>(
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
-            // Every `U<N>` input is range-proven in-circuit — public ones too.
-            // A `< 2^N` bound is *not* implied by Groth16's `< r` public-input
-            // check, and the comparison gadget assumes it; an unchecked public
-            // `U<N>` fed to `lt`/`gt` would let a prover force a wrong result.
-            // (A verifier-side check could reclaim the cost for public inputs,
-            // but only once the width is exported and enforced downstream.)
+            // Range-prove every `U<N>` input, public ones too: `< r` (all
+            // Groth16 checks for a public input) does not imply `< 2^N`, and the
+            // comparison gadget relies on the tighter bound.
             if let Some(n) = range_bits {
                 uint_range_inputs.push((id, n));
             }

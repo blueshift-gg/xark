@@ -180,9 +180,8 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
     let dir = &args.ceremony_dir;
     let baseline = read_baseline_delta_g1(dir)?;
     let count = read_contribution_count(dir)?;
-    // Don't pre-allocate to `count` (read from an attacker-supplied file): the
-    // loop is bounded by the contribution files that actually exist (`fs::read`
-    // fails on the first missing one), so a huge count can't force a huge alloc.
+    // Not `with_capacity(count)` — `count` is attacker-supplied; the loop is
+    // bounded by the contribution files that actually exist.
     let mut contributions: Vec<Contribution> = Vec::new();
     for i in 1..=count {
         let path = dir.join(format!("contribution_{i:04}.json"));

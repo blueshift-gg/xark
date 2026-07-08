@@ -122,19 +122,16 @@ macro_rules! weierstrass {
             Fp::new([xark::Field::from(a), xark::Field::from(b), xark::Field::from(c)])
         }
 
-        /// Assert the affine point `p` lies on the curve `y² = x³ + a·x + b (mod p)`.
-        /// The incomplete group-law formulas below are only meaningful for on-curve
-        /// points, so every gadget consuming a witness/public point must pin it
-        /// first (range-checks the limbs, then checks the curve equation).
+        /// Pin `p` to the curve `y² = x³ + a·x + b (mod p)` (range-checks the
+        /// limbs, then the equation). The incomplete group law is only valid
+        /// on-curve, so gadgets must call this on any witness/public point.
         pub fn enforce_on_curve(p: Point) {
             p.x.range_check();
             p.y.range_check();
             let b = fp($b0, $b1, $b2);
             let a_coeff = $($acoeff)*;
-            // lhs = y² ; rhs = x³ + a·x + b, reduced to canonical form so the
-            // per-limb comparison below is exact. (For `a = 0` the `a·x` term is
-            // a multiply-by-zero — a couple of wasted constraints, kept for a
-            // single uniform on-curve equation across curves.)
+            // y² == x³ + a·x + b, reduced so the per-limb compare is exact.
+            // (`a = 0` makes `a·x` a multiply-by-zero — kept for one uniform form.)
             let lhs = (p.y * p.y).reduce();
             let rhs = (p.x * p.x * p.x + a_coeff * p.x + b).reduce();
             let mut i = 0usize;
@@ -329,10 +326,9 @@ macro_rules! edwards {
             Fp::new(D_LIMBS)
         }
 
-        /// Assert the affine point `p` lies on the twisted-Edwards curve
-        /// `−x² + y² = 1 + d·x²·y²` (`a = −1`). The complete addition law is only
-        /// meaningful on-curve, so every gadget consuming a witness/public point
-        /// must pin it first (range-checks the limbs, then checks the equation).
+        /// Pin `p` to the twisted-Edwards curve `−x² + y² = 1 + d·x²·y²` (`a = −1`;
+        /// range-checks the limbs, then the equation). The complete addition law
+        /// is only valid on-curve, so gadgets must call this on any input point.
         pub fn enforce_on_curve(p: Point) {
             p.x.range_check();
             p.y.range_check();

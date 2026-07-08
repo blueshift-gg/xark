@@ -244,13 +244,9 @@ pub fn verify_keys_consistent_with_chain(
     {
         return Err(CeremonyError::KeysDoNotMatchChain);
     }
-    // NOTE (completeness, not soundness): this binds the shipped δ to the chain
-    // but does not re-verify that `pk.h_query` / `pk.l_query` were δ⁻¹-rescaled
-    // to match (module doc steps 2–3). A proving key with the correct δ but
-    // corrupted query vectors would pass here yet fail at *prove* time — it
-    // cannot forge proofs (verification soundness rests on the vk's δ), only
-    // fail to produce them. Re-checking the query vectors against the final δ
-    // is a tracked follow-up.
+    // Completeness gap (not soundness): this binds δ to the chain but does not
+    // re-check `pk.h_query`/`pk.l_query` δ⁻¹-rescaling. A corrupted pk with the
+    // right δ passes here yet fails at prove time — it can't forge, only fail.
     Ok(())
 }
 

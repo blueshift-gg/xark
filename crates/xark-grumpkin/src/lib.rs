@@ -189,9 +189,8 @@ pub fn enforce_on_curve(p: [Field; 2]) {
 /// `m`; processed MSB-first. `p` is a *witness* Grumpkin point. Returns the
 /// affine point `m · p`. Requires `m ≠ 0`.
 pub fn scalar_mul(bits: [Field; N_BITS], p: [Field; 2]) -> [Field; 2] {
-    // A witness point that is not on the curve makes the group-law formulas
-    // (and the Lean proofs backing them) meaningless — the accumulator would
-    // wander off-curve and the result would prove nothing. Pin it first.
+    // Pin the witness point to the curve: off-curve, the group-law formulas
+    // (and their Lean proofs) are meaningless.
     enforce_on_curve(p);
     let mut acc = offset();
     let mut i = 0usize;

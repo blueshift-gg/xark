@@ -48,16 +48,10 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
 /// hash itself is not constrained here). Fails (unsatisfiable) if the equation
 /// does not hold.
 pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [Field; 256]) {
-    // SOUNDNESS: the point coordinates are untrusted witnesses that feed the
-    // non-native `mod_mul` in the group law. `mod_mul` only range-checks its
-    // *outputs*; its no-wrap correctness assumes every operand limb is < 2^86.
-    // Without pinning them a malicious prover can supply out-of-range limbs so
-    // the schoolbook column products wrap `Fr`, break `a·b = q·m + r`, and forge
-    // acceptance. Check `a_pub` BEFORE the `0 - a_pub.x` negation below (itself a
-    // non-native op with the same precondition); `r_sig` now feeds the cofactor
-    // doublings, so it must be pinned too. `enforce_on_curve` range-checks the
-    // limbs AND binds the point to the curve — an off-curve `A`/`R` makes the
-    // complete-addition group law (and its Lean proofs) meaningless.
+    // Pin A and R to the curve before the group law: `enforce_on_curve` range-
+    // checks the limbs (`mod_mul` assumes operands < 2^86, or its column products
+    // wrap `Fr` and forge acceptance) and binds them on-curve. Must precede the
+    // `0 - a_pub.x` negation, which is itself a non-native op.
     enforce_on_curve(a_pub);
     enforce_on_curve(r_sig);
 

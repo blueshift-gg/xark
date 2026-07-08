@@ -185,9 +185,8 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
         metadata.setup_mode = "phase2-from-ptau".into();
         metadata.production_safe = true;
-        // Record a commitment to the phase-2 seed so an auditor can bind these
-        // keys to a specific (later-discarded) seed. The seed itself must not be
-        // kept — whoever holds it knows the γ/δ trapdoor.
+        // Commit to the (to-be-discarded) phase-2 seed for audit; the seed
+        // itself must not be kept — whoever holds it knows the γ/δ trapdoor.
         metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
         metadata.ptau_source = ptau_file
             .file_name()

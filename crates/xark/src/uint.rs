@@ -51,11 +51,9 @@ impl<const N: usize> U<N> {
     );
     /// Compile-time guard for `mul`: the `2N`-bit product must not wrap `Fr`.
     const MUL_WIDTH_OK: () = assert!(N <= 126, "U<N>::mul requires 2N ≤ 252 to avoid field wrap");
-    /// Compile-time guard for comparison and checked add/sub. These form an
-    /// intermediate up to `2^(N+1)` (a borrow term `lt·2^N` added to a difference,
-    /// or a two-operand sum), which must stay below the BN254 order `r < 2^254`
-    /// for the range proof to bind over the integers — so `2^(N+1) ≤ r`, i.e.
-    /// `N ≤ 252`. A bare `U::new` range proof needs only `2^N ≤ r` (`N ≤ 253`).
+    /// Comparison and checked add/sub form a `2^(N+1)` intermediate that must
+    /// stay below `r` to bind over the integers, so `N ≤ 252` (vs `253` for a
+    /// bare `U::new` range proof).
     const CMP_ARITH_WIDTH_OK: () = assert!(
         N <= 252,
         "U<N>: comparison and checked add/sub require N ≤ 252 so 2^(N+1) ≤ BN254 field order"
@@ -174,17 +172,12 @@ impl<const N: usize> U<N> {
     }
 }
 
-/// Fixed-width arithmetic uses the standard operators (`a + b`, `a - b`,
-/// `a * b`) and is *checked*: each operation re-range-proves its result to `N`
-/// bits, so overflow/underflow makes the circuit unsatisfiable rather than
-/// silently wrapping the field. `Add`/`Sub` require `N ≤ 252` (`CMP_ARITH_WIDTH_OK`):
-/// the two-operand sum, and the wrapped value of an underflowing difference, reach
-/// `~2^(N+1)`, which must stay below `r` or an out-of-range result could wrap back
-/// under `2^N` and pass the range proof. `Mul` requires the stricter `2N ≤ 252`
-/// so the product cannot wrap `Fr` before the range check sees it.
+/// Checked fixed-width arithmetic via `+`/`-`/`*`: each re-range-proves its
+/// result to `N` bits, so overflow/underflow is unsatisfiable rather than
+/// wrapping. `Add`/`Sub` need `N ≤ 252`, `Mul` the stricter `2N ≤ 252`.
 ///
-/// Ordering is deliberately *not* an operator: `<`/`>` must return `bool`, but a
-/// circuit comparison yields a [`Bool`] wire, so use `lt`/`le`/`gt`/`ge`.
+/// Ordering is *not* an operator (`<`/`>` must return `bool`; a circuit
+/// comparison yields a [`Bool`] wire) — use `lt`/`le`/`gt`/`ge`.
 impl<const N: usize> Add for U<N> {
     type Output = U<N>;
     fn add(self, other: U<N>) -> U<N> {
@@ -238,11 +231,9 @@ impl<const N: usize> MulAssign for U<N> {
 /// candidate — its correctness is enforced by the remainder range proof, so a
 /// wrong hint merely makes the circuit unsatisfiable, never unsound.
 pub(crate) fn less_than<const N: usize>(a: Field, b: Field) -> Bool {
-    // The intermediate `d = a - b + 2^N` reaches `2^(N+1)`, which must stay below
-    // the BN254 order `r` (< 2^254) or the remainder range proof no longer pins
-    // `lt` — a false ordering could be proven. Guard here, at the single choke
-    // point, so every caller (`lt`/`le`/`gt`/`ge`, the `*_const` methods, and the
-    // `I<N>` comparisons) is covered.
+    // Guard at the single choke point (covers `lt`/`le`/`gt`/`ge`, the `*_const`
+    // methods, and `I<N>` comparisons): the `2^(N+1)` intermediate must stay below
+    // `r`, else the remainder proof no longer pins `lt`.
     const { assert!(N <= 252, "comparison requires N <= 252 so 2^(N+1) <= BN254 order") };
     let two_pow_n = pow2::<N>();
     let top = Field::hint_bit(a - b + two_pow_n, N);

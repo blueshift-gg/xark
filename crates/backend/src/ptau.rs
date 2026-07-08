@@ -221,24 +221,19 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
         return Err(fail("generators"));
     }
 
-    // (1b) Reject a transcript whose toxic waste is trivially known. τ ∈ {0,1},
-    // α = 0 or β = 0 all satisfy every pairing ladder below (with τ = 0 each
-    // check reduces to 1_GT == 1_GT), yet the setup would be fully backdoored —
-    // so they must be rejected here, before the ladders "pass" them.
+    // Reject a known-trapdoor transcript: τ ∈ {0,1}, α = 0, β = 0 all pass the
+    // pairing ladders below (τ = 0 makes each 1 == 1) but are fully backdoored.
     if ptau.alpha_tau_g1.is_empty() || ptau.beta_tau_g1.is_empty() {
         return Err(fail("missing-alpha-beta"));
     }
-    // τ ∉ {0, 1}: τ·g1 is neither the identity (τ=0) nor the generator (τ=1).
     if ptau.tau_g1[1] == G1Affine::zero() || ptau.tau_g1[1] == g1 {
-        return Err(fail("degenerate-tau"));
+        return Err(fail("degenerate-tau")); // τ = 0 or τ = 1
     }
-    // α ≠ 0: α·g1 is not the identity.
     if ptau.alpha_tau_g1[0] == G1Affine::zero() {
-        return Err(fail("degenerate-alpha"));
+        return Err(fail("degenerate-alpha")); // α = 0
     }
-    // β ≠ 0: β·g1 and β·g2 are not the identity.
     if ptau.beta_tau_g1[0] == G1Affine::zero() || ptau.beta_g2 == G2Affine::zero() {
-        return Err(fail("degenerate-beta"));
+        return Err(fail("degenerate-beta")); // β = 0
     }
 
     // (2) τ links G1 and G2: e(τ·g1, g2) == e(g1, τ·g2).
@@ -446,12 +441,9 @@ pub fn parse_ptau(bytes: &[u8]) -> Result<PtauFile, PtauError> {
     }
     let num_sections = cursor.read_u32()?;
 
-    // First pass: index sections by type so we can read them out of order.
-    // snarkjs writes them in numeric order, but we don't want to depend on
-    // that. Do NOT pre-allocate to `num_sections` (an attacker-controlled u32
-    // from the header): a 12-byte file could request ~100 GB. The loop is
-    // bounded by the file's real content — `read_u32`/`read_slice` fail on a
-    // truncated file long before `num_sections` iterations if it's inflated.
+    // Index sections by type (snarkjs writes them in order; we don't rely on
+    // that). Not `with_capacity(num_sections)` — that u32 is attacker-controlled
+    // (a 12-byte file could request ~100 GB); the loop is bounded by real content.
     let mut sections: Vec<(u32, &[u8])> = Vec::new();
     for _ in 0..num_sections {
         let ty = cursor.read_u32()?;
@@ -617,11 +609,9 @@ fn modulus_matches_bn254(modulus_le: &[u8]) -> bool {
 fn fq_from_le_mont(bytes: &[u8]) -> Option<Fq> {
     debug_assert_eq!(bytes.len(), BN254_FQ_BYTES);
     let n = BigUint::from_bytes_le(bytes);
-    // A canonical Fq element's Montgomery representation is `< p`. Reject a
-    // non-canonical encoding (including any value `>= 2^256`) rather than
-    // trusting `new_unchecked` or silently mapping overflow to 0 — otherwise a
-    // non-canonical encoding of the generator/identity slips past the downstream
-    // equality and degeneracy checks (which compare representations).
+    // Reject a non-canonical encoding (Montgomery rep `>= p`): `new_unchecked`
+    // would trust it, and it can otherwise slip past the representation-comparing
+    // degeneracy checks.
     let modulus: BigUint = Fq::MODULUS.into();
     if n >= modulus {
         return None;
