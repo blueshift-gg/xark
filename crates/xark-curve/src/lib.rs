@@ -35,6 +35,7 @@ macro_rules! weierstrass {
         base = $base:literal,
         scalar = $scalar:literal,
         a = 0,
+        b = [ $b0:literal, $b1:literal, $b2:literal ],
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* $(,)? ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal $(,)? ] $(,)?
     ) => {
@@ -43,6 +44,9 @@ macro_rules! weierstrass {
             scalar = $scalar,
             // a = 0: numerator is exactly `3x²` (NO subtraction).
             numerator_sub = { },
+            // On-curve RHS is `x³ + a·x + b` with `a = 0`.
+            curve_b = [ $b0, $b1, $b2 ],
+            curve_a_coeff = { Fp::new([xark::Field::from(0u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
             generators = [ $( [ $gx0, $gx1, $gx2, $gy0, $gy1, $gy2 ] ),* ],
             correction = [ $cx0, $cx1, $cx2, $cy0, $cy1, $cy2 ]
         }
@@ -52,6 +56,7 @@ macro_rules! weierstrass {
         base = $base:literal,
         scalar = $scalar:literal,
         a = -3,
+        b = [ $b0:literal, $b1:literal, $b2:literal ],
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* $(,)? ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal $(,)? ] $(,)?
     ) => {
@@ -61,6 +66,9 @@ macro_rules! weierstrass {
             // a = -3: numerator is `3x² - 3` (`Fp` resolves to the type generated
             // below — items are non-hygienic, so this splices in cleanly).
             numerator_sub = { - Fp::new([xark::Field::from(3u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
+            // On-curve RHS is `x³ + a·x + b` with `a = −3` (`−3 = p − 3` via Neg).
+            curve_b = [ $b0, $b1, $b2 ],
+            curve_a_coeff = { - Fp::new([xark::Field::from(3u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
             generators = [ $( [ $gx0, $gx1, $gx2, $gy0, $gy1, $gy2 ] ),* ],
             correction = [ $cx0, $cx1, $cx2, $cy0, $cy1, $cy2 ]
         }
@@ -71,6 +79,8 @@ macro_rules! weierstrass {
         base = $base:literal,
         scalar = $scalar:literal,
         numerator_sub = { $($nsub:tt)* },
+        curve_b = [ $b0:literal, $b1:literal, $b2:literal ],
+        curve_a_coeff = { $($acoeff:tt)* },
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal ]
     ) => {
@@ -110,6 +120,23 @@ macro_rules! weierstrass {
         /// Build an `Fp` coordinate from three little-endian 86-bit limbs.
         fn fp(a: u128, b: u128, c: u128) -> Fp {
             Fp::new([xark::Field::from(a), xark::Field::from(b), xark::Field::from(c)])
+        }
+
+        /// Pin `p` to the curve `y² = x³ + a·x + b` (range-checks limbs, then the
+        /// equation). Required before the incomplete group law.
+        pub fn enforce_on_curve(p: Point) {
+            p.x.range_check();
+            p.y.range_check();
+            let b = fp($b0, $b1, $b2);
+            let a_coeff = $($acoeff)*;
+            // y² == x³ + a·x + b, reduced for an exact per-limb compare
+            let lhs = (p.y * p.y).reduce();
+            let rhs = (p.x * p.x * p.x + a_coeff * p.x + b).reduce();
+            let mut i = 0usize;
+            while i < 3usize {
+                xark::assert_eq(lhs.limbs[i], rhs.limbs[i]);
+                i += 1;
+            }
         }
 
         /// Incomplete affine addition, 3-limb (slope-based, `a`-independent).
@@ -160,8 +187,8 @@ macro_rules! weierstrass {
 
         /// Strauss–Shamir `u1·G + u2·Q`, incomplete-affine offset accumulator, 3-limb.
         pub fn double_scalar_mul_incomplete(u1_bits: [xark::Field; 256], u2_bits: [xark::Field; 256], q: Point) -> Point {
-            q.x.range_check();
-            q.y.range_check();
+            // pin `q` to the curve (also range-checks its limbs)
+            enforce_on_curve(q);
             let ig1 = ig1();
             let q2 = q.double_incomplete();
             let jq = [q, q2, q2.add_incomplete(q)];
@@ -190,9 +217,13 @@ macro_rules! weierstrass {
 
         /// ECDSA verification, 3-limb (86-bit) path.
         pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
-            r.range_check();
-            s.range_check();
-            e.range_check();
+            // canonical `< n`, not just limb-bounded — a non-canonical `s` is
+            // signature malleability
+            r.assert_canonical();
+            s.assert_canonical();
+            e.assert_canonical();
+            // r ≠ 0 (s ≠ 0 already enforced by `s.inverse()` below)
+            r.assert_nonzero();
             let s_inv = s.inverse();
             let u1 = e * s_inv;
             let u2 = r * s_inv;
@@ -290,6 +321,23 @@ macro_rules! edwards {
             Fp::new(D_LIMBS)
         }
 
+        /// Pin `p` to the twisted-Edwards curve `−x² + y² = 1 + d·x²·y²`
+        /// (range-checks limbs, then the equation).
+        pub fn enforce_on_curve(p: Point) {
+            p.x.range_check();
+            p.y.range_check();
+            let x2 = p.x * p.x;
+            let y2 = p.y * p.y;
+            // y² − x² == 1 + d·x²·y², reduced for an exact per-limb compare
+            let lhs = (y2 - x2).reduce();
+            let rhs = (fp(1, 0, 0) + d_const() * (x2 * y2)).reduce();
+            let mut i = 0usize;
+            while i < 3usize {
+                xark::assert_eq(lhs.limbs[i], rhs.limbs[i]);
+                i += 1;
+            }
+        }
+
         /// The identity element `(0, 1)`.
         pub fn identity() -> Point {
             Point::new(fp(0, 0, 0), fp(1, 0, 0))
@@ -359,6 +407,10 @@ macro_rules! edwards {
         /// The complete law means the running `acc` (starting at the identity) is
         /// always valid — no offset accumulator needed.
         pub fn scalar_mul(bits: [xark::Field; 256], p: Point) -> Point {
+            // pin coordinates to < 2^BITS before the non-native group law
+            // (`mod_mul` assumes in-range operand limbs, else products wrap `Fr`)
+            p.x.range_check();
+            p.y.range_check();
             let mut table = [identity(); 16];
             let mut i = 1usize;
             while i < 16usize {
@@ -383,6 +435,11 @@ macro_rules! edwards {
         /// identity), then per window does 2 doublings and one 16-way select+add.
         /// Complete law → offset-free (no correction term).
         pub fn double_scalar_mul(bits1: [xark::Field; 256], p1: Point, bits2: [xark::Field; 256], p2: Point) -> Point {
+            // pin coordinates to < 2^BITS before the non-native group law (see `scalar_mul`)
+            p1.x.range_check();
+            p1.y.range_check();
+            p2.x.range_check();
+            p2.y.range_check();
             let jp1 = [p1, p1.double(), p1.double().add(p1)];
             let jp2 = [p2, p2.double(), p2.double().add(p2)];
             let mut table = [identity(); 16];

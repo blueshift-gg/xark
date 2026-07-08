@@ -120,13 +120,41 @@ pub enum SolveError {
     MissingInput(VarId),
     DivisionByZero,
     NonInvertible,
+    /// Hint inputs out of range (would underflow) — rejected, not panicked.
+    MalformedHint(&'static str),
     /// A constraint (by index) was not satisfied.
     ConstraintFailed(usize),
+    /// Field modulus missing, unparseable, or `< 2`.
+    MalformedModulus,
 }
 
-fn modulus_of(program: &PrimitiveProgram) -> BigUint {
-    BigUint::parse_bytes(program.field.modulus_decimal.as_bytes(), 10)
-        .expect("valid modulus decimal")
+impl core::fmt::Display for SolveError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SolveError::MissingInput(v) => write!(f, "missing input for variable {v}"),
+            SolveError::DivisionByZero => write!(f, "division by zero"),
+            SolveError::NonInvertible => write!(f, "value is not invertible"),
+            SolveError::MalformedHint(m) => write!(f, "malformed hint: {m}"),
+            SolveError::ConstraintFailed(i) => write!(f, "constraint {i} is not satisfied"),
+            SolveError::MalformedModulus => {
+                write!(f, "field modulus is missing, unparseable, or < 2")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SolveError {}
+
+/// Cap on a hint's limb_bits (real limbs are 86-bit).
+const MAX_LIMB_BITS: u32 = 128;
+
+fn modulus_of(program: &PrimitiveProgram) -> Result<BigUint, SolveError> {
+    let m = BigUint::parse_bytes(program.field.modulus_decimal.as_bytes(), 10)
+        .ok_or(SolveError::MalformedModulus)?;
+    if m < BigUint::from(2u32) {
+        return Err(SolveError::MalformedModulus);
+    }
+    Ok(m)
 }
 
 fn eval_lc(lc: &LinearCombination, assign: &BTreeMap<VarId, Fp>, modulus: &BigUint) -> Fp {
@@ -163,7 +191,7 @@ pub fn solve(
     program: &PrimitiveProgram,
     inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>, SolveError> {
-    let modulus = modulus_of(program);
+    let modulus = modulus_of(program)?;
     let mut assign: BTreeMap<VarId, Fp> = BTreeMap::new();
 
     // Seed inputs.
@@ -211,6 +239,12 @@ pub fn solve(
                 let inv = v.inverse().unwrap_or_else(|| Fp::zero(&modulus));
                 assign.insert(*out, inv);
             }
+            WitnessGen::InverseOrZero { out, input } => {
+                // `x⁻¹` when `x ≠ 0`, else `0` (unconstrained at 0)
+                let v = eval_lc(input, &assign, &modulus);
+                let inv = v.inverse().unwrap_or_else(|| Fp::zero(&modulus));
+                assign.insert(*out, inv);
+            }
             WitnessGen::Bit { out, input, index } => {
                 let v = eval_lc(input, &assign, &modulus);
                 assign.insert(*out, v.bit(*index as usize));
@@ -234,6 +268,9 @@ pub fn solve(
                 modulus: m,
                 limb_bits,
             } => {
+                if *limb_bits > MAX_LIMB_BITS {
+                    return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
+                }
                 let recompose = |limbs: &[LinearCombination]| -> BigUint {
                     let mut acc = BigUint::zero();
                     for (i, lc) in limbs.iter().enumerate() {
@@ -267,6 +304,9 @@ pub fn solve(
                 modulus: m,
                 limb_bits,
             } => {
+                if *limb_bits > MAX_LIMB_BITS {
+                    return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
+                }
                 let recompose = |limbs: &[LinearCombination]| -> BigUint {
                     let mut acc = BigUint::zero();
                     for (i, lc) in limbs.iter().enumerate() {
@@ -276,6 +316,10 @@ pub fn solve(
                     acc
                 };
                 let m_big = recompose(m);
+                // modulus >= 2 (÷0 / M-2 guard)
+                if m_big < BigUint::from(2u32) {
+                    return Err(SolveError::MalformedHint("mod_inverse: modulus < 2"));
+                }
                 let a_big = recompose(a) % &m_big;
                 if a_big.is_zero() {
                     return Err(SolveError::DivisionByZero);
@@ -298,6 +342,9 @@ pub fn solve(
                 modulus: m,
                 limb_bits,
             } => {
+                if *limb_bits > MAX_LIMB_BITS {
+                    return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
+                }
                 let recompose = |limbs: &[LinearCombination]| -> BigUint {
                     let mut acc = BigUint::zero();
                     for (i, lc) in limbs.iter().enumerate() {
@@ -313,11 +360,21 @@ pub fn solve(
                 if m_big.is_zero() {
                     return Err(SolveError::DivisionByZero);
                 }
-                // s = a + 2m - b - c ∈ [2, 3m) (positive; a,b,c < m). Then r = s mod m,
-                // and qabs = 2 - (s / m) ∈ {0,1,2} so that a + qabs·m = b + c + r.
-                let s = ((&a_big + &m_big + &m_big) - &b_big) - &c_big;
+                // s = a + 2m - b - c; r = s mod m; qabs = 2 - s/m ∈ {0,1,2}.
+                // guard subtractions (adversarial limbs could underflow)
+                let lhs = &a_big + &m_big + &m_big;
+                let rhs = &b_big + &c_big;
+                if lhs < rhs {
+                    return Err(SolveError::MalformedHint("sub2: a + 2m < b + c"));
+                }
+                let s = lhs - rhs;
                 let remainder = &s % &m_big;
                 let q_s = &s / &m_big;
+                if q_s > BigUint::from(2u32) {
+                    return Err(SolveError::MalformedHint(
+                        "sub2: quotient out of range (inputs >= modulus)",
+                    ));
+                }
                 let q_abs = BigUint::from(2u32) - &q_s;
                 assign.insert(*qabs, Fp::new(q_abs, &modulus));
                 let mask = (BigUint::one() << *limb_bits as usize) - BigUint::one();
@@ -335,12 +392,12 @@ pub fn solve(
 /// Construct a field element from a decimal string against a program's field
 /// (for tests / tooling that need to inject specific witness values).
 pub fn fp_from_decimal(s: &str, program: &PrimitiveProgram) -> Fp {
-    Fp::from_decimal(s, &modulus_of(program))
+    Fp::from_decimal(s, &modulus_of(program).expect("valid field modulus"))
 }
 
 /// Check that every constraint evaluates to zero under `assign`.
 pub fn check(program: &PrimitiveProgram, assign: &BTreeMap<VarId, Fp>) -> Result<(), SolveError> {
-    let modulus = modulus_of(program);
+    let modulus = modulus_of(program)?;
     for (i, c) in program.constraints.iter().enumerate() {
         if !eval_expression(c, assign, &modulus).is_zero() {
             return Err(SolveError::ConstraintFailed(i));
@@ -420,7 +477,7 @@ pub fn analyze_underconstrained(
     assign: &BTreeMap<VarId, Fp>,
 ) -> Vec<UnderConstrained> {
     use crate::primitive::VarRole;
-    let modulus = modulus_of(program);
+    let modulus = modulus_of(program).expect("valid field modulus");
 
     // Index: variable -> indices of constraints that reference it.
     let mut refs: BTreeMap<VarId, Vec<usize>> = BTreeMap::new();
@@ -504,4 +561,37 @@ pub fn analyze_underconstrained(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitive::{FieldSpec, PrimitiveProgram};
+
+    fn program_with_modulus(modulus_decimal: &str) -> PrimitiveProgram {
+        PrimitiveProgram {
+            field: FieldSpec {
+                name: "test".into(),
+                modulus_decimal: modulus_decimal.into(),
+            },
+            vars: vec![],
+            constraints: vec![],
+            witness_gen: vec![],
+        }
+    }
+
+    /// A malformed field modulus is rejected cleanly, not panicked.
+    #[test]
+    fn malformed_modulus_is_rejected_not_panicked() {
+        for m in ["0", "1", "", "not-a-number"] {
+            let program = program_with_modulus(m);
+            assert!(
+                matches!(solve(&program, &BTreeMap::new()), Err(SolveError::MalformedModulus)),
+                "modulus {m:?} must be rejected"
+            );
+        }
+        // A valid modulus still solves the (trivial) program.
+        let ok = program_with_modulus("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+        assert!(solve(&ok, &BTreeMap::new()).is_ok());
+    }
 }

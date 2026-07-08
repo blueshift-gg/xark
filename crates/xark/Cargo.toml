@@ -2,7 +2,7 @@
 name = "xark"
 version = "0.0.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Write, compile, prove and verify zero-knowledge circuits in Rust — the language (lib) and the toolchain (bin)."
 
 # The language: `use xark::prelude::*;` in a circuit (no_std, stable).

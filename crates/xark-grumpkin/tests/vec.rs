@@ -66,3 +66,33 @@ fn msm_matches_reference_vector() {
         "wrong output x must be rejected"
     );
 }
+
+/// An off-curve witness point is rejected by the injected on-curve check.
+/// Without it the MSM's group-law accumulator would wander off-curve and prove
+/// nothing about a point that isn't on Grumpkin.
+#[test]
+fn off_curve_point_is_rejected() {
+    let program = load_program();
+    let id = |name: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == name)
+            .unwrap_or_else(|| panic!("missing circuit var `{name}`"))
+            .id
+    };
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("scalars[0]"), S0.to_string());
+    inputs.insert(id("scalars[1]"), S1.to_string());
+    // (P0X, 1) does not satisfy y² = x³ − 17.
+    inputs.insert(id("points[0][0]"), P0X.to_string());
+    inputs.insert(id("points[0][1]"), "1".to_string());
+    inputs.insert(id("points[1][0]"), P1X.to_string());
+    inputs.insert(id("points[1][1]"), P1Y.to_string());
+    inputs.insert(id("r[0]"), RX.to_string());
+    inputs.insert(id("r[1]"), RY.to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "an off-curve point must be rejected by enforce_on_curve"
+    );
+}

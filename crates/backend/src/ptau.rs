@@ -57,10 +57,11 @@
 
 use std::convert::TryFrom;
 
-use ark_bn254::{Fq, Fq2, G1Affine, G2Affine};
-use ark_ec::AffineRepr;
-use ark_ff::{BigInt, BigInteger, Fp, PrimeField, Zero};
+use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, VariableBaseMSM};
+use ark_ff::{BigInt, BigInteger, Fp, One, PrimeField, Zero};
 use num_bigint::BigUint;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// The number of bytes used to encode a single Fq element in a BN254 ptau.
@@ -134,6 +135,16 @@ pub enum Phase2Error {
         needed: usize,
         actual: usize,
     },
+
+    /// The powers-of-tau transcript is not internally consistent: the G1/G2
+    /// powers do not form a single geometric τ-ladder, or the α/β powers are not
+    /// consistent multiples of it. A transcript that fails this check would
+    /// yield keys with a trapdoor the transcript's author knows.
+    #[error(
+        "phase-2 setup: powers-of-tau transcript failed the consistency check \
+ (`{stage}`) — it is not a valid geometric ladder; do not use it"
+    )]
+    InconsistentPowers { stage: &'static str },
 }
 
 /// Verify that `ptau` covers a circuit with the given constraint count.
@@ -179,6 +190,143 @@ pub fn setup_from_ptau<C: ark_relations::gr1cs::ConstraintSynthesizer<ark_bn254:
     randomness_seed: &[u8; 32],
 ) -> Result<crate::keys::Groth16Keys, Phase2Error> {
     crate::setup_phase2::setup_from_ptau(circuit, ptau, randomness_seed)
+}
+
+/// Verify the powers-of-tau transcript is a consistent geometric τ-ladder (G1
+/// and G2 powers), with the α/β powers consistent multiples of it. Guards
+/// against a structurally-valid but backdoored transcript that `parse_ptau`
+/// (structure only) would otherwise turn into keys with a known trapdoor.
+/// Batches each ladder with a Fiat-Shamir challenge (a few MSMs + pairings, not
+/// `O(n)`). Does not verify the contribution chain (that is `xark ceremony`).
+pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Error> {
+    let fail = |stage: &'static str| Phase2Error::InconsistentPowers { stage };
+
+    let g1 = G1Affine::generator();
+    let g2 = G2Affine::generator();
+
+    // (1) Normalization: both ladders start at the generators.
+    if ptau.tau_g1.len() < 2 || ptau.tau_g2.len() < 2 {
+        return Err(fail("too-short"));
+    }
+    if ptau.tau_g1[0] != g1 || ptau.tau_g2[0] != g2 {
+        return Err(fail("generators"));
+    }
+
+    // reject known trapdoors (τ∈{0,1}, α=0, β=0)
+    if ptau.alpha_tau_g1.is_empty() || ptau.beta_tau_g1.is_empty() {
+        return Err(fail("missing-alpha-beta"));
+    }
+    if ptau.tau_g1[1] == G1Affine::zero() || ptau.tau_g1[1] == g1 {
+        return Err(fail("degenerate-tau")); // τ = 0 or τ = 1
+    }
+    if ptau.alpha_tau_g1[0] == G1Affine::zero() {
+        return Err(fail("degenerate-alpha")); // α = 0
+    }
+    if ptau.beta_tau_g1[0] == G1Affine::zero() || ptau.beta_g2 == G2Affine::zero() {
+        return Err(fail("degenerate-beta")); // β = 0
+    }
+
+    // (2) τ links G1 and G2: e(τ·g1, g2) == e(g1, τ·g2).
+    if Bn254::pairing(ptau.tau_g1[1], g2) != Bn254::pairing(g1, ptau.tau_g2[1]) {
+        return Err(fail("tau-link"));
+    }
+
+    // Fiat-Shamir challenge and its powers, used to batch each ladder.
+    let rho = fiat_shamir_challenge(ptau);
+    let tau_lo = ptau.tau_g2[0]; // g2
+    let tau_hi = ptau.tau_g2[1]; // τ·g2
+
+    // G1 τ-ladder: A = Σρⁱ Pᵢ, B = Σρⁱ Pᵢ₊₁; e(B, g2) == e(A, τ·g2) ⇔ B = τ·A.
+    let g1_ladder_ok = |points: &[G1Affine]| -> bool {
+        let m = points.len();
+        if m < 2 {
+            return true;
+        }
+        let scalars = powers_of(rho, m - 1);
+        let a = match G1Projective::msm(&points[..m - 1], &scalars) {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let b = match G1Projective::msm(&points[1..], &scalars) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        Bn254::pairing(b.into_affine(), tau_lo) == Bn254::pairing(a.into_affine(), tau_hi)
+    };
+
+    // (3) G1 τ-ladder; (5) α and β ladders share the same τ.
+    if !g1_ladder_ok(&ptau.tau_g1) {
+        return Err(fail("tau-g1-ladder"));
+    }
+    if !g1_ladder_ok(&ptau.alpha_tau_g1) {
+        return Err(fail("alpha-ladder"));
+    }
+    if !g1_ladder_ok(&ptau.beta_tau_g1) {
+        return Err(fail("beta-ladder"));
+    }
+
+    // (4) G2 τ-ladder: C = Σρⁱ Qᵢ, D = Σρⁱ Qᵢ₊₁; e(g1, D) == e(τ·g1, C) ⇔ D = τ·C.
+    {
+        let m = ptau.tau_g2.len();
+        let scalars = powers_of(rho, m - 1);
+        let c = G2Projective::msm(&ptau.tau_g2[..m - 1], &scalars).map_err(|_| fail("g2-msm"))?;
+        let d = G2Projective::msm(&ptau.tau_g2[1..], &scalars).map_err(|_| fail("g2-msm"))?;
+        if Bn254::pairing(ptau.tau_g1[0], d.into_affine())
+            != Bn254::pairing(ptau.tau_g1[1], c.into_affine())
+        {
+            return Err(fail("tau-g2-ladder"));
+        }
+    }
+
+    // (6) β links G1 and G2: e(β·g1, g2) == e(g1, β·g2).
+    if Bn254::pairing(ptau.beta_tau_g1[0], g2) != Bn254::pairing(g1, ptau.beta_g2) {
+        return Err(fail("beta-link"));
+    }
+
+    Ok(())
+}
+
+/// Fiat-Shamir batching challenge over every transcript point (hashed incrementally).
+fn fiat_shamir_challenge(ptau: &PtauFile) -> Fr {
+    use ark_serialize::CanonicalSerialize;
+    let mut h = Sha256::new();
+    h.update(b"xark-ptau-consistency-v1");
+    let mut buf = Vec::new();
+    for p in &ptau.tau_g1 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g1");
+        h.update(&buf);
+    }
+    for p in &ptau.alpha_tau_g1 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g1");
+        h.update(&buf);
+    }
+    for p in &ptau.beta_tau_g1 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g1");
+        h.update(&buf);
+    }
+    for p in &ptau.tau_g2 {
+        buf.clear();
+        p.serialize_compressed(&mut buf).expect("serialize g2");
+        h.update(&buf);
+    }
+    buf.clear();
+    ptau.beta_g2.serialize_compressed(&mut buf).expect("serialize g2");
+    h.update(&buf);
+    Fr::from_be_bytes_mod_order(&h.finalize())
+}
+
+/// `[ρ⁰, ρ¹, …, ρ^(n-1)]`.
+fn powers_of(rho: Fr, n: usize) -> Vec<Fr> {
+    let mut out = Vec::with_capacity(n);
+    let mut cur = Fr::one();
+    for _ in 0..n {
+        out.push(cur);
+        cur *= rho;
+    }
+    out
 }
 
 /// An in-memory representation of a parsed Powers-of-Tau transcript.
@@ -279,10 +427,8 @@ pub fn parse_ptau(bytes: &[u8]) -> Result<PtauFile, PtauError> {
     }
     let num_sections = cursor.read_u32()?;
 
-    // First pass: index sections by type so we can read them out of order.
-    // snarkjs writes them in numeric order, but we don't want to depend on
-    // that.
-    let mut sections: Vec<(u32, &[u8])> = Vec::with_capacity(num_sections as usize);
+    // index sections by type; no with_capacity (num_sections is attacker-controlled)
+    let mut sections: Vec<(u32, &[u8])> = Vec::new();
     for _ in 0..num_sections {
         let ty = cursor.read_u32()?;
         let size = cursor.read_u64()? as usize;
@@ -444,13 +590,16 @@ fn modulus_matches_bn254(modulus_le: &[u8]) -> bool {
 /// [`Fp::new_unchecked`] which trusts the input is already in Montgomery
 /// form; calling [`PrimeField::from_bigint`] here would apply a *second*
 /// Montgomery reduction and silently scale every coordinate by `R⁻¹`.
-fn fq_from_le_mont(bytes: &[u8]) -> Fq {
+fn fq_from_le_mont(bytes: &[u8]) -> Option<Fq> {
     debug_assert_eq!(bytes.len(), BN254_FQ_BYTES);
     let n = BigUint::from_bytes_le(bytes);
-    // BN254 Fq fits in BigInt<4>; any overflow would mean the producer wrote
-    // a value `>= 2^256` which is malformed.
-    let bigint: BigInt<4> = BigInt::try_from(n).unwrap_or(BigInt::<4>::from(0u64));
-    Fp::new_unchecked(bigint)
+    // reject non-canonical encodings (rep >= p)
+    let modulus: BigUint = Fq::MODULUS.into();
+    if n >= modulus {
+        return None;
+    }
+    let bigint: BigInt<4> = BigInt::try_from(n).ok()?;
+    Some(Fp::new_unchecked(bigint))
 }
 
 fn read_g1_section(
@@ -472,8 +621,9 @@ fn read_g1_section(
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let off = i * point_size;
-        let x = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]);
-        let y = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + point_size]);
+        let nc = || PtauError::InvalidPoint { section: name, index: i, detail: "non-canonical coordinate" };
+        let x = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let y = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
         let p = if x.is_zero() && y.is_zero() {
             G1Affine::zero()
         } else {
@@ -512,10 +662,11 @@ fn read_g2_section(
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let off = i * point_size;
-        let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]);
-        let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES]);
-        let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES]);
-        let y_c1 = fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size]);
+        let nc = || PtauError::InvalidPoint { section: name, index: i, detail: "non-canonical coordinate" };
+        let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES]).ok_or_else(nc)?;
+        let y_c1 = fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
         let x = Fq2::new(x_c0, x_c1);
         let y = Fq2::new(y_c0, y_c1);
         let p = if x.is_zero() && y.is_zero() {
@@ -585,11 +736,11 @@ mod tests {
     #[test]
     fn fq_mont_roundtrip_zero_one() {
         let zero_bytes = [0u8; BN254_FQ_BYTES];
-        assert_eq!(fq_from_le_mont(&zero_bytes), Fq::from(0u64));
+        assert_eq!(fq_from_le_mont(&zero_bytes), Some(Fq::from(0u64)));
 
         let one = Fq::from(1u64);
         let one_bytes = __fq_to_le_mont_bytes_for_tests(one);
-        assert_eq!(fq_from_le_mont(&one_bytes), one);
+        assert_eq!(fq_from_le_mont(&one_bytes), Some(one));
     }
 
     #[test]
@@ -598,7 +749,14 @@ mod tests {
         for _ in 0..16 {
             let f = Fq::rand(&mut rng);
             let bytes = __fq_to_le_mont_bytes_for_tests(f);
-            assert_eq!(fq_from_le_mont(&bytes), f);
+            assert_eq!(fq_from_le_mont(&bytes), Some(f));
         }
+    }
+
+    #[test]
+    fn fq_mont_rejects_non_canonical() {
+        // all-ones 32-byte encoding is `2^256 − 1 ≥ p`: non-canonical, must reject
+        let all_ones = [0xFFu8; BN254_FQ_BYTES];
+        assert_eq!(fq_from_le_mont(&all_ones), None);
     }
 }

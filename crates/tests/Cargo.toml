@@ -12,7 +12,7 @@
 [package]
 name = "xark-tests"
 version.workspace = true
-edition.workspace = true
+edition = "2021"
 license.workspace = true
 publish = false
 

@@ -86,6 +86,18 @@ pub enum CeremonyError {
     DeltaInconsistent { index: usize },
     #[error("ceremony: contribution {index} prev_delta_g1 does not match the running delta")]
     ChainBreak { index: usize },
+    #[error(
+        "ceremony: contribution {index} is degenerate (δ_i·G2 or the new δ·G1 is the identity) — \
+         a zero contribution collapses the accumulated δ and makes the trapdoor trivially known"
+    )]
+    DegenerateContribution { index: usize },
+    #[error("ceremony: final accumulated δ is the identity — the trapdoor would be trivially known")]
+    DegenerateFinalDelta,
+    #[error(
+        "ceremony: the shipped keys do not match the verified contribution chain \
+         (proving_key.delta_g1 ≠ the chain's final δ·G1, or vk.delta_g2 is inconsistent with it)"
+    )]
+    KeysDoNotMatchChain,
 }
 
 /// Apply this contributor's secret `δ_i` to `keys` in place, returning the
@@ -157,6 +169,11 @@ pub fn verify_chain(
         if c.prev_delta_g1 != running {
             return Err(CeremonyError::ChainBreak { index: i });
         }
+        // reject a degenerate δ_i = 0 contribution: it passes the Schnorr and
+        // δ-consistency checks yet zeroes the accumulated δ, so any proof verifies
+        if c.delta_g2_contribution.is_zero() || c.new_delta_g1.is_zero() {
+            return Err(CeremonyError::DegenerateContribution { index: i });
+        }
         // Schnorr proof: proof_response · G2 == proof_commitment + e · (δ_i · G2).
         let challenge = schnorr_challenge_v1(
             &c.prev_delta_g1,
@@ -178,6 +195,38 @@ pub fn verify_chain(
         }
         running = c.new_delta_g1;
     }
+    // accumulated δ must not be the identity (also guarded per-contribution above)
+    if running.is_zero() {
+        return Err(CeremonyError::DegenerateFinalDelta);
+    }
+    Ok(())
+}
+
+/// Confirm the shipped keys are the ones the verified chain produced:
+/// `proving_key.delta_g1` must equal the chain's final δ·G1, and `vk.delta_g2`
+/// must carry the same δ (via `e(δ·G1, G2) == e(G1, δ·G2)`). Call after
+/// [`verify_chain`] returns `Ok`.
+pub fn verify_keys_consistent_with_chain(
+    keys: &Groth16Keys,
+    initial_delta_g1: G1Affine,
+    contributions: &[Contribution],
+) -> Result<(), CeremonyError> {
+    let expected_delta_g1 = contributions
+        .last()
+        .map(|c| c.new_delta_g1)
+        .unwrap_or(initial_delta_g1);
+    if keys.proving_key.delta_g1 != expected_delta_g1 {
+        return Err(CeremonyError::KeysDoNotMatchChain);
+    }
+    // δ·G1 and δ·G2 must share the same scalar δ: e(δ·G1, G2) == e(G1, δ·G2).
+    let g1 = G1Affine::generator();
+    let g2 = G2Affine::generator();
+    if Bn254::pairing(keys.proving_key.delta_g1, g2)
+        != Bn254::pairing(g1, keys.verifying_key.delta_g2)
+    {
+        return Err(CeremonyError::KeysDoNotMatchChain);
+    }
+    // completeness gap: doesn't re-check h_query/l_query δ-rescaling
     Ok(())
 }
 
@@ -445,6 +494,57 @@ mod tests {
         assert!(matches!(
             err,
             CeremonyError::SchnorrInvalid { .. } | CeremonyError::DeltaInconsistent { .. }
+        ));
+    }
+
+    #[test]
+    fn degenerate_zero_delta_contribution_is_rejected() {
+        // A δ_i = 0 contribution crafted to satisfy both the Schnorr proof and
+        // the δ-consistency pairing (accepted pre-fix) must now be rejected — it
+        // collapses the accumulated δ to the identity.
+        let keys = fresh_phase2_keys();
+        let initial = keys.proving_key.delta_g1;
+        let g2 = G2Affine::generator();
+        let r = Fr::from(12_345u64);
+        let proof_commitment = (g2 * r).into_affine();
+
+        let degenerate = Contribution {
+            delta_g2_contribution: G2Affine::zero(),
+            proof_commitment,
+            proof_response: r,
+            prev_delta_g1: initial,
+            new_delta_g1: G1Affine::zero(),
+            contributor_label: "attacker".into(),
+        };
+        let err = verify_chain(initial, &[degenerate]).unwrap_err();
+        assert!(
+            matches!(err, CeremonyError::DegenerateContribution { index: 0 }),
+            "δ=0 contribution must be rejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn keys_must_match_the_verified_chain() {
+        let mut keys = fresh_phase2_keys();
+        let initial = keys.proving_key.delta_g1;
+        let mut rng = ChaCha20Rng::seed_from_u64(9);
+        let c = contribute(&mut keys, "alice", &mut rng).unwrap();
+        verify_chain(initial, &[c.clone()]).unwrap();
+        // Honest shipped keys are bound to the chain.
+        verify_keys_consistent_with_chain(&keys, initial, &[c.clone()]).expect("honest keys match");
+
+        // a different vk.delta_g2 (δ they know) is caught by the pairing check
+        keys.verifying_key.delta_g2 = (G2Affine::generator() * Fr::from(999u64)).into_affine();
+        assert!(matches!(
+            verify_keys_consistent_with_chain(&keys, initial, &[c.clone()]).unwrap_err(),
+            CeremonyError::KeysDoNotMatchChain
+        ));
+
+        // proving_key.delta_g1 not equal to the chain's final δ·G1.
+        keys.proving_key.delta_g1 = (G1Affine::generator() * Fr::from(7u64)).into_affine();
+        assert!(matches!(
+            verify_keys_consistent_with_chain(&keys, initial, &[c]).unwrap_err(),
+            CeremonyError::KeysDoNotMatchChain
         ));
     }
 }

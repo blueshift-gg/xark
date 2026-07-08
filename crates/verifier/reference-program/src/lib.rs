@@ -38,6 +38,11 @@ pub fn process_instruction(
     if public_inputs.len() % FR_BYTES != 0 {
         return Err(ProgramError::Custom(3));
     }
+    // SECURITY: this reference program reads the VK from account 0 with no owner/
+    // address/hash check — acceptable only because it is the circuit-agnostic,
+    // hash-pinned reproducible-build artifact, NOT a production template. A real
+    // deployment MUST authenticate the VK (bake it in, or pin the account
+    // owner/address and VK hash), else an attacker's VK is accepted.
     let vk_account = accounts.first().ok_or(ProgramError::NotEnoughAccountKeys)?;
     let vk_data = vk_account.try_borrow_data()?;
     match verify_groth16(&vk_data, proof, public_inputs) {

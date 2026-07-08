@@ -95,15 +95,18 @@ impl R1csCallbacks {
         std::fs::write(&circuit_path, format!("{circuit}\n"))
             .unwrap_or_else(|e| panic!("failed to write {circuit_path:?}: {e}"));
 
-        // Fully-lowered R1CS (kept for debugging / the DOT graph). For very large
-        // circuits this pretty-printed JSON is multi-gigabyte and nothing
-        // consumes it (the backend reads circuit.json), so skip it — and the DOT
-        // graph — above a threshold to keep big-circuit builds fast and robust.
+        // Fully-lowered R1CS. `xark setup` / `xark prove` build the Groth16
+        // constraint system from r1cs.json, so it MUST always be written —
+        // skipping it above a size threshold would make circuits with >1M
+        // constraints impossible to set up or prove. For very large circuits we
+        // skip only the *pretty-print* (which is multi-gigabyte) and the
+        // human-oriented DOT graph, emitting compact JSON that the backend
+        // consumes identically.
         const DEBUG_R1CS_MAX_CONSTRAINTS: usize = 1_000_000;
         let n_r1cs = output.r1cs.constraints.len();
+        let json_path = self.output_dir.join("r1cs.json");
         if n_r1cs <= DEBUG_R1CS_MAX_CONSTRAINTS {
             let json = xark_ir::to_json_pretty(&output.r1cs);
-            let json_path = self.output_dir.join("r1cs.json");
             std::fs::write(&json_path, format!("{json}\n"))
                 .unwrap_or_else(|e| panic!("failed to write {json_path:?}: {e}"));
 
@@ -112,10 +115,13 @@ impl R1csCallbacks {
             std::fs::write(&dot_path, dot)
                 .unwrap_or_else(|e| panic!("failed to write {dot_path:?}: {e}"));
         } else {
+            let json = xark_ir::json::to_json(&output.r1cs);
+            std::fs::write(&json_path, format!("{json}\n"))
+                .unwrap_or_else(|e| panic!("failed to write {json_path:?}: {e}"));
             eprintln!(
-                "xark: skipped r1cs.json/graph.dot ({n_r1cs} R1CS constraints > \
-                 {DEBUG_R1CS_MAX_CONSTRAINTS} — the debug dump would be multi-GB; \
-                 circuit.json still written)"
+                "xark: wrote compact r1cs.json ({n_r1cs} R1CS constraints > \
+                 {DEBUG_R1CS_MAX_CONSTRAINTS}); skipped the pretty-print and the \
+                 debug graph.dot"
             );
         }
 

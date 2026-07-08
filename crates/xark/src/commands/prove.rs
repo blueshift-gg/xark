@@ -121,6 +121,10 @@ pub fn run(args: ProveArgs) -> Result<()> {
     for (k, v) in &inputs {
         match by_name.get(k.as_str()) {
             Some(&id) => {
+                // strict decimal validation (matches `verify`); the solver's
+                // lenient parse would silently turn a malformed value into 0
+                xark_prover::try_fr_from_decimal(v)
+                    .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
                 id_inputs.insert(id, v.clone());
             }
             None => {
@@ -144,6 +148,10 @@ pub fn run(args: ProveArgs) -> Result<()> {
         .collect();
 
     let circuit = XarkCircuit::for_proving(prog, assign);
+    // reject a malformed `r1cs.json` before synthesis (clean error, not a panic)
+    circuit
+        .validate()
+        .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
     let public = circuit.public_inputs();
 
     let pk = Groth16Keys::read_proving_key(&pk_path).with_context(|| {
@@ -152,6 +160,15 @@ pub fn run(args: ProveArgs) -> Result<()> {
             pk_path.display()
         )
     })?;
+
+    // reproducible randomness breaks zero-knowledge on a production key
+    if args.deterministic_rng.is_some() && key_is_production_safe(&pk_path) {
+        anyhow::bail!(
+            "--deterministic-rng cannot be used with a production key \
+             (metadata.production_safe = true): reproducible prover randomness breaks \
+             zero-knowledge. Remove the flag to prove with OS randomness."
+        );
+    }
 
     let mut rng = match args.deterministic_rng {
         Some(seed) => {
@@ -197,4 +214,16 @@ pub fn run(args: ProveArgs) -> Result<()> {
         ))
     );
     Ok(())
+}
+
+/// Whether the `metadata.json` beside a proving key marks it production-safe.
+fn key_is_production_safe(pk_path: &std::path::Path) -> bool {
+    let Some(dir) = pk_path.parent() else {
+        return false;
+    };
+    fs::read_to_string(dir.join("metadata.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("production_safe").and_then(|b| b.as_bool()))
+        .unwrap_or(false)
 }

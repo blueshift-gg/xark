@@ -91,7 +91,9 @@ fn smul_5b_crosscheck_and_analyzer_clean() {
     // doubling (curve identity `d·x²y² = y²−x²−1`, 5 muls + 2 inv) set this count.
     let n = program.constraints.len();
     eprintln!("ed25519 scalar_mul: {n} constraints");
-    assert_eq!(n, 3_731_054, "ed25519 scalar_mul constraint count changed");
+    // includes the input-point coordinate range checks `scalar_mul` runs before
+    // the group law; confirm before re-pinning if it changes.
+    assert_eq!(n, 3_731_576, "ed25519 scalar_mul constraint count changed");
 
     // (1) [5]·B == the hard-coded 5B vector — pins limb order + bit order.
     let inputs = smul_inputs(&program, K5, BX, BY, R5X, R5Y);
@@ -123,7 +125,9 @@ fn eddsa_verify_honest_and_tamper() {
     // (`eddsa_verify_sound`, `eddsa_verify_compose`).
     let n = program.constraints.len();
     eprintln!("ed25519 eddsa_verify: {n} constraints");
-    assert_eq!(n, 4_584_776, "ed25519 eddsa_verify constraint count changed");
+    // includes: on-curve checks on a_pub/r_sig, double_scalar_mul input-point
+    // range checks, the `S < L` scalar check, and the cofactored `[8]·t == [8]·R`.
+    assert_eq!(n, 4_662_466, "ed25519 eddsa_verify constraint count changed");
 
     let mut inputs = BTreeMap::new();
     put3(&mut inputs, &program, "a.x.limbs", AX);

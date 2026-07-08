@@ -4451,7 +4451,7 @@ version = "0.0.1"
 
 [[package]]
 name = "xark-aes"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4488,14 +4488,14 @@ dependencies = [
 
 [[package]]
 name = "xark-bits"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-blake2s"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4505,7 +4505,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake3"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4515,11 +4515,11 @@ dependencies = [
 
 [[package]]
 name = "xark-curve"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "xark-ed25519"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-curve",
@@ -4530,7 +4530,7 @@ dependencies = [
 
 [[package]]
 name = "xark-ff"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "xark-grumpkin"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4548,7 +4548,7 @@ dependencies = [
 
 [[package]]
 name = "xark-ir"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
@@ -4558,7 +4558,7 @@ dependencies = [
 
 [[package]]
 name = "xark-keccak"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4566,14 +4566,14 @@ dependencies = [
 
 [[package]]
 name = "xark-mimc"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-pedersen"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4583,14 +4583,14 @@ dependencies = [
 
 [[package]]
 name = "xark-poseidon"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-poseidon2"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4599,7 +4599,7 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4615,7 +4615,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256k1"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4625,7 +4625,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256r1"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4635,7 +4635,7 @@ dependencies = [
 
 [[package]]
 name = "xark-sha256"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",

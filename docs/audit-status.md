@@ -60,10 +60,10 @@ tests across the workspace crates, including:
 * **Ceremony enforcement** — the `CeremonyError` rejection paths
   (Schnorr-PoK, transcript hash chain, δ-consistency between G1/G2,
   dev-mode guards) are exercised by the ptau/setup test paths.
-* **cargo-fuzz smoke** (`fuzz`, CI-gated by
-  `.github/workflows/fuzz.yml`) — short-interval fuzz over the
-  artifact parser, witness parser, and the xark-IR→R1CS lowering.
-  Production fuzzing campaigns are CPU-weeks; CI is a regression guard.
+* **cargo-fuzz smoke** (`crates/tests/tests/fuzz.rs`) — fuzz over the
+  artifact parser, witness parser, and the xark-IR→R1CS lowering. Run
+  manually; there is no CI workflow gating it yet. Production fuzzing
+  campaigns are CPU-weeks.
 
 ### Lean 4 / mathlib formal proofs (`formal/`)
 
@@ -260,9 +260,17 @@ correctness of:
   (`a − b + k·m − c = 0`, `k ∈ {0, 1}`).
 * `inv_mod` — modular inverse via `a · a_inv = 1`. Reduces to
   `mul_mod`'s correctness plus a non-zero check on `a`.
-* `enforce_on_curve` — `y² = x³ + a·x + b mod p`. Mechanised for
-  secp256k1 (`Formal.Secp256k1.enforce_on_curve_secp256k1_sound`),
-  secp256r1, and Grumpkin.
+* `enforce_on_curve` — `y² = x³ + a·x + b mod p`. Lean soundness lemmas
+  exist for all three curves (`enforce_on_curve_grumpkin_sound`,
+  `Formal.Secp256k1.enforce_on_curve_secp256k1_sound`, and the secp256r1
+  analogue), **but the in-circuit check was previously not wired into the
+  gadgets.** Grumpkin now enforces it in-circuit
+  (`xark-grumpkin::enforce_on_curve`, `y² = x³ − 17`, called by
+  `scalar_mul`/`multi_scalar_mul`). The secp256k1/secp256r1 (ECDSA) and
+  Ed25519 gadgets do **not** yet call an on-curve check — their points are
+  public inputs, so on-curve validation is currently the caller's
+  responsibility off-circuit; wiring the (already Lean-proven) non-native
+  check into those gadgets is a tracked follow-up.
 * `enforce_in_range_one_to_n` — `r, s ∈ [1, n − 1]`. Without it, a
   malicious prover could exploit the `inv_mod(s)` step.
 * GLV decomposition (`glv_decompose_in_circuit`) — proves

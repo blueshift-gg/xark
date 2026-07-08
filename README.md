@@ -49,11 +49,15 @@ xark init my-circuit
 # Compile a circuit crate: Rust → MIR → xark-IR → R1CS. All xark output
 # (artifacts + an isolated cargo target) lives under the crate's target/xark/.
 xark build examples/cube
-# → xark: wrote examples/cube/target/xark   (circuit.json + r1cs.json)
+# → writes examples/cube/target/xark/cube/ (circuit.json + r1cs.json)
+
+# Generate Groth16 keys. With no .ptau this produces an INSECURE dev key
+# (single-party OsRng); pass --ptau-file (or run `xark ceremony`) for production.
+xark setup examples/cube
 
 # Solve the witness from your inputs, then produce AND verify a Groth16 proof.
-xark prove examples/cube/target/xark --input secret=3 --input result=27
-# → xark: proof verified ✓
+xark prove examples/cube --input secret=3 --input result=27
+# → ✅ Proof produced and self-checked (1 public input).
 
 # Validate a circuit crate WITHOUT emitting artifacts — report subset
 # violations as rustc diagnostics with source spans (great for editors / CI).

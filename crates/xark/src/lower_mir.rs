@@ -37,6 +37,7 @@ pub enum KnownCall {
     FieldConstantDecimal,
     Advice,
     HintInverse,
+    HintInverseOrZero,
     HintBit,
     HintDivRem,
     // Width-generic (`Bignum`) hints: `N` limbs inferred from the array arg,
@@ -54,7 +55,7 @@ pub enum KnownCall {
 /// as the generic `core::convert::From::from` (no MIR); resolving with the
 /// call's generic args points them at the impl (which has MIR and whose def
 /// path still ends in the recognized suffix). Falls back to the original id.
-pub fn resolve_call_instance<'tcx>(
+pub(crate) fn resolve_call_instance<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     generic_args: rustc_middle::ty::GenericArgsRef<'tcx>,
@@ -65,7 +66,7 @@ pub fn resolve_call_instance<'tcx>(
         .flatten()
 }
 
-pub fn resolve_call_def_id<'tcx>(
+pub(crate) fn resolve_call_def_id<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     generic_args: rustc_middle::ty::GenericArgsRef<'tcx>,
@@ -75,14 +76,12 @@ pub fn resolve_call_def_id<'tcx>(
         .unwrap_or(def_id)
 }
 
-pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Option<KnownCall> {
+pub(crate) fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Option<KnownCall> {
     let s = tcx.def_path_str(def_id);
     if s.ends_with("::assert_eq") {
         Some(KnownCall::ConstrainEq)
-    // The operator methods are matched by trait-impl suffix, but ONLY on
-    // `Field` — otherwise an inherent method named `mul`/`add`/… on another type
-    // (e.g. `Bignum::mul`) would be misclassified as the field-arithmetic
-    // intrinsic. The `__xark_*` intrinsics remain unconditional.
+    // Field-method arms are gated on `Field` in the path, so a same-named method
+    // on another type isn't misclassified; `__xark_*` names stay unconditional.
     } else if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
         Some(KnownCall::PowU64)
     } else if s.contains("__xark_add")
@@ -103,25 +102,40 @@ pub fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> Optio
         Some(KnownCall::FieldConstantU128)
     } else if s.contains("constant_u64") {
         Some(KnownCall::FieldConstantU64)
-    } else if s.ends_with("::constant") {
+    } else if s.contains("Field") && s.ends_with("::constant") {
         Some(KnownCall::FieldConstantDecimal)
-    } else if s.contains("__xark_hint_inverse") || s.ends_with("::hint_inverse") {
+    } else if s.contains("__xark_hint_inverse_or_zero")
+        || (s.contains("Field") && s.ends_with("::hint_inverse_or_zero"))
+    {
+        // must precede the `hint_inverse` arm (prefix collision)
+        Some(KnownCall::HintInverseOrZero)
+    } else if s.contains("__xark_hint_inverse")
+        || (s.contains("Field") && s.ends_with("::hint_inverse"))
+    {
         Some(KnownCall::HintInverse)
-    } else if s.contains("__xark_hint_bit") || s.ends_with("::hint_bit") {
+    } else if s.contains("__xark_hint_bit") || (s.contains("Field") && s.ends_with("::hint_bit")) {
         Some(KnownCall::HintBit)
-    } else if s.contains("__xark_hint_div_rem") || s.ends_with("::hint_div_rem") {
+    } else if s.contains("__xark_hint_div_rem")
+        || (s.contains("Field") && s.ends_with("::hint_div_rem"))
+    {
         Some(KnownCall::HintDivRem)
-    } else if s.contains("__xark_hint_mulmod_divmod") || s.ends_with("::hint_mulmod_divmod") {
+    } else if s.contains("__xark_hint_mulmod_divmod")
+        || (s.contains("Field") && s.ends_with("::hint_mulmod_divmod"))
+    {
         Some(KnownCall::HintMulModDivMod)
-    } else if s.contains("__xark_hint_sub2") || s.ends_with("::hint_sub2") {
+    } else if s.contains("__xark_hint_sub2")
+        || (s.contains("Field") && s.ends_with("::hint_sub2"))
+    {
         Some(KnownCall::HintSub2)
-    } else if s.contains("__xark_hint_mod_inverse") || s.ends_with("::hint_mod_inverse") {
+    } else if s.contains("__xark_hint_mod_inverse")
+        || (s.contains("Field") && s.ends_with("::hint_mod_inverse"))
+    {
         Some(KnownCall::HintModInverse)
-    } else if s.contains("__xark_xor") || s.ends_with("::xor") {
+    } else if s.contains("__xark_xor") || (s.contains("Field") && s.ends_with("::xor")) {
         Some(KnownCall::Xor)
-    } else if s.contains("__xark_or") || s.ends_with("::or") {
+    } else if s.contains("__xark_or") || (s.contains("Field") && s.ends_with("::or")) {
         Some(KnownCall::Or)
-    } else if s.contains("__xark_advice") || s.ends_with("::advice") {
+    } else if s.contains("__xark_advice") || (s.contains("Field") && s.ends_with("::advice")) {
         Some(KnownCall::Advice)
     } else {
         None
@@ -170,6 +184,10 @@ struct LoweringEnv<'tcx> {
     /// witness-gen index)`, while it is still eligible for merging into a
     /// following `assert_eq`.
     pending_mul: BTreeMap<VarId, (usize, usize)>,
+    /// Mul outputs folded into a following `assert_eq`, keyed to
+    /// `(a, b, witness_gen_index)` so `finish` can revive `a·b = out` if the var
+    /// is referenced again after the merge.
+    merged: BTreeMap<VarId, (LinearCombination, LinearCombination, usize)>,
     /// The witness-generation ("hint") program, in dependency order. `None`
     /// entries are ops whose output var was merged away (dropped at finish).
     witness_gen: Vec<Option<WitnessGen>>,
@@ -204,6 +222,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             advice_counter: 0,
             next_constraint_id: 0,
             pending_mul: BTreeMap::new(),
+            merged: BTreeMap::new(),
             witness_gen: Vec::new(),
             inlining: Vec::new(),
             inline_substs: Vec::new(),
@@ -245,6 +264,10 @@ impl<'tcx> LoweringEnv<'tcx> {
                     let idx = self.get_int(idx_local).ok_or_else(|| {
                         CompileError::new("array index must be a compile-time constant")
                             .with_note("witness-dependent indexing is not supported")
+                            .with_help(
+                                "use a literal index or a loop variable the unroller can fold to a \
+                                 constant; for a data-dependent choice, use `select`",
+                            )
                     })?;
                     path.push(idx as u64);
                 }
@@ -412,6 +435,11 @@ impl<'tcx> LoweringEnv<'tcx> {
                 let (local, path) = self.resolve_place(place)?;
                 self.get_field_at(local, &path).ok_or_else(|| {
                     CompileError::new("use of a value that is not a supported field expression")
+                        .with_help(
+                            "this position needs a `Field` (or `Bool`/`U<N>` wrapping one); a host \
+                             `bool`/integer, or a value from an operation the circuit can't lower, \
+                             can't be used here",
+                        )
                 })
             }
             // A `Field`-typed constant used directly as an operand — e.g.
@@ -625,16 +653,21 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Read a compile-time unsigned integer operand (constant or tracked int
     /// slot). The slot model is `u128`, so this preserves the full width.
     fn operand_to_u128(&self, operand: &Operand<'tcx>) -> CompileResult<u128> {
+        // integer positions (loop bound, exponent, length, `U<N>` width, …) must
+        // be compile-time constants
+        let want_const = || {
+            CompileError::new("expected a constant integer").with_help(
+                "this must be a compile-time constant (loop bound, `^` exponent, array length, \
+                 `U<N>` width, …), not a witness or runtime value",
+            )
+        };
         match operand {
-            Operand::Constant(c) => self
-                .const_to_u128(c)
-                .ok_or_else(|| CompileError::new("expected a constant integer")),
+            Operand::Constant(c) => self.const_to_u128(c).ok_or_else(want_const),
             Operand::Copy(place) | Operand::Move(place) => {
                 let local = Self::place_local(place)?;
-                self.get_int(local)
-                    .ok_or_else(|| CompileError::new("expected a constant integer"))
+                self.get_int(local).ok_or_else(want_const)
             }
-            Operand::RuntimeChecks(_) => Err(CompileError::new("expected a constant integer")),
+            Operand::RuntimeChecks(_) => Err(want_const()),
         }
     }
 
@@ -646,18 +679,18 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Read a `&str` literal operand (for `Field::constant("...")`), resolving
     /// through the `_a = const "..."; _b = &(*_a)` reborrow chain if needed.
     fn operand_to_str(&self, operand: &Operand<'tcx>) -> CompileResult<String> {
+        let want_literal = || {
+            CompileError::new("`Field::constant` expects a string literal argument").with_help(
+                "pass a decimal string literal, e.g. `Field::constant(\"12345\")`; for values that \
+                 fit in `u128` prefer `Field::from(n)`",
+            )
+        };
         let c = match operand {
             Operand::Constant(c) => c,
             Operand::Copy(place) | Operand::Move(place) => {
-                return self.get_str(place.local).ok_or_else(|| {
-                    CompileError::new("`Field::constant` expects a string literal argument")
-                })
+                return self.get_str(place.local).ok_or_else(want_literal)
             }
-            Operand::RuntimeChecks(_) => {
-                return Err(CompileError::new(
-                    "`Field::constant` expects a string literal argument",
-                ))
-            }
+            Operand::RuntimeChecks(_) => return Err(want_literal()),
         };
         Self::const_to_str(self.tcx, c)
     }
@@ -991,11 +1024,57 @@ impl<'tcx> LoweringEnv<'tcx> {
             .push(R1csConstraint::equal(id, diff, LinearCombination::zero(), &note));
     }
 
+    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)`.
+    fn emit_range_proof(&mut self, value: VarId, n: usize) {
+        let value_lc = LinearCombination::var(value);
+        let two = xark_ir::FieldConst::from_i64(2);
+        let mut pow = xark_ir::FieldConst::from_i64(1);
+        let mut recomp = LinearCombination::zero();
+        for i in 0..n {
+            let b = self.alloc_advice();
+            // Witness-gen: bit `i` of the input value.
+            self.witness_gen.push(Some(WitnessGen::Bit {
+                out: b,
+                input: value_lc.clone(),
+                index: i as u32,
+            }));
+            // Booleanity: `b * b = b` (⟺ `b ∈ {0, 1}`).
+            let id = self.fresh_constraint_id();
+            let note = format!("{} in {{0,1}}", self.var_names[b as usize]);
+            self.constraints.push(R1csConstraint::general(
+                id,
+                LinearCombination::var(b),
+                LinearCombination::var(b),
+                LinearCombination::var(b),
+                &note,
+            ));
+            recomp = recomp.add(LinearCombination::var(b).scale(&pow));
+            pow = pow.mul(&two);
+        }
+        // Recomposition pins the bits to `value` (⇒ `value < 2^n`).
+        let id = self.fresh_constraint_id();
+        let note = format!(
+            "{}-bit range: recompose == {}",
+            n, self.var_names[value as usize]
+        );
+        self.constraints
+            .push(R1csConstraint::equal(id, recomp, value_lc, &note));
+    }
+
     fn merge_mul(&mut self, var: VarId, target: LinearCombination) {
         let (idx, wg_idx) = self
             .pending_mul
             .remove(&var)
             .expect("caller guarantees var is pending");
+        // record operands so the product can be revived if referenced again (see `merged`)
+        self.merged.insert(
+            var,
+            (
+                self.constraints[idx].a.clone(),
+                self.constraints[idx].b.clone(),
+                wg_idx,
+            ),
+        );
         // The merged multiplication `a * b = target` is now a check, not a
         // definition — its output var is gone, so drop its witness-gen Product.
         self.witness_gen[wg_idx] = None;
@@ -1024,21 +1103,59 @@ pub struct LowerOutput {
 
 /// Flatten a circuit parameter type into its `Field` leaves, pairing each with
 /// the MIR projection path (encoded exactly as [`LoweringEnv::resolve_place`]:
-/// array/const index, or struct-field index) and a human-readable name. A scalar
-/// `Field` is one leaf at path `[]`; an array/tuple/struct of `Field` collapses
-/// to `n` leaves (`g[0][1]`, `pubkey.x[0]`, …). Any non-`Field` leaf is rejected.
+/// array/const index, or struct-field index), a human-readable name, and an
+/// optional fixed-width bound. A scalar `Field` is one leaf at path `[]`; an
+/// array/tuple/struct of `Field` collapses to `n` leaves. A `U<N>` is one leaf
+/// carrying `Some(N)` (range-proved `< 2^N`). Any other leaf is rejected.
 fn flatten_field_leaves<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
     path: &mut Vec<u64>,
     name: &str,
-    out: &mut Vec<(Vec<u64>, String)>,
+    out: &mut Vec<(Vec<u64>, String, Option<usize>)>,
 ) -> CompileResult<()> {
     // `Field` is the opaque leaf — never recurse into its private limbs.
     if let Some(d) = ty.ty_adt_def() {
         if tcx.item_name(d.did()).as_str() == "Field" {
-            out.push((path.clone(), name.to_string()));
+            out.push((path.clone(), name.to_string(), None));
             return Ok(());
+        }
+    }
+    // `U<N>` is a fixed-width leaf: one `Field` value at projection index 0,
+    // carrying the bit width so the input path can range-prove it.
+    if let rustc_middle::ty::TyKind::Adt(def, args) = ty.kind() {
+        // accept the re-exported path (`xark::U`) and the definition path (`…::uint::U`)
+        let p = tcx.def_path_str(def.did());
+        if p == "xark::U" || p.ends_with("::uint::U") {
+            let n = args
+                .const_at(0)
+                .try_to_target_usize(tcx)
+                .ok_or_else(|| CompileError::new("U<N>: width `N` must be a constant"))?
+                as usize;
+            if n < 1 || n > 253 {
+                return Err(CompileError::new(format!(
+                    "U<{n}> circuit input: width must be in 1..=253 (BN254 field capacity)"
+                ))
+                .with_help(
+                    "choose `N` in 1..=253; a wider value is not uniquely representable in the \
+                     scalar field",
+                ));
+            }
+            path.push(0);
+            out.push((path.clone(), name.to_string(), Some(n)));
+            path.pop();
+            return Ok(());
+        }
+        // `I<N>` is a two-field struct; flattening it would produce unconstrained
+        // leaves, so reject it as a raw input.
+        if p == "xark::I" || p.ends_with("::int::I") {
+            return Err(CompileError::new(
+                "signed `I<N>` is not yet supported as a circuit input",
+            )
+            .with_help(
+                "take a `Private<Field>`/`Public<Field>` and construct it in-circuit with \
+                 `I::<N>::new(x)`",
+            ));
         }
     }
     match ty.kind() {
@@ -1089,23 +1206,123 @@ pub fn lower<'tcx>(
     // scalar `Field` is one input var; an array/tuple/struct of `Field` collapses
     // to `n` vars, each bound to the leaf's projection path so body reads resolve.
     let mut num_inputs = 0usize;
+    // `U<N>` inputs to range-prove after the input id range is fixed
+    let mut uint_range_inputs: Vec<(VarId, usize)> = Vec::new();
     for (i, input) in entry.inputs.iter().enumerate() {
         let local = rustc_middle::mir::Local::from_usize(i + 1);
         let ty = body.local_decls[local].ty;
         let mut leaves = Vec::new();
         let mut path = Vec::new();
         flatten_field_leaves(tcx, ty, &mut path, &input.name, &mut leaves)?;
-        for (leaf_path, leaf_name) in leaves {
+        for (leaf_path, leaf_name, range_bits) in leaves {
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
+            // range-prove every `U<N>` input (public too): `< r` doesn't imply `< 2^N`
+            if let Some(n) = range_bits {
+                uint_range_inputs.push((id, n));
+            }
         }
+    }
+    for (id, n) in uint_range_inputs {
+        env.emit_range_proof(id, n);
     }
 
     walk_body(&mut env, body)?;
 
     let program = finish(env, field, num_inputs);
+    // reject any hint/advice output or public input left unpinned (see `check_pinning`)
+    check_pinning(&program, num_inputs)?;
     Ok(program)
+}
+
+/// Build-time structural soundness gate: reject a hint/advice output or a public
+/// input that no constraint references (a free witness / unconstrained public
+/// value). A necessary structural check, not a full under-constraint proof (see
+/// `solver::analyze_underconstrained`).
+fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
+    let mut referenced: BTreeSet<VarId> = BTreeSet::new();
+    for c in &out.r1cs.constraints {
+        for lc in [&c.a, &c.b, &c.c] {
+            for term in &lc.terms {
+                referenced.insert(term.var);
+            }
+        }
+    }
+    for v in &out.r1cs.variables {
+        if referenced.contains(&v.id) {
+            continue;
+        }
+        let is_input = (v.id as usize) < n_inputs;
+        match v.visibility {
+            Visibility::Public => {
+                return Err(CompileError::new(format!(
+                    "public input `{}` is declared but no constraint references it — \
+                     the verifier's value for it would be unconstrained",
+                    v.name
+                ))
+                .with_note(
+                    "bind every public input/output with an `assert_eq` (or remove it \
+                     from the signature)",
+                ));
+            }
+            // A `Private` var allocated after the inputs is a hint/advice output.
+            Visibility::Private if !is_input => {
+                return Err(CompileError::new(format!(
+                    "hint/advice output `{}` is not pinned by any constraint — \
+                     a malicious prover could choose it freely",
+                    v.name
+                ))
+                .with_note(
+                    "constrain every hint output, e.g. `assert_eq(x * hint_inverse(x), 1)`",
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Apply Rust `as`-cast truncation of a compile-time integer to `ty`: keep the
+/// low `bits`, sign-extend for a signed target. Non-integer target passes through.
+fn truncate_int_cast(v: i128, ty: rustc_middle::ty::Ty<'_>) -> u128 {
+    use rustc_middle::ty::{IntTy, TyKind, UintTy};
+    let (bits, signed) = match ty.kind() {
+        TyKind::Uint(u) => (
+            match u {
+                UintTy::U8 => 8,
+                UintTy::U16 => 16,
+                UintTy::U32 => 32,
+                UintTy::U64 => 64,
+                UintTy::U128 => 128,
+                UintTy::Usize => 64,
+            },
+            false,
+        ),
+        TyKind::Int(i) => (
+            match i {
+                IntTy::I8 => 8,
+                IntTy::I16 => 16,
+                IntTy::I32 => 32,
+                IntTy::I64 => 64,
+                IntTy::I128 => 128,
+                IntTy::Isize => 64,
+            },
+            true,
+        ),
+        _ => return v as u128,
+    };
+    if bits >= 128 {
+        return v as u128;
+    }
+    let mask = (1u128 << bits) - 1;
+    let low = (v as u128) & mask;
+    // sign-extend a negative value in a signed target
+    if signed && (low >> (bits - 1)) & 1 == 1 {
+        low | !mask
+    } else {
+        low
+    }
 }
 
 /// Maximum number of basic-block visits per body walk. Loops are unrolled by
@@ -1151,6 +1368,10 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                         CompileError::new("witness-dependent control flow is not supported")
                             .with_note(
                                 "branch conditions must be compile-time constants (e.g. loop bounds)",
+                            )
+                            .with_help(
+                                "a circuit has no runtime control flow: for a data-dependent \
+                                 choice use `select(cond, a, b)`; loops must have constant bounds",
                             )
                     })
                     .map_err(|e| e.or_span(term_span))?;
@@ -1201,14 +1422,21 @@ fn lower_statement<'tcx>(
             match rvalue {
                 Rvalue::Use(operand, _) => bind_use(env, dest, &dest_path, operand),
                 // `_b = &(*_a)` reborrow: only supported to carry a `&str`
-                // literal into `Field::constant`.
+                // literal into `Field::constant`. Other `Field` references are
+                // unsupported (rejects `==`/`<` and `+=`/`-=`).
                 Rvalue::Ref(_, _, src) | Rvalue::CopyForDeref(src) => {
                     if let Some(s) = env.get_str(src.local) {
                         env.set_str(dest, s);
                         Ok(())
                     } else {
                         Err(CompileError::new(
-                            "references are only supported for `Field::constant` string literals",
+                            "references to a `Field` value are not supported inside a circuit",
+                        )
+                        .with_note(
+                            "comparisons (`==` `!=` `<` `<=` `>` `>=`) and compound assignments \
+                             (`+=` `-=` `*=` `/=`) are not circuit operations — use `assert_eq(a, b)` \
+                             to constrain equality or `a.is_eq(b)`/`a.is_zero()` for a boolean result, \
+                             and write `a = a + b` instead of `a += b`",
                         ))
                     }
                 }
@@ -1287,19 +1515,22 @@ fn lower_statement<'tcx>(
                     }
                     Ok(())
                 }
-                // Compile-time integer cast (`v as u64` in the `From<uN> for
-                // Field` conversions). The validator only lets int→int casts
-                // through; evaluate the source int into the dest slot.
-                Rvalue::Cast(_, operand, _) => {
+                // Compile-time integer cast (`From<uN> for Field`, or a narrowing
+                // `as uN`). Truncate to the target width per Rust `as` semantics.
+                Rvalue::Cast(_, operand, ty) => {
                     if let Some(v) = env.operand_to_int(operand) {
-                        env.set_int_at(dest, &dest_path, v as u128);
+                        env.set_int_at(dest, &dest_path, truncate_int_cast(v, *ty));
                     }
                     Ok(())
                 }
                 other => Err(CompileError::new(format!(
                     "unsupported rvalue `{}` inside circuit",
                     rvalue_name(other)
-                ))),
+                ))
+                .with_help(
+                    "a circuit supports field arithmetic (`+ - * ^`), comparisons, and the \
+                     provided gadget calls; references, closures, and heap ops are not lowerable",
+                )),
             }
         }
         // A fresh allocation of a local: wipe any stale slots from a previous
@@ -1438,7 +1669,10 @@ fn lower_call<'tcx>(
     destination: &Place<'tcx>,
 ) -> CompileResult<()> {
     let (def_id, generic_args) = func.const_fn_def().ok_or_else(|| {
-        CompileError::new("indirect / dynamic calls are not supported inside a circuit")
+        CompileError::new("indirect / dynamic calls are not supported inside a circuit").with_help(
+            "call functions directly by name; function pointers, closures, and `dyn` dispatch \
+             have no compile-time-known target to inline",
+        )
     })?;
 
     // Monomorphize the call's generic args in the current inlining context (a
@@ -1558,6 +1792,13 @@ fn lower_call<'tcx>(
             let v = env.alloc_advice();
             env.witness_gen
                 .push(Some(WitnessGen::Inverse { out: v, input: x }));
+            env.set_field(dest, LinearCombination::var(v));
+        }
+        KnownCall::HintInverseOrZero => {
+            let x = env.operand_to_lc(arg(0)?)?;
+            let v = env.alloc_advice();
+            env.witness_gen
+                .push(Some(WitnessGen::InverseOrZero { out: v, input: x }));
             env.set_field(dest, LinearCombination::var(v));
         }
         KnownCall::HintBit => {
@@ -1727,7 +1968,34 @@ fn inline_call<'tcx>(
 }
 
 /// Finalize: drop unreferenced internal variables and assemble both programs.
-fn finish(env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerOutput {
+fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerOutput {
+    // Revive a merged mul output (its `a·b = out` folded into `assert_eq`) if a
+    // later constraint still references it, so the reuse stays bound to `a·b`.
+    // Not-reused outputs are pruned below (fast path unchanged).
+    {
+        let mut ref_now: BTreeSet<VarId> = BTreeSet::new();
+        for c in &env.constraints {
+            for lc in [&c.a, &c.b, &c.c] {
+                for term in &lc.terms {
+                    ref_now.insert(term.var);
+                }
+            }
+        }
+        for (out, (a, b, wg_idx)) in std::mem::take(&mut env.merged) {
+            if ref_now.contains(&out) {
+                let id = env.fresh_constraint_id();
+                env.constraints.push(R1csConstraint::mul(
+                    id,
+                    a.clone(),
+                    b.clone(),
+                    out,
+                    "revived a*b = out (product reused after assert_eq merge)",
+                ));
+                env.witness_gen[wg_idx] = Some(WitnessGen::Product { out, left: a, right: b });
+            }
+        }
+    }
+
     let mut referenced: BTreeSet<VarId> = BTreeSet::new();
     for c in &env.constraints {
         for lc in [&c.a, &c.b, &c.c] {
@@ -1805,6 +2073,7 @@ fn witness_gen_out(op: &WitnessGen) -> VarId {
         | WitnessGen::Xor { out, .. }
         | WitnessGen::Or { out, .. }
         | WitnessGen::Inverse { out, .. }
+        | WitnessGen::InverseOrZero { out, .. }
         | WitnessGen::Bit { out, .. } => *out,
         WitnessGen::DivRem { q, .. } => *q,
         // Multi-output; represented by its first output for the "is any output

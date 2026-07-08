@@ -127,6 +127,10 @@ pub fn run(args: SetupArgs) -> Result<()> {
             "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
         );
     }
+    // `--deterministic-rng` leaks the trapdoor, so require `--insecure-dev-mode`
+    if args.deterministic_rng.is_some() && !args.insecure_dev_mode {
+        bail!("--deterministic-rng requires --insecure-dev-mode");
+    }
     // No `.ptau` and no explicit `--insecure-dev-mode`: rather than block, fall
     // back to insecure dev-mode with a hardcoded deterministic seed (1) so the
     // common `xark build && xark setup && xark prove` loop just works. A real
@@ -167,6 +171,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let ptau = xark_backend::ptau::parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
 
         let circuit = XarkCircuit::for_setup(prog.clone());
+        circuit
+            .validate()
+            .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
         let keys = xark_backend::ptau::setup_from_ptau(circuit, &ptau, &seed_arr)
             .map_err(|e| anyhow::anyhow!("phase-2 setup failed: {e}"))?;
 
@@ -176,6 +183,8 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
         metadata.setup_mode = "phase2-from-ptau".into();
         metadata.production_safe = true;
+        // commit to the (to-be-discarded) phase-2 seed for audit; never keep the seed
+        metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
         metadata.ptau_source = ptau_file
             .file_name()
             .and_then(|s| s.to_str())
@@ -191,28 +200,34 @@ pub fn run(args: SetupArgs) -> Result<()> {
         println!("Wrote {}", snarkjs_vk_path.display());
         println!("Wrote {}", meta_path.display());
         println!(
-            "\nphase2-from-ptau setup complete. Production safety depends on the \
-             .ptau ceremony you used."
+            "{}",
+            crate::style::warn(
+                "\nphase2-from-ptau setup complete — but this was a SINGLE-PARTY phase-2 \
+                 contribution. Whoever holds the phase-2 seed knows the γ/δ trapdoor and can \
+                 forge proofs for this circuit. For production you MUST now securely DISCARD the \
+                 seed (only its hash is recorded, in metadata.phase2_seed_hash), and the .ptau \
+                 must itself come from a real multi-party phase-1 ceremony. For a fully \
+                 trustless phase-2, use the multi-party `xark ceremony` flow instead."
+            )
         );
         return Ok(());
     }
 
     // --- Dev-mode path ---------------------------------------------------
     let circuit = XarkCircuit::for_setup(prog.clone());
-    // A user-supplied `--deterministic-rng <n>` wins; otherwise, when we fell
-    // back here for lack of a `.ptau`, use the hardcoded dev seed (1); an
-    // explicit `--insecure-dev-mode` with no seed keeps using the OS RNG.
-    let effective_seed = args
-        .deterministic_rng
-        .or(if dev_fallback { Some(1) } else { None });
+    circuit
+        .validate()
+        .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
+    // Only explicit `--deterministic-rng <n>` makes the key reproducible. The
+    // no-`.ptau` dev fallback uses OsRng: still insecure, but a fixed seed would
+    // be worse (every dev key byte-identical with a known trapdoor).
+    let effective_seed = args.deterministic_rng;
     let mut rng = match effective_seed {
         Some(seed) => {
-            if args.deterministic_rng.is_some() {
-                eprintln!(
-                    "WARN: --deterministic-rng makes the Groth16 trapdoor recoverable from the \
-                     seed; do not reuse the resulting keys outside test fixtures."
-                );
-            }
+            eprintln!(
+                "WARN: --deterministic-rng makes the Groth16 trapdoor recoverable from the \
+                 seed; do not reuse the resulting keys outside test fixtures."
+            );
             SetupRng::Det(ChaCha20Rng::seed_from_u64(seed))
         }
         None => SetupRng::Os(OsRng),
@@ -244,7 +259,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         println!(
             "{}",
             crate::style::warn(
-                "note: no .ptau found — using an insecure hardcoded dev key (seed 1); \
+                "note: no .ptau found — generated an insecure single-party OsRng dev key; \
                  supply --ptau-file for production."
             )
         );

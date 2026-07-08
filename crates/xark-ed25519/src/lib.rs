@@ -48,16 +48,51 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
 /// hash itself is not constrained here). Fails (unsatisfiable) if the equation
 /// does not hold.
 pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [Field; 256]) {
+    // pin A and R to the curve (range-checks limbs) before the group law
+    enforce_on_curve(a_pub);
+    enforce_on_curve(r_sig);
+
+    // canonical scalar `S < L`, else S, S+L, S+2L, … all verify (EdDSA malleability)
+    assert_scalar_below_order(s_bits);
+
     // Rewrite `[S]·B == R + [k]·A` as `[S]·B + [k]·(−A) == R`, so the two scalar
     // multiplications share one windowed Strauss–Shamir pass. Twisted-Edwards
     // negation is `(−x, y)`.
     let neg_a = Point::new(fp(0, 0, 0) - a_pub.x, a_pub.y);
     let t = double_scalar_mul(s_bits, base(), k_bits, neg_a);
-    // Assert t == R, coordinate-wise, limb-by-limb.
+
+    // cofactored verification: assert `[8]·t == [8]·R` (×8 clears any small-order
+    // component of A/R — the RFC 8032 cofactored equation)
+    let t8 = t.double().double().double();
+    let r8 = r_sig.double().double().double();
     let mut i = 0usize;
     while i < 3usize {
-        assert_eq(t.x.limbs[i], r_sig.x.limbs[i]);
-        assert_eq(t.y.limbs[i], r_sig.y.limbs[i]);
+        assert_eq(t8.x.limbs[i], r8.x.limbs[i]);
+        assert_eq(t8.y.limbs[i], r8.y.limbs[i]);
         i += 1;
     }
+}
+
+/// Assert `Σ bits[i]·2^i < L` (the ed25519 group order): recompose the bits into
+/// the scalar field's `3 × 86`-bit limbs and assert canonical. `bits` must be
+/// caller-constrained boolean.
+fn assert_scalar_below_order(bits: [Field; 256]) {
+    let mut limbs = [Field::from(0u8); 3];
+    let mut idx = 0usize;
+    let mut l = 0usize;
+    while l < 3usize {
+        let width = if l == 2 { 84usize } else { 86usize };
+        let mut acc = Field::from(0u8);
+        let mut pow = Field::from(1u8);
+        let mut j = 0usize;
+        while j < width {
+            acc = acc + bits[idx] * pow;
+            pow = pow + pow;
+            idx += 1;
+            j += 1;
+        }
+        limbs[l] = acc;
+        l += 1;
+    }
+    Fq::new(limbs).assert_canonical();
 }

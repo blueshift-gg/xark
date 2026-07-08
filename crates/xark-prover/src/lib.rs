@@ -7,7 +7,7 @@
 //! uses (ark 0.6). This closes the loop: a Rust circuit → MIR → xark-IR → R1CS →
 //! a *verified* Groth16 proof, entirely within xark's own pipeline.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ark_bn254::{Bn254, Fr};
 use ark_ff::{PrimeField, Zero};
@@ -103,10 +103,20 @@ impl XarkCircuit {
 /// descriptive error on the first malformed value. Used to fail gracefully on
 /// an untrusted R1CS program before the panicking synthesis path runs.
 fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
+    // Every term must reference a declared variable: `generate_constraints`
+    // indexes `map[&t.var]`, which panics on a dangling id. Reject it here so a
+    // malformed `r1cs.json` is a clean error, not a crash.
+    let valid_ids: BTreeSet<VarId> = prog.variables.iter().map(|v| v.id).collect();
     let check_lc = |lc: &IrLc| -> Result<(), String> {
         try_fr_from_decimal(&lc.constant.decimal)?;
         for t in &lc.terms {
             try_fr_from_decimal(&t.coeff.decimal)?;
+            if !valid_ids.contains(&t.var) {
+                return Err(format!(
+                    "constraint references undefined variable id {}",
+                    t.var
+                ));
+            }
         }
         Ok(())
     };
@@ -170,6 +180,12 @@ fn public_inputs(prog: &R1csProgram, assign: &BTreeMap<VarId, Fr>) -> Vec<Fr> {
 /// Solve the witness, run Groth16 setup + prove, and return the verifying key,
 /// proof, and public inputs (so the caller can verify — possibly against
 /// tampered public inputs).
+///
+/// **TEST / DEV ONLY.** Setup here uses a *fixed* RNG seed (`0`), so the Groth16
+/// trapdoor is publicly known and any proof this produces is forgeable. It
+/// exists for in-crate round-trip / differential tests. Never use it — or any
+/// key it generates — in production; the CLI `xark setup` (ptau / ceremony) and
+/// `xark prove` (`OsRng`) path is the real one.
 pub fn prove_only(
     r1cs: &R1csProgram,
     circuit: &PrimitiveProgram,
@@ -453,6 +469,22 @@ mod tests {
             }],
         };
         (r1cs, prim)
+    }
+
+    #[test]
+    fn validate_rejects_dangling_variable() {
+        // A term referencing an undeclared variable id would panic at
+        // `map[&t.var]` during synthesis; validation must reject it cleanly.
+        let (mut r1cs, _) = demo();
+        r1cs.constraints[1].a.terms.push(xark_ir::Term {
+            coeff: FieldConst::from_i64(1),
+            var: 99,
+        });
+        let circuit = XarkCircuit::for_setup(r1cs);
+        let err = circuit
+            .validate()
+            .expect_err("a dangling variable id must be rejected");
+        assert!(err.contains("undefined variable id 99"), "got: {err}");
     }
 
     #[test]

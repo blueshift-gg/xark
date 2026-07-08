@@ -17,6 +17,7 @@
 #![no_std]
 
 use xark::assert_eq;
+use xark::Bool;
 /// Re-exported so the [`fp!`] macro can name `$crate::Field` without the caller
 /// importing `xark`.
 pub use xark::Field;
@@ -273,6 +274,16 @@ macro_rules! fp {
             /// Reduce a value `< 2·m` to the canonical `[0, m)`.
             pub fn reduce(self) -> Self {
                 Self::new($crate::reduce_once::<{ $limbs }, { $bits }>(self.limbs, Self::M))
+            }
+            /// Assert canonical: every limb `∈ [0, 2^BITS)` and value `< m`.
+            /// Rejects non-canonical encodings (the source of ECDSA malleability).
+            pub fn assert_canonical(self) {
+                $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs);
+                $crate::assert_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
+            }
+            /// Assert this element is nonzero (assumes range-checked limbs).
+            pub fn assert_nonzero(self) {
+                $crate::assert_nonzero_limbs::<{ $limbs }>(self.limbs);
             }
         }
         impl ::core::ops::Add for $name {
@@ -539,8 +550,9 @@ pub fn reduce_once<const LIMBS: usize, const BITS: usize>(
     out
 }
 
-/// Enforce `x < m` (`(m-1) - x` produces no final borrow).
-fn assert_lt<const LIMBS: usize, const BITS: usize>(
+/// Enforce `x < m` (`(m-1) - x` produces no final borrow). `x`'s limbs must be
+/// range-checked first.
+pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
     x: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
 ) {
@@ -555,6 +567,18 @@ fn assert_lt<const LIMBS: usize, const BITS: usize>(
         i += 1;
     }
     assert_eq(borrow, Field::from(0u8));
+}
+
+/// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
+pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
+    // all_zero = AND of isZero(limbᵢ); assert false to forbid value 0
+    let mut all_zero = Bool::constant(true);
+    let mut i = 0usize;
+    while i < LIMBS {
+        all_zero = all_zero.and(limbs[i].is_zero());
+        i += 1;
+    }
+    all_zero.assert_false();
 }
 
 /// Shared column/carry identity `a·b == q·m + r`. `q`, `r` are the caller-supplied

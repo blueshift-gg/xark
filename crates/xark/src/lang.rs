@@ -9,7 +9,9 @@
 
 
 use core::marker::PhantomData;
-use core::ops::{Add, BitXor, Mul, Neg, Sub};
+use core::ops::{
+    Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign,
+};
 
 /// The opaque circuit field element.
 ///
@@ -17,7 +19,12 @@ use core::ops::{Add, BitXor, Mul, Neg, Sub};
 /// constructed by circuit authors except through the recognized intrinsics, and
 /// (b) MIR optimization cannot collapse `Field` values to a single constant ZST
 /// (which would erase the data-flow the compiler tracks).
-#[derive(Clone, Copy)]
+///
+/// Implements `core::ops` arithmetic (`+ - * /`, unary `-`, `*Assign`, `^`) plus
+/// `PartialEq`/`Eq`/`Hash` for host/const use. Comparisons (`== != < <= > >=`)
+/// are not circuit operations — rejected in-circuit; use `assert_eq`/`is_eq`/
+/// `is_zero` or [`U<N>`](crate::uint::U) for ordering.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
     /// Meaningful only for constants (`Field::from`/`Field::constant`, which are
@@ -101,6 +108,12 @@ impl Field {
         __xark_hint_inverse(x)
     }
 
+    /// Advice hint: `1 / x` if `x != 0`, else `0` (unconstrained at 0).
+    #[inline(never)]
+    pub fn hint_inverse_or_zero(x: Field) -> Field {
+        __xark_hint_inverse_or_zero(x)
+    }
+
     /// Advice hint: the `index`-th least-significant bit of `x`. Allocates a
     /// private witness and records that its value is `bit(x, index)`. Pin it
     /// with a booleanity check and a recomposition constraint.
@@ -114,6 +127,8 @@ impl Field {
     /// (`Σ bitᵢ·2ⁱ == self`) — which also proves `self < 2^N`. Composed entirely
     /// from `Field` primitives (`hint_bit` + arithmetic + `assert_eq`).
     pub fn to_bits<const N: usize>(self) -> [Field; N] {
+        // N > 253 wraps mod r, so recomposition wouldn't pin `self`
+        const { assert!(N <= 253, "to_bits::<N>: N must be <= 253 (BN254 field capacity)") };
         let mut bits = [Field::from(0u8); N];
         let mut i = 0usize;
         while i < N {
@@ -141,6 +156,8 @@ impl Field {
     /// forms the linear combination; the caller must have pinned the bits boolean
     /// (e.g. via [`Field::to_bits`]).
     pub fn from_bits<const N: usize>(bits: [Field; N]) -> Field {
+        // N > 253: weighted sum can exceed r and wrap
+        const { assert!(N <= 253, "from_bits::<N>: N must be <= 253 (BN254 field capacity)") };
         let mut acc = Field::from(0u8);
         let mut pow = Field::from(1u8);
         let mut i = 0usize;
@@ -191,70 +208,17 @@ impl Field {
         w
     }
 
-    /// 1 if `self == 0`, else 0. Hint-based is-zero: `inv = self⁻¹` (or 0), and
-    /// the two constraints pin `out` to the correct boolean.
-    pub fn is_zero(self) -> Field {
-        let inv = Field::hint_inverse(self);
+    /// Circuit equality-to-zero: a [`Bool`] that is `1` iff `self == 0`.
+    pub fn is_zero(self) -> Bool {
+        let inv = Field::hint_inverse_or_zero(self);
         let out = Field::from(1u8) - self * inv;
-        assert_eq(self * out, Field::from(0u8)); // self != 0 ⇒ out == 0; self == 0 ⇒ out == 1
-        out
+        assert_eq(self * out, Field::from(0u8));
+        Bool::from_pinned(out)
     }
 
-    /// 1 if `self == rhs`, else 0.
-    pub fn eq(self, rhs: Field) -> Field {
-        (self - rhs).is_zero()
-    }
-
-    /// 1 if `self != rhs`, else 0.
-    pub fn ne(self, rhs: Field) -> Field {
-        Field::from(1u8) - self.eq(rhs)
-    }
-
-    /// 1 if `self < rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
-    pub fn lt<const N: usize>(self, rhs: Field) -> Field {
-        let _ = self.to_bits::<N>();
-        let _ = rhs.to_bits::<N>();
-        // 2^N
-        let mut two_n = Field::from(1u8);
-        let mut i = 0usize;
-        while i < N {
-            two_n = two_n + two_n;
-            i += 1;
-        }
-        // diff = self + 2^N - rhs ∈ (0, 2^{N+1}); its bit N is [self >= rhs].
-        let diff = self + two_n - rhs;
-        let mut acc = Field::from(0u8);
-        let mut pow = Field::from(1u8);
-        let mut sign = Field::from(0u8);
-        let mut i = 0usize;
-        while i <= N {
-            // N+1 bits (0..=N)
-            let bit = Field::hint_bit(diff, i);
-            bit.assert_bool();
-            acc = acc + bit * pow;
-            if i == N {
-                sign = bit;
-            } // `i`,`N` are const ⇒ resolved at compile time
-            pow = pow + pow;
-            i += 1;
-        }
-        assert_eq(acc, diff); // recomposition pins diff < 2^{N+1}
-        Field::from(1u8) - sign // self < rhs ⟺ bit N == 0
-    }
-
-    /// 1 if `self > rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
-    pub fn gt<const N: usize>(self, rhs: Field) -> Field {
-        rhs.lt::<N>(self)
-    }
-
-    /// 1 if `self <= rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
-    pub fn lte<const N: usize>(self, rhs: Field) -> Field {
-        Field::from(1u8) - self.gt::<N>(rhs)
-    }
-
-    /// 1 if `self >= rhs`, else 0. Both operands are range-checked to `[0, 2^N)`.
-    pub fn gte<const N: usize>(self, rhs: Field) -> Field {
-        Field::from(1u8) - self.lt::<N>(rhs)
+    /// Circuit equality test: a [`Bool`] true iff `self == other`.
+    pub fn is_eq(self, other: Field) -> Bool {
+        (self - other).is_zero()
     }
 
     /// Advice hint: integer division of `a` by `b` on the canonical
@@ -300,6 +264,96 @@ impl Field {
     ) -> (Field, [Field; N]) {
         __xark_hint_sub2(a, b, c, m, bits)
     }
+}
+
+/// A circuit boolean: a [`Field`] wire constrained to `{0, 1}`. Zero-cost
+/// wrapper carrying booleanity in the type; returned by the comparison gadgets
+/// and consumed by [`select`] and the logical combinators.
+#[derive(Clone, Copy)]
+pub struct Bool(Field);
+
+impl Bool {
+    /// Wrap an arbitrary field wire as a boolean, *proving* `f ∈ {0, 1}`.
+    pub fn new(f: Field) -> Bool {
+        f.assert_bool();
+        Bool(f)
+    }
+
+    /// A compile-time-constant boolean (no constraint).
+    pub fn constant(b: bool) -> Bool {
+        Bool(Field::from(b as u8))
+    }
+
+    /// Wrap a wire already pinned to `{0, 1}` by its producer (no extra constraint).
+    pub(crate) fn from_pinned(f: Field) -> Bool {
+        Bool(f)
+    }
+
+    /// The underlying `{0, 1}` field wire.
+    pub fn value(self) -> Field {
+        self.0
+    }
+
+    /// Logical NOT (`1 − self`).
+    pub fn not(self) -> Bool {
+        Bool::from_pinned(self.0.not())
+    }
+
+    /// Logical AND (`self · other`).
+    pub fn and(self, other: Bool) -> Bool {
+        Bool::from_pinned(self.0.and(other.0))
+    }
+
+    /// Logical OR (`self + other − self·other`).
+    pub fn or(self, other: Bool) -> Bool {
+        Bool::from_pinned(self.0.or(other.0))
+    }
+
+    /// Logical XOR.
+    pub fn xor(self, other: Bool) -> Bool {
+        Bool::from_pinned(self.0.xor(other.0))
+    }
+
+    /// Constrain this boolean to be true / false.
+    pub fn assert_true(self) {
+        assert_eq(self.0, Field::from(1u8));
+    }
+    pub fn assert_false(self) {
+        assert_eq(self.0, Field::from(0u8));
+    }
+}
+
+/// Standard `bool` operators for `Bool` (`&` `|` `^` `!`), each forwarding to
+/// the constraint-free combinator.
+impl BitAnd for Bool {
+    type Output = Bool;
+    fn bitand(self, rhs: Bool) -> Bool {
+        self.and(rhs)
+    }
+}
+impl BitOr for Bool {
+    type Output = Bool;
+    fn bitor(self, rhs: Bool) -> Bool {
+        self.or(rhs)
+    }
+}
+impl BitXor for Bool {
+    type Output = Bool;
+    fn bitxor(self, rhs: Bool) -> Bool {
+        self.xor(rhs)
+    }
+}
+impl Not for Bool {
+    type Output = Bool;
+    fn not(self) -> Bool {
+        Bool::from_pinned(self.value().not())
+    }
+}
+
+/// Branchless select: `if_false + cond·(if_true − if_false)` — `if_true` when
+/// `cond`, else `if_false`.
+pub fn select(cond: Bool, if_true: Field, if_false: Field) -> Field {
+    if_false + cond.value() * (if_true - if_false)
 }
 
 /// Canonical conversions from unsigned integer types (`u8`..`u128`) to in-circuit
@@ -376,6 +430,35 @@ impl Neg for Field {
     }
 }
 
+/// Field division `a / b = a · b⁻¹` (`b` must be nonzero).
+impl Div for Field {
+    type Output = Field;
+    fn div(self, rhs: Field) -> Field {
+        self * rhs.inv()
+    }
+}
+
+impl AddAssign for Field {
+    fn add_assign(&mut self, rhs: Field) {
+        *self = *self + rhs;
+    }
+}
+impl SubAssign for Field {
+    fn sub_assign(&mut self, rhs: Field) {
+        *self = *self - rhs;
+    }
+}
+impl MulAssign for Field {
+    fn mul_assign(&mut self, rhs: Field) {
+        *self = *self * rhs;
+    }
+}
+impl DivAssign for Field {
+    fn div_assign(&mut self, rhs: Field) {
+        *self = *self / rhs;
+    }
+}
+
 impl BitXor<u64> for Field {
     type Output = Field;
 
@@ -404,6 +487,22 @@ macro_rules! impl_field_int_ops {
             type Output = Field;
             fn mul(self, rhs: $t) -> Field { self * Field::from(rhs) }
         }
+        impl Div<$t> for Field {
+            type Output = Field;
+            fn div(self, rhs: $t) -> Field { self / Field::from(rhs) }
+        }
+        impl AddAssign<$t> for Field {
+            fn add_assign(&mut self, rhs: $t) { *self = *self + rhs; }
+        }
+        impl SubAssign<$t> for Field {
+            fn sub_assign(&mut self, rhs: $t) { *self = *self - rhs; }
+        }
+        impl MulAssign<$t> for Field {
+            fn mul_assign(&mut self, rhs: $t) { *self = *self * rhs; }
+        }
+        impl DivAssign<$t> for Field {
+            fn div_assign(&mut self, rhs: $t) { *self = *self / rhs; }
+        }
     )+};
 }
 impl_field_int_ops!(u8, u16, u32, u64, u128);
@@ -415,36 +514,6 @@ impl_field_int_ops!(u8, u16, u32, u64, u128);
 #[inline(never)]
 pub fn assert_eq(_lhs: Field, _rhs: Field) {
     loop {}
-}
-
-/// Constrain `cond` to be true (the boolean field element `1`).
-pub fn require(cond: Field) {
-    assert_eq(cond, Field::from(1u8));
-}
-
-/// Constrain `a != b` (that `a - b` is invertible).
-pub fn require_ne(a: Field, b: Field) {
-    let _ = (a - b).inv();
-}
-
-/// Constrain `a < b`, range-checking both to `[0, 2^N)`.
-pub fn require_lt<const N: usize>(a: Field, b: Field) {
-    require(a.lt::<N>(b));
-}
-
-/// Constrain `a <= b`, range-checking both to `[0, 2^N)`.
-pub fn require_lte<const N: usize>(a: Field, b: Field) {
-    require(a.lte::<N>(b));
-}
-
-/// Constrain `a > b`, range-checking both to `[0, 2^N)`.
-pub fn require_gt<const N: usize>(a: Field, b: Field) {
-    require(a.gt::<N>(b));
-}
-
-/// Constrain `a >= b`, range-checking both to `[0, 2^N)`.
-pub fn require_gte<const N: usize>(a: Field, b: Field) {
-    require(a.gte::<N>(b));
 }
 
 #[inline(never)]
@@ -479,6 +548,11 @@ pub fn __xark_advice() -> Field {
 
 #[inline(never)]
 pub fn __xark_hint_inverse(_x: Field) -> Field {
+    loop {}
+}
+
+#[inline(never)]
+pub fn __xark_hint_inverse_or_zero(_x: Field) -> Field {
     loop {}
 }
 

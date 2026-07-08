@@ -1585,7 +1585,7 @@ dependencies = [
 
 [[package]]
 name = "xark-ir"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "num-bigint",
  "num-traits",
@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "ark-bn254",
  "ark-ec",

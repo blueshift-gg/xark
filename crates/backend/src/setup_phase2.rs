@@ -32,12 +32,11 @@
 //!
 //! # Soundness
 //!
-//! `τ, α, β` come from the phase-1 transcript; `γ, δ` are derived from the
-//! caller's seed. The trapdoors `τ, α, β` are not recoverable unless the
-//! phase-1 transcript was malformed (a chain of independent contributors
-//! is the standard assumption). `γ, δ` are public to anyone with the seed;
-//! they're not part of the trapdoor (they randomise the witness blinders
-//! but don't compromise τ).
+//! `τ, α, β` come from the phase-1 transcript; `γ, δ` are drawn from the caller's
+//! seed. `τ, α, β` are safe unless phase-1 was malformed. `γ, δ` are **also
+//! trapdoor components**: anyone with the phase-2 seed can forge proofs, so a
+//! single-party phase-2 is safe only once the seed is discarded (a trustless
+//! phase-2 needs a multi-party contribution).
 //!
 //! **The output keys are valid for production use only if (a) the phase-1
 //! `.ptau` transcript came from an audited ceremony and (b) the
@@ -108,6 +107,10 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     // indexing below (`tau_g1[n + k]`, `tau_g2[..n]`, …) returns a graceful
     // error instead of panicking on an out-of-bounds access.
     check_ptau_section_lengths(ptau, n)?;
+
+    // verify the transcript is a consistent (τ, α, β) ladder before deriving keys
+    // (a malicious transcript would otherwise yield keys with a known trapdoor)
+    crate::ptau::verify_powers_consistency(ptau)?;
 
     // -------------------------------------------------------------------
     // 3) Compute Lagrange evaluations in the group.
@@ -427,5 +430,53 @@ mod tests {
             result,
             Err(Phase2Error::PtauSectionTooShort { section: "tau_g1", .. })
         ));
+    }
+
+    #[test]
+    fn powers_consistency_accepts_valid_and_rejects_tampered() {
+        use crate::ptau::verify_powers_consistency;
+        let mut rng = ChaCha20Rng::seed_from_u64(0x1234);
+        let ptau = fake_ptau(
+            4,
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+        );
+        // A genuine (τ, α, β) ladder passes.
+        verify_powers_consistency(&ptau).expect("consistent ladder must pass");
+
+        // One G1 power bumped off the ladder → rejected.
+        let mut bad = ptau.clone();
+        bad.tau_g1[3] = (bad.tau_g1[3].into_group() + G1Projective::generator()).into_affine();
+        assert!(verify_powers_consistency(&bad).is_err(), "tampered tau_g1 power must reject");
+
+        // `beta_g2` no longer sharing β with `beta_tau_g1[0]` → rejected.
+        let mut bad_beta = ptau.clone();
+        bad_beta.beta_g2 =
+            (bad_beta.beta_g2.into_group() + G2Projective::generator()).into_affine();
+        assert!(verify_powers_consistency(&bad_beta).is_err(), "tampered beta_g2 must reject");
+
+        // An arbitrary (non-ladder) `tau_g1[1]` → rejected at the τ-link.
+        let mut bad_link = ptau.clone();
+        bad_link.tau_g1[1] = (G1Projective::generator() * Fr::from(99u64)).into_affine();
+        assert!(verify_powers_consistency(&bad_link).is_err(), "non-ladder tau_g1[1] must reject");
+    }
+
+    #[test]
+    fn powers_consistency_rejects_degenerate_toxic_waste() {
+        // a trivially-known trapdoor (τ ∈ {0,1}, α = 0, β = 0) passes every ladder
+        // yet is fully backdoored, so it must be rejected
+        use crate::ptau::verify_powers_consistency;
+        let mut rng = ChaCha20Rng::seed_from_u64(0xD00D);
+        let (t, a, b) = (Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng));
+        let zero = Fr::from(0u64);
+        let one = Fr::from(1u64);
+
+        assert!(verify_powers_consistency(&fake_ptau(4, zero, a, b)).is_err(), "τ=0 must reject");
+        assert!(verify_powers_consistency(&fake_ptau(4, one, a, b)).is_err(), "τ=1 must reject");
+        assert!(verify_powers_consistency(&fake_ptau(4, t, zero, b)).is_err(), "α=0 must reject");
+        assert!(verify_powers_consistency(&fake_ptau(4, t, a, zero)).is_err(), "β=0 must reject");
+        // The same nonzero (τ, α, β) still passes.
+        verify_powers_consistency(&fake_ptau(4, t, a, b)).expect("nonzero toxic waste passes");
     }
 }

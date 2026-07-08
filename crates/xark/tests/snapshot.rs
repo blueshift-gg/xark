@@ -1211,3 +1211,747 @@ fn blake3_varlen_matches_real_vector() {
     inputs.insert(id("d[0]"), "42".to_string());
     assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong digest must reject");
 }
+
+/// A multiplication result reused across two `assert_eq`s stays bound to `a*b`
+/// in both (the product is revived after the merge).
+#[test]
+fn mul_reuse_binds_product_in_both_asserts() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+
+    let c = compile_with_field(&example("mul_reuse"), "mul_reuse", "bn254");
+    assert!(c.status_success, "mul_reuse failed: {}", c.stderr);
+    let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
+    let program = primitive::from_json(&json).unwrap();
+    let id = |name: &str| program.vars.iter().find(|v| v.name == name).map(|v| v.id).unwrap();
+
+    // honest: a*b = c = d (3*4 = 12)
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "4".to_string());
+    inputs.insert(id("c"), "12".to_string());
+    inputs.insert(id("d"), "12".to_string());
+    let assign = solver::solve_and_check(&program, &inputs).expect("a*b == c == d must verify");
+    let holes = solver::analyze_underconstrained(&program, &assign);
+    assert!(holes.is_empty(), "mul_reuse under-constrained: {holes:?}");
+
+    // c != d must be rejected (product bound to both asserts)
+    inputs.insert(id("d"), "13".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "c != d must be rejected"
+    );
+}
+
+/// Field division (`/`) lowers to an inverse-pinned multiplication and solves.
+#[test]
+fn field_div_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "field_div",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, q: Public<Field>) {\n\
+         \x20   assert_eq(a / b, q);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "field_div", "bn254");
+    assert!(c.status_success, "field_div failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "6".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    inputs.insert(id("q"), "2".to_string()); // 6 / 3 == 2
+    let assign = solver::solve_and_check(&program, &inputs).expect("a/b == q must verify");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "field_div under-constrained");
+    inputs.insert(id("q"), "3".to_string());
+    assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong quotient must reject");
+}
+
+/// Compound assignment (`+=`, …) is rejected in-circuit (write `acc = acc + b`).
+#[test]
+fn rejects_compound_assign() {
+    let src = write_case(
+        "field_assign",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
+         \x20   let mut acc = a;\n\
+         \x20   acc += b;\n\
+         \x20   assert_eq(acc, b);\n\
+         }\n",
+    );
+    let c = compile(&src, "reject_assign");
+    assert!(!c.status_success, "compound assignment should be rejected in a circuit");
+    assert!(c.stderr.contains("not supported inside a circuit"), "unexpected error: {}", c.stderr);
+}
+
+/// `==` (and other comparisons) on `Field` is rejected in-circuit.
+#[test]
+fn rejects_field_comparison() {
+    let src = write_case(
+        "field_cmp",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
+         \x20   if a == b { assert_eq(a, b); }\n\
+         }\n",
+    );
+    let c = compile(&src, "reject_cmp");
+    assert!(!c.status_success, "comparison circuit should have been rejected");
+    assert!(c.stderr.contains("not supported inside a circuit"), "unexpected error: {}", c.stderr);
+}
+
+/// `is_zero` gadget: returns 1 iff the input is 0, as a pinned boolean wire.
+#[test]
+fn is_zero_gadget_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "is_zero",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(x: Private<Field>, want: Public<Field>) {\n\
+         \x20   assert_eq(x.is_zero().value(), want);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "is_zero", "bn254");
+    assert!(c.status_success, "is_zero failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, want: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("want"), want.to_string());
+        m
+    };
+    // is_zero(0) == 1, is_zero(7) == 0.
+    solver::solve_and_check(&program, &case("0", "1")).expect("is_zero(0) == 1");
+    let assign = solver::solve_and_check(&program, &case("7", "0")).expect("is_zero(7) == 0");
+    // For a nonzero input the inverse advice is pinned ⇒ fully determined.
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "is_zero(x!=0) under-constrained");
+    // Lying either way is rejected.
+    assert!(solver::solve_and_check(&program, &case("7", "1")).is_err(), "is_zero(7) != 1 must reject");
+    assert!(solver::solve_and_check(&program, &case("0", "0")).is_err(), "is_zero(0) != 0 must reject");
+}
+
+/// `is_eq` gadget: returns 1 iff the two inputs are equal, as a boolean wire.
+#[test]
+fn is_eq_gadget_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "is_eq",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
+         \x20   assert_eq(a.is_eq(b).value(), want);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "is_eq", "bn254");
+    assert!(c.status_success, "is_eq failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, want: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("want"), want.to_string());
+        m
+    };
+    solver::solve_and_check(&program, &case("5", "5", "1")).expect("is_eq(5,5) == 1");
+    solver::solve_and_check(&program, &case("5", "6", "0")).expect("is_eq(5,6) == 0");
+    assert!(solver::solve_and_check(&program, &case("5", "6", "1")).is_err(), "is_eq(5,6) != 1 must reject");
+    assert!(solver::solve_and_check(&program, &case("5", "5", "0")).is_err(), "is_eq(5,5) != 0 must reject");
+}
+
+/// `U<N>` construction + `lt`/`le` solve, rejecting false claims and out-of-range inputs.
+#[test]
+fn uint_comparisons_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "uint_cmp",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public, U};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, le: Public<Field>) {\n\
+         \x20   let ua = U::<8>::new(a);\n\
+         \x20   let ub = U::<8>::new(b);\n\
+         \x20   assert_eq(ua.lt(ub).value(), lt);\n\
+         \x20   assert_eq(ua.le(ub).value(), le);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "uint_cmp", "bn254");
+    assert!(c.status_success, "uint_cmp failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, lt: &str, le: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("lt"), lt.to_string());
+        m.insert(id("le"), le.to_string());
+        m
+    };
+    // 3 < 5 (lt=1, le=1); 5 vs 3 (lt=0, le=0); 5 == 5 (lt=0, le=1).
+    solver::solve_and_check(&program, &case("3", "5", "1", "1")).expect("3 < 5");
+    solver::solve_and_check(&program, &case("5", "3", "0", "0")).expect("5 > 3");
+    let assign = solver::solve_and_check(&program, &case("5", "5", "0", "1")).expect("5 == 5");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "U<8> cmp under-constrained");
+    // A false ordering claim is rejected.
+    assert!(solver::solve_and_check(&program, &case("3", "5", "0", "1")).is_err(), "3<5 but lt=0 must reject");
+    // An out-of-range input (300 >= 2^8) fails the construction range proof.
+    assert!(solver::solve_and_check(&program, &case("300", "5", "0", "0")).is_err(), "a=300 exceeds U<8>");
+}
+
+/// A secp256k1 scalar must be canonical (`< n`) and nonzero; a non-canonical `s`
+/// and `s = 0` are both rejected.
+#[test]
+fn ecdsa_scalar_range_checks() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("scalar_range"), "scalar_range", "bn254");
+    assert!(c.status_success, "scalar_range failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |s0: &str, s1: &str, s2: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("s0"), s0.to_string());
+        m.insert(id("s1"), s1.to_string());
+        m.insert(id("s2"), s2.to_string());
+        m
+    };
+    // s = 1 (canonical, nonzero) → satisfiable.
+    solver::solve_and_check(&program, &case("1", "0", "0")).expect("s = 1 must be a valid scalar");
+    // s = 0 → rejected by assert_nonzero.
+    assert!(solver::solve_and_check(&program, &case("0", "0", "0")).is_err(), "s = 0 must be rejected");
+    // Every limb at 2^86-1 → value ≈ 2^258, far above n → rejected by assert_canonical.
+    let max_limb = "77371252455336267181195263"; // 2^86 - 1
+    assert!(
+        solver::solve_and_check(&program, &case(max_limb, max_limb, max_limb)).is_err(),
+        "a non-canonical scalar (>= n) must be rejected"
+    );
+}
+
+/// `Bool` + `select`: branchless conditional pick, with a non-boolean condition
+/// rejected by `Bool::new`.
+#[test]
+fn select_and_bool_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "bool_select",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(cond: Private<Field>, a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let c = Bool::new(cond);\n\
+         \x20   assert_eq(select(c, a, b), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "bool_select", "bn254");
+    assert!(c.status_success, "bool_select failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |cond: &str, a: &str, b: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("cond"), cond.to_string());
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    solver::solve_and_check(&program, &case("1", "7", "9", "7")).expect("cond=true selects a");
+    solver::solve_and_check(&program, &case("0", "7", "9", "9")).expect("cond=false selects b");
+    assert!(solver::solve_and_check(&program, &case("1", "7", "9", "9")).is_err(), "wrong select must reject");
+    assert!(solver::solve_and_check(&program, &case("2", "7", "9", "7")).is_err(), "non-boolean cond must reject");
+}
+
+/// `U<N>` checked `add`/`sub`/`mul` solve; a wrong claimed result is rejected.
+#[test]
+fn uint_checked_arithmetic_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "uint_arith",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, diff: Public<Field>, prod: Public<Field>) {\n\
+         \x20   let ua = U::<8>::new(a);\n\
+         \x20   let ub = U::<8>::new(b);\n\
+         \x20   assert_eq((ua + ub).value(), sum);\n\
+         \x20   assert_eq((ua - ub).value(), diff);\n\
+         \x20   assert_eq((ua * ub).value(), prod);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "uint_arith", "bn254");
+    assert!(c.status_success, "uint_arith failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, sum: &str, diff: &str, prod: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("sum"), sum.to_string());
+        m.insert(id("diff"), diff.to_string());
+        m.insert(id("prod"), prod.to_string());
+        m
+    };
+    // a=5, b=3: 5+3=8, 5-3=2, 5*3=15 (all fit in 8 bits).
+    solver::solve_and_check(&program, &case("5", "3", "8", "2", "15")).expect("5,3 arithmetic");
+    assert!(solver::solve_and_check(&program, &case("5", "3", "8", "2", "16")).is_err(), "wrong product must reject");
+}
+
+/// A `Private<U<N>>` input gets an N-bit range proof: in-range solves, out-of-range fails.
+#[test]
+fn private_uint_input_is_range_proved() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "priv_uint_input",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<U<8>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "priv_uint_input", "bn254");
+    assert!(c.status_success, "priv_uint_input failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    // In range (< 2^8): solves and is fully constrained.
+    let assign = solver::solve_and_check(&program, &case("200", "200")).expect("x=200 in range");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "private U<8> input under-constrained");
+    // Out of range (>= 2^8): the injected range proof makes it unsatisfiable.
+    assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "x=300 exceeds U<8> and must reject");
+}
+
+/// A `Public<U<N>>` input is range-proved in-circuit too (`< r` doesn't imply
+/// `< 2^N`), so an out-of-range public value is rejected.
+#[test]
+fn public_uint_input_is_range_proved() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "pub_uint_input",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Public<U<8>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "pub_uint_input", "bn254");
+    assert!(c.status_success, "pub_uint_input failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    // In range solves; out of range (>= 2^8) is rejected by the injected proof.
+    solver::solve_and_check(&program, &case("200", "200")).expect("public U<8> in range");
+    assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "public U<8> >= 2^8 must reject");
+}
+
+/// `Bool`'s `&`/`|`/`!` operators lower and solve.
+#[test]
+fn bool_operators_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "bool_ops",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
+         \x20   let x = Bool::new(a);\n\
+         \x20   let y = Bool::new(b);\n\
+         \x20   assert_eq(((x & y) | !x).value(), want);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "bool_ops", "bn254");
+    assert!(c.status_success, "bool_ops failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, want: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("want"), want.to_string());
+        m
+    };
+    // (x & y) | !x : a=1,b=0 -> (1&0)|!1 = 0 ; a=0,b=1 -> (0&1)|!0 = 1.
+    solver::solve_and_check(&program, &case("1", "0", "0")).expect("(1&0)|!1 == 0");
+    solver::solve_and_check(&program, &case("0", "1", "1")).expect("(0&1)|!0 == 1");
+    // Non-boolean input is rejected by Bool::new.
+    assert!(solver::solve_and_check(&program, &case("2", "0", "0")).is_err(), "non-boolean input must reject");
+}
+
+/// Rejections carry an actionable `help:` line (the diagnostic contract).
+#[test]
+fn rejections_carry_actionable_help() {
+    // A bare `Field` parameter (must be wrapped in a visibility marker).
+    let bare = write_case(
+        "diag_bare_field",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Field, out: Public<Field>) {\n\
+         \x20   assert_eq(x, out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&bare, "diag_bare_field", "bn254");
+    assert!(!c.status_success, "bare Field param should be rejected");
+    assert!(c.stderr.contains("help:"), "rejection must include a help line; got: {}", c.stderr);
+    assert!(
+        c.stderr.contains("Private<Field>") || c.stderr.contains("Public<Field>"),
+        "help should point at the visibility markers; got: {}",
+        c.stderr
+    );
+
+    // An out-of-range fixed-width input width.
+    let wide = write_case(
+        "diag_wide_uint",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Public<U<300>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&wide, "diag_wide_uint", "bn254");
+    assert!(!c.status_success, "U<300> input should be rejected");
+    assert!(c.stderr.contains("1..=253"), "width error should state the valid range; got: {}", c.stderr);
+}
+
+/// Signed `I<N>`: construction, sign predicates, comparison, and checked add solve.
+#[test]
+fn signed_int_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "signed_int",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, lt: Public<Field>, a_pos: Public<Field>) {\n\
+         \x20   let ia = I::<8>::new(a);\n\
+         \x20   let ib = I::<8>::new(b);\n\
+         \x20   assert_eq((ia + ib).value(), sum);\n\
+         \x20   assert_eq(ia.lt(ib).value(), lt);\n\
+         \x20   assert_eq(ia.is_positive().value(), a_pos);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "signed_int", "bn254");
+    assert!(c.status_success, "signed_int failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, sum: &str, lt: &str, a_pos: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("sum"), sum.to_string());
+        m.insert(id("lt"), lt.to_string());
+        m.insert(id("a_pos"), a_pos.to_string());
+        m
+    };
+    // r-k is the field encoding of -k.
+    let neg2 = "21888242871839275222246405745257275088548364400416034343698204186575808495615";
+    let neg5 = "21888242871839275222246405745257275088548364400416034343698204186575808495612";
+    // a=3, b=5: 3+5=8; 3<5 -> 1; 3>0 -> 1.
+    let assign = solver::solve_and_check(&program, &case("3", "5", "8", "1", "1")).expect("3,5 signed");
+    assert!(solver::analyze_underconstrained(&program, &assign).is_empty(), "I<8> under-constrained");
+    // a=-5, b=3: -5+3 = -2 (=r-2); -5<3 -> 1; -5>0 -> 0.
+    solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "0")).expect("-5,3 signed");
+    // A wrong sign claim is rejected.
+    assert!(solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "1")).is_err(), "-5 is not positive");
+}
+
+/// Signed arithmetic is checked: an out-of-range sum is unsatisfiable.
+#[test]
+fn signed_int_overflow_rejected() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "signed_overflow",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ia = I::<8>::new(a);\n\
+         \x20   let ib = I::<8>::new(b);\n\
+         \x20   assert_eq((ia + ib).value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "signed_overflow", "bn254");
+    assert!(c.status_success, "signed_overflow failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |a: &str, b: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    // 100 + 100 = 200, outside [-128, 128): overflow -> unsatisfiable.
+    assert!(solver::solve_and_check(&program, &case("100", "100", "200")).is_err(), "signed add overflow must reject");
+    // Sanity: 100 + 20 = 120 is in range and solves.
+    solver::solve_and_check(&program, &case("100", "20", "120")).expect("100+20 in range");
+}
+
+/// `I<N>` as a raw input is rejected, steering to `I::new`.
+#[test]
+fn signed_int_input_is_rejected() {
+    let src = write_case(
+        "signed_input",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<I<8>>, out: Public<Field>) {\n\
+         \x20   assert_eq(x.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "signed_input", "bn254");
+    assert!(!c.status_success, "I<8> input must be rejected");
+    assert!(
+        c.stderr.contains("I::") && c.stderr.contains("help:"),
+        "rejection should steer to I::new; got: {}",
+        c.stderr
+    );
+}
+
+/// Constant comparisons fold: `gt_const::<0>` is far cheaper than `gt(U::new(0))`.
+#[test]
+fn uint_const_comparisons_fold_and_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let load = |src: &str, name: &str| {
+        let full = format!("#![no_std]\nuse xark::prelude::*;\n{src}");
+        let c = compile_with_field(&write_case(name, &full), name, "bn254");
+        assert!(c.status_success, "{name} failed: {}", c.stderr);
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap()
+    };
+
+    // Folded form: `x > 0` via the const method.
+    let folded = load(
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+         \x20   let u = U::<32>::new(x);\n\
+         \x20   assert_eq(u.gt_const::<0>().value(), out);\n\
+         }\n",
+        "cmp_gt0_folded",
+    );
+    // Naive form: construct a `U<32>` for the constant 0 and compare.
+    let naive = load(
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+         \x20   let u = U::<32>::new(x);\n\
+         \x20   assert_eq(u.gt(U::<32>::new(Field::from(0u8))).value(), out);\n\
+         }\n",
+        "cmp_gt0_naive",
+    );
+    // The fold removes a full 32-bit range proof + comparison (~60 constraints).
+    assert!(
+        folded.constraints.len() + 30 < naive.constraints.len(),
+        "gt_const::<0> should be far cheaper: folded={}, naive={}",
+        folded.constraints.len(),
+        naive.constraints.len()
+    );
+
+    // Correctness of the folded circuit.
+    let id = |n: &str| folded.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, out: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("out"), out.to_string());
+        m
+    };
+    solver::solve_and_check(&folded, &case("5", "1")).expect("5 > 0");
+    solver::solve_and_check(&folded, &case("0", "0")).expect("0 > 0 is false");
+    assert!(solver::solve_and_check(&folded, &case("5", "0")).is_err(), "5 > 0 must be 1");
+}
+
+/// The remaining constant-comparison folds solve: `lt_const::<0>`≡false,
+/// `ge_const::<0>`≡true, `eq_const`, and a general `lt_const::<C>`.
+#[test]
+fn uint_const_comparison_boundaries_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "cmp_const_bounds",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, lt0: Public<Field>, ge0: Public<Field>, eq7: Public<Field>, lt100: Public<Field>) {\n\
+         \x20   let u = U::<16>::new(x);\n\
+         \x20   assert_eq(u.lt_const::<0>().value(), lt0);\n\
+         \x20   assert_eq(u.ge_const::<0>().value(), ge0);\n\
+         \x20   assert_eq(u.eq_const::<7>().value(), eq7);\n\
+         \x20   assert_eq(u.lt_const::<100>().value(), lt100);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "cmp_const_bounds", "bn254");
+    assert!(c.status_success, "cmp_const_bounds failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let case = |x: &str, lt0: &str, ge0: &str, eq7: &str, lt100: &str| {
+        let mut m = BTreeMap::new();
+        for (k, v) in [("x", x), ("lt0", lt0), ("ge0", ge0), ("eq7", eq7), ("lt100", lt100)] {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    // x=7:  lt0=0 (never), ge0=1 (always), eq7=1, lt100=1 (7<100).
+    solver::solve_and_check(&program, &case("7", "0", "1", "1", "1")).expect("x=7");
+    // x=200: lt0=0, ge0=1, eq7=0, lt100=0 (200>=100).
+    solver::solve_and_check(&program, &case("200", "0", "1", "0", "0")).expect("x=200");
+    // lt_const::<0> is a hard false; claiming true must reject.
+    assert!(solver::solve_and_check(&program, &case("7", "1", "1", "1", "1")).is_err(), "lt_const::<0> is false");
+}
+
+/// `U<N>` width guards: `U::<253>::new` is allowed, but a comparison/checked
+/// add/sub at N=253 is rejected at compile time.
+#[test]
+fn uint_width_guards_reject_unsound_widths() {
+    // N=253 comparison: must fail to compile with the CMP_ARITH_WIDTH_OK message.
+    let cmp = write_case(
+        "u253_cmp",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ua = U::<253>::new(a);\n\
+         \x20   let ub = U::<253>::new(b);\n\
+         \x20   assert_eq(ua.lt(ub).value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&cmp, "u253_cmp", "bn254");
+    assert!(!c.status_success, "U<253> comparison must be rejected");
+    assert!(
+        c.stderr.contains("N ≤ 252") || c.stderr.contains("N <= 252") || c.stderr.contains("CMP_ARITH_WIDTH_OK"),
+        "expected the width-guard message; got: {}",
+        c.stderr
+    );
+
+    // N=253 bare range proof stays legal (pure `2^N ≤ r`).
+    let ok = write_case(
+        "u253_new",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ua = U::<253>::new(a);\n\
+         \x20   assert_eq(ua.value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&ok, "u253_new", "bn254");
+    assert!(c.status_success, "U<253>::new should still compile: {}", c.stderr);
+
+    // `*_const` calls less_than directly (bypasses U::lt), so guard it too.
+    let cmp_const = write_case(
+        "u253_cmp_const",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ua = U::<253>::new(a);\n\
+         \x20   assert_eq(ua.lt_const::<1>().value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&cmp_const, "u253_cmp_const", "bn254");
+    assert!(!c.status_success, "U<253> lt_const must be rejected");
+
+    // I<253> ordering routes through the same less_than, so it's rejected too.
+    let icmp = write_case(
+        "i253_cmp",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         \x20   let ia = I::<253>::new(a);\n\
+         \x20   let ib = I::<253>::new(b);\n\
+         \x20   assert_eq(ia.lt(ib).value(), out);\n\
+         }\n",
+    );
+    let c = compile_with_field(&icmp, "i253_cmp", "bn254");
+    assert!(!c.status_success, "I<253> comparison must be rejected");
+}
+
+/// The secp256k1 on-curve gadget accepts a real pubkey and rejects a perturbed
+/// coordinate (validates `b = 7`, `y² = x³ + 7`).
+#[test]
+fn secp256k1_on_curve_accepts_real_rejects_perturbed() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("on_curve_k1"), "on_curve_k1", "bn254");
+    assert!(c.status_success, "on_curve_k1 failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    // Real secp256k1 pubkey (86-bit limbs), on y² = x³ + 7.
+    let kat = [
+        ("qx0", "36791928440626258064573199"),
+        ("qx1", "61528703143672418979960783"),
+        ("qx2", "14747486129163242114008648"),
+        ("qy0", "76282327881385977091575450"),
+        ("qy1", "51294842334813218325050598"),
+        ("qy2", "6439864854718902709630533"),
+    ];
+    let base = || {
+        let mut m = BTreeMap::new();
+        for (k, v) in kat.iter() {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    solver::solve_and_check(&program, &base()).expect("on-curve pubkey must be accepted");
+    let mut bad = base();
+    bad.insert(id("qy0"), "1".to_string());
+    assert!(
+        solver::solve_and_check(&program, &bad).is_err(),
+        "an off-curve pubkey must be rejected by enforce_on_curve"
+    );
+}
+
+/// The secp256r1 (a = −3) on-curve gadget: real pubkey accepted, perturbed rejected.
+#[test]
+fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("on_curve_r1"), "on_curve_r1", "bn254");
+    assert!(c.status_success, "on_curve_r1 failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    let kat = [
+        ("qx0", "67266088408721815440178629"),
+        ("qx1", "32122441355340553600857496"),
+        ("qx2", "8254854985909125326758352"),
+        ("qy0", "20513967152570891030533053"),
+        ("qy1", "70247732038174899916449580"),
+        ("qy2", "15284152633358001387265917"),
+    ];
+    let base = || {
+        let mut m = BTreeMap::new();
+        for (k, v) in kat.iter() {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    solver::solve_and_check(&program, &base()).expect("on-curve P-256 pubkey must be accepted");
+    let mut bad = base();
+    bad.insert(id("qy0"), "1".to_string());
+    assert!(
+        solver::solve_and_check(&program, &bad).is_err(),
+        "an off-curve P-256 pubkey must be rejected"
+    );
+}
+
+/// The Ed25519 on-curve gadget accepts a real point (base point B) and rejects
+/// a perturbed coordinate.
+#[test]
+fn ed25519_on_curve_accepts_real_rejects_perturbed() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(&example("on_curve_ed25519"), "on_curve_ed25519", "bn254");
+    assert!(c.status_success, "on_curve_ed25519 failed: {}", c.stderr);
+    let program = primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap()).unwrap();
+    let id = |n: &str| program.vars.iter().find(|v| v.name == n).map(|v| v.id).unwrap();
+    // Ed25519 base point B, as 86-bit limbs (from xark_ed25519::base()).
+    let kat = [
+        ("qx0", "45522188556658772877366554"),
+        ("qx1", "10615720421966981067801172"),
+        ("qx2", "2524463244633754693274190"),
+        ("qy0", "46422751473201760308717144"),
+        ("qy1", "30948500982134506872478105"),
+        ("qy2", "7737125245533626718119526"),
+    ];
+    let base = || {
+        let mut m = BTreeMap::new();
+        for (k, v) in kat.iter() {
+            m.insert(id(k), v.to_string());
+        }
+        m
+    };
+    solver::solve_and_check(&program, &base()).expect("on-curve Ed25519 point must be accepted");
+    let mut bad = base();
+    bad.insert(id("qy0"), "1".to_string());
+    assert!(
+        solver::solve_and_check(&program, &bad).is_err(),
+        "an off-curve Ed25519 point must be rejected"
+    );
+}
