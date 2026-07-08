@@ -242,7 +242,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
 
     // Self-contained, shareable proof bundle: the snarkjs proof (verify
     // off-chain) plus the verifier calldata, in one file. Named by the entry
-    // name so it lines up with the IDL / generated client.
+    // name so it lines up with the generated client.
     let circuit_hash = super::circuit_hash(&r1cs_str);
     let name = project.entry_name();
     let bundle_json = serde_json::json!({

@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "test": "tsx test/smoke.ts",
     "typecheck": "tsc --noEmit"
   },

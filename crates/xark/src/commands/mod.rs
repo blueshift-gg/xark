@@ -27,7 +27,6 @@ pub mod client;
 pub mod completions;
 pub mod doctor;
 pub mod export;
-pub mod idl;
 pub mod inspect;
 pub mod prove;
 pub mod setup;
@@ -81,9 +80,7 @@ pub enum Command {
     Verify(verify::VerifyArgs),
     /// Export a self-contained Solana verifier crate.
     Export(export::ExportArgs),
-    /// Emit the circuit's IDL — its interface plus the embedded verifying key.
-    Idl(idl::IdlArgs),
-    /// Scaffold a TypeScript client from the IDL (verify + on-chain calldata).
+    /// Scaffold a TypeScript client (verify with snarkjs + on-chain calldata).
     Client(client::ClientArgs),
     /// Phase-2 MPC ceremony for trusted setup.
     Ceremony(ceremony::CeremonyArgs),
@@ -128,7 +125,6 @@ fn run(cli: Cli) -> Result<()> {
         Command::Prove(a) => prove::run(a),
         Command::Verify(a) => verify::run(a),
         Command::Export(a) => export::run(a),
-        Command::Idl(a) => idl::run(a),
         Command::Client(a) => client::run(a),
         Command::Ceremony(a) => ceremony::run(a),
         Command::Inspect(a) => inspect::run(a),

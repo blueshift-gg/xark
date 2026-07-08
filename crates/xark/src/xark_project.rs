@@ -79,7 +79,8 @@ impl XarkProject {
     }
 
     /// The circuit's entry function name, from the `entry` marker `xark build`
-    /// writes beside the artifacts. Drives the IDL / generated struct name.
+    /// writes beside the artifacts. Names the proof bundle and the generated
+    /// `<Fn>Inputs` struct.
     ///
     /// Falls back to the directory (crate) name when the marker is absent (older
     /// builds) or the entry is the *generic* `circuit` — so a `pub fn circuit`
@@ -93,25 +94,10 @@ impl XarkProject {
             .unwrap_or_else(|| self.circuit_name())
     }
 
-    /// The machine-readable circuit interface (`<name>.idl.json`) — the single
-    /// ABI file a client generator or integrator consumes. Named by
-    /// [`Self::entry_name`] so the filename matches the const/type baked inside
-    /// it (and what `xark client` writes).
-    pub fn idl_json(&self) -> PathBuf {
-        self.xark_dir
-            .join(format!("{}.idl.json", self.entry_name()))
-    }
-
-    /// The typed TypeScript IDL (`<name>.idl.ts`) — the same IDL as an
-    /// `as const` constant + exported type, so `xark-client` infers the
-    /// circuit's shape at compile time (the Anchor `Program<Idl>` pattern).
-    pub fn idl_ts(&self) -> PathBuf {
-        self.xark_dir.join(format!("{}.idl.ts", self.entry_name()))
-    }
-
-    /// Key metadata sidecar (`metadata.json`) written by setup.
-    pub fn metadata(&self) -> PathBuf {
-        self.xark_dir.join("metadata.json")
+    /// snarkjs verifying key (`snarkjs-verification_key.json`) written by setup —
+    /// the file a JS/snarkjs client (or `xark-client`) verifies against.
+    pub fn snarkjs_vk(&self) -> PathBuf {
+        self.xark_dir.join("snarkjs-verification_key.json")
     }
 
     /// Default output directory for `xark export`'s generated verifier crate.

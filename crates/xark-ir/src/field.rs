@@ -12,7 +12,11 @@ use num_bigint::BigInt;
 use num_traits::{One, Signed, Zero};
 use serde::{Deserialize, Serialize};
 
+/// A field constant, stored as a decimal string. Serialized `#[transparent]` —
+/// as the bare `"123"`, not `{"decimal":"123"}` — since the wrapper key is pure
+/// noise in `circuit.json` / `r1cs.json` (every coefficient carries one).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct FieldConst {
     pub decimal: String,
 }

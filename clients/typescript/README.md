@@ -1,28 +1,26 @@
 # xark-client
 
 Verify [xark](https://github.com/blueshift-gg/xark) zero-knowledge proofs and
-build verifier calldata — driven by a circuit's IDL.
-
-Same shape as Anchor: one library, and the per-circuit part is just the IDL. You
-generate the IDL with `xark idl` / `xark client`; this library consumes it.
+build verifier calldata. Construct a client from a circuit's snarkjs verifying
+key, then verify the proof bundles `xark prove` produces.
 
 ```ts
 import { XarkClient } from "xark-client";
-import { cubeIdl } from "./cube.idl"; // typed IDL from `xark client`
+import vk from "./verification_key.json"; // snarkjs VK from `xark setup`
 
-const client = new XarkClient(cubeIdl);
+const client = new XarkClient(vk);
 
-const ok = await client.verify(bundle);        // snarkjs, embedded VK
-const signals = client.publicSignals(bundle);  // typed: { result: string }
-const data = client.calldata(bundle);          // packed proof ‖ public bytes
+const ok = await client.verify(bundle);   // snarkjs verify
+const data = client.calldata(bundle);     // packed proof ‖ public bytes
 ```
 
-`bundle` is the `<name>-<hash>.proof.json` written by `xark prove`.
+`bundle` is the `<name>-<hash>.proof.json` written by `xark prove` (it carries
+the snarkjs proof + public signals + calldata).
 
 ## Verify vs. on-chain
 
-- **verify** runs fully here (snarkjs against the IDL's embedded verifying key),
-  anywhere JavaScript runs.
+- **verify** runs fully here (snarkjs against the verifying key), anywhere
+  JavaScript runs.
 - **calldata**: `calldata(bundle)` returns the packed `proof ‖ public_inputs`
   bytes (little-endian) a verifier consumes. You own the accounts and any
   instruction discriminator, so you build the transaction with your own client.
@@ -33,8 +31,7 @@ Produce proofs with the `xark` CLI (`xark prove`).
 
 ## API
 
-- `new XarkClient(idl)` — pass a typed `*.idl.ts` import for typed public signals.
+- `new XarkClient(vk)` — `vk` is the snarkjs `verification_key.json` from `xark setup`.
 - `verify(bundle)` / `verifyRaw(proof, publicSignals)` → `Promise<boolean>`
-- `publicSignals(bundle)` → `{ [name]: string }`, typed from the IDL
 - `calldata(bundle)` → `Uint8Array` (packed proof ‖ public inputs)
-- `publicSignalOrder` — the signal names in proof order
+- `hexToBytes(hex)` → `Uint8Array`

@@ -62,7 +62,10 @@ pub struct Expression {
     pub mul_terms: Vec<MulTerm>,
     pub linear_terms: Vec<LinearTerm>,
     pub constant: FieldConst,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Human-readable debug annotation (e.g. `secret * secret = t0`). Not part
+    /// of the persisted circuit — `#[serde(skip)]` keeps it out of `circuit.json`
+    /// (it's set during lowering for in-process diagnostics only).
+    #[serde(skip)]
     pub note: Option<String>,
 }
 

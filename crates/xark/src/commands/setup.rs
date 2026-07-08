@@ -270,22 +270,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     Ok(())
 }
 
-/// Guided post-setup footer. Refreshes the circuit IDL (now that a verifying key
-/// exists, so the IDL embeds it), then shows the exact `xark prove` command with
-/// a placeholder for every declared input — so the next step is unambiguous.
-fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_ir::R1csProgram) {
-    match super::idl::write_idl(project) {
-        Ok(idl_path) => println!(
-            "Wrote {}  {}",
-            idl_path.display(),
-            crate::style::dim("# circuit IDL (interface + verifying key)")
-        ),
-        Err(e) => eprintln!(
-            "{}",
-            crate::style::warn(&format!("note: could not write IDL: {e}"))
-        ),
-    }
-
+/// Guided post-setup footer: show the exact `xark prove` command with a
+/// placeholder for every declared input, so the next step is unambiguous.
+fn print_next_steps(_project: &XarkProject, path: &Option<PathBuf>, prog: &xark_ir::R1csProgram) {
     // Every input (public + private), in declaration order — prove needs them all.
     let mut vars: Vec<_> = prog
         .variables

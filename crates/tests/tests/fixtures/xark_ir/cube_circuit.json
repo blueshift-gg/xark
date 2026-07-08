@@ -24,48 +24,34 @@
     {
       "mul_terms": [
         {
-          "coeff": {
-            "decimal": "1"
-          },
+          "coeff": "1",
           "left": 0,
           "right": 0
         }
       ],
       "linear_terms": [
         {
-          "coeff": {
-            "decimal": "-1"
-          },
+          "coeff": "-1",
           "var": 2
         }
       ],
-      "constant": {
-        "decimal": "0"
-      },
-      "note": "secret * secret = t0"
+      "constant": "0"
     },
     {
       "mul_terms": [
         {
-          "coeff": {
-            "decimal": "1"
-          },
+          "coeff": "1",
           "left": 2,
           "right": 0
         }
       ],
       "linear_terms": [
         {
-          "coeff": {
-            "decimal": "-1"
-          },
+          "coeff": "-1",
           "var": 1
         }
       ],
-      "constant": {
-        "decimal": "0"
-      },
-      "note": "t0 * secret = result"
+      "constant": "0"
     }
   ],
   "witness_gen": [
@@ -73,27 +59,19 @@
       "op": "product",
       "out": 2,
       "left": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 0
           }
         ]
       },
       "right": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 0
           }
         ]

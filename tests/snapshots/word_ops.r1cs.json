@@ -829,40 +829,28 @@
     {
       "id": 0,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
@@ -875,40 +863,28 @@
     {
       "id": 1,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
@@ -921,40 +897,28 @@
     {
       "id": 2,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
@@ -967,40 +931,28 @@
     {
       "id": 3,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
@@ -1013,40 +965,28 @@
     {
       "id": 4,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
@@ -1059,40 +999,28 @@
     {
       "id": 5,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
@@ -1105,40 +1033,28 @@
     {
       "id": 6,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
@@ -1151,40 +1067,28 @@
     {
       "id": 7,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
@@ -1197,40 +1101,28 @@
     {
       "id": 8,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
@@ -1243,40 +1135,28 @@
     {
       "id": 9,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
@@ -1289,40 +1169,28 @@
     {
       "id": 10,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           }
         ]
@@ -1335,40 +1203,28 @@
     {
       "id": 11,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 14
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 14
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 14
           }
         ]
@@ -1381,40 +1237,28 @@
     {
       "id": 12,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
@@ -1427,40 +1271,28 @@
     {
       "id": 13,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           }
         ]
@@ -1473,40 +1305,28 @@
     {
       "id": 14,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 17
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 17
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 17
           }
         ]
@@ -1519,40 +1339,28 @@
     {
       "id": 15,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
@@ -1565,40 +1373,28 @@
     {
       "id": 16,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           }
         ]
@@ -1611,40 +1407,28 @@
     {
       "id": 17,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
@@ -1657,40 +1441,28 @@
     {
       "id": 18,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
@@ -1703,40 +1475,28 @@
     {
       "id": 19,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           }
         ]
@@ -1749,40 +1509,28 @@
     {
       "id": 20,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 23
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 23
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 23
           }
         ]
@@ -1795,40 +1543,28 @@
     {
       "id": 21,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
@@ -1841,40 +1577,28 @@
     {
       "id": 22,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           }
         ]
@@ -1887,40 +1611,28 @@
     {
       "id": 23,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
@@ -1933,40 +1645,28 @@
     {
       "id": 24,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
@@ -1979,40 +1679,28 @@
     {
       "id": 25,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           }
         ]
@@ -2025,40 +1713,28 @@
     {
       "id": 26,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           }
         ]
@@ -2071,40 +1747,28 @@
     {
       "id": 27,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
@@ -2117,40 +1781,28 @@
     {
       "id": 28,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           }
         ]
@@ -2163,40 +1815,28 @@
     {
       "id": 29,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           }
         ]
@@ -2209,40 +1849,28 @@
     {
       "id": 30,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
@@ -2255,40 +1883,28 @@
     {
       "id": 31,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           }
         ]
@@ -2301,220 +1917,148 @@
     {
       "id": 32,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 0
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 4
           },
           {
-            "coeff": {
-              "decimal": "4"
-            },
+            "coeff": "4",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "8"
-            },
+            "coeff": "8",
             "var": 6
           },
           {
-            "coeff": {
-              "decimal": "16"
-            },
+            "coeff": "16",
             "var": 7
           },
           {
-            "coeff": {
-              "decimal": "32"
-            },
+            "coeff": "32",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "64"
-            },
+            "coeff": "64",
             "var": 9
           },
           {
-            "coeff": {
-              "decimal": "128"
-            },
+            "coeff": "128",
             "var": 10
           },
           {
-            "coeff": {
-              "decimal": "256"
-            },
+            "coeff": "256",
             "var": 11
           },
           {
-            "coeff": {
-              "decimal": "512"
-            },
+            "coeff": "512",
             "var": 12
           },
           {
-            "coeff": {
-              "decimal": "1024"
-            },
+            "coeff": "1024",
             "var": 13
           },
           {
-            "coeff": {
-              "decimal": "2048"
-            },
+            "coeff": "2048",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "4096"
-            },
+            "coeff": "4096",
             "var": 15
           },
           {
-            "coeff": {
-              "decimal": "8192"
-            },
+            "coeff": "8192",
             "var": 16
           },
           {
-            "coeff": {
-              "decimal": "16384"
-            },
+            "coeff": "16384",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "32768"
-            },
+            "coeff": "32768",
             "var": 18
           },
           {
-            "coeff": {
-              "decimal": "65536"
-            },
+            "coeff": "65536",
             "var": 19
           },
           {
-            "coeff": {
-              "decimal": "131072"
-            },
+            "coeff": "131072",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "262144"
-            },
+            "coeff": "262144",
             "var": 21
           },
           {
-            "coeff": {
-              "decimal": "524288"
-            },
+            "coeff": "524288",
             "var": 22
           },
           {
-            "coeff": {
-              "decimal": "1048576"
-            },
+            "coeff": "1048576",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "2097152"
-            },
+            "coeff": "2097152",
             "var": 24
           },
           {
-            "coeff": {
-              "decimal": "4194304"
-            },
+            "coeff": "4194304",
             "var": 25
           },
           {
-            "coeff": {
-              "decimal": "8388608"
-            },
+            "coeff": "8388608",
             "var": 26
           },
           {
-            "coeff": {
-              "decimal": "16777216"
-            },
+            "coeff": "16777216",
             "var": 27
           },
           {
-            "coeff": {
-              "decimal": "33554432"
-            },
+            "coeff": "33554432",
             "var": 28
           },
           {
-            "coeff": {
-              "decimal": "67108864"
-            },
+            "coeff": "67108864",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "134217728"
-            },
+            "coeff": "134217728",
             "var": 30
           },
           {
-            "coeff": {
-              "decimal": "268435456"
-            },
+            "coeff": "268435456",
             "var": 31
           },
           {
-            "coeff": {
-              "decimal": "536870912"
-            },
+            "coeff": "536870912",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "1073741824"
-            },
+            "coeff": "1073741824",
             "var": 33
           },
           {
-            "coeff": {
-              "decimal": "2147483648"
-            },
+            "coeff": "2147483648",
             "var": 34
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {
@@ -2525,40 +2069,28 @@
     {
       "id": 33,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           }
         ]
@@ -2571,40 +2103,28 @@
     {
       "id": 34,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 68
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 68
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 68
           }
         ]
@@ -2617,40 +2137,28 @@
     {
       "id": 35,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 69
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 69
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 69
           }
         ]
@@ -2663,40 +2171,28 @@
     {
       "id": 36,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 70
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 70
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 70
           }
         ]
@@ -2709,40 +2205,28 @@
     {
       "id": 37,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 71
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 71
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 71
           }
         ]
@@ -2755,40 +2239,28 @@
     {
       "id": 38,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 72
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 72
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 72
           }
         ]
@@ -2801,40 +2273,28 @@
     {
       "id": 39,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 73
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 73
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 73
           }
         ]
@@ -2847,40 +2307,28 @@
     {
       "id": 40,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 74
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 74
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 74
           }
         ]
@@ -2893,40 +2341,28 @@
     {
       "id": 41,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 75
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 75
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 75
           }
         ]
@@ -2939,40 +2375,28 @@
     {
       "id": 42,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 76
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 76
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 76
           }
         ]
@@ -2985,40 +2409,28 @@
     {
       "id": 43,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 77
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 77
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 77
           }
         ]
@@ -3031,40 +2443,28 @@
     {
       "id": 44,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 78
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 78
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 78
           }
         ]
@@ -3077,40 +2477,28 @@
     {
       "id": 45,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 79
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 79
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 79
           }
         ]
@@ -3123,40 +2511,28 @@
     {
       "id": 46,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 80
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 80
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 80
           }
         ]
@@ -3169,40 +2545,28 @@
     {
       "id": 47,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 81
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 81
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 81
           }
         ]
@@ -3215,40 +2579,28 @@
     {
       "id": 48,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 82
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 82
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 82
           }
         ]
@@ -3261,40 +2613,28 @@
     {
       "id": 49,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 83
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 83
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 83
           }
         ]
@@ -3307,40 +2647,28 @@
     {
       "id": 50,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 84
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 84
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 84
           }
         ]
@@ -3353,40 +2681,28 @@
     {
       "id": 51,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 85
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 85
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 85
           }
         ]
@@ -3399,40 +2715,28 @@
     {
       "id": 52,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 86
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 86
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 86
           }
         ]
@@ -3445,40 +2749,28 @@
     {
       "id": 53,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 87
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 87
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 87
           }
         ]
@@ -3491,40 +2783,28 @@
     {
       "id": 54,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 88
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 88
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 88
           }
         ]
@@ -3537,40 +2817,28 @@
     {
       "id": 55,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 89
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 89
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 89
           }
         ]
@@ -3583,40 +2851,28 @@
     {
       "id": 56,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 90
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 90
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 90
           }
         ]
@@ -3629,40 +2885,28 @@
     {
       "id": 57,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 91
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 91
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 91
           }
         ]
@@ -3675,40 +2919,28 @@
     {
       "id": 58,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 92
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 92
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 92
           }
         ]
@@ -3721,40 +2953,28 @@
     {
       "id": 59,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 93
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 93
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 93
           }
         ]
@@ -3767,40 +2987,28 @@
     {
       "id": 60,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 94
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 94
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 94
           }
         ]
@@ -3813,40 +3021,28 @@
     {
       "id": 61,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 95
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 95
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 95
           }
         ]
@@ -3859,40 +3055,28 @@
     {
       "id": 62,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 96
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 96
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 96
           }
         ]
@@ -3905,40 +3089,28 @@
     {
       "id": 63,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 97
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 97
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 97
           }
         ]
@@ -3951,40 +3123,28 @@
     {
       "id": 64,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 98
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 98
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 98
           }
         ]
@@ -3997,220 +3157,148 @@
     {
       "id": 65,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 1
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 68
           },
           {
-            "coeff": {
-              "decimal": "4"
-            },
+            "coeff": "4",
             "var": 69
           },
           {
-            "coeff": {
-              "decimal": "8"
-            },
+            "coeff": "8",
             "var": 70
           },
           {
-            "coeff": {
-              "decimal": "16"
-            },
+            "coeff": "16",
             "var": 71
           },
           {
-            "coeff": {
-              "decimal": "32"
-            },
+            "coeff": "32",
             "var": 72
           },
           {
-            "coeff": {
-              "decimal": "64"
-            },
+            "coeff": "64",
             "var": 73
           },
           {
-            "coeff": {
-              "decimal": "128"
-            },
+            "coeff": "128",
             "var": 74
           },
           {
-            "coeff": {
-              "decimal": "256"
-            },
+            "coeff": "256",
             "var": 75
           },
           {
-            "coeff": {
-              "decimal": "512"
-            },
+            "coeff": "512",
             "var": 76
           },
           {
-            "coeff": {
-              "decimal": "1024"
-            },
+            "coeff": "1024",
             "var": 77
           },
           {
-            "coeff": {
-              "decimal": "2048"
-            },
+            "coeff": "2048",
             "var": 78
           },
           {
-            "coeff": {
-              "decimal": "4096"
-            },
+            "coeff": "4096",
             "var": 79
           },
           {
-            "coeff": {
-              "decimal": "8192"
-            },
+            "coeff": "8192",
             "var": 80
           },
           {
-            "coeff": {
-              "decimal": "16384"
-            },
+            "coeff": "16384",
             "var": 81
           },
           {
-            "coeff": {
-              "decimal": "32768"
-            },
+            "coeff": "32768",
             "var": 82
           },
           {
-            "coeff": {
-              "decimal": "65536"
-            },
+            "coeff": "65536",
             "var": 83
           },
           {
-            "coeff": {
-              "decimal": "131072"
-            },
+            "coeff": "131072",
             "var": 84
           },
           {
-            "coeff": {
-              "decimal": "262144"
-            },
+            "coeff": "262144",
             "var": 85
           },
           {
-            "coeff": {
-              "decimal": "524288"
-            },
+            "coeff": "524288",
             "var": 86
           },
           {
-            "coeff": {
-              "decimal": "1048576"
-            },
+            "coeff": "1048576",
             "var": 87
           },
           {
-            "coeff": {
-              "decimal": "2097152"
-            },
+            "coeff": "2097152",
             "var": 88
           },
           {
-            "coeff": {
-              "decimal": "4194304"
-            },
+            "coeff": "4194304",
             "var": 89
           },
           {
-            "coeff": {
-              "decimal": "8388608"
-            },
+            "coeff": "8388608",
             "var": 90
           },
           {
-            "coeff": {
-              "decimal": "16777216"
-            },
+            "coeff": "16777216",
             "var": 91
           },
           {
-            "coeff": {
-              "decimal": "33554432"
-            },
+            "coeff": "33554432",
             "var": 92
           },
           {
-            "coeff": {
-              "decimal": "67108864"
-            },
+            "coeff": "67108864",
             "var": 93
           },
           {
-            "coeff": {
-              "decimal": "134217728"
-            },
+            "coeff": "134217728",
             "var": 94
           },
           {
-            "coeff": {
-              "decimal": "268435456"
-            },
+            "coeff": "268435456",
             "var": 95
           },
           {
-            "coeff": {
-              "decimal": "536870912"
-            },
+            "coeff": "536870912",
             "var": 96
           },
           {
-            "coeff": {
-              "decimal": "1073741824"
-            },
+            "coeff": "1073741824",
             "var": 97
           },
           {
-            "coeff": {
-              "decimal": "2147483648"
-            },
+            "coeff": "2147483648",
             "var": 98
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {
@@ -4221,52 +3309,36 @@
     {
       "id": 66,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 3
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 131
           }
         ]
@@ -4279,52 +3351,36 @@
     {
       "id": 67,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 4
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 68
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 68
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 132
           }
         ]
@@ -4337,52 +3393,36 @@
     {
       "id": 68,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 5
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 69
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 69
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 133
           }
         ]
@@ -4395,52 +3435,36 @@
     {
       "id": 69,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 6
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 70
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 70
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 134
           }
         ]
@@ -4453,52 +3477,36 @@
     {
       "id": 70,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 7
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 71
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 71
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 135
           }
         ]
@@ -4511,52 +3519,36 @@
     {
       "id": 71,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 8
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 72
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 72
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 136
           }
         ]
@@ -4569,52 +3561,36 @@
     {
       "id": 72,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 9
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 73
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 73
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 137
           }
         ]
@@ -4627,52 +3603,36 @@
     {
       "id": 73,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 10
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 74
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 74
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 138
           }
         ]
@@ -4685,52 +3645,36 @@
     {
       "id": 74,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 75
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 75
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 139
           }
         ]
@@ -4743,52 +3687,36 @@
     {
       "id": 75,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 12
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 76
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 76
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 140
           }
         ]
@@ -4801,52 +3729,36 @@
     {
       "id": 76,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 13
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 77
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 77
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 141
           }
         ]
@@ -4859,52 +3771,36 @@
     {
       "id": 77,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 14
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 78
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 78
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 142
           }
         ]
@@ -4917,52 +3813,36 @@
     {
       "id": 78,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 15
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 79
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 79
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 143
           }
         ]
@@ -4975,52 +3855,36 @@
     {
       "id": 79,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 16
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 80
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 80
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 144
           }
         ]
@@ -5033,52 +3897,36 @@
     {
       "id": 80,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 17
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 81
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 81
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 145
           }
         ]
@@ -5091,52 +3939,36 @@
     {
       "id": 81,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 18
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 82
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 82
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 146
           }
         ]
@@ -5149,52 +3981,36 @@
     {
       "id": 82,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 19
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 83
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 83
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 147
           }
         ]
@@ -5207,52 +4023,36 @@
     {
       "id": 83,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 20
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 84
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 84
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 148
           }
         ]
@@ -5265,52 +4065,36 @@
     {
       "id": 84,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 21
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 85
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 85
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 149
           }
         ]
@@ -5323,52 +4107,36 @@
     {
       "id": 85,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 22
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 86
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 86
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 150
           }
         ]
@@ -5381,52 +4149,36 @@
     {
       "id": 86,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 23
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 87
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 87
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 151
           }
         ]
@@ -5439,52 +4191,36 @@
     {
       "id": 87,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 24
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 88
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 88
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 152
           }
         ]
@@ -5497,52 +4233,36 @@
     {
       "id": 88,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 25
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 89
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 89
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 153
           }
         ]
@@ -5555,52 +4275,36 @@
     {
       "id": 89,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 90
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 90
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 154
           }
         ]
@@ -5613,52 +4317,36 @@
     {
       "id": 90,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 27
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 91
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 91
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 155
           }
         ]
@@ -5671,52 +4359,36 @@
     {
       "id": 91,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 28
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 92
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 92
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 156
           }
         ]
@@ -5729,52 +4401,36 @@
     {
       "id": 92,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 29
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 93
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 93
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 157
           }
         ]
@@ -5787,52 +4443,36 @@
     {
       "id": 93,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 30
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 94
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 94
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 158
           }
         ]
@@ -5845,52 +4485,36 @@
     {
       "id": 94,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 31
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 95
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 95
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 159
           }
         ]
@@ -5903,52 +4527,36 @@
     {
       "id": 95,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 32
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 96
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 96
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 160
           }
         ]
@@ -5961,52 +4569,36 @@
     {
       "id": 96,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 33
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 97
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 97
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 161
           }
         ]
@@ -6019,52 +4611,36 @@
     {
       "id": 97,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 34
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 98
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 98
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 162
           }
         ]
@@ -6077,40 +4653,28 @@
     {
       "id": 98,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 67
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 163
           }
         ]
@@ -6123,40 +4687,28 @@
     {
       "id": 99,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 68
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 164
           }
         ]
@@ -6169,40 +4721,28 @@
     {
       "id": 100,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 69
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 165
           }
         ]
@@ -6215,40 +4755,28 @@
     {
       "id": 101,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 70
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 166
           }
         ]
@@ -6261,40 +4789,28 @@
     {
       "id": 102,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 71
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 167
           }
         ]
@@ -6307,40 +4823,28 @@
     {
       "id": 103,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 72
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 168
           }
         ]
@@ -6353,40 +4857,28 @@
     {
       "id": 104,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 73
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 169
           }
         ]
@@ -6399,40 +4891,28 @@
     {
       "id": 105,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 74
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 170
           }
         ]
@@ -6445,40 +4925,28 @@
     {
       "id": 106,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 75
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 171
           }
         ]
@@ -6491,40 +4959,28 @@
     {
       "id": 107,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 76
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 172
           }
         ]
@@ -6537,40 +4993,28 @@
     {
       "id": 108,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 77
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 173
           }
         ]
@@ -6583,40 +5027,28 @@
     {
       "id": 109,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 14
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 78
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 174
           }
         ]
@@ -6629,40 +5061,28 @@
     {
       "id": 110,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 79
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 175
           }
         ]
@@ -6675,40 +5095,28 @@
     {
       "id": 111,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 80
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 176
           }
         ]
@@ -6721,40 +5129,28 @@
     {
       "id": 112,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 17
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 81
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 177
           }
         ]
@@ -6767,40 +5163,28 @@
     {
       "id": 113,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 82
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 178
           }
         ]
@@ -6813,40 +5197,28 @@
     {
       "id": 114,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 83
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 179
           }
         ]
@@ -6859,40 +5231,28 @@
     {
       "id": 115,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 84
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 180
           }
         ]
@@ -6905,40 +5265,28 @@
     {
       "id": 116,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 85
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 181
           }
         ]
@@ -6951,40 +5299,28 @@
     {
       "id": 117,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 86
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 182
           }
         ]
@@ -6997,40 +5333,28 @@
     {
       "id": 118,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 23
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 87
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 183
           }
         ]
@@ -7043,40 +5367,28 @@
     {
       "id": 119,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 88
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 184
           }
         ]
@@ -7089,40 +5401,28 @@
     {
       "id": 120,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 89
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 185
           }
         ]
@@ -7135,40 +5435,28 @@
     {
       "id": 121,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 90
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 186
           }
         ]
@@ -7181,40 +5469,28 @@
     {
       "id": 122,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 91
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 187
           }
         ]
@@ -7227,40 +5503,28 @@
     {
       "id": 123,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 92
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 188
           }
         ]
@@ -7273,40 +5537,28 @@
     {
       "id": 124,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 93
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 189
           }
         ]
@@ -7319,40 +5571,28 @@
     {
       "id": 125,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 94
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 190
           }
         ]
@@ -7365,40 +5605,28 @@
     {
       "id": 126,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 95
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 191
           }
         ]
@@ -7411,40 +5639,28 @@
     {
       "id": 127,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 96
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 192
           }
         ]
@@ -7457,40 +5673,28 @@
     {
       "id": 128,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 97
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 193
           }
         ]
@@ -7503,40 +5707,28 @@
     {
       "id": 129,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 98
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 194
           }
         ]
@@ -7549,40 +5741,28 @@
     {
       "id": 130,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 195
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 195
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 195
           }
         ]
@@ -7595,40 +5775,28 @@
     {
       "id": 131,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 196
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 196
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 196
           }
         ]
@@ -7641,40 +5809,28 @@
     {
       "id": 132,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 197
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 197
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 197
           }
         ]
@@ -7687,40 +5843,28 @@
     {
       "id": 133,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 198
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 198
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 198
           }
         ]
@@ -7733,40 +5877,28 @@
     {
       "id": 134,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 199
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 199
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 199
           }
         ]
@@ -7779,40 +5911,28 @@
     {
       "id": 135,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 200
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 200
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 200
           }
         ]
@@ -7825,40 +5945,28 @@
     {
       "id": 136,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 201
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 201
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 201
           }
         ]
@@ -7871,40 +5979,28 @@
     {
       "id": 137,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 202
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 202
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 202
           }
         ]
@@ -7917,40 +6013,28 @@
     {
       "id": 138,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 203
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 203
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 203
           }
         ]
@@ -7963,40 +6047,28 @@
     {
       "id": 139,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 204
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 204
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 204
           }
         ]
@@ -8009,40 +6081,28 @@
     {
       "id": 140,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 205
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 205
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 205
           }
         ]
@@ -8055,40 +6115,28 @@
     {
       "id": 141,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 206
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 206
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 206
           }
         ]
@@ -8101,40 +6149,28 @@
     {
       "id": 142,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 207
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 207
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 207
           }
         ]
@@ -8147,40 +6183,28 @@
     {
       "id": 143,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 208
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 208
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 208
           }
         ]
@@ -8193,40 +6217,28 @@
     {
       "id": 144,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 209
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 209
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 209
           }
         ]
@@ -8239,40 +6251,28 @@
     {
       "id": 145,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 210
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 210
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 210
           }
         ]
@@ -8285,40 +6285,28 @@
     {
       "id": 146,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 211
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 211
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 211
           }
         ]
@@ -8331,40 +6319,28 @@
     {
       "id": 147,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 212
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 212
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 212
           }
         ]
@@ -8377,40 +6353,28 @@
     {
       "id": 148,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 213
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 213
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 213
           }
         ]
@@ -8423,40 +6387,28 @@
     {
       "id": 149,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 214
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 214
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 214
           }
         ]
@@ -8469,40 +6421,28 @@
     {
       "id": 150,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 215
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 215
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 215
           }
         ]
@@ -8515,40 +6455,28 @@
     {
       "id": 151,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 216
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 216
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 216
           }
         ]
@@ -8561,40 +6489,28 @@
     {
       "id": 152,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 217
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 217
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 217
           }
         ]
@@ -8607,40 +6523,28 @@
     {
       "id": 153,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 218
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 218
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 218
           }
         ]
@@ -8653,40 +6557,28 @@
     {
       "id": 154,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 219
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 219
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 219
           }
         ]
@@ -8699,40 +6591,28 @@
     {
       "id": 155,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 220
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 220
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 220
           }
         ]
@@ -8745,40 +6625,28 @@
     {
       "id": 156,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 221
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 221
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 221
           }
         ]
@@ -8791,40 +6659,28 @@
     {
       "id": 157,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 222
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 222
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 222
           }
         ]
@@ -8837,40 +6693,28 @@
     {
       "id": 158,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 223
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 223
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 223
           }
         ]
@@ -8883,40 +6727,28 @@
     {
       "id": 159,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 224
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 224
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 224
           }
         ]
@@ -8929,40 +6761,28 @@
     {
       "id": 160,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 225
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 225
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 225
           }
         ]
@@ -8975,40 +6795,28 @@
     {
       "id": 161,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 226
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 226
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 226
           }
         ]
@@ -9021,40 +6829,28 @@
     {
       "id": 162,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 227
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 227
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 227
           }
         ]
@@ -9067,604 +6863,404 @@
     {
       "id": 163,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-33554432"
-            },
+            "coeff": "-33554432",
             "var": 131
           },
           {
-            "coeff": {
-              "decimal": "-67108864"
-            },
+            "coeff": "-67108864",
             "var": 132
           },
           {
-            "coeff": {
-              "decimal": "-134217728"
-            },
+            "coeff": "-134217728",
             "var": 133
           },
           {
-            "coeff": {
-              "decimal": "-268435456"
-            },
+            "coeff": "-268435456",
             "var": 134
           },
           {
-            "coeff": {
-              "decimal": "-536870912"
-            },
+            "coeff": "-536870912",
             "var": 135
           },
           {
-            "coeff": {
-              "decimal": "-1073741824"
-            },
+            "coeff": "-1073741824",
             "var": 136
           },
           {
-            "coeff": {
-              "decimal": "-2147483648"
-            },
+            "coeff": "-2147483648",
             "var": 137
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 138
           },
           {
-            "coeff": {
-              "decimal": "-2"
-            },
+            "coeff": "-2",
             "var": 139
           },
           {
-            "coeff": {
-              "decimal": "-4"
-            },
+            "coeff": "-4",
             "var": 140
           },
           {
-            "coeff": {
-              "decimal": "-8"
-            },
+            "coeff": "-8",
             "var": 141
           },
           {
-            "coeff": {
-              "decimal": "-16"
-            },
+            "coeff": "-16",
             "var": 142
           },
           {
-            "coeff": {
-              "decimal": "-32"
-            },
+            "coeff": "-32",
             "var": 143
           },
           {
-            "coeff": {
-              "decimal": "-64"
-            },
+            "coeff": "-64",
             "var": 144
           },
           {
-            "coeff": {
-              "decimal": "-128"
-            },
+            "coeff": "-128",
             "var": 145
           },
           {
-            "coeff": {
-              "decimal": "-256"
-            },
+            "coeff": "-256",
             "var": 146
           },
           {
-            "coeff": {
-              "decimal": "-512"
-            },
+            "coeff": "-512",
             "var": 147
           },
           {
-            "coeff": {
-              "decimal": "-1024"
-            },
+            "coeff": "-1024",
             "var": 148
           },
           {
-            "coeff": {
-              "decimal": "-2048"
-            },
+            "coeff": "-2048",
             "var": 149
           },
           {
-            "coeff": {
-              "decimal": "-4096"
-            },
+            "coeff": "-4096",
             "var": 150
           },
           {
-            "coeff": {
-              "decimal": "-8192"
-            },
+            "coeff": "-8192",
             "var": 151
           },
           {
-            "coeff": {
-              "decimal": "-16384"
-            },
+            "coeff": "-16384",
             "var": 152
           },
           {
-            "coeff": {
-              "decimal": "-32768"
-            },
+            "coeff": "-32768",
             "var": 153
           },
           {
-            "coeff": {
-              "decimal": "-65536"
-            },
+            "coeff": "-65536",
             "var": 154
           },
           {
-            "coeff": {
-              "decimal": "-131072"
-            },
+            "coeff": "-131072",
             "var": 155
           },
           {
-            "coeff": {
-              "decimal": "-262144"
-            },
+            "coeff": "-262144",
             "var": 156
           },
           {
-            "coeff": {
-              "decimal": "-524288"
-            },
+            "coeff": "-524288",
             "var": 157
           },
           {
-            "coeff": {
-              "decimal": "-1048576"
-            },
+            "coeff": "-1048576",
             "var": 158
           },
           {
-            "coeff": {
-              "decimal": "-2097152"
-            },
+            "coeff": "-2097152",
             "var": 159
           },
           {
-            "coeff": {
-              "decimal": "-4194304"
-            },
+            "coeff": "-4194304",
             "var": 160
           },
           {
-            "coeff": {
-              "decimal": "-8388608"
-            },
+            "coeff": "-8388608",
             "var": 161
           },
           {
-            "coeff": {
-              "decimal": "-16777216"
-            },
+            "coeff": "-16777216",
             "var": 162
           },
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 163
           },
           {
-            "coeff": {
-              "decimal": "-2"
-            },
+            "coeff": "-2",
             "var": 164
           },
           {
-            "coeff": {
-              "decimal": "-4"
-            },
+            "coeff": "-4",
             "var": 165
           },
           {
-            "coeff": {
-              "decimal": "-8"
-            },
+            "coeff": "-8",
             "var": 166
           },
           {
-            "coeff": {
-              "decimal": "-16"
-            },
+            "coeff": "-16",
             "var": 167
           },
           {
-            "coeff": {
-              "decimal": "-32"
-            },
+            "coeff": "-32",
             "var": 168
           },
           {
-            "coeff": {
-              "decimal": "-64"
-            },
+            "coeff": "-64",
             "var": 169
           },
           {
-            "coeff": {
-              "decimal": "-128"
-            },
+            "coeff": "-128",
             "var": 170
           },
           {
-            "coeff": {
-              "decimal": "-256"
-            },
+            "coeff": "-256",
             "var": 171
           },
           {
-            "coeff": {
-              "decimal": "-512"
-            },
+            "coeff": "-512",
             "var": 172
           },
           {
-            "coeff": {
-              "decimal": "-1024"
-            },
+            "coeff": "-1024",
             "var": 173
           },
           {
-            "coeff": {
-              "decimal": "-2048"
-            },
+            "coeff": "-2048",
             "var": 174
           },
           {
-            "coeff": {
-              "decimal": "-4096"
-            },
+            "coeff": "-4096",
             "var": 175
           },
           {
-            "coeff": {
-              "decimal": "-8192"
-            },
+            "coeff": "-8192",
             "var": 176
           },
           {
-            "coeff": {
-              "decimal": "-16384"
-            },
+            "coeff": "-16384",
             "var": 177
           },
           {
-            "coeff": {
-              "decimal": "-32768"
-            },
+            "coeff": "-32768",
             "var": 178
           },
           {
-            "coeff": {
-              "decimal": "-65536"
-            },
+            "coeff": "-65536",
             "var": 179
           },
           {
-            "coeff": {
-              "decimal": "-131072"
-            },
+            "coeff": "-131072",
             "var": 180
           },
           {
-            "coeff": {
-              "decimal": "-262144"
-            },
+            "coeff": "-262144",
             "var": 181
           },
           {
-            "coeff": {
-              "decimal": "-524288"
-            },
+            "coeff": "-524288",
             "var": 182
           },
           {
-            "coeff": {
-              "decimal": "-1048576"
-            },
+            "coeff": "-1048576",
             "var": 183
           },
           {
-            "coeff": {
-              "decimal": "-2097152"
-            },
+            "coeff": "-2097152",
             "var": 184
           },
           {
-            "coeff": {
-              "decimal": "-4194304"
-            },
+            "coeff": "-4194304",
             "var": 185
           },
           {
-            "coeff": {
-              "decimal": "-8388608"
-            },
+            "coeff": "-8388608",
             "var": 186
           },
           {
-            "coeff": {
-              "decimal": "-16777216"
-            },
+            "coeff": "-16777216",
             "var": 187
           },
           {
-            "coeff": {
-              "decimal": "-33554432"
-            },
+            "coeff": "-33554432",
             "var": 188
           },
           {
-            "coeff": {
-              "decimal": "-67108864"
-            },
+            "coeff": "-67108864",
             "var": 189
           },
           {
-            "coeff": {
-              "decimal": "-134217728"
-            },
+            "coeff": "-134217728",
             "var": 190
           },
           {
-            "coeff": {
-              "decimal": "-268435456"
-            },
+            "coeff": "-268435456",
             "var": 191
           },
           {
-            "coeff": {
-              "decimal": "-536870912"
-            },
+            "coeff": "-536870912",
             "var": 192
           },
           {
-            "coeff": {
-              "decimal": "-1073741824"
-            },
+            "coeff": "-1073741824",
             "var": 193
           },
           {
-            "coeff": {
-              "decimal": "-2147483648"
-            },
+            "coeff": "-2147483648",
             "var": 194
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 195
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 196
           },
           {
-            "coeff": {
-              "decimal": "4"
-            },
+            "coeff": "4",
             "var": 197
           },
           {
-            "coeff": {
-              "decimal": "8"
-            },
+            "coeff": "8",
             "var": 198
           },
           {
-            "coeff": {
-              "decimal": "16"
-            },
+            "coeff": "16",
             "var": 199
           },
           {
-            "coeff": {
-              "decimal": "32"
-            },
+            "coeff": "32",
             "var": 200
           },
           {
-            "coeff": {
-              "decimal": "64"
-            },
+            "coeff": "64",
             "var": 201
           },
           {
-            "coeff": {
-              "decimal": "128"
-            },
+            "coeff": "128",
             "var": 202
           },
           {
-            "coeff": {
-              "decimal": "256"
-            },
+            "coeff": "256",
             "var": 203
           },
           {
-            "coeff": {
-              "decimal": "512"
-            },
+            "coeff": "512",
             "var": 204
           },
           {
-            "coeff": {
-              "decimal": "1024"
-            },
+            "coeff": "1024",
             "var": 205
           },
           {
-            "coeff": {
-              "decimal": "2048"
-            },
+            "coeff": "2048",
             "var": 206
           },
           {
-            "coeff": {
-              "decimal": "4096"
-            },
+            "coeff": "4096",
             "var": 207
           },
           {
-            "coeff": {
-              "decimal": "8192"
-            },
+            "coeff": "8192",
             "var": 208
           },
           {
-            "coeff": {
-              "decimal": "16384"
-            },
+            "coeff": "16384",
             "var": 209
           },
           {
-            "coeff": {
-              "decimal": "32768"
-            },
+            "coeff": "32768",
             "var": 210
           },
           {
-            "coeff": {
-              "decimal": "65536"
-            },
+            "coeff": "65536",
             "var": 211
           },
           {
-            "coeff": {
-              "decimal": "131072"
-            },
+            "coeff": "131072",
             "var": 212
           },
           {
-            "coeff": {
-              "decimal": "262144"
-            },
+            "coeff": "262144",
             "var": 213
           },
           {
-            "coeff": {
-              "decimal": "524288"
-            },
+            "coeff": "524288",
             "var": 214
           },
           {
-            "coeff": {
-              "decimal": "1048576"
-            },
+            "coeff": "1048576",
             "var": 215
           },
           {
-            "coeff": {
-              "decimal": "2097152"
-            },
+            "coeff": "2097152",
             "var": 216
           },
           {
-            "coeff": {
-              "decimal": "4194304"
-            },
+            "coeff": "4194304",
             "var": 217
           },
           {
-            "coeff": {
-              "decimal": "8388608"
-            },
+            "coeff": "8388608",
             "var": 218
           },
           {
-            "coeff": {
-              "decimal": "16777216"
-            },
+            "coeff": "16777216",
             "var": 219
           },
           {
-            "coeff": {
-              "decimal": "33554432"
-            },
+            "coeff": "33554432",
             "var": 220
           },
           {
-            "coeff": {
-              "decimal": "67108864"
-            },
+            "coeff": "67108864",
             "var": 221
           },
           {
-            "coeff": {
-              "decimal": "134217728"
-            },
+            "coeff": "134217728",
             "var": 222
           },
           {
-            "coeff": {
-              "decimal": "268435456"
-            },
+            "coeff": "268435456",
             "var": 223
           },
           {
-            "coeff": {
-              "decimal": "536870912"
-            },
+            "coeff": "536870912",
             "var": 224
           },
           {
-            "coeff": {
-              "decimal": "1073741824"
-            },
+            "coeff": "1073741824",
             "var": 225
           },
           {
-            "coeff": {
-              "decimal": "2147483648"
-            },
+            "coeff": "2147483648",
             "var": 226
           },
           {
-            "coeff": {
-              "decimal": "4294967296"
-            },
+            "coeff": "4294967296",
             "var": 227
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {
@@ -9675,220 +7271,148 @@
     {
       "id": 164,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 2
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 195
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 196
           },
           {
-            "coeff": {
-              "decimal": "4"
-            },
+            "coeff": "4",
             "var": 197
           },
           {
-            "coeff": {
-              "decimal": "8"
-            },
+            "coeff": "8",
             "var": 198
           },
           {
-            "coeff": {
-              "decimal": "16"
-            },
+            "coeff": "16",
             "var": 199
           },
           {
-            "coeff": {
-              "decimal": "32"
-            },
+            "coeff": "32",
             "var": 200
           },
           {
-            "coeff": {
-              "decimal": "64"
-            },
+            "coeff": "64",
             "var": 201
           },
           {
-            "coeff": {
-              "decimal": "128"
-            },
+            "coeff": "128",
             "var": 202
           },
           {
-            "coeff": {
-              "decimal": "256"
-            },
+            "coeff": "256",
             "var": 203
           },
           {
-            "coeff": {
-              "decimal": "512"
-            },
+            "coeff": "512",
             "var": 204
           },
           {
-            "coeff": {
-              "decimal": "1024"
-            },
+            "coeff": "1024",
             "var": 205
           },
           {
-            "coeff": {
-              "decimal": "2048"
-            },
+            "coeff": "2048",
             "var": 206
           },
           {
-            "coeff": {
-              "decimal": "4096"
-            },
+            "coeff": "4096",
             "var": 207
           },
           {
-            "coeff": {
-              "decimal": "8192"
-            },
+            "coeff": "8192",
             "var": 208
           },
           {
-            "coeff": {
-              "decimal": "16384"
-            },
+            "coeff": "16384",
             "var": 209
           },
           {
-            "coeff": {
-              "decimal": "32768"
-            },
+            "coeff": "32768",
             "var": 210
           },
           {
-            "coeff": {
-              "decimal": "65536"
-            },
+            "coeff": "65536",
             "var": 211
           },
           {
-            "coeff": {
-              "decimal": "131072"
-            },
+            "coeff": "131072",
             "var": 212
           },
           {
-            "coeff": {
-              "decimal": "262144"
-            },
+            "coeff": "262144",
             "var": 213
           },
           {
-            "coeff": {
-              "decimal": "524288"
-            },
+            "coeff": "524288",
             "var": 214
           },
           {
-            "coeff": {
-              "decimal": "1048576"
-            },
+            "coeff": "1048576",
             "var": 215
           },
           {
-            "coeff": {
-              "decimal": "2097152"
-            },
+            "coeff": "2097152",
             "var": 216
           },
           {
-            "coeff": {
-              "decimal": "4194304"
-            },
+            "coeff": "4194304",
             "var": 217
           },
           {
-            "coeff": {
-              "decimal": "8388608"
-            },
+            "coeff": "8388608",
             "var": 218
           },
           {
-            "coeff": {
-              "decimal": "16777216"
-            },
+            "coeff": "16777216",
             "var": 219
           },
           {
-            "coeff": {
-              "decimal": "33554432"
-            },
+            "coeff": "33554432",
             "var": 220
           },
           {
-            "coeff": {
-              "decimal": "67108864"
-            },
+            "coeff": "67108864",
             "var": 221
           },
           {
-            "coeff": {
-              "decimal": "134217728"
-            },
+            "coeff": "134217728",
             "var": 222
           },
           {
-            "coeff": {
-              "decimal": "268435456"
-            },
+            "coeff": "268435456",
             "var": 223
           },
           {
-            "coeff": {
-              "decimal": "536870912"
-            },
+            "coeff": "536870912",
             "var": 224
           },
           {
-            "coeff": {
-              "decimal": "1073741824"
-            },
+            "coeff": "1073741824",
             "var": 225
           },
           {
-            "coeff": {
-              "decimal": "2147483648"
-            },
+            "coeff": "2147483648",
             "var": 226
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {

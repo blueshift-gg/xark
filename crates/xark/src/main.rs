@@ -52,7 +52,6 @@ const CLI_SUBCOMMANDS: &[&str] = &[
     "prove",
     "verify",
     "export",
-    "idl",
     "client",
     "ceremony",
     "inspect",
@@ -102,10 +101,6 @@ fn print_roadmap() {
             "produce (and self-check) a proof + copy-paste calldata",
         ),
         ("xark verify .", "verify a proof locally"),
-        (
-            "xark idl .",
-            "emit the circuit's IDL (interface + verifying key)",
-        ),
         (
             "xark client .",
             "scaffold a TypeScript client (verify + calldata)",

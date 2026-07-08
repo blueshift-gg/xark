@@ -1,24 +1,20 @@
-// Smoke test: verify a real cube proof through the library, confirm a tampered
-// proof is rejected, and exercise the typed public-signals inference.
+// Smoke test: verify a real cube proof through the library and confirm a
+// tampered proof is rejected.
 //
 //   npm install && npm test
 //
-// Fixtures (`cube.idl.ts`, `cube.proof.json`) are produced by the xark CLI:
-//   xark prove examples/cube --input secret=3 --input result=27
+// Fixtures (`cube.vk.json`, `cube.proof.json`) are produced by the xark CLI:
+//   xark setup examples/cube && xark prove examples/cube --input secret=3 --input result=27
 
 import { XarkClient, type ProofBundle } from "../src/index";
-import { cubeIdl } from "./cube.idl";
+import vk from "./cube.vk.json";
 import bundle from "./cube.proof.json";
 
 async function main() {
-  const client = new XarkClient(cubeIdl);
-  console.log(`circuit: ${client.name}, public signals: ${client.publicSignalOrder.join(", ")}`);
+  const client = new XarkClient(vk);
 
   const ok = await client.verify(bundle as ProofBundle);
-  const signals = client.publicSignals(bundle as ProofBundle);
-  // Compile-time proof of typing: `.result` is known from the IDL, not `any`.
-  const result: string = signals.result;
-  console.log(`verify(valid) = ${ok}, result = ${result}`);
+  console.log(`verify(valid) = ${ok}`);
 
   const tampered = { ...bundle, public_signals: ["999"] } as ProofBundle;
   const bad = await client.verify(tampered);

@@ -468,8 +468,9 @@ use xark::prelude::*;
 /// native `bool`), and `Field` supports `+ - * ^` (with `^ n` = exponentiation).
 ///
 /// The entry function is auto-detected (its parameters are all `Public`/
-/// `Private`), and its name names the circuit everywhere — the IDL, the
-/// generated struct, the client. Rename `__FN__` and it flows through.
+/// `Private`), and its name names the circuit everywhere — the generated
+/// `<Fn>Inputs` struct, the proof bundle, the client. Rename `__FN__` and it
+/// flows through.
 ///
 /// Build with `xark build .`; prove with
 ///   `xark prove . --input secret=3 --input result=9`.

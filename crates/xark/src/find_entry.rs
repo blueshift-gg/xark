@@ -8,7 +8,7 @@
 //! The entry is a `fn circuit` if present; otherwise it is auto-detected as the
 //! single "circuit-shaped" free function (unit return, every parameter
 //! `Public<_>`/`Private<_>`), so the entry can be named after the circuit and
-//! that name flows through to the IDL and generated clients.
+//! that name names the proof bundle and the generated `<Fn>Inputs` struct.
 
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::{FnRetTy, ItemId, ItemKind, PatKind, QPath, Ty, TyKind};
@@ -25,8 +25,8 @@ pub struct CircuitInput {
 
 pub struct EntryInfo {
     pub def_id: LocalDefId,
-    /// The entry function's name — drives the IDL name and generated client
-    /// struct name (e.g. `cube` → `cubeIdl` / `CubeInputs`).
+    /// The entry function's name — names the proof bundle and the generated
+    /// `<Fn>Inputs` struct (e.g. `cube` → `CubeInputs`).
     pub name: String,
     pub inputs: Vec<CircuitInput>,
 }
