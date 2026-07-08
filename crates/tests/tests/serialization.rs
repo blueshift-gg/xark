@@ -1,5 +1,5 @@
-//! Pin the binary format of `verifying_key.bin` and `proof.bin` (and the
-//! `public_inputs.json` they go with) for the `arithmetic_square` example.
+//! Pin the binary format of `verifying_key.bin`, `proof.bin`, and
+//! `public_inputs.bin` for the `arithmetic_square` example.
 //!
 //! Downstream consumers (EVM verifier, Solana verifier) are going to read
 //! these bytes directly, so the formats need to be frozen at this point. If
@@ -14,14 +14,14 @@ use sha2::{Digest, Sha256};
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::PublicInputsJson;
+use xark_backend::serialization::read_public_inputs;
 
 // Bump when the serialized VK/proof byte layout changes (regenerating the
 // fixtures shifts the VK + proof bytes, so these digests move too).
 const VK_SHA256: &str = "0f197c9b98a5237e3d7d128d3653fe8f15f168f2046a16d7e978200f6d6eefbb";
 const PROOF_SHA256: &str = "fbe4f937d8b1a073a3b3e312dd25de904610a0d627b885e892a50f0b7b2a4b9f";
-const PUBLIC_INPUTS_SHA256: &str =
-    "7a90fafeb777a27fbc7a3c9b6763b25476f359aa3ef23a7bb96ea99bdb0e40a9";
+const PUBLIC_INPUTS_BIN_SHA256: &str =
+    "fed364fe00a941d1413ba656bed1e780117eac7beff4792ee33f6d02dab87798";
 
 fn fixture_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/tests; fixtures live alongside the crate at
@@ -109,14 +109,6 @@ fn proof_roundtrip() {
         written, original_bytes,
         "proof.bin is not canonical: re-serialized bytes differ from the committed fixture"
     );
-
-    // Also pin the public_inputs.json hash here so that any silent change to
-    // how the prover emits decimal-string field elements gets caught too.
-    let pi_hash = sha256_hex(&fixture_dir().join("public_inputs.json"));
-    assert_eq!(
-        pi_hash, PUBLIC_INPUTS_SHA256,
-        "public_inputs.json sha256 changed: actual={pi_hash}"
-    );
 }
 
 #[test]
@@ -126,11 +118,8 @@ fn end_to_end_verify_from_fixtures() {
         Groth16Keys::read_verifying_key(&dir.join("verifying_key.bin")).expect("parse vk");
     let proof: Proof<Bn254> = ProofBundle::read_proof(&dir.join("proof.bin")).expect("parse proof");
 
-    let public_inputs_bytes =
-        std::fs::read(dir.join("public_inputs.json")).expect("read public_inputs.json");
-    let pi_json: PublicInputsJson =
-        serde_json::from_slice(&public_inputs_bytes).expect("parse public_inputs.json");
-    let public_inputs = pi_json.into_fr().expect("decode public inputs");
+    let public_inputs =
+        read_public_inputs(&dir.join("public_inputs.bin")).expect("read public inputs");
 
     let ok = xark_backend::verify(&vk, &proof, &public_inputs).expect("verify");
     assert!(
@@ -155,6 +144,15 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
+}
+
+#[test]
+fn public_inputs_bytes_match_hash() {
+    let actual = sha256_hex(&fixture_dir().join("public_inputs.bin"));
+    assert_eq!(
+        actual, PUBLIC_INPUTS_BIN_SHA256,
+        "public_inputs.bin sha256 changed: actual={actual}"
+    );
 }
 
 fn unique_tempdir() -> TempDir {

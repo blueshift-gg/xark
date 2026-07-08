@@ -32,7 +32,7 @@ use clap::Args;
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::PublicInputsJson;
+use xark_backend::serialization::read_public_inputs;
 use xark_backend::solana::{
     assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le,
 };
@@ -53,8 +53,8 @@ pub struct ExportArgs {
     /// `target/xark/proof.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
-    /// Public inputs JSON produced by `xark prove`. Inferred as
-    /// `target/xark/public_inputs.json`.
+    /// Public inputs file produced by `xark prove`. Inferred as
+    /// `target/xark/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
     /// Output directory — the root of the generated verifier crate. Inferred as
@@ -90,12 +90,8 @@ pub fn run(args: ExportArgs) -> Result<()> {
     check_key_safe_for_export(&vk_path, args.allow_insecure)?;
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
-    let public_inputs_str = fs::read_to_string(&public_inputs_path)
+    let public_inputs = read_public_inputs(&public_inputs_path)
         .with_context(|| format!("reading public inputs {}", public_inputs_path.display()))?;
-    let public_inputs = serde_json::from_str::<PublicInputsJson>(&public_inputs_str)
-        .with_context(|| format!("parsing {}", public_inputs_path.display()))?
-        .into_fr()
-        .map_err(anyhow::Error::from)?;
 
     let num_public_inputs = public_inputs.len();
     let ic_len = vk.gamma_abc_g1.len();

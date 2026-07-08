@@ -16,7 +16,9 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::{ProofJson, PublicInputsJson};
+use xark_backend::serialization::{
+    proof_to_snarkjs, public_inputs_to_snarkjs, write_public_inputs,
+};
 use xark_backend::{keys::Groth16Keys, prove};
 use xark_ir::primitive::VarRole;
 use xark_ir::VarId;
@@ -190,22 +192,30 @@ pub fn run(args: ProveArgs) -> Result<()> {
         .with_context(|| format!("creating output dir {}", out_dir.display()))?;
     bundle.write_proof(&proof_out)?;
 
-    // Public inputs (JSON, decimal-string encoded) for `verify` / `export`.
-    let public_path = out_dir.join("public_inputs.json");
-    let public_json = PublicInputsJson::from_fr(&public);
-    fs::write(&public_path, serde_json::to_string_pretty(&public_json)?)?;
+    // Public inputs as canonical binary (primary format for verify/export).
+    let public_path = out_dir.join("public_inputs.bin");
+    write_public_inputs(&public, &public_path)?;
 
-    // snarkjs-compatible proof, for differential checks.
+    // snarkjs-compatible proof.
     let snarkjs_proof_path = out_dir.join("snarkjs-proof.json");
-    let snarkjs_proof = ProofJson::from_proof(&bundle.proof);
+    let snarkjs_proof = proof_to_snarkjs(&bundle.proof);
     fs::write(
         &snarkjs_proof_path,
         serde_json::to_string_pretty(&snarkjs_proof)?,
     )?;
 
+    // snarkjs-compatible public inputs.
+    let snarkjs_public_path = out_dir.join("snarkjs-public.json");
+    let snarkjs_public = public_inputs_to_snarkjs(&public);
+    fs::write(
+        &snarkjs_public_path,
+        serde_json::to_string_pretty(&snarkjs_public)?,
+    )?;
+
     println!("Wrote {}", proof_out.display());
-    println!("Wrote {}", public_path.display());
     println!("Wrote {}", snarkjs_proof_path.display());
+    println!("Wrote {}", snarkjs_public_path.display());
+    println!("Wrote {}", public_path.display());
     println!(
         "{}",
         crate::style::brand(&format!(

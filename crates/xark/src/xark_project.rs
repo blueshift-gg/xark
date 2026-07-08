@@ -63,7 +63,7 @@ impl XarkProject {
     }
 
     pub fn public_inputs(&self) -> PathBuf {
-        self.xark_dir.join("public_inputs.json")
+        self.xark_dir.join("public_inputs.bin")
     }
 
     /// Default output directory for `xark export`'s generated verifier crate.

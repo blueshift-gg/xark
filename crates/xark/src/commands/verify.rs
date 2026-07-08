@@ -2,7 +2,7 @@
 //!
 //! Loads the verifying key and proof written by `xark setup` / `xark prove`.
 //! Public inputs come from the circuit's public vars + `--input` values when
-//! provided; otherwise from the `public_inputs.json` written by `xark prove`.
+//! provided; otherwise from the `public_inputs.bin` written by `xark prove`.
 
 use std::path::PathBuf;
 
@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use ark_bn254::Fr;
 use clap::Args;
 
-use xark_backend::serialization::PublicInputsJson;
+use xark_backend::serialization::read_public_inputs;
 use xark_backend::{keys::Groth16Keys, proof::ProofBundle, verify};
 
 use super::{load_r1cs, parse_inputs, public_inputs_from_inputs};
@@ -24,7 +24,7 @@ pub struct VerifyArgs {
     pub path: Option<PathBuf>,
 
     /// Circuit public input as `name=value` (repeatable). When omitted, the
-    /// public inputs are read from `public_inputs.json`.
+    /// public inputs are read from `public_inputs.bin`.
     #[arg(long = "input", value_name = "NAME=VALUE")]
     pub inputs: Vec<String>,
 
@@ -34,7 +34,7 @@ pub struct VerifyArgs {
     /// Proof file. Inferred as `target/xark/proof.bin` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
-    /// Public inputs JSON. Inferred as `target/xark/public_inputs.json`.
+    /// Public inputs file. Inferred as `target/xark/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
     /// Path to `r1cs.json` (used to order `--input` public values). Inferred
@@ -61,21 +61,18 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
 
     // Public inputs: from `--input` values (recomputed) when given, else from
-    // the `public_inputs.json` the prover wrote.
+    // the `public_inputs.bin` the prover wrote.
     let public: Vec<Fr> = if args.inputs.is_empty() {
         let path = args
             .public_inputs
             .clone()
             .unwrap_or_else(|| project.public_inputs());
-        let s = std::fs::read_to_string(&path).with_context(|| {
+        read_public_inputs(&path).with_context(|| {
             format!(
                 "reading {} (pass --input <name=value> or run `xark prove` first)",
                 path.display()
             )
-        })?;
-        let json: PublicInputsJson =
-            serde_json::from_str(&s).with_context(|| format!("parsing {}", path.display()))?;
-        json.into_fr().map_err(anyhow::Error::from)?
+        })?
     } else {
         let r1cs_path = args.r1cs.clone().unwrap_or_else(|| project.r1cs_json());
         let prog = load_r1cs(&r1cs_path)?;

@@ -110,6 +110,26 @@ Rust source  →  rustc MIR  →  xark-IR  →  R1CS  →  Groth16 (BN254)  → 
 The backend never grows a per-gadget opcode to special-case: hashes / curves /
 ECDSA / … are plain Rust crates that lower to the same primitive constraints.
 
+## snarkjs compatibility
+
+`xark setup` and `xark prove` emit snarkjs-compatible JSON alongside the
+native binary artifacts:
+
+* `snarkjs-verification_key.json` — from `xark setup`
+* `snarkjs-proof.json` and `snarkjs-public.json` — from `xark prove`
+
+These can be verified directly with snarkjs:
+
+```bash
+snarkjs groth16 verify \
+  target/xark/<name>/snarkjs-verification_key.json \
+  target/xark/<name>/snarkjs-public.json \
+  target/xark/<name>/snarkjs-proof.json
+```
+
+This enables verification in JavaScript environments (browser, Node.js, etc.)
+and compatibility with the snarkjs/circom ecosystem.
+
 ## How it uses MIR
 
 The `xark` binary is both the CLI and, when `cargo` invokes it as `RUSTC` during

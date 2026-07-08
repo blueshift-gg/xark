@@ -14,7 +14,7 @@ use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use xark_backend::serialization::VerifyingKeyJson;
+use xark_backend::serialization::vk_to_snarkjs;
 use xark_backend::{keys::KeyMetadata, setup};
 use xark_prover::XarkCircuit;
 
@@ -192,7 +192,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)
             .with_context(|| format!("writing {}", meta_path.display()))?;
 
-        let snarkjs_vk = VerifyingKeyJson::from_vk(&keys.verifying_key);
+        let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, num_pi);
         fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
 
         println!("Wrote {}", pk_path.display());
@@ -237,7 +237,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
     keys.write_proving_key(&pk_path)?;
     keys.write_verifying_key(&vk_path)?;
 
-    let snarkjs_vk = VerifyingKeyJson::from_vk(&keys.verifying_key);
+    let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, num_pi);
     fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
 
     let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
