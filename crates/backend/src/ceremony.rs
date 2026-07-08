@@ -533,12 +533,14 @@ mod tests {
         let c = contribute(&mut keys, "alice", &mut rng).unwrap();
         verify_chain(initial, std::slice::from_ref(&c)).unwrap();
         // Honest shipped keys are bound to the chain.
-        verify_keys_consistent_with_chain(&keys, initial, std::slice::from_ref(&c)).expect("honest keys match");
+        verify_keys_consistent_with_chain(&keys, initial, std::slice::from_ref(&c))
+            .expect("honest keys match");
 
         // a different vk.delta_g2 (δ they know) is caught by the pairing check
         keys.verifying_key.delta_g2 = (G2Affine::generator() * Fr::from(999u64)).into_affine();
         assert!(matches!(
-            verify_keys_consistent_with_chain(&keys, initial, std::slice::from_ref(&c)).unwrap_err(),
+            verify_keys_consistent_with_chain(&keys, initial, std::slice::from_ref(&c))
+                .unwrap_err(),
             CeremonyError::KeysDoNotMatchChain
         ));
 
