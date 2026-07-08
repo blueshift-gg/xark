@@ -47,6 +47,16 @@ fn example(name: &str) -> PathBuf {
         .join("src/lib.rs")
 }
 
+/// Assert a `for`-loop circuit lowers byte-for-byte identically to its `while`
+/// counterpart, in both emitted views (`r1cs.json` and `circuit.json`).
+fn assert_for_equals_while(for_c: &Compiled, while_c: &Compiled, what: &str) {
+    for f in ["r1cs.json", "circuit.json"] {
+        let for_j = std::fs::read_to_string(for_c.out_dir.join(f)).unwrap();
+        let while_j = std::fs::read_to_string(while_c.out_dir.join(f)).unwrap();
+        assert_eq!(for_j, while_j, "{what}: `for` must equal `while` in `{f}`");
+    }
+}
+
 #[test]
 fn cube_matches_snapshot() {
     let c = compile(&example("cube"), "cube");
@@ -653,8 +663,8 @@ fn sub2_matches_vector_and_rejects_forgery() {
             .unwrap()
     };
     let set = |m: &mut BTreeMap<u32, String>, pre: &str, v: [&str; 3]| {
-        for i in 0..3 {
-            m.insert(id(&format!("{pre}[{i}]")), v[i].to_string());
+        for (i, vi) in v.iter().enumerate() {
+            m.insert(id(&format!("{pre}[{i}]")), vi.to_string());
         }
     };
     // a < b+c so qabs = 1 (borrow path exercised).
@@ -769,8 +779,8 @@ fn ec_incomplete_r1_matches_vectors() {
             .unwrap()
     };
     let set = |m: &mut BTreeMap<u32, String>, pre: &str, v: [&str; 3]| {
-        for i in 0..3 {
-            m.insert(id(&format!("{pre}[{i}]")), v[i].to_string());
+        for (i, vi) in v.iter().enumerate() {
+            m.insert(id(&format!("{pre}[{i}]")), vi.to_string());
         }
     };
     let mut inputs = BTreeMap::new();
@@ -857,8 +867,8 @@ fn ec_incomplete_matches_vectors() {
             .unwrap()
     };
     let set = |m: &mut BTreeMap<u32, String>, pre: &str, v: [&str; 3]| {
-        for i in 0..3 {
-            m.insert(id(&format!("{pre}[{i}]")), v[i].to_string());
+        for (i, vi) in v.iter().enumerate() {
+            m.insert(id(&format!("{pre}[{i}]")), vi.to_string());
         }
     };
     let mut inputs = BTreeMap::new();
@@ -1047,6 +1057,194 @@ fn while_loop_unrolls() {
     assert_eq!(json.matches("\"source_span\"").count(), 2);
     assert!(json.contains("\"note\": \"a * a = t0\""), "{json}");
     assert!(json.contains("\"note\": \"t0 * a = c\""), "{json}");
+}
+
+/// A `for i in a..b` loop over a constant integer range lowers **byte-for-byte
+/// identically** to the hand-written `let mut i = a; while i < b { .. i += 1; }`.
+/// This is the core correctness gate for `for`-range support: the desugared
+/// iterator calls (`into_iter`/`next`) are modeled at compile time so the loop
+/// unrolls into the exact same R1CS. Checked for a value use (`acc * a`), an
+/// array index (`arr[i]`), and an inclusive range (`a..=b` ≡ `while i <= b`),
+/// across both `circuit.json` and `r1cs.json`.
+#[test]
+fn for_range_equals_while() {
+    // (1) cube via `for _ in 0..2` ≡ `while i < 2`.
+    let cf = compile(&example("for_cube"), "for_cube");
+    assert!(cf.status_success, "for_cube failed: {}", cf.stderr);
+    let cw = compile(
+        &write_case(
+            "for_cube_while",
+            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
+                 let mut acc = a; let mut i = 0u64;\n\
+                 while i < 2u64 { acc = acc * a; i += 1; }\n\
+                 assert_eq(acc, c);\n\
+             }\n",
+        ),
+        "for_cube_while",
+    );
+    assert!(cw.status_success, "for_cube while failed: {}", cw.stderr);
+    assert_for_equals_while(&cf, &cw, "for_cube");
+    // a^3: a*a=t0, t0*a=c → 2 constraints.
+    let json = std::fs::read_to_string(cf.out_dir.join("r1cs.json")).unwrap();
+    assert_eq!(json.matches("\"source_span\"").count(), 2);
+
+    // (2) array indexed by the loop counter: `for i in 0..3 { acc += arr[i]; }`.
+    let idxf = compile(&example("for_index"), "for_index");
+    assert!(idxf.status_success, "for_index failed: {}", idxf.stderr);
+    let idxw = compile(
+        &write_case(
+            "for_index_while",
+            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
+                 let arr = [a, b, a];\n\
+                 let mut acc = Field::constant(\"0\"); let mut i = 0usize;\n\
+                 while i < 3 { acc = acc + arr[i]; i += 1; }\n\
+                 assert_eq(acc, c);\n\
+             }\n",
+        ),
+        "for_index_while",
+    );
+    assert!(
+        idxw.status_success,
+        "for_index while failed: {}",
+        idxw.stderr
+    );
+    assert_for_equals_while(&idxf, &idxw, "for_index");
+
+    // (3) inclusive `for i in 0..=2` ≡ `while i <= 2` (a^4).
+    let incf = compile(
+        &write_case(
+            "for_incl",
+            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
+                 let mut acc = a;\n\
+                 for _i in 0..=2u64 { acc = acc * a; }\n\
+                 assert_eq(acc, c);\n\
+             }\n",
+        ),
+        "for_incl",
+    );
+    assert!(incf.status_success, "for_incl failed: {}", incf.stderr);
+    let incw = compile(
+        &write_case(
+            "for_incl_while",
+            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
+                 let mut acc = a; let mut i = 0u64;\n\
+                 while i <= 2u64 { acc = acc * a; i += 1; }\n\
+                 assert_eq(acc, c);\n\
+             }\n",
+        ),
+        "for_incl_while",
+    );
+    assert!(
+        incw.status_success,
+        "for_incl while failed: {}",
+        incw.stderr
+    );
+    assert_for_equals_while(&incf, &incw, "for_incl (a..=b)");
+}
+
+/// Iterating a **fixed-size array** — by value (`for x in arr`) and by reference
+/// (`for x in &arr`) — lowers byte-for-byte identically to the counter-indexed
+/// `while i < N { let x = arr[i]; .. }`. The array's element values are captured
+/// at compile time (references are transparent in the value model), so the two
+/// desugared iterators (`array::IntoIter` / `slice::Iter`) unroll to identical
+/// R1CS.
+#[test]
+fn for_array_equals_while() {
+    let byval = compile(&example("for_array"), "for_array");
+    assert!(byval.status_success, "for_array failed: {}", byval.stderr);
+    let byref = compile(
+        &write_case(
+            "for_array_ref",
+            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
+                 let arr = [a, b, a];\n\
+                 let mut acc = Field::constant(\"0\");\n\
+                 for x in &arr { acc = acc + *x; }\n\
+                 assert_eq(acc, c);\n\
+             }\n",
+        ),
+        "for_array_ref",
+    );
+    assert!(
+        byref.status_success,
+        "for_array ref failed: {}",
+        byref.stderr
+    );
+    let whilev = compile(
+        &write_case(
+            "for_array_while",
+            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
+                 let arr = [a, b, a];\n\
+                 let mut acc = Field::constant(\"0\"); let mut i = 0usize;\n\
+                 while i < 3 { acc = acc + arr[i]; i += 1; }\n\
+                 assert_eq(acc, c);\n\
+             }\n",
+        ),
+        "for_array_while",
+    );
+    assert!(
+        whilev.status_success,
+        "for_array while failed: {}",
+        whilev.stderr
+    );
+    assert_for_equals_while(&byval, &whilev, "for x in arr");
+    assert_for_equals_while(&byref, &whilev, "for x in &arr");
+}
+
+/// A `for` over anything but a constant integer range or a fixed-size array is
+/// rejected with a clear diagnostic — never an ICE. A range iterator adapter
+/// (`.rev()`) gets the specific "only `for` over a constant integer range"
+/// message; a slice iterator (`.iter()`, which needs an unsize coercion the
+/// circuit can't lower) is also cleanly rejected.
+#[test]
+fn for_over_unsupported_iterator_is_rejected() {
+    let mk = |name: &str, body: &str| {
+        write_case(
+            name,
+            &format!(
+                "#![no_std]\nuse xark::{{assert_eq, Field, Private, Public}};\n\
+                 pub fn circuit(a: Private<Field>, c: Public<Field>) {{\n\
+                     let arr = [a, a];\n\
+                     let mut acc = a;\n\
+                     {body}\n\
+                     assert_eq(acc, c);\n\
+                 }}\n"
+            ),
+        )
+    };
+
+    // `.rev()` reaches our range modeling and gets the specific message.
+    let rev = compile(
+        &mk(
+            "for_reject_rev",
+            "for _i in (0..2).rev() { acc = acc * a; }",
+        ),
+        "for_reject_rev",
+    );
+    assert!(!rev.status_success, "a range adapter must be rejected");
+    assert!(
+        rev.stderr
+            .contains("only `for` over a constant integer range is supported"),
+        "{}",
+        rev.stderr
+    );
+
+    // `.iter()` is rejected too (cleanly — no ICE).
+    let it = compile(
+        &mk("for_reject_iter", "for x in arr.iter() { acc = acc + *x; }"),
+        "for_reject_iter",
+    );
+    assert!(!it.status_success, "a slice iterator must be rejected");
+    assert!(
+        it.stderr.contains("error:") && !it.stderr.contains("panicked"),
+        "expected a clean rejection, got: {}",
+        it.stderr
+    );
 }
 
 /// A helper function is inlined, and a multiplication inside it still merges

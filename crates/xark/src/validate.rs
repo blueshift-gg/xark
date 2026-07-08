@@ -14,6 +14,16 @@ pub fn validate<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> CompileResult<()>
     for bb in body.basic_blocks.indices() {
         let data = &body.basic_blocks[bb];
 
+        // Skip unwind/cleanup blocks. A circuit never unwinds (no panics are
+        // reachable — bounds/overflow asserts follow their success edge), so
+        // lowering only ever walks the non-unwind edges. These blocks exist only
+        // to drop values during a panic (e.g. the `array::IntoIter` of a
+        // `for x in arr`), and contain `UnwindResume`/`Drop … unwind` terminators
+        // that would otherwise be spuriously rejected.
+        if data.is_cleanup {
+            continue;
+        }
+
         for stmt in &data.statements {
             // Attach the statement's source span as a fallback; an inner check's
             // more precise span (if any) is preserved by `or_span`.
@@ -51,14 +61,20 @@ fn check_place(place: &Place<'_>) -> CompileResult<()> {
         match elem {
             // Array indexing (constant indices) and tuple/overflow-check field
             // access. Lowering enforces that indices are compile-time constants.
+            // `Downcast` is the enum-variant selector of `(_opt as Some).0` when
+            // reading the modeled `Option` produced by iterating a constant range;
+            // lowering only resolves that case and rejects genuine enum matches.
+            // `Deref` is a transparent reference in the value model (e.g. `*x`
+            // reading a `&Field` yielded by iterating `&arr`); lowering copies the
+            // referent's slots so the deref reads them back.
             ProjectionElem::Index(_)
             | ProjectionElem::ConstantIndex { .. }
-            | ProjectionElem::Field(..) => {}
+            | ProjectionElem::Field(..)
+            | ProjectionElem::Downcast(..)
+            | ProjectionElem::Deref => {}
             _ => {
-                return Err(CompileError::new(
-                    "unsupported place projection (deref, subslice, or downcast)",
-                )
-                .with_note("only fixed-size array indexing is supported"))
+                return Err(CompileError::new("unsupported place projection (subslice)")
+                    .with_note("only fixed-size array indexing is supported"))
             }
         }
     }
@@ -84,7 +100,11 @@ fn check_rvalue(rvalue: &Rvalue<'_>) -> CompileResult<()> {
         // `Field::constant("...")` string-literal chain and rejects the rest.
         Rvalue::Ref(..) | Rvalue::CopyForDeref(..) => Ok(()),
         // Array construction / repeat; lowering restricts these to `Field` arrays.
+        // `Aggregate` also builds the `Range { start, end }` of a `for` loop.
         Rvalue::Aggregate(..) | Rvalue::Repeat(..) => Ok(()),
+        // `discriminant(_opt)` for a modeled range-iterator `Option`; lowering
+        // rejects a discriminant of any value it can't const-fold.
+        Rvalue::Discriminant(..) => Ok(()),
         Rvalue::RawPtr(..) => Err(unsupported_rvalue("raw pointers")),
         // Compile-time integer widening/narrowing (e.g. `v as u64` in the
         // `From<uN> for Field` conversions); other casts stay rejected.
@@ -136,6 +156,15 @@ fn check_terminator<'tcx>(tcx: TyCtxt<'tcx>, kind: &TerminatorKind<'tcx>) -> Com
         // Compile-time-resolvable branches (loop conditions, `if CONST`).
         // Lowering rejects any that turn out to be witness-dependent.
         TerminatorKind::SwitchInt { .. } => Ok(()),
+        // The `otherwise` edge of a `for`-loop's `switchInt(discriminant)` is an
+        // `unreachable` block. Lowering never follows it (the discriminant is a
+        // constant 0/1); if some path ever did, `walk_body` rejects it there.
+        TerminatorKind::Unreachable => Ok(()),
+        // A `Drop` in circuit code comes from a non-`Copy` value — in practice the
+        // by-value `array::IntoIter` of `for x in arr`. Drops have no arithmetic
+        // effect; lowering follows the success edge and ignores the drop. An
+        // iterator we can't model is rejected later, when its `next` is lowered.
+        TerminatorKind::Drop { .. } => Ok(()),
         _ => Err(CompileError::new(
             "unsupported control-flow construct inside circuit",
         )),

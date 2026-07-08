@@ -47,6 +47,13 @@ pub enum KnownCall {
     HintSub2,
     Xor,
     Or,
+    // `for` desugaring (modeled, not inlined): the two `core` iterator calls plus
+    // `RangeInclusive::new`. See `lower_call` for how each is folded into the
+    // compile-time loop-unrolling machinery. `IntoIter`/`IterNext` handle both a
+    // constant integer range and a fixed-size array (by value or by reference).
+    IntoIter,
+    IterNext,
+    RangeInclusiveNew,
 }
 
 /// Classify a called function by its fully-qualified path.
@@ -139,6 +146,16 @@ pub(crate) fn classify_call(
         Some(KnownCall::Or)
     } else if s.contains("__xark_advice") || (s.contains("Field") && s.ends_with("::advice")) {
         Some(KnownCall::Advice)
+    // `for` desugaring. `into_iter` is the blanket `<I as IntoIterator>::into_iter`
+    // (identity); `next` on a `Range`/`RangeInclusive`; `RangeInclusive::new`. We
+    // *model* these (evaluate their effect on a compile-time range) rather than
+    // inline them, so the surrounding `discriminant`/`switchInt` fold to constants.
+    } else if s.ends_with("::into_iter") {
+        Some(KnownCall::IntoIter)
+    } else if s.ends_with("::next") && s.contains("Iterator") {
+        Some(KnownCall::IterNext)
+    } else if s.contains("RangeInclusive") && s.ends_with("::new") {
+        Some(KnownCall::RangeInclusiveNew)
     } else {
         None
     }
@@ -156,6 +173,32 @@ fn binop_rhs_is_field(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> bool
     )
 }
 
+/// True if `did` is the exclusive `core::ops::Range` struct (matched via its
+/// def path, which ends in `::Range` — `RangeInclusive`/`RangeFrom`/… do not).
+fn is_exclusive_range(tcx: TyCtxt<'_>, did: DefId) -> bool {
+    tcx.def_path_str(did).ends_with("::Range")
+}
+
+/// The diagnostic for a `for` over anything but a constant integer range.
+fn unsupported_iterator() -> CompileError {
+    CompileError::new("only `for` over a constant integer range is supported")
+        .with_note(
+            "iterating arrays/slices, `.iter()`, `.enumerate()`, `.rev()`, `.step_by()`, and \
+             other iterator adapters are not circuit operations",
+        )
+        .with_help("use `for i in 0..N { .. }` with constant `N`, or a `while` loop")
+}
+
+/// Read a range bound operand as a compile-time-constant integer, rejecting a
+/// witness/non-const bound (`for i in 0..n`) with a clear diagnostic.
+fn range_bound<'tcx>(env: &LoweringEnv<'tcx>, operand: &Operand<'tcx>) -> CompileResult<u128> {
+    env.operand_to_int(operand).map(|v| v as u128).ok_or_else(|| {
+        CompileError::new("`for` range bounds must be compile-time constants")
+            .with_note("a circuit has no runtime control flow, so the loop length must be fixed")
+            .with_help("use constant bounds, e.g. `for i in 0..N`; for data-dependent work use `select`")
+    })
+}
+
 /// One inlining frame's local state. Values are keyed by `Local`, then by
 /// projection path (`[]` for a scalar, `[i]`/`[i, j]` for array elements /
 /// tuple fields), so slot lookups/copies stay local to a single variable
@@ -169,6 +212,42 @@ struct Frame {
     field: BTreeMap<rustc_middle::mir::Local, BTreeMap<Vec<u64>, LinearCombination>>,
     int: BTreeMap<rustc_middle::mir::Local, BTreeMap<Vec<u64>, u128>>,
     str: BTreeMap<rustc_middle::mir::Local, String>,
+    // `for` desugaring state, all purely compile-time:
+    // - `range_iter`: a local holding a `Range`/`RangeInclusive` iterator's
+    //   current cursor + bound (established by the `Range { .. }` aggregate or
+    //   `RangeInclusive::new`, carried through `into_iter`/moves).
+    // - `ref_alias`: a `&mut iter` reference local → the base iterator local it
+    //   points at, so `next(&mut iter)` finds the state to advance.
+    // - `opt_disc`: a local holding a modeled `Option` produced by `next` → its
+    //   discriminant (0 = None, 1 = Some); the `Some` payload lives in int slot
+    //   `[0]` so `(_opt as Some).0` reads back as a constant.
+    range_iter: BTreeMap<rustc_middle::mir::Local, RangeState>,
+    // A local holding a fixed-size-array iterator (`for x in arr` / `for x in
+    // &arr`): the array's element values plus a cursor, modeled like a range.
+    array_iter: BTreeMap<rustc_middle::mir::Local, ArrayIterState>,
+    ref_alias: BTreeMap<rustc_middle::mir::Local, rustc_middle::mir::Local>,
+    opt_disc: BTreeMap<rustc_middle::mir::Local, u128>,
+}
+
+/// A compile-time fixed-size-array iterator's state. `elems[i]` is element `i`'s
+/// field slots as `(path-relative-to-the-element, lc)` (one entry for a scalar
+/// `Field`, N for a nested `[Field; N]`), and `cursor` the next index to yield.
+#[derive(Clone, Debug)]
+struct ArrayIterState {
+    elems: Vec<Vec<(Vec<u64>, LinearCombination)>>,
+    cursor: usize,
+}
+
+/// A compile-time integer-range iterator's state. `cur` is the next value to
+/// yield; `end` the (exclusive or inclusive) bound. For `RangeInclusive`,
+/// `exhausted` records that the final `end` value has been yielded (matching
+/// `RangeInclusive`'s internal flag, since `cur == end` is ambiguous otherwise).
+#[derive(Clone, Copy, Debug)]
+struct RangeState {
+    cur: u128,
+    end: u128,
+    inclusive: bool,
+    exhausted: bool,
 }
 
 struct LoweringEnv<'tcx> {
@@ -295,6 +374,16 @@ impl<'tcx> LoweringEnv<'tcx> {
                 rustc_middle::mir::ProjectionElem::Field(field, _) => {
                     path.push(field.as_u32() as u64)
                 }
+                // Enum-variant selector, e.g. `(_opt as Some).0` reading a
+                // modeled `Option` produced by a range `next`. It selects a
+                // variant but contributes nothing to the slot path (the following
+                // `Field` does); a genuine non-modeled downcast simply misses.
+                rustc_middle::mir::ProjectionElem::Downcast(..) => {}
+                // Transparent reference: `&x` copies `x`'s slots to the reference
+                // local, so a later `*r` reads them straight back. Used by
+                // by-reference array iteration (`for x in &arr`, whose `next`
+                // yields `&Field` that the body then dereferences).
+                rustc_middle::mir::ProjectionElem::Deref => {}
                 other => {
                     return Err(CompileError::new(format!(
                         "unsupported place projection: {other:?}"
@@ -326,13 +415,56 @@ impl<'tcx> LoweringEnv<'tcx> {
     fn set_str(&mut self, local: rustc_middle::mir::Local, s: String) {
         self.frame_mut().str.insert(local, s);
     }
-    /// Drop all slots (field / int / str) tracked for `local` in the current
-    /// frame — used on `StorageLive` so a reused local starts clean.
+    /// Drop all slots (field / int / str / range-iter / option) tracked for
+    /// `local` in the current frame — used on `StorageLive` so a reused local
+    /// starts clean.
     fn clear_local(&mut self, local: rustc_middle::mir::Local) {
         let f = self.frame_mut();
         f.field.remove(&local);
         f.int.remove(&local);
         f.str.remove(&local);
+        f.range_iter.remove(&local);
+        f.array_iter.remove(&local);
+        f.ref_alias.remove(&local);
+        f.opt_disc.remove(&local);
+    }
+
+    // --- `for`-loop iterator state -----------------------------------------
+
+    fn set_range_state(&mut self, local: rustc_middle::mir::Local, st: RangeState) {
+        self.frame_mut().range_iter.insert(local, st);
+    }
+    /// Remove and return the range state tracked for `local` (used to *move* it
+    /// through `into_iter` / `let iter = range`).
+    fn take_range_state(&mut self, local: rustc_middle::mir::Local) -> Option<RangeState> {
+        self.frame_mut().range_iter.remove(&local)
+    }
+    fn set_array_iter(&mut self, local: rustc_middle::mir::Local, st: ArrayIterState) {
+        self.frame_mut().array_iter.insert(local, st);
+    }
+    fn take_array_iter(&mut self, local: rustc_middle::mir::Local) -> Option<ArrayIterState> {
+        self.frame_mut().array_iter.remove(&local)
+    }
+    /// The base iterator local a place refers to: either the iterator itself
+    /// (range or array), or a `&mut iter` reference resolved through `ref_alias`.
+    /// The reborrow chain (`&mut iter` then `&mut (*r)`) always refers to the
+    /// whole iterator, so the projection (a `Deref`) is irrelevant.
+    fn iter_base_of_place(&self, place: &Place<'tcx>) -> Option<rustc_middle::mir::Local> {
+        let f = self.frame();
+        if f.range_iter.contains_key(&place.local) || f.array_iter.contains_key(&place.local) {
+            Some(place.local)
+        } else {
+            f.ref_alias.get(&place.local).copied()
+        }
+    }
+    fn set_ref_alias(&mut self, from: rustc_middle::mir::Local, to: rustc_middle::mir::Local) {
+        self.frame_mut().ref_alias.insert(from, to);
+    }
+    fn set_opt_disc(&mut self, local: rustc_middle::mir::Local, disc: u128) {
+        self.frame_mut().opt_disc.insert(local, disc);
+    }
+    fn get_opt_disc(&self, local: rustc_middle::mir::Local) -> Option<u128> {
+        self.frame().opt_disc.get(&local).copied()
     }
     /// Generic args of the innermost inlined callee (identity at the top level),
     /// applied to monomorphize nested calls before resolving them.
@@ -1410,6 +1542,9 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
             // Bounds/overflow checks: indices are compile-time constants (the
             // loop unroller guarantees this), so follow the success edge.
             TerminatorKind::Assert { target, .. } => bb = *target,
+            // The by-value `array::IntoIter` of `for x in arr` is dropped after
+            // the loop; the drop has no circuit effect, so follow its edge.
+            TerminatorKind::Drop { target, .. } => bb = *target,
             // Compile-time-known branch (loop condition, match on constant).
             TerminatorKind::SwitchInt { discr, targets } => {
                 let v = env
@@ -1471,29 +1606,48 @@ fn lower_statement<'tcx>(
             let (dest, dest_path) = env.resolve_place(place)?;
             match rvalue {
                 Rvalue::Use(operand, _) => bind_use(env, dest, &dest_path, operand),
-                // `_b = &(*_a)` reborrow: only supported to carry a `&str`
-                // literal into `Field::constant`. Other `Field` references are
-                // unsupported (rejects `==`/`<` and `+=`/`-=`).
-                Rvalue::Ref(_, _, src) | Rvalue::CopyForDeref(src) => {
-                    if let Some(s) = env.get_str(src.local) {
-                        env.set_str(dest, s);
-                        Ok(())
-                    } else {
-                        Err(CompileError::new(
-                            "references to a `Field` value are not supported inside a circuit",
-                        )
-                        .with_note(
-                            "comparisons (`==` `!=` `<` `<=` `>` `>=`) and compound assignments \
-                             (`+=` `-=` `*=` `/=`) are not circuit operations — use `assert_eq(a, b)` \
-                             to constrain equality or `a.is_eq(b)`/`a.is_zero()` for a boolean result, \
-                             and write `a = a + b` instead of `a += b`",
-                        ))
-                    }
-                }
+                // `_b = &(*_a)` reborrow: supported to carry a `&str` literal into
+                // `Field::constant`, or a *shared* borrow of a `Field`-bearing
+                // value (transparent in the value model). A `&mut` borrow of a
+                // `Field` is still rejected (rejects `+=`/`-=` write-back), except
+                // the `&mut iter` reborrow of a `for`-loop iterator.
+                Rvalue::Ref(_, kind, src) => lower_ref(
+                    env,
+                    dest,
+                    src,
+                    matches!(
+                        kind,
+                        rustc_middle::mir::BorrowKind::Shared
+                            | rustc_middle::mir::BorrowKind::Fake(_)
+                    ),
+                ),
+                // `CopyForDeref` is always a read (a projection copy), so it is
+                // transparent like a shared borrow.
+                Rvalue::CopyForDeref(src) => lower_ref(env, dest, src, true),
                 // Array literal `[a, b, c]`: store each element in its slot.
                 // Elements may themselves be arrays (nested arrays like
                 // `[[Field; 32]; 8]`), copied slot-by-slot.
                 Rvalue::Aggregate(kind, operands) => {
+                    // `for i in a..b`: the exclusive `Range { start, end }` literal.
+                    // Model it as a compile-time range-iterator on `dest` (bounds
+                    // must be constants) rather than a struct of int fields.
+                    if let rustc_middle::mir::AggregateKind::Adt(did, ..) = &**kind {
+                        if is_exclusive_range(env.tcx, *did) {
+                            let mut it = operands.iter();
+                            let start = range_bound(env, it.next().expect("Range.start"))?;
+                            let end = range_bound(env, it.next().expect("Range.end"))?;
+                            env.set_range_state(
+                                dest,
+                                RangeState {
+                                    cur: start,
+                                    end,
+                                    inclusive: false,
+                                    exhausted: false,
+                                },
+                            );
+                            return Ok(());
+                        }
+                    }
                     // Arrays, tuples, and plain structs all lay their components
                     // out by index: operand `i` goes to slot `[dest_path, i]`. For
                     // a struct the operands are the fields in declaration
@@ -1566,6 +1720,21 @@ fn lower_statement<'tcx>(
                     }
                     Ok(())
                 }
+                // `discriminant(_opt)` on a modeled `Option` from a range `next`:
+                // yield its constant discriminant (0 = None, 1 = Some) so the
+                // following `switchInt` resolves at compile time.
+                Rvalue::Discriminant(place) => {
+                    let (local, _) = env.resolve_place(place)?;
+                    let disc = env.get_opt_disc(local).ok_or_else(|| {
+                        CompileError::new("`discriminant` of a value the circuit can't model")
+                            .with_note(
+                                "only the `Option` produced by iterating a constant integer range \
+                                 is supported; matching on other enums is not a circuit operation",
+                            )
+                    })?;
+                    env.set_int_at(dest, &dest_path, disc);
+                    Ok(())
+                }
                 // Compile-time integer cast (`From<uN> for Field`, or a narrowing
                 // `as uN`). Truncate to the target width per Rust `as` semantics.
                 Rvalue::Cast(_, operand, ty) => {
@@ -1636,6 +1805,18 @@ fn bind_use<'tcx>(
     match operand {
         Operand::Copy(place) | Operand::Move(place) => {
             let (src, src_path) = env.resolve_place(place)?;
+            // Carry an iterator through `let iter = <into_iter result>`
+            // (`_6 = move _4`) — for both a range and a fixed-size array.
+            if src_path.is_empty() && dest_path.is_empty() {
+                if let Some(st) = env.take_range_state(src) {
+                    env.set_range_state(dest, st);
+                    return Ok(());
+                }
+                if let Some(st) = env.take_array_iter(src) {
+                    env.set_array_iter(dest, st);
+                    return Ok(());
+                }
+            }
             if let Some(lc) = env.get_field_at(src, &src_path) {
                 env.set_field_at(dest, dest_path, lc);
             } else if let Some(v) = env.get_int_at(src, &src_path) {
@@ -1680,6 +1861,49 @@ fn bind_use<'tcx>(
         }
         Operand::RuntimeChecks(_) => Ok(()),
     }
+}
+
+/// Lower `dest = &src` / `dest = &(*src)`.
+///
+/// - A `&mut iter` reborrow of a `for`-loop iterator records an alias so a later
+///   `next(move r)` finds the base state.
+/// - A *shared* borrow of a `Field`-bearing value is transparent: copy the
+///   referent's field slots to `dest`, so `*dest` (or `into_iter(&arr)`) reads
+///   them back. `shared` is false for `&mut` borrows — copying those would
+///   silently drop the write-back (e.g. `acc += b`), so they stay rejected.
+/// - The `&str` reborrow chain of `Field::constant("...")` is carried through.
+fn lower_ref<'tcx>(
+    env: &mut LoweringEnv<'tcx>,
+    dest: rustc_middle::mir::Local,
+    src: &Place<'tcx>,
+    shared: bool,
+) -> CompileResult<()> {
+    if let Some(base) = env.iter_base_of_place(src) {
+        env.set_ref_alias(dest, base);
+        return Ok(());
+    }
+    if shared {
+        let (sl, spath) = env.resolve_place(src)?;
+        let slots = env.collect_field_slots(sl, &spath);
+        if !slots.is_empty() {
+            for (rel, lc) in slots {
+                env.set_field_at(dest, &rel, lc);
+            }
+            return Ok(());
+        }
+    }
+    if let Some(s) = env.get_str(src.local) {
+        env.set_str(dest, s);
+        return Ok(());
+    }
+    Err(CompileError::new(
+        "references to a `Field` value are not supported inside a circuit",
+    )
+    .with_note(
+        "comparisons (`==` `!=` `<` `<=` `>` `>=`) and compound assignments (`+=` `-=` `*=` `/=`) \
+         are not circuit operations — use `assert_eq(a, b)` to constrain equality or \
+         `a.is_eq(b)`/`a.is_zero()` for a boolean result, and write `a = a + b` instead of `a += b`",
+    ))
 }
 
 fn is_with_overflow(op: rustc_middle::mir::BinOp) -> bool {
@@ -1951,6 +2175,103 @@ fn lower_call<'tcx>(
             // Returns `[q, r]` as a two-element array.
             env.set_field_at(dest, &[0], LinearCombination::var(q));
             env.set_field_at(dest, &[1], LinearCombination::var(r));
+        }
+        // `RangeInclusive::new(a, b)` → the inclusive range-iterator state.
+        KnownCall::RangeInclusiveNew => {
+            let start = range_bound(env, arg(0)?)?;
+            let end = range_bound(env, arg(1)?)?;
+            env.set_range_state(
+                dest,
+                RangeState {
+                    cur: start,
+                    end,
+                    inclusive: true,
+                    exhausted: false,
+                },
+            );
+        }
+        // `into_iter` is the identity for both a `Range` and a fixed-size array.
+        // Carry the range state, or capture the array's element slots as an array
+        // iterator. A non-range/array argument (e.g. `for x in v.iter()`, a slice
+        // iterator we can't const-model) has neither → reject with a clear error.
+        KnownCall::IntoIter => {
+            let src = match arg(0)? {
+                Operand::Copy(p) | Operand::Move(p) => LoweringEnv::place_local(p)?,
+                _ => return Err(unsupported_iterator()),
+            };
+            if let Some(st) = env.take_range_state(src) {
+                env.set_range_state(dest, st);
+            } else {
+                // Fixed-size array (`for x in arr` / `for x in &arr`, whose `&arr`
+                // copied the slots here transparently). Group the flat field slots
+                // by element index into per-element slot lists.
+                let slots = env.collect_field_slots(src, &[]);
+                if slots.is_empty() {
+                    return Err(unsupported_iterator());
+                }
+                let mut groups: BTreeMap<u64, Vec<(Vec<u64>, LinearCombination)>> = BTreeMap::new();
+                for (path, lc) in slots {
+                    let Some((first, rest)) = path.split_first() else {
+                        // A scalar (empty path) isn't iterable.
+                        return Err(unsupported_iterator());
+                    };
+                    groups.entry(*first).or_default().push((rest.to_vec(), lc));
+                }
+                let elems: Vec<_> = groups.into_values().collect();
+                env.set_array_iter(dest, ArrayIterState { elems, cursor: 0 });
+            }
+        }
+        // `<_ as Iterator>::next(&mut iter)` — model one step: advance the
+        // compile-time cursor and produce a modeled `Option` (`Some(v)`/`None`) so
+        // the following `discriminant`/`switchInt` fold to constants. `Some`'s
+        // payload lives in the option local's slot `[0]` (an int for a range, the
+        // element's field slots for an array), read back via `(_opt as Some).0`.
+        KnownCall::IterNext => {
+            let base = env
+                .iter_base_of_place(match arg(0)? {
+                    Operand::Copy(p) | Operand::Move(p) => p,
+                    _ => return Err(unsupported_iterator()),
+                })
+                .ok_or_else(unsupported_iterator)?;
+            if let Some(mut st) = env.take_range_state(base) {
+                let yields = if st.exhausted {
+                    false
+                } else if st.inclusive {
+                    st.cur <= st.end
+                } else {
+                    st.cur < st.end
+                };
+                if yields {
+                    env.set_opt_disc(dest, 1);
+                    env.set_int_at(dest, &[0], st.cur);
+                    // For an inclusive range, yielding `end` exhausts it (rather
+                    // than overflowing past `end`).
+                    if st.inclusive && st.cur == st.end {
+                        st.exhausted = true;
+                    } else {
+                        st.cur += 1;
+                    }
+                } else {
+                    env.set_opt_disc(dest, 0);
+                }
+                env.set_range_state(base, st);
+            } else {
+                let mut st = env.take_array_iter(base).expect("iter_base implies state");
+                if st.cursor < st.elems.len() {
+                    env.set_opt_disc(dest, 1);
+                    // Store the element's slots under the `Some` payload path `[0]`.
+                    let elem = st.elems[st.cursor].clone();
+                    for (rel, lc) in elem {
+                        let mut p = vec![0u64];
+                        p.extend(rel);
+                        env.set_field_at(dest, &p, lc);
+                    }
+                    st.cursor += 1;
+                } else {
+                    env.set_opt_disc(dest, 0);
+                }
+                env.set_array_iter(base, st);
+            }
         }
     }
     Ok(())
