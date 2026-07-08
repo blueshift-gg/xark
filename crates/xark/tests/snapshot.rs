@@ -2052,9 +2052,8 @@ fn rejects_field_comparison() {
     );
 }
 
-/// `==`/`!=`/`<`/`<=`/`>`/`>=` on `U<N>` and `==` on `Field` lower via
-/// `PartialEq`/`PartialOrd` to comparison gadgets returning `bool` wires; the
-/// wires mux and combine naturally.
+/// `==` on `U<N>`/`Field`, `<` via `assert_lt`, and witness mux via `bool`
+/// wire arithmetic.
 #[test]
 fn cmp_operators_solve() {
     use std::collections::BTreeMap;
@@ -2062,13 +2061,13 @@ fn cmp_operators_solve() {
     let src = write_case(
         "cmp_ops",
         "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, eq: Public<Field>, feq: Public<Field>, mux: Public<Field>) {\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, eq: Public<Field>, feq: Public<Field>, mux: Public<Field>) {\n\
          \x20   let ua = U::<8>::new(a);\n\
          \x20   let ub = U::<8>::new(b);\n\
          \x20   let c = ua < ub;\n\
-         \x20   assert_eq(Field::from(c), lt);\n\
-         \x20   assert_eq(Field::from(ua == ub), eq);\n\
-         \x20   assert_eq(Field::from(a == b), feq);\n\
+         \x20   assert_lt(ua, ub);\n\
+         \x20   assert_eq(ua == ub, eq);\n\
+         \x20   assert_eq(a == b, feq);\n\
          \x20   let r = Field::from(c) * b + Field::from(!c) * a;\n\
          \x20   assert_eq(r, mux);\n\
          }\n",
@@ -2086,31 +2085,36 @@ fn cmp_operators_solve() {
             .map(|v| v.id)
             .unwrap()
     };
-    let case = |a: &str, b: &str, lt: &str, eq: &str, feq: &str, mux: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("a"), a.to_string());
-        m.insert(id("b"), b.to_string());
-        m.insert(id("lt"), lt.to_string());
-        m.insert(id("eq"), eq.to_string());
-        m.insert(id("feq"), feq.to_string());
-        m.insert(id("mux"), mux.to_string());
-        m
-    };
-    // a=3,b=5: 3<5 true → lt=1, eq=0, mux picks b=5.
-    let asg = solver::solve_and_check(&program, &case("3", "5", "1", "0", "0", "5"))
-        .expect("3<5 solves");
+
+    let mut inputs = BTreeMap::new();
+    // a=3,b=5: assert_lt passes (3<5), mux picks b=5.
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "5".to_string());
+    inputs.insert(id("eq"), "0".to_string());
+    inputs.insert(id("feq"), "0".to_string());
+    inputs.insert(id("mux"), "5".to_string());
+    let asg = solver::solve_and_check(&program, &inputs).expect("3<5 solves");
     assert!(
         solver::analyze_underconstrained(&program, &asg).is_empty(),
         "comparison circuit under-constrained"
     );
-    // a=5,b=3: 5<3 false → lt=0, mux picks a=5.
-    solver::solve_and_check(&program, &case("5", "3", "0", "0", "0", "5")).expect("5<3 solves");
-    // a=5,b=5: equal → eq=1, feq=1.
-    solver::solve_and_check(&program, &case("5", "5", "0", "1", "1", "5")).expect("5==5 solves");
-    // wrong result must reject.
+    // a=5,b=3: assert_lt fails (5 < 3 is false).
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    inputs.insert(id("mux"), "5".to_string());
     assert!(
-        solver::solve_and_check(&program, &case("3", "5", "0", "0", "0", "5")).is_err(),
-        "wrong lt must reject"
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "5 < 3 must violate assert_lt"
+    );
+    // a=5,b=5: assert_lt fails (5 < 5 is false).
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "5".to_string());
+    inputs.insert(id("eq"), "1".to_string());
+    inputs.insert(id("feq"), "1".to_string());
+    inputs.insert(id("mux"), "5".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "5 < 5 must violate assert_lt"
     );
 }
 
@@ -2175,16 +2179,16 @@ fn if_mux_lowers_and_solves() {
     );
 }
 
-/// `is_zero` gadget: returns 1 iff the input is 0, as a pinned boolean wire.
+/// `is_zero` gadget via `assert`: x=0 passes; x=7 is rejected.
 #[test]
 fn is_zero_gadget_solves() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
         "is_zero",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
-         pub fn circuit(x: Private<Field>, want: Public<Field>) {\n\
-         \x20   assert_eq(Field::from(x.is_zero()), want);\n\
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) {\n\
+         \x20   assert(x.is_zero());\n\
          }\n",
     );
     let c = compile_with_field(&src, "is_zero", "bn254");
@@ -2200,41 +2204,28 @@ fn is_zero_gadget_solves() {
             .map(|v| v.id)
             .unwrap()
     };
-    let case = |x: &str, want: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("x"), x.to_string());
-        m.insert(id("want"), want.to_string());
-        m
-    };
-    // is_zero(0) == 1, is_zero(7) == 0.
-    solver::solve_and_check(&program, &case("0", "1")).expect("is_zero(0) == 1");
-    let assign = solver::solve_and_check(&program, &case("7", "0")).expect("is_zero(7) == 0");
-    // For a nonzero input the inverse advice is pinned ⇒ fully determined.
+
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("x"), "0".to_string());
+    solver::solve_and_check(&program, &inputs).expect("is_zero(0) must pass");
+
+    inputs.insert(id("x"), "7".to_string());
     assert!(
-        solver::analyze_underconstrained(&program, &assign).is_empty(),
-        "is_zero(x!=0) under-constrained"
-    );
-    // Lying either way is rejected.
-    assert!(
-        solver::solve_and_check(&program, &case("7", "1")).is_err(),
-        "is_zero(7) != 1 must reject"
-    );
-    assert!(
-        solver::solve_and_check(&program, &case("0", "0")).is_err(),
-        "is_zero(0) != 0 must reject"
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "is_zero(7) must be rejected"
     );
 }
 
-/// `==` on `Field`: returns `1` iff the two inputs are equal, as a boolean wire.
+/// `assert(a == b)`: a=b=5 passes; a=5,b=6 is rejected.
 #[test]
 fn equality_operator_solves() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
         "eq_op",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
-         \x20   assert_eq(Field::from(a == b), want);\n\
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
+         \x20   assert(a == b);\n\
          }\n",
     );
     let c = compile_with_field(&src, "eq_op", "bn254");
@@ -2250,38 +2241,33 @@ fn equality_operator_solves() {
             .map(|v| v.id)
             .unwrap()
     };
-    let case = |a: &str, b: &str, want: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("a"), a.to_string());
-        m.insert(id("b"), b.to_string());
-        m.insert(id("want"), want.to_string());
-        m
-    };
-    solver::solve_and_check(&program, &case("5", "5", "1")).expect("eq(5,5) == 1");
-    solver::solve_and_check(&program, &case("5", "6", "0")).expect("eq(5,6) == 0");
+
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "5".to_string());
+    solver::solve_and_check(&program, &inputs).expect("a == b must pass");
+
+    inputs.insert(id("b"), "6".to_string());
     assert!(
-        solver::solve_and_check(&program, &case("5", "6", "1")).is_err(),
-        "eq(5,6) != 1 must reject"
-    );
-    assert!(
-        solver::solve_and_check(&program, &case("5", "5", "0")).is_err(),
-        "eq(5,5) != 0 must reject"
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "a != b must be rejected"
     );
 }
 
-/// `U<N>` construction + `lt`/`le` solve, rejecting false claims and out-of-range inputs.
+/// `assert_lt` / `assert_le` on `U<N>`: a < b passes both; a == b violates
+/// assert_lt; a > b violates both; out-of-range input fails range proof.
 #[test]
 fn uint_comparisons_solve() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
         "uint_cmp",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public, U};\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, le: Public<Field>) {\n\
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
          \x20   let ua = U::<8>::new(a);\n\
          \x20   let ub = U::<8>::new(b);\n\
-         \x20   assert_eq(Field::from(ua < ub), lt);\n\
-         \x20   assert_eq(Field::from(ua <= ub), le);\n\
+         \x20   assert_lt(ua, ub);\n\
+         \x20   assert_le(ua, ub);\n\
          }\n",
     );
     let c = compile_with_field(&src, "uint_cmp", "bn254");
@@ -2297,30 +2283,36 @@ fn uint_comparisons_solve() {
             .map(|v| v.id)
             .unwrap()
     };
-    let case = |a: &str, b: &str, lt: &str, le: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("a"), a.to_string());
-        m.insert(id("b"), b.to_string());
-        m.insert(id("lt"), lt.to_string());
-        m.insert(id("le"), le.to_string());
-        m
-    };
-    // 3 < 5 (lt=1, le=1); 5 vs 3 (lt=0, le=0); 5 == 5 (lt=0, le=1).
-    solver::solve_and_check(&program, &case("3", "5", "1", "1")).expect("3 < 5");
-    solver::solve_and_check(&program, &case("5", "3", "0", "0")).expect("5 > 3");
-    let assign = solver::solve_and_check(&program, &case("5", "5", "0", "1")).expect("5 == 5");
+
+    let mut inputs = BTreeMap::new();
+    // 3 < 5 passes both lt and le.
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "5".to_string());
+    let assign =
+        solver::solve_and_check(&program, &inputs).expect("3 < 5 must pass both");
     assert!(
         solver::analyze_underconstrained(&program, &assign).is_empty(),
         "U<8> cmp under-constrained"
     );
-    // A false ordering claim is rejected.
+    // 5 == 5: assert_le passes but assert_lt fails.
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "5".to_string());
     assert!(
-        solver::solve_and_check(&program, &case("3", "5", "0", "1")).is_err(),
-        "3<5 but lt=0 must reject"
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "a == b must violate assert_lt"
     );
-    // An out-of-range input (300 >= 2^8) fails the construction range proof.
+    // 5 > 3 violates both.
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "3".to_string());
     assert!(
-        solver::solve_and_check(&program, &case("300", "5", "0", "0")).is_err(),
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "a > b must violate assert_lt"
+    );
+    // Out-of-range input (300 >= 2^8) fails the range proof.
+    inputs.insert(id("a"), "300".to_string());
+    inputs.insert(id("b"), "5".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
         "a=300 exceeds U<8>"
     );
 }
@@ -2630,7 +2622,8 @@ fn rejections_carry_actionable_help() {
     );
 }
 
-/// Signed `I<N>`: construction, sign predicates, comparison, and checked add solve.
+/// `assert_lt` + `assert` on `I<8>` (signed). a=3,b=5 passes; a=-5,b=3
+/// violates `assert(ia.is_positive())`.
 #[test]
 fn signed_int_solves() {
     use std::collections::BTreeMap;
@@ -2638,12 +2631,11 @@ fn signed_int_solves() {
     let src = write_case(
         "signed_int",
         "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, lt: Public<Field>, a_pos: Public<Field>) {\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
          \x20   let ia = I::<8>::new(a);\n\
          \x20   let ib = I::<8>::new(b);\n\
-         \x20   assert_eq((ia + ib).value(), sum);\n\
-         \x20   assert_eq(Field::from(ia < ib), lt);\n\
-         \x20   assert_eq(Field::from(ia.is_positive()), a_pos);\n\
+         \x20   assert_lt(ia, ib);\n\
+         \x20   assert(ia.is_positive());\n\
          }\n",
     );
     let c = compile_with_field(&src, "signed_int", "bn254");
@@ -2659,31 +2651,24 @@ fn signed_int_solves() {
             .map(|v| v.id)
             .unwrap()
     };
-    let case = |a: &str, b: &str, sum: &str, lt: &str, a_pos: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("a"), a.to_string());
-        m.insert(id("b"), b.to_string());
-        m.insert(id("sum"), sum.to_string());
-        m.insert(id("lt"), lt.to_string());
-        m.insert(id("a_pos"), a_pos.to_string());
-        m
-    };
-    // r-k is the field encoding of -k.
-    let neg2 = "21888242871839275222246405745257275088548364400416034343698204186575808495615";
-    let neg5 = "21888242871839275222246405745257275088548364400416034343698204186575808495612";
-    // a=3, b=5: 3+5=8; 3<5 -> 1; 3>0 -> 1.
+
+    // a=3, b=5: 3 < 5 ✓, 3 > 0 ✓.
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "5".to_string());
     let assign =
-        solver::solve_and_check(&program, &case("3", "5", "8", "1", "1")).expect("3,5 signed");
+        solver::solve_and_check(&program, &inputs).expect("3,5 signed must pass");
     assert!(
         solver::analyze_underconstrained(&program, &assign).is_empty(),
         "I<8> under-constrained"
     );
-    // a=-5, b=3: -5+3 = -2 (=r-2); -5<3 -> 1; -5>0 -> 0.
-    solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "0")).expect("-5,3 signed");
-    // A wrong sign claim is rejected.
+    // a=-5, b=3: -5 < 3 ✓ but is_positive() fails.
+    let neg5 = "21888242871839275222246405745257275088548364400416034343698204186575808495612";
+    inputs.insert(id("a"), neg5.to_string());
+    inputs.insert(id("b"), "3".to_string());
     assert!(
-        solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "1")).is_err(),
-        "-5 is not positive"
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "-5 is not positive, must reject"
     );
 }
 
@@ -2766,15 +2751,15 @@ fn uint_const_comparisons_fold_and_solve() {
     let folded = load(
         "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
          \x20   let u = U::<32>::new(x);\n\
-         \x20   assert_eq(Field::from(u.gt_const::<0>()), out);\n\
+         \x20   assert_eq(u.gt_const::<0>(), out);\n\
          }\n",
         "cmp_gt0_folded",
     );
     // Naive form: construct a `U<32>` for the constant 0 and compare.
     let naive = load(
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+        "pub fn circuit(x: Private<Field>) {\n\
          \x20   let u = U::<32>::new(x);\n\
-         \x20   assert_eq(Field::from(u > U::<32>::new(Field::from(0u8))), out);\n\
+         \x20   assert_gt(u, U::<32>::new(Field::from(0u8)));\n\
          }\n",
         "cmp_gt0_naive",
     );
@@ -2820,10 +2805,10 @@ fn uint_const_comparison_boundaries_solve() {
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(x: Private<Field>, lt0: Public<Field>, ge0: Public<Field>, eq7: Public<Field>, lt100: Public<Field>) {\n\
          \x20   let u = U::<16>::new(x);\n\
-         \x20   assert_eq(Field::from(u.lt_const::<0>()), lt0);\n\
-         \x20   assert_eq(Field::from(u.ge_const::<0>()), ge0);\n\
-         \x20   assert_eq(Field::from(u.eq_const::<7>()), eq7);\n\
-         \x20   assert_eq(Field::from(u.lt_const::<100>()), lt100);\n\
+         \x20   assert_eq(u.lt_const::<0>(), lt0);\n\
+         \x20   assert_eq(u.ge_const::<0>(), ge0);\n\
+         \x20   assert_eq(u.eq_const::<7>(), eq7);\n\
+         \x20   assert_eq(u.lt_const::<100>(), lt100);\n\
          }\n",
     );
     let c = compile_with_field(&src, "cmp_const_bounds", "bn254");
@@ -2871,10 +2856,10 @@ fn uint_width_guards_reject_unsound_widths() {
     let cmp = write_case(
         "u253_cmp",
         "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
          \x20   let ua = U::<253>::new(a);\n\
          \x20   let ub = U::<253>::new(b);\n\
-         \x20   assert_eq(Field::from(ua < ub), out);\n\
+         \x20   assert_lt(ua, ub);\n\
          }\n",
     );
     let c = compile_with_field(&cmp, "u253_cmp", "bn254");
@@ -2919,10 +2904,10 @@ fn uint_width_guards_reject_unsound_widths() {
     let icmp = write_case(
         "i253_cmp",
         "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
          \x20   let ia = I::<253>::new(a);\n\
          \x20   let ib = I::<253>::new(b);\n\
-         \x20   assert_eq(Field::from(ia < ib), out);\n\
+         \x20   assert_lt(ia, ib);\n\
          }\n",
     );
     let c = compile_with_field(&icmp, "i253_cmp", "bn254");
@@ -3056,5 +3041,128 @@ fn ed25519_on_curve_accepts_real_rejects_perturbed() {
     assert!(
         solver::solve_and_check(&program, &bad).is_err(),
         "an off-curve Ed25519 point must be rejected"
+    );
+}
+
+// --- assert / assert_lt / assert_ge (author-facing constraint API) ------------
+
+/// `assert(cond)` constrains a boolean wire to true. a=b passes; a≠b fails.
+#[test]
+fn assert_bool_demo() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+
+    let src = write_case(
+        "assert_demo",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
+         \x20   assert(a == b);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "assert_demo", "bn254");
+    assert!(c.status_success, "assert_demo failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    let id = |n: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == n)
+            .map(|v| v.id)
+            .unwrap()
+    };
+
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    solver::solve_and_check(&program, &inputs).expect("a == b must pass");
+
+    inputs.insert(id("b"), "5".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "a != b must violate assert"
+    );
+}
+
+/// `assert_lt(ua, ub)` on `U<8>`. 3 < 5 passes; 5 < 3 is rejected.
+#[test]
+fn assert_uint_lt_demo() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+
+    let src = write_case(
+        "assert_lt_demo",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
+         \x20   assert_lt(U::<8>::new(a), U::<8>::new(b));\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "assert_lt_demo", "bn254");
+    assert!(c.status_success, "assert_lt_demo failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    let id = |n: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == n)
+            .map(|v| v.id)
+            .unwrap()
+    };
+
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "3".to_string());
+    inputs.insert(id("b"), "5".to_string());
+    solver::solve_and_check(&program, &inputs).expect("3 < 5 must pass");
+
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "5 < 3 must violate assert_lt"
+    );
+}
+
+/// `assert_ge(ia, ib)` on `I<8>` (signed). 5 ≥ 3 passes; (-2) ≥ 3 is rejected.
+#[test]
+fn assert_signed_ge_demo() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+
+    let src = write_case(
+        "assert_ge_demo",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
+         \x20   assert_ge(I::<8>::new(a), I::<8>::new(b));\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "assert_ge_demo", "bn254");
+    assert!(c.status_success, "assert_ge_demo failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    let id = |n: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == n)
+            .map(|v| v.id)
+            .unwrap()
+    };
+
+    // 5 ≥ 3 holds.
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("a"), "5".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    solver::solve_and_check(&program, &inputs).expect("5 >= 3 must pass");
+
+    // (-2) ≥ 3 is false.
+    inputs.insert(id("a"), "21888242871839275222246405745257275088548364400416034343698204186575808495615".to_string());
+    inputs.insert(id("b"), "3".to_string());
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "(-2) >= 3 must violate assert_ge"
     );
 }

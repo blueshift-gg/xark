@@ -97,11 +97,15 @@ pub(crate) fn classify_call(
     def_id: rustc_hir::def_id::DefId,
 ) -> Option<KnownCall> {
     let s = tcx.def_path_str(def_id);
-    if s.ends_with("::assert_eq") {
-        Some(KnownCall::ConstrainEq)
+    if let Some(pos) = s.rfind("::assert_eq") {
+        let rest = &s[pos + "::assert_eq".len()..];
+        if rest.is_empty() || rest.starts_with("::<") {
+            return Some(KnownCall::ConstrainEq);
+        }
+    }
     // Field-method arms are gated on `Field` in the path, so a same-named method
     // on another type isn't misclassified; `__xark_*` names stay unconditional.
-    } else if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
+    if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
         Some(KnownCall::PowU64)
     } else if s.contains("__xark_add")
         || (s.contains("Field") && s.ends_with("::add") && binop_rhs_is_field(tcx, def_id))
@@ -611,6 +615,14 @@ impl<'tcx> LoweringEnv<'tcx> {
                              circuit can't lower, can't be used here",
                     )
                 })
+            }
+            // A `bool` constant (`true` / `false`) — e.g. the `true` in
+            // `assert_eq(a < b, true)` inside `assert_lt`'s body.
+            Operand::Constant(c) if c.const_.ty().is_bool() => {
+                match c.const_.try_to_scalar_int() {
+                    Some(s) if s.to_uint(s.size()) == 1 => Ok(LinearCombination::one()),
+                    _ => Ok(LinearCombination::zero()),
+                }
             }
             // A `Field`-typed constant used directly as an operand — e.g.
             // `Field::from(3)` behind `a + 3` (the `Add<u64>` etc. operators) —

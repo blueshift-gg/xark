@@ -49,7 +49,7 @@ pub mod int;
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::int::I;
-    pub use crate::lang::{assert_eq, Field, Private, Public};
+    pub use crate::lang::{assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public};
     pub use crate::uint::U;
 }
 

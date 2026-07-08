@@ -15,6 +15,7 @@
 #![allow(clippy::assign_op_pattern)]
 
 use core::marker::PhantomData;
+use core::cmp::PartialOrd;
 use core::ops::{
     Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign,
 };
@@ -468,11 +469,41 @@ impl_field_int_ops!(u8, u16, u32, u64, u128);
 
 /// Emit a circuit equality constraint `lhs == rhs`.
 ///
+/// Either argument may be `bool` (the result of a comparison, `.is_zero()`,
+/// etc.) or `Field` — both types convert to `Field` for zero-cost.
+///
 /// This is a marker: the compiler lowers it to an R1CS constraint rather than
 /// executing it.
 #[inline(never)]
-pub fn assert_eq(_lhs: Field, _rhs: Field) {
+pub fn assert_eq<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
     loop {}
+}
+
+/// Constrain a boolean wire to be true.
+///
+/// `assert(cond)` decomposes into `assert_eq(cond, true)` at lowering time.
+pub fn assert(cond: bool) {
+    assert_eq(cond, true);
+}
+
+/// Emit a circuit constraint `a < b` (less than).
+pub fn assert_lt<A: PartialOrd<B>, B>(a: A, b: B) {
+    assert_eq(a < b, true);
+}
+
+/// Emit a circuit constraint `a <= b` (less than or equal).
+pub fn assert_le<A: PartialOrd<B>, B>(a: A, b: B) {
+    assert_eq(a <= b, true);
+}
+
+/// Emit a circuit constraint `a > b` (greater than).
+pub fn assert_gt<A: PartialOrd<B>, B>(a: A, b: B) {
+    assert_eq(a > b, true);
+}
+
+/// Emit a circuit constraint `a >= b` (greater than or equal).
+pub fn assert_ge<A: PartialOrd<B>, B>(a: A, b: B) {
+    assert_eq(a >= b, true);
 }
 
 #[inline(never)]
