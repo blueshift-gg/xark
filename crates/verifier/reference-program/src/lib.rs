@@ -38,19 +38,11 @@ pub fn process_instruction(
     if public_inputs.len() % FR_BYTES != 0 {
         return Err(ProgramError::Custom(3));
     }
-    // ⚠️ SECURITY — VK AUTHENTICATION IS THE CALLER'S RESPONSIBILITY.
-    //
-    // This reference program reads the verifying key from account 0's data with
-    // **no** owner check, address pin, or hash check. That is acceptable *only*
-    // because this binary is the circuit-agnostic reproducible-build artifact
-    // (a single fixed `.so`, hash-pinned in `expected.sha256`) — it is NOT a
-    // production template for VK handling. A real deployment MUST authenticate
-    // the VK, e.g. bake it in at compile time via
-    // `Verifier::<N>::from_le_bytes(include_bytes!("vk.bin"))` (see the
-    // `xark-verifier` README), or hard-assert the account's owner/address and a
-    // pinned VK hash here. Without that, an attacker supplies their own account
-    // 0 holding any VK they have a valid proof for and `verify_groth16` returns
-    // `Ok(true)` — accepting a proof for a *different* statement.
+    // SECURITY: this reference program reads the VK from account 0 with no owner/
+    // address/hash check — acceptable only because it is the circuit-agnostic,
+    // hash-pinned reproducible-build artifact, NOT a production template. A real
+    // deployment MUST authenticate the VK (bake it in, or pin the account
+    // owner/address and VK hash), else an attacker's VK is accepted.
     let vk_account = accounts.first().ok_or(ProgramError::NotEnoughAccountKeys)?;
     let vk_data = vk_account.try_borrow_data()?;
     match verify_groth16(&vk_data, proof, public_inputs) {

@@ -48,18 +48,11 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
 /// hash itself is not constrained here). Fails (unsatisfiable) if the equation
 /// does not hold.
 pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [Field; 256]) {
-    // Pin A and R to the curve before the group law: `enforce_on_curve` range-
-    // checks the limbs (`mod_mul` assumes operands < 2^86, or its column products
-    // wrap `Fr` and forge acceptance) and binds them on-curve. Must precede the
-    // `0 - a_pub.x` negation, which is itself a non-native op.
+    // pin A and R to the curve (range-checks limbs) before the group law
     enforce_on_curve(a_pub);
     enforce_on_curve(r_sig);
 
-    // Canonical scalar: `S < L`. The signature scalar must be a canonical
-    // element of the order-`L` scalar field, else `S`, `S + L`, `S + 2L`, … all
-    // verify — EdDSA signature malleability. `s_bits` are boolean-constrained by
-    // the windowed multiplication's point selects, so recomposing them into the
-    // scalar field's 3×86-bit limbs and asserting canonicity (`< L`) is sound.
+    // canonical scalar `S < L`, else S, S+L, S+2L, … all verify (EdDSA malleability)
     assert_scalar_below_order(s_bits);
 
     // Rewrite `[S]·B == R + [k]·A` as `[S]·B + [k]·(−A) == R`, so the two scalar
@@ -68,11 +61,8 @@ pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [F
     let neg_a = Point::new(fp(0, 0, 0) - a_pub.x, a_pub.y);
     let t = double_scalar_mul(s_bits, base(), k_bits, neg_a);
 
-    // Cofactored verification: assert `[8]·t == [8]·R`, not `t == R`. Multiplying
-    // by the cofactor 8 clears any small-order (8-torsion) component of `A` or
-    // `R`, so a public key or `R` outside the prime-order subgroup cannot be
-    // exploited — this is the RFC 8032 cofactored equation. Three doublings per
-    // side, far cheaper than an in-circuit `[L]·A == O` subgroup check.
+    // cofactored verification: assert `[8]·t == [8]·R` (×8 clears any small-order
+    // component of A/R — the RFC 8032 cofactored equation)
     let t8 = t.double().double().double();
     let r8 = r_sig.double().double().double();
     let mut i = 0usize;
@@ -83,11 +73,9 @@ pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [F
     }
 }
 
-/// Assert `Σ bits[i]·2^i < L` (the ed25519 group order) by recomposing the
-/// little-endian scalar bits into the scalar field's `3 × 86`-bit limbs
-/// (86 + 86 + 84 = 256) and asserting the element is canonical. `bits` must be
-/// boolean-constrained by the caller — they are, via the windowed
-/// multiplication's point selects.
+/// Assert `Σ bits[i]·2^i < L` (the ed25519 group order): recompose the bits into
+/// the scalar field's `3 × 86`-bit limbs and assert canonical. `bits` must be
+/// caller-constrained boolean.
 fn assert_scalar_below_order(bits: [Field; 256]) {
     let mut limbs = [Field::from(0u8); 3];
     let mut idx = 0usize;

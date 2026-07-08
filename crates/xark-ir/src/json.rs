@@ -7,9 +7,7 @@ pub fn to_json_pretty(program: &R1csProgram) -> String {
     serde_json::to_string_pretty(program).expect("R1csProgram is always serializable")
 }
 
-/// Serialize a program to compact JSON. Used for very large circuits where the
-/// pretty form would be multi-gigabyte; consumed by the backend (`xark setup` /
-/// `xark prove`) exactly like [`to_json_pretty`].
+/// Serialize a program to compact JSON (for very large circuits).
 pub fn to_json(program: &R1csProgram) -> String {
     serde_json::to_string(program).expect("R1csProgram is always serializable")
 }

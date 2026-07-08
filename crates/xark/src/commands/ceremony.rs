@@ -180,8 +180,7 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
     let dir = &args.ceremony_dir;
     let baseline = read_baseline_delta_g1(dir)?;
     let count = read_contribution_count(dir)?;
-    // Not `with_capacity(count)` — `count` is attacker-supplied; the loop is
-    // bounded by the contribution files that actually exist.
+    // no with_capacity: count is attacker-supplied
     let mut contributions: Vec<Contribution> = Vec::new();
     for i in 1..=count {
         let path = dir.join(format!("contribution_{i:04}.json"));
@@ -190,11 +189,8 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
         contributions.push(c);
     }
     verify_chain(baseline, &contributions).map_err(|e| anyhow!("verify failed: {e}"))?;
-    // The Schnorr/δ-consistency chain proves a valid randomness sequence over
-    // the baseline δ·G1, but on its own says NOTHING about the keys this
-    // ceremony ships. Bind them: confirm proving_key.bin/verifying_key.bin are
-    // the keys the chain actually produced, so a coordinator can't run an
-    // honest-looking transcript yet ship a verifying key whose δ they know.
+    // bind the shipped keys to the verified chain, so a coordinator can't ship a
+    // verifying key whose δ they know behind an honest-looking transcript
     let keys = load_keys(&dir.join("proving_key.bin"), &dir.join("verifying_key.bin"))
         .context("loading ceremony keys to bind them to the transcript")?;
     verify_keys_consistent_with_chain(&keys, baseline, &contributions)

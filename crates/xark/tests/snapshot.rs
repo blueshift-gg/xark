@@ -1212,12 +1212,8 @@ fn blake3_varlen_matches_real_vector() {
     assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong digest must reject");
 }
 
-/// A multiplication result reused across two `assert_eq`s must stay bound to
-/// `a*b` in BOTH. The first `assert_eq` folds the product's defining row (the
-/// compaction optimization); the second must not be left pinning a detached
-/// free witness. Compiling `examples/mul_reuse` and
-/// solving it confirms the product is revived: the honest `a*b == c == d`
-/// witness verifies, and a `c != d` witness is rejected.
+/// A multiplication result reused across two `assert_eq`s stays bound to `a*b`
+/// in both (the product is revived after the merge).
 #[test]
 fn mul_reuse_binds_product_in_both_asserts() {
     use std::collections::BTreeMap;
@@ -1229,8 +1225,7 @@ fn mul_reuse_binds_product_in_both_asserts() {
     let program = primitive::from_json(&json).unwrap();
     let id = |name: &str| program.vars.iter().find(|v| v.name == name).map(|v| v.id).unwrap();
 
-    // Honest: a*b = c = d (3*4 = 12). Pre-fix this FAILED to solve — the reused
-    // product `t` had no witness-gen op after the merge dropped it.
+    // honest: a*b = c = d (3*4 = 12)
     let mut inputs = BTreeMap::new();
     inputs.insert(id("a"), "3".to_string());
     inputs.insert(id("b"), "4".to_string());
@@ -1240,8 +1235,7 @@ fn mul_reuse_binds_product_in_both_asserts() {
     let holes = solver::analyze_underconstrained(&program, &assign);
     assert!(holes.is_empty(), "mul_reuse under-constrained: {holes:?}");
 
-    // Soundness: c != d must be rejected — the product is bound to both asserts,
-    // so `d = 13` with `a*b = c = 12` cannot satisfy the circuit.
+    // c != d must be rejected (product bound to both asserts)
     inputs.insert(id("d"), "13".to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
@@ -1275,10 +1269,7 @@ fn field_div_solves() {
     assert!(solver::solve_and_check(&program, &inputs).is_err(), "wrong quotient must reject");
 }
 
-/// Compound assignment (`+=`, `*=`, …) needs `&mut self`; taking a reference to
-/// a `Field` is not a circuit operation, so the compiler rejects it in-circuit
-/// (write `acc = acc + b`). The `AddAssign`/… traits still exist for host/const
-/// use — this only asserts the *circuit* rejection.
+/// Compound assignment (`+=`, …) is rejected in-circuit (write `acc = acc + b`).
 #[test]
 fn rejects_compound_assign() {
     let src = write_case(
@@ -1295,9 +1286,7 @@ fn rejects_compound_assign() {
     assert!(c.stderr.contains("not supported inside a circuit"), "unexpected error: {}", c.stderr);
 }
 
-/// `==` (and the other comparisons) on `Field` need `&self`; a native `bool`
-/// from comparing witnesses is not a circuit operation, so the compiler rejects
-/// it in-circuit. The `PartialEq`/… impls still exist for host/const use.
+/// `==` (and other comparisons) on `Field` is rejected in-circuit.
 #[test]
 fn rejects_field_comparison() {
     let src = write_case(
@@ -1373,9 +1362,7 @@ fn is_eq_gadget_solves() {
     assert!(solver::solve_and_check(&program, &case("5", "5", "0")).is_err(), "is_eq(5,5) != 0 must reject");
 }
 
-/// `U<N>` fixed-width unsigned integers: range-proved construction + ordering
-/// comparisons (`lt`/`le`) that solve correctly and reject false claims and
-/// out-of-range inputs.
+/// `U<N>` construction + `lt`/`le` solve, rejecting false claims and out-of-range inputs.
 #[test]
 fn uint_comparisons_solve() {
     use std::collections::BTreeMap;
@@ -1413,10 +1400,8 @@ fn uint_comparisons_solve() {
     assert!(solver::solve_and_check(&program, &case("300", "5", "0", "0")).is_err(), "a=300 exceeds U<8>");
 }
 
-/// A secp256k1 scalar must be canonical (`< n`) and nonzero — `s ∈ [1, n-1]` —
-/// which is what makes ECDSA signatures non-malleable. Solving `scalar_range`
-/// proves such an `s`; a non-canonical `s` (all limbs `2^86-1`, value
-/// `≈ 2^258 >> n`) and `s = 0` are both rejected.
+/// A secp256k1 scalar must be canonical (`< n`) and nonzero; a non-canonical `s`
+/// and `s = 0` are both rejected.
 #[test]
 fn ecdsa_scalar_range_checks() {
     use std::collections::BTreeMap;
@@ -1476,8 +1461,7 @@ fn select_and_bool_solve() {
     assert!(solver::solve_and_check(&program, &case("2", "7", "9", "7")).is_err(), "non-boolean cond must reject");
 }
 
-/// `U<N>` checked arithmetic: `add`/`sub`/`mul` compose and solve; a wrong
-/// claimed result is rejected.
+/// `U<N>` checked `add`/`sub`/`mul` solve; a wrong claimed result is rejected.
 #[test]
 fn uint_checked_arithmetic_solves() {
     use std::collections::BTreeMap;
@@ -1511,9 +1495,7 @@ fn uint_checked_arithmetic_solves() {
     assert!(solver::solve_and_check(&program, &case("5", "3", "8", "2", "16")).is_err(), "wrong product must reject");
 }
 
-/// A `Private<U<N>>` input is prover-chosen, so the compiler injects an N-bit
-/// range proof at the input boundary: an honest in-range value solves, and an
-/// out-of-range value is unsatisfiable.
+/// A `Private<U<N>>` input gets an N-bit range proof: in-range solves, out-of-range fails.
 #[test]
 fn private_uint_input_is_range_proved() {
     use std::collections::BTreeMap;
@@ -1542,10 +1524,8 @@ fn private_uint_input_is_range_proved() {
     assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "x=300 exceeds U<8> and must reject");
 }
 
-/// A `Public<U<N>>` input is range-proved in-circuit too: `< 2^N` is *not*
-/// implied by Groth16's `< r` public-input check, and the comparison gadget
-/// relies on it, so an out-of-range public value must be rejected — otherwise a
-/// prover could feed `x ≥ 2^N` into `lt`/`gt` and force a wrong result.
+/// A `Public<U<N>>` input is range-proved in-circuit too (`< r` doesn't imply
+/// `< 2^N`), so an out-of-range public value is rejected.
 #[test]
 fn public_uint_input_is_range_proved() {
     use std::collections::BTreeMap;
@@ -1572,8 +1552,7 @@ fn public_uint_input_is_range_proved() {
     assert!(solver::solve_and_check(&program, &case("300", "300")).is_err(), "public U<8> >= 2^8 must reject");
 }
 
-/// `Bool` supports the standard boolean operators (`&`, `|`, `!`) as core-trait
-/// impls, so circuits read like ordinary Rust. Verifies they lower and solve.
+/// `Bool`'s `&`/`|`/`!` operators lower and solve.
 #[test]
 fn bool_operators_solve() {
     use std::collections::BTreeMap;
@@ -1605,9 +1584,7 @@ fn bool_operators_solve() {
     assert!(solver::solve_and_check(&program, &case("2", "0", "0")).is_err(), "non-boolean input must reject");
 }
 
-/// Rejections carry an actionable `help:` line, not just a terse error — this is
-/// what `xark check` surfaces in rust-analyzer. Guards that the diagnostic
-/// contract doesn't silently regress.
+/// Rejections carry an actionable `help:` line (the diagnostic contract).
 #[test]
 fn rejections_carry_actionable_help() {
     // A bare `Field` parameter (must be wrapped in a visibility marker).
@@ -1640,8 +1617,7 @@ fn rejections_carry_actionable_help() {
     assert!(c.stderr.contains("1..=253"), "width error should state the valid range; got: {}", c.stderr);
 }
 
-/// Signed `I<N>`: construction, sign predicates, signed comparison and checked
-/// add all solve — for positive and (field-encoded) negative values alike.
+/// Signed `I<N>`: construction, sign predicates, comparison, and checked add solve.
 #[test]
 fn signed_int_solves() {
     use std::collections::BTreeMap;
@@ -1682,8 +1658,7 @@ fn signed_int_solves() {
     assert!(solver::solve_and_check(&program, &case(neg5, "3", neg2, "1", "1")).is_err(), "-5 is not positive");
 }
 
-/// Signed arithmetic is checked: a sum outside `[-2^(N-1), 2^(N-1))`, and the
-/// classic `-I::MIN`, both make the circuit unsatisfiable.
+/// Signed arithmetic is checked: an out-of-range sum is unsatisfiable.
 #[test]
 fn signed_int_overflow_rejected() {
     use std::collections::BTreeMap;
@@ -1714,8 +1689,7 @@ fn signed_int_overflow_rejected() {
     solver::solve_and_check(&program, &case("100", "20", "120")).expect("100+20 in range");
 }
 
-/// `I<N>` as a raw input is rejected (a two-field struct would flatten into
-/// unconstrained leaves) — the guard steers to `I::new`.
+/// `I<N>` as a raw input is rejected, steering to `I::new`.
 #[test]
 fn signed_int_input_is_rejected() {
     let src = write_case(
@@ -1734,9 +1708,7 @@ fn signed_int_input_is_rejected() {
     );
 }
 
-/// Constant comparisons fold: `gt_const::<0>` lowers to the ~2-constraint
-/// `is_positive` path, not an N-bit decomposition — and never range-proves a
-/// constructed constant. Verified against the naive `gt(U::new(0))` form.
+/// Constant comparisons fold: `gt_const::<0>` is far cheaper than `gt(U::new(0))`.
 #[test]
 fn uint_const_comparisons_fold_and_solve() {
     use std::collections::BTreeMap;
@@ -1821,9 +1793,8 @@ fn uint_const_comparison_boundaries_solve() {
     assert!(solver::solve_and_check(&program, &case("7", "1", "1", "1", "1")).is_err(), "lt_const::<0> is false");
 }
 
-/// The `U<N>` width guards: a bare `U::<253>::new` range proof is allowed, but a
-/// comparison or checked add/sub at N=253 is rejected at compile time (the
-/// `2^(N+1)` intermediate would exceed the BN254 order and could wrap).
+/// `U<N>` width guards: `U::<253>::new` is allowed, but a comparison/checked
+/// add/sub at N=253 is rejected at compile time.
 #[test]
 fn uint_width_guards_reject_unsound_widths() {
     // N=253 comparison: must fail to compile with the CMP_ARITH_WIDTH_OK message.
@@ -1856,8 +1827,7 @@ fn uint_width_guards_reject_unsound_widths() {
     let c = compile_with_field(&ok, "u253_new", "bn254");
     assert!(c.status_success, "U<253>::new should still compile: {}", c.stderr);
 
-    // The `*_const` path calls less_than directly (bypassing U::lt), so it must
-    // be guarded at the source too.
+    // `*_const` calls less_than directly (bypasses U::lt), so guard it too.
     let cmp_const = write_case(
         "u253_cmp_const",
         "#![no_std]\nuse xark::prelude::*;\n\
@@ -1869,8 +1839,7 @@ fn uint_width_guards_reject_unsound_widths() {
     let c = compile_with_field(&cmp_const, "u253_cmp_const", "bn254");
     assert!(!c.status_success, "U<253> lt_const must be rejected");
 
-    // Signed comparison routes through the same less_than, so I<253> ordering is
-    // rejected as well (construction at 253 stays legal).
+    // I<253> ordering routes through the same less_than, so it's rejected too.
     let icmp = write_case(
         "i253_cmp",
         "#![no_std]\nuse xark::prelude::*;\n\
@@ -1884,9 +1853,8 @@ fn uint_width_guards_reject_unsound_widths() {
     assert!(!c.status_success, "I<253> comparison must be rejected");
 }
 
-/// The secp256k1 on-curve gadget (now run on every ECDSA public key) accepts a
-/// real on-curve pubkey and rejects a perturbed coordinate — validating the
-/// b = 7 curve constant and the non-native `y² = x³ + 7` equation.
+/// The secp256k1 on-curve gadget accepts a real pubkey and rejects a perturbed
+/// coordinate (validates `b = 7`, `y² = x³ + 7`).
 #[test]
 fn secp256k1_on_curve_accepts_real_rejects_perturbed() {
     use std::collections::BTreeMap;
@@ -1920,8 +1888,7 @@ fn secp256k1_on_curve_accepts_real_rejects_perturbed() {
     );
 }
 
-/// The secp256r1 (a = −3) on-curve gadget: real pubkey accepted, perturbed
-/// rejected — validating the b constant and the `x³ − 3x + b` equation.
+/// The secp256r1 (a = −3) on-curve gadget: real pubkey accepted, perturbed rejected.
 #[test]
 fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
     use std::collections::BTreeMap;
@@ -1954,9 +1921,8 @@ fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
     );
 }
 
-/// The Ed25519 twisted-Edwards on-curve gadget (now run on `eddsa_verify`'s A/R
-/// inputs) accepts a real on-curve point (the base point B) and rejects a
-/// perturbed coordinate — validating the `−x² + y² = 1 + d·x²·y²` equation.
+/// The Ed25519 on-curve gadget accepts a real point (base point B) and rejects
+/// a perturbed coordinate.
 #[test]
 fn ed25519_on_curve_accepts_real_rejects_perturbed() {
     use std::collections::BTreeMap;

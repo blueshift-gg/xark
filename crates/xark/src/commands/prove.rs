@@ -121,11 +121,8 @@ pub fn run(args: ProveArgs) -> Result<()> {
     for (k, v) in &inputs {
         match by_name.get(k.as_str()) {
             Some(&id) => {
-                // Validate the value with the same strict decimal parser the
-                // `verify` path uses. Without this, the witness solver's lenient
-                // parse silently turns a malformed value (`0x1b`, `abc`, ``,
-                // `3.5`) into 0 — which can "prove" a trivial statement and makes
-                // `prove` and `verify` disagree on what a valid input is.
+                // strict decimal validation (matches `verify`); the solver's
+                // lenient parse would silently turn a malformed value into 0
                 xark_prover::try_fr_from_decimal(v)
                     .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
                 id_inputs.insert(id, v.clone());
@@ -151,8 +148,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         .collect();
 
     let circuit = XarkCircuit::for_proving(prog, assign);
-    // Reject a malformed `r1cs.json` (bad constant, dangling variable id) before
-    // synthesis, so it is a clean error rather than a panic in the backend.
+    // reject a malformed `r1cs.json` before synthesis (clean error, not a panic)
     circuit
         .validate()
         .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
@@ -165,8 +161,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         )
     })?;
 
-    // A production key must not be proven with reproducible randomness:
-    // deterministic Groth16 blinders break zero-knowledge. Refuse rather than warn.
+    // reproducible randomness breaks zero-knowledge on a production key
     if args.deterministic_rng.is_some() && key_is_production_safe(&pk_path) {
         anyhow::bail!(
             "--deterministic-rng cannot be used with a production key \
@@ -222,7 +217,6 @@ pub fn run(args: ProveArgs) -> Result<()> {
 }
 
 /// Whether the `metadata.json` beside a proving key marks it production-safe.
-/// A missing, unreadable, or `false` sidecar is treated as not production-safe.
 fn key_is_production_safe(pk_path: &std::path::Path) -> bool {
     let Some(dir) = pk_path.parent() else {
         return false;

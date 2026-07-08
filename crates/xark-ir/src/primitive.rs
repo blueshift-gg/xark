@@ -98,9 +98,7 @@ pub enum WitnessGen {
     },
     /// `out = 1 / eval(input)` — modular inverse hint (`input` must be nonzero).
     Inverse { out: VarId, input: LinearCombination },
-    /// `out = 1 / eval(input)` if `input ≠ 0`, else `0` — the inverse-or-zero
-    /// hint backing the `is_zero` gadget. Unlike [`Inverse`], it does not fail on
-    /// a zero input (the value is unconstrained there and multiplied out).
+    /// `out = 1 / eval(input)` if `input ≠ 0`, else `0` — backs the `is_zero` gadget.
     InverseOrZero { out: VarId, input: LinearCombination },
     /// `out = the `index`-th least-significant bit of eval(input)` — one bit of a
     /// bit-decomposition hint (gadgets emit one per bit).

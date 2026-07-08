@@ -20,23 +20,10 @@ use core::ops::{
 /// (b) MIR optimization cannot collapse `Field` values to a single constant ZST
 /// (which would erase the data-flow the compiler tracks).
 ///
-/// `Field` implements the standard `core::ops` arithmetic (`+ - * /`, unary `-`,
-/// their `*Assign` forms, and `^` for exponentiation) — all of which lower to
-/// R1CS — plus the `core::cmp` traits (`PartialEq`, `Eq`, `PartialOrd`, `Ord`,
-/// `Hash`) over the constant payload, so a `Field` is usable as an ordinary
-/// value in `const`/host/tooling code (map keys, `derive`d struct comparisons,
-/// unit tests).
-///
-/// **Comparison operators are not circuit operations.** A native `bool` from
-/// `a == b` on witnesses would require witness-dependent control flow, which a
-/// circuit cannot express soundly, so the compiler *rejects* `== != < <= > >=`
-/// inside a circuit and points you at `assert_eq` / `Field::is_eq` / `is_zero`
-/// (equality) or [`U<N>`](crate::uint::U) (ordering, which needs a bit width).
-///
-/// `PartialEq`/`Eq`/`Hash` are derived for host/const use (field-element
-/// equality is meaningful, and lets `Field` be a `HashMap` key). `Ord` is
-/// deliberately **not** derived: a field element is a residue mod p with no
-/// semantic order — ordering belongs on the width-carrying [`U<N>`](crate::uint::U).
+/// Implements `core::ops` arithmetic (`+ - * /`, unary `-`, `*Assign`, `^`) plus
+/// `PartialEq`/`Eq`/`Hash` for host/const use. Comparisons (`== != < <= > >=`)
+/// are not circuit operations — rejected in-circuit; use `assert_eq`/`is_eq`/
+/// `is_zero` or [`U<N>`](crate::uint::U) for ordering.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
@@ -121,9 +108,7 @@ impl Field {
         __xark_hint_inverse(x)
     }
 
-    /// Advice hint: `1 / x` if `x != 0`, else `0`. Unlike [`Field::hint_inverse`]
-    /// it never fails on a zero input; the value is unconstrained there and is
-    /// multiplied out by the [`Field::is_zero`] gadget that consumes it.
+    /// Advice hint: `1 / x` if `x != 0`, else `0` (unconstrained at 0).
     #[inline(never)]
     pub fn hint_inverse_or_zero(x: Field) -> Field {
         __xark_hint_inverse_or_zero(x)
@@ -142,8 +127,7 @@ impl Field {
     /// (`Σ bitᵢ·2ⁱ == self`) — which also proves `self < 2^N`. Composed entirely
     /// from `Field` primitives (`hint_bit` + arithmetic + `assert_eq`).
     pub fn to_bits<const N: usize>(self) -> [Field; N] {
-        // A 254-bit (or wider) decomposition is not injective mod the BN254 order
-        // `r` (< 2^254): the recomposition could wrap, so it would not pin `self`.
+        // N > 253 wraps mod r, so recomposition wouldn't pin `self`
         const { assert!(N <= 253, "to_bits::<N>: N must be <= 253 (BN254 field capacity)") };
         let mut bits = [Field::from(0u8); N];
         let mut i = 0usize;
@@ -172,8 +156,7 @@ impl Field {
     /// forms the linear combination; the caller must have pinned the bits boolean
     /// (e.g. via [`Field::to_bits`]).
     pub fn from_bits<const N: usize>(bits: [Field; N]) -> Field {
-        // Beyond 253 bits the weighted sum can exceed `r` and wrap, so the
-        // recomposition would not equal the intended integer.
+        // N > 253: weighted sum can exceed r and wrap
         const { assert!(N <= 253, "from_bits::<N>: N must be <= 253 (BN254 field capacity)") };
         let mut acc = Field::from(0u8);
         let mut pow = Field::from(1u8);
@@ -225,16 +208,7 @@ impl Field {
         w
     }
 
-    /// Circuit equality-to-zero: returns `1` if `self == 0`, else `0`, as a
-    /// constrained boolean `Field` wire.
-    ///
-    /// This is the circuit-native way to *test* equality (native `==` returns a
-    /// Rust `bool` and is not a circuit operation). Standard inverse-or-zero
-    /// construction: with `inv = self⁻¹ or 0` supplied as advice,
-    /// `out = 1 − self·inv` and the constraint `self·out == 0` together pin
-    /// `out = (self == 0)`. For `self ≠ 0` the constraint forces `inv = self⁻¹`
-    /// so `out = 0`; for `self = 0`, `out = 1` (and `inv`, multiplied by `0`, is
-    /// irrelevant). The output is uniquely determined and boolean.
+    /// Circuit equality-to-zero: a [`Bool`] that is `1` iff `self == 0`.
     pub fn is_zero(self) -> Bool {
         let inv = Field::hint_inverse_or_zero(self);
         let out = Field::from(1u8) - self * inv;
@@ -242,9 +216,7 @@ impl Field {
         Bool::from_pinned(out)
     }
 
-    /// Circuit equality test: a [`Bool`] that is true iff `self == other`. Equal
-    /// to `(self − other).is_zero()`. (For an equality *constraint* — "require
-    /// `a == b`" — use `assert_eq`.)
+    /// Circuit equality test: a [`Bool`] true iff `self == other`.
     pub fn is_eq(self, other: Field) -> Bool {
         (self - other).is_zero()
     }
@@ -294,12 +266,9 @@ impl Field {
     }
 }
 
-/// A circuit boolean: a [`Field`] wire constrained to `{0, 1}`. It is what the
-/// comparison gadgets (`is_zero`, `is_eq`, `U<N>::lt`, …) return, and what
-/// [`select`] and the logical combinators consume — carrying booleanity in the
-/// type lets callers `&`/`|`/`!`/`select` without re-proving it. `Bool` is a
-/// zero-cost wrapper: it introduces no constraint of its own (the wire it wraps
-/// is already pinned), so using it never costs more than the raw `Field` form.
+/// A circuit boolean: a [`Field`] wire constrained to `{0, 1}`. Zero-cost
+/// wrapper carrying booleanity in the type; returned by the comparison gadgets
+/// and consumed by [`select`] and the logical combinators.
 #[derive(Clone, Copy)]
 pub struct Bool(Field);
 
@@ -310,15 +279,12 @@ impl Bool {
         Bool(f)
     }
 
-    /// A compile-time-constant boolean. `b as u8` is `1`/`0`, a pinned constant
-    /// wire, so this introduces no constraint.
+    /// A compile-time-constant boolean (no constraint).
     pub fn constant(b: bool) -> Bool {
         Bool(Field::from(b as u8))
     }
 
-    /// Wrap a wire already pinned to `{0, 1}` by its producer, with no extra
-    /// booleanity constraint. Crate-internal: only sound where the caller has
-    /// already constrained the wire boolean (e.g. an `is_zero` output).
+    /// Wrap a wire already pinned to `{0, 1}` by its producer (no extra constraint).
     pub(crate) fn from_pinned(f: Field) -> Bool {
         Bool(f)
     }
@@ -357,10 +323,8 @@ impl Bool {
     }
 }
 
-/// `Bool` mirrors the standard `bool` operators so circuits read naturally:
-/// `a & b`, `a | b`, `a ^ b`, `!a`. (Note `^` on `Bool` is boolean xor, matching
-/// `bool`; `^` on [`Field`] is exponentiation — the two never overlap because
-/// they act on different types.) Each forwards to the constraint-free combinator.
+/// Standard `bool` operators for `Bool` (`&` `|` `^` `!`), each forwarding to
+/// the constraint-free combinator.
 impl BitAnd for Bool {
     type Output = Bool;
     fn bitand(self, rhs: Bool) -> Bool {
@@ -386,10 +350,8 @@ impl Not for Bool {
     }
 }
 
-/// Branchless select: `if_true` when `cond` is true, else `if_false`, computed
-/// as `if_false + cond·(if_true − if_false)` (one multiplication). The circuit
-/// analog of `if cond { … } else { … }` — there is no control flow, both values
-/// are always present and `cond` binds which one is the result.
+/// Branchless select: `if_false + cond·(if_true − if_false)` — `if_true` when
+/// `cond`, else `if_false`.
 pub fn select(cond: Bool, if_true: Field, if_false: Field) -> Field {
     if_false + cond.value() * (if_true - if_false)
 }
@@ -468,9 +430,7 @@ impl Neg for Field {
     }
 }
 
-/// Field division `a / b = a · b⁻¹`. Lowers to a modular-inverse advice pinned
-/// by `b · b⁻¹ == 1` (so `b` must be nonzero — a zero divisor makes the circuit
-/// unsatisfiable, matching field semantics) followed by one multiplication.
+/// Field division `a / b = a · b⁻¹` (`b` must be nonzero).
 impl Div for Field {
     type Output = Field;
     fn div(self, rhs: Field) -> Field {

@@ -127,9 +127,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
             "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
         );
     }
-    // `--deterministic-rng` leaks the Groth16 trapdoor (reproducible from the
-    // seed); its doc requires `--insecure-dev-mode`, so enforce that rather than
-    // silently honoring it on the dev-fallback path.
+    // `--deterministic-rng` leaks the trapdoor, so require `--insecure-dev-mode`
     if args.deterministic_rng.is_some() && !args.insecure_dev_mode {
         bail!("--deterministic-rng requires --insecure-dev-mode");
     }
@@ -185,8 +183,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
         metadata.setup_mode = "phase2-from-ptau".into();
         metadata.production_safe = true;
-        // Commit to the (to-be-discarded) phase-2 seed for audit; the seed
-        // itself must not be kept — whoever holds it knows the γ/δ trapdoor.
+        // commit to the (to-be-discarded) phase-2 seed for audit; never keep the seed
         metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
         metadata.ptau_source = ptau_file
             .file_name()
@@ -221,11 +218,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     circuit
         .validate()
         .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
-    // Only an explicit `--deterministic-rng <n>` makes the key reproducible
-    // (and its trapdoor recoverable from the seed). The no-`.ptau` dev fallback
-    // uses OsRng — still insecure (single party, no ceremony, no transcript),
-    // but a fixed seed would be worse: every user's dev key for a given circuit
-    // would then be byte-identical with a publicly-known, reproducible trapdoor.
+    // Only explicit `--deterministic-rng <n>` makes the key reproducible. The
+    // no-`.ptau` dev fallback uses OsRng: still insecure, but a fixed seed would
+    // be worse (every dev key byte-identical with a known trapdoor).
     let effective_seed = args.deterministic_rng;
     let mut rng = match effective_seed {
         Some(seed) => {

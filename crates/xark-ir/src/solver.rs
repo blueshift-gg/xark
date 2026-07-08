@@ -120,13 +120,11 @@ pub enum SolveError {
     MissingInput(VarId),
     DivisionByZero,
     NonInvertible,
-    /// A hint's inputs are outside the range it assumes (its computation would
-    /// underflow) — returned rather than panicking on adversarial input.
+    /// Hint inputs out of range (would underflow) — rejected, not panicked.
     MalformedHint(&'static str),
     /// A constraint (by index) was not satisfied.
     ConstraintFailed(usize),
-    /// Field modulus is missing, unparseable, or `< 2` (would make `% modulus`
-    /// panic).
+    /// Field modulus missing, unparseable, or `< 2`.
     MalformedModulus,
 }
 
@@ -147,8 +145,7 @@ impl core::fmt::Display for SolveError {
 
 impl std::error::Error for SolveError {}
 
-/// Cap on a hint's `limb_bits` (real limbs are 86-bit); stops an adversarial
-/// artifact from forcing a huge `1 << limb_bits` allocation.
+/// Cap on a hint's limb_bits (real limbs are 86-bit).
 const MAX_LIMB_BITS: u32 = 128;
 
 fn modulus_of(program: &PrimitiveProgram) -> Result<BigUint, SolveError> {
@@ -242,9 +239,7 @@ pub fn solve(
                 assign.insert(*out, inv);
             }
             WitnessGen::InverseOrZero { out, input } => {
-                // `x⁻¹` when `x ≠ 0`, else `0`. The zero case is fine: the
-                // is_zero gadget multiplies this value by `x`, so it is
-                // unconstrained (and irrelevant) exactly when `x = 0`.
+                // `x⁻¹` when `x ≠ 0`, else `0` (unconstrained at 0)
                 let v = eval_lc(input, &assign, &modulus);
                 let inv = v.inverse().unwrap_or_else(|| Fp::zero(&modulus));
                 assign.insert(*out, inv);
@@ -320,7 +315,7 @@ pub fn solve(
                     acc
                 };
                 let m_big = recompose(m);
-                // Guard the `%` (÷0) and `M-2` (underflow) below.
+                // modulus >= 2 (÷0 / M-2 guard)
                 if m_big < BigUint::from(2u32) {
                     return Err(SolveError::MalformedHint("mod_inverse: modulus < 2"));
                 }
@@ -364,9 +359,8 @@ pub fn solve(
                 if m_big.is_zero() {
                     return Err(SolveError::DivisionByZero);
                 }
-                // s = a + 2m - b - c ∈ [2, 3m); r = s mod m; qabs = 2 - s/m ∈ {0,1,2}
-                // so a + qabs·m = b + c + r. Guard the subtractions: honest limbs
-                // (a,b,c < m) never underflow, adversarial ones could.
+                // s = a + 2m - b - c; r = s mod m; qabs = 2 - s/m ∈ {0,1,2}.
+                // guard subtractions (adversarial limbs could underflow)
                 let lhs = &a_big + &m_big + &m_big;
                 let rhs = &b_big + &c_big;
                 if lhs < rhs {
@@ -585,9 +579,7 @@ mod tests {
         }
     }
 
-    /// A malformed field modulus (`0`, `1`, or unparseable) is a clean
-    /// `MalformedModulus` error, not a `% 0` / `.expect` panic — adversarial
-    /// artifacts must not crash the prover.
+    /// A malformed field modulus is rejected cleanly, not panicked.
     #[test]
     fn malformed_modulus_is_rejected_not_panicked() {
         for m in ["0", "1", "", "not-a-number"] {

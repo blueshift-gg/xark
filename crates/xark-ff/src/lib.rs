@@ -275,16 +275,13 @@ macro_rules! fp {
             pub fn reduce(self) -> Self {
                 Self::new($crate::reduce_once::<{ $limbs }, { $bits }>(self.limbs, Self::M))
             }
-            /// Assert this element is *canonical*: every limb `∈ [0, 2^BITS)` AND
-            /// the value `< m`. Rejects a non-canonical encoding (a value in
-            /// `[m, 2^(LIMBS·BITS))`), which is how ECDSA signature malleability
-            /// (`s ∈ [n, 2^258)`) gets in.
+            /// Assert canonical: every limb `∈ [0, 2^BITS)` and value `< m`.
+            /// Rejects non-canonical encodings (the source of ECDSA malleability).
             pub fn assert_canonical(self) {
                 $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs);
                 $crate::assert_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
             }
-            /// Assert this element is nonzero. Assumes the limbs are
-            /// range-checked (e.g. via [`Self::assert_canonical`]).
+            /// Assert this element is nonzero (assumes range-checked limbs).
             pub fn assert_nonzero(self) {
                 $crate::assert_nonzero_limbs::<{ $limbs }>(self.limbs);
             }
@@ -554,7 +551,7 @@ pub fn reduce_once<const LIMBS: usize, const BITS: usize>(
 }
 
 /// Enforce `x < m` (`(m-1) - x` produces no final borrow). `x`'s limbs must be
-/// range-checked to `[0, 2^BITS)` first.
+/// range-checked first.
 pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
     x: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
@@ -572,12 +569,9 @@ pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
     assert_eq(borrow, Field::from(0u8));
 }
 
-/// Assert the limb-vector encodes a *nonzero* value, i.e. not every limb is
-/// zero. Assumes the limbs are range-checked. Used to enforce `r, s ∈ [1, n-1]`
-/// for ECDSA (a zero scalar has no meaning there).
+/// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
-    // `all_zero` is the AND of `isZero(limbᵢ)`: true iff every limb is zero.
-    // Asserting it false forbids the all-zero (value 0) case.
+    // all_zero = AND of isZero(limbᵢ); assert false to forbid value 0
     let mut all_zero = Bool::constant(true);
     let mut i = 0usize;
     while i < LIMBS {

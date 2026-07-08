@@ -32,14 +32,11 @@
 //!
 //! # Soundness
 //!
-//! `τ, α, β` come from the phase-1 transcript; `γ, δ` are drawn from the
-//! caller's seed. `τ, α, β` are not recoverable unless the phase-1 transcript
-//! was malformed (a chain of independent contributors is the standard
-//! assumption). `γ, δ` are **also trapdoor components**: anyone who knows `δ`
-//! (i.e. anyone with the phase-2 seed) can forge proofs for this circuit — a
-//! single-party phase-2 is only safe once that seed is discarded, and a fully
-//! trustless phase-2 requires a multi-party contribution. This is why the seed
-//! must never be retained.
+//! `τ, α, β` come from the phase-1 transcript; `γ, δ` are drawn from the caller's
+//! seed. `τ, α, β` are safe unless phase-1 was malformed. `γ, δ` are **also
+//! trapdoor components**: anyone with the phase-2 seed can forge proofs, so a
+//! single-party phase-2 is safe only once the seed is discarded (a trustless
+//! phase-2 needs a multi-party contribution).
 //!
 //! **The output keys are valid for production use only if (a) the phase-1
 //! `.ptau` transcript came from an audited ceremony and (b) the
@@ -111,9 +108,8 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     // error instead of panicking on an out-of-bounds access.
     check_ptau_section_lengths(ptau, n)?;
 
-    // Verify the transcript is a consistent (τ, α, β) powers ladder before we
-    // derive any key material from it. A structurally-valid but malicious
-    // transcript would otherwise yield keys with a known trapdoor.
+    // verify the transcript is a consistent (τ, α, β) ladder before deriving keys
+    // (a malicious transcript would otherwise yield keys with a known trapdoor)
     crate::ptau::verify_powers_consistency(ptau)?;
 
     // -------------------------------------------------------------------
@@ -468,9 +464,8 @@ mod tests {
 
     #[test]
     fn powers_consistency_rejects_degenerate_toxic_waste() {
-        // A transcript with a trivially-known trapdoor (τ ∈ {0,1}, α = 0, β = 0)
-        // satisfies every pairing ladder yet is fully backdoored, so it must be
-        // rejected up front.
+        // a trivially-known trapdoor (τ ∈ {0,1}, α = 0, β = 0) passes every ladder
+        // yet is fully backdoored, so it must be rejected
         use crate::ptau::verify_powers_consistency;
         let mut rng = ChaCha20Rng::seed_from_u64(0xD00D);
         let (t, a, b) = (Fr::rand(&mut rng), Fr::rand(&mut rng), Fr::rand(&mut rng));

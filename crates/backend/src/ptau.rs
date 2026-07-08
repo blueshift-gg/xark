@@ -192,21 +192,12 @@ pub fn setup_from_ptau<C: ark_relations::gr1cs::ConstraintSynthesizer<ark_bn254:
     crate::setup_phase2::setup_from_ptau(circuit, ptau, randomness_seed)
 }
 
-/// Verify the powers-of-tau transcript is internally consistent: the G1 and G2
-/// powers form a single geometric τ-ladder, and the α/β powers are consistent
-/// multiples of it (`beta_g2` sharing β with `beta_tau_g1`). `parse_ptau` only
-/// checks each point is on-curve / in-subgroup, so without this a structurally
-/// valid but *malicious* transcript (arbitrary or backdoored points) would be
-/// turned into keys with a trapdoor its author knows.
-///
-/// This is the standard powers-of-tau verification (à la snarkjs
-/// `powersOfTau verify`), batching each ladder with a Fiat-Shamir challenge
-/// `ρ = H(all points)` and its powers, so the cost is a few MSMs + pairings
-/// rather than `O(n)` pairings. It does **not** verify the contribution chain —
-/// that is a separate concern handled by `xark ceremony`.
-///
-/// Called by the phase-2 setup, so every transcript actually used to derive
-/// keys is verified. `parse_ptau` stays a pure structural parser.
+/// Verify the powers-of-tau transcript is a consistent geometric τ-ladder (G1
+/// and G2 powers), with the α/β powers consistent multiples of it. Guards
+/// against a structurally-valid but backdoored transcript that `parse_ptau`
+/// (structure only) would otherwise turn into keys with a known trapdoor.
+/// Batches each ladder with a Fiat-Shamir challenge (a few MSMs + pairings, not
+/// `O(n)`). Does not verify the contribution chain (that is `xark ceremony`).
 pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Error> {
     let fail = |stage: &'static str| Phase2Error::InconsistentPowers { stage };
 
@@ -221,8 +212,7 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
         return Err(fail("generators"));
     }
 
-    // Reject a known-trapdoor transcript: τ ∈ {0,1}, α = 0, β = 0 all pass the
-    // pairing ladders below (τ = 0 makes each 1 == 1) but are fully backdoored.
+    // reject known trapdoors (τ∈{0,1}, α=0, β=0)
     if ptau.alpha_tau_g1.is_empty() || ptau.beta_tau_g1.is_empty() {
         return Err(fail("missing-alpha-beta"));
     }
@@ -246,8 +236,7 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
     let tau_lo = ptau.tau_g2[0]; // g2
     let tau_hi = ptau.tau_g2[1]; // τ·g2
 
-    // A G1 τ-ladder check: with A = Σρⁱ Pᵢ, B = Σρⁱ Pᵢ₊₁, verify
-    // e(B, g2) == e(A, τ·g2)  ⇔  B = τ·A  ⇔  every step multiplies by τ.
+    // G1 τ-ladder: A = Σρⁱ Pᵢ, B = Σρⁱ Pᵢ₊₁; e(B, g2) == e(A, τ·g2) ⇔ B = τ·A.
     let g1_ladder_ok = |points: &[G1Affine]| -> bool {
         let m = points.len();
         if m < 2 {
@@ -276,8 +265,7 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
         return Err(fail("beta-ladder"));
     }
 
-    // (4) G2 τ-ladder: with C = Σρⁱ Qᵢ, D = Σρⁱ Qᵢ₊₁, verify
-    // e(g1, D) == e(τ·g1, C)  ⇔  D = τ·C.
+    // (4) G2 τ-ladder: C = Σρⁱ Qᵢ, D = Σρⁱ Qᵢ₊₁; e(g1, D) == e(τ·g1, C) ⇔ D = τ·C.
     {
         let m = ptau.tau_g2.len();
         let scalars = powers_of(rho, m - 1);
@@ -298,9 +286,7 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
     Ok(())
 }
 
-/// Derive the Fiat-Shamir batching challenge from every transcript point, so a
-/// transcript cannot be crafted for a known challenge. Hashed incrementally
-/// (bounded memory even for a `2^28` transcript).
+/// Fiat-Shamir batching challenge over every transcript point (hashed incrementally).
 fn fiat_shamir_challenge(ptau: &PtauFile) -> Fr {
     use ark_serialize::CanonicalSerialize;
     let mut h = Sha256::new();
@@ -441,9 +427,7 @@ pub fn parse_ptau(bytes: &[u8]) -> Result<PtauFile, PtauError> {
     }
     let num_sections = cursor.read_u32()?;
 
-    // Index sections by type (snarkjs writes them in order; we don't rely on
-    // that). Not `with_capacity(num_sections)` — that u32 is attacker-controlled
-    // (a 12-byte file could request ~100 GB); the loop is bounded by real content.
+    // index sections by type; no with_capacity (num_sections is attacker-controlled)
     let mut sections: Vec<(u32, &[u8])> = Vec::new();
     for _ in 0..num_sections {
         let ty = cursor.read_u32()?;
@@ -609,9 +593,7 @@ fn modulus_matches_bn254(modulus_le: &[u8]) -> bool {
 fn fq_from_le_mont(bytes: &[u8]) -> Option<Fq> {
     debug_assert_eq!(bytes.len(), BN254_FQ_BYTES);
     let n = BigUint::from_bytes_le(bytes);
-    // Reject a non-canonical encoding (Montgomery rep `>= p`): `new_unchecked`
-    // would trust it, and it can otherwise slip past the representation-comparing
-    // degeneracy checks.
+    // reject non-canonical encodings (rep >= p)
     let modulus: BigUint = Fq::MODULUS.into();
     if n >= modulus {
         return None;
@@ -773,8 +755,7 @@ mod tests {
 
     #[test]
     fn fq_mont_rejects_non_canonical() {
-        // The all-ones 32-byte encoding is `2^256 − 1 ≥ p`: a non-canonical
-        // Montgomery representation, which must be rejected rather than trusted.
+        // all-ones 32-byte encoding is `2^256 − 1 ≥ p`: non-canonical, must reject
         let all_ones = [0xFFu8; BN254_FQ_BYTES];
         assert_eq!(fq_from_le_mont(&all_ones), None);
     }

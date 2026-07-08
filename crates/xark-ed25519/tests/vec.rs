@@ -91,10 +91,8 @@ fn smul_5b_crosscheck_and_analyzer_clean() {
     // doubling (curve identity `d·x²y² = y²−x²−1`, 5 muls + 2 inv) set this count.
     let n = program.constraints.len();
     eprintln!("ed25519 scalar_mul: {n} constraints");
-    // This count includes the input-point coordinate range checks `scalar_mul`
-    // runs before the non-native group law (2 coords × 3 × 86-bit limbs), which
-    // pin every `mod_mul` operand < 2^86. If it changes, confirm the change is
-    // intended before re-pinning.
+    // includes the input-point coordinate range checks `scalar_mul` runs before
+    // the group law; confirm before re-pinning if it changes.
     assert_eq!(n, 3_731_576, "ed25519 scalar_mul constraint count changed");
 
     // (1) [5]·B == the hard-coded 5B vector — pins limb order + bit order.
@@ -127,13 +125,8 @@ fn eddsa_verify_honest_and_tamper() {
     // (`eddsa_verify_sound`, `eddsa_verify_compose`).
     let n = program.constraints.len();
     eprintln!("ed25519 eddsa_verify: {n} constraints");
-    // This count reflects the full verification relation:
-    //  * `enforce_on_curve` on `a_pub` and `r_sig` (range-checks the coordinates
-    //    AND binds each point to `−x² + y² = 1 + d·x²·y²`) before the group law;
-    //  * `double_scalar_mul` range-checks its two input points;
-    //  * `S < L` canonical-scalar check (recompose bits → Fq limbs, assert < L);
-    //  * cofactored equation `[8]·t == [8]·R` (6 `ec_double`s) clearing any
-    //    small-order component of `A`/`R`.
+    // includes: on-curve checks on a_pub/r_sig, double_scalar_mul input-point
+    // range checks, the `S < L` scalar check, and the cofactored `[8]·t == [8]·R`.
     assert_eq!(n, 4_662_466, "ed25519 eddsa_verify constraint count changed");
 
     let mut inputs = BTreeMap::new();

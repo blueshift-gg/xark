@@ -80,9 +80,8 @@ pub(crate) fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -
     let s = tcx.def_path_str(def_id);
     if s.ends_with("::assert_eq") {
         Some(KnownCall::ConstrainEq)
-    // Every `Field`-method arm is gated on the path containing `Field`, so a
-    // same-named method on another type (`Bool::or`, `Bignum::mul`) isn't
-    // misclassified as the intrinsic; the `__xark_*` names stay unconditional.
+    // Field-method arms are gated on `Field` in the path, so a same-named method
+    // on another type isn't misclassified; `__xark_*` names stay unconditional.
     } else if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
         Some(KnownCall::PowU64)
     } else if s.contains("__xark_add")
@@ -108,8 +107,7 @@ pub(crate) fn classify_call(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -
     } else if s.contains("__xark_hint_inverse_or_zero")
         || (s.contains("Field") && s.ends_with("::hint_inverse_or_zero"))
     {
-        // Must precede the `hint_inverse` arm: `__xark_hint_inverse` is a prefix
-        // of `__xark_hint_inverse_or_zero`, so `contains` would misclassify it.
+        // must precede the `hint_inverse` arm (prefix collision)
         Some(KnownCall::HintInverseOrZero)
     } else if s.contains("__xark_hint_inverse")
         || (s.contains("Field") && s.ends_with("::hint_inverse"))
@@ -186,15 +184,9 @@ struct LoweringEnv<'tcx> {
     /// witness-gen index)`, while it is still eligible for merging into a
     /// following `assert_eq`.
     pending_mul: BTreeMap<VarId, (usize, usize)>,
-    /// Multiplication outputs whose defining row was folded into a following
-    /// `assert_eq` (the merge dropped their `Product` witness-gen and repurposed
-    /// their `a·b = out` row into `a·b = target`). Maps the output var to
-    /// `(a, b, witness_gen_index)` so `finish` can *revive* it — re-pin
-    /// `a·b = out` and restore its `Product` — IF the var turns out to be
-    /// referenced again after the merge. Without this, reusing a product after
-    /// asserting it (`let t = a*b; assert_eq(t, c); assert_eq(t, d);`) leaves `t`
-    /// a free witness detached from `a·b` — a silent under-constraint that a
-    /// malicious prover could exploit.
+    /// Mul outputs folded into a following `assert_eq`, keyed to
+    /// `(a, b, witness_gen_index)` so `finish` can revive `a·b = out` if the var
+    /// is referenced again after the merge.
     merged: BTreeMap<VarId, (LinearCombination, LinearCombination, usize)>,
     /// The witness-generation ("hint") program, in dependency order. `None`
     /// entries are ops whose output var was merged away (dropped at finish).
@@ -661,9 +653,8 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Read a compile-time unsigned integer operand (constant or tracked int
     /// slot). The slot model is `u128`, so this preserves the full width.
     fn operand_to_u128(&self, operand: &Operand<'tcx>) -> CompileResult<u128> {
-        // An integer position (loop bound, `^` exponent, array length, `U<N>`
-        // width, bit index) must be known at compile time — it shapes the
-        // constraint system, which is fixed before any witness exists.
+        // integer positions (loop bound, exponent, length, `U<N>` width, …) must
+        // be compile-time constants
         let want_const = || {
             CompileError::new("expected a constant integer").with_help(
                 "this must be a compile-time constant (loop bound, `^` exponent, array length, \
@@ -1033,9 +1024,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             .push(R1csConstraint::equal(id, diff, LinearCombination::zero(), &note));
     }
 
-    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)` — the same
-    /// decomposition as `Field::to_bits::<N>`, injected at the input boundary for
-    /// a `U<N>` parameter.
+    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)`.
     fn emit_range_proof(&mut self, value: VarId, n: usize) {
         let value_lc = LinearCombination::var(value);
         let two = xark_ir::FieldConst::from_i64(2);
@@ -1077,9 +1066,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             .pending_mul
             .remove(&var)
             .expect("caller guarantees var is pending");
-        // Record enough to revive this product if it is referenced again after
-        // the merge (see the `merged` field). `.a`/`.b` are the mul's operands
-        // and are unchanged by the merge — only `.c` becomes `target` below.
+        // record operands so the product can be revived if referenced again (see `merged`)
         self.merged.insert(
             var,
             (
@@ -1118,10 +1105,8 @@ pub struct LowerOutput {
 /// the MIR projection path (encoded exactly as [`LoweringEnv::resolve_place`]:
 /// array/const index, or struct-field index), a human-readable name, and an
 /// optional fixed-width bound. A scalar `Field` is one leaf at path `[]`; an
-/// array/tuple/struct of `Field` collapses to `n` leaves (`g[0][1]`,
-/// `pubkey.x[0]`, …). A `U<N>` is one leaf carrying `Some(N)`: its value must be
-/// proven `< 2^N` (in-circuit for a private input, by the verifier for a public
-/// one). Any other leaf is rejected.
+/// array/tuple/struct of `Field` collapses to `n` leaves. A `U<N>` is one leaf
+/// carrying `Some(N)` (range-proved `< 2^N`). Any other leaf is rejected.
 fn flatten_field_leaves<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
@@ -1136,12 +1121,10 @@ fn flatten_field_leaves<'tcx>(
             return Ok(());
         }
     }
-    // `U<N>` is a fixed-width leaf: one `Field` value carrying the bit width, so
-    // the input path can range-prove it (private) or delegate to the verifier
-    // (public). Its single `value` field sits at projection index 0.
+    // `U<N>` is a fixed-width leaf: one `Field` value at projection index 0,
+    // carrying the bit width so the input path can range-prove it.
     if let rustc_middle::ty::TyKind::Adt(def, args) = ty.kind() {
-        // `def_path_str` renders the re-exported path (`xark::U`); accept that and
-        // the definition path (`…::uint::U`). Matches xark's `U`, not a user type.
+        // accept the re-exported path (`xark::U`) and the definition path (`…::uint::U`)
         let p = tcx.def_path_str(def.did());
         if p == "xark::U" || p.ends_with("::uint::U") {
             let n = args
@@ -1163,9 +1146,8 @@ fn flatten_field_leaves<'tcx>(
             path.pop();
             return Ok(());
         }
-        // `I<N>` is a two-field struct (value + cached sign) whose fields must be
-        // kept consistent — it cannot be accepted as a raw input yet (flattening
-        // it would produce two unconstrained leaves). Reject with guidance.
+        // `I<N>` is a two-field struct; flattening it would produce unconstrained
+        // leaves, so reject it as a raw input.
         if p == "xark::I" || p.ends_with("::int::I") {
             return Err(CompileError::new(
                 "signed `I<N>` is not yet supported as a circuit input",
@@ -1224,8 +1206,7 @@ pub fn lower<'tcx>(
     // scalar `Field` is one input var; an array/tuple/struct of `Field` collapses
     // to `n` vars, each bound to the leaf's projection path so body reads resolve.
     let mut num_inputs = 0usize;
-    // `U<N>` inputs whose `< 2^N` bound must be proven in-circuit, collected here
-    // and emitted after the input id range is fixed.
+    // `U<N>` inputs to range-prove after the input id range is fixed
     let mut uint_range_inputs: Vec<(VarId, usize)> = Vec::new();
     for (i, input) in entry.inputs.iter().enumerate() {
         let local = rustc_middle::mir::Local::from_usize(i + 1);
@@ -1237,9 +1218,7 @@ pub fn lower<'tcx>(
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
-            // Range-prove every `U<N>` input, public ones too: `< r` (all
-            // Groth16 checks for a public input) does not imply `< 2^N`, and the
-            // comparison gadget relies on the tighter bound.
+            // range-prove every `U<N>` input (public too): `< r` doesn't imply `< 2^N`
             if let Some(n) = range_bits {
                 uint_range_inputs.push((id, n));
             }
@@ -1252,30 +1231,15 @@ pub fn lower<'tcx>(
     walk_body(&mut env, body)?;
 
     let program = finish(env, field, num_inputs);
-    // Machine-checked soundness gate (runs on every `xark build`/`xark check`):
-    // reject a circuit that leaves a hint/advice output or a public input
-    // unpinned by any constraint. See `check_pinning`.
+    // reject any hint/advice output or public input left unpinned (see `check_pinning`)
     check_pinning(&program, num_inputs)?;
     Ok(program)
 }
 
-/// Build-time structural soundness gate.
-///
-/// Rejects two "author forgot to constrain X" footguns:
-///
-/// * a **hint/advice output** (`Field::advice()`, `hint_inverse`, `hint_bit`,
-///   `hint_div_rem`, `hint_mulmod_divmod`, `hint_mod_inverse`, `hint_sub2` — all
-///   allocated as `Private` witnesses with id ≥ `n_inputs`) that appears in **no**
-///   constraint. Such a witness is free: a malicious prover chooses it at will.
-/// * a declared **public input** (`Public` visibility) that appears in **no**
-///   constraint. The verifier's supplied value for it would then be unconstrained
-///   — the proof "verifies" for any value.
-///
-/// This is a *necessary* structural check (every such value must be referenced by
-/// at least one constraint), not a full under-constraint proof — the deeper
-/// "referenced but two-valued" analysis is `solver::analyze_underconstrained`,
-/// run over the honest witness in the gadget test suites. Together they close the
-/// pinning gap from both ends.
+/// Build-time structural soundness gate: reject a hint/advice output or a public
+/// input that no constraint references (a free witness / unconstrained public
+/// value). A necessary structural check, not a full under-constraint proof (see
+/// `solver::analyze_underconstrained`).
 fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
     let mut referenced: BTreeSet<VarId> = BTreeSet::new();
     for c in &out.r1cs.constraints {
@@ -1319,10 +1283,8 @@ fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
     Ok(())
 }
 
-/// Apply Rust `as`-cast truncation to a compile-time integer narrowed to `ty`
-/// (an int/uint type): keep only the low `bits` of `v` and, for a signed target,
-/// sign-extend — matching `v as iN` / `v as uN`. A non-integer target (rejected
-/// for circuit code by the validator) passes the value through unchanged.
+/// Apply Rust `as`-cast truncation of a compile-time integer to `ty`: keep the
+/// low `bits`, sign-extend for a signed target. Non-integer target passes through.
 fn truncate_int_cast(v: i128, ty: rustc_middle::ty::Ty<'_>) -> u128 {
     use rustc_middle::ty::{IntTy, TyKind, UintTy};
     let (bits, signed) = match ty.kind() {
@@ -1355,8 +1317,7 @@ fn truncate_int_cast(v: i128, ty: rustc_middle::ty::Ty<'_>) -> u128 {
     }
     let mask = (1u128 << bits) - 1;
     let low = (v as u128) & mask;
-    // Sign-extend a negative value in a signed target so the stored u128 is the
-    // two's-complement of the narrowed `iN`.
+    // sign-extend a negative value in a signed target
     if signed && (low >> (bits - 1)) & 1 == 1 {
         low | !mask
     } else {
@@ -1461,10 +1422,8 @@ fn lower_statement<'tcx>(
             match rvalue {
                 Rvalue::Use(operand, _) => bind_use(env, dest, &dest_path, operand),
                 // `_b = &(*_a)` reborrow: only supported to carry a `&str`
-                // literal into `Field::constant`. Taking a reference to a `Field`
-                // value is otherwise unsupported — the circuit lowering is
-                // deliberately reference-free — which is what rejects `==`/`<`
-                // (need `&self`) and `+=`/`-=`/… (need `&mut self`).
+                // literal into `Field::constant`. Other `Field` references are
+                // unsupported (rejects `==`/`<` and `+=`/`-=`).
                 Rvalue::Ref(_, _, src) | Rvalue::CopyForDeref(src) => {
                     if let Some(s) = env.get_str(src.local) {
                         env.set_str(dest, s);
@@ -1556,12 +1515,8 @@ fn lower_statement<'tcx>(
                     }
                     Ok(())
                 }
-                // Compile-time integer cast (`v as u64` in the `From<uN> for
-                // Field` conversions, or a narrowing `as u8`/`as u16`/… used to
-                // derive an index or loop bound). Truncate to the target type's
-                // width per Rust `as` semantics: storing the source value verbatim
-                // miscompiles any narrowing cast whose value exceeds the target
-                // width (e.g. `(i * K) as u8` with `i*K >= 256` would truncate).
+                // Compile-time integer cast (`From<uN> for Field`, or a narrowing
+                // `as uN`). Truncate to the target width per Rust `as` semantics.
                 Rvalue::Cast(_, operand, ty) => {
                     if let Some(v) = env.operand_to_int(operand) {
                         env.set_int_at(dest, &dest_path, truncate_int_cast(v, *ty));
@@ -2014,14 +1969,9 @@ fn inline_call<'tcx>(
 
 /// Finalize: drop unreferenced internal variables and assemble both programs.
 fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerOutput {
-    // Revive any multiplication output that was folded into an `assert_eq` (its
-    // `a·b = out` row repurposed to `a·b = target`, `Product` dropped) but is
-    // still referenced by a later constraint — i.e. the product was *reused*
-    // after being asserted. Re-pin `a·b = out` and restore its `Product` at its
-    // original witness-gen position, so the later use stays bound to `a·b`.
-    // A merged-and-not-reused output is unreferenced and pruned below, so the
-    // single-use fast path — and every existing snapshot gate count — is
-    // unchanged.
+    // Revive a merged mul output (its `a·b = out` folded into `assert_eq`) if a
+    // later constraint still references it, so the reuse stays bound to `a·b`.
+    // Not-reused outputs are pruned below (fast path unchanged).
     {
         let mut ref_now: BTreeSet<VarId> = BTreeSet::new();
         for c in &env.constraints {

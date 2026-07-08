@@ -122,16 +122,14 @@ macro_rules! weierstrass {
             Fp::new([xark::Field::from(a), xark::Field::from(b), xark::Field::from(c)])
         }
 
-        /// Pin `p` to the curve `y² = x³ + a·x + b (mod p)` (range-checks the
-        /// limbs, then the equation). The incomplete group law is only valid
-        /// on-curve, so gadgets must call this on any witness/public point.
+        /// Pin `p` to the curve `y² = x³ + a·x + b` (range-checks limbs, then the
+        /// equation). Required before the incomplete group law.
         pub fn enforce_on_curve(p: Point) {
             p.x.range_check();
             p.y.range_check();
             let b = fp($b0, $b1, $b2);
             let a_coeff = $($acoeff)*;
-            // y² == x³ + a·x + b, reduced so the per-limb compare is exact.
-            // (`a = 0` makes `a·x` a multiply-by-zero — kept for one uniform form.)
+            // y² == x³ + a·x + b, reduced for an exact per-limb compare
             let lhs = (p.y * p.y).reduce();
             let rhs = (p.x * p.x * p.x + a_coeff * p.x + b).reduce();
             let mut i = 0usize;
@@ -189,8 +187,7 @@ macro_rules! weierstrass {
 
         /// Strauss–Shamir `u1·G + u2·Q`, incomplete-affine offset accumulator, 3-limb.
         pub fn double_scalar_mul_incomplete(u1_bits: [xark::Field; 256], u2_bits: [xark::Field; 256], q: Point) -> Point {
-            // Pin `q` to the curve (this also range-checks its limbs) — the
-            // incomplete group law is only valid for on-curve points.
+            // pin `q` to the curve (also range-checks its limbs)
             enforce_on_curve(q);
             let ig1 = ig1();
             let q2 = q.double_incomplete();
@@ -220,14 +217,12 @@ macro_rules! weierstrass {
 
         /// ECDSA verification, 3-limb (86-bit) path.
         pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
-            // Canonical `< n` (not merely limb-bounded `< 2^258`): a non-canonical
-            // `s ∈ [n, 2^258)` with `s mod n ≠ 0` used to verify — signature
-            // malleability. `assert_canonical` = per-limb range check + value < n.
+            // canonical `< n`, not just limb-bounded — a non-canonical `s` is
+            // signature malleability
             r.assert_canonical();
             s.assert_canonical();
             e.assert_canonical();
-            // r ∈ [1, n-1]. s ≠ 0 is already enforced by `s.inverse()` below
-            // (a modular inverse of 0 is unsatisfiable).
+            // r ≠ 0 (s ≠ 0 already enforced by `s.inverse()` below)
             r.assert_nonzero();
             let s_inv = s.inverse();
             let u1 = e * s_inv;
@@ -326,15 +321,14 @@ macro_rules! edwards {
             Fp::new(D_LIMBS)
         }
 
-        /// Pin `p` to the twisted-Edwards curve `−x² + y² = 1 + d·x²·y²` (`a = −1`;
-        /// range-checks the limbs, then the equation). The complete addition law
-        /// is only valid on-curve, so gadgets must call this on any input point.
+        /// Pin `p` to the twisted-Edwards curve `−x² + y² = 1 + d·x²·y²`
+        /// (range-checks limbs, then the equation).
         pub fn enforce_on_curve(p: Point) {
             p.x.range_check();
             p.y.range_check();
             let x2 = p.x * p.x;
             let y2 = p.y * p.y;
-            // y² − x² == 1 + d·x²·y², reduced so the per-limb comparison is exact.
+            // y² − x² == 1 + d·x²·y², reduced for an exact per-limb compare
             let lhs = (y2 - x2).reduce();
             let rhs = (fp(1, 0, 0) + d_const() * (x2 * y2)).reduce();
             let mut i = 0usize;
@@ -413,11 +407,8 @@ macro_rules! edwards {
         /// The complete law means the running `acc` (starting at the identity) is
         /// always valid — no offset accumulator needed.
         pub fn scalar_mul(bits: [xark::Field; 256], p: Point) -> Point {
-            // Untrusted point coordinates must be pinned to < 2^BITS before
-            // entering the non-native group law: `mod_mul` range-checks only its
-            // outputs and assumes in-range operand limbs, so an unchecked point
-            // lets the column products wrap `Fr`. Mirrors the secp
-            // `double_scalar_mul_incomplete` guard.
+            // pin coordinates to < 2^BITS before the non-native group law
+            // (`mod_mul` assumes in-range operand limbs, else products wrap `Fr`)
             p.x.range_check();
             p.y.range_check();
             let mut table = [identity(); 16];
@@ -444,8 +435,7 @@ macro_rules! edwards {
         /// identity), then per window does 2 doublings and one 16-way select+add.
         /// Complete law → offset-free (no correction term).
         pub fn double_scalar_mul(bits1: [xark::Field; 256], p1: Point, bits2: [xark::Field; 256], p2: Point) -> Point {
-            // Pin untrusted point coordinates to < 2^BITS before the non-native
-            // group law (see `scalar_mul`).
+            // pin coordinates to < 2^BITS before the non-native group law (see `scalar_mul`)
             p1.x.range_check();
             p1.y.range_check();
             p2.x.range_check();

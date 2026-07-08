@@ -64,8 +64,7 @@ pub struct ExportArgs {
     /// Name for the generated crate. Defaults to the `--out` directory name.
     #[arg(long)]
     pub crate_name: Option<String>,
-    /// Permit exporting an on-chain verifier for a non-production (dev-mode)
-    /// key. Without this flag, export refuses an insecure key. For local
+    /// Permit exporting a verifier for a non-production (dev-mode) key. Local
     /// testing only — never deploy a verifier built this way.
     #[arg(long)]
     pub allow_insecure: bool,
@@ -87,9 +86,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // ---- Load inputs ------------------------------------------------------
     let vk = Groth16Keys::read_verifying_key(&vk_path)
         .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
-    // Refuse to bake a non-production (dev-mode) key into an on-chain verifier
-    // crate unless `--allow-insecure` is passed. Exporting a dev-mode key is
-    // legitimate for local testing, but must be an explicit, loud opt-in.
+    // refuse a non-production key unless `--allow-insecure` is passed
     check_key_safe_for_export(&vk_path, args.allow_insecure)?;
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
@@ -154,14 +151,11 @@ pub fn run(args: ExportArgs) -> Result<()> {
     Ok(())
 }
 
-/// Warn (on stderr) if the verifying key beside `vk_path` was produced by an
-/// insecure setup. Reads the `metadata.json` sidecar and checks
-/// `production_safe`; a `false` value (or a missing/unreadable sidecar) means
-/// the embedded trapdoor is not protected by a trusted-setup ceremony and the
-/// generated on-chain verifier must not be deployed.
+/// Reject (or with `--allow-insecure`, warn) if the verifying key beside
+/// `vk_path` was produced by an insecure setup (`metadata.json` not marked
+/// `production_safe`).
 fn check_key_safe_for_export(vk_path: &Path, allow_insecure: bool) -> Result<()> {
-    // production_safe only when a metadata.json beside the key says so; a
-    // missing/unreadable/false sidecar counts as insecure.
+    // production_safe only if a metadata.json beside the key says so
     let production_safe = vk_path
         .parent()
         .and_then(|dir| fs::read_to_string(dir.join("metadata.json")).ok())

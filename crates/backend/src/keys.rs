@@ -35,10 +35,8 @@ impl Groth16Keys {
 /// Metadata written alongside the keys so the user (and later, audits) can
 /// trace which circuit and backend the keys came from.
 ///
-/// Advisory sidecar, not bound to the key bytes: `production_safe`/provenance
-/// are editable, so the `export`/`prove` guards catch honest misconfiguration,
-/// not a forged sidecar. Binding provenance cryptographically would need a
-/// signed ceremony attestation.
+/// Advisory sidecar, not bound to the key bytes: the `export`/`prove` guards
+/// catch honest misconfiguration, not a forged sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyMetadata {
     pub protocol: String,

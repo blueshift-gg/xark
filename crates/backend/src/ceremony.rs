@@ -169,13 +169,8 @@ pub fn verify_chain(
         if c.prev_delta_g1 != running {
             return Err(CeremonyError::ChainBreak { index: i });
         }
-        // Reject a degenerate δ_i = 0 contribution. Such a contribution passes
-        // the Schnorr check (response = r, since e·(0·G2) = O) AND the
-        // δ-consistency pairing (both sides collapse to 1_GT), yet it zeroes the
-        // accumulated δ: `vk.delta_g2` becomes the identity, so `e(C, δ) = 1` for
-        // every C and *any* proof verifies. Without this guard a single
-        // malicious contributor could silently break the whole ceremony while
-        // `verify_chain` still returned Ok.
+        // reject a degenerate δ_i = 0 contribution: it passes the Schnorr and
+        // δ-consistency checks yet zeroes the accumulated δ, so any proof verifies
         if c.delta_g2_contribution.is_zero() || c.new_delta_g1.is_zero() {
             return Err(CeremonyError::DegenerateContribution { index: i });
         }
@@ -200,30 +195,17 @@ pub fn verify_chain(
         }
         running = c.new_delta_g1;
     }
-    // Defence-in-depth: the accumulated δ must not be the identity. (Implied by
-    // the per-contribution guard above, but asserted on the final result so the
-    // invariant is local and holds even for an empty/degenerate baseline.)
+    // accumulated δ must not be the identity (also guarded per-contribution above)
     if running.is_zero() {
         return Err(CeremonyError::DegenerateFinalDelta);
     }
     Ok(())
 }
 
-/// Confirm the shipped keys are the ones the verified contribution chain
-/// actually produced.
-///
-/// `verify_chain` alone certifies a valid Schnorr/δ-consistency chain over a
-/// `baseline` δ·G1 — but it never sees the `proving_key`/`verifying_key` a
-/// coordinator ships, so on its own it says nothing about those keys. A
-/// malicious coordinator could publish an honest-looking transcript yet ship a
-/// verifying key whose δ they know the discrete log of. This binds the two:
-///
-/// * `proving_key.delta_g1` must equal the chain's final δ·G1 (the last
-///   contribution's `new_delta_g1`, or `initial_delta_g1` if the chain is empty);
-/// * `verifying_key.delta_g2` must be consistent with that δ·G1 — i.e. carry the
-///   *same* scalar δ — verified by the pairing `e(δ·G1, G2) == e(G1, δ·G2)`.
-///
-/// Call this after [`verify_chain`] returns `Ok`.
+/// Confirm the shipped keys are the ones the verified chain produced:
+/// `proving_key.delta_g1` must equal the chain's final δ·G1, and `vk.delta_g2`
+/// must carry the same δ (via `e(δ·G1, G2) == e(G1, δ·G2)`). Call after
+/// [`verify_chain`] returns `Ok`.
 pub fn verify_keys_consistent_with_chain(
     keys: &Groth16Keys,
     initial_delta_g1: G1Affine,
@@ -244,9 +226,7 @@ pub fn verify_keys_consistent_with_chain(
     {
         return Err(CeremonyError::KeysDoNotMatchChain);
     }
-    // Completeness gap (not soundness): this binds δ to the chain but does not
-    // re-check `pk.h_query`/`pk.l_query` δ⁻¹-rescaling. A corrupted pk with the
-    // right δ passes here yet fails at prove time — it can't forge, only fail.
+    // completeness gap: doesn't re-check h_query/l_query δ-rescaling
     Ok(())
 }
 
@@ -519,13 +499,9 @@ mod tests {
 
     #[test]
     fn degenerate_zero_delta_contribution_is_rejected() {
-        // A δ_i = 0 contribution, hand-crafted to satisfy BOTH the Schnorr proof
-        // and the δ-consistency pairing (so the pre-fix `verify_chain` accepted
-        // it), must now be rejected. With δ_i = 0: δ_i·G2 = O and new δ·G1 = O;
-        // pick proof_commitment = r·G2 and proof_response = r, so
-        //   Schnorr: r·G2 == r·G2 + e·O   ✓
-        //   pairing: e(O, G2) == e(prev, O)  (both 1_GT)  ✓
-        // Yet the accumulated δ collapses to the identity → trivial forgery.
+        // A δ_i = 0 contribution crafted to satisfy both the Schnorr proof and
+        // the δ-consistency pairing (accepted pre-fix) must now be rejected — it
+        // collapses the accumulated δ to the identity.
         let keys = fresh_phase2_keys();
         let initial = keys.proving_key.delta_g1;
         let g2 = G2Affine::generator();
@@ -557,8 +533,7 @@ mod tests {
         // Honest shipped keys are bound to the chain.
         verify_keys_consistent_with_chain(&keys, initial, &[c.clone()]).expect("honest keys match");
 
-        // A coordinator who ships a different vk.delta_g2 (a δ they know) while
-        // keeping delta_g1 matching the chain is caught by the pairing check.
+        // a different vk.delta_g2 (δ they know) is caught by the pairing check
         keys.verifying_key.delta_g2 = (G2Affine::generator() * Fr::from(999u64)).into_affine();
         assert!(matches!(
             verify_keys_consistent_with_chain(&keys, initial, &[c.clone()]).unwrap_err(),

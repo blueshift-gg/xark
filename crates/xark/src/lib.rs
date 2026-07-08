@@ -40,12 +40,10 @@
 /// programs and gadgets depend on a single crate (`xark`).
 pub mod lang;
 
-/// Fixed-width unsigned integers (`U<N>`) — the circuit-native way to do
-/// ordering comparisons, which a bare [`lang::Field`] intentionally cannot.
+/// Fixed-width unsigned integers (`U<N>`) for ordering comparisons.
 pub mod uint;
 
-/// Fixed-width signed integers (`I<N>`) — the unsigned `U<N>` story extended to
-/// negatives, with a cached sign so `is_negative`/`> 0` stay cheap.
+/// Fixed-width signed integers (`I<N>`).
 pub mod int;
 
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
