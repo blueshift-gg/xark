@@ -2288,8 +2288,7 @@ fn uint_comparisons_solve() {
     // 3 < 5 passes both lt and le.
     inputs.insert(id("a"), "3".to_string());
     inputs.insert(id("b"), "5".to_string());
-    let assign =
-        solver::solve_and_check(&program, &inputs).expect("3 < 5 must pass both");
+    let assign = solver::solve_and_check(&program, &inputs).expect("3 < 5 must pass both");
     assert!(
         solver::analyze_underconstrained(&program, &assign).is_empty(),
         "U<8> cmp under-constrained"
@@ -2656,8 +2655,7 @@ fn signed_int_solves() {
     let mut inputs = BTreeMap::new();
     inputs.insert(id("a"), "3".to_string());
     inputs.insert(id("b"), "5".to_string());
-    let assign =
-        solver::solve_and_check(&program, &inputs).expect("3,5 signed must pass");
+    let assign = solver::solve_and_check(&program, &inputs).expect("3,5 signed must pass");
     assert!(
         solver::analyze_underconstrained(&program, &assign).is_empty(),
         "I<8> under-constrained"
@@ -3159,7 +3157,10 @@ fn assert_signed_ge_demo() {
     solver::solve_and_check(&program, &inputs).expect("5 >= 3 must pass");
 
     // (-2) ≥ 3 is false.
-    inputs.insert(id("a"), "21888242871839275222246405745257275088548364400416034343698204186575808495615".to_string());
+    inputs.insert(
+        id("a"),
+        "21888242871839275222246405745257275088548364400416034343698204186575808495615".to_string(),
+    );
     inputs.insert(id("b"), "3".to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),

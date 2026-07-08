@@ -610,20 +610,18 @@ impl<'tcx> LoweringEnv<'tcx> {
                 self.get_field_at(local, &path).ok_or_else(|| {
                     CompileError::new("use of a value that is not a supported field expression")
                         .with_help(
-                        "this position needs a `Field`, a `bool` wire, or a `U<N>`/`I<N>` \
+                            "this position needs a `Field`, a `bool` wire, or a `U<N>`/`I<N>` \
                              wrapping one; a host integer, or a value from an operation the \
                              circuit can't lower, can't be used here",
-                    )
+                        )
                 })
             }
             // A `bool` constant (`true` / `false`) — e.g. the `true` in
             // `assert_eq(a < b, true)` inside `assert_lt`'s body.
-            Operand::Constant(c) if c.const_.ty().is_bool() => {
-                match c.const_.try_to_scalar_int() {
-                    Some(s) if s.to_uint(s.size()) == 1 => Ok(LinearCombination::one()),
-                    _ => Ok(LinearCombination::zero()),
-                }
-            }
+            Operand::Constant(c) if c.const_.ty().is_bool() => match c.const_.try_to_scalar_int() {
+                Some(s) if s.to_uint(s.size()) == 1 => Ok(LinearCombination::one()),
+                _ => Ok(LinearCombination::zero()),
+            },
             // A `Field`-typed constant used directly as an operand — e.g.
             // `Field::from(3)` behind `a + 3` (the `Add<u64>` etc. operators) —
             // lowers to a constant linear combination.
@@ -1317,7 +1315,10 @@ impl<'tcx> LoweringEnv<'tcx> {
         }));
         // Booleanity: `top * top == top` (⟺ `top ∈ {0, 1}`).
         let id = self.fresh_constraint_id();
-        let note = format!("{} = cmp borrow bit ∈ {{0,1}}", self.var_names[top as usize]);
+        let note = format!(
+            "{} = cmp borrow bit ∈ {{0,1}}",
+            self.var_names[top as usize]
+        );
         self.constraints.push(R1csConstraint::general(
             id,
             LinearCombination::var(top),
@@ -1610,9 +1611,7 @@ const MAX_STEPS: u64 = 5_000_000;
 /// The fallback error for a `SwitchInt` on a witness discriminant that cannot
 /// be lowered to a branchless mux (e.g. more than 2 targets, or a non-bool
 /// discriminant).
-fn fallback_witness_control_flow_error(
-    term_span: rustc_span::Span,
-) -> CompileError {
+fn fallback_witness_control_flow_error(term_span: rustc_span::Span) -> CompileError {
     CompileError::new("witness-dependent control flow is not supported")
         .with_note("branch conditions must be compile-time constants (e.g. loop bounds)")
         .with_help(
@@ -1679,7 +1678,10 @@ fn collect_arm_assignments<'tcx>(
                             if !ok {
                                 return Err(CompileError::new(
                                     "unsupported aggregate in conditional arm",
-                                ).with_help("only tuples, arrays, and plain structs are supported"));
+                                )
+                                .with_help(
+                                    "only tuples, arrays, and plain structs are supported",
+                                ));
                             }
                         }
                         _ => {
@@ -1694,10 +1696,10 @@ fn collect_arm_assignments<'tcx>(
                     }
                 }
                 _ => {
-                    return Err(CompileError::new(
-                        "unsupported statement in conditional arm",
-                    )
-                    .with_help("no calls, no control flow"));
+                    return Err(
+                        CompileError::new("unsupported statement in conditional arm")
+                            .with_help("no calls, no control flow"),
+                    );
                 }
             }
         }
@@ -1745,17 +1747,14 @@ fn collect_arm_assignments<'tcx>(
     }
 
     // Arms must be pure — no constraints or witness entries emitted.
-    if env.constraints.len() != n_constraints_before
-        || env.witness_gen.len() != n_witness_before
-    {
+    if env.constraints.len() != n_constraints_before || env.witness_gen.len() != n_witness_before {
         env.frame_mut().field = saved_fields;
-        return Err(CompileError::new(
-            "conditional arm must not emit constraints or hints",
-        )
-        .with_help(
-            "only value assignments are allowed in `if`/`else` arms; \
+        return Err(
+            CompileError::new("conditional arm must not emit constraints or hints").with_help(
+                "only value assignments are allowed in `if`/`else` arms; \
              move arithmetic and calls before the `if`",
-        ));
+            ),
+        );
     }
 
     // Collect the field slots that were added or changed by this arm.
@@ -1827,49 +1826,42 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                 } else {
                     // Try witness bool → branchless mux.
                     let targs: Vec<(u128, _)> = targets.iter().collect();
-                    let (then_bb, else_bb) =
-                        if targs.len() == 2
-                            && targs.iter().any(|(v, _)| *v == 0)
-                            && targs.iter().any(|(v, _)| *v == 1)
-                        {
-                            // Both arms explicit: `[(0, else), (1, then)]`
-                            let else_bb = targs
-                                .iter()
-                                .find(|(v, _)| *v == 0)
-                                .map(|(_, bb)| *bb)
-                                .unwrap();
-                            let then_bb = targs
-                                .iter()
-                                .find(|(v, _)| *v == 1)
-                                .map(|(_, bb)| *bb)
-                                .unwrap();
-                            (then_bb, else_bb)
-                        } else if targs.len() == 1 {
-                            let (val, bb) = targs[0];
-                            if val == 0 {
-                                // `[(0, else)]` + `otherwise → then`
-                                (targets.otherwise(), bb)
-                            } else if val == 1 {
-                                // `[(1, then)]` + `otherwise → else`
-                                (bb, targets.otherwise())
-                            } else {
-                                return Err(fallback_witness_control_flow_error(
-                                    term_span,
-                                ));
-                            }
-                        } else {
-                            return Err(fallback_witness_control_flow_error(
-                                term_span,
-                            ));
-                        };
+                    let (then_bb, else_bb) = if targs.len() == 2
+                        && targs.iter().any(|(v, _)| *v == 0)
+                        && targs.iter().any(|(v, _)| *v == 1)
                     {
-                        let cond_lc = env.operand_to_lc(discr).map_err(|_| {
-                            fallback_witness_control_flow_error(term_span)
-                        })?;
-                        let (then_join, then_map) =
-                            collect_arm_assignments(env, body, then_bb)?;
-                        let (else_join, else_map) =
-                            collect_arm_assignments(env, body, else_bb)?;
+                        // Both arms explicit: `[(0, else), (1, then)]`
+                        let else_bb = targs
+                            .iter()
+                            .find(|(v, _)| *v == 0)
+                            .map(|(_, bb)| *bb)
+                            .unwrap();
+                        let then_bb = targs
+                            .iter()
+                            .find(|(v, _)| *v == 1)
+                            .map(|(_, bb)| *bb)
+                            .unwrap();
+                        (then_bb, else_bb)
+                    } else if targs.len() == 1 {
+                        let (val, bb) = targs[0];
+                        if val == 0 {
+                            // `[(0, else)]` + `otherwise → then`
+                            (targets.otherwise(), bb)
+                        } else if val == 1 {
+                            // `[(1, then)]` + `otherwise → else`
+                            (bb, targets.otherwise())
+                        } else {
+                            return Err(fallback_witness_control_flow_error(term_span));
+                        }
+                    } else {
+                        return Err(fallback_witness_control_flow_error(term_span));
+                    };
+                    {
+                        let cond_lc = env
+                            .operand_to_lc(discr)
+                            .map_err(|_| fallback_witness_control_flow_error(term_span))?;
+                        let (then_join, then_map) = collect_arm_assignments(env, body, then_bb)?;
+                        let (else_join, else_map) = collect_arm_assignments(env, body, else_bb)?;
                         if then_join != else_join {
                             return Err(CompileError::new(
                                 "`if`/`else` arms must converge on the same join block",
@@ -1887,19 +1879,14 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                             .cloned()
                             .collect();
                         if common.is_empty() {
-                            return Err(CompileError::new(
-                                "`if`/`else` arms share no assignments",
-                            )
-                            .with_help(
-                                "both arms must assign the same bindings",
-                            ));
+                            return Err(CompileError::new("`if`/`else` arms share no assignments")
+                                .with_help("both arms must assign the same bindings"));
                         }
                         for key in &common {
                             let then_lc = &then_map[key];
                             let else_lc = &else_map[key];
                             let diff = then_lc.clone() - else_lc.clone();
-                            let mux = else_lc.clone()
-                                + env.emit_mul(cond_lc.clone(), diff);
+                            let mux = else_lc.clone() + env.emit_mul(cond_lc.clone(), diff);
                             env.set_field_at(key.0, &key.1, mux);
                         }
                         bb = then_join;
@@ -2294,14 +2281,14 @@ fn lower_ref<'tcx>(
         env.set_str(dest, s);
         return Ok(());
     }
-    Err(CompileError::new(
-        "a mutable borrow of a `Field` value is not supported inside a circuit",
-    )
-    .with_note(
-        "comparisons (`==` `!=` `<` `<=` `>` `>=`) are circuit operations that return a \
+    Err(
+        CompileError::new("a mutable borrow of a `Field` value is not supported inside a circuit")
+            .with_note(
+                "comparisons (`==` `!=` `<` `<=` `>` `>=`) are circuit operations that return a \
          `bool` wire; compound assignments (`+=` `-=` `*=` `/=`) are not — write \
          `a = a + b` instead of `a += b`",
-    ))
+            ),
+    )
 }
 
 /// `2^n` as a `Field` constant linear combination (zero constraints).

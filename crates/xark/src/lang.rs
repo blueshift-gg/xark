@@ -14,11 +14,9 @@
 // assignment on `Field`, so `acc = acc + …` is required, not `acc += …`.
 #![allow(clippy::assign_op_pattern)]
 
-use core::marker::PhantomData;
 use core::cmp::PartialOrd;
-use core::ops::{
-    Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign,
-};
+use core::marker::PhantomData;
+use core::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// The opaque circuit field element.
 ///
