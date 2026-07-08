@@ -4569,6 +4569,8 @@ name = "xark-mimc"
 version = "0.0.1"
 dependencies = [
  "xark",
+ "xark-ir",
+ "xark-test-harness",
 ]
 
 [[package]]

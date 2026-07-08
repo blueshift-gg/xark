@@ -106,24 +106,18 @@ fn mimc_matches_snapshot() {
         .contains("21888242871839275222246405745257275088548364400416034343698204186575808495617"));
 }
 
-/// The `xark-mimc` gadget crate is inlined across the crate boundary and yields
-/// exactly the same R1CS as the hand-unrolled `mimc` example.
+/// The real `xark-mimc` gadget crate (a port of `noir-lang/mimc`: MiMC-p/p,
+/// exponent 7, 91 rounds) is inlined across the crate boundary and lowers to a
+/// stable R1CS. `examples/mimc_gadget` proves a two-input MiMC-BN254 Feistel
+/// hash preimage `mimc_bn254([x, k]) == h`.
 #[test]
-fn mimc_gadget_matches_snapshot_and_inline() {
+fn mimc_gadget_matches_snapshot() {
     let c = compile_with_field(&example("mimc_gadget"), "mimc_gadget", "bn254");
     assert!(c.status_success, "mimc_gadget failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let dot = std::fs::read_to_string(c.out_dir.join("graph.dot")).unwrap();
     check_snapshot("mimc_gadget.r1cs.json", &json);
     check_snapshot("mimc_gadget.graph.dot", &dot);
-
-    // Same constraint structure as the inline hand-unrolled version.
-    let inline = compile_with_field(&example("mimc"), "mimc_cmp", "bn254");
-    let inline_json = std::fs::read_to_string(inline.out_dir.join("r1cs.json")).unwrap();
-    assert_eq!(
-        json, inline_json,
-        "gadget crate must lower identically to inline mimc"
-    );
 }
 
 /// The advice primitive: an inverse gadget introduces a fresh private witness
