@@ -150,7 +150,6 @@ jobs:
           #print axioms selector_partition_unique
           #print axioms read_value_correct
           #print axioms write_value_correct
-          #print axioms memory_scope_splice_fresh
           -- Inductive `allocList` reach lemma closing the memory-scope splice (Formal.Bookkeeping)
           #print axioms AllocState.allocList
           #print axioms AllocState.alloc_next_le
@@ -204,9 +203,6 @@ jobs:
           #print axioms addMod32_bit_sound
           #print axioms blake2s_round_compose_bit
           #print axioms blake3_round_compose_bit
-          #print axioms sha256_round_bit_equivalence
-          #print axioms keccak_round_bit_equivalence
-          #print axioms keccak_closed_chain
           -- Keccak per-bit / per-layer structural soundness (Formal.Keccak)
           #print axioms not64_sound
           #print axioms and64_sound
@@ -218,11 +214,7 @@ jobs:
           #print axioms keccakChi_sound
           #print axioms keccakIota_sound
           #print axioms keccakRoundStep_bit_sound
-          #print axioms blake2s_closed_chain
-          #print axioms aes128_round_bit_equivalence
-          #print axioms aes128_closed_chain
-          -- AES-128 per-layer structural soundness (Formal.Aes) — the
-          -- four-layer composition backing `aes128_round_bit_equivalence`.
+          -- AES-128 per-layer structural soundness (Formal.Aes).
           #print axioms xor8_sound
           #print axioms and8_sound
           #print axioms not8_sound
@@ -241,7 +233,7 @@ jobs:
           #print axioms poseidon2_bn254_t3_determined
           #print axioms gf256_pow254_eq_inv
           #print axioms aesSbox_pow_eq_table
-          #print axioms mul_mod_via_Fr_limbwise_constraints_3
+          #print axioms mul_mod_via_Fr_limbwise_constraints
           #print axioms ec_add_incomplete_secp256k1_sound
           #print axioms ec_add_incomplete_secp256r1_sound
           EOF
