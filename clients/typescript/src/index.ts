@@ -92,20 +92,13 @@ export type PublicSignals<I extends Idl> = {
   [K in I["public_signals"][number]]: string;
 };
 
-/**
- * The circuit's inputs as a typed object, inferred from the IDL's input names.
- * For `cubeIdl` this is `{ secret: …; result: … }`. Values are field elements,
- * given as decimal strings, numbers, or bigints. Use this to type the inputs
- * you pass to a prover (the `xark` CLI, or a Node wrapper around it).
- */
-export type Inputs<I extends Idl> = {
-  [K in I["inputs"][number]["name"]]: string | number | bigint;
-};
-
 /** Decode a `0x…`/bare hex string into bytes (browser- and Node-safe). */
 export function hexToBytes(hex: string): Uint8Array {
   const h = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (h.length % 2 !== 0) throw new Error("odd-length hex string");
+  if (h.length % 2 !== 0) throw new Error("hexToBytes: odd-length hex string");
+  // Reject non-hex up front — otherwise a bad pair parses to NaN, which
+  // Uint8Array silently coerces to 0 (wrong bytes, no error).
+  if (!/^[0-9a-fA-F]*$/.test(h)) throw new Error("hexToBytes: invalid hex string");
   const out = new Uint8Array(h.length / 2);
   for (let i = 0; i < out.length; i++) {
     out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
@@ -130,6 +123,15 @@ export class XarkClient<I extends Idl = Idl> {
   /** The circuit name. */
   get name(): string {
     return this.idl.name;
+  }
+
+  /**
+   * Whether the embedded verifying key came from a production trusted setup.
+   * `false` means a dev key (known trapdoor) — a proof can still `verify()`, but
+   * that result is not a security guarantee. Check this before trusting a proof.
+   */
+  get productionSafe(): boolean {
+    return this.idl.verifying_key?.production_safe ?? false;
   }
 
   /** Public-signal names, in the order the proof commits to them (typed). */

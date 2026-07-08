@@ -121,10 +121,17 @@ pub fn find_circuit<'tcx>(tcx: TyCtxt<'tcx>) -> CompileResult<EntryInfo> {
     })
 }
 
-/// Whether a free function looks like a circuit entry: unit return and at least
-/// one parameter, every one a `Public<_>` / `Private<_>`. Used only to
+/// Whether a free function looks like a circuit entry: `pub`, unit return, at
+/// least one parameter, every one a `Public<_>` / `Private<_>`. Used only to
 /// auto-detect the entry when no `fn circuit` is present, so it must not error.
+///
+/// The `pub` requirement (matching the help text) keeps private helper functions
+/// — which can legitimately take `Private<_>`/`Public<_>` params — from being
+/// mistaken for the entry or colliding with it.
 fn is_circuit_shaped(tcx: TyCtxt<'_>, item_id: ItemId) -> bool {
+    if !tcx.visibility(item_id.owner_id.def_id).is_public() {
+        return false;
+    }
     let ItemKind::Fn { sig, .. } = tcx.hir_item(item_id).kind else {
         return false;
     };

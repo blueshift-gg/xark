@@ -82,8 +82,16 @@ impl R1csCallbacks {
         if !self.check_only {
             self.emit_outputs(&output);
             // Record the entry fn name beside the artifacts so downstream (IDL,
-            // clients) can name things after the circuit, not the crate dir.
-            let _ = std::fs::write(self.output_dir.join("entry"), &entry.name);
+            // clients) can name things after the circuit, not the crate dir. Not
+            // fatal (a correct dir-name fallback exists), but warn rather than
+            // silently degrade to the wrong name.
+            let entry_path = self.output_dir.join("entry");
+            if let Err(e) = std::fs::write(&entry_path, &entry.name) {
+                eprintln!(
+                    "xark: warning: could not write {}: {e}",
+                    entry_path.display()
+                );
+            }
         }
         Ok(())
     }

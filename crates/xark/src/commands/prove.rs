@@ -25,7 +25,7 @@ use xark_ir::primitive::VarRole;
 use xark_ir::VarId;
 use xark_prover::{fr_from_decimal, XarkCircuit};
 
-use super::{load_circuit, load_r1cs, parse_inputs, setup, synth_err};
+use super::{load_circuit, parse_inputs, setup, synth_err};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -119,7 +119,12 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // it just replaces a "run build first" error with actually doing it.
     autobuild_and_setup(&args, &project, &r1cs_path, &pk_path)?;
 
-    let prog = load_r1cs(&r1cs_path)?;
+    // Read the R1CS text once: parse it here, and reuse the same text for the
+    // bundle's circuit hash below (no second read, no silent empty-string hash).
+    let r1cs_str = std::fs::read_to_string(&r1cs_path)
+        .with_context(|| format!("reading {} (run `xark build` first?)", r1cs_path.display()))?;
+    let prog = xark_ir::json::from_json(&r1cs_str)
+        .with_context(|| format!("parsing {}", r1cs_path.display()))?;
     let prim = load_circuit(&circuit_path)?;
     let inputs = parse_inputs(&args.inputs)?;
 
@@ -235,11 +240,11 @@ pub fn run(args: ProveArgs) -> Result<()> {
     let proof_sha = super::sha256_hex(&proof_bytes);
     let proof_short = &proof_sha[..proof_sha.len().min(8)];
 
-    // Self-contained, shareable proof bundle: one file with the snarkjs proof
-    // (verify off-chain) AND the on-chain calldata (submit on-chain).
-    let r1cs_str = fs::read_to_string(&r1cs_path).unwrap_or_default();
+    // Self-contained, shareable proof bundle: the snarkjs proof (verify
+    // off-chain) plus the verifier calldata, in one file. Named by the entry
+    // name so it lines up with the IDL / generated client.
     let circuit_hash = super::circuit_hash(&r1cs_str);
-    let name = project.circuit_name();
+    let name = project.entry_name();
     let bundle_json = serde_json::json!({
         "circuit": name,
         "circuit_hash": format!("sha256:{circuit_hash}"),
@@ -347,14 +352,18 @@ fn autobuild_and_setup(
     }
     if args.proving_key.is_none() && r1cs_path.exists() && !pk_path.exists() {
         eprintln!(
-            "{} no proving key found — running `xark setup` first…",
+            "{} no proving key found — generating a dev key (use `xark setup --ptau-file` \
+             for production)…",
             crate::style::tag()
         );
+        // Force dev-mode: the convenience loop must not silently run a production
+        // phase-2 ceremony just because a stray `.ptau` is discoverable. Producing
+        // a real key stays an explicit `xark setup`.
         setup::run(setup::SetupArgs {
             path: args.path.clone(),
             r1cs: args.r1cs.clone(),
             out: None,
-            insecure_dev_mode: false,
+            insecure_dev_mode: true,
             deterministic_rng: None,
             ptau_file: None,
             phase2_seed: None,
@@ -367,11 +376,15 @@ fn autobuild_and_setup(
 /// auto-build: an explicit crate path, else the cwd, else walking up from the
 /// resolved output dir.
 fn find_crate_dir(args: &ProveArgs, project: &XarkProject) -> Option<PathBuf> {
+    // Try each source independently: an explicit crate path, then the cwd, then
+    // walking up from the resolved output dir. (Independent `if`s, not else-if,
+    // so an explicit *non-crate* path still falls back to cwd.)
     if let Some(p) = &args.path {
         if p.join("Cargo.toml").is_file() {
             return Some(p.clone());
         }
-    } else if let Ok(cwd) = std::env::current_dir() {
+    }
+    if let Ok(cwd) = std::env::current_dir() {
         if cwd.join("Cargo.toml").is_file() {
             return Some(cwd);
         }

@@ -84,8 +84,8 @@ pub fn run(args: ClientArgs) -> Result<()> {
         "\n{}",
         crate::style::next_steps(&[
             (
-                format!("cd {dir} && npm install"),
-                "install xark-client (+ snarkjs)",
+                format!("cd {dir}"),
+                "then install deps — see README (xark-client isn't on npm yet)",
             ),
             (
                 "npx tsx example.ts <path-to-.proof.json>".to_string(),
@@ -169,9 +169,15 @@ data.
 
 ## Install
 
+`xark-client` isn't published to npm yet, so point the dependency at your local
+checkout of the xark repo first, then install:
+
 ```bash
-npm install
+npm install /path/to/xark/clients/typescript   # the xark-client library
+npm install                                     # snarkjs + tsx
 ```
+
+(Once `xark-client` is published, `npm install` alone will suffice.)
 
 ## Verify a proof
 
@@ -197,9 +203,6 @@ comes from `xark export`.
 
 Proving happens in the `xark` CLI: snarkjs can verify an xark proof but cannot
 generate one. Flow: `xark prove …` → feed the `.proof.json` bundle here.
-
-> **xark-client not on npm yet?** Point the dependency at a local checkout:
-> `npm install /path/to/xark/clients/typescript` (or a git URL).
 
 Files: `__NAME__.idl.json`, `__NAME__.idl.ts` (typed), `example.ts`.
 "#;

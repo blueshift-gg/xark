@@ -94,18 +94,19 @@ impl XarkProject {
     }
 
     /// The machine-readable circuit interface (`<name>.idl.json`) — the single
-    /// ABI file a client generator or integrator consumes.
+    /// ABI file a client generator or integrator consumes. Named by
+    /// [`Self::entry_name`] so the filename matches the const/type baked inside
+    /// it (and what `xark client` writes).
     pub fn idl_json(&self) -> PathBuf {
         self.xark_dir
-            .join(format!("{}.idl.json", self.circuit_name()))
+            .join(format!("{}.idl.json", self.entry_name()))
     }
 
     /// The typed TypeScript IDL (`<name>.idl.ts`) — the same IDL as an
     /// `as const` constant + exported type, so `xark-client` infers the
     /// circuit's shape at compile time (the Anchor `Program<Idl>` pattern).
     pub fn idl_ts(&self) -> PathBuf {
-        self.xark_dir
-            .join(format!("{}.idl.ts", self.circuit_name()))
+        self.xark_dir.join(format!("{}.idl.ts", self.entry_name()))
     }
 
     /// Key metadata sidecar (`metadata.json`) written by setup.

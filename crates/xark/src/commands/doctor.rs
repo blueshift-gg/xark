@@ -70,8 +70,14 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
         String::new()
     };
     for comp in ["rustc-dev", "rust-src", "llvm-tools"] {
+        // Match a whole component line — `llvm-tools` or a target-suffixed
+        // `llvm-tools-<triple>` — not any incidental substring.
+        let installed = tc_ok
+            && comps
+                .lines()
+                .any(|l| l.trim() == comp || l.trim().starts_with(&format!("{comp}-")));
         problems += check(
-            tc_ok && comps.contains(comp),
+            installed,
             &format!("component {comp}"),
             None,
             &format!("rustup component add {comp} --toolchain {channel}"),
