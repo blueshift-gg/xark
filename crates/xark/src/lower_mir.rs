@@ -47,6 +47,15 @@ pub enum KnownCall {
     HintSub2,
     Xor,
     Or,
+    // Comparison intrinsics returning a `bool` ({0,1} wire). They back
+    // `PartialEq`/`PartialOrd` on `Field`/`U<N>`/`I<N>` so `==` `!=` `<` `<=` `>`
+    // `>=` are circuit operations. `ULt`/`ILt` carry the width `N` in the call's
+    // const generic arg.
+    Eq,
+    ULt,
+    ILt,
+    BoolToField,
+    FieldToBool,
     // `for` desugaring (modeled, not inlined): the two `core` iterator calls plus
     // `RangeInclusive::new`. See `lower_call` for how each is folded into the
     // compile-time loop-unrolling machinery. `IntoIter`/`IterNext` handle both a
@@ -144,6 +153,16 @@ pub(crate) fn classify_call(
         Some(KnownCall::Xor)
     } else if s.contains("__xark_or") || (s.contains("Field") && s.ends_with("::or")) {
         Some(KnownCall::Or)
+    } else if s.contains("__xark_eq") {
+        Some(KnownCall::Eq)
+    } else if s.contains("__xark_ult") {
+        Some(KnownCall::ULt)
+    } else if s.contains("__xark_ilt") {
+        Some(KnownCall::ILt)
+    } else if s.contains("__xark_bool_to_field") {
+        Some(KnownCall::BoolToField)
+    } else if s.contains("__xark_field_to_bool") {
+        Some(KnownCall::FieldToBool)
     } else if s.contains("__xark_advice") || (s.contains("Field") && s.ends_with("::advice")) {
         Some(KnownCall::Advice)
     // `for` desugaring. `into_iter` is the blanket `<I as IntoIterator>::into_iter`
@@ -195,7 +214,7 @@ fn range_bound<'tcx>(env: &LoweringEnv<'tcx>, operand: &Operand<'tcx>) -> Compil
     env.operand_to_int(operand).map(|v| v as u128).ok_or_else(|| {
         CompileError::new("`for` range bounds must be compile-time constants")
             .with_note("a circuit has no runtime control flow, so the loop length must be fixed")
-            .with_help("use constant bounds, e.g. `for i in 0..N`; for data-dependent work use `select`")
+            .with_help("use constant bounds, e.g. `for i in 0..N`; for data-dependent work assert a boolean and mux with `b + cond·(a − b)`")
     })
 }
 
@@ -359,7 +378,8 @@ impl<'tcx> LoweringEnv<'tcx> {
                             .with_note("witness-dependent indexing is not supported")
                             .with_help(
                                 "use a literal index or a loop variable the unroller can fold to a \
-                                 constant; for a data-dependent choice, use `select`",
+                                 constant; for a data-dependent choice, assert a boolean and mux with \
+                                 `b + cond·(a − b)`",
                             )
                     })?;
                     path.push(idx as u64);
@@ -586,9 +606,9 @@ impl<'tcx> LoweringEnv<'tcx> {
                 self.get_field_at(local, &path).ok_or_else(|| {
                     CompileError::new("use of a value that is not a supported field expression")
                         .with_help(
-                        "this position needs a `Field` (or `Bool`/`U<N>` wrapping one); a host \
-                             `bool`/integer, or a value from an operation the circuit can't lower, \
-                             can't be used here",
+                        "this position needs a `Field`, a `bool` wire, or a `U<N>`/`I<N>` \
+                             wrapping one; a host integer, or a value from an operation the \
+                             circuit can't lower, can't be used here",
                     )
                 })
             }
@@ -1206,7 +1226,13 @@ impl<'tcx> LoweringEnv<'tcx> {
 
     /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)`.
     fn emit_range_proof(&mut self, value: VarId, n: usize) {
-        let value_lc = LinearCombination::var(value);
+        self.emit_range_proof_lc(LinearCombination::var(value), n);
+    }
+
+    /// `emit_range_proof` over a (possibly compound) linear combination: decompose
+    /// `value` into `n` boolean bits and pin their recomposition to `value`
+    /// (⇒ `value < 2^n`).
+    fn emit_range_proof_lc(&mut self, value: LinearCombination, n: usize) {
         let two = xark_ir::FieldConst::from_i64(2);
         let mut pow = xark_ir::FieldConst::from_i64(1);
         let mut recomp = LinearCombination::zero();
@@ -1215,7 +1241,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             // Witness-gen: bit `i` of the input value.
             self.witness_gen.push(Some(WitnessGen::Bit {
                 out: b,
-                input: value_lc.clone(),
+                input: value.clone(),
                 index: i as u32,
             }));
             // Booleanity: `b * b = b` (⟺ `b ∈ {0, 1}`).
@@ -1233,12 +1259,66 @@ impl<'tcx> LoweringEnv<'tcx> {
         }
         // Recomposition pins the bits to `value` (⇒ `value < 2^n`).
         let id = self.fresh_constraint_id();
-        let note = format!(
-            "{}-bit range: recompose == {}",
-            n, self.var_names[value as usize]
-        );
+        let note = format!("{n}-bit range: recompose == <lc>");
         self.constraints
-            .push(R1csConstraint::equal(id, recomp, value_lc, &note));
+            .push(R1csConstraint::equal(id, recomp, value, &note));
+    }
+
+    /// Equality-to-zero gadget: a `{0,1}` lc that is `1` iff `input == 0`.
+    /// `out = 1 − input·inv` with `input·out == 0` (the inverse-or-zero hint
+    /// yields `0` when `input == 0`). Backs `==` on `Field`/`U<N>`/`I<N>`.
+    fn emit_is_zero(&mut self, input: LinearCombination) -> LinearCombination {
+        let inv = self.alloc_advice();
+        self.witness_gen.push(Some(WitnessGen::InverseOrZero {
+            out: inv,
+            input: input.clone(),
+        }));
+        let prod = self.emit_mul(input.clone(), LinearCombination::var(inv));
+        let out = LinearCombination::one() - prod;
+        let input_out = self.emit_mul(input, out.clone());
+        self.emit_assert_eq(input_out, LinearCombination::zero());
+        out
+    }
+
+    /// Unsigned `a < b` for `a, b ∈ [0, 2^n)`: a `{0,1}` lc. Borrow trick:
+    /// `top = bitₙ(a − b + 2ⁿ)`, `lt = 1 − top`, range-prove
+    /// `r = a − b + lt·2ⁿ ∈ [0, 2ⁿ)` (which pins `lt`). Needs `n ≤ 252`.
+    fn emit_less_than(
+        &mut self,
+        n: usize,
+        a: LinearCombination,
+        b: LinearCombination,
+    ) -> CompileResult<LinearCombination> {
+        if n > 252 {
+            return Err(CompileError::new(
+                "comparison requires N ≤ 252 so 2^(N+1) ≤ BN254 field order",
+            )
+            .with_help("use a narrower fixed width; `2^(N+1)` must stay below the field order"));
+        }
+        let two_pow_n = pow2_lc(n);
+        let diff_plus = a.clone() - b.clone() + two_pow_n.clone();
+        let top = self.alloc_advice();
+        self.witness_gen.push(Some(WitnessGen::Bit {
+            out: top,
+            input: diff_plus,
+            index: n as u32,
+        }));
+        // Booleanity: `top * top == top` (⟺ `top ∈ {0, 1}`).
+        let id = self.fresh_constraint_id();
+        let note = format!("{} = cmp borrow bit ∈ {{0,1}}", self.var_names[top as usize]);
+        self.constraints.push(R1csConstraint::general(
+            id,
+            LinearCombination::var(top),
+            LinearCombination::var(top),
+            LinearCombination::var(top),
+            &note,
+        ));
+        let lt = LinearCombination::one() - LinearCombination::var(top);
+        // `r = a − b + lt·2ⁿ`; range-proving `r ∈ [0, 2ⁿ)` pins `lt`.
+        let lt_pow = self.emit_mul(lt.clone(), two_pow_n);
+        let r = (a.clone() - b.clone()) + lt_pow;
+        self.emit_range_proof_lc(r, n);
+        Ok(lt)
     }
 
     fn merge_mul(&mut self, var: VarId, target: LinearCombination) {
@@ -1515,6 +1595,184 @@ const MAX_STEPS: u64 = 5_000_000;
 /// Walk a body's CFG (from the start block) in the current frame, lowering each
 /// statement and terminator. Loops with compile-time bounds are unrolled by
 /// following back-edges; witness-dependent control flow is rejected.
+/// The fallback error for a `SwitchInt` on a witness discriminant that cannot
+/// be lowered to a branchless mux (e.g. more than 2 targets, or a non-bool
+/// discriminant).
+fn fallback_witness_control_flow_error(
+    term_span: rustc_span::Span,
+) -> CompileError {
+    CompileError::new("witness-dependent control flow is not supported")
+        .with_note("branch conditions must be compile-time constants (e.g. loop bounds)")
+        .with_help(
+            "for a data-dependent choice, assert a boolean and \
+             mux with `Field::from(cond) * a + Field::from(!cond) * b`; \
+             loops must have constant bounds",
+        )
+        .or_span(term_span)
+}
+
+/// Walk one unconditional basic-block arm of an `if cond { a } else { b }` and
+/// collect every `_dest = place` assignment. The arm must be pure: no
+/// constraints, no witness-gen, no calls — only value copies and aggregates.
+/// Returns the join-block (the `Goto` target) and the per-`(dest_local, dest_path)`
+/// lc mapping.
+fn collect_arm_assignments<'tcx>(
+    env: &mut LoweringEnv<'tcx>,
+    body: &Body<'tcx>,
+    bb: rustc_middle::mir::BasicBlock,
+) -> CompileResult<(
+    rustc_middle::mir::BasicBlock,
+    BTreeMap<(rustc_middle::mir::Local, Vec<u64>), LinearCombination>,
+)> {
+    // Snapshot field state before processing any arm blocks.
+    let saved_fields = env.frame_mut().field.clone();
+    let n_constraints_before = env.constraints.len();
+    let n_witness_before = env.witness_gen.len();
+
+    // Walk through one or more basic blocks, following `Assert` terminators
+    // (bounds checks on compile-time indices) until we reach the real `Goto`.
+    let mut cur_bb = bb;
+    let join_bb;
+    loop {
+        let data = &body.basic_blocks[cur_bb];
+
+        // Validate + lower this block's statements.
+        for stmt in &data.statements {
+            match &stmt.kind {
+                StatementKind::StorageLive(_)
+                | StatementKind::StorageDead(_)
+                | StatementKind::Nop => {}
+                StatementKind::Assign(boxed) => {
+                    let (_, rvalue) = &**boxed;
+                    match rvalue {
+                        Rvalue::Use(_, _) => {}
+                        Rvalue::Ref(_, kind, _)
+                            if matches!(
+                                kind,
+                                rustc_middle::mir::BorrowKind::Shared
+                                    | rustc_middle::mir::BorrowKind::Fake(_)
+                            ) => {}
+                        Rvalue::CopyForDeref(_) => {}
+                        Rvalue::Repeat(..) => {}
+                        Rvalue::BinaryOp(..) | Rvalue::UnaryOp(..) => {}
+                        Rvalue::Aggregate(kind, _) => {
+                            let ok = match &**kind {
+                                rustc_middle::mir::AggregateKind::Array(_)
+                                | rustc_middle::mir::AggregateKind::Tuple => true,
+                                rustc_middle::mir::AggregateKind::Adt(did, ..) => {
+                                    env.tcx.adt_def(*did).is_struct()
+                                }
+                                _ => false,
+                            };
+                            if !ok {
+                                return Err(CompileError::new(
+                                    "unsupported aggregate in conditional arm",
+                                ).with_help("only tuples, arrays, and plain structs are supported"));
+                            }
+                        }
+                        _ => {
+                            return Err(CompileError::new(format!(
+                                "unsupported operation `{rvalue:?}` inside a conditional arm",
+                            ))
+                            .with_help(
+                                "only plain value copies and tuple/struct aggregates are allowed; \
+                                 move arithmetic and calls before the `if`",
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(CompileError::new(
+                        "unsupported statement in conditional arm",
+                    )
+                    .with_help("no calls, no control flow"));
+                }
+            }
+        }
+
+        // Process the terminator.
+        let term = data.terminator();
+        match &term.kind {
+            TerminatorKind::Goto { target } => {
+                join_bb = *target;
+                break;
+            }
+            // Bounds checks on compile-time indices — always succeed, skip.
+            TerminatorKind::Assert { target, .. } => {
+                cur_bb = *target;
+            }
+            other => {
+                return Err(CompileError::new(format!(
+                    "conditional arm ends with `{}` instead of `goto` — \
+                     arms cannot contain calls, returns, or nested control flow",
+                    terminator_name(other)
+                ))
+                .with_help(
+                    "move function calls and assertions before the `if`; only \
+                     plain value assignments are allowed in each arm",
+                ));
+            }
+        }
+    }
+
+    // Now lower all traversed blocks (a second pass, but kept simple).
+    let mut cur_bb = bb;
+    loop {
+        let data = &body.basic_blocks[cur_bb];
+        for stmt in &data.statements {
+            lower_statement(env, &stmt.kind).map_err(|e| {
+                e.with_help("error inside a conditional arm — ensure only value copies are used")
+            })?;
+        }
+        let term = data.terminator();
+        match &term.kind {
+            TerminatorKind::Goto { .. } => break,
+            TerminatorKind::Assert { target, .. } => cur_bb = *target,
+            _ => unreachable!("already validated"),
+        }
+    }
+
+    // Arms must be pure — no constraints or witness entries emitted.
+    if env.constraints.len() != n_constraints_before
+        || env.witness_gen.len() != n_witness_before
+    {
+        env.frame_mut().field = saved_fields;
+        return Err(CompileError::new(
+            "conditional arm must not emit constraints or hints",
+        )
+        .with_help(
+            "only value assignments are allowed in `if`/`else` arms; \
+             move arithmetic and calls before the `if`",
+        ));
+    }
+
+    // Collect the field slots that were added or changed by this arm.
+    let mut map = BTreeMap::new();
+    for (local, slots) in &env.frame().field {
+        match saved_fields.get(local) {
+            None => {
+                for (path, lc) in slots {
+                    map.insert((*local, path.clone()), lc.clone());
+                }
+            }
+            Some(old)
+                if old.len() != slots.len()
+                    || old.keys().collect::<BTreeSet<_>>()
+                        != slots.keys().collect::<BTreeSet<_>>() =>
+            {
+                for (path, lc) in slots {
+                    map.insert((*local, path.clone()), lc.clone());
+                }
+            }
+            _ => { /* unchanged */ }
+        }
+    }
+
+    // Restore pre-arm state.
+    env.frame_mut().field = saved_fields;
+    Ok((join_bb, map))
+}
+
 fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileResult<()> {
     let mut bb = START_BLOCK;
     let mut steps = 0u64;
@@ -1545,26 +1803,96 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
             // The by-value `array::IntoIter` of `for x in arr` is dropped after
             // the loop; the drop has no circuit effect, so follow its edge.
             TerminatorKind::Drop { target, .. } => bb = *target,
-            // Compile-time-known branch (loop condition, match on constant).
+            // Compile-time-known branch (loop condition, match on constant), or
+            // witness boolean `if` lowered to branchless muxes.
             TerminatorKind::SwitchInt { discr, targets } => {
-                let v = env
-                    .operand_to_int(discr)
-                    .ok_or_else(|| {
-                        CompileError::new("witness-dependent control flow is not supported")
-                            .with_note(
-                                "branch conditions must be compile-time constants (e.g. loop bounds)",
+                if let Some(v) = env.operand_to_int(discr) {
+                    bb = targets
+                        .iter()
+                        .find(|(val, _)| *val == v as u128)
+                        .map(|(_, t)| t)
+                        .unwrap_or_else(|| targets.otherwise());
+                } else {
+                    // Try witness bool → branchless mux.
+                    let targs: Vec<(u128, _)> = targets.iter().collect();
+                    let (then_bb, else_bb) =
+                        if targs.len() == 2
+                            && targs.iter().any(|(v, _)| *v == 0)
+                            && targs.iter().any(|(v, _)| *v == 1)
+                        {
+                            // Both arms explicit: `[(0, else), (1, then)]`
+                            let else_bb = targs
+                                .iter()
+                                .find(|(v, _)| *v == 0)
+                                .map(|(_, bb)| *bb)
+                                .unwrap();
+                            let then_bb = targs
+                                .iter()
+                                .find(|(v, _)| *v == 1)
+                                .map(|(_, bb)| *bb)
+                                .unwrap();
+                            (then_bb, else_bb)
+                        } else if targs.len() == 1 {
+                            let (val, bb) = targs[0];
+                            if val == 0 {
+                                // `[(0, else)]` + `otherwise → then`
+                                (targets.otherwise(), bb)
+                            } else if val == 1 {
+                                // `[(1, then)]` + `otherwise → else`
+                                (bb, targets.otherwise())
+                            } else {
+                                return Err(fallback_witness_control_flow_error(
+                                    term_span,
+                                ));
+                            }
+                        } else {
+                            return Err(fallback_witness_control_flow_error(
+                                term_span,
+                            ));
+                        };
+                    {
+                        let cond_lc = env.operand_to_lc(discr).map_err(|_| {
+                            fallback_witness_control_flow_error(term_span)
+                        })?;
+                        let (then_join, then_map) =
+                            collect_arm_assignments(env, body, then_bb)?;
+                        let (else_join, else_map) =
+                            collect_arm_assignments(env, body, else_bb)?;
+                        if then_join != else_join {
+                            return Err(CompileError::new(
+                                "`if`/`else` arms must converge on the same join block",
                             )
                             .with_help(
-                                "a circuit has no runtime control flow: for a data-dependent \
-                                 choice use `select(cond, a, b)`; loops must have constant bounds",
+                                "both arms must end at the same point; \
+                                 consider extracting differing control flow",
+                            ));
+                        }
+                        // Only mux locals assigned in both arms; a local only
+                        // present in one arm is a dead intra-arm temp.
+                        let common: BTreeSet<_> = then_map
+                            .keys()
+                            .filter(|k| else_map.contains_key(*k))
+                            .cloned()
+                            .collect();
+                        if common.is_empty() {
+                            return Err(CompileError::new(
+                                "`if`/`else` arms share no assignments",
                             )
-                    })
-                    .map_err(|e| e.or_span(term_span))?;
-                bb = targets
-                    .iter()
-                    .find(|(val, _)| *val == v as u128)
-                    .map(|(_, t)| t)
-                    .unwrap_or_else(|| targets.otherwise());
+                            .with_help(
+                                "both arms must assign the same bindings",
+                            ));
+                        }
+                        for key in &common {
+                            let then_lc = &then_map[key];
+                            let else_lc = &else_map[key];
+                            let diff = then_lc.clone() - else_lc.clone();
+                            let mux = else_lc.clone()
+                                + env.emit_mul(cond_lc.clone(), diff);
+                            env.set_field_at(key.0, &key.1, mux);
+                        }
+                        bb = then_join;
+                    }
+                }
             }
             TerminatorKind::Call {
                 func,
@@ -1687,7 +2015,8 @@ fn lower_statement<'tcx>(
                     }
                     Ok(())
                 }
-                // Integer arithmetic/comparison (loop counters, bounds checks).
+                // Integer arithmetic/comparison (loop counters, bounds checks), and
+                // boolean-wire ops on `{0,1}` comparison results.
                 Rvalue::BinaryOp(op, operands) => {
                     if let (Some(a), Some(b)) = (
                         env.operand_to_int(&operands.0),
@@ -1706,6 +2035,54 @@ fn lower_statement<'tcx>(
                                 env.set_int_at(dest, &dest_path, r as u128);
                             }
                         }
+                        return Ok(());
+                    }
+                    // Otherwise these are boolean ops on `{0,1}` wires (the
+                    // results of circuit comparisons).
+                    use rustc_middle::mir::BinOp::*;
+                    match op {
+                        BitAnd => {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            env.consume_pending(&a);
+                            env.consume_pending(&b);
+                            let out = env.emit_mul(a, b);
+                            env.set_field(dest, out);
+                        }
+                        BitOr => {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let out = env.emit_or(a, b);
+                            env.set_field(dest, out);
+                        }
+                        BitXor => {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let out = env.emit_xor(a, b);
+                            env.set_field(dest, out);
+                        }
+                        Eq => {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let out = env.emit_is_zero(a - b);
+                            env.set_field(dest, out);
+                        }
+                        Ne => {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let out = env.emit_xor(a, b);
+                            env.set_field(dest, out);
+                        }
+                        _ => {
+                            return Err(CompileError::new(format!(
+                                "binary op `{op:?}` on witness values is not a circuit operation"
+                            ))
+                            .with_help(
+                                "bitwise (`& | ^`) and equality (`== !=`) ops on `bool` wires are \
+                                 supported; other operators need field arithmetic or a comparison \
+                                 gadget",
+                            ))
+                        }
                     }
                     Ok(())
                 }
@@ -1717,8 +2094,17 @@ fn lower_statement<'tcx>(
                             _ => a,
                         };
                         env.set_int_at(dest, &dest_path, r as u128);
+                        return Ok(());
                     }
-                    Ok(())
+                    // Boolean NOT on a `{0,1}` wire: `1 − x`.
+                    if matches!(op, rustc_middle::mir::UnOp::Not) {
+                        let x = env.operand_to_lc(operand)?;
+                        env.set_field(dest, LinearCombination::one() - x);
+                        return Ok(());
+                    }
+                    Err(CompileError::new(format!(
+                        "unary op `{op:?}` on a witness value is not a circuit operation"
+                    )))
                 }
                 // `discriminant(_opt)` on a modeled `Option` from a range `next`:
                 // yield its constant discriminant (0 = None, 1 = Some) so the
@@ -1897,13 +2283,25 @@ fn lower_ref<'tcx>(
         return Ok(());
     }
     Err(CompileError::new(
-        "references to a `Field` value are not supported inside a circuit",
+        "a mutable borrow of a `Field` value is not supported inside a circuit",
     )
     .with_note(
-        "comparisons (`==` `!=` `<` `<=` `>` `>=`) and compound assignments (`+=` `-=` `*=` `/=`) \
-         are not circuit operations — use `assert_eq(a, b)` to constrain equality or \
-         `a.is_eq(b)`/`a.is_zero()` for a boolean result, and write `a = a + b` instead of `a += b`",
+        "comparisons (`==` `!=` `<` `<=` `>` `>=`) are circuit operations that return a \
+         `bool` wire; compound assignments (`+=` `-=` `*=` `/=`) are not — write \
+         `a = a + b` instead of `a += b`",
     ))
+}
+
+/// `2^n` as a `Field` constant linear combination (zero constraints).
+fn pow2_lc(n: usize) -> LinearCombination {
+    let mut p = xark_ir::FieldConst::from_i64(1);
+    let two = xark_ir::FieldConst::from_i64(2);
+    let mut i = 0;
+    while i < n {
+        p = p.mul(&two);
+        i += 1;
+    }
+    LinearCombination::constant(p.decimal.clone())
 }
 
 fn is_with_overflow(op: rustc_middle::mir::BinOp) -> bool {
@@ -2098,6 +2496,44 @@ fn lower_call<'tcx>(
             let b = env.operand_to_lc(arg(1)?)?;
             let out = env.emit_or(a, b);
             env.set_field(dest, out);
+        }
+        // Comparison intrinsics returning a `bool` (`{0,1}` wire). Back the
+        // `PartialEq`/`PartialOrd` impls on `Field`/`U<N>`/`I<N>`; the width `N`
+        // for `ULt`/`ILt` comes from the call's const generic arg.
+        KnownCall::Eq => {
+            let a = env.operand_to_lc(arg(0)?)?;
+            let b = env.operand_to_lc(arg(1)?)?;
+            let out = env.emit_is_zero(a - b);
+            env.set_field(dest, out);
+        }
+        KnownCall::ULt => {
+            let n = call_args
+                .const_at(0)
+                .try_to_target_usize(env.tcx)
+                .ok_or_else(|| CompileError::new("comparison width `N` must be a constant"))?
+                as usize;
+            let a = env.operand_to_lc(arg(0)?)?;
+            let b = env.operand_to_lc(arg(1)?)?;
+            let out = env.emit_less_than(n, a, b)?;
+            env.set_field(dest, out);
+        }
+        KnownCall::ILt => {
+            let n = call_args
+                .const_at(0)
+                .try_to_target_usize(env.tcx)
+                .ok_or_else(|| CompileError::new("comparison width `N` must be a constant"))?
+                as usize;
+            let a = env.operand_to_lc(arg(0)?)?;
+            let b = env.operand_to_lc(arg(1)?)?;
+            // signed: bias both by 2^(n-1) into [0, 2^n), then unsigned-compare
+            let bias = pow2_lc(n - 1);
+            let out = env.emit_less_than(n, a.clone() + bias.clone(), b.clone() + bias)?;
+            env.set_field(dest, out);
+        }
+        KnownCall::BoolToField | KnownCall::FieldToBool => {
+            // identity: a `bool` and a `{0,1}` `Field` wire are the same variable
+            let x = env.operand_to_lc(arg(0)?)?;
+            env.set_field(dest, x);
         }
         // Width-generic hints: `N` inferred from the array args, `bits` from the
         // trailing `usize`. Returns are tuples (`[0,i]`/`[1,i]` slot paths).

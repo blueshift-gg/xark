@@ -16,7 +16,7 @@
 
 use core::marker::PhantomData;
 use core::ops::{
-    Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign,
+    Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign,
 };
 
 /// The opaque circuit field element.
@@ -27,10 +27,13 @@ use core::ops::{
 /// (which would erase the data-flow the compiler tracks).
 ///
 /// Implements `core::ops` arithmetic (`+ - * /`, unary `-`, `*Assign`, `^`) plus
-/// `PartialEq`/`Eq`/`Hash` for host/const use. Comparisons (`== != < <= > >=`)
-/// are not circuit operations — rejected in-circuit; use `assert_eq`/`is_eq`/
-/// `is_zero` or [`U<N>`](crate::uint::U) for ordering.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/// Comparisons (`== != < <= > >=`) are circuit operations: they return a `bool`
+/// that is a `{0,1}` field wire (the compiler lowers `PartialEq`/`PartialOrd`),
+/// usable in further boolean logic or muxed via [`Field::from`]`(cond)`. For
+/// *ordering* on a bounded integer, wrap in [`U<N>`](crate::uint::U) /
+/// [`I<N>`](crate::int::I) — a bare `Field` only supports `==`/`!=` (equality);
+/// ordering the canonical `[0, r)` representative is rarely intended.
+#[derive(Clone, Copy)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
     /// Meaningful only for constants (`Field::from`/`Field::constant`, which are
@@ -235,17 +238,10 @@ impl Field {
         w
     }
 
-    /// Circuit equality-to-zero: a [`Bool`] that is `1` iff `self == 0`.
-    pub fn is_zero(self) -> Bool {
-        let inv = Field::hint_inverse_or_zero(self);
-        let out = Field::from(1u8) - self * inv;
-        assert_eq(self * out, Field::from(0u8));
-        Bool::from_pinned(out)
-    }
-
-    /// Circuit equality test: a [`Bool`] true iff `self == other`.
-    pub fn is_eq(self, other: Field) -> Bool {
-        (self - other).is_zero()
+    /// Circuit equality-to-zero: a `bool` (a `{0,1}` wire) that is `true` iff
+    /// `self == 0`.
+    pub fn is_zero(self) -> bool {
+        self == Field::from(0u8)
     }
 
     /// Advice hint: integer division of `a` by `b` on the canonical
@@ -297,98 +293,6 @@ impl Field {
     }
 }
 
-/// A circuit boolean: a [`Field`] wire constrained to `{0, 1}`. Zero-cost
-/// wrapper carrying booleanity in the type; returned by the comparison gadgets
-/// and consumed by [`select`] and the logical combinators.
-#[derive(Clone, Copy)]
-pub struct Bool(Field);
-
-impl Bool {
-    /// Wrap an arbitrary field wire as a boolean, *proving* `f ∈ {0, 1}`.
-    pub fn new(f: Field) -> Bool {
-        f.assert_bool();
-        Bool(f)
-    }
-
-    /// A compile-time-constant boolean (no constraint).
-    pub fn constant(b: bool) -> Bool {
-        Bool(Field::from(b as u8))
-    }
-
-    /// Wrap a wire already pinned to `{0, 1}` by its producer (no extra constraint).
-    pub(crate) fn from_pinned(f: Field) -> Bool {
-        Bool(f)
-    }
-
-    /// The underlying `{0, 1}` field wire.
-    pub fn value(self) -> Field {
-        self.0
-    }
-
-    /// Logical NOT (`1 − self`).
-    // Inherent named method mirroring the `Not` impl below; both are provided intentionally.
-    #[allow(clippy::should_implement_trait)]
-    pub fn not(self) -> Bool {
-        Bool::from_pinned(self.0.not())
-    }
-
-    /// Logical AND (`self · other`).
-    pub fn and(self, other: Bool) -> Bool {
-        Bool::from_pinned(self.0.and(other.0))
-    }
-
-    /// Logical OR (`self + other − self·other`).
-    pub fn or(self, other: Bool) -> Bool {
-        Bool::from_pinned(self.0.or(other.0))
-    }
-
-    /// Logical XOR.
-    pub fn xor(self, other: Bool) -> Bool {
-        Bool::from_pinned(self.0.xor(other.0))
-    }
-
-    /// Constrain this boolean to be true / false.
-    pub fn assert_true(self) {
-        assert_eq(self.0, Field::from(1u8));
-    }
-    pub fn assert_false(self) {
-        assert_eq(self.0, Field::from(0u8));
-    }
-}
-
-/// Standard `bool` operators for `Bool` (`&` `|` `^` `!`), each forwarding to
-/// the constraint-free combinator.
-impl BitAnd for Bool {
-    type Output = Bool;
-    fn bitand(self, rhs: Bool) -> Bool {
-        self.and(rhs)
-    }
-}
-impl BitOr for Bool {
-    type Output = Bool;
-    fn bitor(self, rhs: Bool) -> Bool {
-        self.or(rhs)
-    }
-}
-impl BitXor for Bool {
-    type Output = Bool;
-    fn bitxor(self, rhs: Bool) -> Bool {
-        self.xor(rhs)
-    }
-}
-impl Not for Bool {
-    type Output = Bool;
-    fn not(self) -> Bool {
-        Bool::from_pinned(self.value().not())
-    }
-}
-
-/// Branchless select: `if_false + cond·(if_true − if_false)` — `if_true` when
-/// `cond`, else `if_false`.
-pub fn select(cond: Bool, if_true: Field, if_false: Field) -> Field {
-    if_false + cond.value() * (if_true - if_false)
-}
-
 /// Canonical conversions from unsigned integer types (`u8`..`u128`) to in-circuit
 /// `Field` constants: `Field::from(x)`. Each routes through an internal constant
 /// intrinsic. For constants above `u128` (up to ~254 bits) use [`Field::constant`]
@@ -424,6 +328,26 @@ impl From<u128> for Field {
 impl From<&str> for Field {
     fn from(s: &str) -> Field {
         Field::constant(s)
+    }
+}
+
+/// Circuit equality: `self == other` / `self != other` return a `bool` that is a
+/// `{0,1}` field wire (the compiler lowers this to the equality gadget). It is
+/// *not* a host comparison — `Field` holds a symbolic witness with no host
+/// value, so the derived `PartialEq`/`Eq`/`Hash` were dropped on purpose.
+impl PartialEq for Field {
+    fn eq(&self, other: &Field) -> bool {
+        __xark_eq(*self, *other)
+    }
+}
+
+/// Reinterpret a circuit `bool` (a `{0,1}` wire) as a `Field` wire, so a
+/// comparison result can be used in arithmetic — e.g. a branchless mux
+/// `if_false + Field::from(cond) * (if_true - if_false)`. Zero constraints: a
+/// `bool` *is* already a `{0,1}` field wire.
+impl From<bool> for Field {
+    fn from(b: bool) -> Field {
+        __xark_bool_to_field(b)
     }
 }
 
@@ -638,6 +562,44 @@ pub fn __xark_hint_sub2<const N: usize>(
     _m: [Field; N],
     _bits: usize,
 ) -> (Field, [Field; N]) {
+    loop {}
+}
+
+// --- comparison intrinsics: return a `bool` that is a `{0,1}` field wire -----
+// The compiler lowers these directly (never inlined); they back `PartialEq` /
+// `PartialOrd` on `Field` / `U<N>` / `I<N>` so `==` `!=` `<` `<=` `>` `>=` work
+// as circuit operations.
+
+/// Field equality: `a == b` as a `bool` wire (`1` iff `a == b`).
+#[inline(never)]
+pub fn __xark_eq(_a: Field, _b: Field) -> bool {
+    loop {}
+}
+
+/// Unsigned less-than: `a < b` for `a, b ∈ [0, 2^N)`, as a `bool` wire.
+#[inline(never)]
+pub fn __xark_ult<const N: usize>(_a: Field, _b: Field) -> bool {
+    loop {}
+}
+
+/// Signed less-than: `a < b` for `a, b ∈ [−2^(N−1), 2^(N−1))`, as a `bool` wire.
+#[inline(never)]
+pub fn __xark_ilt<const N: usize>(_a: Field, _b: Field) -> bool {
+    loop {}
+}
+
+/// Reinterpret a `bool` wire as a `Field` wire (identity — both are `{0,1}`
+/// wires). Backs `From<bool> for Field`.
+#[inline(never)]
+pub fn __xark_bool_to_field(_b: bool) -> Field {
+    loop {}
+}
+
+/// Reinterpret a `{0,1}` `Field` wire as a `bool` wire (identity). For producers
+/// that already pinned a wire boolean (e.g. a cached sign bit) and want to feed
+/// it to `bool` operators.
+#[inline(never)]
+pub fn __xark_field_to_bool(_f: Field) -> bool {
     loop {}
 }
 

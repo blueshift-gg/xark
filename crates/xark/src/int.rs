@@ -4,11 +4,11 @@
 //! `[−2^(N−1), 2^(N−1))` stored field-native (`−v` is `p − v`). Signedness is
 //! proven by biasing: `v + 2^(N−1) ∈ [0, 2^N)`, whose top bit is the sign — so
 //! `is_negative` is a cached free read and `is_positive` costs only `is_zero`.
-//! `lt`/`le`/`gt`/`ge` reuse the `U<N>` comparison on the biased values (~`N + 2`).
+//! Ordering `< <= > >= == !=` works via `PartialOrd`/`PartialEq` (signed, ~`N + 2`).
 //! `+`/`−`/unary `−` are checked (overflow is unsatisfiable); no signed `*` yet.
 
-use crate::lang::{Bool, Field};
-use crate::uint::{less_than, pow2_val};
+use crate::lang::{__xark_eq, __xark_field_to_bool, __xark_ilt, Field};
+use crate::uint::pow2_val;
 use core::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 /// A signed `N`-bit integer: a field-native value proven `∈ [−2^(N−1), 2^(N−1))`,
@@ -18,7 +18,7 @@ pub struct I<const N: usize> {
     /// Field-native signed value (`−k` is `p − k`).
     value: Field,
     /// Cached sign: true iff `value < 0` (from the biased decomposition's top bit).
-    negative: Bool,
+    negative: Field,
 }
 
 impl<const N: usize> I<N> {
@@ -36,7 +36,7 @@ impl<const N: usize> I<N> {
         let bits = biased.to_bits::<N>();
         // top bit is `1` iff value ≥ 0; sign is its complement (a pinned {0,1} wire)
         let top = bits[N - 1];
-        let negative = Bool::from_pinned(Field::from(1u8) - top);
+        let negative = Field::from(1u8) - top;
         I { value, negative }
     }
 
@@ -46,49 +46,43 @@ impl<const N: usize> I<N> {
     }
 
     /// True iff the value is negative (`< 0`) — the cached sign bit.
-    pub fn is_negative(self) -> Bool {
-        self.negative
+    pub fn is_negative(self) -> bool {
+        __xark_field_to_bool(self.negative)
     }
 
     /// True iff the value is exactly `0`.
-    pub fn is_zero(self) -> Bool {
+    pub fn is_zero(self) -> bool {
         self.value.is_zero()
     }
 
     /// True iff the value is strictly positive (`> 0`).
-    pub fn is_positive(self) -> Bool {
-        self.is_zero().not().and(self.negative.not())
+    pub fn is_positive(self) -> bool {
+        !self.value.is_zero() & !self.is_negative()
     }
+}
 
-    /// True iff `self == other`.
-    pub fn is_eq(self, other: I<N>) -> Bool {
-        self.value.is_eq(other.value)
+/// `I<N>` equality and ordering are circuit operations returning a `bool` wire:
+/// `==` `!=` `<` `<=` `>` `>=` all work naturally (signed).
+impl<const N: usize> PartialEq for I<N> {
+    fn eq(&self, other: &I<N>) -> bool {
+        __xark_eq(self.value, other.value)
     }
-
-    /// True iff `self < other` (signed).
-    pub fn lt(self, other: I<N>) -> Bool {
-        // signed order == order of the biased values
-        less_than::<N>(self.biased(), other.biased())
+}
+impl<const N: usize> PartialOrd for I<N> {
+    fn partial_cmp(&self, _other: &I<N>) -> Option<core::cmp::Ordering> {
+        unreachable!("I<N> has no host ordering")
     }
-
-    /// True iff `self <= other` (signed).
-    pub fn le(self, other: I<N>) -> Bool {
-        other.lt(self).not()
+    fn lt(&self, other: &I<N>) -> bool {
+        __xark_ilt::<N>(self.value, other.value)
     }
-
-    /// True iff `self > other` (signed).
-    pub fn gt(self, other: I<N>) -> Bool {
-        other.lt(self)
+    fn le(&self, other: &I<N>) -> bool {
+        !__xark_ilt::<N>(other.value, self.value)
     }
-
-    /// True iff `self >= other` (signed).
-    pub fn ge(self, other: I<N>) -> Bool {
-        self.lt(other).not()
+    fn gt(&self, other: &I<N>) -> bool {
+        __xark_ilt::<N>(other.value, self.value)
     }
-
-    /// The biased value `value + 2^(N−1) ∈ [0, 2^N)`.
-    fn biased(self) -> Field {
-        self.value + pow2_val(N - 1)
+    fn ge(&self, other: &I<N>) -> bool {
+        !__xark_ilt::<N>(self.value, other.value)
     }
 }
 

@@ -2028,7 +2028,8 @@ fn rejects_compound_assign() {
     );
 }
 
-/// `==` (and other comparisons) on `Field` is rejected in-circuit.
+/// `==` on `Field` is now a circuit operation (yields a `bool` wire); what is
+/// rejected is branching on that witness-dependent bool.
 #[test]
 fn rejects_field_comparison() {
     let src = write_case(
@@ -2041,12 +2042,136 @@ fn rejects_field_comparison() {
     let c = compile(&src, "reject_cmp");
     assert!(
         !c.status_success,
-        "comparison circuit should have been rejected"
+        "branching on a witness comparison should have been rejected"
     );
     assert!(
-        c.stderr.contains("not supported inside a circuit"),
+        c.stderr.contains("conditional arm ends with")
+            || c.stderr.contains("unsupported operation"),
         "unexpected error: {}",
         c.stderr
+    );
+}
+
+/// `==`/`!=`/`<`/`<=`/`>`/`>=` on `U<N>` and `==` on `Field` lower via
+/// `PartialEq`/`PartialOrd` to comparison gadgets returning `bool` wires; the
+/// wires mux and combine naturally.
+#[test]
+fn cmp_operators_solve() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "cmp_ops",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, eq: Public<Field>, feq: Public<Field>, mux: Public<Field>) {\n\
+         \x20   let ua = U::<8>::new(a);\n\
+         \x20   let ub = U::<8>::new(b);\n\
+         \x20   let c = ua < ub;\n\
+         \x20   assert_eq(Field::from(c), lt);\n\
+         \x20   assert_eq(Field::from(ua == ub), eq);\n\
+         \x20   assert_eq(Field::from(a == b), feq);\n\
+         \x20   let r = Field::from(c) * b + Field::from(!c) * a;\n\
+         \x20   assert_eq(r, mux);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "cmp_ops", "bn254");
+    assert!(c.status_success, "cmp_ops failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    let id = |n: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == n)
+            .map(|v| v.id)
+            .unwrap()
+    };
+    let case = |a: &str, b: &str, lt: &str, eq: &str, feq: &str, mux: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("lt"), lt.to_string());
+        m.insert(id("eq"), eq.to_string());
+        m.insert(id("feq"), feq.to_string());
+        m.insert(id("mux"), mux.to_string());
+        m
+    };
+    // a=3,b=5: 3<5 true → lt=1, eq=0, mux picks b=5.
+    let asg = solver::solve_and_check(&program, &case("3", "5", "1", "0", "0", "5"))
+        .expect("3<5 solves");
+    assert!(
+        solver::analyze_underconstrained(&program, &asg).is_empty(),
+        "comparison circuit under-constrained"
+    );
+    // a=5,b=3: 5<3 false → lt=0, mux picks a=5.
+    solver::solve_and_check(&program, &case("5", "3", "0", "0", "0", "5")).expect("5<3 solves");
+    // a=5,b=5: equal → eq=1, feq=1.
+    solver::solve_and_check(&program, &case("5", "5", "0", "1", "1", "5")).expect("5==5 solves");
+    // wrong result must reject.
+    assert!(
+        solver::solve_and_check(&program, &case("3", "5", "0", "0", "0", "5")).is_err(),
+        "wrong lt must reject"
+    );
+}
+
+/// Branchless lowering of `if` on a witness `bool`: the compiler detects both
+/// arms are pure value copies converging at a join block, and replaces the
+/// `SwitchInt` with muxes (`else + cond·(then − else)`).
+#[test]
+fn if_mux_lowers_and_solves() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let src = write_case(
+        "if_mux",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, a: Private<Field>, b: Private<Field>, left: Public<Field>, right: Public<Field>) {\n\
+         \x20   let (l, r) = if x.is_zero() {\n\
+         \x20       (a, b)\n\
+         \x20   } else {\n\
+         \x20       (b, a)\n\
+         \x20   };\n\
+         \x20   assert_eq(l, left);\n\
+         \x20   assert_eq(r, right);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "if_mux", "bn254");
+    assert!(c.status_success, "if_mux failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    let id = |n: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == n)
+            .map(|v| v.id)
+            .unwrap()
+    };
+    let case = |x: &str, a: &str, b: &str, left: &str, right: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), x.to_string());
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("left"), left.to_string());
+        m.insert(id("right"), right.to_string());
+        m
+    };
+    // x=0 → is_zero=true → pick (a,b) = (7,9). (The zero-input edge case yields
+    // a statically free inverse witness — a known limitation of the gadget, not
+    // a soundness issue.)
+    solver::solve_and_check(&program, &case("0", "7", "9", "7", "9")).expect("x=0 pick a");
+    // x=5 → is_zero=false → pick (b,a) = (9,7). Non-zero case must be fully constrained.
+    let asg =
+        solver::solve_and_check(&program, &case("5", "7", "9", "9", "7")).expect("x=5 pick b");
+    assert!(
+        solver::analyze_underconstrained(&program, &asg).is_empty(),
+        "if-mux circuit under-constrained: {:?}",
+        solver::analyze_underconstrained(&program, &asg)
+    );
+    // Wrong result rejected.
+    assert!(
+        solver::solve_and_check(&program, &case("0", "7", "9", "9", "7")).is_err(),
+        "wrong mux must reject"
     );
 }
 
@@ -2059,7 +2184,7 @@ fn is_zero_gadget_solves() {
         "is_zero",
         "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
          pub fn circuit(x: Private<Field>, want: Public<Field>) {\n\
-         \x20   assert_eq(x.is_zero().value(), want);\n\
+         \x20   assert_eq(Field::from(x.is_zero()), want);\n\
          }\n",
     );
     let c = compile_with_field(&src, "is_zero", "bn254");
@@ -2100,20 +2225,20 @@ fn is_zero_gadget_solves() {
     );
 }
 
-/// `is_eq` gadget: returns 1 iff the two inputs are equal, as a boolean wire.
+/// `==` on `Field`: returns `1` iff the two inputs are equal, as a boolean wire.
 #[test]
-fn is_eq_gadget_solves() {
+fn equality_operator_solves() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
-        "is_eq",
+        "eq_op",
         "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
-         \x20   assert_eq(a.is_eq(b).value(), want);\n\
+         \x20   assert_eq(Field::from(a == b), want);\n\
          }\n",
     );
-    let c = compile_with_field(&src, "is_eq", "bn254");
-    assert!(c.status_success, "is_eq failed: {}", c.stderr);
+    let c = compile_with_field(&src, "eq_op", "bn254");
+    assert!(c.status_success, "eq_op failed: {}", c.stderr);
     let program =
         primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
             .unwrap();
@@ -2132,15 +2257,15 @@ fn is_eq_gadget_solves() {
         m.insert(id("want"), want.to_string());
         m
     };
-    solver::solve_and_check(&program, &case("5", "5", "1")).expect("is_eq(5,5) == 1");
-    solver::solve_and_check(&program, &case("5", "6", "0")).expect("is_eq(5,6) == 0");
+    solver::solve_and_check(&program, &case("5", "5", "1")).expect("eq(5,5) == 1");
+    solver::solve_and_check(&program, &case("5", "6", "0")).expect("eq(5,6) == 0");
     assert!(
         solver::solve_and_check(&program, &case("5", "6", "1")).is_err(),
-        "is_eq(5,6) != 1 must reject"
+        "eq(5,6) != 1 must reject"
     );
     assert!(
         solver::solve_and_check(&program, &case("5", "5", "0")).is_err(),
-        "is_eq(5,5) != 0 must reject"
+        "eq(5,5) != 0 must reject"
     );
 }
 
@@ -2155,8 +2280,8 @@ fn uint_comparisons_solve() {
          pub fn circuit(a: Private<Field>, b: Private<Field>, lt: Public<Field>, le: Public<Field>) {\n\
          \x20   let ua = U::<8>::new(a);\n\
          \x20   let ub = U::<8>::new(b);\n\
-         \x20   assert_eq(ua.lt(ub).value(), lt);\n\
-         \x20   assert_eq(ua.le(ub).value(), le);\n\
+         \x20   assert_eq(Field::from(ua < ub), lt);\n\
+         \x20   assert_eq(Field::from(ua <= ub), le);\n\
          }\n",
     );
     let c = compile_with_field(&src, "uint_cmp", "bn254");
@@ -2241,22 +2366,23 @@ fn ecdsa_scalar_range_checks() {
     );
 }
 
-/// `Bool` + `select`: branchless conditional pick, with a non-boolean condition
-/// rejected by `Bool::new`.
+/// Branchless boolean mux: `assert_bool` pins the condition, then
+/// `if_false + cond·(if_true − if_false)` selects — a non-boolean condition is
+/// rejected by `assert_bool`.
 #[test]
-fn select_and_bool_solve() {
+fn bool_mux_solve() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
-        "bool_select",
+        "bool_mux",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(cond: Private<Field>, a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
-         \x20   let c = Bool::new(cond);\n\
-         \x20   assert_eq(select(c, a, b), out);\n\
+         \x20   cond.assert_bool();\n\
+         \x20   assert_eq(b + cond * (a - b), out);\n\
          }\n",
     );
-    let c = compile_with_field(&src, "bool_select", "bn254");
-    assert!(c.status_success, "bool_select failed: {}", c.stderr);
+    let c = compile_with_field(&src, "bool_mux", "bn254");
+    assert!(c.status_success, "bool_mux failed: {}", c.stderr);
     let program =
         primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
             .unwrap();
@@ -2280,7 +2406,7 @@ fn select_and_bool_solve() {
     solver::solve_and_check(&program, &case("0", "7", "9", "9")).expect("cond=false selects b");
     assert!(
         solver::solve_and_check(&program, &case("1", "7", "9", "9")).is_err(),
-        "wrong select must reject"
+        "wrong mux must reject"
     );
     assert!(
         solver::solve_and_check(&program, &case("2", "7", "9", "7")).is_err(),
@@ -2418,18 +2544,19 @@ fn public_uint_input_is_range_proved() {
     );
 }
 
-/// `Bool`'s `&`/`|`/`!` operators lower and solve.
+/// `Field` boolean combinators `and`/`or`/`not` (on wires pinned `{0,1}` by
+/// `assert_bool`) lower and solve.
 #[test]
-fn bool_operators_solve() {
+fn bool_combinators_solve() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = write_case(
         "bool_ops",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
-         \x20   let x = Bool::new(a);\n\
-         \x20   let y = Bool::new(b);\n\
-         \x20   assert_eq(((x & y) | !x).value(), want);\n\
+         \x20   a.assert_bool();\n\
+         \x20   b.assert_bool();\n\
+         \x20   assert_eq(a.and(b).or(a.not()), want);\n\
          }\n",
     );
     let c = compile_with_field(&src, "bool_ops", "bn254");
@@ -2452,10 +2579,10 @@ fn bool_operators_solve() {
         m.insert(id("want"), want.to_string());
         m
     };
-    // (x & y) | !x : a=1,b=0 -> (1&0)|!1 = 0 ; a=0,b=1 -> (0&1)|!0 = 1.
+    // a.and(b).or(a.not()) : a=1,b=0 -> (1&0)|!1 = 0 ; a=0,b=1 -> (0&1)|!0 = 1.
     solver::solve_and_check(&program, &case("1", "0", "0")).expect("(1&0)|!1 == 0");
     solver::solve_and_check(&program, &case("0", "1", "1")).expect("(0&1)|!0 == 1");
-    // Non-boolean input is rejected by Bool::new.
+    // Non-boolean input is rejected by assert_bool.
     assert!(
         solver::solve_and_check(&program, &case("2", "0", "0")).is_err(),
         "non-boolean input must reject"
@@ -2515,8 +2642,8 @@ fn signed_int_solves() {
          \x20   let ia = I::<8>::new(a);\n\
          \x20   let ib = I::<8>::new(b);\n\
          \x20   assert_eq((ia + ib).value(), sum);\n\
-         \x20   assert_eq(ia.lt(ib).value(), lt);\n\
-         \x20   assert_eq(ia.is_positive().value(), a_pos);\n\
+         \x20   assert_eq(Field::from(ia < ib), lt);\n\
+         \x20   assert_eq(Field::from(ia.is_positive()), a_pos);\n\
          }\n",
     );
     let c = compile_with_field(&src, "signed_int", "bn254");
@@ -2639,7 +2766,7 @@ fn uint_const_comparisons_fold_and_solve() {
     let folded = load(
         "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
          \x20   let u = U::<32>::new(x);\n\
-         \x20   assert_eq(u.gt_const::<0>().value(), out);\n\
+         \x20   assert_eq(Field::from(u.gt_const::<0>()), out);\n\
          }\n",
         "cmp_gt0_folded",
     );
@@ -2647,7 +2774,7 @@ fn uint_const_comparisons_fold_and_solve() {
     let naive = load(
         "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
          \x20   let u = U::<32>::new(x);\n\
-         \x20   assert_eq(u.gt(U::<32>::new(Field::from(0u8))).value(), out);\n\
+         \x20   assert_eq(Field::from(u > U::<32>::new(Field::from(0u8))), out);\n\
          }\n",
         "cmp_gt0_naive",
     );
@@ -2693,10 +2820,10 @@ fn uint_const_comparison_boundaries_solve() {
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(x: Private<Field>, lt0: Public<Field>, ge0: Public<Field>, eq7: Public<Field>, lt100: Public<Field>) {\n\
          \x20   let u = U::<16>::new(x);\n\
-         \x20   assert_eq(u.lt_const::<0>().value(), lt0);\n\
-         \x20   assert_eq(u.ge_const::<0>().value(), ge0);\n\
-         \x20   assert_eq(u.eq_const::<7>().value(), eq7);\n\
-         \x20   assert_eq(u.lt_const::<100>().value(), lt100);\n\
+         \x20   assert_eq(Field::from(u.lt_const::<0>()), lt0);\n\
+         \x20   assert_eq(Field::from(u.ge_const::<0>()), ge0);\n\
+         \x20   assert_eq(Field::from(u.eq_const::<7>()), eq7);\n\
+         \x20   assert_eq(Field::from(u.lt_const::<100>()), lt100);\n\
          }\n",
     );
     let c = compile_with_field(&src, "cmp_const_bounds", "bn254");
@@ -2747,7 +2874,7 @@ fn uint_width_guards_reject_unsound_widths() {
          pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
          \x20   let ua = U::<253>::new(a);\n\
          \x20   let ub = U::<253>::new(b);\n\
-         \x20   assert_eq(ua.lt(ub).value(), out);\n\
+         \x20   assert_eq(Field::from(ua < ub), out);\n\
          }\n",
     );
     let c = compile_with_field(&cmp, "u253_cmp", "bn254");
@@ -2782,7 +2909,7 @@ fn uint_width_guards_reject_unsound_widths() {
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
          \x20   let ua = U::<253>::new(a);\n\
-         \x20   assert_eq(ua.lt_const::<1>().value(), out);\n\
+         \x20   assert_eq(ua.lt_const::<1>(), out);\n\
          }\n",
     );
     let c = compile_with_field(&cmp_const, "u253_cmp_const", "bn254");
@@ -2795,7 +2922,7 @@ fn uint_width_guards_reject_unsound_widths() {
          pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
          \x20   let ia = I::<253>::new(a);\n\
          \x20   let ib = I::<253>::new(b);\n\
-         \x20   assert_eq(ia.lt(ib).value(), out);\n\
+         \x20   assert_eq(Field::from(ia < ib), out);\n\
          }\n",
     );
     let c = compile_with_field(&icmp, "i253_cmp", "bn254");

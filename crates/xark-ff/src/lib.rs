@@ -20,7 +20,6 @@
 #![allow(clippy::assign_op_pattern)]
 
 use xark::assert_eq;
-use xark::Bool;
 /// Re-exported so the [`fp!`] macro can name `$crate::Field` without the caller
 /// importing `xark`.
 pub use xark::Field;
@@ -577,14 +576,14 @@ pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
 
 /// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
-    // all_zero = AND of isZero(limbᵢ); assert false to forbid value 0
-    let mut all_zero = Bool::constant(true);
+    // all_zero = AND of isZero(limbᵢ); assert it is 0 to forbid value 0
+    let mut all_zero = Field::from(1u8);
     let mut i = 0usize;
     while i < LIMBS {
-        all_zero = all_zero.and(limbs[i].is_zero());
+        all_zero = all_zero.and(Field::from(limbs[i].is_zero()));
         i += 1;
     }
-    all_zero.assert_false();
+    assert_eq(all_zero, Field::from(0u8));
 }
 
 /// Shared column/carry identity `a·b == q·m + r`. `q`, `r` are the caller-supplied
