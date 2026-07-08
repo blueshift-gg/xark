@@ -235,7 +235,8 @@ pub fn solve(
             }
             WitnessGen::Inverse { out, input } => {
                 let v = eval_lc(input, &assign, &modulus);
-                let inv = v.inverse().ok_or(SolveError::NonInvertible)?;
+                // Inverse-or-zero: 0 maps to 0 (the is_zero convention).
+                let inv = v.inverse().unwrap_or_else(|| Fp::zero(&modulus));
                 assign.insert(*out, inv);
             }
             WitnessGen::InverseOrZero { out, input } => {

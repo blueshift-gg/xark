@@ -75,6 +75,9 @@ pub fn cmd_build(args: &[String]) -> i32 {
         touch_sources(&crate_abs);
     }
 
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| xark_dir.clone());
     eprintln!(
         "{} building circuit `{name}` (toolchain {toolchain})",
         crate::style::tag()
@@ -84,7 +87,7 @@ pub fn cmd_build(args: &[String]) -> i32 {
         .current_dir(&crate_dir)
         .env("RUSTC", &self_exe)
         .env("RUSTUP_TOOLCHAIN", toolchain)
-        .env("CARGO_TARGET_DIR", &xark_dir)
+        .env("CARGO_TARGET_DIR", &target_dir)
         .env(
             "RUSTFLAGS",
             "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0",

@@ -392,9 +392,9 @@ checksum = "21e14a4f604117f379840956a8fc8695e4c84f5b0ebed192f31f60d9b85d581d"
 
 [[package]]
 name = "solana-nostd-alt-bn128"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "351aebf3dfc882836de35867889d7929996b8a30071724da2bfa4355edfe25f5"
+checksum = "b881117c294543b5ab41c6996bc3f122d3796a557589e3486d3e728ac806dc4a"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -476,7 +476,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "xark-verifier"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",
