@@ -81,6 +81,9 @@ impl R1csCallbacks {
 
         if !self.check_only {
             self.emit_outputs(&output);
+            // Record the entry fn name beside the artifacts so downstream (IDL,
+            // clients) can name things after the circuit, not the crate dir.
+            let _ = std::fs::write(self.output_dir.join("entry"), &entry.name);
         }
         Ok(())
     }

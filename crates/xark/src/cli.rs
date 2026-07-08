@@ -103,6 +103,13 @@ pub fn cmd_build(args: &[String]) -> i32 {
                 crate::style::tag(),
                 crate::style::brand(&out_abs.display().to_string())
             );
+            eprintln!(
+                "\n{}",
+                crate::style::next_steps(&[(
+                    format!("xark setup {}", crate_dir.display()),
+                    "generate the proving/verifying keys",
+                )])
+            );
             0
         }
         Ok(s) => {
@@ -330,7 +337,13 @@ pub fn cmd_init(args: &[String]) -> i32 {
          # From a local checkout:   xark-prover = {{ path = \"../xark/crates/xark-prover\" }}\n\
          # xark-prover = \"0.1\"\n"
     );
-    let lib_rs = format!("{LIB_TEMPLATE}{}", tests_template(&name));
+    let fn_ident = ident_of(&name);
+    let inputs_struct = format!("{}Inputs", pascal_of(&fn_ident));
+    let lib_rs = format!(
+        "{}{}",
+        LIB_TEMPLATE.replace("__FN__", &fn_ident),
+        tests_template(&name, &inputs_struct)
+    );
     // Both files set the same rust-analyzer override: `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code specifically.
     let ra_cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\"]";
@@ -377,15 +390,66 @@ pub fn cmd_init(args: &[String]) -> i32 {
         "xark: scaffolded circuit `{name}` ({created} files) in {}",
         dir.display()
     );
+    let where_ = if name_arg.is_some() {
+        name.as_str()
+    } else {
+        "."
+    };
     eprintln!("  1. set the `xark` dependency in Cargo.toml (see its comments)");
     eprintln!("  2. install the CLI so editors can find it:");
     eprintln!(
         "       cargo +nightly-2026-05-03 install --path <xark-repo>/crates/xark --features cli"
     );
     eprintln!(
-        "  3. open the folder for live diagnostics, then: xark build . && xark prove target/xark"
+        "\n{}",
+        crate::style::next_steps(&[
+            (
+                format!("xark build {where_}"),
+                "compile the circuit to R1CS"
+            ),
+            (
+                format!("xark setup {where_}"),
+                "generate the proving/verifying keys"
+            ),
+            (
+                format!("xark prove {where_} --input secret=3 --input result=9"),
+                "produce your first proof",
+            ),
+        ])
     );
     0
+}
+
+/// Turn a crate name into a valid Rust identifier for the scaffolded entry fn
+/// (`my-circuit` → `my_circuit`); falls back to `circuit`.
+fn ident_of(name: &str) -> String {
+    let mut s: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if s.is_empty() {
+        return "circuit".to_string();
+    }
+    if s.starts_with(|c: char| c.is_ascii_digit()) {
+        s.insert(0, '_');
+    }
+    s
+}
+
+/// `my_square` → `MySquare` — must match `xark-macros`' struct naming so the
+/// scaffolded test references the generated `<Fn>Inputs` struct correctly.
+fn pascal_of(ident: &str) -> String {
+    ident
+        .split('_')
+        .filter(|seg| !seg.is_empty())
+        .map(|seg| {
+            let mut chars = seg.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 /// The starter circuit written by `xark init`. The `#[cfg(test)] mod tests`
@@ -403,9 +467,14 @@ use xark::prelude::*;
 /// are known to the verifier. `assert_eq` emits an equality *constraint* (not a
 /// native `bool`), and `Field` supports `+ - * ^` (with `^ n` = exponentiation).
 ///
+/// The entry function is auto-detected (its parameters are all `Public`/
+/// `Private`), and its name names the circuit everywhere — the IDL, the
+/// generated struct, the client. Rename `__FN__` and it flows through.
+///
 /// Build with `xark build .`; prove with
-///   `xark prove target/xark --input secret=3 --input result=9`.
-pub fn circuit(secret: Private<Field>, result: Public<Field>) {
+///   `xark prove . --input secret=3 --input result=9`.
+#[circuit]
+pub fn __FN__(secret: Private<Field>, result: Public<Field>) {
     // Prove knowledge of a square root: `secret * secret == result`.
     assert_eq(secret * secret, result);
 }
@@ -413,28 +482,28 @@ pub fn circuit(secret: Private<Field>, result: Public<Field>) {
 
 /// The `#[cfg(test)] mod tests` appended to the scaffolded `src/lib.rs`.
 ///
-/// Inputs map **positionally** onto the circuit's params in declaration order:
-/// here `[secret, result]`. These tests load the built artifacts, so they need
-/// `xark build .` to have run first.
-fn tests_template(name: &str) -> String {
+/// Inputs are the typed struct `#[circuit]` generates from the entry signature
+/// (`inputs` = `<Fn>Inputs`), so they're named, not positional. These tests load
+/// the built artifacts, so they need `xark build .` to have run first.
+fn tests_template(name: &str, inputs: &str) -> String {
     format!(
         "\n\
          #[cfg(test)]\n\
          mod tests {{\n\
+         \x20   use super::*;\n\
          \x20   // These tests load the built circuit — run `xark build .` first\n\
          \x20   // (or `xark test`, which builds then runs `cargo test`).\n\
-         \x20   // Inputs are positional: [secret, result].\n\
          \n\
          \x20   #[test]\n\
          \x20   fn prove_valid() {{\n\
          \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       assert!(c.prove([2, 4])); // 2 * 2 == 4\n\
+         \x20       assert!(c.prove({inputs} {{ secret: 2, result: 4 }})); // 2 * 2 == 4\n\
          \x20   }}\n\
          \n\
          \x20   #[test]\n\
          \x20   fn prove_invalid() {{\n\
          \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       assert!(!c.prove([3, 4])); // 3 * 3 != 4\n\
+         \x20       assert!(!c.prove({inputs} {{ secret: 3, result: 4 }})); // 3 * 3 != 4\n\
          \x20   }}\n\
          }}\n"
     )

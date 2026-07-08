@@ -38,6 +38,8 @@ cli = [
 ]
 
 [dependencies]
+# The `#[circuit]` attribute macro (always available to circuit authors).
+xark-macros = { path = "../xark-macros" }
 xark-ir = { path = "../xark-ir", optional = true }
 xark-prover = { path = "../xark-prover", optional = true }
 xark-backend = { path = "../backend", optional = true }

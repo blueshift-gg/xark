@@ -16,6 +16,7 @@ use rand_chacha::ChaCha20Rng;
 
 use xark_backend::serialization::vk_to_snarkjs;
 use xark_backend::{keys::KeyMetadata, setup};
+use xark_ir::Visibility;
 use xark_prover::XarkCircuit;
 
 use super::{circuit_hash, load_r1cs, num_public_inputs, synth_err};
@@ -210,6 +211,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
                  trustless phase-2, use the multi-party `xark ceremony` flow instead."
             )
         );
+        print_next_steps(&project, &args.path, &prog);
         return Ok(());
     }
 
@@ -264,5 +266,43 @@ pub fn run(args: SetupArgs) -> Result<()> {
             )
         );
     }
+    print_next_steps(&project, &args.path, &prog);
     Ok(())
+}
+
+/// Guided post-setup footer. Refreshes the circuit IDL (now that a verifying key
+/// exists, so the IDL embeds it), then shows the exact `xark prove` command with
+/// a placeholder for every declared input — so the next step is unambiguous.
+fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_ir::R1csProgram) {
+    match super::idl::write_idl(project) {
+        Ok(idl_path) => println!(
+            "Wrote {}  {}",
+            idl_path.display(),
+            crate::style::dim("# circuit IDL (interface + verifying key)")
+        ),
+        Err(e) => eprintln!(
+            "{}",
+            crate::style::warn(&format!("note: could not write IDL: {e}"))
+        ),
+    }
+
+    // Every input (public + private), in declaration order — prove needs them all.
+    let mut vars: Vec<_> = prog
+        .variables
+        .iter()
+        .filter(|v| v.visibility != Visibility::Internal)
+        .collect();
+    vars.sort_by_key(|v| v.id);
+    let inputs: String = vars
+        .iter()
+        .map(|v| format!(" --input {}=<value>", v.name))
+        .collect();
+    let p = super::path_arg(path);
+    println!(
+        "\n{}",
+        crate::style::next_steps(&[(
+            format!("xark prove {p}{inputs}"),
+            "solve the witness and produce a proof",
+        )])
+    );
 }

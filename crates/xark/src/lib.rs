@@ -51,8 +51,10 @@ pub mod prelude {
     pub use crate::int::I;
     pub use crate::lang::{assert_eq, select, Bool, Field, Private, Public};
     pub use crate::uint::U;
+    pub use xark_macros::circuit;
 }
 
 pub use crate::int::I;
 pub use crate::lang::{assert_eq, select, Bool, Field, Private, Public};
 pub use crate::uint::U;
+pub use xark_macros::circuit;

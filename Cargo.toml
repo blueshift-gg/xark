@@ -13,6 +13,7 @@ members = [
     "crates/xark-grumpkin",
     "crates/xark-keccak",
     "crates/xark-ir",
+    "crates/xark-macros",
     "crates/xark-prover",
     "crates/xark-mimc",
     "crates/xark-pedersen",

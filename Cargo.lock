@@ -4448,6 +4448,9 @@ dependencies = [
 [[package]]
 name = "xark"
 version = "0.0.1"
+dependencies = [
+ "xark-macros",
+]
 
 [[package]]
 name = "xark-aes"
@@ -4562,6 +4565,15 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
+]
+
+[[package]]
+name = "xark-macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]

@@ -1,0 +1,35 @@
+{
+  "name": "xark-client",
+  "version": "0.1.0",
+  "description": "Verify xark zero-knowledge proofs with snarkjs and build Solana instruction data, driven by a circuit IDL.",
+  "license": "MIT",
+  "repository": "https://github.com/blueshift-gg/xark",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx test/smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "xark",
+    "zero-knowledge",
+    "groth16",
+    "snarkjs",
+    "solana",
+    "idl"
+  ],
+  "dependencies": {
+    "snarkjs": "^0.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
