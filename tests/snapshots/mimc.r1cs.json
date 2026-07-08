@@ -1,0 +1,429 @@
+{
+  "field": {
+    "name": "bn254",
+    "modulus_decimal": "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+  },
+  "variables": [
+    {
+      "id": 0,
+      "name": "x",
+      "visibility": "Private"
+    },
+    {
+      "id": 1,
+      "name": "k",
+      "visibility": "Public"
+    },
+    {
+      "id": 2,
+      "name": "h",
+      "visibility": "Public"
+    },
+    {
+      "id": 3,
+      "name": "t0",
+      "visibility": "Internal"
+    },
+    {
+      "id": 4,
+      "name": "t1",
+      "visibility": "Internal"
+    },
+    {
+      "id": 5,
+      "name": "t2",
+      "visibility": "Internal"
+    },
+    {
+      "id": 6,
+      "name": "t3",
+      "visibility": "Internal"
+    },
+    {
+      "id": 7,
+      "name": "t4",
+      "visibility": "Internal"
+    },
+    {
+      "id": 8,
+      "name": "t5",
+      "visibility": "Internal"
+    }
+  ],
+  "constraints": [
+    {
+      "id": 0,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(x + k) * (x + k) = t0"
+      }
+    },
+    {
+      "id": 1,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 3
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 0
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t0 * (x + k) = t1"
+      }
+    },
+    {
+      "id": 2,
+      "a": {
+        "constant": {
+          "decimal": "7120861356467033611736373842526102177239622603558704633600844922174959859415"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "7120861356467033611736373842526102177239622603558704633600844922174959859415"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(k + t1 + 7120861356467033611736373842526102177239622603558704633600844922174959859415) * (k + t1 + 7120861356467033611736373842526102177239622603558704633600844922174959859415) = t2"
+      }
+    },
+    {
+      "id": 3,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 5
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "7120861356467033611736373842526102177239622603558704633600844922174959859415"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 4
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t2 * (k + t1 + 7120861356467033611736373842526102177239622603558704633600844922174959859415) = t3"
+      }
+    },
+    {
+      "id": 4,
+      "a": {
+        "constant": {
+          "decimal": "5464731394973421946722394282035800941955447322641943688940765294088180338198"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "5464731394973421946722394282035800941955447322641943688940765294088180338198"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(k + t3 + 5464731394973421946722394282035800941955447322641943688940765294088180338198) * (k + t3 + 5464731394973421946722394282035800941955447322641943688940765294088180338198) = t4"
+      }
+    },
+    {
+      "id": 5,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 7
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "5464731394973421946722394282035800941955447322641943688940765294088180338198"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 6
+          }
+        ]
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          }
+        ]
+      },
+      "debug": {
+        "source_span": null,
+        "note": "t4 * (k + t3 + 5464731394973421946722394282035800941955447322641943688940765294088180338198) = t5"
+      }
+    },
+    {
+      "id": 6,
+      "a": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": [
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 1
+          },
+          {
+            "coeff": {
+              "decimal": "-1"
+            },
+            "var": 2
+          },
+          {
+            "coeff": {
+              "decimal": "1"
+            },
+            "var": 8
+          }
+        ]
+      },
+      "b": {
+        "constant": {
+          "decimal": "1"
+        },
+        "terms": []
+      },
+      "c": {
+        "constant": {
+          "decimal": "0"
+        },
+        "terms": []
+      },
+      "debug": {
+        "source_span": null,
+        "note": "(k - h + t5) * 1 = 0"
+      }
+    }
+  ]
+}

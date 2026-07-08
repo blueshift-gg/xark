@@ -1,0 +1,80 @@
+name: Reproducible build
+
+# Build the reference Solana program with the pinned toolchain and confirm
+# the resulting `.so` matches the committed SHA-256 in
+# `crates/verifier/reference-program/expected.sha256`. Drift (the .so
+# bytes change for the same committed sources) fails the build, so the
+# audited-vs-deployed hash link can't break silently.
+#
+# Scope is intentionally narrow: any path that can influence the compiled
+# bytes — verifier sources, the reference program crate, the workflow
+# itself — triggers a rebuild.
+
+on:
+  push:
+    paths:
+      - "crates/verifier/**"
+      - ".github/workflows/reproducible-build.yml"
+      - "docs/reproducible-build.md"
+  pull_request:
+    paths:
+      - "crates/verifier/**"
+      - ".github/workflows/reproducible-build.yml"
+      - "docs/reproducible-build.md"
+
+jobs:
+  reproducible-build:
+    name: Build verifier reference program + check hash
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain (host)
+        # Only used to drive cargo-build-sbf; the SBF target uses its own
+        # pinned `platform-tools` rustc.
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + reference-program target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/verifier/reference-program
+          key: reproducible-build-${{ hashFiles('crates/verifier/reference-program/Cargo.lock') }}
+
+      - name: Install Solana CLI (pinned `platform-tools`)
+        # `release.anza.xyz/stable/install` resolves to the current stable
+        # Solana CLI, whose bundled `platform-tools` is what determines
+        # the SBF codegen. Pin a specific version here when you cut an
+        # audit-anchored release.
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Print pinned toolchain versions (for audit log)
+        run: |
+          cargo-build-sbf --version
+          rustc --version
+
+      - name: Build reference program with cargo-build-sbf (locked)
+        # `--locked` is forwarded to the inner cargo so a dirty Cargo.lock
+        # fails the build outright (i.e. a `cargo update` in CI is forbidden).
+        run: |
+          mkdir -p build-out
+          cargo build-sbf \
+            --manifest-path crates/verifier/reference-program/Cargo.toml \
+            --sbf-out-dir build-out \
+            -- \
+            --locked
+
+      - name: Print produced .so size + hash (for audit log)
+        run: |
+          ls -la build-out
+          shasum -a 256 build-out/xark_verifier_reference_program.so
+
+      - name: Verify .so SHA-256 matches expected.sha256 (no drift)
+        # `shasum -c` returns non-zero iff any line mismatches. We run it
+        # from the build-out dir so the bare basename in expected.sha256
+        # resolves against the produced binary.
+        run: |
+          cp crates/verifier/reference-program/expected.sha256 build-out/
+          ( cd build-out && shasum -a 256 -c expected.sha256 )

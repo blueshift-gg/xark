@@ -1,0 +1,62 @@
+[package]
+name = "xark"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Write, compile, prove and verify zero-knowledge circuits in Rust — the language (lib) and the toolchain (bin)."
+
+# The language: `use xark::prelude::*;` in a circuit (no_std, stable).
+[lib]
+name = "xark"
+path = "src/lib.rs"
+
+# The toolchain: `cargo install xark --features cli` → the `xark` CLI (nightly).
+[[bin]]
+name = "xark"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+# The CLI/compiler pulls the rustc-driver support crates; kept off the default
+# path so depending on `xark` as a library stays lightweight and no_std.
+cli = [
+    "dep:xark-ir",
+    "dep:xark-prover",
+    "dep:xark-backend",
+    "dep:serde_json",
+    "dep:clap",
+    "dep:clap_complete",
+    "dep:anyhow",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:sha2",
+    "dep:hex",
+    "dep:rand",
+    "dep:rand_chacha",
+    "dep:ark-bn254",
+    "dep:ark-serialize",
+]
+
+[dependencies]
+xark-ir = { path = "../xark-ir", optional = true }
+xark-prover = { path = "../xark-prover", optional = true }
+xark-backend = { path = "../backend", optional = true }
+serde_json = { version = "1", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+clap_complete = { version = "4", optional = true }
+anyhow = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+sha2 = { version = "0.11", optional = true }
+hex = { version = "0.4", optional = true }
+rand = { version = "0.8", optional = true }
+rand_chacha = { version = "0.3", optional = true }
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"], optional = true }
+ark-serialize = { version = "0.6", default-features = false, optional = true }
+
+
+[dev-dependencies]
+xark-test-harness = { path = "../xark-test-harness" }
+xark-ir = { path = "../xark-ir" }
+xark-prover = { path = "../xark-prover" }
+serde_json = "1"

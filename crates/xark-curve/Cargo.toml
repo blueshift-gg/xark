@@ -1,0 +1,10 @@
+[package]
+name = "xark-curve"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_curve"
+path = "src/lib.rs"

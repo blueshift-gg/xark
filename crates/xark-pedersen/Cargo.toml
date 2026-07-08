@@ -1,0 +1,18 @@
+[package]
+name = "xark-pedersen"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_pedersen"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+xark-bits = { path = "../xark-bits" }
+
+[dev-dependencies]
+xark-test-harness = { path = "../xark-test-harness" }
+xark-ir = { path = "../xark-ir" }

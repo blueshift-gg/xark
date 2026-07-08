@@ -1,0 +1,13 @@
+[package]
+name = "xark-mimc"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_mimc"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }

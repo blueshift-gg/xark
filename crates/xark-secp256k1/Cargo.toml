@@ -1,0 +1,16 @@
+[package]
+name = "xark-secp256k1"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_secp256k1"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+xark-bits = { path = "../xark-bits" }
+xark-ff = { path = "../xark-ff" }
+xark-curve = { path = "../xark-curve" }

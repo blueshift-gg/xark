@@ -1,0 +1,96 @@
+name: Solana E2E
+
+# On-chain verifier tests. The `#[svm_test]` bodies in
+# `crates/tests/tests/sbpf.rs` are each compiled to their own SBF program
+# (svm-unit-test shells out to `cargo build-sbf`) and run in Mollusk on the
+# real `alt_bn128` syscalls — positive across every committed circuit, plus
+# negative tests that bad inputs are rejected on chain.
+#
+# Also runs the **`alt_bn128` ↔ Arkworks differential** in
+# `crates/tests/tests/differential_alt_bn128.rs`: the same fixed test
+# vectors are evaluated host-side (Arkworks fallback) and on-chain
+# (syscall path) and must produce byte-identical results — the only
+# out-of-Lean trust assumption flagged by name in the formal sources.
+#
+# This needs the Anza Solana toolchain, so it lives in its own workflow
+# gated to verifier changes.
+
+on:
+  push:
+    paths:
+      - "crates/verifier/**"
+      - "crates/backend/src/solana.rs"
+      - "crates/tests/tests/differential_alt_bn128.rs"
+      - "crates/tests/Cargo.toml"
+      - ".github/workflows/solana-ci.yml"
+  pull_request:
+    paths:
+      - "crates/verifier/**"
+      - "crates/backend/src/solana.rs"
+      - "crates/tests/tests/differential_alt_bn128.rs"
+      - "crates/tests/Cargo.toml"
+      - ".github/workflows/solana-ci.yml"
+
+jobs:
+  sbpf:
+    name: on-chain verifier tests (Mollusk + SBF)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: solana-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install Solana CLI (provides cargo-build-sbf)
+        # `release.anza.xyz` regularly returns "body error" mid-stream
+        # during business-hours US-East peak. Retry up to 5× with
+        # exponential backoff so a transient CDN hiccup doesn't fail the
+        # whole job; on persistent failure surface the original error.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"; then
+              echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+            echo "Anza install attempt $attempt failed; retrying in $((attempt * 10))s..."
+            sleep $((attempt * 10))
+          done
+          echo "::error::Anza install failed after 5 attempts"
+          exit 1
+
+      - name: Pre-install platform-tools (avoid parallel-download race)
+        # Each `#[svm_test]` body shells out to `cargo build-sbf`, and on
+        # first invocation that downloads + unpacks platform-tools (the
+        # pinned SBF rustc + LLVM) into `~/.cache/solana/<ver>/`. When the
+        # test binary launches multiple `#[svm_test]`s in parallel the
+        # downloads race each other: "rename: NotFound",
+        # "Permission denied", and "could not remove downloaded archive"
+        # all fall out of two threads stomping on the same temp file. Use
+        # `--install-only --force-tools-install` to populate the cache
+        # once, sequentially, before any test thread touches it. The
+        # retry handles transient archive-download failures from the
+        # `release.anza.xyz` CDN.
+        run: |
+          cargo build-sbf --install-only --force-tools-install \
+            || cargo build-sbf --install-only --force-tools-install
+
+      - name: Run on-chain verifier tests
+        # svm-unit-test invokes `cargo build-sbf` per `#[svm_test]`; --release
+        # because the bodies run real Groth16 verification.
+        run: cargo test -p xark-tests --test sbpf --release
+
+      - name: Run alt_bn128 ↔ Arkworks differential
+        # Same fixed inputs evaluated host-side (Arkworks) and on-chain
+        # (syscalls); any disagreement fails CI. See file header for the
+        # trust-anchor rationale.
+        run: cargo test -p xark-tests --test differential_alt_bn128 --release

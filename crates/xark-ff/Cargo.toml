@@ -1,0 +1,13 @@
+[package]
+name = "xark-ff"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../xark", default-features = false }
+xark-bits = { path = "../xark-bits" }

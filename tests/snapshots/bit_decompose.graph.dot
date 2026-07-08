@@ -1,0 +1,57 @@
+digraph R1CS {
+  rankdir=LR;
+
+  v0 [label="x\nPrivate"];
+  v1 [label="bit0\nPublic"];
+  v2 [label="bit7\nPublic"];
+  v3 [label="w0\nPrivate"];
+  v4 [label="w1\nPrivate"];
+  v5 [label="w2\nPrivate"];
+  v6 [label="w3\nPrivate"];
+  v7 [label="w4\nPrivate"];
+  v8 [label="w5\nPrivate"];
+  v9 [label="w6\nPrivate"];
+  v10 [label="w7\nPrivate"];
+
+  constraint0 [shape=box, label="C0: w0 * w0 = w0"];
+  constraint1 [shape=box, label="C1: w1 * w1 = w1"];
+  constraint2 [shape=box, label="C2: w2 * w2 = w2"];
+  constraint3 [shape=box, label="C3: w3 * w3 = w3"];
+  constraint4 [shape=box, label="C4: w4 * w4 = w4"];
+  constraint5 [shape=box, label="C5: w5 * w5 = w5"];
+  constraint6 [shape=box, label="C6: w6 * w6 = w6"];
+  constraint7 [shape=box, label="C7: w7 * w7 = w7"];
+  constraint8 [shape=box, label="C8: (-x + w0 + 2*w1 + 4*w2 + 8*w3 + 16*w4 + 32*w5 + 64*w6 + 128*w7) * 1 = 0"];
+  constraint9 [shape=box, label="C9: (-bit0 + w0) * 1 = 0"];
+  constraint10 [shape=box, label="C10: (-bit7 + w7) * 1 = 0"];
+
+  v3 -> constraint0;
+  constraint0 -> v3;
+  v4 -> constraint1;
+  constraint1 -> v4;
+  v5 -> constraint2;
+  constraint2 -> v5;
+  v6 -> constraint3;
+  constraint3 -> v6;
+  v7 -> constraint4;
+  constraint4 -> v7;
+  v8 -> constraint5;
+  constraint5 -> v8;
+  v9 -> constraint6;
+  constraint6 -> v9;
+  v10 -> constraint7;
+  constraint7 -> v10;
+  v0 -> constraint8;
+  v3 -> constraint8;
+  v4 -> constraint8;
+  v5 -> constraint8;
+  v6 -> constraint8;
+  v7 -> constraint8;
+  v8 -> constraint8;
+  v9 -> constraint8;
+  v10 -> constraint8;
+  v1 -> constraint9;
+  v3 -> constraint9;
+  v2 -> constraint10;
+  v10 -> constraint10;
+}

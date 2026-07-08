@@ -1,0 +1,13 @@
+digraph R1CS {
+  rankdir=LR;
+
+  v0 [label="x\nPrivate"];
+  v1 [label="y\nPrivate"];
+  v2 [label="z\nPublic"];
+
+  constraint0 [shape=box, label="C0: (x + y) * (x - y) = z"];
+
+  v0 -> constraint0;
+  v1 -> constraint0;
+  constraint0 -> v2;
+}

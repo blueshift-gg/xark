@@ -1,0 +1,51 @@
+# Reference Solana cdylib that wraps `xark_verifier::verify_groth16` as its
+# entrypoint. This is the *reproducible-build target* (see
+# `docs/reproducible-build.md`): the program's `.so` SHA-256 is pinned in
+# `expected.sha256` and enforced by `.github/workflows/reproducible-build.yml`.
+#
+# The crate is intentionally *not* a workspace member: `cargo-build-sbf`
+# spawns its own resolver, and keeping it out of the host workspace makes
+# the SBF build hermetic to this crate's `Cargo.lock`.
+#
+# Real deployments embed a pinned VK via `Verifier<N>::from_le_bytes(...)`;
+# this reference program reads the VK from instruction data so the audit
+# artifact is one fixed `.so`, independent of any specific circuit.
+
+[package]
+name = "xark-verifier-reference-program"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Reproducible-build reference Solana program wrapping xark-verifier."
+
+# Standalone workspace so `cargo-build-sbf` resolves against this crate's
+# own `Cargo.lock` (committed) — not the host workspace's lock. That is
+# what makes the build hermetic.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+xark-verifier = { path = ".." }
+solana-program-entrypoint = { version = "3.1.1", default-features = false }
+solana-program-error = { version = "3.0.1", default-features = false }
+
+# `target_os = "solana"` is a Solana-toolchain-only cfg value; declare it
+# so host rustc's `unexpected_cfgs` lint (1.80+) doesn't fire.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(target_os, values("solana"))',
+] }
+
+# Reproducible-build profile: deterministic codegen, no incremental builds,
+# strip symbols. These match the `cargo-build-sbf` defaults so the .so hash
+# stays stable across machines with the same pinned platform-tools.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+overflow-checks = false
+panic = "abort"
+strip = "symbols"
+incremental = false

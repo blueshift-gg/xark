@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test (release)
+        # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
+        # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
+        # in debug. Debug-mode workspace takes 10+ minutes; release ~90s.
+        #
+        # The `sbpf` and `differential_alt_bn128` integration tests under
+        # `crates/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
+        # they need the Anza toolchain and run in `solana-ci.yml`.
+        # Build one xark-tests test list excluding those, then test.
+        run: |
+          cargo test --workspace --release --exclude xark-tests
+          cargo test -p xark-tests --release --lib
+          tests_args=()
+          for t in $(ls crates/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
+                      | grep -vE '^(sbpf|differential_alt_bn128)'); do
+            tests_args+=(--test "$t")
+          done
+          cargo test -p xark-tests --release "${tests_args[@]}"
+
+  compiler-snapshots:
+    name: compiler snapshot suite (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned nightly (rustc_private) toolchain
+        # `crates/xark` is a `rustc_driver` built on nightly with `rustc-dev`;
+        # it is deliberately excluded from the root workspace, so the `check`
+        # job's `cargo test --workspace` never touches it. See docs/toolchain.md
+        # for the pin and the bump procedure.
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev, llvm-tools-preview
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            crates/xark/target
+          key: snapshots-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo test (compiler snapshots)
+        # Runs `crates/xark/tests/snapshot.rs` — the byte-identical count bridges
+        # (fp_mul 1154, ec_incomplete 15369/15891, sha256 38602, blake2s 27808,
+        # blake3 19792, keccak 153664, aes 145816, poseidon2 240, bignum 1189,
+        # struct_point, aggregate-input + int-operator solves, …).
+        #
+        # The `xark-test-harness` builds every gadget crate with
+        # `-Zalways-encode-mir` into an isolated `target/xark-compile` (so their
+        # MIR is inlinable) and the compiler into `crates/xark/target`, then
+        # compiles each example and diffs its emitted R1CS/IR against the
+        # committed snapshots. The heavy `#[ignore]`d known-answer-vector tests
+        # run separately in `nightly-kats.yml`.
+        run: cd crates/xark && cargo test --features cli --test snapshot

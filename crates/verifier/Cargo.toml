@@ -1,0 +1,22 @@
+[package]
+name = "xark-verifier"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Solana on-chain Groth16 BN254 verifier consuming xark-exported VK + proof bytes."
+
+# Lean publishable verifier: source + README only. Fixtures + the
+# on-chain/host/fuzz test harness live in the (unpublished) `xark-tests` crate.
+exclude = ["tests", "benches"]
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+solana-nostd-alt-bn128 = { version = "0.1.1" }
+solana-program-error = { version = "3", default-features = false }
+
+[lints]
+workspace = true

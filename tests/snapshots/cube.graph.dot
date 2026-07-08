@@ -1,0 +1,16 @@
+digraph R1CS {
+  rankdir=LR;
+
+  v0 [label="secret\nPrivate"];
+  v1 [label="result\nPublic"];
+  v2 [label="t0\nInternal"];
+
+  constraint0 [shape=box, label="C0: secret * secret = t0"];
+  constraint1 [shape=box, label="C1: t0 * secret = result"];
+
+  v0 -> constraint0;
+  constraint0 -> v2;
+  v0 -> constraint1;
+  v2 -> constraint1;
+  constraint1 -> v1;
+}

@@ -1,0 +1,79 @@
+name: Nightly KATs (known-answer vectors)
+
+# The compiler snapshot suite and the ed25519 gadget carry heavy correctness
+# tests that check real hash / curve output against published test vectors:
+#   * `crates/xark/tests/snapshot.rs` `#[ignore]`d KATs — SHA-256("abc"),
+#     keccak256("") and the 2-block keccak256(bytes(0..200)) vector, the
+#     variable-length sha256/blake2s/blake3 vectors, the secp256k1/r1 2G·3G
+#     incomplete-EC vectors, and the Keccak/AES Lean-model gate-count bridges;
+#   * `crates/xark-ed25519/tests/vec.rs` — scalar-mul cross-checks + EdDSA
+#     verify/tamper, which each solve a full non-native EC hint program.
+# They take minutes (some circuits are >150k constraints), so they run on a
+# schedule and on demand rather than on every push. The fast snapshot suite
+# (byte-exact gate counts, no KAT solving) runs per-push in `ci.yml`.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily, 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  compiler-kats:
+    name: compiler KAT vectors (nightly, --include-ignored)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned nightly (rustc_private) toolchain
+        # See docs/toolchain.md for the pin and the bump procedure.
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev, llvm-tools-preview
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            crates/xark/target
+          key: kats-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo test (snapshots + ignored KAT vectors)
+        # `--include-ignored` runs the fast snapshot tests AND the heavy
+        # known-answer-vector tests in one pass.
+        run: cd crates/xark && cargo test --features cli --test snapshot -- --include-ignored
+
+  ed25519-vectors:
+    name: ed25519 scalar-mul + EdDSA (release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned nightly (rustc_private) toolchain
+        # The ed25519 vec.rs suite drives the same nightly compiler via the
+        # `xark-test-harness` (which builds the gadgets + compiler), so it needs
+        # `rustc-dev` too. See docs/toolchain.md.
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev, llvm-tools-preview
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            crates/xark/target
+          key: ed25519-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo test (ed25519 vectors, release)
+        # Release is mandatory: the non-native EC solves are 10–50× slower in
+        # debug (see the release-mode note in the repo).
+        run: cargo test -p xark-ed25519 --release

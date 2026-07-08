@@ -1,0 +1,46 @@
+digraph R1CS {
+  rankdir=LR;
+
+  v0 [label="x\nPrivate"];
+  v1 [label="k\nPublic"];
+  v2 [label="h\nPublic"];
+  v3 [label="t0\nInternal"];
+  v4 [label="t1\nInternal"];
+  v5 [label="t2\nInternal"];
+  v6 [label="t3\nInternal"];
+  v7 [label="t4\nInternal"];
+  v8 [label="t5\nInternal"];
+
+  constraint0 [shape=box, label="C0: (x + k) * (x + k) = t0"];
+  constraint1 [shape=box, label="C1: t0 * (x + k) = t1"];
+  constraint2 [shape=box, label="C2: (k + t1 + 7120861356467033611736373842526102177239622603558704633600844922174959859415) * (k + t1 + 7120861356467033611736373842526102177239622603558704633600844922174959859415) = t2"];
+  constraint3 [shape=box, label="C3: t2 * (k + t1 + 7120861356467033611736373842526102177239622603558704633600844922174959859415) = t3"];
+  constraint4 [shape=box, label="C4: (k + t3 + 5464731394973421946722394282035800941955447322641943688940765294088180338198) * (k + t3 + 5464731394973421946722394282035800941955447322641943688940765294088180338198) = t4"];
+  constraint5 [shape=box, label="C5: t4 * (k + t3 + 5464731394973421946722394282035800941955447322641943688940765294088180338198) = t5"];
+  constraint6 [shape=box, label="C6: (k - h + t5) * 1 = 0"];
+
+  v0 -> constraint0;
+  v1 -> constraint0;
+  constraint0 -> v3;
+  v0 -> constraint1;
+  v1 -> constraint1;
+  v3 -> constraint1;
+  constraint1 -> v4;
+  v1 -> constraint2;
+  v4 -> constraint2;
+  constraint2 -> v5;
+  v1 -> constraint3;
+  v4 -> constraint3;
+  v5 -> constraint3;
+  constraint3 -> v6;
+  v1 -> constraint4;
+  v6 -> constraint4;
+  constraint4 -> v7;
+  v1 -> constraint5;
+  v6 -> constraint5;
+  v7 -> constraint5;
+  constraint5 -> v8;
+  v1 -> constraint6;
+  v2 -> constraint6;
+  v8 -> constraint6;
+}
