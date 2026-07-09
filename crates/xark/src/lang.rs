@@ -20,6 +20,11 @@ use core::ops::{
     Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub, SubAssign,
 };
 
+// The compiler intrinsics (the `__xark_*` marker stubs) live in `crate::intrinsics`;
+// the `Field` impls and `hint_*` methods below call them. Recognition is by name,
+// so their module location does not affect the compiler.
+use crate::intrinsics::*;
+
 /// The opaque circuit field element.
 ///
 /// It carries a private non-zero-sized payload so that (a) it cannot be
@@ -722,123 +727,10 @@ pub fn assert_ge<A: PartialOrd<B>, B>(a: A, b: B) {
     assert_eq(a >= b, true);
 }
 
-#[inline(never)]
-pub fn __xark_add(_lhs: Field, _rhs: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_sub(_lhs: Field, _rhs: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_mul(_lhs: Field, _rhs: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_neg(_value: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_pow_u64(_base: Field, _exponent: u64) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_advice() -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_inverse(_x: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_inverse_or_zero(_x: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_bit(_x: Field, _index: usize) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_div_rem(_a: Field, _b: Field) -> [Field; 2] {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_xor(_a: Field, _b: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_or(_a: Field, _b: Field) -> Field {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_mulmod_divmod<const N: usize>(
-    _a: [Field; N],
-    _b: [Field; N],
-    _m: [Field; N],
-    _bits: usize,
-) -> ([Field; N], [Field; N]) {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_mod_inverse<const N: usize>(
-    _a: [Field; N],
-    _m: [Field; N],
-    _bits: usize,
-) -> [Field; N] {
-    loop {}
-}
-
-#[inline(never)]
-pub fn __xark_hint_sub2<const N: usize>(
-    _a: [Field; N],
-    _b: [Field; N],
-    _c: [Field; N],
-    _m: [Field; N],
-    _bits: usize,
-) -> (Field, [Field; N]) {
-    loop {}
-}
-
-// --- comparison intrinsics: return a `bool` that is a `{0,1}` field wire -----
-// The compiler lowers these directly (never inlined). They back the circuit
-// comparison surface on `Field` (see `docs/integer-ops.md`): `PartialEq` /
-// `PartialEq<uN>` (`==` `!=`) — width-independent equality — and, against a
-// native-int constant, `PartialOrd<uN>` (`<` `<=` `>` `>=`) plus the
-// explicit-width Field-vs-Field methods `Field::lt::<N>` / `gt` / `le` / `ge`.
-// There are no fixed-width integer wrapper types; a bare `Field` stays orderless
-// (ordering needs a width, supplied by the native-int RHS or the `::<N>`).
-
-/// Field equality: `a == b` as a `bool` wire (`1` iff `a == b`).
-#[inline(never)]
-pub fn __xark_eq(_a: Field, _b: Field) -> bool {
-    loop {}
-}
-
-/// Unsigned less-than: `a < b` for `a, b ∈ [0, 2^N)`, as a `bool` wire.
-#[inline(never)]
-pub fn __xark_ult<const N: usize>(_a: Field, _b: Field) -> bool {
-    loop {}
-}
-
-/// Reinterpret a `bool` wire as a `Field` wire (identity — both are `{0,1}`
-/// wires). Backs `From<bool> for Field`.
-#[inline(never)]
-pub fn __xark_bool_to_field(_b: bool) -> Field {
-    loop {}
-}
+// The `__xark_*` compiler intrinsics referenced above (`__xark_add`,
+// `__xark_eq`, the `hint_*` family, …) now live in `crate::intrinsics`, imported
+// at the top of this module. See that module for the constraint-vs-hint ABI and
+// per-intrinsic lowering docs.
 
 // Keep `PhantomData` referenced so `#![no_std]` users pulling only this crate do
 // not trip an unused-import lint if they re-export internals. It documents that

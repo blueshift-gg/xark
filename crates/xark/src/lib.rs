@@ -40,6 +40,12 @@
 /// programs and gadgets depend on a single crate (`xark`).
 pub mod lang;
 
+/// The compiler intrinsics — the `#[inline(never)]` `loop {}` stubs the compiler
+/// recognizes by name in MIR (the `Field` operator/hint ABI). See the module doc
+/// for the constraint-vs-hint distinction. `lang.rs` calls these to back its
+/// `Field` impls; circuit authors use the `Field` methods, not these directly.
+pub mod intrinsics;
+
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{
