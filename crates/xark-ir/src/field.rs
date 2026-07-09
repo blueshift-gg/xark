@@ -111,6 +111,19 @@ impl FieldConst {
         FieldConst::from_bigint(r)
     }
 
+    /// Canonical `[0, modulus)` representative (matching the backend). Two
+    /// constants are equal as field elements iff their `reduce`d forms match, so
+    /// `a.reduce(m) == b.reduce(m)` decides equality even when one is stored
+    /// unreduced (e.g. `p` vs `0`).
+    pub fn reduce(&self, modulus: &FieldConst) -> FieldConst {
+        let m = modulus.big();
+        let mut r = self.big() % &m;
+        if r.is_negative() {
+            r += &m;
+        }
+        FieldConst::from_bigint(r)
+    }
+
     pub fn neg(&self) -> FieldConst {
         FieldConst::from_bigint(-self.big())
     }

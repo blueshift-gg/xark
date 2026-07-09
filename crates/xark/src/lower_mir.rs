@@ -2747,7 +2747,24 @@ fn lower_call<'tcx>(
             // bare unsigned integer literal (`assert_eq(x, 0u64)`).
             let lhs = env.operand_to_field(arg(0)?)?;
             let rhs = env.operand_to_field(arg(1)?)?;
-            env.emit_assert_eq(lhs, rhs);
+            // Both sides compile-time constants: decide the assertion now — emit
+            // nothing if it holds, reject the circuit if it's a contradiction.
+            // (Also covers `assert(cond)`, which lowers to `assert_eq(cond,
+            // true)`, so a violated const-generic invariant like `assert(N > 0)`
+            // is a compile error, not a runtime "constraint not satisfied".)
+            if lhs.is_constant() && rhs.is_constant() && env.modulus.is_some() {
+                let m = env.modulus.as_ref().unwrap();
+                let (l, r) = (lhs.constant.reduce(m), rhs.constant.reduce(m));
+                if l != r {
+                    return Err(CompileError::new(format!(
+                        "assert_eq of two unequal compile-time constants: {} != {}",
+                        l.decimal, r.decimal
+                    )));
+                }
+                // holds — no constraint needed
+            } else {
+                env.emit_assert_eq(lhs, rhs);
+            }
         }
         KnownCall::Advice => {
             // A fresh prover-supplied private witness variable with no hint. The

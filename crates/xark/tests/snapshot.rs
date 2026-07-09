@@ -3078,3 +3078,44 @@ fn field_rem_u128_is_not_provided() {
         "103 % 5u64 = 3"
     );
 }
+
+/// An `assert_eq` between two compile-time constants is decided at compile time:
+/// one that holds emits no constraint; a contradiction is a compile error (a
+/// clear diagnostic, not a confusing runtime "constraint not satisfied").
+#[test]
+fn const_assert_eq_decided_at_compile_time() {
+    // Holds → folds away; only the variable binding `x == out` remains.
+    let ok = xark_test_harness::compile_source(
+        "const_ceq_ok",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+             assert_eq(Field::from(5u64) + Field::from(2u64), Field::from(7u64));\n\
+             assert_eq(x, out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(ok.status_success, "should compile: {}", ok.stderr);
+    let json = std::fs::read_to_string(ok.out_dir.join("r1cs.json")).unwrap();
+    assert_eq!(
+        json.matches("\"source_span\"").count(),
+        1,
+        "the true const assert_eq folds away; only the variable binding remains"
+    );
+
+    // Contradiction → compile error with a clear message.
+    let bad = xark_test_harness::compile_source(
+        "const_ceq_bad",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private};\n\
+         pub fn circuit(x: Private<Field>) {\n\
+             assert_eq(Field::from(5u64), Field::from(7u64));\n\
+             assert_eq(x, x);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(!bad.status_success, "a contradiction must be rejected at compile time");
+    assert!(
+        bad.stderr.contains("unequal compile-time constants"),
+        "expected a clear contradiction message, got: {}",
+        bad.stderr
+    );
+}
