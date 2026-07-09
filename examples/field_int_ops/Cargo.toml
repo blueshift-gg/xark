@@ -6,4 +6,3 @@ publish = false
 [lib]
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
-xark-bignum = { path = "../../crates/xark-bignum" }

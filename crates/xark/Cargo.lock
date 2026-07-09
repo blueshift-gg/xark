@@ -1548,7 +1548,6 @@ dependencies = [
  "rand_chacha",
  "serde_json",
  "sha2 0.11.0",
- "tracing",
  "tracing-subscriber",
  "xark-backend",
  "xark-ir",
@@ -1560,7 +1559,6 @@ dependencies = [
 name = "xark-backend"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "ark-bn254",
  "ark-ec",
  "ark-ff",
@@ -1573,14 +1571,12 @@ dependencies = [
  "chrono",
  "hex",
  "num-bigint",
- "num-traits",
  "rand",
  "rand_chacha",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -1598,12 +1594,10 @@ name = "xark-prover"
 version = "0.0.1"
 dependencies = [
  "ark-bn254",
- "ark-ec",
  "ark-ff",
  "ark-groth16",
  "ark-relations",
  "ark-snark",
- "ark-std",
  "num-bigint",
  "rand",
  "xark-ir",

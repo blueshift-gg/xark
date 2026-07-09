@@ -20,16 +20,13 @@ ark-snark.workspace = true
 ark-std.workspace = true
 
 
-anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
 hex.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 num-bigint.workspace = true
-num-traits.workspace = true
 chrono.workspace = true
 sha2.workspace = true
 

@@ -164,12 +164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.103"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
-
-[[package]]
 name = "ark-bn254"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4454,7 +4448,6 @@ name = "xark-aes"
 version = "0.0.1"
 dependencies = [
  "xark",
- "xark-bits",
  "xark-ir",
  "xark-test-harness",
 ]
@@ -4463,7 +4456,6 @@ dependencies = [
 name = "xark-backend"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
@@ -4476,14 +4468,12 @@ dependencies = [
  "chrono",
  "hex",
  "num-bigint 0.4.8",
- "num-traits",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -4491,7 +4481,6 @@ name = "xark-bignum"
 version = "0.0.1"
 dependencies = [
  "xark",
- "xark-bits",
 ]
 
 [[package]]
@@ -4541,7 +4530,6 @@ name = "xark-grumpkin"
 version = "0.0.1"
 dependencies = [
  "xark",
- "xark-bits",
  "xark-ir",
  "xark-test-harness",
 ]
@@ -4578,7 +4566,6 @@ name = "xark-pedersen"
 version = "0.0.1"
 dependencies = [
  "xark",
- "xark-bits",
  "xark-ir",
  "xark-test-harness",
 ]
@@ -4604,12 +4591,10 @@ name = "xark-prover"
 version = "0.0.1"
 dependencies = [
  "ark-bn254 0.6.0",
- "ark-ec 0.6.0",
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-relations",
  "ark-snark",
- "ark-std 0.6.0",
  "num-bigint 0.4.8",
  "rand 0.8.6",
  "xark-ir",
@@ -4621,7 +4606,6 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bignum",
- "xark-bits",
  "xark-curve",
 ]
 
@@ -4631,7 +4615,6 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bignum",
- "xark-bits",
  "xark-curve",
 ]
 
