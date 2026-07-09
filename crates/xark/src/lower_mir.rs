@@ -1440,22 +1440,20 @@ pub struct LowerOutput {
 
 /// Flatten a circuit parameter type into its `Field` leaves, pairing each with
 /// the MIR projection path (encoded exactly as [`LoweringEnv::resolve_place`]:
-/// array/const index, or struct-field index), a human-readable name, and an
-/// optional fixed-width bound. A scalar `Field` is one leaf at path `[]`; an
-/// array/tuple/struct of `Field` collapses to `n` leaves. Any other leaf is
-/// rejected. The `Option<usize>` slot is unused (reserved for a future
-/// range-proved fixed-width leaf); it is always `None`.
+/// array/const index, or struct-field index) and a human-readable name. A
+/// scalar `Field` is one leaf at path `[]`; an array/tuple/struct of `Field`
+/// collapses to `n` leaves. Any other leaf is rejected.
 fn flatten_field_leaves<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
     path: &mut Vec<u64>,
     name: &str,
-    out: &mut Vec<(Vec<u64>, String, Option<usize>)>,
+    out: &mut Vec<(Vec<u64>, String)>,
 ) -> CompileResult<()> {
     // `Field` is the opaque leaf — never recurse into its private limbs.
     if let Some(d) = ty.ty_adt_def() {
         if tcx.item_name(d.did()).as_str() == "Field" {
-            out.push((path.clone(), name.to_string(), None));
+            out.push((path.clone(), name.to_string()));
             return Ok(());
         }
     }
@@ -1515,7 +1513,7 @@ pub fn lower<'tcx>(
         let mut leaves = Vec::new();
         let mut path = Vec::new();
         flatten_field_leaves(tcx, ty, &mut path, &input.name, &mut leaves)?;
-        for (leaf_path, leaf_name, _range_bits) in leaves {
+        for (leaf_path, leaf_name) in leaves {
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
