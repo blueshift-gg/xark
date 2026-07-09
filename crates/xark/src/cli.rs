@@ -73,17 +73,25 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     let self_exe = std::env::current_exe().expect("current_exe");
     let toolchain = option_env!("XARK_TOOLCHAIN").unwrap_or("nightly");
 
-    // The emitted artifacts (circuit.json / r1cs.json / graph.dot) are a
-    // side-effect of compilation. If they were deleted but the source is
-    // unchanged, cargo cache-hits and never re-runs the extractor, so they never
-    // come back. Bump the source mtime to force the primary crate to recompile
-    // when the output looks incomplete — but only then, so an unchanged large
-    // circuit (whose r1cs.json/graph.dot are legitimately gated off) is not
-    // needlessly recompiled.
-    let regen_needed = !out_abs.join("circuit.json").exists()
-        || (out_abs.join("r1cs.json").exists() && !out_abs.join("graph.dot").exists())
-        // `xark profile` needs profile.json; force a recompile if it's absent so
-        // an already-built (cache-hit) circuit still produces the attribution.
+    // The emitted artifacts (circuit.json / r1cs.json) are a side-effect of
+    // compilation. cargo caches on *source mtime* and cannot see that the xark
+    // compiler binary, the target field, the profile flag, or the artifact
+    // format changed — so without help it cache-hits and leaves STALE artifacts
+    // (e.g. after `cargo install`ing a new xark). We record a fingerprint of all
+    // of that beside the artifacts and force a recompile (by bumping the source
+    // mtime) whenever it, or a required artifact, is missing or differs.
+    //
+    // Note: `graph.dot` is intentionally skipped for very large circuits, so its
+    // absence is NOT an incompleteness signal — only circuit.json + r1cs.json
+    // (and profile.json under `--profile`) are required.
+    let stamp_path = out_abs.join(".xark-build-stamp");
+    let want_stamp = build_fingerprint(&self_exe, &field, profile);
+    let stamp_ok = std::fs::read_to_string(&stamp_path)
+        .map(|s| s.trim() == want_stamp)
+        .unwrap_or(false);
+    let regen_needed = !stamp_ok
+        || !out_abs.join("circuit.json").exists()
+        || !out_abs.join("r1cs.json").exists()
         || (profile && !out_abs.join("profile.json").exists());
     if regen_needed {
         touch_sources(&crate_abs);
@@ -115,7 +123,21 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
         .status();
 
     match status {
-        Ok(_) if out_abs.join("circuit.json").exists() => {
+        // Reject a failed compile BEFORE inspecting artifacts: otherwise a stale
+        // circuit.json from a previous build makes a broken source look like a
+        // success (silent corruption). Existing artifacts are left untouched so
+        // the previous good build is still there to inspect.
+        Ok(s) if !s.success() => {
+            eprintln!(
+                "xark: circuit compilation failed (cargo exit {:?}); artifacts left unchanged",
+                s.code()
+            );
+            1
+        }
+        Ok(_) if out_abs.join("circuit.json").exists() && out_abs.join("r1cs.json").exists() => {
+            // Record the fingerprint so an unchanged rebuild with the same
+            // compiler/field/profile cache-hits instead of recompiling.
+            let _ = std::fs::write(&stamp_path, &want_stamp);
             eprintln!(
                 "{} wrote {}",
                 crate::style::tag(),
@@ -130,11 +152,10 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
             );
             0
         }
-        Ok(s) => {
+        Ok(_) => {
             eprintln!(
-                "xark: no circuit.json produced (does the crate expose `pub fn circuit(..)`?); \
-                 cargo exit {:?}",
-                s.code()
+                "xark: build succeeded but produced no circuit.json/r1cs.json \
+                 (does the crate expose `pub fn circuit(..)`?)"
             );
             1
         }
@@ -143,6 +164,36 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
             1
         }
     }
+}
+
+/// A fingerprint of everything that affects the emitted artifacts but that
+/// cargo's own source-mtime cache does not track. Written beside the artifacts
+/// as `.xark-build-stamp`; a mismatch forces `xark build` to re-extract.
+///
+/// Covers: the xark crate version + a lowering-schema number (bump it when the
+/// emitted IR format changes), a cheap signature of the compiler binary itself
+/// (mtime + size — the crate version is `0.0.1` and never moves for a local
+/// `cargo install`, so the binary signature is what actually catches a
+/// reinstall), the target field, and profile mode.
+fn build_fingerprint(self_exe: &std::path::Path, field: &str, profile: bool) -> String {
+    /// Bump when the emitted circuit.json / r1cs.json format or lowering changes,
+    /// so a released `xark` re-extracts artifacts written by an older one.
+    const LOWERING_SCHEMA: u32 = 1;
+    let (mtime_ns, len) = std::fs::metadata(self_exe)
+        .map(|m| {
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            (t, m.len())
+        })
+        .unwrap_or((0, 0));
+    format!(
+        "xark={} schema={LOWERING_SCHEMA} field={field} profile={profile} bin={mtime_ns}:{len}",
+        env!("CARGO_PKG_VERSION"),
+    )
 }
 
 /// Bump the mtime of the crate's `src/*.rs` files so cargo recompiles the primary
@@ -526,4 +577,24 @@ fn tests_template(name: &str, inputs: &str) -> String {
          \x20   }}\n\
          }}\n"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_fingerprint;
+
+    /// The build stamp must change with anything cargo's source-mtime cache
+    /// can't see (the compiler binary, the field, profile mode) so `xark build`
+    /// re-extracts, and stay stable for identical inputs so it doesn't rebuild
+    /// needlessly.
+    #[test]
+    fn build_fingerprint_reflects_field_profile_and_schema() {
+        let exe = std::env::current_exe().unwrap();
+        let base = build_fingerprint(&exe, "bn254", false);
+        assert_eq!(base, build_fingerprint(&exe, "bn254", false), "stable for same inputs");
+        assert_ne!(base, build_fingerprint(&exe, "grumpkin", false), "field must matter");
+        assert_ne!(base, build_fingerprint(&exe, "bn254", true), "profile must matter");
+        assert!(base.contains("schema="), "carries a lowering-schema version");
+        assert!(base.contains("bin="), "carries a compiler-binary signature");
+    }
 }
