@@ -274,10 +274,10 @@ fn sha256_compiles() {
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let constraints = json.matches("\"source_span\"").count();
     // Deterministic circuit; exact counts guard against accidental changes.
-    assert_eq!(constraints, 38602, "SHA-256 constraint count changed");
+    assert_eq!(constraints, 37922, "SHA-256 constraint count changed");
     assert_eq!(
         json.matches("\"name\": \"w").count(),
-        7680,
+        7424,
         "advice bit count changed"
     );
 }
@@ -1353,7 +1353,7 @@ fn sha256_matches_lean_model() {
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
     assert_eq!(
-        mul, 36814,
+        mul, 35790,
         "SHA-256 multiplication-gate count pins the Sha256.lean bit-soundness model; got {mul}"
     );
 }
@@ -1377,7 +1377,7 @@ fn blake3_matches_lean_model() {
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
     assert_eq!(
-        mul, 19792,
+        mul, 18832,
         "BLAKE3 mult-gate count pins blake3_round_compose_bit; got {mul}"
     );
 }
@@ -1399,7 +1399,7 @@ fn blake2s_matches_lean_model() {
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
     assert_eq!(
-        mul, 27808,
+        mul, 26720,
         "BLAKE2s mult-gate count pins blake2s_round_compose_bit; got {mul}"
     );
 }
@@ -1677,6 +1677,57 @@ fn to_bits_lowers() {
     )
     .expect("parse r1cs.json");
     assert_eq!(r1cs.constraints.len(), 10, "8 booleanity + 2 recomposition");
+}
+
+/// **Const-fold `to_bits` — zero constraints.** Decomposing a *constant* has
+/// known bits, so the `N` booleanity + 1 recomposition constraints are
+/// tautologies and are dropped entirely. Here the only value that ever varies is
+/// the public output, and the whole body reduces to a single linear `assert_eq`
+/// with no multiplication (booleanity) gates at all.
+#[test]
+fn const_to_bits_emits_no_booleanity() {
+    let src = write_case(
+        "const_to_bits",
+        "#![no_std]\nuse xark::{assert_eq, Field, Public};\n\
+         pub fn circuit(out: Public<Field>) {\n\
+           let bits = Field::from(5u8).to_bits::<8>();\n\
+           assert_eq(Field::from_bits::<8>(bits), out);\n\
+         }\n",
+    );
+    let c = compile(&src, "const_to_bits");
+    assert!(c.status_success, "const to_bits compiles: {}", c.stderr);
+    let r1cs = xark_ir::json::from_json(
+        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
+    )
+    .expect("parse r1cs.json");
+    let mul_gates = r1cs
+        .constraints
+        .iter()
+        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
+        .count();
+    assert_eq!(
+        mul_gates, 0,
+        "constant decomposition must emit no booleanity/mul gates"
+    );
+}
+
+/// **Const-fold `to_bits` — overflow is a compile error.** A constant that does
+/// not fit in `N` bits could never satisfy the recomposition (an `N`-bit sum
+/// lives in `[0, 2ᴺ)`), so it was already unprovable; const-folding turns that
+/// silent dead end into a clean compile-time rejection.
+#[test]
+fn const_to_bits_overflow_rejected() {
+    let src = write_case(
+        "const_to_bits_overflow",
+        "#![no_std]\nuse xark::{assert_eq, Field, Public};\n\
+         pub fn circuit(out: Public<Field>) {\n\
+           let bits = Field::from(300u16).to_bits::<8>();\n\
+           assert_eq(Field::from_bits::<8>(bits), out);\n\
+         }\n",
+    );
+    let c = compile(&src, "const_to_bits_overflow");
+    assert!(!c.status_success, "overflow must be rejected");
+    assert!(c.stderr.contains("does not fit in 8 bits"), "{}", c.stderr);
 }
 
 /// **Poseidon2 sponge — lowering.** Variable-length `hash::<N>` (5 elements → 3

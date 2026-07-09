@@ -94,6 +94,21 @@ impl FieldConst {
         FieldConst::from_bigint(-self.big())
     }
 
+    /// If this constant is a non-negative integer that fits in `n` bits, return
+    /// its little-endian bits (`bits[0]` = LSB, each `false`/`true` = `0`/`1`).
+    /// Returns `None` when the value is negative or `>= 2^n` — i.e. it "does not
+    /// fit in `n` bits". Used to const-fold `Field::to_bits::<N>` of a constant:
+    /// the bits are known, so no booleanity/recomposition constraints are needed.
+    pub fn to_bits_le(&self, n: usize) -> Option<Vec<bool>> {
+        // `to_biguint` is `None` for a negative value (which cannot fit in `n`
+        // unsigned bits); `bits()` is the count of significant bits.
+        let v = self.big().to_biguint()?;
+        if v.bits() as usize > n {
+            return None;
+        }
+        Some((0..n).map(|i| v.bit(i as u64)).collect())
+    }
+
     /// Single-parse rendering helper: returns `(is_negative, abs_is_one,
     /// abs_decimal)` with exactly one BigInt parse (vs. calling `is_negative` +
     /// `is_neg_one` + `is_one` + `abs_decimal` separately, which parse 4×). This

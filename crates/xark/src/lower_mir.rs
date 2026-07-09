@@ -2783,7 +2783,35 @@ fn inline_call<'tcx>(
         // `self` is the sole argument; its LC in the caller frame is the key.
         let x = env.operand_to_lc(&args[0].node)?;
         if x.is_constant() {
-            None
+            // Const-fold: the input's value is known at compile time, so its bits
+            // are fixed. The `N` booleanity (`bitᵢ² == bitᵢ`) and the recomposition
+            // (`Σ bitᵢ·2ⁱ == c`) constraints the witness path emits are then all
+            // tautologies — satisfied by the known bits and by nothing else — so
+            // dropping them removes zero degrees of freedom: what was provable
+            // stays provable, and no witness is admitted that wasn't before. It is
+            // a pure constraint-count reduction with no soundness change. We bind
+            // each `dest` bit slot to its constant `0`/`1` LC and emit nothing.
+            //
+            // If the constant does not fit in `N` bits, the recomposition could
+            // never hold (an `N`-bit sum lives in `[0, 2ᴺ)`), so the circuit was
+            // already unprovable at prove time; rejecting it here is strictly
+            // better — a clean compile error instead of a silent dead end.
+            let bits = x.constant.to_bits_le(n).ok_or_else(|| {
+                CompileError::new(format!(
+                    "constant `{}` does not fit in {n} bits",
+                    x.constant.decimal
+                ))
+                .with_note("`Field::to_bits::<N>` of a constant requires `0 <= value < 2^N`")
+            })?;
+            for (i, &b) in bits.iter().enumerate() {
+                let lc = if b {
+                    LinearCombination::one()
+                } else {
+                    LinearCombination::zero()
+                };
+                env.set_field_at(dest, &[i as u64], lc);
+            }
+            return Ok(());
         } else {
             let key = (canonical_lc_key(&x), n);
             if let Some(bits) = env.bit_cache.get(&key).cloned() {
