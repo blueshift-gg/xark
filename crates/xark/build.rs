@@ -2,6 +2,17 @@
 //! `cargo`/the rustc-driver with the *same* nightly (sysroot + toolchain),
 //! independent of the ambient toolchain where `xark build` is later run.
 use std::process::Command;
+
+fn git(args: &[&str]) -> Option<String> {
+    Command::new("git")
+        .args(args)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn main() {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
     if let Ok(out) = Command::new(&rustc).args(["--print", "sysroot"]).output() {
@@ -37,5 +48,22 @@ fn main() {
             }
         }
     }
+    // Stamp the git revision so `xark --version` identifies the exact build
+    // (a stale `~/.cargo/bin/xark` vs a fresh `--path` install are otherwise
+    // indistinguishable — both just say the crate version).
+    let git_hash = git(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=XARK_GIT_HASH={git_hash}");
     println!("cargo:rerun-if-changed=build.rs");
+
+    // Resolve paths through git so this works from the nested crate and from a
+    // linked worktree. Watching HEAD is sufficient when detached; on a branch,
+    // also watch the referenced file because HEAD itself does not change.
+    if let Some(head) = git(&["rev-parse", "--git-path", "HEAD"]) {
+        println!("cargo:rerun-if-changed={head}");
+    }
+    if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        if let Some(path) = git(&["rev-parse", "--git-path", &reference]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
 }

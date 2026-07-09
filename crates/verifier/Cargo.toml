@@ -14,8 +14,25 @@ exclude = ["tests", "benches"]
 [lib]
 crate-type = ["lib"]
 
+[features]
+# `solana-nostd-alt-bn128` defaults `static-syscalls` ON, which emits the SBPFv3
+# static-syscall ABI (a `callx` to a murmur-hashed immediate). In an SBPFv0/v2
+# program — still the default `cargo-build-sbf` output on platform-tools v1.53,
+# and what current mainnet + published LiteSVM (solana-sbpf reads the version
+# from ELF e_flags) execute — that instruction decodes as an out-of-bounds
+# relative call and the loader rejects the whole `.so`. So default it OFF
+# (dynamic syscall symbols, which load everywhere today) and expose an opt-in
+# passthrough for when you build for SBPFv3 against a v3-capable loader.
+#
+# Caveat: a toolchain that both defaults to v3 AND sets `target_feature =
+# "static-syscalls"` re-activates the crate's static path regardless of this
+# feature (it gates on `any(target_feature, feature)`); there the fix is a
+# v3-enabled VM, not this switch.
+default = []
+static-syscalls = ["solana-nostd-alt-bn128/static-syscalls"]
+
 [dependencies]
-solana-nostd-alt-bn128 = { version = "0.1.1" }
+solana-nostd-alt-bn128 = { version = "0.1.1", default-features = false }
 solana-program-error = { version = "3", default-features = false }
 
 [lints]

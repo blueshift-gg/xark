@@ -49,28 +49,46 @@ pub fn run(args: InspectArgs) -> Result<()> {
     let prog = load_r1cs(&r1cs_path)?;
     let prim = load_circuit(&circuit_path).ok();
 
-    let mut num_public = 0usize;
-    let mut num_private = 0usize;
-    let mut num_internal = 0usize;
-    for v in &prog.variables {
-        match v.visibility {
-            Visibility::Public => num_public += 1,
-            Visibility::Private => num_private += 1,
-            Visibility::Internal => num_internal += 1,
-        }
-    }
-    let public_names: Vec<&str> = prog
+    let num_internal = prog
         .variables
         .iter()
-        .filter(|v| v.visibility == Visibility::Public)
-        .map(|v| v.name.as_str())
-        .collect();
-    let private_names: Vec<&str> = prog
-        .variables
-        .iter()
-        .filter(|v| v.visibility == Visibility::Private)
-        .map(|v| v.name.as_str())
-        .collect();
+        .filter(|v| v.visibility == Visibility::Internal)
+        .count();
+    // Declared inputs come from the primitive program's roles, not the R1CS
+    // visibility: the solver *derives* internal witnesses (e.g. `to_bits`
+    // range-check bits), which the R1CS still marks `Private`. Listing those as
+    // inputs is wrong — the prover never supplies them. Fall back to visibility
+    // only when the primitive program is unavailable (older builds).
+    let (public_names, private_names): (Vec<&str>, Vec<&str>) = match prim.as_ref() {
+        Some(p) => (
+            p.vars
+                .iter()
+                .filter(|v| v.role == VarRole::PublicInput)
+                .map(|v| v.name.as_str())
+                .collect(),
+            p.vars
+                .iter()
+                .filter(|v| v.role == VarRole::PrivateInput)
+                .map(|v| v.name.as_str())
+                .collect(),
+        ),
+        None => (
+            prog.variables
+                .iter()
+                .filter(|v| v.visibility == Visibility::Public)
+                .map(|v| v.name.as_str())
+                .collect(),
+            prog.variables
+                .iter()
+                .filter(|v| v.visibility == Visibility::Private)
+                .map(|v| v.name.as_str())
+                .collect(),
+        ),
+    };
+    // Report the declared-input counts (what a user supplies), not the raw R1CS
+    // visibility tally that lumps derived witnesses in with private inputs.
+    let num_public = public_names.len();
+    let num_private = private_names.len();
 
     let num_derived = prim
         .as_ref()

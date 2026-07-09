@@ -17,6 +17,7 @@ name: Solana E2E
 
 on:
   push:
+    branches: [master]
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
@@ -30,6 +31,11 @@ on:
       - "crates/tests/tests/differential_alt_bn128.rs"
       - "crates/tests/Cargo.toml"
       - ".github/workflows/solana-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   sbpf:
@@ -37,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable

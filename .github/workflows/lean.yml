@@ -11,6 +11,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lean:
     name: prove (gadget soundness)
@@ -21,7 +25,7 @@ jobs:
         working-directory: formal
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install elan (Lean toolchain manager)
         run: |

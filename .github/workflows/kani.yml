@@ -22,6 +22,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   kani:
     name: prove (verifier)
@@ -29,7 +33,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Replace default 4 GB swap with 12 GB
         # `ubuntu-latest` has 7 GB RAM + a pre-mounted 4 GB `/swapfile`

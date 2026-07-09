@@ -2,7 +2,13 @@ name: CI
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -10,7 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Install pinned compiler toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-03
+          components: rustc-dev, llvm-tools-preview
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -35,14 +47,16 @@ jobs:
       - name: cargo test (release)
         # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
         # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
-        # in debug. Debug-mode workspace takes 10+ minutes; release ~90s.
+        # in debug. The full Ed25519 scalar-mul/EdDSA vectors take longer than
+        # the per-step CI limit and run in nightly-kats.yml with a 60-minute
+        # timeout; exclude that package here rather than terminating mid-test.
         #
         # The `sbpf` and `differential_alt_bn128` integration tests under
         # `crates/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
         # they need the Anza toolchain and run in `solana-ci.yml`.
         # Build one xark-tests test list excluding those, then test.
         run: |
-          cargo test --workspace --release --exclude xark-tests
+          cargo test --workspace --release --exclude xark-tests --exclude xark-ed25519
           cargo test -p xark-tests --release --lib
           tests_args=()
           for t in $(ls crates/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
@@ -56,15 +70,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install pinned nightly (rustc_private) toolchain
         # `crates/xark` is a `rustc_driver` built on nightly with `rustc-dev`;
         # it is deliberately excluded from the root workspace, so the `check`
         # job's `cargo test --workspace` never touches it. See docs/toolchain.md
         # for the pin and the bump procedure.
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-05-03
           components: rustc-dev, llvm-tools-preview
 
       - name: Cache cargo registry, git, and target

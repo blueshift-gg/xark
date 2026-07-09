@@ -39,6 +39,15 @@ pub struct ProveArgs {
     #[arg(long = "input", value_name = "NAME=VALUE")]
     pub inputs: Vec<String>,
 
+    /// Read inputs from a file instead of (or in addition to) `--input`. Each
+    /// line is `name = value` (`#` comments and blank lines ignored); a `.json`
+    /// file may instead be a `{ "name": value, … }` object. Array elements use
+    /// the flat names `xark inspect` prints, e.g. `path[0] = 123`. Any `--input`
+    /// on the command line overrides the file. Essential for circuits with many
+    /// inputs (a 2-in/2-out JoinSplit has ~200) where flags are unwieldy.
+    #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
+    pub input_file: Option<PathBuf>,
+
     /// Path to `r1cs.json`. Inferred from `target/xark/` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub r1cs: Option<PathBuf>,
@@ -125,7 +134,12 @@ pub fn run(args: ProveArgs) -> Result<()> {
     let prog = xark_ir::json::from_json(&r1cs_str)
         .with_context(|| format!("parsing {}", r1cs_path.display()))?;
     let prim = load_circuit(&circuit_path)?;
-    let inputs = parse_inputs(&args.inputs)?;
+    // File first, then CLI `--input` on top (CLI overrides the file).
+    let mut inputs = match &args.input_file {
+        Some(path) => parse_input_file(path)?,
+        None => Default::default(),
+    };
+    inputs.extend(parse_inputs(&args.inputs)?);
 
     // Resolve input names → variable ids for the solver (shared with `check`).
     let id_inputs = resolve_input_ids(&prim, &inputs)?;
@@ -308,6 +322,57 @@ pub fn run(args: ProveArgs) -> Result<()> {
     Ok(())
 }
 
+/// Parse an `--input-file`: either a `{ "name": value, … }` JSON object, or
+/// lines of `name = value` (`#` comments and blank lines ignored). Values are
+/// kept as decimal strings, matching `--input`; array elements use the flat
+/// names `xark inspect` prints (e.g. `path[0]`).
+fn parse_input_file(path: &std::path::Path) -> Result<BTreeMap<String, String>> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading --input-file {}", path.display()))?;
+    parse_input_text(&text, path)
+}
+
+fn parse_input_text(text: &str, source: &std::path::Path) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+
+    if text.trim_start().starts_with('{') {
+        let obj: serde_json::Value = serde_json::from_str(text)
+            .with_context(|| format!("parsing {} as JSON", source.display()))?;
+        let map = obj.as_object().ok_or_else(|| {
+            anyhow::anyhow!("{}: expected a JSON object of name→value", source.display())
+        })?;
+        for (name, value) in map {
+            let v = match value {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                other => anyhow::bail!(
+                    "{}: input `{name}` must be a decimal string or number, got {other}",
+                    source.display()
+                ),
+            };
+            out.insert(name.clone(), v);
+        }
+        return Ok(out);
+    }
+
+    for (lineno, raw) in text.lines().enumerate() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (name, value) = line.split_once('=').with_context(|| {
+            format!(
+                "{}:{}: expected `name = value`",
+                source.display(),
+                lineno + 1
+            )
+        })?;
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        out.insert(name.trim().to_string(), value.to_string());
+    }
+    Ok(out)
+}
+
 /// When `xark prove` is run before `build`/`setup`, do them on demand so the
 /// first-time loop is a single command. Triggers only on *missing* default
 /// artifacts; explicit `--r1cs` / `--proving-key` paths are left untouched.
@@ -389,4 +454,46 @@ fn key_is_production_safe(pk_path: &std::path::Path) -> bool {
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("production_safe").and_then(|b| b.as_bool()))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_input_text;
+    use std::path::Path;
+
+    #[test]
+    fn parses_line_input_file() {
+        let inputs = parse_input_text(
+            "# witness\npath[0] = 12\namount = '34' # inline comment\n",
+            Path::new("witness.inputs"),
+        )
+        .unwrap();
+
+        assert_eq!(inputs.get("path[0]").map(String::as_str), Some("12"));
+        assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
+    }
+
+    #[test]
+    fn parses_json_input_file_without_losing_large_values() {
+        let inputs = parse_input_text(
+            r#"{"amount": 34, "field": "21888242871839275222246405745257275088548364400416034343698204186575808495616"}"#,
+            Path::new("witness.json"),
+        )
+        .unwrap();
+
+        assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
+        assert_eq!(
+            inputs.get("field").map(String::as_str),
+            Some("21888242871839275222246405745257275088548364400416034343698204186575808495616")
+        );
+    }
+
+    #[test]
+    fn rejects_non_scalar_json_values() {
+        let err = parse_input_text(r#"{"path": [1, 2]}"#, Path::new("witness.json")).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("input `path` must be a decimal string or number"));
+    }
 }

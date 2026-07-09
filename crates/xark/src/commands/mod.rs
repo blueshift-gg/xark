@@ -46,7 +46,7 @@ pub fn synth_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
 #[derive(Parser, Debug)]
 #[command(
     name = "xark",
-    version,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("XARK_GIT_HASH"), ")"),
     styles = crate::style::clap_styles(),
     about = "Write, compile, prove and verify zero-knowledge circuits in Rust",
     long_about = "xark compiles a restricted Rust circuit (via rustc MIR) into \
@@ -347,8 +347,21 @@ pub fn soundness_check(
     prim: &PrimitiveProgram,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
-    let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs)
-        .map_err(|e| anyhow::anyhow!("witness does not satisfy the circuit: {e:?}"))?;
+    let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs).map_err(|e| {
+        // Translate a bare variable id into the declared input name the user
+        // actually types, e.g. `missing input for variable 1` → `missing
+        // --input for `result``.
+        if let xark_ir::solver::SolveError::MissingInput(id) = e {
+            if let Some(v) = prim.vars.iter().find(|v| v.id == id) {
+                return anyhow::anyhow!(
+                    "missing --input for `{}` (pass --input {}=<value>)",
+                    v.name,
+                    v.name
+                );
+            }
+        }
+        anyhow::anyhow!("witness does not satisfy the circuit: {e}")
+    })?;
 
     let holes = xark_ir::solver::analyze_underconstrained(prim, &assign_fp);
     if !holes.is_empty() {
