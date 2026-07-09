@@ -337,14 +337,14 @@ pub fn cmd_init(args: &[String]) -> i32 {
          [dependencies]\n\
          # Once xark is published:  xark = \"0.1\"\n\
          # From git:                
-         xark = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\", default-features = false }}\n\
+         xark = {{ git = \"https://github.com/blueshift-gg/xark\", default-features = false }}\n\
          # From a local checkout:   xark = {{ path = \"../xark/crates/xark\", default-features = false }}\n\
          # xark = \"0.1\"\n\n\
          # `xark-prover` powers the in-crate `cargo test` circuit tests below.\n\
          [dev-dependencies]\n\
          # Once xark is published:  xark-prover = \"0.1\"\n\
          # From git:                
-         xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\", branch = \"lang\" }}\n\
+         xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\" }}\n\
          # From a local checkout:   xark-prover = {{ path = \"../xark/crates/xark-prover\" }}\n\
          # xark-prover = \"0.1\"\n"
     );
