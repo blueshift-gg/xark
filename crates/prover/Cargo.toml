@@ -13,8 +13,18 @@ repository.workspace = true
 path = "src/lib.rs"
 
 [features]
+default = ["parallel"]
+
 # Opt-in developer diagnostics — forwards to `xark-ir`'s `debug` feature.
 debug = ["xark-ir/debug"]
+
+parallel = [
+    "ark-ff/parallel",
+    "ark-ec/parallel",
+    "ark-groth16/parallel",
+    "ark-relations/parallel",
+    "ark-std/parallel",
+]
 
 [dependencies]
 xark-ir = { path = "../ir", version = "0.2.1" }
@@ -23,9 +33,11 @@ xark-ir = { path = "../ir", version = "0.2.1" }
 # Cargo feature-unification happens to pull `parallel` in via `xark-backend`.
 ark-bn254 = { workspace = true }
 ark-ff = { workspace = true }
+ark-ec = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-relations = { workspace = true }
 ark-snark = { workspace = true }
+ark-std = { workspace = true }
 num-bigint = "0.4"
 rand = "0.8"
 
