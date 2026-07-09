@@ -1406,6 +1406,18 @@ impl<'tcx> LoweringEnv<'tcx> {
                 return LinearCombination::constant(folded.decimal);
             }
         }
+        // constant * anything is linear — scale, no gate. The `KnownCall::Mul`
+        // handler already folds this for user-level `*`, but direct callers do
+        // not: e.g. `emit_less_than` multiplies the borrow bit by a constant
+        // `2^n`, one wasted gate per comparison (`<`, `<=`, `.lt`, …).
+        if lhs.is_constant() {
+            self.consume_pending(&rhs);
+            return rhs.scale(&lhs.constant);
+        }
+        if rhs.is_constant() {
+            self.consume_pending(&lhs);
+            return lhs.scale(&rhs.constant);
+        }
         let lhs = self.materialize(lhs);
         let rhs = self.materialize(rhs);
         let out = self.alloc_internal();
@@ -1518,6 +1530,20 @@ impl<'tcx> LoweringEnv<'tcx> {
         }
 
         let diff = lhs - rhs;
+        // A difference that simplifies to the zero constant — `assert_eq(x, x)`,
+        // `assert_eq(a + b, b + a)` — is a tautology; emit no constraint. (A
+        // nonzero *constant* difference is a contradiction; the `ConstrainEq`
+        // handler already rejects the const-vs-const case at compile time, and a
+        // non-constant-operand contradiction still surfaces at solve time.)
+        if diff.is_constant() {
+            let is_zero = match &self.modulus {
+                Some(m) => diff.constant.reduce(m).is_zero(),
+                None => diff.constant.is_zero(),
+            };
+            if is_zero {
+                return;
+            }
+        }
         let id = self.fresh_constraint_id();
         let note = format!("({}) * 1 = 0", self.render_lc(&diff));
         self.push_constraint(
@@ -1570,6 +1596,20 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// `out = 1 − input·inv` with `input·out == 0` (the inverse-or-zero hint
     /// yields `0` when `input == 0`). Backs `==` on `Field`.
     fn emit_is_zero(&mut self, input: LinearCombination) -> LinearCombination {
+        // A constant input decides `== 0` at compile time — no advice, no gates.
+        // Backs `c1 == c2` (which lowers to `is_zero(c1 - c2)`); the inverse-fold
+        // handles `x.inv()` but not `==`, which calls this directly.
+        if input.is_constant() {
+            let zero = match &self.modulus {
+                Some(m) => input.constant.reduce(m).is_zero(),
+                None => input.constant.is_zero(),
+            };
+            return if zero {
+                LinearCombination::one()
+            } else {
+                LinearCombination::zero()
+            };
+        }
         let inv = self.alloc_advice();
         self.witness_gen.push(Some(WitnessGen::InverseOrZero {
             out: inv,
