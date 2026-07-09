@@ -24,35 +24,25 @@
     {
       "id": 0,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 0
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 2
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "debug": {
@@ -63,34 +53,24 @@
     {
       "id": 1,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 1
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 2
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {

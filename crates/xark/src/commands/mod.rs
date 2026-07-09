@@ -25,7 +25,9 @@ use xark_ir::{R1csProgram, VarId, Visibility};
 
 pub mod ceremony;
 pub mod check;
+pub mod client;
 pub mod completions;
+pub mod doctor;
 pub mod export;
 pub mod inspect;
 pub mod profile;
@@ -60,6 +62,8 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Check your toolchain is set up to build & prove circuits.
+    Doctor(doctor::DoctorArgs),
     /// Scaffold a starter circuit crate (rust-analyzer ready).
     #[command(alias = "new")]
     Init(InitArgs),
@@ -79,6 +83,8 @@ pub enum Command {
     Verify(verify::VerifyArgs),
     /// Export a self-contained Solana verifier crate.
     Export(export::ExportArgs),
+    /// Scaffold a TypeScript client (verify with snarkjs + on-chain calldata).
+    Client(client::ClientArgs),
     /// Phase-2 MPC ceremony for trusted setup.
     Ceremony(ceremony::CeremonyArgs),
     /// Print circuit statistics (variables, constraints, public inputs).
@@ -112,6 +118,7 @@ pub fn main() {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Doctor(a) => doctor::run(a),
         // Frontend commands delegate to the hand-rolled `cargo`-driving
         // implementations, which return a process exit code.
         Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
@@ -130,6 +137,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Prove(a) => prove::run(a),
         Command::Verify(a) => verify::run(a),
         Command::Export(a) => export::run(a),
+        Command::Client(a) => client::run(a),
         Command::Ceremony(a) => ceremony::run(a),
         Command::Inspect(a) => inspect::run(a),
         Command::Profile(a) => profile::run(a),
@@ -251,6 +259,16 @@ impl TestArgs {
 
 // -- Shared helpers for the backend commands ----------------------------------
 
+/// Render the path argument the user passed (for the guided "Next:" hints), so
+/// suggested commands are copy-pasteable verbatim. Falls back to `.` (the
+/// current directory) when no path was given, matching the commands' defaults.
+pub fn path_arg(path: &Option<std::path::PathBuf>) -> String {
+    match path {
+        Some(p) => p.display().to_string(),
+        None => ".".to_string(),
+    }
+}
+
 /// Parse `--input name=value` pairs into a name→value map.
 pub fn parse_inputs(pairs: &[String]) -> Result<BTreeMap<String, String>> {
     let mut inputs = BTreeMap::new();
@@ -359,10 +377,16 @@ pub fn num_public_inputs(prog: &R1csProgram) -> usize {
         .count()
 }
 
+/// SHA-256 of arbitrary bytes, hex-encoded (no `0x`). Used to fingerprint a
+/// proof so it can be referenced/tracked and content-addressed on disk.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
+}
+
 /// A stable circuit identifier: the SHA-256 (hex) of the `r1cs.json` text.
 pub fn circuit_hash(r1cs_json: &str) -> String {
-    use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(r1cs_json.as_bytes()))
+    sha256_hex(r1cs_json.as_bytes())
 }
 
 /// Public inputs in variable-id (allocation) order, taken from `--input`

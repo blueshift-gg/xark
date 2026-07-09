@@ -144,6 +144,24 @@ pub fn run(args: ExportArgs) -> Result<()> {
         num_public_inputs,
         vk_bytes.len(),
     );
+    println!(
+        "{}",
+        crate::style::brand("✅ On-chain verifier crate ready (verifying key embedded).")
+    );
+    let p = super::path_arg(&args.path);
+    println!(
+        "\n{}",
+        crate::style::next_steps(&[
+            (
+                format!("xark client {p}"),
+                "scaffold a TypeScript client (verify + calldata)",
+            ),
+            (
+                "cargo test".to_string(),
+                "run inside the generated crate to self-check the bundled proof",
+            ),
+        ])
+    );
     Ok(())
 }
 

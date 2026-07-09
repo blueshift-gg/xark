@@ -64,40 +64,28 @@
     {
       "id": 0,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
@@ -110,40 +98,28 @@
     {
       "id": 1,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
@@ -156,40 +132,28 @@
     {
       "id": 2,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
@@ -202,40 +166,28 @@
     {
       "id": 3,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
@@ -248,40 +200,28 @@
     {
       "id": 4,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
@@ -294,40 +234,28 @@
     {
       "id": 5,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
@@ -340,40 +268,28 @@
     {
       "id": 6,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
@@ -386,40 +302,28 @@
     {
       "id": 7,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
@@ -432,76 +336,52 @@
     {
       "id": 8,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 0
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 4
           },
           {
-            "coeff": {
-              "decimal": "4"
-            },
+            "coeff": "4",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "8"
-            },
+            "coeff": "8",
             "var": 6
           },
           {
-            "coeff": {
-              "decimal": "16"
-            },
+            "coeff": "16",
             "var": 7
           },
           {
-            "coeff": {
-              "decimal": "32"
-            },
+            "coeff": "32",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "64"
-            },
+            "coeff": "64",
             "var": 9
           },
           {
-            "coeff": {
-              "decimal": "128"
-            },
+            "coeff": "128",
             "var": 10
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {
@@ -512,34 +392,24 @@
     {
       "id": 9,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 1
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {
@@ -550,34 +420,24 @@
     {
       "id": 10,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 2
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {

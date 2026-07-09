@@ -41,6 +41,7 @@ use driver::R1csCallbacks;
 /// parses with clap; otherwise it was invoked as `RUSTC` (by cargo during
 /// `xark build`, or directly with rustc arguments) and drives `rustc_driver`.
 const CLI_SUBCOMMANDS: &[&str] = &[
+    "doctor",
     "init",
     "new",
     "build",
@@ -51,6 +52,7 @@ const CLI_SUBCOMMANDS: &[&str] = &[
     "prove",
     "verify",
     "export",
+    "client",
     "ceremony",
     "inspect",
     "profile",
@@ -64,6 +66,12 @@ const CLI_SUBCOMMANDS: &[&str] = &[
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // A bare `xark` is a human at the terminal: cargo drives the RUSTC shim with
+    // compile flags, never argv-less. Show the roadmap instead of a rustc error.
+    if args.len() == 1 {
+        print_roadmap();
+        return;
+    }
     let is_cli = args
         .get(1)
         .map(String::as_str)
@@ -77,6 +85,57 @@ fn main() {
         // rustc arguments. The snapshot harness depends on this direct path.
         run_as_rustc(args);
     }
+}
+
+/// The zero-to-on-chain roadmap, shown when `xark` is run with no arguments.
+fn print_roadmap() {
+    let steps: &[(&str, &str)] = &[
+        ("xark doctor", "check your toolchain is set up"),
+        (
+            "xark init my-circuit",
+            "scaffold a circuit crate (rust-analyzer ready)",
+        ),
+        ("xark build .", "compile the circuit → R1CS"),
+        ("xark setup .", "generate the proving/verifying keys"),
+        (
+            "xark prove . --input …",
+            "produce (and self-check) a proof + copy-paste calldata",
+        ),
+        ("xark verify .", "verify a proof locally"),
+        (
+            "xark client .",
+            "scaffold a TypeScript client (verify + calldata)",
+        ),
+        (
+            "xark export .",
+            "generate the on-chain Solana verifier crate",
+        ),
+    ];
+    // Align by display columns, not bytes (some commands contain `…`).
+    let width = steps
+        .iter()
+        .map(|(c, _)| c.chars().count())
+        .max()
+        .unwrap_or(0);
+    println!(
+        "{}",
+        style::brand("xark — write, prove & verify zero-knowledge circuits in Rust")
+    );
+    println!("\nThe path from zero to an on-chain proof:\n");
+    for (cmd, hint) in steps {
+        println!(
+            "  {}{}   {}",
+            style::brand(cmd),
+            " ".repeat(width.saturating_sub(cmd.chars().count())),
+            style::dim(hint),
+        );
+    }
+    println!(
+        "\n{}",
+        style::dim(
+            "Run `xark <command> --help` for details, or `xark doctor` to check your setup."
+        )
+    );
 }
 
 /// `rustc_driver` entry. Extract the circuit's R1CS when an output directory is

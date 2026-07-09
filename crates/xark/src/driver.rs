@@ -96,6 +96,17 @@ impl R1csCallbacks {
 
         if !self.check_only {
             self.emit_outputs(&output);
+            // Record the entry fn name beside the artifacts so downstream (proof
+            // bundle, generated client) can name things after the circuit, not
+            // the crate dir. Not fatal (a correct dir-name fallback exists), but
+            // warn rather than silently degrade to the wrong name.
+            let entry_path = self.output_dir.join("entry");
+            if let Err(e) = std::fs::write(&entry_path, &entry.name) {
+                eprintln!(
+                    "xark: warning: could not write {}: {e}",
+                    entry_path.display()
+                );
+            }
         }
         Ok(())
     }
@@ -104,7 +115,8 @@ impl R1csCallbacks {
         std::fs::create_dir_all(&self.output_dir)
             .unwrap_or_else(|e| panic!("failed to create output dir {:?}: {e}", self.output_dir));
 
-        // Primitive IR — the artifact the backend lowering consumes.
+        // Primitive IR — the artifact the backend lowering consumes (and the
+        // sole circuit description now).
         let circuit = xark_ir::primitive::to_json_pretty(&output.primitive);
         let circuit_path = self.output_dir.join("circuit.json");
         std::fs::write(&circuit_path, format!("{circuit}\n"))

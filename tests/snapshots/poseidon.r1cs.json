@@ -234,26 +234,18 @@
     {
       "id": 0,
       "a": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
@@ -266,40 +258,28 @@
     {
       "id": 1,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 3
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
@@ -312,33 +292,23 @@
     {
       "id": 2,
       "a": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 4
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           }
         ]
@@ -351,40 +321,28 @@
     {
       "id": 3,
       "a": {
-        "constant": {
-          "decimal": "2"
-        },
+        "constant": "2",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 0
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "2"
-        },
+        "constant": "2",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 0
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
@@ -397,40 +355,28 @@
     {
       "id": 4,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 6
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
@@ -443,40 +389,28 @@
     {
       "id": 5,
       "a": {
-        "constant": {
-          "decimal": "2"
-        },
+        "constant": "2",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 0
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 7
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           }
         ]
@@ -489,40 +423,28 @@
     {
       "id": 6,
       "a": {
-        "constant": {
-          "decimal": "3"
-        },
+        "constant": "3",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 1
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "3"
-        },
+        "constant": "3",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 1
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
@@ -535,40 +457,28 @@
     {
       "id": 7,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 9
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
@@ -581,40 +491,28 @@
     {
       "id": 8,
       "a": {
-        "constant": {
-          "decimal": "3"
-        },
+        "constant": "3",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 1
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 10
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
@@ -627,64 +525,44 @@
     {
       "id": 9,
       "a": {
-        "constant": {
-          "decimal": "4"
-        },
+        "constant": "4",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "4"
-        },
+        "constant": "4",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
@@ -697,40 +575,28 @@
     {
       "id": 10,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 12
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           }
         ]
@@ -743,52 +609,36 @@
     {
       "id": 11,
       "a": {
-        "constant": {
-          "decimal": "4"
-        },
+        "constant": "4",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 13
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 14
           }
         ]
@@ -801,64 +651,44 @@
     {
       "id": 12,
       "a": {
-        "constant": {
-          "decimal": "5"
-        },
+        "constant": "5",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "5"
-        },
+        "constant": "5",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 11
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
@@ -871,40 +701,28 @@
     {
       "id": 13,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 15
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           }
         ]
@@ -917,52 +735,36 @@
     {
       "id": 14,
       "a": {
-        "constant": {
-          "decimal": "5"
-        },
+        "constant": "5",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 16
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 17
           }
         ]
@@ -975,64 +777,44 @@
     {
       "id": 15,
       "a": {
-        "constant": {
-          "decimal": "6"
-        },
+        "constant": "6",
         "terms": [
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "6"
-        },
+        "constant": "6",
         "terms": [
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 11
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
@@ -1045,40 +827,28 @@
     {
       "id": 16,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 18
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           }
         ]
@@ -1091,52 +861,36 @@
     {
       "id": 17,
       "a": {
-        "constant": {
-          "decimal": "6"
-        },
+        "constant": "6",
         "terms": [
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 5
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 8
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 11
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 19
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
@@ -1149,64 +903,44 @@
     {
       "id": 18,
       "a": {
-        "constant": {
-          "decimal": "7"
-        },
+        "constant": "7",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "7"
-        },
+        "constant": "7",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
@@ -1219,40 +953,28 @@
     {
       "id": 19,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 21
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           }
         ]
@@ -1265,52 +987,36 @@
     {
       "id": 20,
       "a": {
-        "constant": {
-          "decimal": "7"
-        },
+        "constant": "7",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 20
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 22
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 23
           }
         ]
@@ -1323,76 +1029,52 @@
     {
       "id": 21,
       "a": {
-        "constant": {
-          "decimal": "43"
-        },
+        "constant": "43",
         "terms": [
           {
-            "coeff": {
-              "decimal": "6"
-            },
+            "coeff": "6",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "7"
-            },
+            "coeff": "7",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "11"
-            },
+            "coeff": "11",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 23
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "43"
-        },
+        "constant": "43",
         "terms": [
           {
-            "coeff": {
-              "decimal": "6"
-            },
+            "coeff": "6",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "7"
-            },
+            "coeff": "7",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "11"
-            },
+            "coeff": "11",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 23
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
@@ -1405,40 +1087,28 @@
     {
       "id": 22,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 24
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           }
         ]
@@ -1451,58 +1121,40 @@
     {
       "id": 23,
       "a": {
-        "constant": {
-          "decimal": "43"
-        },
+        "constant": "43",
         "terms": [
           {
-            "coeff": {
-              "decimal": "6"
-            },
+            "coeff": "6",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "7"
-            },
+            "coeff": "7",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "11"
-            },
+            "coeff": "11",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 23
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 25
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
@@ -1515,88 +1167,60 @@
     {
       "id": 24,
       "a": {
-        "constant": {
-          "decimal": "213"
-        },
+        "constant": "213",
         "terms": [
           {
-            "coeff": {
-              "decimal": "40"
-            },
+            "coeff": "40",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "25"
-            },
+            "coeff": "25",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "43"
-            },
+            "coeff": "43",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "6"
-            },
+            "coeff": "6",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "213"
-        },
+        "constant": "213",
         "terms": [
           {
-            "coeff": {
-              "decimal": "40"
-            },
+            "coeff": "40",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "25"
-            },
+            "coeff": "25",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "43"
-            },
+            "coeff": "43",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "6"
-            },
+            "coeff": "6",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 26
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
@@ -1609,40 +1233,28 @@
     {
       "id": 25,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 27
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           }
         ]
@@ -1655,64 +1267,44 @@
     {
       "id": 26,
       "a": {
-        "constant": {
-          "decimal": "213"
-        },
+        "constant": "213",
         "terms": [
           {
-            "coeff": {
-              "decimal": "40"
-            },
+            "coeff": "40",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "25"
-            },
+            "coeff": "25",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "43"
-            },
+            "coeff": "43",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "6"
-            },
+            "coeff": "6",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 28
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           }
         ]
@@ -1725,88 +1317,60 @@
     {
       "id": 27,
       "a": {
-        "constant": {
-          "decimal": "236"
-        },
+        "constant": "236",
         "terms": [
           {
-            "coeff": {
-              "decimal": "43"
-            },
+            "coeff": "43",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "26"
-            },
+            "coeff": "26",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "45"
-            },
+            "coeff": "45",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "11"
-            },
+            "coeff": "11",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "236"
-        },
+        "constant": "236",
         "terms": [
           {
-            "coeff": {
-              "decimal": "43"
-            },
+            "coeff": "43",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "26"
-            },
+            "coeff": "26",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "45"
-            },
+            "coeff": "45",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "11"
-            },
+            "coeff": "11",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
@@ -1819,40 +1383,28 @@
     {
       "id": 28,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 30
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           }
         ]
@@ -1865,64 +1417,44 @@
     {
       "id": 29,
       "a": {
-        "constant": {
-          "decimal": "236"
-        },
+        "constant": "236",
         "terms": [
           {
-            "coeff": {
-              "decimal": "43"
-            },
+            "coeff": "43",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "26"
-            },
+            "coeff": "26",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "45"
-            },
+            "coeff": "45",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "11"
-            },
+            "coeff": "11",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 31
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           }
         ]
@@ -1935,88 +1467,60 @@
     {
       "id": 30,
       "a": {
-        "constant": {
-          "decimal": "145"
-        },
+        "constant": "145",
         "terms": [
           {
-            "coeff": {
-              "decimal": "25"
-            },
+            "coeff": "25",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "15"
-            },
+            "coeff": "15",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "26"
-            },
+            "coeff": "26",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "7"
-            },
+            "coeff": "7",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "145"
-        },
+        "constant": "145",
         "terms": [
           {
-            "coeff": {
-              "decimal": "25"
-            },
+            "coeff": "25",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "15"
-            },
+            "coeff": "15",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "26"
-            },
+            "coeff": "26",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "7"
-            },
+            "coeff": "7",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 26
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
@@ -2029,40 +1533,28 @@
     {
       "id": 31,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 33
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           }
         ]
@@ -2075,64 +1567,44 @@
     {
       "id": 32,
       "a": {
-        "constant": {
-          "decimal": "145"
-        },
+        "constant": "145",
         "terms": [
           {
-            "coeff": {
-              "decimal": "25"
-            },
+            "coeff": "25",
             "var": 14
           },
           {
-            "coeff": {
-              "decimal": "15"
-            },
+            "coeff": "15",
             "var": 17
           },
           {
-            "coeff": {
-              "decimal": "26"
-            },
+            "coeff": "26",
             "var": 20
           },
           {
-            "coeff": {
-              "decimal": "7"
-            },
+            "coeff": "7",
             "var": 23
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 26
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 34
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 35
           }
         ]
@@ -2145,64 +1617,44 @@
     {
       "id": 33,
       "a": {
-        "constant": {
-          "decimal": "16"
-        },
+        "constant": "16",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 35
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "16"
-        },
+        "constant": "16",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 35
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 36
           }
         ]
@@ -2215,40 +1667,28 @@
     {
       "id": 34,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 36
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 36
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 37
           }
         ]
@@ -2261,52 +1701,36 @@
     {
       "id": 35,
       "a": {
-        "constant": {
-          "decimal": "16"
-        },
+        "constant": "16",
         "terms": [
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 35
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 37
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 38
           }
         ]
@@ -2319,64 +1743,44 @@
     {
       "id": 36,
       "a": {
-        "constant": {
-          "decimal": "17"
-        },
+        "constant": "17",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 35
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "17"
-        },
+        "constant": "17",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 35
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 39
           }
         ]
@@ -2389,40 +1793,28 @@
     {
       "id": 37,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 39
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 39
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 40
           }
         ]
@@ -2435,52 +1827,36 @@
     {
       "id": 38,
       "a": {
-        "constant": {
-          "decimal": "17"
-        },
+        "constant": "17",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 35
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 40
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 41
           }
         ]
@@ -2493,64 +1869,44 @@
     {
       "id": 39,
       "a": {
-        "constant": {
-          "decimal": "18"
-        },
+        "constant": "18",
         "terms": [
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 35
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "18"
-        },
+        "constant": "18",
         "terms": [
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 35
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 42
           }
         ]
@@ -2563,40 +1919,28 @@
     {
       "id": 40,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 42
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 42
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 43
           }
         ]
@@ -2609,52 +1953,36 @@
     {
       "id": 41,
       "a": {
-        "constant": {
-          "decimal": "18"
-        },
+        "constant": "18",
         "terms": [
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 29
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 32
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 35
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 43
           }
         ]
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 44
           }
         ]
@@ -2667,46 +1995,32 @@
     {
       "id": 42,
       "a": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": [
           {
-            "coeff": {
-              "decimal": "-1"
-            },
+            "coeff": "-1",
             "var": 2
           },
           {
-            "coeff": {
-              "decimal": "2"
-            },
+            "coeff": "2",
             "var": 38
           },
           {
-            "coeff": {
-              "decimal": "3"
-            },
+            "coeff": "3",
             "var": 41
           },
           {
-            "coeff": {
-              "decimal": "1"
-            },
+            "coeff": "1",
             "var": 44
           }
         ]
       },
       "b": {
-        "constant": {
-          "decimal": "1"
-        },
+        "constant": "1",
         "terms": []
       },
       "c": {
-        "constant": {
-          "decimal": "0"
-        },
+        "constant": "0",
         "terms": []
       },
       "debug": {

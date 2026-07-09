@@ -1551,6 +1551,7 @@ dependencies = [
  "tracing-subscriber",
  "xark-backend",
  "xark-ir",
+ "xark-macros",
  "xark-prover",
  "xark-test-harness",
 ]
@@ -1587,6 +1588,15 @@ dependencies = [
  "num-traits",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "xark-macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]

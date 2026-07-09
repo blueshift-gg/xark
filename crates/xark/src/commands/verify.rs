@@ -92,5 +92,19 @@ pub fn run(args: VerifyArgs) -> Result<()> {
     if !ok {
         std::process::exit(2);
     }
+    let p = super::path_arg(&args.path);
+    println!(
+        "\n{}",
+        crate::style::next_steps(&[
+            (
+                format!("xark export {p}"),
+                "generate the on-chain Solana verifier crate",
+            ),
+            (
+                format!("xark client {p}"),
+                "scaffold a TypeScript client (verify + calldata)",
+            ),
+        ])
+    );
     Ok(())
 }
