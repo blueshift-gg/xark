@@ -166,7 +166,7 @@ authors: **you write stable Rust**; only the `xark` tool touches nightly.
   Both are frontend-agnostic.
 
 **Basic building blocks (bits) ship in `xark`.** Specialized building blocks and
-gadgets are **separate crates you add only when you need them**: `xark-ff`
+gadgets are **separate crates you add only when you need them**: `xark-bignum`
 (non-native / foreign-field arithmetic, used by the EC gadgets) and the gadgets
 `xark-poseidon`, `xark-poseidon2`, `xark-sha256`, `xark-keccak`, `xark-mimc`,
 `xark-blake3`, `xark-blake2s`, `xark-aes`, `xark-pedersen`, `xark-grumpkin`,

@@ -9,7 +9,7 @@ members = [
     "crates/xark-blake2s",
     "crates/xark-blake3",
     "crates/xark-ed25519",
-    "crates/xark-ff",
+    "crates/xark-bignum",
     "crates/xark-grumpkin",
     "crates/xark-keccak",
     "crates/xark-ir",

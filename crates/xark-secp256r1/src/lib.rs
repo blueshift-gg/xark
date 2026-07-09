@@ -4,7 +4,7 @@
 //! P-256 is `y² = x³ − 3x + b` (short Weierstrass with **a = −3**) over the base
 //! field `p = 2^256 − 2^224 + 2^192 + 2^96 − 1`, group order `n`. It shares all
 //! non-native field arithmetic *and* the incomplete-affine **addition** law with
-//! secp256k1 via [`xark_ff`] (modulus-parameterized); only the curve constants
+//! secp256k1 via [`xark_bignum`] (modulus-parameterized); only the curve constants
 //! and the **doubling** slope differ.
 //!
 //! # Doubling with `a = −3`

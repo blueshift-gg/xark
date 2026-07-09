@@ -1,4 +1,4 @@
-//! `xark-ff`: non-native ("foreign field") arithmetic over a 256-bit prime
+//! `xark-bignum`: non-native ("foreign field") arithmetic over a 256-bit prime
 //! modulus, shared by the secp256k1 / secp256r1 curve gadgets.
 //!
 //! A field element is a **width-generic `Bignum`**: `LIMBS` little-endian
@@ -218,7 +218,7 @@ pub const fn complement<const N: usize, const BITS: usize>(s: &str) -> [Field; N
 
 /// Define a non-native prime-field element type in one line:
 /// ```ignore
-/// xark_ff::fp!(Fp, "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+/// xark_bignum::fp!(Fp, "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
 /// let c = a * b + a - b;   // `Fp` has +  -  *  unary-  and .inverse()/.sub2()/.triple()/.reduce()
 /// ```
 /// You give it the name and the modulus (a decimal or `0x`-hex string); a

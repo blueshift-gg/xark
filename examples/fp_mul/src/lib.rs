@@ -2,7 +2,7 @@
 //! the constraint count vs the 4×64 representation. Pure `mod_mul::<3, 86>` (no input
 //! range checks — the boundary check is ~identical (256 bits) for both widths).
 #![no_std]
-use xark_ff::mod_mul;
+use xark_bignum::mod_mul;
 use xark::{assert_eq, Field, Private, Public};
 
 pub fn circuit(

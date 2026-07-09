@@ -6,7 +6,7 @@
 //! The field elements are passed **directly as aggregate circuit inputs**: each
 //! `Private<Fp>`/`Public<Fp>` flattens to 3 `Field` inputs (`a.limbs[0..2]`, …).
 #![no_std]
-use xark_ff::Bignum;
+use xark_bignum::Bignum;
 use xark::{assert_eq, Private, Public};
 
 type Fp = Bignum<3, 86>;

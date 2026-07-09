@@ -222,7 +222,7 @@ pub fn __xark_hint_div_rem(_a: Field, _b: Field) -> [Field; 2] {
 /// allocates `2N` advice variables + records a mul-mod div/mod witness-gen step.
 /// Returns `(q, r)` with `A·B = q·m + r`, `0 ≤ r < m` (each of `A`, `B`, `m`, `q`,
 /// `r` recomposed from its limbs). **Unconstrained** — the caller must pin the
-/// limb-wise `A·B == q·m + r` identity plus range checks. Backs `xark-ff`
+/// limb-wise `A·B == q·m + r` identity plus range checks. Backs `xark-bignum`
 /// `Bignum::mul`.
 ///
 /// [`KnownCall::HintMulModDivMod`]: crate::lower_mir::KnownCall::HintMulModDivMod

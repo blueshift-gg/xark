@@ -11,7 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 xark = { path = "../xark", default-features = false }
-xark-ff = { path = "../xark-ff" }
+xark-bignum = { path = "../xark-bignum" }
 xark-curve = { path = "../xark-curve" }
 
 [dev-dependencies]

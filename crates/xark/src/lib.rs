@@ -29,7 +29,7 @@
 //!
 //! Lower-level bit/word helpers live in the `xark-bits` crate (`to_bits32`,
 //! `xor32`, `rotr32`, `add32`, …). Specialized building blocks — non-native
-//! ("foreign field") arithmetic (`xark-ff`) and the gadgets (`xark-poseidon`,
+//! ("foreign field") arithmetic (`xark-bignum`) and the gadgets (`xark-poseidon`,
 //! `xark-keccak`, …) — are *separate crates* you add only when you need them.
 
 #![no_std]

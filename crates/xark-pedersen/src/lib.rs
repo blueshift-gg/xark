@@ -9,7 +9,7 @@
 //! which is precisely `xark`'s native `Field`. So a Grumpkin point's
 //! coordinates are ordinary `Field` values and **all elliptic-curve arithmetic
 //! is native `Field` `+ - *`** — no non-native limbs, no `mod_mul`, no
-//! `xark-ff`. This makes the whole gadget dramatically simpler (and cheaper)
+//! `xark-bignum`. This makes the whole gadget dramatically simpler (and cheaper)
 //! than the secp256k1 gadget, which lives over a foreign 256-bit field.
 //!
 //! Grumpkin short-Weierstrass form: `y² = x³ - 17`  (`a = 0`, `b = -17`).

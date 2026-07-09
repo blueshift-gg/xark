@@ -3,7 +3,7 @@
 //! secp256k1 is `y² = x³ + 7` (short Weierstrass with **a = 0**, j-invariant 0)
 //! over the base field `p = 2^256 - 2^32 - 977`, group order `n`. 256-bit field
 //! elements are 3 little-endian 86-bit limbs (86 is the multiply-optimal size
-//! over BN254); the non-native field arithmetic lives in [`xark_ff`] (shared
+//! over BN254); the non-native field arithmetic lives in [`xark_bignum`] (shared
 //! with secp256r1, parameterized by modulus). This crate supplies the curve
 //! constants and the incomplete-affine group law — with `a = 0` the doubling
 //! slope is just `3x²/2y` (no `a` term).

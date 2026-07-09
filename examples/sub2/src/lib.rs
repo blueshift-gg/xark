@@ -1,6 +1,6 @@
 //! Isolated validation of the fused subtract (a-b-c) mod p over secp256k1's base field.
 #![no_std]
-use xark_ff::sub2;
+use xark_bignum::sub2;
 use xark::{assert_eq, Field, Private, Public};
 pub fn circuit(
     a: Private<[Field; 3]>,

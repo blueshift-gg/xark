@@ -3,7 +3,7 @@
 //! source of truth. The two curves differ only in their moduli, the doubling
 //! slope numerator (`3x²` vs `3x² − 3`), and the precomputed constant tables.
 //!
-//! This crate has **no dependencies**: the macro emits absolute `xark_ff::…` /
+//! This crate has **no dependencies**: the macro emits absolute `xark_bignum::…` /
 //! `xark::…` paths that resolve in the *caller* crate (which must depend on
 //! both). Every op the macro emits is token-for-token what the two hand-written,
 //! solver-validated gadgets used to contain, so the emitted R1CS is unchanged.
@@ -86,8 +86,8 @@ macro_rules! weierstrass {
     ) => {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod n), 3 × 86-bit limbs.
         // Only the modulus is written; limbs, `m − 1`, and the complement derive.
-        xark_ff::fp!(pub Fp, $base);
-        xark_ff::fp!(pub Fq, $scalar);
+        xark_bignum::fp!(pub Fp, $base);
+        xark_bignum::fp!(pub Fq, $scalar);
 
         /// An affine curve point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy)]
@@ -181,7 +181,7 @@ macro_rules! weierstrass {
                 raw[i] = [table[i].x.limbs, table[i].y.limbs];
                 i += 1;
             }
-            let r = xark_ff::select16_affine(raw, b3, b2, b1, b0);
+            let r = xark_bignum::select16_affine(raw, b3, b2, b1, b0);
             Point::from_limbs(r[0], r[1])
         }
 
@@ -227,7 +227,7 @@ macro_rules! weierstrass {
             let s_inv = s.inverse();
             let u1 = e * s_inv;
             let u2 = r * s_inv;
-            let rr = double_scalar_mul_incomplete(xark_ff::scalar_to_bits(u1.limbs), xark_ff::scalar_to_bits(u2.limbs), q);
+            let rr = double_scalar_mul_incomplete(xark_bignum::scalar_to_bits(u1.limbs), xark_bignum::scalar_to_bits(u2.limbs), q);
             let rx_mod_n = Fq::new(rr.x.limbs).reduce();
             let mut i = 0usize;
             while i < 3usize {
@@ -272,8 +272,8 @@ macro_rules! edwards {
         d = $d:literal $(,)?
     ) => {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod L), 3 × 86-bit limbs.
-        xark_ff::fp!(pub Fp, $base);
-        xark_ff::fp!(pub Fq, $scalar);
+        xark_bignum::fp!(pub Fp, $base);
+        xark_bignum::fp!(pub Fq, $scalar);
 
         /// An affine twisted-Edwards point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy)]
@@ -315,7 +315,7 @@ macro_rules! edwards {
 
         /// The curve constant `d` as compile-time 86-bit limbs (only the `&str`
         /// literal `$d` is parsed here, in `const`-eval — never in circuit MIR).
-        const D_LIMBS: [xark::Field; 3] = xark_ff::modulus_limbs::<3, 86>($d);
+        const D_LIMBS: [xark::Field; 3] = xark_bignum::modulus_limbs::<3, 86>($d);
         /// The curve constant `d` as an `Fp` (its limbs are the compile-time const).
         fn d_const() -> Fp {
             Fp::new(D_LIMBS)
@@ -397,7 +397,7 @@ macro_rules! edwards {
                 raw[i] = [table[i].x.limbs, table[i].y.limbs];
                 i += 1;
             }
-            let r = xark_ff::select16_affine(raw, b3, b2, b1, b0);
+            let r = xark_bignum::select16_affine(raw, b3, b2, b1, b0);
             Point::from_limbs(r[0], r[1])
         }
 

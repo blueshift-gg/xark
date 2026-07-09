@@ -247,7 +247,7 @@ stays.
 
 Listed in rough order of "biggest blast radius if wrong":
 
-### 1. Non-native arithmetic over secp curves (`crates/xark-secp256k1/src/lib.rs`, `crates/xark-ff/src/lib.rs`)
+### 1. Non-native arithmetic over secp curves (`crates/xark-secp256k1/src/lib.rs`, `crates/xark-bignum/src/lib.rs`)
 
 The single largest soundness surface. Every ECDSA proof depends on the
 correctness of:

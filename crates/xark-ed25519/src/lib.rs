@@ -4,7 +4,7 @@
 //! Ed25519 lives over the base field `p = 2^255 − 19` with the curve equation
 //! `−x² + y² = 1 + d·x²·y²` and group order `L`. Its ~255-bit coordinates are
 //! foreign to the native BN254 proving field, so they use the shared 3 × 86-bit
-//! non-native limb arithmetic in [`xark_ff`]. The whole group law, scalar-mul, and
+//! non-native limb arithmetic in [`xark_bignum`]. The whole group law, scalar-mul, and
 //! constants are emitted by the shared [`xark_curve::edwards!`] macro — the
 //! addition is **complete** (no exceptional cases), so unlike the secp256k1 ECDSA
 //! gadget there is no offset accumulator.
@@ -46,7 +46,7 @@ pub fn base() -> Point {
 }
 
 /// Fixed-base scalar multiplication `[k]·B`, where `k_bits` is the 256-bit
-/// little-endian decomposition of the scalar (see [`xark_ff::scalar_to_bits`]).
+/// little-endian decomposition of the scalar (see [`xark_bignum::scalar_to_bits`]).
 pub fn mul_base(k_bits: [Field; 256]) -> Point {
     scalar_mul(k_bits, base())
 }

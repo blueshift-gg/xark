@@ -1646,7 +1646,7 @@ fn bignum_wrapper_lowers() {
     assert_eq!(r1cs.constraints.len(), 1189, "Bignum::mul is zero-cost");
 }
 
-/// **`fp!` operator layer.** `xark_ff::fp!` defines a non-native field-element
+/// **`fp!` operator layer.** `xark_bignum::fp!` defines a non-native field-element
 /// type from just its modulus, with `core::ops` (`+`/`-`/`*`/unary `-`) on it
 /// (`a * b + a - b`). Guards that the operator methods (`<El as Mul>::mul` etc.)
 /// are *not* mistaken for the `Field` intrinsics — they inline to the

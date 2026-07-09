@@ -7,7 +7,7 @@
 #![no_std]
 
 use xark_ed25519::{scalar_mul, Point};
-use xark_ff::scalar_to_bits;
+use xark_bignum::scalar_to_bits;
 use xark::{assert_eq, Field, Private, Public};
 
 pub fn circuit(k: Private<[Field; 3]>, p: Public<Point>, r: Public<Point>) {

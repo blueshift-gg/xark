@@ -80,7 +80,7 @@ the `rustc_driver` that extracts each circuit's R1CS. Compiler internals live in
 ### Gadget crates (add individually)
 
 Specialized building blocks are *separate crates* you depend on only when you
-need them: `xark-ff` (non-native / foreign-field arithmetic, used by the EC
+need them: `xark-bignum` (non-native / foreign-field arithmetic, used by the EC
 gadgets) and the gadgets `xark-poseidon`, `xark-poseidon2`, `xark-sha256`,
 `xark-keccak`, `xark-mimc`, `xark-blake3`, `xark-blake2s`, `xark-aes`,
 `xark-pedersen`, `xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`. Each is

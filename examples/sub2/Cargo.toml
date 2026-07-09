@@ -7,4 +7,4 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
-xark-ff = { path = "../../crates/xark-ff" }
+xark-bignum = { path = "../../crates/xark-bignum" }

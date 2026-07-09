@@ -9,5 +9,5 @@ path = "src/lib.rs"
 
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
-xark-ff = { path = "../../crates/xark-ff" }
+xark-bignum = { path = "../../crates/xark-bignum" }
 xark-ed25519 = { path = "../../crates/xark-ed25519" }

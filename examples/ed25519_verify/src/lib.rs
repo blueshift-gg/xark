@@ -9,7 +9,7 @@
 #![no_std]
 
 use xark_ed25519::{eddsa_verify, Point};
-use xark_ff::scalar_to_bits;
+use xark_bignum::scalar_to_bits;
 use xark::{Field, Private, Public};
 
 pub fn circuit(

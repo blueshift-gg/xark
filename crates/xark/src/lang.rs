@@ -82,7 +82,7 @@ impl Field {
 
     /// A `const`-context constructor from a `u128` value. Unlike `From<u128>`
     /// (a non-`const` trait method), this is usable in `const` items — it exists
-    /// so field-parameter derivation (`xark_ff`'s limb splitting) can build
+    /// so field-parameter derivation (`xark_bignum`'s limb splitting) can build
     /// `[Field; N]` limb arrays at compile time. Not for circuit bodies; use
     /// `Field::from(x)` there.
     #[doc(hidden)]
