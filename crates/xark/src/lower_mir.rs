@@ -17,7 +17,8 @@ use rustc_middle::ty::TyCtxt;
 
 use xark_ir::primitive::{self, PrimitiveProgram, WitnessGen};
 use xark_ir::{
-    FieldSpec, LinearCombination, R1csConstraint, R1csProgram, VarId, Variable, Visibility,
+    ConstraintKind, ConstraintProfile, FieldSpec, LinearCombination, R1csConstraint, R1csProgram,
+    VarId, Variable, Visibility,
 };
 
 use crate::diagnostics::{CompileError, CompileResult};
@@ -39,6 +40,30 @@ fn canonical_lc_key(lc: &LinearCombination) -> CanonicalLcKey {
             .map(|t| (t.coeff.decimal.clone(), t.var))
             .collect(),
     )
+}
+
+/// Is `name` a low-level arithmetic/conversion operator impl method? These are
+/// noise in a profiling gadget chain (`s * a` is a `mul` impl, `a + 3` an `add`
+/// impl, `Field::from(n)` a `from` impl), so they are elided so the chain reads
+/// at gadget granularity. Kept: comparison methods (`lt`/`gt`/…), `to_bits`,
+/// `assert_bool`, `is_zero`, and every user/gadget function.
+fn is_operator_impl_name(name: &str) -> bool {
+    matches!(
+        name,
+        "add" | "sub" | "mul" | "neg" | "bitxor" | "from" | "into"
+    )
+}
+
+/// The [`ConstraintKind`] a gadget function *fixes* for every constraint emitted
+/// inside it (pushed onto `kind_stack` while it is inlined). `assert_bool`'s
+/// `b*b=b` flows through `emit_mul` but must read as a booleanity check, not a
+/// multiplication; the inverse gadget `inv`'s `x·w == 1` pins a hint output.
+fn gadget_kind_hint(name: &str) -> Option<ConstraintKind> {
+    Some(match name {
+        "assert_bool" => ConstraintKind::Booleanity,
+        "inv" => ConstraintKind::HintPin,
+        _ => return None,
+    })
 }
 
 /// Recognized circuit calls.
@@ -378,9 +403,10 @@ struct LoweringEnv<'tcx> {
     /// following `assert_eq`.
     pending_mul: BTreeMap<VarId, (usize, usize)>,
     /// Mul outputs folded into a following `assert_eq`, keyed to
-    /// `(a, b, witness_gen_index)` so `finish` can revive `a·b = out` if the var
-    /// is referenced again after the merge.
-    merged: BTreeMap<VarId, (LinearCombination, LinearCombination, usize)>,
+    /// `(a, b, witness_gen_index, original_constraint_index)` so `finish` can
+    /// revive `a·b = out` if the var is referenced again after the merge (and
+    /// re-attribute the revived constraint from the original's profile record).
+    merged: BTreeMap<VarId, (LinearCombination, LinearCombination, usize, usize)>,
     /// The witness-generation ("hint") program, in dependency order. `None`
     /// entries are ops whose output var was merged away (dropped at finish).
     witness_gen: Vec<Option<WitnessGen>>,
@@ -399,6 +425,24 @@ struct LoweringEnv<'tcx> {
     /// Exact `DefId → KnownCall` table, resolved once up front (see
     /// [`CallRegistry`]). Replaces def-path string matching in call recognition.
     registry: CallRegistry,
+    // --- profiling (see `docs`/`profile.json`; kept entirely OUT of the R1CS) ---
+    /// Whether to build the per-constraint [`ConstraintProfile`] buffer. Only set
+    /// by `xark profile` (via the `--profile` flag); a normal build leaves this
+    /// `false` so lowering does zero span-resolution work.
+    profile_enabled: bool,
+    /// The span of the *top-level* circuit statement/terminator currently being
+    /// lowered (set only at inline depth 0, never overwritten during inline
+    /// recursion — so a constraint emitted deep inside an inlined gadget still
+    /// attributes to the user's circuit line).
+    root_span: Option<rustc_span::Span>,
+    /// Parallel to `constraints`: one attribution record per emitted constraint,
+    /// pushed alongside it in [`Self::push_constraint`] (only when profiling).
+    profile: Vec<ConstraintProfile>,
+    /// Kind-override stack: a gadget (or an emit helper) pushes a kind here so
+    /// every constraint emitted while it is on top is attributed to that kind,
+    /// overriding the emit-site's natural kind (e.g. `assert_bool`'s `b*b=b` goes
+    /// through `emit_mul` but should read as `Booleanity`, not `Mul`).
+    kind_stack: Vec<ConstraintKind>,
 }
 
 /// A value passed into or returned from an inlined function. `Fields` carries a
@@ -412,10 +456,14 @@ enum ArgValue {
 }
 
 impl<'tcx> LoweringEnv<'tcx> {
-    fn new(tcx: TyCtxt<'tcx>, registry: CallRegistry) -> Self {
+    fn new(tcx: TyCtxt<'tcx>, registry: CallRegistry, profile_enabled: bool) -> Self {
         LoweringEnv {
             tcx,
             registry,
+            profile_enabled,
+            root_span: None,
+            profile: Vec::new(),
+            kind_stack: Vec::new(),
             frames: vec![Frame::default()],
             variables: Vec::new(),
             var_names: Vec::new(),
@@ -638,6 +686,68 @@ impl<'tcx> LoweringEnv<'tcx> {
         let id = self.next_constraint_id;
         self.next_constraint_id += 1;
         id
+    }
+
+    // --- constraint emission + profiling -----------------------------------
+
+    /// Push a constraint into the R1CS *and* (when profiling) record its
+    /// attribution — the top-level user source line ([`Self::root_span`]), the
+    /// gadget call-chain, and its kind — into the parallel [`Self::profile`]
+    /// buffer. This is the single choke point every emit helper routes through,
+    /// so `profile` stays index-aligned with `constraints` (`profile[i].id ==
+    /// constraints[i].id == i`). The R1CS constraint itself is untouched by
+    /// profiling, so `r1cs.json` / `circuit.json` stay byte-identical.
+    fn push_constraint(&mut self, kind: ConstraintKind, c: R1csConstraint) {
+        if self.profile_enabled {
+            let kind = self.kind_stack.last().copied().unwrap_or(kind);
+            let prof = self.constraint_profile(c.id, kind);
+            self.profile.push(prof);
+        }
+        self.constraints.push(c);
+    }
+
+    /// Build the [`ConstraintProfile`] for constraint `id` at the current point
+    /// in lowering (root span + inline chain + kind). Called only when profiling.
+    fn constraint_profile(&self, id: u32, kind: ConstraintKind) -> ConstraintProfile {
+        let (file, line, col) = self.resolve_root_loc();
+        ConstraintProfile {
+            id,
+            file,
+            line,
+            col,
+            chain: self.gadget_chain(),
+            kind,
+        }
+    }
+
+    /// Resolve [`Self::root_span`] to `(file, 1-based line, 1-based col)`. An
+    /// unset or dummy span yields `("", 0, 0)`.
+    fn resolve_root_loc(&self) -> (String, u32, u32) {
+        let Some(span) = self.root_span else {
+            return (String::new(), 0, 0);
+        };
+        if span.is_dummy() {
+            return (String::new(), 0, 0);
+        }
+        let sm = self.tcx.sess.source_map();
+        let loc = sm.lookup_char_pos(span.lo());
+        // `prefer_local_unconditionally` yields the local (un-remapped) path —
+        // relative to the compile cwd (the crate dir), which `xark profile`
+        // resolves against `source_root`. `line` is 1-based; `col_display` 0-based.
+        let file = loc.file.name.prefer_local_unconditionally().to_string();
+        (file, loc.line as u32, loc.col_display as u32 + 1)
+    }
+
+    /// The gadget call-chain (outermost → innermost) at the current emit point:
+    /// each inlined callee's short name, with low-level arithmetic/conversion
+    /// operator impls (`add`/`sub`/`mul`/`neg`/`bitxor`/`from`/`into`) elided so
+    /// the chain reads at gadget granularity (e.g. `lt → to_bits → assert_bool`).
+    fn gadget_chain(&self) -> Vec<String> {
+        self.inlining
+            .iter()
+            .map(|&did| self.tcx.item_name(did).to_string())
+            .filter(|n| !is_operator_impl_name(n))
+            .collect()
     }
 
     // --- rendering (for debug notes) ---------------------------------------
@@ -1239,12 +1349,10 @@ impl<'tcx> LoweringEnv<'tcx> {
             lc: lc.clone(),
         }));
         // Defining constraint: (lc - v) * 1 = 0.
-        self.constraints.push(R1csConstraint::equal(
-            id,
-            lc,
-            LinearCombination::var(v),
-            &note,
-        ));
+        self.push_constraint(
+            ConstraintKind::Other,
+            R1csConstraint::equal(id, lc, LinearCombination::var(v), &note),
+        );
         LinearCombination::var(v)
     }
 
@@ -1260,13 +1368,10 @@ impl<'tcx> LoweringEnv<'tcx> {
             self.render_side(&rhs),
             self.var_names[out as usize]
         );
-        self.constraints.push(R1csConstraint::mul(
-            id,
-            lhs.clone(),
-            rhs.clone(),
-            out,
-            &note,
-        ));
+        self.push_constraint(
+            ConstraintKind::Mul,
+            R1csConstraint::mul(id, lhs.clone(), rhs.clone(), out, &note),
+        );
         let c_idx = self.constraints.len() - 1;
         // Witness-gen: the mul output is computed as `eval(lhs) * eval(rhs)`.
         self.witness_gen.push(Some(WitnessGen::Product {
@@ -1290,8 +1395,10 @@ impl<'tcx> LoweringEnv<'tcx> {
         let a2 = a.clone().scale(&xark_ir::FieldConst::from_i64(2));
         let c_side = a.clone() + b.clone() - LinearCombination::var(c);
         let note = format!("{} = xor", self.var_names[c as usize]);
-        self.constraints
-            .push(R1csConstraint::general(id, a2, b.clone(), c_side, &note));
+        self.push_constraint(
+            ConstraintKind::Xor,
+            R1csConstraint::general(id, a2, b.clone(), c_side, &note),
+        );
         self.witness_gen
             .push(Some(WitnessGen::Xor { out: c, a, b }));
         LinearCombination::var(c)
@@ -1306,13 +1413,10 @@ impl<'tcx> LoweringEnv<'tcx> {
         let id = self.fresh_constraint_id();
         let c_side = a.clone() + b.clone() - LinearCombination::var(c);
         let note = format!("{} = or", self.var_names[c as usize]);
-        self.constraints.push(R1csConstraint::general(
-            id,
-            a.clone(),
-            b.clone(),
-            c_side,
-            &note,
-        ));
+        self.push_constraint(
+            ConstraintKind::Or,
+            R1csConstraint::general(id, a.clone(), b.clone(), c_side, &note),
+        );
         self.witness_gen.push(Some(WitnessGen::Or { out: c, a, b }));
         LinearCombination::var(c)
     }
@@ -1368,12 +1472,10 @@ impl<'tcx> LoweringEnv<'tcx> {
         let diff = lhs - rhs;
         let id = self.fresh_constraint_id();
         let note = format!("({}) * 1 = 0", self.render_lc(&diff));
-        self.constraints.push(R1csConstraint::equal(
-            id,
-            diff,
-            LinearCombination::zero(),
-            &note,
-        ));
+        self.push_constraint(
+            ConstraintKind::Equality,
+            R1csConstraint::equal(id, diff, LinearCombination::zero(), &note),
+        );
     }
 
     /// Emit an `n`-bit range proof over a (possibly compound) linear combination:
@@ -1394,21 +1496,26 @@ impl<'tcx> LoweringEnv<'tcx> {
             // Booleanity: `b * b = b` (⟺ `b ∈ {0, 1}`).
             let id = self.fresh_constraint_id();
             let note = format!("{} in {{0,1}}", self.var_names[b as usize]);
-            self.constraints.push(R1csConstraint::general(
-                id,
-                LinearCombination::var(b),
-                LinearCombination::var(b),
-                LinearCombination::var(b),
-                &note,
-            ));
+            self.push_constraint(
+                ConstraintKind::Booleanity,
+                R1csConstraint::general(
+                    id,
+                    LinearCombination::var(b),
+                    LinearCombination::var(b),
+                    LinearCombination::var(b),
+                    &note,
+                ),
+            );
             recomp = recomp + LinearCombination::var(b).scale(&pow);
             pow = pow.mul(&two);
         }
         // Recomposition pins the bits to `value` (⇒ `value < 2^n`).
         let id = self.fresh_constraint_id();
         let note = format!("{n}-bit range: recompose == <lc>");
-        self.constraints
-            .push(R1csConstraint::equal(id, recomp, value, &note));
+        self.push_constraint(
+            ConstraintKind::Equality,
+            R1csConstraint::equal(id, recomp, value, &note),
+        );
     }
 
     /// Equality-to-zero gadget: a `{0,1}` lc that is `1` iff `input == 0`.
@@ -1450,24 +1557,33 @@ impl<'tcx> LoweringEnv<'tcx> {
             input: diff_plus,
             index: n as u32,
         }));
-        // Booleanity: `top * top == top` (⟺ `top ∈ {0, 1}`).
+        // Booleanity: `top * top == top` (⟺ `top ∈ {0, 1}`). Attributed to the
+        // comparison (its structural borrow bit), not a bare booleanity.
         let id = self.fresh_constraint_id();
         let note = format!(
             "{} = cmp borrow bit ∈ {{0,1}}",
             self.var_names[top as usize]
         );
-        self.constraints.push(R1csConstraint::general(
-            id,
-            LinearCombination::var(top),
-            LinearCombination::var(top),
-            LinearCombination::var(top),
-            &note,
-        ));
+        self.kind_stack.push(ConstraintKind::Comparison);
+        self.push_constraint(
+            ConstraintKind::Comparison,
+            R1csConstraint::general(
+                id,
+                LinearCombination::var(top),
+                LinearCombination::var(top),
+                LinearCombination::var(top),
+                &note,
+            ),
+        );
         let lt = LinearCombination::one() - LinearCombination::var(top);
-        // `r = a − b + lt·2ⁿ`; range-proving `r ∈ [0, 2ⁿ)` pins `lt`.
+        // `r = a − b + lt·2ⁿ`; range-proving `r ∈ [0, 2ⁿ)` pins `lt`. The `lt·2ⁿ`
+        // product is part of the comparison; the range proof is a RangeCheck.
         let lt_pow = self.emit_mul(lt.clone(), two_pow_n);
+        self.kind_stack.pop();
         let r = (a.clone() - b.clone()) + lt_pow;
+        self.kind_stack.push(ConstraintKind::RangeCheck);
         self.emit_range_proof_lc(r, n);
+        self.kind_stack.pop();
         Ok(lt)
     }
 
@@ -1483,6 +1599,7 @@ impl<'tcx> LoweringEnv<'tcx> {
                 self.constraints[idx].a.clone(),
                 self.constraints[idx].b.clone(),
                 wg_idx,
+                idx,
             ),
         );
         // The merged multiplication `a * b = target` is now a check, not a
@@ -1509,6 +1626,10 @@ pub struct LowerOutput {
     /// Primitive IR (AssertZero expressions + witness-gen hint program) — the
     /// artifact the backend lowering consumes.
     pub primitive: PrimitiveProgram,
+    /// Per-constraint profiling attribution, index-aligned with
+    /// `r1cs.constraints`. Empty unless profiling was requested (`--profile`).
+    /// Emitted to a **separate** `profile.json`; never mixed into the R1CS.
+    pub profile: Vec<ConstraintProfile>,
 }
 
 /// Flatten a circuit parameter type into its `Field` leaves, pairing each with
@@ -1573,8 +1694,9 @@ pub fn lower<'tcx>(
     body: &Body<'tcx>,
     field: FieldSpec,
     registry: CallRegistry,
+    profile_enabled: bool,
 ) -> CompileResult<LowerOutput> {
-    let mut env = LoweringEnv::new(tcx, registry);
+    let mut env = LoweringEnv::new(tcx, registry, profile_enabled);
 
     // Frame 0: circuit inputs become variables `0..num_inputs`, bound to params
     // `_1.._n`. Each parameter's type is flattened into its `Field` leaves — a
@@ -1893,6 +2015,13 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
         let data = &body.basic_blocks[bb];
 
         for stmt in &data.statements {
+            // Track the top-level (depth-0) circuit statement span as the profile
+            // "user line" for any constraints it triggers — but never overwrite
+            // it while inlining a gadget, so deep constraints still attribute to
+            // the user's circuit line (see `LoweringEnv::root_span`).
+            if env.inlining.is_empty() {
+                env.root_span = Some(stmt.source_info.span);
+            }
             // Any lowering error bubbling up gets this statement's span as a
             // fallback location; a deeper error's own span (if set) is kept.
             lower_statement(env, &stmt.kind).map_err(|e| e.or_span(stmt.source_info.span))?;
@@ -1900,6 +2029,9 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
 
         let terminator = data.terminator();
         let term_span = terminator.source_info.span;
+        if env.inlining.is_empty() {
+            env.root_span = Some(term_span);
+        }
         match &terminator.kind {
             TerminatorKind::Return => break,
             TerminatorKind::Goto { target } => bb = *target,
@@ -2914,6 +3046,11 @@ fn inline_call<'tcx>(
     env.inlining.push(def_id);
     env.inline_substs.push(call_args);
     env.enter_frame();
+    // If this gadget fixes the kind of the constraints it emits (e.g.
+    // `assert_bool` → Booleanity), push that override for the duration of its
+    // body. Only relevant when profiling; harmless otherwise.
+    let pushed_kind =
+        gadget_kind_hint(env.tcx.item_name(def_id).as_str()).inspect(|&k| env.kind_stack.push(k));
 
     for (i, value) in arg_values.into_iter().enumerate() {
         let param = rustc_middle::mir::Local::from_usize(i + 1);
@@ -2923,6 +3060,9 @@ fn inline_call<'tcx>(
     let walk_result = walk_body(env, body);
     let ret = env.frame_return();
 
+    if pushed_kind.is_some() {
+        env.kind_stack.pop();
+    }
     env.exit_frame();
     env.inline_substs.pop();
     env.inlining.pop();
@@ -2969,9 +3109,18 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
                 }
             }
         }
-        for (out, (a, b, wg_idx)) in std::mem::take(&mut env.merged) {
+        for (out, (a, b, wg_idx, orig_idx)) in std::mem::take(&mut env.merged) {
             if ref_now.contains(&out) {
                 let id = env.fresh_constraint_id();
+                // Inherit the original mul's attribution (source line + chain);
+                // it is genuinely a `Mul`. Keeps `profile` index-aligned with
+                // `constraints` for the appended revival.
+                if env.profile_enabled {
+                    let mut prof = env.profile[orig_idx].clone();
+                    prof.id = id;
+                    prof.kind = ConstraintKind::Mul;
+                    env.profile.push(prof);
+                }
                 env.constraints.push(R1csConstraint::mul(
                     id,
                     a.clone(),
@@ -3048,13 +3197,19 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
         witness_gen,
     };
 
+    let profile = env.profile;
+
     let r1cs = R1csProgram {
         field,
         variables,
         constraints: env.constraints,
     };
 
-    LowerOutput { r1cs, primitive }
+    LowerOutput {
+        r1cs,
+        primitive,
+        profile,
+    }
 }
 
 /// The primary output variable of a witness-gen op.

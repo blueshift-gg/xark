@@ -9,6 +9,7 @@ pub mod graph;
 pub mod json;
 pub mod linear_combination;
 pub mod primitive;
+pub mod profile;
 pub mod r1cs;
 pub mod solver;
 
@@ -16,6 +17,7 @@ pub use field::FieldConst;
 pub use graph::to_dot;
 pub use json::to_json_pretty;
 pub use linear_combination::{LinearCombination, Term, VarId};
+pub use profile::{ConstraintKind, ConstraintProfile, ProfileProgram};
 pub use r1cs::{DebugInfo, FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 
 #[cfg(test)]

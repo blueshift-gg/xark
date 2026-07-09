@@ -19,6 +19,11 @@ pub struct R1csCallbacks {
     /// diagnostic, but skip writing artifacts (no r1cs.json / circuit.json /
     /// graph.dot). A clean run prints nothing.
     pub check_only: bool,
+    /// `--profile`: additionally build the per-constraint attribution buffer and
+    /// write it to a **separate** `profile.json` (never mixed into the R1CS).
+    /// Only `xark profile` sets this; a normal build leaves it `false` (no
+    /// span-resolution overhead, no extra file).
+    pub profile: bool,
 }
 
 /// Isolate the rest of the compiler from rustc query churn: obtain the MIR body
@@ -80,7 +85,14 @@ impl R1csCallbacks {
 
         // Lower even in `--check` mode so lowering-stage rejections (e.g.
         // witness-dependent control flow) are reported too.
-        let output = lower(tcx, &entry, body, self.field.clone(), registry)?;
+        let output = lower(
+            tcx,
+            &entry,
+            body,
+            self.field.clone(),
+            registry,
+            self.profile,
+        )?;
 
         if !self.check_only {
             self.emit_outputs(&output);
@@ -135,5 +147,21 @@ impl R1csCallbacks {
             output.primitive.constraints.len(),
             output.primitive.witness_gen.len(),
         );
+
+        // `--profile` only: the per-constraint attribution, in a SEPARATE file so
+        // r1cs.json / circuit.json stay byte-identical.
+        if self.profile {
+            let source_root = std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            let prof = xark_ir::ProfileProgram {
+                source_root,
+                constraints: output.profile.clone(),
+            };
+            let profile_json = xark_ir::profile::to_json_pretty(&prof);
+            let profile_path = self.output_dir.join("profile.json");
+            std::fs::write(&profile_path, format!("{profile_json}\n"))
+                .unwrap_or_else(|e| panic!("failed to write {profile_path:?}: {e}"));
+        }
     }
 }

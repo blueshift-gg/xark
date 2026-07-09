@@ -53,6 +53,7 @@ const CLI_SUBCOMMANDS: &[&str] = &[
     "export",
     "ceremony",
     "inspect",
+    "profile",
     "completions",
     "help",
     "-h",
@@ -84,9 +85,9 @@ fn main() {
 /// package via `XARK_OUT`/`CARGO_PRIMARY_PACKAGE`. Dependency crates compile
 /// normally so their MIR-encoded rlibs exist for cross-crate inlining.
 fn run_as_rustc(mut args: Vec<String>) {
-    // Direct-invocation flags (`--r1cs-out`, `--field`, `--check`) — stripped
-    // before rustc.
-    let (direct_out, direct_field, check) = strip_xark_flags(&mut args);
+    // Direct-invocation flags (`--r1cs-out`, `--field`, `--check`, `--profile`)
+    // — stripped before rustc.
+    let (direct_out, direct_field, check, profile) = strip_xark_flags(&mut args);
     ensure_sysroot(&mut args);
 
     let is_build_script = args
@@ -113,6 +114,9 @@ fn run_as_rustc(mut args: Vec<String>) {
             output_dir: out.map(PathBuf::from).unwrap_or_default(),
             field,
             check_only: check_here,
+            // Emit `profile.json` only in a real build (not `--check`, which
+            // writes no artifacts) and only for the extracted primary crate.
+            profile: profile && !check_here,
         };
         rustc_driver::catch_fatal_errors(|| rustc_driver::run_compiler(&args, &mut cb))
     } else {
@@ -129,12 +133,13 @@ struct PassThrough;
 impl rustc_driver::Callbacks for PassThrough {}
 
 /// Strip the tool's own flags (`--r1cs-out <dir>`, `--field <name>`, in both
-/// `X Y` and `X=Y` forms, and the boolean `--check`) from a rustc argument
-/// vector, returning their values.
-fn strip_xark_flags(args: &mut Vec<String>) -> (Option<String>, Option<String>, bool) {
+/// `X Y` and `X=Y` forms, and the booleans `--check` / `--profile`) from a rustc
+/// argument vector, returning their values.
+fn strip_xark_flags(args: &mut Vec<String>) -> (Option<String>, Option<String>, bool, bool) {
     let mut out = None;
     let mut field = None;
     let mut check = false;
+    let mut profile = false;
     let mut kept = Vec::with_capacity(args.len());
     let mut it = std::mem::take(args).into_iter();
     while let Some(a) = it.next() {
@@ -148,12 +153,14 @@ fn strip_xark_flags(args: &mut Vec<String>) -> (Option<String>, Option<String>, 
             field = Some(v.to_string());
         } else if a == "--check" {
             check = true;
+        } else if a == "--profile" {
+            profile = true;
         } else {
             kept.push(a);
         }
     }
     *args = kept;
-    (out, field, check)
+    (out, field, check, profile)
 }
 
 /// Point `--sysroot` at the nightly the `xark` binary was built with (embedded by

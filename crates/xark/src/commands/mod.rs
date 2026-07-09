@@ -28,6 +28,7 @@ pub mod check;
 pub mod completions;
 pub mod export;
 pub mod inspect;
+pub mod profile;
 pub mod prove;
 pub mod setup;
 pub mod verify;
@@ -82,6 +83,9 @@ pub enum Command {
     Ceremony(ceremony::CeremonyArgs),
     /// Print circuit statistics (variables, constraints, public inputs).
     Inspect(inspect::InspectArgs),
+    /// Profile a circuit: attribute each constraint to its source line, gadget
+    /// chain, and kind, then print a sorted drill-down.
+    Profile(profile::ProfileArgs),
     /// Generate shell completion scripts.
     Completions(completions::CompletionsArgs),
 }
@@ -128,6 +132,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Export(a) => export::run(a),
         Command::Ceremony(a) => ceremony::run(a),
         Command::Inspect(a) => inspect::run(a),
+        Command::Profile(a) => profile::run(a),
         Command::Completions(a) => completions::run(a),
     }
 }

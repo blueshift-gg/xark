@@ -14,6 +14,17 @@ use std::process::Command;
 /// one pinned nightly, so every dependency (the `xark` lib + gadget crates) is
 /// built with matching MIR-encoded rlibs and only the primary crate is extracted.
 pub fn cmd_build(args: &[String]) -> i32 {
+    cmd_build_impl(args, false)
+}
+
+/// Like [`cmd_build`], but injects `--profile` so the extractor additionally
+/// writes `profile.json` (per-constraint source/gadget/kind attribution). Used
+/// by `xark profile`; a normal `xark build` never emits it.
+pub fn cmd_build_profile(args: &[String]) -> i32 {
+    cmd_build_impl(args, true)
+}
+
+fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     let mut crate_dir: Option<String> = None;
     let mut out: Option<String> = None;
     let mut field = "bn254".to_string();
@@ -70,7 +81,10 @@ pub fn cmd_build(args: &[String]) -> i32 {
     // circuit (whose r1cs.json/graph.dot are legitimately gated off) is not
     // needlessly recompiled.
     let regen_needed = !out_abs.join("circuit.json").exists()
-        || (out_abs.join("r1cs.json").exists() && !out_abs.join("graph.dot").exists());
+        || (out_abs.join("r1cs.json").exists() && !out_abs.join("graph.dot").exists())
+        // `xark profile` needs profile.json; force a recompile if it's absent so
+        // an already-built (cache-hit) circuit still produces the attribution.
+        || (profile && !out_abs.join("profile.json").exists());
     if regen_needed {
         touch_sources(&crate_abs);
     }
@@ -82,16 +96,20 @@ pub fn cmd_build(args: &[String]) -> i32 {
         "{} building circuit `{name}` (toolchain {toolchain})",
         crate::style::tag()
     );
+    // `--profile` (when requested) is injected globally, but only the primary
+    // package extracts (see `run_as_rustc`), so dependency crates ignore it.
+    let rustflags = if profile {
+        "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0 --profile"
+    } else {
+        "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0"
+    };
     let status = Command::new("cargo")
         .arg("build")
         .current_dir(&crate_dir)
         .env("RUSTC", &self_exe)
         .env("RUSTUP_TOOLCHAIN", toolchain)
         .env("CARGO_TARGET_DIR", &target_dir)
-        .env(
-            "RUSTFLAGS",
-            "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0",
-        )
+        .env("RUSTFLAGS", rustflags)
         .env("XARK_OUT", &out_abs)
         .env("XARK_FIELD", &field)
         .status();
