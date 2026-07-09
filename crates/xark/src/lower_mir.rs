@@ -23,6 +23,32 @@ use xark_ir::{
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::find_entry::EntryInfo;
 
+/// A stable, `Ord`-able key for a canonical [`LinearCombination`]: its constant
+/// plus its sorted `(coeff, var)` terms, all as canonical decimal strings
+/// (`FieldConst::decimal` is always `BigInt::to_string()` output, so equal
+/// values compare equal). Used to memoize bit decompositions (see `bit_cache`).
+type CanonicalLcKey = (String, Vec<(String, VarId)>);
+
+/// Build the [`CanonicalLcKey`] for `lc` (simplified → merged + sorted terms).
+fn canonical_lc_key(lc: &LinearCombination) -> CanonicalLcKey {
+    let lc = lc.clone().simplified();
+    (
+        lc.constant.decimal,
+        lc.terms
+            .iter()
+            .map(|t| (t.coeff.decimal.clone(), t.var))
+            .collect(),
+    )
+}
+
+/// Is this call `Field::to_bits::<N>`? (Not `from_bits`.) The bit-cache hooks
+/// this specific decomposition method so a value decomposed to the same width
+/// more than once shares one decomposition (see `docs/integer-ops.md`).
+fn is_to_bits_call(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
+    let s = tcx.def_path_str(def_id);
+    s.ends_with("::to_bits") && s.contains("Field")
+}
+
 /// Recognized circuit calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KnownCall {
@@ -48,14 +74,12 @@ pub enum KnownCall {
     Xor,
     Or,
     // Comparison intrinsics returning a `bool` ({0,1} wire). They back
-    // `PartialEq`/`PartialOrd` on `Field`/`U<N>`/`I<N>` so `==` `!=` `<` `<=` `>`
-    // `>=` are circuit operations. `ULt`/`ILt` carry the width `N` in the call's
-    // const generic arg.
+    // `PartialEq`/`PartialOrd` on `Field` so `==` `!=` `<` `<=` `>` `>=` are
+    // circuit operations. `ULt` carries the width `N` in the call's const
+    // generic arg (from a native-int RHS or an explicit `a.lt::<N>(b)`).
     Eq,
     ULt,
-    ILt,
     BoolToField,
-    FieldToBool,
     // `for` desugaring (modeled, not inlined): the two `core` iterator calls plus
     // `RangeInclusive::new`. See `lower_call` for how each is folded into the
     // compile-time loop-unrolling machinery. `IntoIter`/`IterNext` handle both a
@@ -161,12 +185,8 @@ pub(crate) fn classify_call(
         Some(KnownCall::Eq)
     } else if s.contains("__xark_ult") {
         Some(KnownCall::ULt)
-    } else if s.contains("__xark_ilt") {
-        Some(KnownCall::ILt)
     } else if s.contains("__xark_bool_to_field") {
         Some(KnownCall::BoolToField)
-    } else if s.contains("__xark_field_to_bool") {
-        Some(KnownCall::FieldToBool)
     } else if s.contains("__xark_advice") || (s.contains("Field") && s.ends_with("::advice")) {
         Some(KnownCall::Advice)
     // `for` desugaring. `into_iter` is the blanket `<I as IntoIterator>::into_iter`
@@ -301,6 +321,12 @@ struct LoweringEnv<'tcx> {
     /// to monomorphize nested calls in a generic callee body (e.g. the blanket
     /// `Into::into`, whose body calls `From::from` with the impl's type params).
     inline_substs: Vec<rustc_middle::ty::GenericArgsRef<'tcx>>,
+    /// Bit-decomposition memo: `(canonical LC of x, width N) → the N bit vars`.
+    /// A `to_bits::<N>(x)` on a value already decomposed to that width reuses the
+    /// stored bits, skipping the redundant `N` booleanity + 1 recomposition
+    /// constraints. Circuit values are immutable in the lowering (each local is a
+    /// stable LC), so cached bits never go stale (docs/integer-ops.md § Bit caching).
+    bit_cache: BTreeMap<(CanonicalLcKey, usize), Vec<VarId>>,
 }
 
 /// A value passed into or returned from an inlined function. `Fields` carries a
@@ -330,6 +356,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             witness_gen: Vec::new(),
             inlining: Vec::new(),
             inline_substs: Vec::new(),
+            bit_cache: BTreeMap::new(),
         }
     }
 
@@ -610,9 +637,8 @@ impl<'tcx> LoweringEnv<'tcx> {
                 self.get_field_at(local, &path).ok_or_else(|| {
                     CompileError::new("use of a value that is not a supported field expression")
                         .with_help(
-                            "this position needs a `Field`, a `bool` wire, or a `U<N>`/`I<N>` \
-                             wrapping one; a host integer, or a value from an operation the \
-                             circuit can't lower, can't be used here",
+                            "this position needs a `Field` or a `bool` wire; a host integer, or a \
+                             value from an operation the circuit can't lower, can't be used here",
                         )
                 })
             }
@@ -660,6 +686,49 @@ impl<'tcx> LoweringEnv<'tcx> {
         );
         let s = konst.try_eval_scalar_int(self.tcx, typing_env)?;
         Some(s.to_uint(s.size()))
+    }
+
+    /// Read the *pointee* of a reference-to-integer constant, e.g. the promoted
+    /// `&100u32` that `x < 100u32` desugars into. The comparison traits
+    /// (`PartialEq`/`PartialOrd`) take `&Rhs` — unlike the by-value arithmetic
+    /// operators (`Add<u32>` etc.) — so a native-int constant RHS arrives as a
+    /// promoted `&uN` rather than by value. This evaluates the reference and
+    /// reads the referenced integer so `bind_use` can carry it as an ordinary
+    /// int slot (which `lower_ref`/`operand_to_int` then read back through the
+    /// `*rhs` deref).
+    fn const_ref_int_to_u128(&self, c: &ConstOperand<'tcx>) -> Option<u128> {
+        use rustc_middle::mir::interpret::alloc_range;
+        use rustc_middle::ty::{self, TyKind};
+        let TyKind::Ref(_, inner, _) = c.const_.ty().kind() else {
+            return None;
+        };
+        if !inner.is_integral() {
+            return None;
+        }
+        let typing_env = ty::TypingEnv::fully_monomorphized();
+        let konst = self.tcx.instantiate_and_normalize_erasing_regions(
+            self.cur_substs(),
+            typing_env,
+            rustc_middle::ty::EarlyBinder::bind(c.const_),
+        );
+        let cv = konst.eval(self.tcx, typing_env, c.span).ok()?;
+        let ConstValue::Scalar(scalar) = cv else {
+            return None;
+        };
+        let ptr = scalar.to_pointer(&self.tcx).discard_err()?;
+        let ptr = ptr.into_pointer_or_addr().ok()?;
+        let (prov, offset) = ptr.prov_and_relative_offset();
+        let alloc = self.tcx.global_alloc(prov.alloc_id()).unwrap_memory();
+        let size = self
+            .tcx
+            .layout_of(typing_env.as_query_input(*inner))
+            .ok()?
+            .size;
+        let val = alloc
+            .inner()
+            .read_scalar(&self.tcx, alloc_range(offset, size), false)
+            .ok()?;
+        val.to_uint(size).discard_err()
     }
 
     /// If `c` is a compile-time array of integers (e.g. a `const P: [u128; 3]`
@@ -843,12 +912,12 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Read a compile-time unsigned integer operand (constant or tracked int
     /// slot). The slot model is `u128`, so this preserves the full width.
     fn operand_to_u128(&self, operand: &Operand<'tcx>) -> CompileResult<u128> {
-        // integer positions (loop bound, exponent, length, `U<N>` width, …) must
-        // be compile-time constants
+        // integer positions (loop bound, exponent, length, comparison width, …)
+        // must be compile-time constants
         let want_const = || {
             CompileError::new("expected a constant integer").with_help(
                 "this must be a compile-time constant (loop bound, `^` exponent, array length, \
-                 `U<N>` width, …), not a witness or runtime value",
+                 comparison width `N`, …), not a witness or runtime value",
             )
         };
         match operand {
@@ -1234,14 +1303,9 @@ impl<'tcx> LoweringEnv<'tcx> {
         ));
     }
 
-    /// Emit an `n`-bit range proof pinning `value` to `[0, 2^n)`.
-    fn emit_range_proof(&mut self, value: VarId, n: usize) {
-        self.emit_range_proof_lc(LinearCombination::var(value), n);
-    }
-
-    /// `emit_range_proof` over a (possibly compound) linear combination: decompose
-    /// `value` into `n` boolean bits and pin their recomposition to `value`
-    /// (⇒ `value < 2^n`).
+    /// Emit an `n`-bit range proof over a (possibly compound) linear combination:
+    /// decompose `value` into `n` boolean bits and pin their recomposition to
+    /// `value` (⇒ `value < 2^n`).
     fn emit_range_proof_lc(&mut self, value: LinearCombination, n: usize) {
         let two = xark_ir::FieldConst::from_i64(2);
         let mut pow = xark_ir::FieldConst::from_i64(1);
@@ -1276,7 +1340,7 @@ impl<'tcx> LoweringEnv<'tcx> {
 
     /// Equality-to-zero gadget: a `{0,1}` lc that is `1` iff `input == 0`.
     /// `out = 1 − input·inv` with `input·out == 0` (the inverse-or-zero hint
-    /// yields `0` when `input == 0`). Backs `==` on `Field`/`U<N>`/`I<N>`.
+    /// yields `0` when `input == 0`). Backs `==` on `Field`.
     fn emit_is_zero(&mut self, input: LinearCombination) -> LinearCombination {
         let inv = self.alloc_advice();
         self.witness_gen.push(Some(WitnessGen::InverseOrZero {
@@ -1378,8 +1442,9 @@ pub struct LowerOutput {
 /// the MIR projection path (encoded exactly as [`LoweringEnv::resolve_place`]:
 /// array/const index, or struct-field index), a human-readable name, and an
 /// optional fixed-width bound. A scalar `Field` is one leaf at path `[]`; an
-/// array/tuple/struct of `Field` collapses to `n` leaves. A `U<N>` is one leaf
-/// carrying `Some(N)` (range-proved `< 2^N`). Any other leaf is rejected.
+/// array/tuple/struct of `Field` collapses to `n` leaves. Any other leaf is
+/// rejected. The `Option<usize>` slot is unused (reserved for a future
+/// range-proved fixed-width leaf); it is always `None`.
 fn flatten_field_leaves<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: rustc_middle::ty::Ty<'tcx>,
@@ -1392,43 +1457,6 @@ fn flatten_field_leaves<'tcx>(
         if tcx.item_name(d.did()).as_str() == "Field" {
             out.push((path.clone(), name.to_string(), None));
             return Ok(());
-        }
-    }
-    // `U<N>` is a fixed-width leaf: one `Field` value at projection index 0,
-    // carrying the bit width so the input path can range-prove it.
-    if let rustc_middle::ty::TyKind::Adt(def, args) = ty.kind() {
-        // accept the re-exported path (`xark::U`) and the definition path (`…::uint::U`)
-        let p = tcx.def_path_str(def.did());
-        if p == "xark::U" || p.ends_with("::uint::U") {
-            let n = args
-                .const_at(0)
-                .try_to_target_usize(tcx)
-                .ok_or_else(|| CompileError::new("U<N>: width `N` must be a constant"))?
-                as usize;
-            if !(1..=253).contains(&n) {
-                return Err(CompileError::new(format!(
-                    "U<{n}> circuit input: width must be in 1..=253 (BN254 field capacity)"
-                ))
-                .with_help(
-                    "choose `N` in 1..=253; a wider value is not uniquely representable in the \
-                     scalar field",
-                ));
-            }
-            path.push(0);
-            out.push((path.clone(), name.to_string(), Some(n)));
-            path.pop();
-            return Ok(());
-        }
-        // `I<N>` is a two-field struct; flattening it would produce unconstrained
-        // leaves, so reject it as a raw input.
-        if p == "xark::I" || p.ends_with("::int::I") {
-            return Err(
-                CompileError::new("signed `I<N>` is not yet supported as a circuit input")
-                    .with_help(
-                        "take a `Private<Field>`/`Public<Field>` and construct it in-circuit with \
-                 `I::<N>::new(x)`",
-                    ),
-            );
         }
     }
     match ty.kind() {
@@ -1481,26 +1509,17 @@ pub fn lower<'tcx>(
     // scalar `Field` is one input var; an array/tuple/struct of `Field` collapses
     // to `n` vars, each bound to the leaf's projection path so body reads resolve.
     let mut num_inputs = 0usize;
-    // `U<N>` inputs to range-prove after the input id range is fixed
-    let mut uint_range_inputs: Vec<(VarId, usize)> = Vec::new();
     for (i, input) in entry.inputs.iter().enumerate() {
         let local = rustc_middle::mir::Local::from_usize(i + 1);
         let ty = body.local_decls[local].ty;
         let mut leaves = Vec::new();
         let mut path = Vec::new();
         flatten_field_leaves(tcx, ty, &mut path, &input.name, &mut leaves)?;
-        for (leaf_path, leaf_name, range_bits) in leaves {
+        for (leaf_path, leaf_name, _range_bits) in leaves {
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
             num_inputs += 1;
-            // range-prove every `U<N>` input (public too): `< r` doesn't imply `< 2^N`
-            if let Some(n) = range_bits {
-                uint_range_inputs.push((id, n));
-            }
         }
-    }
-    for (id, n) in uint_range_inputs {
-        env.emit_range_proof(id, n);
     }
 
     walk_body(&mut env, body)?;
@@ -1627,14 +1646,18 @@ fn fallback_witness_control_flow_error(term_span: rustc_span::Span) -> CompileEr
 /// constraints, no witness-gen, no calls — only value copies and aggregates.
 /// Returns the join-block (the `Goto` target) and the per-`(dest_local, dest_path)`
 /// lc mapping.
+/// One `if`-arm's join block plus the field values it assigned (keyed by
+/// `(local, projection path)`), used to mux converging arms.
+type ArmAssignments = (
+    rustc_middle::mir::BasicBlock,
+    BTreeMap<(rustc_middle::mir::Local, Vec<u64>), LinearCombination>,
+);
+
 fn collect_arm_assignments<'tcx>(
     env: &mut LoweringEnv<'tcx>,
     body: &Body<'tcx>,
     bb: rustc_middle::mir::BasicBlock,
-) -> CompileResult<(
-    rustc_middle::mir::BasicBlock,
-    BTreeMap<(rustc_middle::mir::Local, Vec<u64>), LinearCombination>,
-)> {
+) -> CompileResult<ArmAssignments> {
     // Snapshot field state before processing any arm blocks.
     let saved_fields = env.frame_mut().field.clone();
     let n_constraints_before = env.constraints.len();
@@ -1657,12 +1680,12 @@ fn collect_arm_assignments<'tcx>(
                     let (_, rvalue) = &**boxed;
                     match rvalue {
                         Rvalue::Use(_, _) => {}
-                        Rvalue::Ref(_, kind, _)
-                            if matches!(
-                                kind,
-                                rustc_middle::mir::BorrowKind::Shared
-                                    | rustc_middle::mir::BorrowKind::Fake(_)
-                            ) => {}
+                        Rvalue::Ref(
+                            _,
+                            rustc_middle::mir::BorrowKind::Shared
+                            | rustc_middle::mir::BorrowKind::Fake(_),
+                            _,
+                        ) => {}
                         Rvalue::CopyForDeref(_) => {}
                         Rvalue::Repeat(..) => {}
                         Rvalue::BinaryOp(..) | Rvalue::UnaryOp(..) => {}
@@ -2231,6 +2254,10 @@ fn bind_use<'tcx>(
             if dest_path.is_empty() {
                 if let Some(v) = env.const_to_u128(c) {
                     env.set_int(dest, v);
+                } else if let Some(v) = env.const_ref_int_to_u128(c) {
+                    // a promoted `&uN` (e.g. the `&100u32` a `Field`-vs-const
+                    // comparison desugars into): carry the referenced integer.
+                    env.set_int(dest, v);
                 } else if env.try_bind_const_int_array(dest, c) {
                     // populated per-element int slots for a `const [uN; K]` array
                 } else if let Some(slots) = env.const_field_slots(c) {
@@ -2274,6 +2301,13 @@ fn lower_ref<'tcx>(
             for (rel, lc) in slots {
                 env.set_field_at(dest, &rel, lc);
             }
+            return Ok(());
+        }
+        // A shared borrow of a tracked integer (e.g. the `&(*_7)` reborrow of a
+        // promoted `&uN` in a `Field`-vs-const comparison) carries the integer
+        // through transparently, so a later `*r` reads it back.
+        if let Some(v) = env.get_int_at(sl, &spath) {
+            env.set_int(dest, v);
             return Ok(());
         }
     }
@@ -2497,8 +2531,8 @@ fn lower_call<'tcx>(
             env.set_field(dest, out);
         }
         // Comparison intrinsics returning a `bool` (`{0,1}` wire). Back the
-        // `PartialEq`/`PartialOrd` impls on `Field`/`U<N>`/`I<N>`; the width `N`
-        // for `ULt`/`ILt` comes from the call's const generic arg.
+        // `PartialEq`/`PartialOrd` impls on `Field`; the width `N` for `ULt`
+        // comes from the call's const generic arg.
         KnownCall::Eq => {
             let a = env.operand_to_lc(arg(0)?)?;
             let b = env.operand_to_lc(arg(1)?)?;
@@ -2516,20 +2550,7 @@ fn lower_call<'tcx>(
             let out = env.emit_less_than(n, a, b)?;
             env.set_field(dest, out);
         }
-        KnownCall::ILt => {
-            let n = call_args
-                .const_at(0)
-                .try_to_target_usize(env.tcx)
-                .ok_or_else(|| CompileError::new("comparison width `N` must be a constant"))?
-                as usize;
-            let a = env.operand_to_lc(arg(0)?)?;
-            let b = env.operand_to_lc(arg(1)?)?;
-            // signed: bias both by 2^(n-1) into [0, 2^n), then unsigned-compare
-            let bias = pow2_lc(n - 1);
-            let out = env.emit_less_than(n, a.clone() + bias.clone(), b.clone() + bias)?;
-            env.set_field(dest, out);
-        }
-        KnownCall::BoolToField | KnownCall::FieldToBool => {
+        KnownCall::BoolToField => {
             // identity: a `bool` and a `{0,1}` `Field` wire are the same variable
             let x = env.operand_to_lc(arg(0)?)?;
             env.set_field(dest, x);
@@ -2742,6 +2763,41 @@ fn inline_call<'tcx>(
         )));
     }
 
+    // Bit-cache: `Field::to_bits::<N>(x)` is memoized on `(canonical(x), N)`.
+    // A hit returns the cached bit vars and emits nothing (skipping the `N`
+    // booleanity + 1 recomposition constraints); a miss falls through to the
+    // ordinary inline below (so the miss path is *byte-identical* to the
+    // un-cached lowering) and captures the produced bits afterward.
+    // Only memoize *witness* decompositions (non-constant LCs). A constant's bits
+    // are all pinned to fixed values, so caching them saves little and — crucially
+    // — decomposing the same constant twice is the one repeat some existing gadgets
+    // do (BLAKE2s/3 decompose `Field::from(0u8)` etc. more than once), which must
+    // stay byte-identical. The optimization that matters is amortizing a *witness*
+    // value's range check across repeated width-`N` ops (docs/integer-ops.md).
+    let bit_cache_key: Option<(CanonicalLcKey, usize)> = if is_to_bits_call(env.tcx, def_id) {
+        let n = call_args
+            .const_at(0)
+            .try_to_target_usize(env.tcx)
+            .ok_or_else(|| CompileError::new("`to_bits::<N>`: width `N` must be a constant"))?
+            as usize;
+        // `self` is the sole argument; its LC in the caller frame is the key.
+        let x = env.operand_to_lc(&args[0].node)?;
+        if x.is_constant() {
+            None
+        } else {
+            let key = (canonical_lc_key(&x), n);
+            if let Some(bits) = env.bit_cache.get(&key).cloned() {
+                for (i, &v) in bits.iter().enumerate() {
+                    env.set_field_at(dest, &[i as u64], LinearCombination::var(v));
+                }
+                return Ok(());
+            }
+            Some(key)
+        }
+    } else {
+        None
+    };
+
     // Evaluate arguments in the *caller* frame.
     let mut arg_values: Vec<ArgValue> = Vec::with_capacity(args.len());
     for a in args {
@@ -2771,6 +2827,28 @@ fn inline_call<'tcx>(
 
     // Bind the return value into the caller frame.
     env.bind_value(dest, &[], ret);
+
+    // Bit-cache miss: capture the freshly produced bit vars (each returned slot
+    // is a single `var(bᵢ)` LC) so a later `to_bits::<N>` on the same value hits.
+    if let Some(key) = bit_cache_key {
+        let n = key.1;
+        let mut bits = Vec::with_capacity(n);
+        for i in 0..n {
+            match env.get_field_at(dest, &[i as u64]) {
+                Some(lc)
+                    if lc.constant.is_zero()
+                        && lc.terms.len() == 1
+                        && lc.terms[0].coeff.is_one() =>
+                {
+                    bits.push(lc.terms[0].var);
+                }
+                // Defensive: an unexpected non-var slot → don't cache (correctness
+                // over the optimization). Should not happen for `to_bits`.
+                _ => return Ok(()),
+            }
+        }
+        env.bit_cache.insert(key, bits);
+    }
     Ok(())
 }
 

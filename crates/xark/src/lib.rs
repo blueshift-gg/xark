@@ -40,21 +40,11 @@
 /// programs and gadgets depend on a single crate (`xark`).
 pub mod lang;
 
-/// Fixed-width unsigned integers (`U<N>`) for ordering comparisons.
-pub mod uint;
-
-/// Fixed-width signed integers (`I<N>`).
-pub mod int;
-
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
-    pub use crate::int::I;
     pub use crate::lang::{
         assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public,
     };
-    pub use crate::uint::U;
 }
 
-pub use crate::int::I;
 pub use crate::lang::{assert_eq, Field, Private, Public};
-pub use crate::uint::U;

@@ -2052,8 +2052,8 @@ fn rejects_field_comparison() {
     );
 }
 
-/// `==` on `U<N>`/`Field`, `<` via `assert_lt`, and witness mux via `bool`
-/// wire arithmetic.
+/// `==` on `Field`, `<` via `Field::lt::<N>` + `assert`, and witness mux via
+/// `bool` wire arithmetic.
 #[test]
 fn cmp_operators_solve() {
     use std::collections::BTreeMap;
@@ -2062,11 +2062,9 @@ fn cmp_operators_solve() {
         "cmp_ops",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, eq: Public<Field>, feq: Public<Field>, mux: Public<Field>) {\n\
-         \x20   let ua = U::<8>::new(a);\n\
-         \x20   let ub = U::<8>::new(b);\n\
-         \x20   let c = ua < ub;\n\
-         \x20   assert_lt(ua, ub);\n\
-         \x20   assert_eq(ua == ub, eq);\n\
+         \x20   let c = a.lt::<8>(b);\n\
+         \x20   assert(c);\n\
+         \x20   assert_eq(a == b, eq);\n\
          \x20   assert_eq(a == b, feq);\n\
          \x20   let r = Field::from(c) * b + Field::from(!c) * a;\n\
          \x20   assert_eq(r, mux);\n\
@@ -2254,68 +2252,6 @@ fn equality_operator_solves() {
     );
 }
 
-/// `assert_lt` / `assert_le` on `U<N>`: a < b passes both; a == b violates
-/// assert_lt; a > b violates both; out-of-range input fails range proof.
-#[test]
-fn uint_comparisons_solve() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "uint_cmp",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   let ua = U::<8>::new(a);\n\
-         \x20   let ub = U::<8>::new(b);\n\
-         \x20   assert_lt(ua, ub);\n\
-         \x20   assert_le(ua, ub);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "uint_cmp", "bn254");
-    assert!(c.status_success, "uint_cmp failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-
-    let mut inputs = BTreeMap::new();
-    // 3 < 5 passes both lt and le.
-    inputs.insert(id("a"), "3".to_string());
-    inputs.insert(id("b"), "5".to_string());
-    let assign = solver::solve_and_check(&program, &inputs).expect("3 < 5 must pass both");
-    assert!(
-        solver::analyze_underconstrained(&program, &assign).is_empty(),
-        "U<8> cmp under-constrained"
-    );
-    // 5 == 5: assert_le passes but assert_lt fails.
-    inputs.insert(id("a"), "5".to_string());
-    inputs.insert(id("b"), "5".to_string());
-    assert!(
-        solver::solve_and_check(&program, &inputs).is_err(),
-        "a == b must violate assert_lt"
-    );
-    // 5 > 3 violates both.
-    inputs.insert(id("a"), "5".to_string());
-    inputs.insert(id("b"), "3".to_string());
-    assert!(
-        solver::solve_and_check(&program, &inputs).is_err(),
-        "a > b must violate assert_lt"
-    );
-    // Out-of-range input (300 >= 2^8) fails the range proof.
-    inputs.insert(id("a"), "300".to_string());
-    inputs.insert(id("b"), "5".to_string());
-    assert!(
-        solver::solve_and_check(&program, &inputs).is_err(),
-        "a=300 exceeds U<8>"
-    );
-}
-
 /// A secp256k1 scalar must be canonical (`< n`) and nonzero; a non-canonical `s`
 /// and `s = 0` are both rejected.
 #[test]
@@ -2405,136 +2341,6 @@ fn bool_mux_solve() {
     );
 }
 
-/// `U<N>` checked `add`/`sub`/`mul` solve; a wrong claimed result is rejected.
-#[test]
-fn uint_checked_arithmetic_solves() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "uint_arith",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, sum: Public<Field>, diff: Public<Field>, prod: Public<Field>) {\n\
-         \x20   let ua = U::<8>::new(a);\n\
-         \x20   let ub = U::<8>::new(b);\n\
-         \x20   assert_eq((ua + ub).value(), sum);\n\
-         \x20   assert_eq((ua - ub).value(), diff);\n\
-         \x20   assert_eq((ua * ub).value(), prod);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "uint_arith", "bn254");
-    assert!(c.status_success, "uint_arith failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let case = |a: &str, b: &str, sum: &str, diff: &str, prod: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("a"), a.to_string());
-        m.insert(id("b"), b.to_string());
-        m.insert(id("sum"), sum.to_string());
-        m.insert(id("diff"), diff.to_string());
-        m.insert(id("prod"), prod.to_string());
-        m
-    };
-    // a=5, b=3: 5+3=8, 5-3=2, 5*3=15 (all fit in 8 bits).
-    solver::solve_and_check(&program, &case("5", "3", "8", "2", "15")).expect("5,3 arithmetic");
-    assert!(
-        solver::solve_and_check(&program, &case("5", "3", "8", "2", "16")).is_err(),
-        "wrong product must reject"
-    );
-}
-
-/// A `Private<U<N>>` input gets an N-bit range proof: in-range solves, out-of-range fails.
-#[test]
-fn private_uint_input_is_range_proved() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "priv_uint_input",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(x: Private<U<8>>, out: Public<Field>) {\n\
-         \x20   assert_eq(x.value(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "priv_uint_input", "bn254");
-    assert!(c.status_success, "priv_uint_input failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let case = |x: &str, out: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("x"), x.to_string());
-        m.insert(id("out"), out.to_string());
-        m
-    };
-    // In range (< 2^8): solves and is fully constrained.
-    let assign = solver::solve_and_check(&program, &case("200", "200")).expect("x=200 in range");
-    assert!(
-        solver::analyze_underconstrained(&program, &assign).is_empty(),
-        "private U<8> input under-constrained"
-    );
-    // Out of range (>= 2^8): the injected range proof makes it unsatisfiable.
-    assert!(
-        solver::solve_and_check(&program, &case("300", "300")).is_err(),
-        "x=300 exceeds U<8> and must reject"
-    );
-}
-
-/// A `Public<U<N>>` input is range-proved in-circuit too (`< r` doesn't imply
-/// `< 2^N`), so an out-of-range public value is rejected.
-#[test]
-fn public_uint_input_is_range_proved() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "pub_uint_input",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(x: Public<U<8>>, out: Public<Field>) {\n\
-         \x20   assert_eq(x.value(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "pub_uint_input", "bn254");
-    assert!(c.status_success, "pub_uint_input failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let case = |x: &str, out: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("x"), x.to_string());
-        m.insert(id("out"), out.to_string());
-        m
-    };
-    // In range solves; out of range (>= 2^8) is rejected by the injected proof.
-    solver::solve_and_check(&program, &case("200", "200")).expect("public U<8> in range");
-    assert!(
-        solver::solve_and_check(&program, &case("300", "300")).is_err(),
-        "public U<8> >= 2^8 must reject"
-    );
-}
-
 /// `Field` boolean combinators `and`/`or`/`not` (on wires pinned `{0,1}` by
 /// `assert_bool`) lower and solve.
 #[test]
@@ -2603,313 +2409,6 @@ fn rejections_carry_actionable_help() {
         "help should point at the visibility markers; got: {}",
         c.stderr
     );
-
-    // An out-of-range fixed-width input width.
-    let wide = write_case(
-        "diag_wide_uint",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(x: Public<U<300>>, out: Public<Field>) {\n\
-         \x20   assert_eq(x.value(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&wide, "diag_wide_uint", "bn254");
-    assert!(!c.status_success, "U<300> input should be rejected");
-    assert!(
-        c.stderr.contains("1..=253"),
-        "width error should state the valid range; got: {}",
-        c.stderr
-    );
-}
-
-/// `assert_lt` + `assert` on `I<8>` (signed). a=3,b=5 passes; a=-5,b=3
-/// violates `assert(ia.is_positive())`.
-#[test]
-fn signed_int_solves() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "signed_int",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   let ia = I::<8>::new(a);\n\
-         \x20   let ib = I::<8>::new(b);\n\
-         \x20   assert_lt(ia, ib);\n\
-         \x20   assert(ia.is_positive());\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "signed_int", "bn254");
-    assert!(c.status_success, "signed_int failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-
-    // a=3, b=5: 3 < 5 ✓, 3 > 0 ✓.
-    let mut inputs = BTreeMap::new();
-    inputs.insert(id("a"), "3".to_string());
-    inputs.insert(id("b"), "5".to_string());
-    let assign = solver::solve_and_check(&program, &inputs).expect("3,5 signed must pass");
-    assert!(
-        solver::analyze_underconstrained(&program, &assign).is_empty(),
-        "I<8> under-constrained"
-    );
-    // a=-5, b=3: -5 < 3 ✓ but is_positive() fails.
-    let neg5 = "21888242871839275222246405745257275088548364400416034343698204186575808495612";
-    inputs.insert(id("a"), neg5.to_string());
-    inputs.insert(id("b"), "3".to_string());
-    assert!(
-        solver::solve_and_check(&program, &inputs).is_err(),
-        "-5 is not positive, must reject"
-    );
-}
-
-/// Signed arithmetic is checked: an out-of-range sum is unsatisfiable.
-#[test]
-fn signed_int_overflow_rejected() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "signed_overflow",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
-         \x20   let ia = I::<8>::new(a);\n\
-         \x20   let ib = I::<8>::new(b);\n\
-         \x20   assert_eq((ia + ib).value(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "signed_overflow", "bn254");
-    assert!(c.status_success, "signed_overflow failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let case = |a: &str, b: &str, out: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("a"), a.to_string());
-        m.insert(id("b"), b.to_string());
-        m.insert(id("out"), out.to_string());
-        m
-    };
-    // 100 + 100 = 200, outside [-128, 128): overflow -> unsatisfiable.
-    assert!(
-        solver::solve_and_check(&program, &case("100", "100", "200")).is_err(),
-        "signed add overflow must reject"
-    );
-    // Sanity: 100 + 20 = 120 is in range and solves.
-    solver::solve_and_check(&program, &case("100", "20", "120")).expect("100+20 in range");
-}
-
-/// `I<N>` as a raw input is rejected, steering to `I::new`.
-#[test]
-fn signed_int_input_is_rejected() {
-    let src = write_case(
-        "signed_input",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(x: Private<I<8>>, out: Public<Field>) {\n\
-         \x20   assert_eq(x.value(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "signed_input", "bn254");
-    assert!(!c.status_success, "I<8> input must be rejected");
-    assert!(
-        c.stderr.contains("I::") && c.stderr.contains("help:"),
-        "rejection should steer to I::new; got: {}",
-        c.stderr
-    );
-}
-
-/// Constant comparisons fold: `gt_const::<0>` is far cheaper than `gt(U::new(0))`.
-#[test]
-fn uint_const_comparisons_fold_and_solve() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let load = |src: &str, name: &str| {
-        let full = format!("#![no_std]\nuse xark::prelude::*;\n{src}");
-        let c = compile_with_field(&write_case(name, &full), name, "bn254");
-        assert!(c.status_success, "{name} failed: {}", c.stderr);
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap()
-    };
-
-    // Folded form: `x > 0` via the const method.
-    let folded = load(
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
-         \x20   let u = U::<32>::new(x);\n\
-         \x20   assert_eq(u.gt_const::<0>(), out);\n\
-         }\n",
-        "cmp_gt0_folded",
-    );
-    // Naive form: construct a `U<32>` for the constant 0 and compare.
-    let naive = load(
-        "pub fn circuit(x: Private<Field>) {\n\
-         \x20   let u = U::<32>::new(x);\n\
-         \x20   assert_gt(u, U::<32>::new(Field::from(0u8)));\n\
-         }\n",
-        "cmp_gt0_naive",
-    );
-    // The fold removes a full 32-bit range proof + comparison (~60 constraints).
-    assert!(
-        folded.constraints.len() + 30 < naive.constraints.len(),
-        "gt_const::<0> should be far cheaper: folded={}, naive={}",
-        folded.constraints.len(),
-        naive.constraints.len()
-    );
-
-    // Correctness of the folded circuit.
-    let id = |n: &str| {
-        folded
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let case = |x: &str, out: &str| {
-        let mut m = BTreeMap::new();
-        m.insert(id("x"), x.to_string());
-        m.insert(id("out"), out.to_string());
-        m
-    };
-    solver::solve_and_check(&folded, &case("5", "1")).expect("5 > 0");
-    solver::solve_and_check(&folded, &case("0", "0")).expect("0 > 0 is false");
-    assert!(
-        solver::solve_and_check(&folded, &case("5", "0")).is_err(),
-        "5 > 0 must be 1"
-    );
-}
-
-/// The remaining constant-comparison folds solve: `lt_const::<0>`≡false,
-/// `ge_const::<0>`≡true, `eq_const`, and a general `lt_const::<C>`.
-#[test]
-fn uint_const_comparison_boundaries_solve() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let src = write_case(
-        "cmp_const_bounds",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(x: Private<Field>, lt0: Public<Field>, ge0: Public<Field>, eq7: Public<Field>, lt100: Public<Field>) {\n\
-         \x20   let u = U::<16>::new(x);\n\
-         \x20   assert_eq(u.lt_const::<0>(), lt0);\n\
-         \x20   assert_eq(u.ge_const::<0>(), ge0);\n\
-         \x20   assert_eq(u.eq_const::<7>(), eq7);\n\
-         \x20   assert_eq(u.lt_const::<100>(), lt100);\n\
-         }\n",
-    );
-    let c = compile_with_field(&src, "cmp_const_bounds", "bn254");
-    assert!(c.status_success, "cmp_const_bounds failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let case = |x: &str, lt0: &str, ge0: &str, eq7: &str, lt100: &str| {
-        let mut m = BTreeMap::new();
-        for (k, v) in [
-            ("x", x),
-            ("lt0", lt0),
-            ("ge0", ge0),
-            ("eq7", eq7),
-            ("lt100", lt100),
-        ] {
-            m.insert(id(k), v.to_string());
-        }
-        m
-    };
-    // x=7:  lt0=0 (never), ge0=1 (always), eq7=1, lt100=1 (7<100).
-    solver::solve_and_check(&program, &case("7", "0", "1", "1", "1")).expect("x=7");
-    // x=200: lt0=0, ge0=1, eq7=0, lt100=0 (200>=100).
-    solver::solve_and_check(&program, &case("200", "0", "1", "0", "0")).expect("x=200");
-    // lt_const::<0> is a hard false; claiming true must reject.
-    assert!(
-        solver::solve_and_check(&program, &case("7", "1", "1", "1", "1")).is_err(),
-        "lt_const::<0> is false"
-    );
-}
-
-/// `U<N>` width guards: `U::<253>::new` is allowed, but a comparison/checked
-/// add/sub at N=253 is rejected at compile time.
-#[test]
-fn uint_width_guards_reject_unsound_widths() {
-    // N=253 comparison: must fail to compile with the CMP_ARITH_WIDTH_OK message.
-    let cmp = write_case(
-        "u253_cmp",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   let ua = U::<253>::new(a);\n\
-         \x20   let ub = U::<253>::new(b);\n\
-         \x20   assert_lt(ua, ub);\n\
-         }\n",
-    );
-    let c = compile_with_field(&cmp, "u253_cmp", "bn254");
-    assert!(!c.status_success, "U<253> comparison must be rejected");
-    assert!(
-        c.stderr.contains("N ≤ 252")
-            || c.stderr.contains("N <= 252")
-            || c.stderr.contains("CMP_ARITH_WIDTH_OK"),
-        "expected the width-guard message; got: {}",
-        c.stderr
-    );
-
-    // N=253 bare range proof stays legal (pure `2^N ≤ r`).
-    let ok = write_case(
-        "u253_new",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
-         \x20   let ua = U::<253>::new(a);\n\
-         \x20   assert_eq(ua.value(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&ok, "u253_new", "bn254");
-    assert!(
-        c.status_success,
-        "U<253>::new should still compile: {}",
-        c.stderr
-    );
-
-    // `*_const` calls less_than directly (bypasses U::lt), so guard it too.
-    let cmp_const = write_case(
-        "u253_cmp_const",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, out: Public<Field>) {\n\
-         \x20   let ua = U::<253>::new(a);\n\
-         \x20   assert_eq(ua.lt_const::<1>(), out);\n\
-         }\n",
-    );
-    let c = compile_with_field(&cmp_const, "u253_cmp_const", "bn254");
-    assert!(!c.status_success, "U<253> lt_const must be rejected");
-
-    // I<253> ordering routes through the same less_than, so it's rejected too.
-    let icmp = write_case(
-        "i253_cmp",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   let ia = I::<253>::new(a);\n\
-         \x20   let ib = I::<253>::new(b);\n\
-         \x20   assert_lt(ia, ib);\n\
-         }\n",
-    );
-    let c = compile_with_field(&icmp, "i253_cmp", "bn254");
-    assert!(!c.status_success, "I<253> comparison must be rejected");
 }
 
 /// The secp256k1 on-curve gadget accepts a real pubkey and rejects a perturbed
@@ -3083,87 +2582,444 @@ fn assert_bool_demo() {
     );
 }
 
-/// `assert_lt(ua, ub)` on `U<8>`. 3 < 5 passes; 5 < 3 is rejected.
-#[test]
-fn assert_uint_lt_demo() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
+// --- Field vs native-int-constant comparison surface (docs/integer-ops.md) -----
+// `PartialEq<uN>` (`==`/`!=`, width-independent) and `PartialOrd<uN>`
+// (`<`/`<=`/`>`/`>=`, range-checked to `< 2^N`) for `Field`, plus the
+// explicit-width Field-vs-Field methods `Field::lt::<N>` etc.
 
+/// Build a `bn254` circuit from a body (prelude in scope) and return its
+/// primitive program.
+fn cmp_program(name: &str, body: &str) -> xark_ir::primitive::PrimitiveProgram {
     let src = write_case(
-        "assert_lt_demo",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   assert_lt(U::<8>::new(a), U::<8>::new(b));\n\
-         }\n",
+        name,
+        &format!("#![no_std]\nuse xark::prelude::*;\n{body}\n"),
     );
-    let c = compile_with_field(&src, "assert_lt_demo", "bn254");
-    assert!(c.status_success, "assert_lt_demo failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
+    let c = compile_with_field(&src, name, "bn254");
+    assert!(c.status_success, "{name} failed to compile: {}", c.stderr);
+    xark_ir::primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+        .unwrap()
+}
+
+/// Solve `program` with the given `(name, decimal)` inputs; returns whether the
+/// witness solves AND satisfies every constraint.
+fn solves(program: &xark_ir::primitive::PrimitiveProgram, inputs: &[(&str, &str)]) -> bool {
+    use std::collections::BTreeMap;
     let id = |n: &str| {
         program
             .vars
             .iter()
             .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
+            .unwrap_or_else(|| panic!("no input var `{n}`"))
+            .id
     };
+    let map: BTreeMap<u32, String> = inputs.iter().map(|(n, v)| (id(n), v.to_string())).collect();
+    xark_ir::solver::solve_and_check(program, &map).is_ok()
+}
 
-    let mut inputs = BTreeMap::new();
-    inputs.insert(id("a"), "3".to_string());
-    inputs.insert(id("b"), "5".to_string());
-    solver::solve_and_check(&program, &inputs).expect("3 < 5 must pass");
-
-    inputs.insert(id("a"), "5".to_string());
-    inputs.insert(id("b"), "3".to_string());
+/// `x == c` / `x != c` / `x < c` / `x <= c` / `x > c` / `x >= c` against a `u32`
+/// constant: each comparison is bound to a public output; a correct set of
+/// outputs solves, and flipping any one output is rejected.
+#[test]
+fn field_cmp_uint_const_ops_solve() {
+    let program = cmp_program(
+        "cmp_uint_const",
+        "pub fn circuit(x: Private<Field>, lt: Public<Field>, le: Public<Field>, \
+         gt: Public<Field>, ge: Public<Field>, eq: Public<Field>, ne: Public<Field>) {\n\
+         \x20   assert_eq(x < 100u32, lt);\n\
+         \x20   assert_eq(x <= 100u32, le);\n\
+         \x20   assert_eq(x > 100u32, gt);\n\
+         \x20   assert_eq(x >= 100u32, ge);\n\
+         \x20   assert_eq(x == 100u32, eq);\n\
+         \x20   assert_eq(x != 100u32, ne);\n\
+         }",
+    );
+    // x = 50: <100 t, <=100 t, >100 f, >=100 f, ==100 f, !=100 t.
+    let ok = [
+        ("x", "50"),
+        ("lt", "1"),
+        ("le", "1"),
+        ("gt", "0"),
+        ("ge", "0"),
+        ("eq", "0"),
+        ("ne", "1"),
+    ];
+    assert!(solves(&program, &ok), "x=50 correct outputs must solve");
+    // Flip each output → rejected.
+    for (i, (nm, _)) in ok.iter().enumerate().skip(1) {
+        let mut bad = ok;
+        bad[i].1 = if ok[i].1 == "1" { "0" } else { "1" };
+        assert!(
+            !solves(&program, &bad),
+            "flipping `{nm}` must violate a constraint"
+        );
+    }
+    // x = 100: ==100 t, <100 f, <=100 t, >100 f, >=100 t, !=100 f.
     assert!(
-        solver::solve_and_check(&program, &inputs).is_err(),
-        "5 < 3 must violate assert_lt"
+        solves(
+            &program,
+            &[
+                ("x", "100"),
+                ("lt", "0"),
+                ("le", "1"),
+                ("gt", "0"),
+                ("ge", "1"),
+                ("eq", "1"),
+                ("ne", "0"),
+            ]
+        ),
+        "x=100 boundary outputs must solve"
     );
 }
 
-/// `assert_ge(ia, ib)` on `I<8>` (signed). 5 ≥ 3 passes; (-2) ≥ 3 is rejected.
+/// Boundary behaviour of `<` and `<=` against a constant, via `assert`.
 #[test]
-fn assert_signed_ge_demo() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-
-    let src = write_case(
-        "assert_ge_demo",
-        "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   assert_ge(I::<8>::new(a), I::<8>::new(b));\n\
-         }\n",
+fn field_cmp_boundaries() {
+    // assert(x < 100): true at 99, false at 100.
+    let lt = cmp_program(
+        "cmp_lt_boundary",
+        "pub fn circuit(x: Private<Field>) { assert(x < 100u32); }",
     );
-    let c = compile_with_field(&src, "assert_ge_demo", "bn254");
-    assert!(c.status_success, "assert_ge_demo failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
+    assert!(solves(&lt, &[("x", "99")]), "99 < 100 holds");
+    assert!(!solves(&lt, &[("x", "100")]), "100 < 100 must fail");
 
-    // 5 ≥ 3 holds.
-    let mut inputs = BTreeMap::new();
-    inputs.insert(id("a"), "5".to_string());
-    inputs.insert(id("b"), "3".to_string());
-    solver::solve_and_check(&program, &inputs).expect("5 >= 3 must pass");
-
-    // (-2) ≥ 3 is false.
-    inputs.insert(
-        id("a"),
-        "21888242871839275222246405745257275088548364400416034343698204186575808495615".to_string(),
+    // assert(x <= 100): true at 100, false at 101.
+    let le = cmp_program(
+        "cmp_le_boundary",
+        "pub fn circuit(x: Private<Field>) { assert(x <= 100u32); }",
     );
-    inputs.insert(id("b"), "3".to_string());
+    assert!(solves(&le, &[("x", "100")]), "100 <= 100 holds");
+    assert!(!solves(&le, &[("x", "101")]), "101 <= 100 must fail");
+}
+
+/// Edge constants: `c = 0` (`x < 0` never holds; `x >= 0` always holds) and a
+/// constant near `2^32 − 1` (the negation form of `<=` avoids a `c + 1`
+/// overflow at the top of the domain).
+#[test]
+fn field_cmp_edge_constants() {
+    // x < 0u32 is always false: unprovable even for x = 0.
+    let lt0 = cmp_program(
+        "cmp_lt_zero",
+        "pub fn circuit(x: Private<Field>) { assert(x < 0u32); }",
+    );
+    assert!(!solves(&lt0, &[("x", "0")]), "x < 0 is never true");
+
+    // x >= 0u32 is always true.
+    let ge0 = cmp_program(
+        "cmp_ge_zero",
+        "pub fn circuit(x: Private<Field>) { assert(x >= 0u32); }",
+    );
+    assert!(solves(&ge0, &[("x", "0")]), "0 >= 0 holds");
+    assert!(solves(&ge0, &[("x", "5")]), "5 >= 0 holds");
+
+    // c = 2^32 - 2: x <= c true at c, false at c+1 = 2^32 - 1 (both in-domain).
+    let hi = cmp_program(
+        "cmp_le_near_max",
+        "pub fn circuit(x: Private<Field>) { assert(x <= 4294967294u32); }",
+    );
     assert!(
-        solver::solve_and_check(&program, &inputs).is_err(),
-        "(-2) >= 3 must violate assert_ge"
+        solves(&hi, &[("x", "4294967294")]),
+        "x <= 2^32-2 holds at 2^32-2"
+    );
+    assert!(
+        !solves(&hi, &[("x", "4294967295")]),
+        "2^32-1 <= 2^32-2 must fail"
+    );
+}
+
+/// SOUNDNESS: the `to_bits::<32>` range check inside `<` makes an out-of-domain
+/// witness (`x = 2^32 + 5`) unprovable — the decomposition cannot recompose to
+/// `x`, so no false proof of `x < 100u32` is possible.
+#[test]
+fn field_cmp_out_of_range_is_unprovable() {
+    let program = cmp_program(
+        "cmp_soundness",
+        "pub fn circuit(x: Private<Field>) { assert(x < 100u32); }",
+    );
+    // In-domain small value proves.
+    assert!(solves(&program, &[("x", "50")]), "50 < 100 proves");
+    // 2^32 + 5 = 4294967301: residue's low 32 bits are 5 (< 100), but it is NOT
+    // < 2^32, so the range check is unsatisfiable — must be REJECTED.
+    assert!(
+        !solves(&program, &[("x", "4294967301")]),
+        "an out-of-32-bit witness must fail the range check, not sneak a proof"
+    );
+}
+
+/// Field-vs-Field explicit-width methods: `a.lt::<32>(b)` proves for `a < b`,
+/// rejects `a >= b`, and rejects an out-of-domain `a` (both operands are
+/// range-checked).
+#[test]
+fn field_field_lt_method() {
+    let program = cmp_program(
+        "cmp_field_field",
+        "pub fn circuit(a: Private<Field>, b: Private<Field>) { assert(a.lt::<32>(b)); }",
+    );
+    assert!(solves(&program, &[("a", "3"), ("b", "5")]), "3 < 5 proves");
+    assert!(
+        !solves(&program, &[("a", "5"), ("b", "3")]),
+        "5 < 3 rejects"
+    );
+    assert!(
+        !solves(&program, &[("a", "5"), ("b", "5")]),
+        "5 < 5 rejects"
+    );
+    // Out-of-range `a` (2^32 + 1) fails its own range check.
+    assert!(
+        !solves(&program, &[("a", "4294967297"), ("b", "5")]),
+        "out-of-range `a` must fail the range check"
+    );
+
+    // le/ge via `!gt`/`!lt`.
+    let le = cmp_program(
+        "cmp_field_field_le",
+        "pub fn circuit(a: Private<Field>, b: Private<Field>) { assert(a.le::<32>(b)); }",
+    );
+    assert!(solves(&le, &[("a", "5"), ("b", "5")]), "5 <= 5 proves");
+    assert!(!solves(&le, &[("a", "6"), ("b", "5")]), "6 <= 5 rejects");
+}
+
+// --- Field shift + modulus surface (docs/integer-ops.md) -----------------------
+// `Shr<uN>` (`x >> n`), `Shl<uN>` (`x << n`, truncated to N bits), and `Rem<uN>`
+// (`x % m`) for `Field`, where the native-int RHS type carries the domain width
+// `N` and its value is the shift amount / modulus. All range-check `x < 2^N`.
+
+/// `x >> 3u32` = ⌊x / 8⌋ within the 32-bit domain (100 → 12); a wrong output is
+/// rejected, and an out-of-32-bit witness fails the `to_bits::<32>` range check.
+#[test]
+fn field_shr_solves() {
+    let program = cmp_program(
+        "shr_u32",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 3u32, out); }",
+    );
+    assert!(
+        solves(&program, &[("x", "100"), ("out", "12")]),
+        "100 >> 3 = 12"
+    );
+    assert!(
+        !solves(&program, &[("x", "100"), ("out", "13")]),
+        "wrong result rejected"
+    );
+    // SOUNDNESS: 2^32 + 100 is not < 2^32, so `to_bits::<32>` is unsatisfiable —
+    // no sneaking a proof by supplying the low-32-bit shift.
+    assert!(
+        !solves(&program, &[("x", "4294967396"), ("out", "12")]),
+        "out-of-32-bit witness must fail the range check"
+    );
+}
+
+/// BIT CACHE (docs/integer-ops.md § Bit caching): a witness value decomposed to
+/// the same width `N` more than once shares ONE `to_bits::<N>` — the second op
+/// reuses the stored bits, skipping the `N` booleanity + 1 recomposition
+/// constraints. Proven differentially: reusing one `x` costs exactly one 32-bit
+/// decomposition (33 constraints) less than decomposing two distinct values.
+#[test]
+fn bit_cache_shares_one_decomposition() {
+    // `x` is used in both `x < 100u32` and `x >> 1u32` → one shared decomposition.
+    let shared = cmp_program(
+        "bitcache_shared",
+        "pub fn circuit(x: Private<Field>, half: Public<Field>) {\n\
+         \x20   assert(x < 100u32);\n\
+         \x20   assert_eq(x >> 1u32, half);\n\
+         }",
+    );
+    // Same shape but the shift is on a *distinct* value `y` → two independent
+    // decompositions (no cache hit possible across different values).
+    let distinct = cmp_program(
+        "bitcache_distinct",
+        "pub fn circuit(x: Private<Field>, y: Private<Field>, half: Public<Field>) {\n\
+         \x20   assert(x < 100u32);\n\
+         \x20   assert_eq(y >> 1u32, half);\n\
+         }",
+    );
+
+    // A width-32 decomposition is 32 booleanity constraints + 1 recomposition.
+    const DECOMP_32: usize = 33;
+    let shared_n = shared.constraints.len();
+    let distinct_n = distinct.constraints.len();
+    assert!(
+        shared_n < distinct_n,
+        "the reused decomposition must drop constraints: shared={shared_n}, distinct={distinct_n}"
+    );
+    assert_eq!(
+        shared_n + DECOMP_32,
+        distinct_n,
+        "reusing `x` must save exactly one 32-bit decomposition ({DECOMP_32} constraints): \
+         shared={shared_n}, distinct={distinct_n}"
+    );
+
+    // CORRECTNESS still holds with the shared decomposition: x = 50 (< 100),
+    // 50 >> 1 = 25 solves; a wrong shifted output is rejected.
+    assert!(
+        solves(&shared, &[("x", "50"), ("half", "25")]),
+        "x=50: 50 < 100 and 50 >> 1 = 25 must solve"
+    );
+    assert!(
+        !solves(&shared, &[("x", "50"), ("half", "26")]),
+        "a wrong `x >> 1` output must be rejected"
+    );
+    // The bounds check is real: x = 100 is not < 100 → unprovable.
+    assert!(
+        !solves(&shared, &[("x", "100"), ("half", "50")]),
+        "x=100 violates `x < 100u32`"
+    );
+}
+
+/// Shift edges: `x >> 0u32` is the identity, and `x >> 40u32` at width 32 shifts
+/// every bit out → 0.
+#[test]
+fn field_shr_edges() {
+    let id = cmp_program(
+        "shr_zero",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 0u32, out); }",
+    );
+    assert!(
+        solves(&id, &[("x", "12345"), ("out", "12345")]),
+        "x >> 0 = x"
+    );
+    assert!(
+        !solves(&id, &[("x", "12345"), ("out", "12344")]),
+        "x >> 0 != x-1"
+    );
+
+    let big = cmp_program(
+        "shr_overshift",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 40u32, out); }",
+    );
+    assert!(
+        solves(&big, &[("x", "4000000000"), ("out", "0")]),
+        "shift >= width -> 0"
+    );
+    assert!(
+        !solves(&big, &[("x", "4000000000"), ("out", "1")]),
+        "overshift is exactly 0"
+    );
+}
+
+/// `x << 2u16` = x·4 within the 16-bit domain (5 → 20); wrong output rejected.
+#[test]
+fn field_shl_solves() {
+    let program = cmp_program(
+        "shl_u16",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x << 2u16, out); }",
+    );
+    assert!(
+        solves(&program, &[("x", "5"), ("out", "20")]),
+        "5 << 2 = 20"
+    );
+    assert!(
+        !solves(&program, &[("x", "5"), ("out", "21")]),
+        "wrong result rejected"
+    );
+}
+
+/// `<<` truncates at `2^N` (integer shift semantics, NOT `x·2ⁿ mod p`): an 8-bit
+/// `200u8 << 2` drops the bits pushed past position 8, giving `(200<<2) mod 256
+/// = 32`.
+#[test]
+fn field_shl_truncates() {
+    let program = cmp_program(
+        "shl_trunc_u8",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x << 2u8, out); }",
+    );
+    // 200 << 2 = 800; low 8 bits = 800 mod 256 = 32.
+    assert!(
+        solves(&program, &[("x", "200"), ("out", "32")]),
+        "200 << 2 truncates to 32"
+    );
+    // The non-truncated value 800 is NOT the result.
+    assert!(
+        !solves(&program, &[("x", "200"), ("out", "800")]),
+        "no `x*4` (would be 800)"
+    );
+}
+
+/// `x % 8u32` — power-of-two modulus, the low 3 bits, no hint (100 → 4).
+#[test]
+fn field_rem_pow2_solves() {
+    let program = cmp_program(
+        "rem_pow2_u32",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 8u32, out); }",
+    );
+    assert!(
+        solves(&program, &[("x", "100"), ("out", "4")]),
+        "100 % 8 = 4"
+    );
+    assert!(
+        !solves(&program, &[("x", "100"), ("out", "5")]),
+        "wrong remainder rejected"
+    );
+    // Out-of-32-bit witness fails the range check.
+    assert!(
+        !solves(&program, &[("x", "4294967396"), ("out", "4")]),
+        "out-of-range witness must fail the range check"
+    );
+}
+
+/// `x % 7u32` — general (non-power-of-two) modulus via `hint_div_rem`, pinned by
+/// `7·q + r == x`, `r < 7`, `q < 2³²` (100 → 2). A wrong remainder is
+/// unsatisfiable (the hint is honest; the equality/range pins reject a forged
+/// `r`), and an out-of-range witness fails.
+#[test]
+fn field_rem_general_solves() {
+    let program = cmp_program(
+        "rem_general_u32",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 7u32, out); }",
+    );
+    assert!(
+        solves(&program, &[("x", "100"), ("out", "2")]),
+        "100 % 7 = 2"
+    );
+    assert!(solves(&program, &[("x", "98"), ("out", "0")]), "98 % 7 = 0");
+    // SOUNDNESS: a circuit asserting a *wrong* remainder is unsatisfiable.
+    assert!(
+        !solves(&program, &[("x", "100"), ("out", "3")]),
+        "forged remainder rejected"
+    );
+    assert!(
+        !solves(&program, &[("x", "4294967396"), ("out", "2")]),
+        "out-of-range witness must fail the range check"
+    );
+}
+
+/// SOUNDNESS: `Rem<u128>` is intentionally NOT provided (a general modulus at
+/// `N = 128` could wrap `m·q` past the field and forge a remainder). `x % 5u128`
+/// must therefore fail to compile — while `x >> 3u128` (a shift, always sound at
+/// any width) and `x % 5u64` (a narrower modulus) still work.
+#[test]
+fn field_rem_u128_is_not_provided() {
+    // `Rem<u128> for Field` does not resolve → a type error, compile fails.
+    let bad = write_case(
+        "rem_u128",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 5u128, out); }\n",
+    );
+    let c = compile_with_field(&bad, "rem_u128", "bn254");
+    assert!(
+        !c.status_success,
+        "`x % 5u128` must not compile (Rem<u128> is deliberately omitted)"
+    );
+
+    // Shifts remain available at u128 (pure re-wiring, sound).
+    let shr = cmp_program(
+        "shr_u128",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 3u128, out); }",
+    );
+    assert!(
+        solves(&shr, &[("x", "100"), ("out", "12")]),
+        "100 >> 3u128 = 12"
+    );
+
+    // Modulus remains available at u64 (2N = 128 <= 253, sound).
+    let rem = cmp_program(
+        "rem_u64",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 5u64, out); }",
+    );
+    assert!(
+        solves(&rem, &[("x", "100"), ("out", "0")]),
+        "100 % 5u64 = 0"
+    );
+    assert!(
+        solves(&rem, &[("x", "103"), ("out", "3")]),
+        "103 % 5u64 = 3"
     );
 }

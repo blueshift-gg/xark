@@ -14,9 +14,11 @@
 // assignment on `Field`, so `acc = acc + …` is required, not `acc += …`.
 #![allow(clippy::assign_op_pattern)]
 
-use core::cmp::PartialOrd;
+use core::cmp::{Ordering, PartialOrd};
 use core::marker::PhantomData;
-use core::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::ops::{
+    Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub, SubAssign,
+};
 
 /// The opaque circuit field element.
 ///
@@ -25,13 +27,20 @@ use core::ops::{Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Sub
 /// (b) MIR optimization cannot collapse `Field` values to a single constant ZST
 /// (which would erase the data-flow the compiler tracks).
 ///
-/// Implements `core::ops` arithmetic (`+ - * /`, unary `-`, `*Assign`, `^`) plus
-/// Comparisons (`== != < <= > >=`) are circuit operations: they return a `bool`
-/// that is a `{0,1}` field wire (the compiler lowers `PartialEq`/`PartialOrd`),
-/// usable in further boolean logic or muxed via [`Field::from`]`(cond)`. For
-/// *ordering* on a bounded integer, wrap in [`U<N>`](crate::uint::U) /
-/// [`I<N>`](crate::int::I) — a bare `Field` only supports `==`/`!=` (equality);
-/// ordering the canonical `[0, r)` representative is rarely intended.
+/// Implements `core::ops` arithmetic (`+ - * /`, unary `-`, `*Assign`, `^`).
+///
+/// Comparisons are circuit operations that return a `bool` — a `{0,1}` field
+/// wire (usable in further boolean logic or muxed via [`Field::from`]`(cond)`):
+/// * `==` / `!=` against another `Field` **or** a native-int constant
+///   (`PartialEq` / `PartialEq<uN>`) — width-independent equality.
+/// * `<` `<=` `>` `>=` against a native-int constant (`PartialOrd<uN>`), whose
+///   type fixes the bit-width `N` for the required range check.
+/// * two-witness ordering via the explicit-width methods
+///   [`Field::lt`]`::<N>` / `gt` / `le` / `ge`.
+///
+/// A bare `Field` is intentionally **not** `PartialOrd for Field`: ordering the
+/// canonical `[0, r)` representative needs a width, so it must come from the RHS
+/// type or the `::<N>`. See `docs/integer-ops.md`.
 #[derive(Clone, Copy)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
@@ -226,6 +235,46 @@ impl Field {
     /// Assert `self ∈ {0, 1}` — the booleanity constraint `self² == self`.
     pub fn assert_bool(self) {
         assert_eq(self * self, self);
+    }
+
+    // --- Field-vs-Field ordered comparison (explicit width) ------------------
+    // The one comparison case with no native-int operand to carry a width, so
+    // the width `N` is spelled explicitly: `a.lt::<32>(b)`. Both operands are
+    // *witnesses*, so BOTH are range-checked to `< 2^N` via `to_bits::<N>`
+    // before the width-`N` unsigned comparison — otherwise a prover could place
+    // an out-of-range residue in either wire and defeat the compare. `le`/`ge`
+    // delegate to `gt`/`lt` (boolean `!`), inheriting that single pair of range
+    // checks. These are inherent methods (not `PartialOrd for Field`): a bare
+    // `Field` stays orderless because ordering needs a width (see docs/integer-ops).
+
+    /// `self < rhs` as a `{0,1}` `bool` wire, interpreting both as `N`-bit
+    /// unsigned integers (range-checks both to `< 2^N`).
+    // Named like `PartialOrd::lt` on purpose: the explicit-width Field-vs-Field form.
+    #[allow(clippy::should_implement_trait)]
+    pub fn lt<const N: usize>(self, rhs: Field) -> bool {
+        let _ = self.to_bits::<N>();
+        let _ = rhs.to_bits::<N>();
+        __xark_ult::<N>(self, rhs)
+    }
+
+    /// `self > rhs` (= `rhs < self`), `N`-bit unsigned. See [`Field::lt`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn gt<const N: usize>(self, rhs: Field) -> bool {
+        let _ = self.to_bits::<N>();
+        let _ = rhs.to_bits::<N>();
+        __xark_ult::<N>(rhs, self)
+    }
+
+    /// `self <= rhs`, `N`-bit unsigned — `!(self > rhs)`. See [`Field::lt`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn le<const N: usize>(self, rhs: Field) -> bool {
+        !self.gt::<N>(rhs)
+    }
+
+    /// `self >= rhs`, `N`-bit unsigned — `!(self < rhs)`. See [`Field::lt`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn ge<const N: usize>(self, rhs: Field) -> bool {
+        !self.lt::<N>(rhs)
     }
 
     /// Native modular inverse. Allocates `w = self⁻¹` as advice AND pins it with
@@ -465,6 +514,175 @@ macro_rules! impl_field_int_ops {
 }
 impl_field_int_ops!(u8, u16, u32, u64, u128);
 
+/// Integer comparison of a `Field` against a native-integer *constant*, where the
+/// constant's type supplies the domain width `N = bitwidth(T)` (`bool → 1`,
+/// `u8 → 8`, …, `u128 → 128`).
+///
+/// * `x == c` / `x != c` — width-independent equality (`__xark_eq`), **no** range
+///   check: equality of residues needs no bounding.
+/// * `x < c` / `x <= c` / `x > c` / `x >= c` — ordered comparison. Each first
+///   range-checks the *witness* operand `x` to `< 2^N` via `to_bits::<N>` (the
+///   soundness contract: a prover holding an out-of-range residue cannot satisfy
+///   the decomposition, so the compare can't be defeated), then compares against
+///   the compile-time constant `c` (which needs no check — it is known `< 2^N`).
+///   `le`/`ge` are `!gt`/`!lt` so they inherit `gt`/`lt`'s single range check.
+///
+/// The `c < x` mirror is written `x > c`. Two-witness comparison uses the
+/// explicit-width [`Field::lt`] etc. See `docs/integer-ops.md`.
+macro_rules! impl_field_int_cmp {
+    ($($t:ty => $n:literal),+ $(,)?) => {$(
+        impl PartialEq<$t> for Field {
+            // Equality is width-independent: no range check needed.
+            fn eq(&self, rhs: &$t) -> bool {
+                __xark_eq(*self, Field::from(*rhs))
+            }
+            // `ne` uses the default (`!eq`).
+        }
+        impl PartialOrd<$t> for Field {
+            // Never reaches lowering: once `lt`/`le`/`gt`/`ge` are overridden the
+            // `<`/`<=`/`>`/`>=` operators call those directly, so `partial_cmp` is
+            // never invoked. It exists only to satisfy the trait — a circuit
+            // comparison yields a `{0,1}` wire, not a host `Option<Ordering>`.
+            fn partial_cmp(&self, _rhs: &$t) -> Option<Ordering> {
+                loop {}
+            }
+            fn lt(&self, rhs: &$t) -> bool {
+                let _ = self.to_bits::<$n>(); // range-check the witness operand < 2^N
+                __xark_ult::<$n>(*self, Field::from(*rhs))
+            }
+            fn gt(&self, rhs: &$t) -> bool {
+                let _ = self.to_bits::<$n>(); // range-check the witness operand < 2^N
+                __xark_ult::<$n>(Field::from(*rhs), *self) // c < x
+            }
+            fn le(&self, rhs: &$t) -> bool {
+                !self.gt(rhs)
+            }
+            fn ge(&self, rhs: &$t) -> bool {
+                !self.lt(rhs)
+            }
+        }
+    )+};
+}
+impl_field_int_cmp!(bool => 1, u8 => 8, u16 => 16, u32 => 32, u64 => 64, u128 => 128);
+
+/// Integer shifts of a `Field` against a native-integer *constant*, where the
+/// constant's type supplies the domain width `N = bitwidth(T)` (`u8 → 8`, …,
+/// `u128 → 128`) and its value is the shift amount. So `x >> 3u32` means "treat
+/// `x` as a 32-bit value, shift right by 3". `bool` is excluded (a 1-bit domain
+/// is degenerate for shifting); signed shifts are out of scope.
+///
+/// Provided for `u8`..`u128` — all sound: a shift is pure bit re-wiring, and
+/// `from_bits::<N>` with `N ≤ 128 ≤ 253` cannot wrap the field.
+///
+/// Each op first calls `to_bits::<N>(self)`, which range-checks `self < 2^N`
+/// (the soundness contract — a prover holding an out-of-domain residue cannot
+/// satisfy the decomposition). The shift amount `n` must be a compile-time
+/// constant; the compiler const-propagates it at the inline site so the loop
+/// bounds, branch conditions, and array indices fold to constants (a non-const
+/// amount naturally fails to lower).
+///
+/// * **`x >> n`** — `⌊x / 2ⁿ⌋` within the `N`-bit domain: place bit `i+n` at
+///   position `i`, zero-fill the top. `n ≥ N` → 0. Free re-wiring (just the
+///   shared `to_bits::<N>`, then `from_bits::<N>`).
+/// * **`x << n`** — place bit `i-n` at position `i`, zero-fill the low bits;
+///   bits shifted past position `N` are **dropped** (integer `<<`, i.e.
+///   truncated to `N` bits — *not* `x·2ⁿ mod p`). `n ≥ N` → 0.
+macro_rules! impl_field_int_shift {
+    ($($t:ty => $n:literal),+ $(,)?) => {$(
+        impl Shr<$t> for Field {
+            type Output = Field;
+            fn shr(self, n: $t) -> Field {
+                let bits = self.to_bits::<$n>(); // range-check self < 2^N
+                let mut out = [Field::from(0u8); $n];
+                // Guard in the widened domain so a huge `n` can't truncate to a
+                // small `usize` and shift by the wrong amount; `n >= N` → all 0.
+                if (n as u128) < $n {
+                    let n = n as usize; // exact: n < N <= 128
+                    let mut i = 0usize;
+                    while i + n < $n {
+                        out[i] = bits[i + n];
+                        i += 1;
+                    }
+                }
+                Field::from_bits::<$n>(out)
+            }
+        }
+        impl Shl<$t> for Field {
+            type Output = Field;
+            fn shl(self, n: $t) -> Field {
+                let bits = self.to_bits::<$n>(); // range-check self < 2^N
+                let mut out = [Field::from(0u8); $n];
+                if (n as u128) < $n {
+                    let n = n as usize; // exact: n < N <= 128
+                    let mut i = n;
+                    while i < $n {
+                        out[i] = bits[i - n]; // bits past position N are dropped (truncate)
+                        i += 1;
+                    }
+                }
+                Field::from_bits::<$n>(out)
+            }
+        }
+    )+};
+}
+impl_field_int_shift!(u8 => 8, u16 => 16, u32 => 32, u64 => 64, u128 => 128);
+
+/// Integer modulus of a `Field` against a native-integer *constant* `m`, where
+/// the constant's type supplies the domain width `N = bitwidth(T)` and its value
+/// is the modulus: `x % 8u16` means "treat `x` as 16-bit, mod 8".
+///
+/// **Provided for `u8`..`u64` only** (deliberately **not** `u128`). The general
+/// (non-power-of-two) path pins a `hint_div_rem` witness `[q, r]` with
+/// `m·q + r == x`, `r < m`, `q < 2ᴺ`; that is sound only while `m·q + r` cannot
+/// wrap the field, i.e. `2·N ≤ 253`. For `u8`..`u64` (`2·N ≤ 128 ≤ 253`) this
+/// always holds. For `u128` (`N = 128`, `2·N = 256 > 253`) a modulus `m > 2¹²⁶`
+/// could admit a wrapping `q < 2¹²⁸` and forge the remainder, so we omit
+/// `Rem<u128>` entirely (`x % 5u128` does not compile — use a `u64`-or-narrower
+/// modulus, or `Field::from(m)` division primitives directly).
+///
+/// `x % m`: for `m = 2ᵏ` (power of two), the low `k` bits — free, no hint. For
+/// general `m`, the pinned `hint_div_rem` above; the two range checks (`r < m`
+/// and `q < 2ᴺ`) are what stop a malicious prover from choosing a wrapping
+/// `q`/`r`. `m` must be a compile-time constant (const-propagated at the inline
+/// site). Mod-by-zero falls into the general path and is **unprovable** (a
+/// `hint_div_rem` by 0), not a clean compile error — because `m` is runtime from
+/// rustc's view, so a `const { assert!(m != 0) }` is not available here.
+macro_rules! impl_field_int_rem {
+    ($($t:ty => $n:literal),+ $(,)?) => {$(
+        impl Rem<$t> for Field {
+            type Output = Field;
+            // Manual power-of-two test: `is_power_of_two` may not lower cleanly.
+            #[allow(clippy::manual_is_power_of_two)]
+            fn rem(self, m: $t) -> Field {
+                let bits = self.to_bits::<$n>(); // range-check self < 2^N (bounds q < 2^N too)
+                if m != 0 && (m & (m - 1)) == 0 {
+                    // m = 2^k: x mod 2^k is the low k bits — free, no hint.
+                    let mut out = [Field::from(0u8); $n];
+                    let mut i = 0usize;
+                    while i < $n {
+                        if (1u128 << i) < (m as u128) {
+                            out[i] = bits[i];
+                        }
+                        i += 1;
+                    }
+                    Field::from_bits::<$n>(out)
+                } else {
+                    // General m (m == 0 also lands here and is unprovable: div by 0).
+                    let qr = Field::hint_div_rem(self, Field::from(m));
+                    let q = qr[0];
+                    let r = qr[1];
+                    assert_eq(Field::from(m) * q + r, self); // pin the division
+                    assert(r < m); // r < m AND r < 2^N (range check via PartialOrd<T>)
+                    let _ = q.to_bits::<$n>(); // q < 2^N: with 2N <= 253, m*q + r can't wrap
+                    r
+                }
+            }
+        }
+    )+};
+}
+// u128 deliberately excluded: 2N = 256 > 253 would let m*q wrap the field.
+impl_field_int_rem!(u8 => 8, u16 => 16, u32 => 32, u64 => 64);
+
 /// Emit a circuit equality constraint `lhs == rhs`.
 ///
 /// Either argument may be `bool` (the result of a comparison, `.is_zero()`,
@@ -595,9 +813,13 @@ pub fn __xark_hint_sub2<const N: usize>(
 }
 
 // --- comparison intrinsics: return a `bool` that is a `{0,1}` field wire -----
-// The compiler lowers these directly (never inlined); they back `PartialEq` /
-// `PartialOrd` on `Field` / `U<N>` / `I<N>` so `==` `!=` `<` `<=` `>` `>=` work
-// as circuit operations.
+// The compiler lowers these directly (never inlined). They back the circuit
+// comparison surface on `Field` (see `docs/integer-ops.md`): `PartialEq` /
+// `PartialEq<uN>` (`==` `!=`) — width-independent equality — and, against a
+// native-int constant, `PartialOrd<uN>` (`<` `<=` `>` `>=`) plus the
+// explicit-width Field-vs-Field methods `Field::lt::<N>` / `gt` / `le` / `ge`.
+// There are no fixed-width integer wrapper types; a bare `Field` stays orderless
+// (ordering needs a width, supplied by the native-int RHS or the `::<N>`).
 
 /// Field equality: `a == b` as a `bool` wire (`1` iff `a == b`).
 #[inline(never)]
@@ -611,24 +833,10 @@ pub fn __xark_ult<const N: usize>(_a: Field, _b: Field) -> bool {
     loop {}
 }
 
-/// Signed less-than: `a < b` for `a, b ∈ [−2^(N−1), 2^(N−1))`, as a `bool` wire.
-#[inline(never)]
-pub fn __xark_ilt<const N: usize>(_a: Field, _b: Field) -> bool {
-    loop {}
-}
-
 /// Reinterpret a `bool` wire as a `Field` wire (identity — both are `{0,1}`
 /// wires). Backs `From<bool> for Field`.
 #[inline(never)]
 pub fn __xark_bool_to_field(_b: bool) -> Field {
-    loop {}
-}
-
-/// Reinterpret a `{0,1}` `Field` wire as a `bool` wire (identity). For producers
-/// that already pinned a wire boolean (e.g. a cached sign bit) and want to feed
-/// it to `bool` operators.
-#[inline(never)]
-pub fn __xark_field_to_bool(_f: Field) -> bool {
     loop {}
 }
 
