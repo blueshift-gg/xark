@@ -213,33 +213,28 @@
       "id": 41,
       "name": "t38",
       "visibility": "Internal"
-    },
-    {
-      "id": 42,
-      "name": "t39",
-      "visibility": "Internal"
-    },
-    {
-      "id": 43,
-      "name": "t40",
-      "visibility": "Internal"
-    },
-    {
-      "id": 44,
-      "name": "t41",
-      "visibility": "Internal"
     }
   ],
   "constraints": [
     {
       "id": 0,
       "a": {
-        "constant": "1",
-        "terms": []
+        "constant": "2",
+        "terms": [
+          {
+            "coeff": "1",
+            "var": 0
+          }
+        ]
       },
       "b": {
-        "constant": "1",
-        "terms": []
+        "constant": "2",
+        "terms": [
+          {
+            "coeff": "1",
+            "var": 0
+          }
+        ]
       },
       "c": {
         "constant": "0",
@@ -252,7 +247,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "1 * 1 = t0"
+        "note": "(a + 2) * (a + 2) = t0"
       }
     },
     {
@@ -292,8 +287,13 @@
     {
       "id": 2,
       "a": {
-        "constant": "1",
-        "terms": []
+        "constant": "2",
+        "terms": [
+          {
+            "coeff": "1",
+            "var": 0
+          }
+        ]
       },
       "b": {
         "constant": "0",
@@ -315,26 +315,26 @@
       },
       "debug": {
         "source_span": null,
-        "note": "1 * t1 = t2"
+        "note": "(a + 2) * t1 = t2"
       }
     },
     {
       "id": 3,
       "a": {
-        "constant": "2",
+        "constant": "3",
         "terms": [
           {
             "coeff": "1",
-            "var": 0
+            "var": 1
           }
         ]
       },
       "b": {
-        "constant": "2",
+        "constant": "3",
         "terms": [
           {
             "coeff": "1",
-            "var": 0
+            "var": 1
           }
         ]
       },
@@ -349,7 +349,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(a + 2) * (a + 2) = t3"
+        "note": "(b + 3) * (b + 3) = t3"
       }
     },
     {
@@ -389,11 +389,11 @@
     {
       "id": 5,
       "a": {
-        "constant": "2",
+        "constant": "3",
         "terms": [
           {
             "coeff": "1",
-            "var": 0
+            "var": 1
           }
         ]
       },
@@ -417,26 +417,34 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(a + 2) * t4 = t5"
+        "note": "(b + 3) * t4 = t5"
       }
     },
     {
       "id": 6,
       "a": {
-        "constant": "3",
+        "constant": "6",
         "terms": [
           {
+            "coeff": "3",
+            "var": 5
+          },
+          {
             "coeff": "1",
-            "var": 1
+            "var": 8
           }
         ]
       },
       "b": {
-        "constant": "3",
+        "constant": "6",
         "terms": [
           {
+            "coeff": "3",
+            "var": 5
+          },
+          {
             "coeff": "1",
-            "var": 1
+            "var": 8
           }
         ]
       },
@@ -451,7 +459,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(b + 3) * (b + 3) = t6"
+        "note": "(3*t2 + t5 + 6) * (3*t2 + t5 + 6) = t6"
       }
     },
     {
@@ -491,11 +499,15 @@
     {
       "id": 8,
       "a": {
-        "constant": "3",
+        "constant": "6",
         "terms": [
           {
+            "coeff": "3",
+            "var": 5
+          },
+          {
             "coeff": "1",
-            "var": 1
+            "var": 8
           }
         ]
       },
@@ -519,13 +531,13 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(b + 3) * t7 = t8"
+        "note": "(3*t2 + t5 + 6) * t7 = t8"
       }
     },
     {
       "id": 9,
       "a": {
-        "constant": "4",
+        "constant": "6",
         "terms": [
           {
             "coeff": "2",
@@ -534,15 +546,11 @@
           {
             "coeff": "3",
             "var": 8
-          },
-          {
-            "coeff": "1",
-            "var": 11
           }
         ]
       },
       "b": {
-        "constant": "4",
+        "constant": "6",
         "terms": [
           {
             "coeff": "2",
@@ -551,10 +559,6 @@
           {
             "coeff": "3",
             "var": 8
-          },
-          {
-            "coeff": "1",
-            "var": 11
           }
         ]
       },
@@ -569,7 +573,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(2*t2 + 3*t5 + t8 + 4) * (2*t2 + 3*t5 + t8 + 4) = t9"
+        "note": "(2*t2 + 3*t5 + 6) * (2*t2 + 3*t5 + 6) = t9"
       }
     },
     {
@@ -609,7 +613,7 @@
     {
       "id": 11,
       "a": {
-        "constant": "4",
+        "constant": "6",
         "terms": [
           {
             "coeff": "2",
@@ -618,10 +622,6 @@
           {
             "coeff": "3",
             "var": 8
-          },
-          {
-            "coeff": "1",
-            "var": 11
           }
         ]
       },
@@ -645,13 +645,13 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(2*t2 + 3*t5 + t8 + 4) * t10 = t11"
+        "note": "(2*t2 + 3*t5 + 6) * t10 = t11"
       }
     },
     {
       "id": 12,
       "a": {
-        "constant": "5",
+        "constant": "9",
         "terms": [
           {
             "coeff": "1",
@@ -660,15 +660,11 @@
           {
             "coeff": "2",
             "var": 8
-          },
-          {
-            "coeff": "3",
-            "var": 11
           }
         ]
       },
       "b": {
-        "constant": "5",
+        "constant": "9",
         "terms": [
           {
             "coeff": "1",
@@ -677,10 +673,6 @@
           {
             "coeff": "2",
             "var": 8
-          },
-          {
-            "coeff": "3",
-            "var": 11
           }
         ]
       },
@@ -695,7 +687,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(t2 + 2*t5 + 3*t8 + 5) * (t2 + 2*t5 + 3*t8 + 5) = t12"
+        "note": "(t2 + 2*t5 + 9) * (t2 + 2*t5 + 9) = t12"
       }
     },
     {
@@ -735,7 +727,7 @@
     {
       "id": 14,
       "a": {
-        "constant": "5",
+        "constant": "9",
         "terms": [
           {
             "coeff": "1",
@@ -744,10 +736,6 @@
           {
             "coeff": "2",
             "var": 8
-          },
-          {
-            "coeff": "3",
-            "var": 11
           }
         ]
       },
@@ -771,42 +759,42 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(t2 + 2*t5 + 3*t8 + 5) * t13 = t14"
+        "note": "(t2 + 2*t5 + 9) * t13 = t14"
       }
     },
     {
       "id": 15,
       "a": {
-        "constant": "6",
+        "constant": "7",
         "terms": [
-          {
-            "coeff": "3",
-            "var": 5
-          },
-          {
-            "coeff": "1",
-            "var": 8
-          },
           {
             "coeff": "2",
             "var": 11
+          },
+          {
+            "coeff": "3",
+            "var": 14
+          },
+          {
+            "coeff": "1",
+            "var": 17
           }
         ]
       },
       "b": {
-        "constant": "6",
+        "constant": "7",
         "terms": [
-          {
-            "coeff": "3",
-            "var": 5
-          },
-          {
-            "coeff": "1",
-            "var": 8
-          },
           {
             "coeff": "2",
             "var": 11
+          },
+          {
+            "coeff": "3",
+            "var": 14
+          },
+          {
+            "coeff": "1",
+            "var": 17
           }
         ]
       },
@@ -821,7 +809,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(3*t2 + t5 + 2*t8 + 6) * (3*t2 + t5 + 2*t8 + 6) = t15"
+        "note": "(2*t8 + 3*t11 + t14 + 7) * (2*t8 + 3*t11 + t14 + 7) = t15"
       }
     },
     {
@@ -861,19 +849,19 @@
     {
       "id": 17,
       "a": {
-        "constant": "6",
+        "constant": "7",
         "terms": [
-          {
-            "coeff": "3",
-            "var": 5
-          },
-          {
-            "coeff": "1",
-            "var": 8
-          },
           {
             "coeff": "2",
             "var": 11
+          },
+          {
+            "coeff": "3",
+            "var": 14
+          },
+          {
+            "coeff": "1",
+            "var": 17
           }
         ]
       },
@@ -897,41 +885,49 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(3*t2 + t5 + 2*t8 + 6) * t16 = t17"
+        "note": "(2*t8 + 3*t11 + t14 + 7) * t16 = t17"
       }
     },
     {
       "id": 18,
       "a": {
-        "constant": "7",
+        "constant": "43",
         "terms": [
           {
-            "coeff": "2",
+            "coeff": "6",
+            "var": 11
+          },
+          {
+            "coeff": "7",
             "var": 14
           },
           {
-            "coeff": "3",
+            "coeff": "11",
             "var": 17
           },
           {
-            "coeff": "1",
+            "coeff": "2",
             "var": 20
           }
         ]
       },
       "b": {
-        "constant": "7",
+        "constant": "43",
         "terms": [
           {
-            "coeff": "2",
+            "coeff": "6",
+            "var": 11
+          },
+          {
+            "coeff": "7",
             "var": 14
           },
           {
-            "coeff": "3",
+            "coeff": "11",
             "var": 17
           },
           {
-            "coeff": "1",
+            "coeff": "2",
             "var": 20
           }
         ]
@@ -947,7 +943,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(2*t11 + 3*t14 + t17 + 7) * (2*t11 + 3*t14 + t17 + 7) = t18"
+        "note": "(6*t8 + 7*t11 + 11*t14 + 2*t17 + 43) * (6*t8 + 7*t11 + 11*t14 + 2*t17 + 43) = t18"
       }
     },
     {
@@ -987,18 +983,22 @@
     {
       "id": 20,
       "a": {
-        "constant": "7",
+        "constant": "43",
         "terms": [
           {
-            "coeff": "2",
+            "coeff": "6",
+            "var": 11
+          },
+          {
+            "coeff": "7",
             "var": 14
           },
           {
-            "coeff": "3",
+            "coeff": "11",
             "var": 17
           },
           {
-            "coeff": "1",
+            "coeff": "2",
             "var": 20
           }
         ]
@@ -1023,24 +1023,28 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(2*t11 + 3*t14 + t17 + 7) * t19 = t20"
+        "note": "(6*t8 + 7*t11 + 11*t14 + 2*t17 + 43) * t19 = t20"
       }
     },
     {
       "id": 21,
       "a": {
-        "constant": "43",
+        "constant": "213",
         "terms": [
           {
-            "coeff": "6",
+            "coeff": "40",
+            "var": 11
+          },
+          {
+            "coeff": "25",
             "var": 14
           },
           {
-            "coeff": "7",
+            "coeff": "43",
             "var": 17
           },
           {
-            "coeff": "11",
+            "coeff": "6",
             "var": 20
           },
           {
@@ -1050,18 +1054,22 @@
         ]
       },
       "b": {
-        "constant": "43",
+        "constant": "213",
         "terms": [
           {
-            "coeff": "6",
+            "coeff": "40",
+            "var": 11
+          },
+          {
+            "coeff": "25",
             "var": 14
           },
           {
-            "coeff": "7",
+            "coeff": "43",
             "var": 17
           },
           {
-            "coeff": "11",
+            "coeff": "6",
             "var": 20
           },
           {
@@ -1081,7 +1089,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(6*t11 + 7*t14 + 11*t17 + 2*t20 + 43) * (6*t11 + 7*t14 + 11*t17 + 2*t20 + 43) = t21"
+        "note": "(40*t8 + 25*t11 + 43*t14 + 6*t17 + 2*t20 + 213) * (40*t8 + 25*t11 + 43*t14 + 6*t17 + 2*t20 + 213) = t21"
       }
     },
     {
@@ -1121,18 +1129,22 @@
     {
       "id": 23,
       "a": {
-        "constant": "43",
+        "constant": "213",
         "terms": [
           {
-            "coeff": "6",
+            "coeff": "40",
+            "var": 11
+          },
+          {
+            "coeff": "25",
             "var": 14
           },
           {
-            "coeff": "7",
+            "coeff": "43",
             "var": 17
           },
           {
-            "coeff": "11",
+            "coeff": "6",
             "var": 20
           },
           {
@@ -1161,58 +1173,58 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(6*t11 + 7*t14 + 11*t17 + 2*t20 + 43) * t22 = t23"
+        "note": "(40*t8 + 25*t11 + 43*t14 + 6*t17 + 2*t20 + 213) * t22 = t23"
       }
     },
     {
       "id": 24,
       "a": {
-        "constant": "213",
+        "constant": "236",
         "terms": [
           {
-            "coeff": "40",
+            "coeff": "43",
+            "var": 11
+          },
+          {
+            "coeff": "26",
             "var": 14
           },
           {
-            "coeff": "25",
+            "coeff": "45",
             "var": 17
           },
           {
-            "coeff": "43",
+            "coeff": "11",
             "var": 20
           },
           {
-            "coeff": "6",
+            "coeff": "1",
             "var": 23
-          },
-          {
-            "coeff": "2",
-            "var": 26
           }
         ]
       },
       "b": {
-        "constant": "213",
+        "constant": "236",
         "terms": [
           {
-            "coeff": "40",
+            "coeff": "43",
+            "var": 11
+          },
+          {
+            "coeff": "26",
             "var": 14
           },
           {
-            "coeff": "25",
+            "coeff": "45",
             "var": 17
           },
           {
-            "coeff": "43",
+            "coeff": "11",
             "var": 20
           },
           {
-            "coeff": "6",
+            "coeff": "1",
             "var": 23
-          },
-          {
-            "coeff": "2",
-            "var": 26
           }
         ]
       },
@@ -1227,7 +1239,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(40*t11 + 25*t14 + 43*t17 + 6*t20 + 2*t23 + 213) * (40*t11 + 25*t14 + 43*t17 + 6*t20 + 2*t23 + 213) = t24"
+        "note": "(43*t8 + 26*t11 + 45*t14 + 11*t17 + t20 + 236) * (43*t8 + 26*t11 + 45*t14 + 11*t17 + t20 + 236) = t24"
       }
     },
     {
@@ -1267,27 +1279,27 @@
     {
       "id": 26,
       "a": {
-        "constant": "213",
+        "constant": "236",
         "terms": [
           {
-            "coeff": "40",
+            "coeff": "43",
+            "var": 11
+          },
+          {
+            "coeff": "26",
             "var": 14
           },
           {
-            "coeff": "25",
+            "coeff": "45",
             "var": 17
           },
           {
-            "coeff": "43",
+            "coeff": "11",
             "var": 20
           },
           {
-            "coeff": "6",
+            "coeff": "1",
             "var": 23
-          },
-          {
-            "coeff": "2",
-            "var": 26
           }
         ]
       },
@@ -1311,16 +1323,20 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(40*t11 + 25*t14 + 43*t17 + 6*t20 + 2*t23 + 213) * t25 = t26"
+        "note": "(43*t8 + 26*t11 + 45*t14 + 11*t17 + t20 + 236) * t25 = t26"
       }
     },
     {
       "id": 27,
       "a": {
-        "constant": "236",
+        "constant": "145",
         "terms": [
           {
-            "coeff": "43",
+            "coeff": "25",
+            "var": 11
+          },
+          {
+            "coeff": "15",
             "var": 14
           },
           {
@@ -1328,24 +1344,24 @@
             "var": 17
           },
           {
-            "coeff": "45",
+            "coeff": "7",
             "var": 20
           },
           {
-            "coeff": "11",
+            "coeff": "3",
             "var": 23
-          },
-          {
-            "coeff": "1",
-            "var": 26
           }
         ]
       },
       "b": {
-        "constant": "236",
+        "constant": "145",
         "terms": [
           {
-            "coeff": "43",
+            "coeff": "25",
+            "var": 11
+          },
+          {
+            "coeff": "15",
             "var": 14
           },
           {
@@ -1353,16 +1369,12 @@
             "var": 17
           },
           {
-            "coeff": "45",
+            "coeff": "7",
             "var": 20
           },
           {
-            "coeff": "11",
+            "coeff": "3",
             "var": 23
-          },
-          {
-            "coeff": "1",
-            "var": 26
           }
         ]
       },
@@ -1377,7 +1389,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(43*t11 + 26*t14 + 45*t17 + 11*t20 + t23 + 236) * (43*t11 + 26*t14 + 45*t17 + 11*t20 + t23 + 236) = t27"
+        "note": "(25*t8 + 15*t11 + 26*t14 + 7*t17 + 3*t20 + 145) * (25*t8 + 15*t11 + 26*t14 + 7*t17 + 3*t20 + 145) = t27"
       }
     },
     {
@@ -1417,10 +1429,14 @@
     {
       "id": 29,
       "a": {
-        "constant": "236",
+        "constant": "145",
         "terms": [
           {
-            "coeff": "43",
+            "coeff": "25",
+            "var": 11
+          },
+          {
+            "coeff": "15",
             "var": 14
           },
           {
@@ -1428,16 +1444,12 @@
             "var": 17
           },
           {
-            "coeff": "45",
+            "coeff": "7",
             "var": 20
           },
           {
-            "coeff": "11",
+            "coeff": "3",
             "var": 23
-          },
-          {
-            "coeff": "1",
-            "var": 26
           }
         ]
       },
@@ -1461,58 +1473,42 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(43*t11 + 26*t14 + 45*t17 + 11*t20 + t23 + 236) * t28 = t29"
+        "note": "(25*t8 + 15*t11 + 26*t14 + 7*t17 + 3*t20 + 145) * t28 = t29"
       }
     },
     {
       "id": 30,
       "a": {
-        "constant": "145",
+        "constant": "16",
         "terms": [
           {
-            "coeff": "25",
-            "var": 14
-          },
-          {
-            "coeff": "15",
-            "var": 17
-          },
-          {
-            "coeff": "26",
-            "var": 20
-          },
-          {
-            "coeff": "7",
-            "var": 23
+            "coeff": "2",
+            "var": 26
           },
           {
             "coeff": "3",
-            "var": 26
+            "var": 29
+          },
+          {
+            "coeff": "1",
+            "var": 32
           }
         ]
       },
       "b": {
-        "constant": "145",
+        "constant": "16",
         "terms": [
           {
-            "coeff": "25",
-            "var": 14
-          },
-          {
-            "coeff": "15",
-            "var": 17
-          },
-          {
-            "coeff": "26",
-            "var": 20
-          },
-          {
-            "coeff": "7",
-            "var": 23
+            "coeff": "2",
+            "var": 26
           },
           {
             "coeff": "3",
-            "var": 26
+            "var": 29
+          },
+          {
+            "coeff": "1",
+            "var": 32
           }
         ]
       },
@@ -1527,7 +1523,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(25*t11 + 15*t14 + 26*t17 + 7*t20 + 3*t23 + 145) * (25*t11 + 15*t14 + 26*t17 + 7*t20 + 3*t23 + 145) = t30"
+        "note": "(2*t23 + 3*t26 + t29 + 16) * (2*t23 + 3*t26 + t29 + 16) = t30"
       }
     },
     {
@@ -1567,27 +1563,19 @@
     {
       "id": 32,
       "a": {
-        "constant": "145",
+        "constant": "16",
         "terms": [
           {
-            "coeff": "25",
-            "var": 14
-          },
-          {
-            "coeff": "15",
-            "var": 17
-          },
-          {
-            "coeff": "26",
-            "var": 20
-          },
-          {
-            "coeff": "7",
-            "var": 23
+            "coeff": "2",
+            "var": 26
           },
           {
             "coeff": "3",
-            "var": 26
+            "var": 29
+          },
+          {
+            "coeff": "1",
+            "var": 32
           }
         ]
       },
@@ -1611,14 +1599,18 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(25*t11 + 15*t14 + 26*t17 + 7*t20 + 3*t23 + 145) * t31 = t32"
+        "note": "(2*t23 + 3*t26 + t29 + 16) * t31 = t32"
       }
     },
     {
       "id": 33,
       "a": {
-        "constant": "16",
+        "constant": "17",
         "terms": [
+          {
+            "coeff": "1",
+            "var": 26
+          },
           {
             "coeff": "2",
             "var": 29
@@ -1626,16 +1618,16 @@
           {
             "coeff": "3",
             "var": 32
-          },
-          {
-            "coeff": "1",
-            "var": 35
           }
         ]
       },
       "b": {
-        "constant": "16",
+        "constant": "17",
         "terms": [
+          {
+            "coeff": "1",
+            "var": 26
+          },
           {
             "coeff": "2",
             "var": 29
@@ -1643,10 +1635,6 @@
           {
             "coeff": "3",
             "var": 32
-          },
-          {
-            "coeff": "1",
-            "var": 35
           }
         ]
       },
@@ -1661,7 +1649,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(2*t26 + 3*t29 + t32 + 16) * (2*t26 + 3*t29 + t32 + 16) = t33"
+        "note": "(t23 + 2*t26 + 3*t29 + 17) * (t23 + 2*t26 + 3*t29 + 17) = t33"
       }
     },
     {
@@ -1701,8 +1689,12 @@
     {
       "id": 35,
       "a": {
-        "constant": "16",
+        "constant": "17",
         "terms": [
+          {
+            "coeff": "1",
+            "var": 26
+          },
           {
             "coeff": "2",
             "var": 29
@@ -1710,10 +1702,6 @@
           {
             "coeff": "3",
             "var": 32
-          },
-          {
-            "coeff": "1",
-            "var": 35
           }
         ]
       },
@@ -1737,14 +1725,18 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(2*t26 + 3*t29 + t32 + 16) * t34 = t35"
+        "note": "(t23 + 2*t26 + 3*t29 + 17) * t34 = t35"
       }
     },
     {
       "id": 36,
       "a": {
-        "constant": "17",
+        "constant": "18",
         "terms": [
+          {
+            "coeff": "3",
+            "var": 26
+          },
           {
             "coeff": "1",
             "var": 29
@@ -1752,16 +1744,16 @@
           {
             "coeff": "2",
             "var": 32
-          },
-          {
-            "coeff": "3",
-            "var": 35
           }
         ]
       },
       "b": {
-        "constant": "17",
+        "constant": "18",
         "terms": [
+          {
+            "coeff": "3",
+            "var": 26
+          },
           {
             "coeff": "1",
             "var": 29
@@ -1769,10 +1761,6 @@
           {
             "coeff": "2",
             "var": 32
-          },
-          {
-            "coeff": "3",
-            "var": 35
           }
         ]
       },
@@ -1787,7 +1775,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(t26 + 2*t29 + 3*t32 + 17) * (t26 + 2*t29 + 3*t32 + 17) = t36"
+        "note": "(3*t23 + t26 + 2*t29 + 18) * (3*t23 + t26 + 2*t29 + 18) = t36"
       }
     },
     {
@@ -1827,8 +1815,12 @@
     {
       "id": 38,
       "a": {
-        "constant": "17",
+        "constant": "18",
         "terms": [
+          {
+            "coeff": "3",
+            "var": 26
+          },
           {
             "coeff": "1",
             "var": 29
@@ -1836,10 +1828,6 @@
           {
             "coeff": "2",
             "var": 32
-          },
-          {
-            "coeff": "3",
-            "var": 35
           }
         ]
       },
@@ -1863,137 +1851,11 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(t26 + 2*t29 + 3*t32 + 17) * t37 = t38"
+        "note": "(3*t23 + t26 + 2*t29 + 18) * t37 = t38"
       }
     },
     {
       "id": 39,
-      "a": {
-        "constant": "18",
-        "terms": [
-          {
-            "coeff": "3",
-            "var": 29
-          },
-          {
-            "coeff": "1",
-            "var": 32
-          },
-          {
-            "coeff": "2",
-            "var": 35
-          }
-        ]
-      },
-      "b": {
-        "constant": "18",
-        "terms": [
-          {
-            "coeff": "3",
-            "var": 29
-          },
-          {
-            "coeff": "1",
-            "var": 32
-          },
-          {
-            "coeff": "2",
-            "var": 35
-          }
-        ]
-      },
-      "c": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 42
-          }
-        ]
-      },
-      "debug": {
-        "source_span": null,
-        "note": "(3*t26 + t29 + 2*t32 + 18) * (3*t26 + t29 + 2*t32 + 18) = t39"
-      }
-    },
-    {
-      "id": 40,
-      "a": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 42
-          }
-        ]
-      },
-      "b": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 42
-          }
-        ]
-      },
-      "c": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 43
-          }
-        ]
-      },
-      "debug": {
-        "source_span": null,
-        "note": "t39 * t39 = t40"
-      }
-    },
-    {
-      "id": 41,
-      "a": {
-        "constant": "18",
-        "terms": [
-          {
-            "coeff": "3",
-            "var": 29
-          },
-          {
-            "coeff": "1",
-            "var": 32
-          },
-          {
-            "coeff": "2",
-            "var": 35
-          }
-        ]
-      },
-      "b": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 43
-          }
-        ]
-      },
-      "c": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 44
-          }
-        ]
-      },
-      "debug": {
-        "source_span": null,
-        "note": "(3*t26 + t29 + 2*t32 + 18) * t40 = t41"
-      }
-    },
-    {
-      "id": 42,
       "a": {
         "constant": "0",
         "terms": [
@@ -2003,15 +1865,15 @@
           },
           {
             "coeff": "2",
-            "var": 38
+            "var": 35
           },
           {
             "coeff": "3",
-            "var": 41
+            "var": 38
           },
           {
             "coeff": "1",
-            "var": 44
+            "var": 41
           }
         ]
       },
@@ -2025,7 +1887,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(-out + 2*t35 + 3*t38 + t41) * 1 = 0"
+        "note": "(-out + 2*t32 + 3*t35 + t38) * 1 = 0"
       }
     }
   ]

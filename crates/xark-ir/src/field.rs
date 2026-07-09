@@ -94,6 +94,23 @@ impl FieldConst {
         FieldConst::from_bigint(self.big() * other.big())
     }
 
+    /// Multiply and reduce into the canonical `[0, modulus)` representative.
+    ///
+    /// Unlike [`mul`], which keeps the exact (unbounded) product, this bounds
+    /// the result's size — essential when repeatedly folding a constant through
+    /// a deep computation (e.g. an `x^5` S-box across 64 Poseidon rounds), where
+    /// the exact product would grow exponentially. The reduction matches the
+    /// backend's canonical form (`xark-prover`'s `fr_from_decimal`): `r % m`,
+    /// then `+= m` if negative. The represented field element is unchanged.
+    pub fn mul_mod(&self, other: &FieldConst, modulus: &FieldConst) -> FieldConst {
+        let m = modulus.big();
+        let mut r = (self.big() * other.big()) % &m;
+        if r.is_negative() {
+            r += &m;
+        }
+        FieldConst::from_bigint(r)
+    }
+
     pub fn neg(&self) -> FieldConst {
         FieldConst::from_bigint(-self.big())
     }

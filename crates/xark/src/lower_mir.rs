@@ -443,6 +443,12 @@ struct LoweringEnv<'tcx> {
     /// overriding the emit-site's natural kind (e.g. `assert_bool`'s `b*b=b` goes
     /// through `emit_mul` but should read as `Booleanity`, not `Mul`).
     kind_stack: Vec<ConstraintKind>,
+    /// The field modulus (from [`FieldSpec`]), when known. Used to reduce a
+    /// folded `constant * constant` product into `[0, p)` so folding a constant
+    /// through a deep computation (e.g. a Poseidon S-box chain) stays bounded
+    /// instead of growing exponentially. `None` for the `unknown` field, where
+    /// the const-fold is skipped and a gate is emitted as before.
+    modulus: Option<xark_ir::FieldConst>,
 }
 
 /// A value passed into or returned from an inlined function. `Fields` carries a
@@ -464,6 +470,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             root_span: None,
             profile: Vec::new(),
             kind_stack: Vec::new(),
+            modulus: None,
             frames: vec![Frame::default()],
             variables: Vec::new(),
             var_names: Vec::new(),
@@ -1358,6 +1365,19 @@ impl<'tcx> LoweringEnv<'tcx> {
 
     /// Emit `lhs * rhs = t` for a fresh internal `t`, returning `t`'s LC.
     fn emit_mul(&mut self, lhs: LinearCombination, rhs: LinearCombination) -> LinearCombination {
+        // constant * constant is a compile-time constant — fold it, no gate.
+        // The `KnownCall::Mul` path already folds constant operands, but direct
+        // callers (notably `emit_pow`'s `x^5` S-box) do not; folding here makes
+        // hashing over constant inputs — e.g. a Merkle `zeros[]` table computed
+        // in-circuit — cost zero gates instead of a full permutation each. The
+        // product is reduced mod p (hence the modulus requirement) so folding a
+        // constant through many rounds stays bounded rather than blowing up.
+        if lhs.is_constant() && rhs.is_constant() {
+            if let Some(m) = &self.modulus {
+                let folded = lhs.constant.mul_mod(&rhs.constant, m);
+                return LinearCombination::constant(folded.decimal);
+            }
+        }
         let lhs = self.materialize(lhs);
         let rhs = self.materialize(rhs);
         let out = self.alloc_internal();
@@ -1697,6 +1717,12 @@ pub fn lower<'tcx>(
     profile_enabled: bool,
 ) -> CompileResult<LowerOutput> {
     let mut env = LoweringEnv::new(tcx, registry, profile_enabled);
+    // Record the field modulus once, so `emit_mul` can reduce folded constants
+    // into `[0, p)` (see `LoweringEnv::modulus`).
+    env.modulus = field
+        .modulus_decimal
+        .as_deref()
+        .map(xark_ir::FieldConst::from);
 
     // Frame 0: circuit inputs become variables `0..num_inputs`, bound to params
     // `_1.._n`. Each parameter's type is flattened into its `Field` leaves — a

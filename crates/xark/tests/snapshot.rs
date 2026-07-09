@@ -211,9 +211,13 @@ fn poseidon_gadget() {
     check_snapshot("poseidon.r1cs.json", &json);
     check_snapshot("poseidon.graph.dot", &dot);
 
-    // R_F=4 full (9 gates each) + R_P=2 partial (3 gates each) = 42 S-box gates,
-    // plus 1 final `assert_eq` equality = 43 constraints.
-    assert_eq!(json.matches("\"source_span\"").count(), 43);
+    // `hash2(a, b)` seeds the capacity lane with a constant, so round 1's S-box
+    // on that lane is `const^5` — folded to a constant at compile time (const×
+    // const), not gates. So round 1 costs 6 S-box gates (the two variable lanes)
+    // and rounds 2..4 cost 9 each once the MDS has mixed variables into every
+    // lane: R_F=4 full → 6 + 3·9 = 33, plus R_P=2 partial (3 each) = 6, for 39
+    // S-box gates, plus 1 final `assert_eq` equality = 40 constraints.
+    assert_eq!(json.matches("\"source_span\"").count(), 40);
     let notes: Vec<&str> = json.lines().filter(|l| l.contains("\"note\"")).collect();
     let equalities = notes.iter().filter(|n| n.contains("* 1 = 0")).count();
     assert_eq!(
@@ -222,8 +226,8 @@ fn poseidon_gadget() {
     );
     assert_eq!(
         notes.len() - equalities,
-        42,
-        "expected exactly 42 S-box multiplication gates"
+        39,
+        "expected exactly 39 S-box multiplication gates (round-1 constant lane folds)"
     );
 }
 
