@@ -858,6 +858,34 @@ impl<'tcx> LoweringEnv<'tcx> {
         }
     }
 
+    /// Like [`operand_to_lc`], but also accepts a bare unsigned integer literal
+    /// where a `Field` is expected, coercing it to that field constant.
+    ///
+    /// `assert_eq`/`assert` take `Into<Field>` parameters, but they are
+    /// recognized *markers* — their `.into()` conversion lives in a body the
+    /// compiler never lowers, so `assert_eq(x, 0u64)` reaches the handler with a
+    /// raw `u64` operand. Coercing here makes the bare literal work exactly like
+    /// `Field::from(0u64)`. Kept distinct from [`operand_to_lc`] so its
+    /// fallthrough callers (e.g. `store_operand_slots`) never gain this coercion.
+    ///
+    /// [`operand_to_lc`]: Self::operand_to_lc
+    fn operand_to_field(&self, operand: &Operand<'tcx>) -> CompileResult<LinearCombination> {
+        self.operand_to_lc(operand).or_else(|e| {
+            match operand {
+                // Gated to `Uint` so a negative literal can't silently become
+                // its two's-complement residue (and `Field` has no `From<iN>`).
+                Operand::Constant(c)
+                    if matches!(c.const_.ty().kind(), rustc_middle::ty::TyKind::Uint(_)) =>
+                {
+                    self.const_to_u128(c)
+                        .map(|v| LinearCombination::constant(v.to_string()))
+                        .ok_or(e)
+                }
+                _ => Err(e),
+            }
+        })
+    }
+
     /// Read an integer constant, evaluating named/associated `const`s (e.g. a
     /// `const N: usize = 3` used as a loop bound), not just literals.
     fn const_to_u128(&self, c: &ConstOperand<'tcx>) -> Option<u128> {
@@ -2715,8 +2743,10 @@ fn lower_call<'tcx>(
             env.set_field(dest, LinearCombination::constant(field_const.decimal));
         }
         KnownCall::ConstrainEq => {
-            let lhs = env.operand_to_lc(arg(0)?)?;
-            let rhs = env.operand_to_lc(arg(1)?)?;
+            // `assert_eq`'s params are `Into<Field>`, so either side may be a
+            // bare unsigned integer literal (`assert_eq(x, 0u64)`).
+            let lhs = env.operand_to_field(arg(0)?)?;
+            let rhs = env.operand_to_field(arg(1)?)?;
             env.emit_assert_eq(lhs, rhs);
         }
         KnownCall::Advice => {
