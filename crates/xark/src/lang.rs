@@ -755,6 +755,23 @@ pub fn assert(cond: bool) {
     assert_eq(cond, true);
 }
 
+/// Branchless selection — `if cond { if_true } else { if_false }` as a circuit
+/// value.
+///
+/// A proof has no control flow, so a witness-dependent `if` cannot be lowered;
+/// this is how you choose between two `Field`s on a *computed* condition:
+///
+/// ```ignore
+/// // instead of `if a < b { x } else { y }` (rejected — witness-dependent):
+/// let m = select(a.lt::<32>(b), x, y);
+/// ```
+///
+/// `cond` is any `{0,1}` wire — a comparison, `.is_zero()`, a boolean gadget.
+/// Costs a single multiplication (`if_false + cond·(if_true − if_false)`).
+pub fn select(cond: bool, if_true: Field, if_false: Field) -> Field {
+    if_false + Field::from(cond) * (if_true - if_false)
+}
+
 /// Emit a circuit constraint `a < b` (less than).
 pub fn assert_lt<A: PartialOrd<B>, B>(a: A, b: B) {
     assert_eq(a < b, true);

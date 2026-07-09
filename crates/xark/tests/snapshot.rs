@@ -3161,3 +3161,43 @@ fn division_by_constant_folds() {
     );
     assert!(!z.status_success, "division by a zero constant must be rejected");
 }
+
+/// `select(cond, a, b)` is the branchless replacement for a witness-dependent
+/// `if` — the prelude primitive authors reach for when the compiler rejects
+/// data-dependent control flow. It picks `a` when `cond`, else `b`, and the
+/// rejection diagnostic points to it.
+#[test]
+fn select_is_a_branchless_mux() {
+    // `max(a, b)` — the canonical witness-`if` that `select` expresses.
+    let c = xark_test_harness::compile_source(
+        "select_max",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+             assert_eq(select(a.gt::<8>(b), a, b), out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(c.status_success, "should compile: {}", c.stderr);
+    let prog = c.program();
+    assert!(solves(&prog, &[("a", "5"), ("b", "3"), ("out", "5")]), "max(5,3) == 5");
+    assert!(solves(&prog, &[("a", "3"), ("b", "5"), ("out", "5")]), "max(3,5) == 5");
+    assert!(!solves(&prog, &[("a", "5"), ("b", "3"), ("out", "3")]), "max(5,3) != 3");
+
+    // The witness-`if` rejection points the author to `select`.
+    let bad = xark_test_harness::compile_source(
+        "witness_if",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+             let mut y = x;\n\
+             if x == out { y = out; }\n\
+             assert_eq(y, out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(!bad.status_success, "witness-dependent `if` must be rejected");
+    assert!(
+        bad.stderr.contains("select("),
+        "the diagnostic should point to `select`, got: {}",
+        bad.stderr
+    );
+}

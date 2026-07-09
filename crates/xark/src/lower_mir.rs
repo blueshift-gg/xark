@@ -1882,8 +1882,7 @@ fn fallback_witness_control_flow_error(term_span: rustc_span::Span) -> CompileEr
     CompileError::new("witness-dependent control flow is not supported")
         .with_note("branch conditions must be compile-time constants (e.g. loop bounds)")
         .with_help(
-            "for a data-dependent choice, assert a boolean and \
-             mux with `Field::from(cond) * a + Field::from(!cond) * b`; \
+            "for a data-dependent choice, use `select(cond, if_true, if_false)`; \
              loops must have constant bounds",
         )
         .or_span(term_span)
@@ -2161,7 +2160,10 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                             .collect();
                         if common.is_empty() {
                             return Err(CompileError::new("`if`/`else` arms share no assignments")
-                                .with_help("both arms must assign the same bindings"));
+                                .with_help(
+                                    "both arms must assign the same bindings; for a \
+                                     data-dependent value use `select(cond, if_true, if_false)`",
+                                ));
                         }
                         for key in &common {
                             let then_lc = &then_map[key];
