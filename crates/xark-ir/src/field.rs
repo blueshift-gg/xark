@@ -124,6 +124,21 @@ impl FieldConst {
         FieldConst::from_bigint(r)
     }
 
+    /// Modular inverse `self^{-1} mod modulus` for a prime `modulus` (Fermat:
+    /// `self^{modulus-2}`), mapping a non-invertible `0` to `0` — the same
+    /// convention the witness solver's inverse hint uses. Lets the compiler fold
+    /// `x.inv()` / `x / c` when the divisor is a compile-time constant.
+    pub fn inverse_mod(&self, modulus: &FieldConst) -> FieldConst {
+        use num_bigint::BigUint;
+        let m = modulus.big().to_biguint().unwrap_or_default();
+        if m < BigUint::from(2u32) {
+            return FieldConst::zero();
+        }
+        // `0^(m-2) = 0`, so a zero base yields `0` (non-invertible) automatically.
+        let base = self.reduce(modulus).big().to_biguint().unwrap_or_default();
+        FieldConst::from_bigint(base.modpow(&(&m - BigUint::from(2u32)), &m).into())
+    }
+
     pub fn neg(&self) -> FieldConst {
         FieldConst::from_bigint(-self.big())
     }

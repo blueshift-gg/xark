@@ -3119,3 +3119,45 @@ fn const_assert_eq_decided_at_compile_time() {
         bad.stderr
     );
 }
+
+/// Division by a compile-time constant uses the constant's known inverse:
+/// `x / c == x * c^{-1}` folds to a scale (no gate) pinned by one output
+/// equality — no advice and no inverse constraint. Dividing by a zero constant
+/// is a compile error.
+#[test]
+fn division_by_constant_folds() {
+    let c = xark_test_harness::compile_source(
+        "div_const_fold",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+             assert_eq(x / Field::from(7u64), out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(c.status_success, "should compile: {}", c.stderr);
+    let prog = c.program();
+    let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
+    assert_eq!(
+        json.matches("\"source_span\"").count(),
+        1,
+        "only the output binding remains; the inverse folds"
+    );
+    assert!(
+        prog.witness_gen.is_empty(),
+        "the constant inverse is folded, not a witness-gen hint"
+    );
+    // Sound: 21 / 7 == 3 solves; 21 / 7 == 4 does not.
+    assert!(solves(&prog, &[("x", "21"), ("out", "3")]), "21/7 == 3");
+    assert!(!solves(&prog, &[("x", "21"), ("out", "4")]), "21/7 != 4");
+
+    // Division by a zero constant is rejected at compile time.
+    let z = xark_test_harness::compile_source(
+        "div_by_zero_const",
+        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+         pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+             assert_eq(x / Field::from(0u64), out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(!z.status_success, "division by a zero constant must be rejected");
+}

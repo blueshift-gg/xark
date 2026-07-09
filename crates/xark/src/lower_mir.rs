@@ -2775,17 +2775,41 @@ fn lower_call<'tcx>(
         }
         KnownCall::HintInverse => {
             let x = env.operand_to_lc(arg(0)?)?;
-            let v = env.alloc_advice();
-            env.witness_gen
-                .push(Some(WitnessGen::Inverse { out: v, input: x }));
-            env.set_field(dest, LinearCombination::var(v));
+            // A constant's inverse is compile-time known — fold it (no advice,
+            // no witness-gen). The caller's `x·w == 1` pin then folds too (a
+            // const `assert_eq`), so `x / c` / `x.inv()` for a constant `c`
+            // costs nothing; `c == 0` becomes a compile error (division by zero).
+            let folded = x
+                .is_constant()
+                .then(|| env.modulus.as_ref().map(|m| x.constant.inverse_mod(m)))
+                .flatten();
+            match folded {
+                Some(inv) => env.set_field(dest, LinearCombination::constant(inv.decimal)),
+                None => {
+                    let v = env.alloc_advice();
+                    env.witness_gen
+                        .push(Some(WitnessGen::Inverse { out: v, input: x }));
+                    env.set_field(dest, LinearCombination::var(v));
+                }
+            }
         }
         KnownCall::HintInverseOrZero => {
             let x = env.operand_to_lc(arg(0)?)?;
-            let v = env.alloc_advice();
-            env.witness_gen
-                .push(Some(WitnessGen::InverseOrZero { out: v, input: x }));
-            env.set_field(dest, LinearCombination::var(v));
+            // Same constant fold (`inverse_mod` maps `0 → 0`, matching the
+            // inverse-or-zero convention), so `is_zero(c)` of a constant folds.
+            let folded = x
+                .is_constant()
+                .then(|| env.modulus.as_ref().map(|m| x.constant.inverse_mod(m)))
+                .flatten();
+            match folded {
+                Some(inv) => env.set_field(dest, LinearCombination::constant(inv.decimal)),
+                None => {
+                    let v = env.alloc_advice();
+                    env.witness_gen
+                        .push(Some(WitnessGen::InverseOrZero { out: v, input: x }));
+                    env.set_field(dest, LinearCombination::var(v));
+                }
+            }
         }
         KnownCall::HintBit => {
             let x = env.operand_to_lc(arg(0)?)?;
