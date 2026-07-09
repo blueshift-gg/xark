@@ -32,7 +32,9 @@
 //! ("foreign field") arithmetic (`xark-bignum`) and the gadgets (`xark-poseidon`,
 //! `xark-keccak`, …) — are *separate crates* you add only when you need them.
 
-#![no_std]
+// `no_std` for circuit authoring (the default). The `native` feature runs
+// gadgets on the host over arkworks, which needs `std`.
+#![cfg_attr(not(feature = "native"), no_std)]
 
 /// The `xark` language markers (`Field`, `Private`, `Public`, `assert_eq`, the
 /// `Field` methods and operator impls, and the recognized intrinsics). Formerly

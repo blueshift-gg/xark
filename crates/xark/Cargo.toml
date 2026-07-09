@@ -17,6 +17,14 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [features]
+# `native` gives the arithmetic `Field` operators real bodies (over arkworks
+# BN254 `Fr`), so a circuit *gadget* (`xark-poseidon2::hash2`, …) runs as
+# ordinary Rust on the host — a wallet computes the exact hash the circuit does,
+# with no hand-mirrored copy. Default-OFF: the circuit-compilation path (where
+# these ops are recognized markers) is byte-identical without it. Enabling it
+# pulls `std` + arkworks and is for host execution, not circuit compilation.
+native = ["dep:ark-bn254", "dep:ark-ff"]
+
 # The CLI/compiler pulls the rustc-driver support crates; kept off the default
 # path so depending on `xark` as a library stays lightweight and no_std.
 cli = [
@@ -52,6 +60,7 @@ hex = { version = "0.4", optional = true }
 rand = { version = "0.8", optional = true }
 rand_chacha = { version = "0.3", optional = true }
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"], optional = true }
+ark-ff = { version = "0.6", default-features = false, optional = true }
 ark-serialize = { version = "0.6", default-features = false, optional = true }
 
 

@@ -1540,6 +1540,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "ark-bn254",
+ "ark-ff",
  "ark-serialize",
  "clap",
  "clap_complete",

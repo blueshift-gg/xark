@@ -43,6 +43,13 @@
 
 // The intrinsic stubs below are recognized by the compiler by name and never
 // run; their `loop {}` bodies are the intended marker shape.
+//
+// Under the `native` feature the *arithmetic* intrinsics (`add`/`sub`/`mul`/
+// `neg`/`pow`) additionally carry real host bodies, so a pure-arithmetic gadget
+// (`xark-poseidon2`, `xark-mimc`) runs off-circuit and computes the same value
+// the circuit does. The remaining intrinsics (comparisons, hints, bignum) keep
+// their marker bodies — they are unreachable from those gadgets — so native
+// currently targets arithmetic gadgets only.
 #![allow(clippy::empty_loop)]
 
 use crate::lang::Field;
@@ -55,18 +62,31 @@ use crate::lang::Field;
 /// combination `a + b` with **no constraint**.
 ///
 /// [`KnownCall::Add`]: crate::lower_mir::KnownCall::Add
+#[cfg(not(feature = "native"))]
 #[inline(never)]
 pub fn __xark_add(_lhs: Field, _rhs: Field) -> Field {
     loop {}
+}
+/// Native host arithmetic (see the `native` feature). The compiler never runs
+/// these bodies; they exist so the *same gadget source* computes real values
+/// off-circuit (a wallet calling `xark_poseidon2::hash2`).
+#[cfg(feature = "native")]
+pub fn __xark_add(lhs: Field, rhs: Field) -> Field {
+    Field::from_fr(lhs.to_fr() + rhs.to_fr())
 }
 
 /// Field subtraction `a - b`. Maps to [`KnownCall::Sub`]; lowers to the linear
 /// combination `a - b` with **no constraint**.
 ///
 /// [`KnownCall::Sub`]: crate::lower_mir::KnownCall::Sub
+#[cfg(not(feature = "native"))]
 #[inline(never)]
 pub fn __xark_sub(_lhs: Field, _rhs: Field) -> Field {
     loop {}
+}
+#[cfg(feature = "native")]
+pub fn __xark_sub(lhs: Field, rhs: Field) -> Field {
+    Field::from_fr(lhs.to_fr() - rhs.to_fr())
 }
 
 /// Field multiplication `a · b`. Maps to [`KnownCall::Mul`]. Emits **one** R1CS
@@ -75,18 +95,28 @@ pub fn __xark_sub(_lhs: Field, _rhs: Field) -> Field {
 /// coefficients instead (no constraint, no fresh variable).
 ///
 /// [`KnownCall::Mul`]: crate::lower_mir::KnownCall::Mul
+#[cfg(not(feature = "native"))]
 #[inline(never)]
 pub fn __xark_mul(_lhs: Field, _rhs: Field) -> Field {
     loop {}
+}
+#[cfg(feature = "native")]
+pub fn __xark_mul(lhs: Field, rhs: Field) -> Field {
+    Field::from_fr(lhs.to_fr() * rhs.to_fr())
 }
 
 /// Field negation `-a`. Maps to [`KnownCall::Neg`]; lowers to the linear
 /// combination `-a` with **no constraint**.
 ///
 /// [`KnownCall::Neg`]: crate::lower_mir::KnownCall::Neg
+#[cfg(not(feature = "native"))]
 #[inline(never)]
 pub fn __xark_neg(_value: Field) -> Field {
     loop {}
+}
+#[cfg(feature = "native")]
+pub fn __xark_neg(value: Field) -> Field {
+    Field::from_fr(-value.to_fr())
 }
 
 /// Exponentiation `base^n` for a compile-time `n`. Maps to
@@ -96,9 +126,15 @@ pub fn __xark_neg(_value: Field) -> Field {
 /// operator (`BitXor<u64>`) on `Field`.
 ///
 /// [`KnownCall::PowU64`]: crate::lower_mir::KnownCall::PowU64
+#[cfg(not(feature = "native"))]
 #[inline(never)]
 pub fn __xark_pow_u64(_base: Field, _exponent: u64) -> Field {
     loop {}
+}
+#[cfg(feature = "native")]
+pub fn __xark_pow_u64(base: Field, exponent: u64) -> Field {
+    use ark_ff::Field as _;
+    Field::from_fr(base.to_fr().pow([exponent]))
 }
 
 /// Boolean XOR for `a, b ∈ {0, 1}`. Maps to [`KnownCall::Xor`]; lowers to a

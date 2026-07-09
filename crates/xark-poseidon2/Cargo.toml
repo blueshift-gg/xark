@@ -9,6 +9,12 @@ repository.workspace = true
 name = "xark_poseidon2"
 path = "src/lib.rs"
 
+[features]
+# Run this gadget as ordinary Rust on the host (a wallet computing the same
+# Poseidon2 the circuit does). Forwards to `xark/native`. Circuit compilation
+# needs neither.
+native = ["xark/native"]
+
 [dependencies]
 xark = { path = "../xark", default-features = false }
 

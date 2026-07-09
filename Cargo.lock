@@ -4443,6 +4443,8 @@ dependencies = [
 name = "xark"
 version = "0.0.1"
 dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "xark-macros",
 ]
 

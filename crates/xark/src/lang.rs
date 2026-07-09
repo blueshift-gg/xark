@@ -132,6 +132,54 @@ impl Field {
         __xark_advice()
     }
 
+    /// Interpret the stored limbs as a BN254 field element. Native-only: the
+    /// bridge between the opaque circuit `Field` and real arithmetic.
+    #[cfg(feature = "native")]
+    pub(crate) fn to_fr(self) -> ark_bn254::Fr {
+        use ark_ff::PrimeField;
+        let mut bytes = [0u8; 32];
+        let mut i = 0;
+        while i < 4 {
+            bytes[i * 8..i * 8 + 8].copy_from_slice(&self._limbs[i].to_le_bytes());
+            i += 1;
+        }
+        ark_bn254::Fr::from_le_bytes_mod_order(&bytes)
+    }
+
+    /// Store a BN254 field element's canonical representative in the limbs.
+    #[cfg(feature = "native")]
+    pub(crate) fn from_fr(value: ark_bn254::Fr) -> Field {
+        use ark_ff::{BigInteger, PrimeField};
+        let bytes = value.into_bigint().to_bytes_le();
+        let mut limbs = [0u64; 4];
+        for (i, chunk) in bytes.chunks(8).take(4).enumerate() {
+            let mut b = [0u8; 8];
+            b[..chunk.len()].copy_from_slice(chunk);
+            limbs[i] = u64::from_le_bytes(b);
+        }
+        Field { _limbs: limbs }
+    }
+
+    /// The field element's value as a canonical decimal string (native-only).
+    /// Lets host code read a computed `Field` — e.g. a commitment from
+    /// `xark_poseidon2::hash2` — to feed `xark prove --input` or store on-chain.
+    #[cfg(feature = "native")]
+    pub fn to_decimal(self) -> String {
+        use ark_ff::PrimeField;
+        self.to_fr().into_bigint().to_string()
+    }
+
+    /// The field element as 32 canonical little-endian bytes — the on-chain /
+    /// `xark`-artifact wire format (native-only).
+    #[cfg(feature = "native")]
+    pub fn to_bytes_le(self) -> [u8; 32] {
+        use ark_ff::{BigInteger, PrimeField};
+        let mut out = [0u8; 32];
+        let bytes = self.to_fr().into_bigint().to_bytes_le();
+        out[..bytes.len()].copy_from_slice(&bytes);
+        out
+    }
+
     /// Advice hint: `1 / x`. Allocates a private witness and records that its
     /// value is the modular inverse of `x`. Pin it with `x * w == 1`.
     #[inline(never)]
