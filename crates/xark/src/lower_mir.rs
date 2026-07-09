@@ -41,14 +41,6 @@ fn canonical_lc_key(lc: &LinearCombination) -> CanonicalLcKey {
     )
 }
 
-/// Is this call `Field::to_bits::<N>`? (Not `from_bits`.) The bit-cache hooks
-/// this specific decomposition method so a value decomposed to the same width
-/// more than once shares one decomposition (see `docs/integer-ops.md`).
-fn is_to_bits_call(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
-    let s = tcx.def_path_str(def_id);
-    s.ends_with("::to_bits") && s.contains("Field")
-}
-
 /// Recognized circuit calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KnownCall {
@@ -89,12 +81,12 @@ pub enum KnownCall {
     RangeInclusiveNew,
 }
 
-/// Classify a called function by its fully-qualified path.
 /// Resolve a (possibly trait-method) call to its concrete monomorphized impl
-/// `DefId`. The MIR references trait methods like `<Field as From<u8>>::from`
+/// `Instance`. The MIR references trait methods like `<Field as From<u8>>::from`
 /// as the generic `core::convert::From::from` (no MIR); resolving with the
-/// call's generic args points them at the impl (which has MIR and whose def
-/// path still ends in the recognized suffix). Falls back to the original id.
+/// call's generic args points them at the impl, which has MIR to inline. Falls
+/// back to the original id. Used for inlining and MIR-availability checks — call
+/// *recognition* keys on the pre-resolution id (see [`CallRegistry::classify`]).
 pub(crate) fn resolve_call_instance<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
@@ -116,110 +108,187 @@ pub(crate) fn resolve_call_def_id<'tcx>(
         .unwrap_or(def_id)
 }
 
-pub(crate) fn classify_call(
-    tcx: TyCtxt<'_>,
-    def_id: rustc_hir::def_id::DefId,
-) -> Option<KnownCall> {
-    let s = tcx.def_path_str(def_id);
-    if let Some(pos) = s.rfind("::assert_eq") {
-        let rest = &s[pos + "::assert_eq".len()..];
-        if rest.is_empty() || rest.starts_with("::<") {
-            return Some(KnownCall::ConstrainEq);
+/// A recognized-call registry: an exact `DefId → KnownCall` map, resolved once
+/// per compile (in `after_analysis`, before validation/lowering) by
+/// [`build_call_registry`]. It replaces the old fragile def-path *string*
+/// matching (`s.contains("__xark_add")`, `s.ends_with("::add")`, …) with `DefId`
+/// equality, so a same-named method on another type can never be misclassified.
+pub(crate) struct CallRegistry {
+    // `DefId` is deliberately not `Ord`/`Hash`-stable across compiles, so a
+    // (small, ≈two-dozen-entry) association list keyed by `Eq` is both correct
+    // and deterministic. Recognition only ever does point lookups, never
+    // iteration, so linear scan is fine and order is irrelevant.
+    map: Vec<(DefId, KnownCall)>,
+    /// `Field::to_bits` (a `Field` inherent method with no [`KnownCall`]) — the
+    /// bit-cache hooks this specific decomposition method (see [`Self::is_to_bits`]).
+    to_bits: Option<DefId>,
+    /// The `core::ops::Range` *struct* type (the exclusive `a..b` range), used to
+    /// recognize its aggregate literal (see [`Self::is_exclusive_range_ty`]).
+    range_ty: Option<DefId>,
+}
+
+impl CallRegistry {
+    /// Classify a called function by its **pre-resolution** `DefId` — the one
+    /// from `Operand::const_fn_def`, *before* `resolve_call_instance`.
+    ///
+    /// Two invariants make the pre-resolution id the right key:
+    ///  * The `xark` intrinsics/constants/`assert_eq` are free functions or
+    ///    inherent methods, so resolution is the identity (pre == post).
+    ///  * The `for`-desugaring calls appear in MIR as their trait-method
+    ///    (`IntoIterator::into_iter` / `Iterator::next`) `DefId`, which is the
+    ///    lang-item id we register; resolving them first would point at a
+    ///    concrete impl and miss.
+    ///
+    /// The `Field` operator/hint *methods* (`<Field as Add>::add`,
+    /// `Field::hint_bit`, `PartialEq::eq`, …) are deliberately absent: they
+    /// return `None` here and fall through to inlining, and every one of their
+    /// bodies calls a registered `__xark_*` intrinsic, so the effect is reached
+    /// there instead (all their MIR is encoded via `-Zalways-encode-mir`).
+    pub(crate) fn classify(&self, def_id: DefId) -> Option<KnownCall> {
+        self.map
+            .iter()
+            .find(|(d, _)| *d == def_id)
+            .map(|(_, kc)| *kc)
+    }
+
+    fn insert(&mut self, def_id: DefId, kc: KnownCall) {
+        self.map.push((def_id, kc));
+    }
+
+    /// Is this call `Field::to_bits::<N>`? (Not `from_bits`.) The bit-cache hooks
+    /// this specific decomposition method so a value decomposed to the same width
+    /// more than once shares one decomposition (see `docs/integer-ops.md`). Keyed
+    /// on the same pre-resolution `DefId` as `classify`; for this generic inherent
+    /// method resolution is the identity, so the resolved call id matches too.
+    pub(crate) fn is_to_bits(&self, def_id: DefId) -> bool {
+        self.to_bits == Some(def_id)
+    }
+
+    /// Is `did` the exclusive `core::ops::Range` struct? (`RangeInclusive`/
+    /// `RangeFrom`/… are distinct types with distinct `DefId`s.) Used to spot the
+    /// `Range { start, end }` aggregate literal of a `for a..b` loop.
+    pub(crate) fn is_exclusive_range_ty(&self, did: DefId) -> bool {
+        self.range_ty == Some(did)
+    }
+}
+
+/// Map a bare `__xark_*` intrinsic name (a function directly in `xark`'s
+/// `intrinsics` module) to its [`KnownCall`]. The sole remaining place the ABI
+/// is keyed by name — but against a *known module's* enumerated children, so a
+/// typo renames the intrinsic on both sides at once (the stub is unused
+/// otherwise). Every entry corresponds to exactly one stub in `intrinsics.rs`.
+fn intrinsic_known_call(name: &str) -> Option<KnownCall> {
+    Some(match name {
+        "__xark_add" => KnownCall::Add,
+        "__xark_sub" => KnownCall::Sub,
+        "__xark_mul" => KnownCall::Mul,
+        "__xark_neg" => KnownCall::Neg,
+        "__xark_pow_u64" => KnownCall::PowU64,
+        "__xark_xor" => KnownCall::Xor,
+        "__xark_or" => KnownCall::Or,
+        "__xark_eq" => KnownCall::Eq,
+        "__xark_ult" => KnownCall::ULt,
+        "__xark_bool_to_field" => KnownCall::BoolToField,
+        "__xark_advice" => KnownCall::Advice,
+        "__xark_hint_inverse" => KnownCall::HintInverse,
+        "__xark_hint_inverse_or_zero" => KnownCall::HintInverseOrZero,
+        "__xark_hint_bit" => KnownCall::HintBit,
+        "__xark_hint_div_rem" => KnownCall::HintDivRem,
+        "__xark_hint_mulmod_divmod" => KnownCall::HintMulModDivMod,
+        "__xark_hint_mod_inverse" => KnownCall::HintModInverse,
+        "__xark_hint_sub2" => KnownCall::HintSub2,
+        _ => return None,
+    })
+}
+
+/// Resolve every recognized call to its concrete `DefId` **once** per compile.
+///
+/// Sources:
+///  * the `__xark_*` stubs in `xark::intrinsics` (enumerated, mapped by name);
+///  * the `Field` constant constructors `constant` / `constant_u64` /
+///    `constant_u128` (inherent methods — no `__xark_*` intrinsic) and the free
+///    `assert_eq` function, all in the `xark` crate;
+///  * the three `for`-loop lang items `into_iter` / `next` / `RangeInclusive::new`.
+///
+/// The `xark` crate is a dependency of the circuit being compiled; we find it in
+/// `tcx.crates(())` and walk its `module_children` def tree.
+pub(crate) fn build_call_registry(tcx: TyCtxt<'_>) -> CallRegistry {
+    use rustc_hir::def::{DefKind, Res};
+
+    let mut reg = CallRegistry {
+        map: Vec::new(),
+        to_bits: None,
+        range_ty: None,
+    };
+
+    if let Some(cnum) = tcx
+        .crates(())
+        .iter()
+        .copied()
+        .find(|&cnum| tcx.crate_name(cnum).as_str() == "xark")
+    {
+        let root = cnum.as_def_id();
+        for child in tcx.module_children(root) {
+            let name = child.ident.name;
+            match child.res {
+                // The free `assert_eq` function (re-exported at the crate root).
+                Res::Def(DefKind::Fn, def_id) if name.as_str() == "assert_eq" => {
+                    reg.insert(def_id, KnownCall::ConstrainEq);
+                }
+                // The `Field` type: register its constant constructors (inherent
+                // methods with no `__xark_*` intrinsic backing).
+                Res::Def(DefKind::Struct, field_did) if name.as_str() == "Field" => {
+                    for &impl_did in tcx.inherent_impls(field_did) {
+                        for item in tcx.associated_items(impl_did).in_definition_order() {
+                            // `to_bits` is tracked separately (bit-cache hook, not
+                            // a `KnownCall`); the constants map to `KnownCall`s.
+                            if item.name().as_str() == "to_bits" {
+                                reg.to_bits = Some(item.def_id);
+                                continue;
+                            }
+                            let kc = match item.name().as_str() {
+                                "constant" => KnownCall::FieldConstantDecimal,
+                                "constant_u64" => KnownCall::FieldConstantU64,
+                                "constant_u128" => KnownCall::FieldConstantU128,
+                                _ => continue,
+                            };
+                            reg.insert(item.def_id, kc);
+                        }
+                    }
+                }
+                // The `intrinsics` module: map each `__xark_*` stub by name.
+                Res::Def(DefKind::Mod, mod_did) if name.as_str() == "intrinsics" => {
+                    for item in tcx.module_children(mod_did) {
+                        if let Res::Def(DefKind::Fn, def_id) = item.res {
+                            if let Some(kc) = intrinsic_known_call(item.ident.name.as_str()) {
+                                reg.insert(def_id, kc);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
-    // Field-method arms are gated on `Field` in the path, so a same-named method
-    // on another type isn't misclassified; `__xark_*` names stay unconditional.
-    if s.contains("__xark_pow_u64") || (s.contains("Field") && s.ends_with("::bitxor")) {
-        Some(KnownCall::PowU64)
-    } else if s.contains("__xark_add")
-        || (s.contains("Field") && s.ends_with("::add") && binop_rhs_is_field(tcx, def_id))
-    {
-        Some(KnownCall::Add)
-    } else if s.contains("__xark_sub")
-        || (s.contains("Field") && s.ends_with("::sub") && binop_rhs_is_field(tcx, def_id))
-    {
-        Some(KnownCall::Sub)
-    } else if s.contains("__xark_mul")
-        || (s.contains("Field") && s.ends_with("::mul") && binop_rhs_is_field(tcx, def_id))
-    {
-        Some(KnownCall::Mul)
-    } else if s.contains("__xark_neg") || (s.contains("Field") && s.ends_with("::neg")) {
-        Some(KnownCall::Neg)
-    } else if s.contains("constant_u128") {
-        Some(KnownCall::FieldConstantU128)
-    } else if s.contains("constant_u64") {
-        Some(KnownCall::FieldConstantU64)
-    } else if s.contains("Field") && s.ends_with("::constant") {
-        Some(KnownCall::FieldConstantDecimal)
-    } else if s.contains("__xark_hint_inverse_or_zero")
-        || (s.contains("Field") && s.ends_with("::hint_inverse_or_zero"))
-    {
-        // must precede the `hint_inverse` arm (prefix collision)
-        Some(KnownCall::HintInverseOrZero)
-    } else if s.contains("__xark_hint_inverse")
-        || (s.contains("Field") && s.ends_with("::hint_inverse"))
-    {
-        Some(KnownCall::HintInverse)
-    } else if s.contains("__xark_hint_bit") || (s.contains("Field") && s.ends_with("::hint_bit")) {
-        Some(KnownCall::HintBit)
-    } else if s.contains("__xark_hint_div_rem")
-        || (s.contains("Field") && s.ends_with("::hint_div_rem"))
-    {
-        Some(KnownCall::HintDivRem)
-    } else if s.contains("__xark_hint_mulmod_divmod")
-        || (s.contains("Field") && s.ends_with("::hint_mulmod_divmod"))
-    {
-        Some(KnownCall::HintMulModDivMod)
-    } else if s.contains("__xark_hint_sub2") || (s.contains("Field") && s.ends_with("::hint_sub2"))
-    {
-        Some(KnownCall::HintSub2)
-    } else if s.contains("__xark_hint_mod_inverse")
-        || (s.contains("Field") && s.ends_with("::hint_mod_inverse"))
-    {
-        Some(KnownCall::HintModInverse)
-    } else if s.contains("__xark_xor") || (s.contains("Field") && s.ends_with("::xor")) {
-        Some(KnownCall::Xor)
-    } else if s.contains("__xark_or") || (s.contains("Field") && s.ends_with("::or")) {
-        Some(KnownCall::Or)
-    } else if s.contains("__xark_eq") {
-        Some(KnownCall::Eq)
-    } else if s.contains("__xark_ult") {
-        Some(KnownCall::ULt)
-    } else if s.contains("__xark_bool_to_field") {
-        Some(KnownCall::BoolToField)
-    } else if s.contains("__xark_advice") || (s.contains("Field") && s.ends_with("::advice")) {
-        Some(KnownCall::Advice)
-    // `for` desugaring. `into_iter` is the blanket `<I as IntoIterator>::into_iter`
-    // (identity); `next` on a `Range`/`RangeInclusive`; `RangeInclusive::new`. We
-    // *model* these (evaluate their effect on a compile-time range) rather than
-    // inline them, so the surrounding `discriminant`/`switchInt` fold to constants.
-    } else if s.ends_with("::into_iter") {
-        Some(KnownCall::IntoIter)
-    } else if s.ends_with("::next") && s.contains("Iterator") {
-        Some(KnownCall::IterNext)
-    } else if s.contains("RangeInclusive") && s.ends_with("::new") {
-        Some(KnownCall::RangeInclusiveNew)
-    } else {
-        None
+
+    // `for`-loop desugaring lang items. These appear in MIR as their trait /
+    // inherent method `DefId` (see `CallRegistry::classify`), which is exactly
+    // what the lang-item table records.
+    let li = tcx.lang_items();
+    if let Some(did) = li.into_iter_fn() {
+        reg.insert(did, KnownCall::IntoIter);
     }
-}
+    if let Some(did) = li.next_fn() {
+        reg.insert(did, KnownCall::IterNext);
+    }
+    if let Some(did) = li.range_inclusive_new_method() {
+        reg.insert(did, KnownCall::RangeInclusiveNew);
+    }
+    // The exclusive `core::ops::Range` struct type (`#[lang = "Range"]`); its
+    // aggregate literal marks a `for a..b` loop.
+    reg.range_ty = li.range_struct();
 
-/// True if `def_id`'s second parameter is `Field`. Distinguishes the
-/// `Field`-`Field` operator methods (`<Field as Mul>::mul`, which we intercept as
-/// the field intrinsic) from the native-int convenience operators
-/// (`<Field as Mul<u64>>::mul` etc.), which have a `u64`/`u32`/… RHS and must be
-/// *inlined* — their body forwards to `self * Field::from(rhs)`.
-fn binop_rhs_is_field(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> bool {
-    let sig = tcx.fn_sig(def_id).instantiate_identity().skip_binder();
-    sig.inputs().get(1).is_some_and(
-        |t| matches!(t.ty_adt_def(), Some(d) if tcx.item_name(d.did()).as_str() == "Field"),
-    )
-}
-
-/// True if `did` is the exclusive `core::ops::Range` struct (matched via its
-/// def path, which ends in `::Range` — `RangeInclusive`/`RangeFrom`/… do not).
-fn is_exclusive_range(tcx: TyCtxt<'_>, did: DefId) -> bool {
-    tcx.def_path_str(did).ends_with("::Range")
+    reg
 }
 
 /// The diagnostic for a `for` over anything but a constant integer range.
@@ -327,6 +396,9 @@ struct LoweringEnv<'tcx> {
     /// constraints. Circuit values are immutable in the lowering (each local is a
     /// stable LC), so cached bits never go stale (docs/integer-ops.md § Bit caching).
     bit_cache: BTreeMap<(CanonicalLcKey, usize), Vec<VarId>>,
+    /// Exact `DefId → KnownCall` table, resolved once up front (see
+    /// [`CallRegistry`]). Replaces def-path string matching in call recognition.
+    registry: CallRegistry,
 }
 
 /// A value passed into or returned from an inlined function. `Fields` carries a
@@ -340,9 +412,10 @@ enum ArgValue {
 }
 
 impl<'tcx> LoweringEnv<'tcx> {
-    fn new(tcx: TyCtxt<'tcx>) -> Self {
+    fn new(tcx: TyCtxt<'tcx>, registry: CallRegistry) -> Self {
         LoweringEnv {
             tcx,
+            registry,
             frames: vec![Frame::default()],
             variables: Vec::new(),
             var_names: Vec::new(),
@@ -1499,8 +1572,9 @@ pub fn lower<'tcx>(
     entry: &EntryInfo,
     body: &Body<'tcx>,
     field: FieldSpec,
+    registry: CallRegistry,
 ) -> CompileResult<LowerOutput> {
-    let mut env = LoweringEnv::new(tcx);
+    let mut env = LoweringEnv::new(tcx, registry);
 
     // Frame 0: circuit inputs become variables `0..num_inputs`, bound to params
     // `_1.._n`. Each parameter's type is flattened into its `Field` leaves — a
@@ -1980,7 +2054,7 @@ fn lower_statement<'tcx>(
                     // Model it as a compile-time range-iterator on `dest` (bounds
                     // must be constants) rather than a struct of int fields.
                     if let rustc_middle::mir::AggregateKind::Adt(did, ..) = &**kind {
-                        if is_exclusive_range(env.tcx, *did) {
+                        if env.registry.is_exclusive_range_ty(*did) {
                             let mut it = operands.iter();
                             let start = range_bound(env, it.next().expect("Range.start"))?;
                             let end = range_bound(env, it.next().expect("Range.end"))?;
@@ -2386,6 +2460,7 @@ fn lower_call<'tcx>(
         rustc_middle::ty::TypingEnv::fully_monomorphized(),
         rustc_middle::ty::EarlyBinder::bind(generic_args),
     );
+    let orig_def_id = def_id;
     let (def_id, call_args) = match resolve_call_instance(env.tcx, def_id, generic_args) {
         Some(inst) => (inst.def_id(), inst.args),
         None => (def_id, generic_args),
@@ -2394,8 +2469,10 @@ fn lower_call<'tcx>(
     let dest = LoweringEnv::place_local(destination)?;
 
     // A recognized intrinsic is lowered directly; any other ordinary function
-    // with available MIR is inlined; anything else is rejected.
-    let known = match classify_call(env.tcx, def_id) {
+    // with available MIR is inlined; anything else is rejected. Recognition keys
+    // on the *pre-resolution* `DefId` (see `CallRegistry::classify`); inlining
+    // uses the resolved id + args.
+    let known = match env.registry.classify(orig_def_id) {
         Some(known) => known,
         None => return inline_call(env, def_id, call_args, args, dest),
     };
@@ -2772,7 +2849,7 @@ fn inline_call<'tcx>(
     // do (BLAKE2s/3 decompose `Field::from(0u8)` etc. more than once), which must
     // stay byte-identical. The optimization that matters is amortizing a *witness*
     // value's range check across repeated width-`N` ops (docs/integer-ops.md).
-    let bit_cache_key: Option<(CanonicalLcKey, usize)> = if is_to_bits_call(env.tcx, def_id) {
+    let bit_cache_key: Option<(CanonicalLcKey, usize)> = if env.registry.is_to_bits(def_id) {
         let n = call_args
             .const_at(0)
             .try_to_target_usize(env.tcx)

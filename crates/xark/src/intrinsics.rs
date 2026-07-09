@@ -5,20 +5,23 @@
 //!
 //! An intrinsic is a plain `#[inline(never)]` function whose body is `loop {}`
 //! and is **never executed**. It exists only as a marker the compiler
-//! recognizes: [`classify_call`] (in `lower_mir.rs`) matches the call *by name*
-//! (`s.contains("__xark_add")`, …) to a [`KnownCall`] variant, and `lower_call`
-//! has one arm per variant that emits the real R1CS / witness-generation effect.
+//! recognizes: [`build_call_registry`] (in `lower_mir.rs`) enumerates this
+//! module's functions and maps each `__xark_*` stub — by its exact name, against
+//! this known module — to a [`KnownCall`] variant, producing a `DefId → KnownCall`
+//! table. [`classify_call`] is then an exact `DefId` lookup, and `lower_call` has
+//! one arm per variant that emits the real R1CS / witness-generation effect.
 //! Compilation stops after MIR extraction, so the `loop {}` never runs — it is
 //! just the intended shape of an unreachable marker.
 //!
-//! Because recognition is by *name* and not by crate path, moving these stubs
-//! between modules does not change classification; only renaming a `__xark_*`
-//! function would. These functions live here (rather than inline in `lang.rs`)
-//! purely to gather the compiler ABI in one documented place; `lang.rs`'s
-//! `Field` operator impls and `hint_*` methods call them via `use
-//! crate::intrinsics::*`.
+//! Recognition is by `DefId`, resolved once from this module, so a `__xark_*`
+//! stub must keep its exact name (the registry keys on it) but may move modules
+//! freely. These functions live here (rather than inline in `lang.rs`) purely to
+//! gather the compiler ABI in one documented place; `lang.rs`'s `Field` operator
+//! impls and `hint_*` methods call them via `use crate::intrinsics::*`, and the
+//! compiler reaches the intrinsic by *inlining* those thin wrappers.
 //!
-//! [`classify_call`]: crate::lower_mir::classify_call
+//! [`build_call_registry`]: crate::lower_mir::build_call_registry
+//! [`classify_call`]: crate::lower_mir::CallRegistry::classify
 //! [`KnownCall`]: crate::lower_mir::KnownCall
 //!
 //! # Two families

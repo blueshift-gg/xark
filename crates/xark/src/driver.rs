@@ -72,12 +72,15 @@ impl R1csCallbacks {
         let entry = find_circuit(tcx)?;
         let def_id = entry.def_id.to_def_id();
 
+        // Resolve every recognized call to an exact `DefId` once, up front.
+        let registry = crate::lower_mir::build_call_registry(tcx);
+
         let body = get_mir_body(tcx, def_id);
-        validate(tcx, body)?;
+        validate(tcx, &registry, body)?;
 
         // Lower even in `--check` mode so lowering-stage rejections (e.g.
         // witness-dependent control flow) are reported too.
-        let output = lower(tcx, &entry, body, self.field.clone())?;
+        let output = lower(tcx, &entry, body, self.field.clone(), registry)?;
 
         if !self.check_only {
             self.emit_outputs(&output);

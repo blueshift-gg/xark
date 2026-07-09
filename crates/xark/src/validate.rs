@@ -8,9 +8,13 @@ use rustc_middle::mir::{Body, Operand, Place, Rvalue, StatementKind, TerminatorK
 use rustc_middle::ty::TyCtxt;
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::lower_mir::classify_call;
+use crate::lower_mir::CallRegistry;
 
-pub fn validate<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> CompileResult<()> {
+pub fn validate<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    registry: &CallRegistry,
+    body: &Body<'tcx>,
+) -> CompileResult<()> {
     for bb in body.basic_blocks.indices() {
         let data = &body.basic_blocks[bb];
 
@@ -49,7 +53,7 @@ pub fn validate<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> CompileResult<()>
         }
 
         let terminator = data.terminator();
-        check_terminator(tcx, &terminator.kind)
+        check_terminator(tcx, registry, &terminator.kind)
             .map_err(|e| e.or_span(terminator.source_info.span))?;
     }
     Ok(())
@@ -120,7 +124,11 @@ fn unsupported_rvalue(what: &str) -> CompileError {
     CompileError::new(format!("unsupported operation inside circuit: {what}"))
 }
 
-fn check_terminator<'tcx>(tcx: TyCtxt<'tcx>, kind: &TerminatorKind<'tcx>) -> CompileResult<()> {
+fn check_terminator<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    registry: &CallRegistry,
+    kind: &TerminatorKind<'tcx>,
+) -> CompileResult<()> {
     match kind {
         TerminatorKind::Return | TerminatorKind::Goto { .. } => Ok(()),
         TerminatorKind::Call {
@@ -132,16 +140,15 @@ fn check_terminator<'tcx>(tcx: TyCtxt<'tcx>, kind: &TerminatorKind<'tcx>) -> Com
                     "indirect / dynamic calls are not supported inside a circuit",
                 ));
             };
-            // Resolve trait methods (e.g. `From::from`) to their concrete impl
-            // before checking, matching what lowering does.
-            let def_id = crate::lower_mir::resolve_call_def_id(tcx, def_id, generic_args);
-            // A call is acceptable if it is a recognized intrinsic or an
-            // ordinary function whose MIR is available to inline. Bodies of
-            // inlined callees are validated by lowering as they are walked.
-            if classify_call(tcx, def_id).is_none() && !tcx.is_mir_available(def_id) {
+            // A call is acceptable if it is a recognized call (keyed on the
+            // pre-resolution `DefId`, as lowering does) or an ordinary function
+            // whose MIR is available to inline (checked on the resolved impl).
+            // Bodies of inlined callees are validated by lowering as walked.
+            let resolved = crate::lower_mir::resolve_call_def_id(tcx, def_id, generic_args);
+            if registry.classify(def_id).is_none() && !tcx.is_mir_available(resolved) {
                 return Err(CompileError::new(format!(
                     "unsupported function call inside circuit: `{}`",
-                    tcx.def_path_str(def_id)
+                    tcx.def_path_str(resolved)
                 ))
                 .with_note(
                     "only xark field operations, assert_eq, and functions whose MIR is \
