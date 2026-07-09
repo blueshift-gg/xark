@@ -244,6 +244,39 @@ pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
     (o.status.success(), combined)
 }
 
+/// `xark check --input k=v … --out <out>` on a circuit crate, with an isolated
+/// `CARGO_TARGET_DIR` (so cargo can't replay a cached, non-extracting compile
+/// and nothing lands in the committed example's `target/`). Runs the
+/// witness-based under-constrained soundness check — build + solve + analyze,
+/// **no** setup/prove. Returns `(success, combined stdout+stderr)`.
+pub fn xark_check_input(
+    name: &str,
+    out: &Path,
+    target: &Path,
+    inputs: &[(&str, &str)],
+) -> (bool, String) {
+    let mut c = Command::new(xark_bin());
+    c.arg("check")
+        .arg(circuit_crate(name))
+        .arg("--out")
+        .arg(out)
+        .env("CARGO_TARGET_DIR", target);
+    for (k, v) in inputs {
+        c.arg("--input").arg(format!("{k}={v}"));
+    }
+    let o = c
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn xark check --input");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr),
+    );
+    (o.status.success(), combined)
+}
+
 /// Run the `xark` binary with `args`, returning `(success, stdout, stderr)`.
 pub fn run(args: &[&str]) -> (bool, String, String) {
     let output = Command::new(xark_bin())

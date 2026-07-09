@@ -19,10 +19,12 @@ use ark_bn254::Fr;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use xark_ir::primitive::PrimitiveProgram;
-use xark_ir::{R1csProgram, Visibility};
+use xark_ir::primitive::{PrimitiveProgram, VarRole};
+use xark_ir::solver::Fp;
+use xark_ir::{R1csProgram, VarId, Visibility};
 
 pub mod ceremony;
+pub mod check;
 pub mod completions;
 pub mod export;
 pub mod inspect;
@@ -110,7 +112,13 @@ fn run(cli: Cli) -> Result<()> {
         // implementations, which return a process exit code.
         Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
         Command::Build(a) => exit_code("build", crate::cli::cmd_build(&a.to_argv())),
-        Command::Check(a) => exit_code("check", crate::cli::cmd_check(&a.to_argv())),
+        // Bare `xark check` stays the fast, artifact-free `cargo check` validator.
+        // `xark check --input …` opts into the witness-based soundness analyzer
+        // (build + solve + `analyze_underconstrained`), which is `anyhow`-based.
+        Command::Check(a) if a.inputs.is_empty() => {
+            exit_code("check", crate::cli::cmd_check(&a.to_argv()))
+        }
+        Command::Check(a) => check::run(a),
         Command::Test(a) => exit_code("test", crate::cli::cmd_test(&a.to_argv())),
         Command::Clean(a) => exit_code("clean", crate::cli::cmd_clean(&a.to_argv())),
         // Backend commands are `anyhow`-based.
@@ -192,6 +200,17 @@ pub struct CheckArgs {
     /// Emit machine-readable JSON diagnostics (for editors / rust-analyzer).
     #[arg(long = "message-format", value_parser = ["json", "human"])]
     pub message_format: Option<String>,
+    /// Circuit input as `name=value` (repeatable). Passing any `--input` opts
+    /// into the witness-based under-constrained soundness check: xark builds the
+    /// circuit, solves the witness from these inputs, and reports any derived
+    /// variable the constraints fail to pin. Provide every circuit input, as
+    /// `xark prove` does. With no `--input`, `check` stays the fast validator.
+    #[arg(long = "input", value_name = "NAME=VALUE")]
+    pub inputs: Vec<String>,
+    /// Output directory for the intermediate `circuit.json` / `r1cs.json` built
+    /// by `--input` (default: `<crate>/target/xark/`). Only used with `--input`.
+    #[arg(long, value_hint = clap::ValueHint::DirPath)]
+    pub out: Option<String>,
 }
 
 impl CheckArgs {
@@ -251,6 +270,80 @@ pub fn load_circuit(path: &std::path::Path) -> Result<PrimitiveProgram> {
     let s = std::fs::read_to_string(path)
         .with_context(|| format!("reading {} (run `xark build` first?)", path.display()))?;
     xark_ir::primitive::from_json(&s).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// Resolve `--input name=value` pairs to `VarId → decimal` for the solver.
+///
+/// Shared by `xark prove` and `xark check --input`: applies the same strict
+/// decimal validation (the solver's lenient parse would silently turn a
+/// malformed value into 0) and the same unknown-name error (listing the
+/// circuit's non-derived inputs).
+pub fn resolve_input_ids(
+    prim: &PrimitiveProgram,
+    inputs: &BTreeMap<String, String>,
+) -> Result<BTreeMap<VarId, String>> {
+    let by_name: BTreeMap<&str, VarId> =
+        prim.vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
+    let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
+    for (k, v) in inputs {
+        match by_name.get(k.as_str()) {
+            Some(&id) => {
+                xark_prover::try_fr_from_decimal(v)
+                    .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
+                id_inputs.insert(id, v.clone());
+            }
+            None => {
+                let names: Vec<&String> = prim
+                    .vars
+                    .iter()
+                    .filter(|v| !matches!(v.role, VarRole::Derived))
+                    .map(|v| &v.name)
+                    .collect();
+                anyhow::bail!("unknown input `{k}` (circuit inputs: {names:?})");
+            }
+        }
+    }
+    Ok(id_inputs)
+}
+
+/// The witness-based under-constrained soundness gate, shared by `xark prove`
+/// and `xark check --input`.
+///
+/// Solves the witness from `id_inputs`, then runs
+/// [`xark_ir::solver::analyze_underconstrained`]: if any derived variable is not
+/// uniquely pinned by the constraints (a value a malicious prover could forge
+/// without violating any constraint — a genuine soundness hole), it `bail!`s
+/// with a clear message listing each hole. On success it returns the solved
+/// assignment.
+///
+/// This is the *witness-based* check: it needs the solved assignment (hence it
+/// runs after solving, before any key-loading / synthesis). It rejects circuits
+/// with a derived variable the constraints fail to pin uniquely. A structural,
+/// witness-free version at `xark build`/`check` is planned.
+pub fn soundness_check(
+    prim: &PrimitiveProgram,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<BTreeMap<VarId, Fp>> {
+    let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs)
+        .map_err(|e| anyhow::anyhow!("witness does not satisfy the circuit: {e:?}"))?;
+
+    let holes = xark_ir::solver::analyze_underconstrained(prim, &assign_fp);
+    if !holes.is_empty() {
+        let mut msg = crate::style::err(
+            "circuit is under-constrained: a malicious prover could forge the \
+             following derived variable(s) without violating any constraint, so \
+             any proof of this circuit is unsound:",
+        );
+        for h in &holes {
+            msg.push_str(&format!("\n  - `{}` (var {}): {}", h.name, h.var, h.reason));
+        }
+        msg.push_str(
+            "\nevery hint/advice value (`hint_inverse`, `hint_bit`, `advice`, the \
+             bignum hints) must be pinned by a constraint (e.g. `assert_eq`).",
+        );
+        anyhow::bail!(msg);
+    }
+    Ok(assign_fp)
 }
 
 /// The number of public inputs the circuit exposes.

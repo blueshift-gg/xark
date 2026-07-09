@@ -20,11 +20,10 @@ use xark_backend::serialization::{
     proof_to_snarkjs, public_inputs_to_snarkjs, write_public_inputs,
 };
 use xark_backend::{keys::Groth16Keys, prove};
-use xark_ir::primitive::VarRole;
 use xark_ir::VarId;
 use xark_prover::{fr_from_decimal, XarkCircuit};
 
-use super::{load_circuit, load_r1cs, parse_inputs, synth_err};
+use super::{load_circuit, load_r1cs, parse_inputs, resolve_input_ids, soundness_check, synth_err};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -116,34 +115,16 @@ pub fn run(args: ProveArgs) -> Result<()> {
     let prim = load_circuit(&circuit_path)?;
     let inputs = parse_inputs(&args.inputs)?;
 
-    // Resolve input names → variable ids for the solver.
-    let by_name: BTreeMap<&str, VarId> =
-        prim.vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
-    let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
-    for (k, v) in &inputs {
-        match by_name.get(k.as_str()) {
-            Some(&id) => {
-                // strict decimal validation (matches `verify`); the solver's
-                // lenient parse would silently turn a malformed value into 0
-                xark_prover::try_fr_from_decimal(v)
-                    .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
-                id_inputs.insert(id, v.clone());
-            }
-            None => {
-                let names: Vec<&String> = prim
-                    .vars
-                    .iter()
-                    .filter(|v| !matches!(v.role, VarRole::Derived))
-                    .map(|v| &v.name)
-                    .collect();
-                anyhow::bail!("unknown input `{k}` (circuit inputs: {names:?})");
-            }
-        }
-    }
+    // Resolve input names → variable ids for the solver (shared with `check`).
+    let id_inputs = resolve_input_ids(&prim, &inputs)?;
 
-    // Solve the witness, then map field elements → arkworks `Fr`.
-    let assign_fp = xark_ir::solver::solve_and_check(&prim, &id_inputs)
-        .map_err(|e| anyhow::anyhow!("witness does not satisfy the circuit: {e:?}"))?;
+    // Solve the witness, then run the shared under-constrained soundness gate.
+    // This is the *witness-based* check: it needs the solved assignment (hence
+    // it runs here, before any key-loading / synthesis), and rejects circuits
+    // with a derived variable the constraints fail to pin uniquely. It returns
+    // the solved assignment on success.
+    let assign_fp = soundness_check(&prim, &id_inputs)?;
+
     let assign: BTreeMap<VarId, ark_bn254::Fr> = assign_fp
         .iter()
         .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
