@@ -28,8 +28,9 @@ jobs:
 
       - name: Install pinned nightly (rustc_private) toolchain
         # See docs/toolchain.md for the pin and the bump procedure.
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-05-03
           components: rustc-dev, llvm-tools-preview
 
       - name: Cache cargo registry, git, and target
@@ -59,8 +60,9 @@ jobs:
         # The ed25519 vec.rs suite drives the same nightly compiler via the
         # `xark-test-harness` (which builds the gadgets + compiler), so it needs
         # `rustc-dev` too. See docs/toolchain.md.
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-05-03
           components: rustc-dev, llvm-tools-preview
 
       - name: Cache cargo registry, git, and target

@@ -107,7 +107,7 @@ const EXAMPLE_TS: &str = r#"// Verify a proof for the __NAME__ circuit with the 
 //   npm install
 //   npx tsx example.ts <path-to-.proof.json>
 //
-// Produce a bundle first with:  xark prove <circuit> --input <name>=<value>
+// Produce a bundle first with:  xark prove <circuit> --inputs <JSON|FILE>
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -120,7 +120,7 @@ async function main() {
   const path = process.argv[2];
   if (!path) {
     console.error("usage: npx tsx example.ts <path-to-.proof.json>");
-    console.error("  produce one with:  xark prove <circuit> --input <name>=<value>");
+    console.error("  produce one with:  xark prove <circuit> --inputs <JSON|FILE>");
     process.exit(2);
   }
 
@@ -166,7 +166,7 @@ npm install                                     # tsx (+ snarkjs, via xark-clien
 ## Verify a proof
 
 ```bash
-xark prove <circuit> --input <name>=<value>   # writes <name>-<hash>.proof.json
+xark prove <circuit> --inputs <JSON|FILE>   # writes <name>-<hash>.proof.json
 npx tsx example.ts /path/to/<name>-<hash>.proof.json
 ```
 

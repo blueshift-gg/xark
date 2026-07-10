@@ -4,7 +4,7 @@
 //! constraint and — when `profile.json` attribution is available — the source
 //! line and gadget chain it came from. Shared by the `xark_prover` test harness
 //! ([`Circuit::check`](../../xark_prover/struct.Circuit.html)) and the CLI
-//! soundness gate (`xark prove` / `xark check --input`), so both worlds surface
+//! soundness gate (`xark prove` / `xark check --inputs`), so both worlds surface
 //! the *same* explanation from one place.
 
 use crate::profile::ProfileProgram;

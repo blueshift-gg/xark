@@ -336,7 +336,12 @@ impl Circuit {
             .collect();
         let by_name: BTreeMap<&str, VarId> =
             input_vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
-        let names = || input_vars.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
+        let names = || {
+            input_vars
+                .iter()
+                .map(|v| v.name.as_str())
+                .collect::<Vec<_>>()
+        };
 
         let pairs = inputs.into_inputs();
         if pairs.len() != input_vars.len() {
@@ -397,9 +402,13 @@ impl Circuit {
         // statement — surface it rather than swallowing it into a bare `false`.
         use rand::SeedableRng;
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-        let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circ.clone(), &mut rng).map_err(
-            |e| ProveError(format!("circuit `{}` solved but Groth16 setup failed: {e}", self.name)),
-        )?;
+        let (pk, vk) =
+            Groth16::<Bn254>::circuit_specific_setup(circ.clone(), &mut rng).map_err(|e| {
+                ProveError(format!(
+                    "circuit `{}` solved but Groth16 setup failed: {e}",
+                    self.name
+                ))
+            })?;
         let proof = Groth16::<Bn254>::prove(&pk, circ, &mut rng).map_err(|e| {
             ProveError(format!(
                 "circuit `{}` solved but Groth16 prove failed: {e}",

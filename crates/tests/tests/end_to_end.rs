@@ -2,7 +2,7 @@
 //! against the purpose-built circuit crates under `examples/`.
 //!
 //! `xark build <crate> --out <dir>` compiles a circuit crate (rustc-MIR →
-//! xark-IR → R1CS) to `<dir>/{circuit,r1cs}.json`; `xark prove <dir> --input
+//! xark-IR → R1CS) to `<dir>/{circuit,r1cs}.json`; `xark prove <dir> --inputs
 //! k=v` solves the witness and produces + verifies a Groth16 proof in one shot.
 
 mod common;
@@ -124,9 +124,9 @@ fn underconstrained_circuit_is_rejected_by_prove() {
     );
 }
 
-/// **`xark check --input` opt-in soundness check — rejection.** The same
+/// **`xark check --inputs` opt-in soundness check — rejection.** The same
 /// witness-based analyzer `prove` runs, but *without* the expensive
-/// `setup`+`prove`: `check --input` on the two-valued `underconstrained_bit`
+/// `setup`+`prove`: `check --inputs` on the two-valued `underconstrained_bit`
 /// fixture must fail with the under-constraint diagnostic, and must NOT have
 /// produced any proving key / proof (it never runs `setup`).
 #[test]
@@ -143,7 +143,7 @@ fn check_input_rejects_underconstrained_circuit() {
     );
     assert!(
         !ok,
-        "check --input unexpectedly succeeded on an under-constrained circuit: {combined}"
+        "check --inputs unexpectedly succeeded on an under-constrained circuit: {combined}"
     );
     assert!(
         combined.contains("under-constrained"),
@@ -152,12 +152,12 @@ fn check_input_rejects_underconstrained_circuit() {
     // `check` builds only — it never runs `setup`, so no proving key exists.
     assert!(
         !out.join("pk.bin").exists(),
-        "check --input must not run setup, but pk.bin was produced"
+        "check --inputs must not run setup, but pk.bin was produced"
     );
 }
 
-/// **`xark check --input` opt-in soundness check — success.** On a properly
-/// constrained circuit (`cube`: `secret^3 == result`) `check --input` builds +
+/// **`xark check --inputs` opt-in soundness check — success.** On a properly
+/// constrained circuit (`cube`: `secret^3 == result`) `check --inputs` builds +
 /// solves + analyzes and reports the circuit sound, again without running
 /// `setup`/`prove` (no `pk.bin`).
 #[test]
@@ -169,7 +169,7 @@ fn check_input_accepts_sound_circuit() {
     // secret = 2, result = 8 satisfies `secret^3 == result`.
     let (ok, combined) =
         xark_check_input("cube", &out, &target, &[("secret", "2"), ("result", "8")]);
-    assert!(ok, "check --input failed on a sound circuit: {combined}");
+    assert!(ok, "check --inputs failed on a sound circuit: {combined}");
     assert!(
         combined.contains("circuit sound"),
         "expected the positive soundness line, got: {combined}"
@@ -177,6 +177,6 @@ fn check_input_accepts_sound_circuit() {
     // No proving key — `check` never runs `setup`.
     assert!(
         !out.join("pk.bin").exists(),
-        "check --input must not run setup, but pk.bin was produced"
+        "check --inputs must not run setup, but pk.bin was produced"
     );
 }

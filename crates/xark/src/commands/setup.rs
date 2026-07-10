@@ -272,23 +272,40 @@ pub fn run(args: SetupArgs) -> Result<()> {
 
 /// Guided post-setup footer: show the exact `xark prove` command with a
 /// placeholder for every declared input, so the next step is unambiguous.
-fn print_next_steps(_project: &XarkProject, path: &Option<PathBuf>, prog: &xark_ir::R1csProgram) {
-    // Every input (public + private), in declaration order — prove needs them all.
-    let mut vars: Vec<_> = prog
-        .variables
-        .iter()
-        .filter(|v| v.visibility != Visibility::Internal)
-        .collect();
-    vars.sort_by_key(|v| v.id);
-    let inputs: String = vars
-        .iter()
-        .map(|v| format!(" --input {}=<value>", v.name))
-        .collect();
+fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_ir::R1csProgram) {
+    // Only the *declared* inputs — never the witnesses the solver derives
+    // (e.g. `to_bits` range-check bits). The primitive program carries the
+    // roles that tell them apart; the R1CS marks both `Private`, so falling
+    // back to it (older builds without circuit.json) may over-list. Declared
+    // inputs come first and in order, so that fallback is still usable.
+    let names: Vec<String> = match super::load_circuit(&project.circuit_json()).ok() {
+        Some(prim) => {
+            use xark_ir::primitive::VarRole;
+            let mut vars: Vec<_> = prim
+                .vars
+                .iter()
+                .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
+                .collect();
+            vars.sort_by_key(|v| v.id);
+            vars.iter().map(|v| v.name.clone()).collect()
+        }
+        None => {
+            let mut vars: Vec<_> = prog
+                .variables
+                .iter()
+                .filter(|v| v.visibility != Visibility::Internal)
+                .collect();
+            vars.sort_by_key(|v| v.id);
+            vars.iter().map(|v| v.name.clone()).collect()
+        }
+    };
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let hint = super::inputs_hint(&name_refs);
     let p = super::path_arg(path);
     println!(
         "\n{}",
         crate::style::next_steps(&[(
-            format!("xark prove {p}{inputs}"),
+            format!("xark prove {p} {hint}"),
             "solve the witness and produce a proof",
         )])
     );

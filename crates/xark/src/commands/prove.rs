@@ -1,9 +1,9 @@
 //! `xark prove` — produce a Groth16 proof for a built circuit.
 //!
 //! Self-contained: loads `r1cs.json` + `circuit.json`, *solves* the witness from
-//! the `--input name=value` values (via the reference solver), loads the proving
-//! key written by `xark setup`, and runs the shared `xark_backend` prover. The
-//! proof and its public inputs are written next to the build output.
+//! the `--inputs` values (via the reference solver), loads the proving key
+//! written by `xark setup`, and runs the shared `xark_backend` prover. The proof
+//! and its public inputs are written next to the build output.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -24,7 +24,7 @@ use xark_backend::{keys::Groth16Keys, prove};
 use xark_ir::VarId;
 use xark_prover::{fr_from_decimal, XarkCircuit};
 
-use super::{load_circuit, parse_inputs, resolve_input_ids, setup, soundness_check, synth_err};
+use super::{load_circuit, parse_inputs_arg, resolve_input_ids, setup, soundness_check, synth_err};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -34,10 +34,14 @@ pub struct ProveArgs {
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
-    /// Circuit input as `name=value` (repeatable). Provide every public and
-    /// private input the circuit declares.
-    #[arg(long = "input", value_name = "NAME=VALUE")]
-    pub inputs: Vec<String>,
+    /// Circuit inputs as inline JSON `{"name": value, …}` or a path to an input
+    /// file (a JSON object, or `name = value` lines with `#` comments and blank
+    /// lines ignored). Provide every public and private input the circuit
+    /// declares; array elements use the flat names `xark inspect` prints, e.g.
+    /// `path[0]`. One argument for both — inline for a quick proof, a file for a
+    /// big witness (a 2-in/2-out JoinSplit has ~200 inputs).
+    #[arg(long = "inputs", value_name = "JSON|FILE")]
+    pub inputs: Option<String>,
 
     /// Path to `r1cs.json`. Inferred from `target/xark/` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
@@ -125,7 +129,11 @@ pub fn run(args: ProveArgs) -> Result<()> {
     let prog = xark_ir::json::from_json(&r1cs_str)
         .with_context(|| format!("parsing {}", r1cs_path.display()))?;
     let prim = load_circuit(&circuit_path)?;
-    let inputs = parse_inputs(&args.inputs)?;
+    // Inputs come from `--inputs`: inline JSON or a file path (agnostic).
+    let inputs = match &args.inputs {
+        Some(arg) => parse_inputs_arg(arg)?,
+        None => Default::default(),
+    };
 
     // Resolve input names → variable ids for the solver (shared with `check`).
     let id_inputs = resolve_input_ids(&prim, &inputs)?;

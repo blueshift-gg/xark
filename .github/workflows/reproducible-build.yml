@@ -12,6 +12,7 @@ name: Reproducible build
 
 on:
   push:
+    branches: [master]
     paths:
       - "crates/verifier/**"
       - ".github/workflows/reproducible-build.yml"
@@ -21,6 +22,11 @@ on:
       - "crates/verifier/**"
       - ".github/workflows/reproducible-build.yml"
       - "docs/reproducible-build.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   reproducible-build:
@@ -35,19 +41,11 @@ jobs:
         # pinned `platform-tools` rustc.
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry + reference-program target
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/verifier/reference-program
-          key: reproducible-build-${{ hashFiles('crates/verifier/reference-program/Cargo.lock') }}
-
       - name: Install Solana CLI (pinned `platform-tools`)
-        # `release.anza.xyz/stable/install` resolves to the current stable
-        # Solana CLI, whose bundled `platform-tools` is what determines
-        # the SBF codegen. Pin a specific version here when you cut an
-        # audit-anchored release.
+        # This release bundles the platform-tools version that determines the
+        # SBF codegen. Changing it requires regenerating expected.sha256.
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/v4.0.0/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Print pinned toolchain versions (for audit log)

@@ -47,7 +47,7 @@ pub fn synth_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
 #[derive(Parser, Debug)]
 #[command(
     name = "xark",
-    version,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("XARK_GIT_HASH"), ")"),
     styles = crate::style::clap_styles(),
     about = "Write, compile, prove and verify zero-knowledge circuits in Rust",
     long_about = "xark compiles a restricted Rust circuit (via rustc MIR) into \
@@ -78,7 +78,7 @@ pub enum Command {
     Clean(CleanArgs),
     /// Generate Groth16 proving and verifying keys.
     Setup(setup::SetupArgs),
-    /// Solve the witness from --input values and produce a Groth16 proof.
+    /// Solve the witness from --inputs values and produce a Groth16 proof.
     Prove(prove::ProveArgs),
     /// Verify a Groth16 proof against public inputs.
     Verify(verify::VerifyArgs),
@@ -125,9 +125,9 @@ fn run(cli: Cli) -> Result<()> {
         Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
         Command::Build(a) => exit_code("build", crate::cli::cmd_build(&a.to_argv())),
         // Bare `xark check` stays the fast, artifact-free `cargo check` validator.
-        // `xark check --input …` opts into the witness-based soundness analyzer
+        // `xark check --inputs …` opts into the witness-based soundness analyzer
         // (build + solve + `analyze_underconstrained`), which is `anyhow`-based.
-        Command::Check(a) if a.inputs.is_empty() => {
+        Command::Check(a) if a.inputs.is_none() => {
             exit_code("check", crate::cli::cmd_check(&a.to_argv()))
         }
         Command::Check(a) => check::run(a),
@@ -214,15 +214,16 @@ pub struct CheckArgs {
     /// Emit machine-readable JSON diagnostics (for editors / rust-analyzer).
     #[arg(long = "message-format", value_parser = ["json", "human"])]
     pub message_format: Option<String>,
-    /// Circuit input as `name=value` (repeatable). Passing any `--input` opts
-    /// into the witness-based under-constrained soundness check: xark builds the
-    /// circuit, solves the witness from these inputs, and reports any derived
-    /// variable the constraints fail to pin. Provide every circuit input, as
-    /// `xark prove` does. With no `--input`, `check` stays the fast validator.
-    #[arg(long = "input", value_name = "NAME=VALUE")]
-    pub inputs: Vec<String>,
+    /// Circuit inputs as inline JSON `{"name": value, …}` or a path to an input
+    /// file. Passing `--inputs` opts into the witness-based under-constrained
+    /// soundness check: xark builds the circuit, solves the witness from these
+    /// inputs, and reports any derived variable the constraints fail to pin.
+    /// Provide every circuit input, as `xark prove` does. With no `--inputs`,
+    /// `check` stays the fast validator.
+    #[arg(long = "inputs", value_name = "JSON|FILE")]
+    pub inputs: Option<String>,
     /// Output directory for the intermediate `circuit.json` / `r1cs.json` built
-    /// by `--input` (default: `<crate>/target/xark/`). Only used with `--input`.
+    /// by `--inputs` (default: `<crate>/target/xark/`). Only used with `--inputs`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<String>,
 }
@@ -270,16 +271,75 @@ pub fn path_arg(path: &Option<std::path::PathBuf>) -> String {
     }
 }
 
-/// Parse `--input name=value` pairs into a name→value map.
-pub fn parse_inputs(pairs: &[String]) -> Result<BTreeMap<String, String>> {
-    let mut inputs = BTreeMap::new();
-    for kv in pairs {
-        let (k, v) = kv
-            .split_once('=')
-            .with_context(|| format!("--input expects name=value, got `{kv}`"))?;
-        inputs.insert(k.to_string(), v.to_string());
+/// Parse the `--inputs` argument: either an inline JSON object
+/// `{ "name": value, … }` or a path to a file (a JSON object, or `name = value`
+/// lines with `#` comments and blank lines ignored). Array elements use the flat
+/// names `xark inspect` prints, e.g. `path[0]`. A leading `{` (after trimming)
+/// selects inline JSON; anything else is treated as a file path — so the one
+/// argument is agnostic to how you pass the witness.
+pub fn parse_inputs_arg(arg: &str) -> Result<BTreeMap<String, String>> {
+    if arg.trim_start().starts_with('{') {
+        parse_input_text(arg, std::path::Path::new("<--inputs>"))
+    } else {
+        let text = std::fs::read_to_string(arg)
+            .with_context(|| format!("reading --inputs file `{arg}`"))?;
+        parse_input_text(&text, std::path::Path::new(arg))
     }
-    Ok(inputs)
+}
+
+/// Parse input text: either a `{ "name": value, … }` JSON object, or lines of
+/// `name = value` (`#` comments and blank lines ignored). Values are kept as
+/// decimal strings; array elements use the flat names `xark inspect` prints.
+pub fn parse_input_text(text: &str, source: &std::path::Path) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+
+    if text.trim_start().starts_with('{') {
+        let obj: serde_json::Value = serde_json::from_str(text)
+            .with_context(|| format!("parsing {} as JSON", source.display()))?;
+        let map = obj.as_object().ok_or_else(|| {
+            anyhow::anyhow!("{}: expected a JSON object of name→value", source.display())
+        })?;
+        for (name, value) in map {
+            let v = match value {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                other => anyhow::bail!(
+                    "{}: input `{name}` must be a decimal string or number, got {other}",
+                    source.display()
+                ),
+            };
+            out.insert(name.clone(), v);
+        }
+        return Ok(out);
+    }
+
+    for (lineno, raw) in text.lines().enumerate() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (name, value) = line.split_once('=').with_context(|| {
+            format!(
+                "{}:{}: expected `name = value`",
+                source.display(),
+                lineno + 1
+            )
+        })?;
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        out.insert(name.trim().to_string(), value.to_string());
+    }
+    Ok(out)
+}
+
+/// Render a copy-pasteable `--inputs` JSON template naming every declared input,
+/// e.g. `--inputs '{"secret": <value>, "result": <value>}'`.
+pub fn inputs_hint(names: &[&str]) -> String {
+    let body = names
+        .iter()
+        .map(|n| format!("\"{n}\": <value>"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("--inputs '{{{body}}}'")
 }
 
 /// Load and parse an `r1cs.json` file.
@@ -305,9 +365,9 @@ pub fn load_profile(dir: &std::path::Path) -> Option<ProfileProgram> {
         .and_then(|s| xark_ir::profile::from_json(&s).ok())
 }
 
-/// Resolve `--input name=value` pairs to `VarId → decimal` for the solver.
+/// Resolve `name → value` inputs to `VarId → decimal` for the solver.
 ///
-/// Shared by `xark prove` and `xark check --input`: applies the same strict
+/// Shared by `xark prove` and `xark check --inputs`: applies the same strict
 /// decimal validation (the solver's lenient parse would silently turn a
 /// malformed value into 0) and the same unknown-name error (listing the
 /// circuit's non-derived inputs).
@@ -340,7 +400,7 @@ pub fn resolve_input_ids(
 }
 
 /// The witness-based under-constrained soundness gate, shared by `xark prove`
-/// and `xark check --input`.
+/// and `xark check --inputs`.
 ///
 /// Solves the witness from `id_inputs`, then runs
 /// [`xark_ir::solver::analyze_underconstrained`]: if any derived variable is not
@@ -359,10 +419,25 @@ pub fn soundness_check(
     profile: Option<&ProfileProgram>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
-    // On an unsatisfied witness, name *which* constraint (and, when profiled, its
-    // source line / gadget) failed — the same explanation `xark test` surfaces.
-    let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs)
-        .map_err(|e| anyhow::anyhow!("{}", xark_ir::diagnose::describe_unsatisfied(&e, r1cs, profile)))?;
+    let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs).map_err(|e| {
+        // A missing input names the *declared* input the user actually types,
+        // e.g. `MissingInput(1)` → "missing input `result`". Every other failure
+        // defers to the shared diagnostic, which names the failing constraint
+        // (and its source line / gadget when profiled) — the same explanation
+        // `xark test` surfaces.
+        if let xark_ir::solver::SolveError::MissingInput(id) = e {
+            if let Some(v) = prim.vars.iter().find(|v| v.id == id) {
+                return anyhow::anyhow!(
+                    "missing input `{0}` (add it to --inputs, e.g. --inputs '{{\"{0}\": <value>}}')",
+                    v.name
+                );
+            }
+        }
+        anyhow::anyhow!(
+            "{}",
+            xark_ir::diagnose::describe_unsatisfied(&e, r1cs, profile)
+        )
+    })?;
 
     let holes = xark_ir::solver::analyze_underconstrained(prim, &assign_fp);
     if !holes.is_empty() {
@@ -403,7 +478,7 @@ pub fn circuit_hash(r1cs_json: &str) -> String {
     sha256_hex(r1cs_json.as_bytes())
 }
 
-/// Public inputs in variable-id (allocation) order, taken from `--input`
+/// Public inputs in variable-id (allocation) order, taken from `--inputs`
 /// values. This matches how the prover derives them from the solved witness:
 /// the public portion of the assignment, in var-id order.
 pub fn public_inputs_from_inputs(
@@ -420,8 +495,8 @@ pub fn public_inputs_from_inputs(
     for v in vars {
         let value = inputs.get(&v.name).with_context(|| {
             format!(
-                "missing public input `{}` (pass --input {}=<value>)",
-                v.name, v.name
+                "missing public input `{0}` (add it to --inputs, e.g. --inputs '{{\"{0}\": <value>}}')",
+                v.name
             )
         })?;
         let fr = xark_prover::try_fr_from_decimal(value)
@@ -429,4 +504,74 @@ pub fn public_inputs_from_inputs(
         out.push(fr);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inputs_hint, parse_input_text, parse_inputs_arg};
+    use std::path::Path;
+
+    #[test]
+    fn parses_line_input_file() {
+        let inputs = parse_input_text(
+            "# witness\npath[0] = 12\namount = '34' # inline comment\n",
+            Path::new("witness.inputs"),
+        )
+        .unwrap();
+
+        assert_eq!(inputs.get("path[0]").map(String::as_str), Some("12"));
+        assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
+    }
+
+    #[test]
+    fn parses_json_without_losing_large_values() {
+        let inputs = parse_input_text(
+            r#"{"amount": 34, "field": "21888242871839275222246405745257275088548364400416034343698204186575808495616"}"#,
+            Path::new("witness.json"),
+        )
+        .unwrap();
+
+        assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
+        assert_eq!(
+            inputs.get("field").map(String::as_str),
+            Some("21888242871839275222246405745257275088548364400416034343698204186575808495616")
+        );
+    }
+
+    #[test]
+    fn rejects_non_scalar_json_values() {
+        let err = parse_input_text(r#"{"path": [1, 2]}"#, Path::new("witness.json")).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("input `path` must be a decimal string or number"));
+    }
+
+    #[test]
+    fn inputs_arg_accepts_inline_json() {
+        // A leading `{` is read as inline JSON — no file on disk.
+        let inputs = parse_inputs_arg(r#"{"secret": 3, "result": 27}"#).unwrap();
+        assert_eq!(inputs.get("secret").map(String::as_str), Some("3"));
+        assert_eq!(inputs.get("result").map(String::as_str), Some("27"));
+    }
+
+    #[test]
+    fn inputs_arg_reads_a_file_path() {
+        let dir = std::env::temp_dir().join("xark-inputs-arg-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("w.inputs");
+        std::fs::write(&path, "secret = 3\nresult = 27\n").unwrap();
+
+        let inputs = parse_inputs_arg(path.to_str().unwrap()).unwrap();
+        assert_eq!(inputs.get("secret").map(String::as_str), Some("3"));
+        assert_eq!(inputs.get("result").map(String::as_str), Some("27"));
+    }
+
+    #[test]
+    fn hint_renders_a_json_template() {
+        assert_eq!(
+            inputs_hint(&["secret", "result"]),
+            r#"--inputs '{"secret": <value>, "result": <value>}'"#
+        );
+    }
 }
