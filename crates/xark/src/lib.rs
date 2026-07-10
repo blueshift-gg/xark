@@ -49,7 +49,8 @@ pub mod intrinsics;
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{
-        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public,
+        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, select, Field, Private,
+        Public,
     };
     pub use xark_macros::circuit;
 }
@@ -57,6 +58,6 @@ pub mod prelude {
 // The same surface as `prelude`, re-exported at the crate root so both
 // `use xark::prelude::*;` and `use xark::{assert, Field, ...};` work.
 pub use crate::lang::{
-    assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public,
+    assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, select, Field, Private, Public,
 };
 pub use xark_macros::circuit;

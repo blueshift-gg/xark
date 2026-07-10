@@ -707,6 +707,22 @@ pub fn assert(cond: bool) {
     assert_eq(cond, true);
 }
 
+/// Branchless selection: returns `if_true` when `cond` is true and
+/// `if_false` otherwise.
+///
+/// Witness-dependent Rust control flow cannot be lowered to a circuit. Use
+/// this when the condition is a computed circuit boolean:
+///
+/// ```ignore
+/// let maximum = select(a.gt::<32>(b), a, b);
+/// ```
+///
+/// This emits one multiplication for
+/// `if_false + Field::from(cond) * (if_true - if_false)`.
+pub fn select(cond: bool, if_true: Field, if_false: Field) -> Field {
+    if_false + Field::from(cond) * (if_true - if_false)
+}
+
 /// Emit a circuit constraint `a < b` (less than).
 pub fn assert_lt<A: PartialOrd<B>, B>(a: A, b: B) {
     assert_eq(a < b, true);

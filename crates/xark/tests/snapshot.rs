@@ -3074,3 +3074,49 @@ fn field_rem_u128_is_not_provided() {
         "103 % 5u64 = 3"
     );
 }
+
+/// `select(cond, a, b)` is the branchless replacement for a
+/// witness-dependent `if`: it picks `a` when `cond` is true and `b` otherwise.
+#[test]
+fn select_is_a_branchless_mux() {
+    let compiled = xark_test_harness::compile_source(
+        "select_max",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
+             assert_eq(select(a.gt::<8>(b), a, b), out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(
+        compiled.status_success,
+        "select should compile: {}",
+        compiled.stderr
+    );
+    let program = compiled.program();
+    assert!(solves(&program, &[("a", "5"), ("b", "3"), ("out", "5")]));
+    assert!(solves(&program, &[("a", "3"), ("b", "5"), ("out", "5")]));
+    assert!(
+        !solves(&program, &[("a", "5"), ("b", "3"), ("out", "3")]),
+        "a false selected output must not satisfy the circuit"
+    );
+
+    let rejected = xark_test_harness::compile_source(
+        "witness_if_select_help",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, out: Public<Field>) {\n\
+             let mut y = x;\n\
+             if x == out { y = out; }\n\
+             assert_eq(y, out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(
+        !rejected.status_success,
+        "witness-dependent control flow must remain rejected"
+    );
+    assert!(
+        rejected.stderr.contains("select(cond, if_true, if_false)"),
+        "the rejection should point to the supported mux: {}",
+        rejected.stderr
+    );
+}
