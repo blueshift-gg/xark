@@ -214,6 +214,7 @@ fn intrinsic_known_call(name: &str) -> Option<KnownCall> {
         "__xark_eq" => KnownCall::Eq,
         "__xark_ult" => KnownCall::ULt,
         "__xark_bool_to_field" => KnownCall::BoolToField,
+        "__xark_assert_eq" => KnownCall::ConstrainEq,
         "__xark_advice" => KnownCall::Advice,
         "__xark_hint_inverse" => KnownCall::HintInverse,
         "__xark_hint_inverse_or_zero" => KnownCall::HintInverseOrZero,
@@ -231,8 +232,7 @@ fn intrinsic_known_call(name: &str) -> Option<KnownCall> {
 /// Sources:
 ///  * the `__xark_*` stubs in `xark::intrinsics` (enumerated, mapped by name);
 ///  * the `Field` constant constructors `constant` / `constant_u64` /
-///    `constant_u128` (inherent methods — no `__xark_*` intrinsic) and the free
-///    `assert_eq` function, all in the `xark` crate;
+///    `constant_u128` (inherent methods with no `__xark_*` intrinsic);
 ///  * the three `for`-loop lang items `into_iter` / `next` / `RangeInclusive::new`.
 ///
 /// The `xark` crate is a dependency of the circuit being compiled; we find it in
@@ -256,10 +256,6 @@ pub(crate) fn build_call_registry(tcx: TyCtxt<'_>) -> CallRegistry {
         for child in tcx.module_children(root) {
             let name = child.ident.name;
             match child.res {
-                // The free `assert_eq` function (re-exported at the crate root).
-                Res::Def(DefKind::Fn, def_id) if name.as_str() == "assert_eq" => {
-                    reg.insert(def_id, KnownCall::ConstrainEq);
-                }
                 // The `Field` type: register its constant constructors (inherent
                 // methods with no `__xark_*` intrinsic backing).
                 Res::Def(DefKind::Struct, field_did) if name.as_str() == "Field" => {
@@ -2761,8 +2757,18 @@ fn lower_call<'tcx>(
             env.set_field(dest, out);
         }
         KnownCall::BoolToField => {
-            // identity: a `bool` and a `{0,1}` `Field` wire are the same variable
-            let x = env.operand_to_lc(arg(0)?)?;
+            // A computed `bool` is already a `{0,1}` field wire. A constant
+            // passed through an inlined generic function is tracked in the
+            // compile-time integer slots, so recover its same zero/one LC.
+            let operand = arg(0)?;
+            let x = match env.operand_to_lc(operand) {
+                Ok(x) => x,
+                Err(field_error) => match env.operand_to_int(operand) {
+                    Some(0) => LinearCombination::zero(),
+                    Some(1) => LinearCombination::one(),
+                    _ => return Err(field_error),
+                },
+            };
             env.set_field(dest, x);
         }
         // Width-generic hints: `N` inferred from the array args, `bits` from the

@@ -157,6 +157,15 @@ pub fn __xark_bool_to_field(_b: bool) -> Field {
     loop {}
 }
 
+/// Circuit equality constraint. Maps to [`KnownCall::ConstrainEq`] after the
+/// public `assert_eq` wrapper converts both operands to `Field`.
+///
+/// [`KnownCall::ConstrainEq`]: crate::lower_mir::KnownCall::ConstrainEq
+#[inline(never)]
+pub fn __xark_assert_eq(_lhs: Field, _rhs: Field) {
+    loop {}
+}
+
 // ---------------------------------------------------------------------------
 // Hint intrinsics — the solver computes the value; the CALLER must pin it.
 // ---------------------------------------------------------------------------

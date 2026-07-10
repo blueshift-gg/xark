@@ -693,11 +693,12 @@ impl_field_int_rem!(u8 => 8, u16 => 16, u32 => 32, u64 => 64);
 /// Either argument may be `bool` (the result of a comparison, `.is_zero()`,
 /// etc.) or `Field` — both types convert to `Field` for zero-cost.
 ///
-/// This is a marker: the compiler lowers it to an R1CS constraint rather than
-/// executing it.
+/// The wrapper performs the ordinary Rust conversions before calling the typed
+/// equality intrinsic. This keeps the compiler boundary `Field × Field` while
+/// allowing every existing `Into<Field>` input, including unsigned literals.
 #[inline(never)]
-pub fn assert_eq<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
-    loop {}
+pub fn assert_eq<L: Into<Field>, R: Into<Field>>(lhs: L, rhs: R) {
+    __xark_assert_eq(lhs.into(), rhs.into())
 }
 
 /// Constrain a boolean wire to be true.

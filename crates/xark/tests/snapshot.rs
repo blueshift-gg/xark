@@ -3074,3 +3074,90 @@ fn field_rem_u128_is_not_provided() {
         "103 % 5u64 = 3"
     );
 }
+
+/// `assert_eq` lowers its declared `Into<Field>` conversions before the typed
+/// compiler intrinsic. Cover every supported unsigned width, decimal strings,
+/// both operand orders, and constant/computed booleans.
+#[test]
+fn assert_eq_lowers_into_field_operands() {
+    let compiled = xark_test_harness::compile_source(
+        "assert_eq_into_field",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) {\n\
+             assert_eq(x, 7u8);\n\
+             assert_eq(7u16, x);\n\
+             assert_eq(x, 7u32);\n\
+             assert_eq(7u64, x);\n\
+             assert_eq(x, 7u128);\n\
+             assert_eq(\"7\", x);\n\
+             assert_eq(true, Field::from(1u8));\n\
+             assert_eq(Field::from(0u8), false);\n\
+             assert_eq(x == Field::from(7u8), true);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(
+        compiled.status_success,
+        "unsigned operands should compile through Into<Field>: {}",
+        compiled.stderr
+    );
+    let program = compiled.program();
+    assert!(solves(&program, &[("x", "7")]));
+    assert!(
+        !solves(&program, &[("x", "8")]),
+        "the converted constants must still constrain the witness"
+    );
+
+    let signed = xark_test_harness::compile_source(
+        "assert_eq_signed_rejected",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) { assert_eq(x, -1i64); }\n",
+        "bn254",
+    );
+    assert!(
+        !signed.status_success,
+        "signed integers have no Into<Field> implementation"
+    );
+
+    let invalid_decimal = xark_test_harness::compile_source(
+        "assert_eq_invalid_decimal",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) { assert_eq(x, \"not-a-number\"); }\n",
+        "bn254",
+    );
+    assert!(!invalid_decimal.status_success);
+    assert!(
+        invalid_decimal.stderr.contains("non-numeric character"),
+        "the typed wrapper must preserve the Field constant diagnostic: {}",
+        invalid_decimal.stderr
+    );
+}
+
+/// Passing an unsigned literal through the public generic wrapper must produce
+/// exactly the same primitive circuit as an explicit `Field::from` conversion.
+#[test]
+fn assert_eq_literal_matches_explicit_conversion() {
+    let literal = xark_test_harness::compile_source(
+        "assert_eq_literal_ir",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) { assert_eq(x, 7u64); }\n",
+        "bn254",
+    );
+    let explicit = xark_test_harness::compile_source(
+        "assert_eq_explicit_ir",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) { assert_eq(x, Field::from(7u64)); }\n",
+        "bn254",
+    );
+    assert!(literal.status_success, "literal failed: {}", literal.stderr);
+    assert!(
+        explicit.status_success,
+        "explicit conversion failed: {}",
+        explicit.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(literal.out_dir.join("circuit.json")).unwrap(),
+        std::fs::read_to_string(explicit.out_dir.join("circuit.json")).unwrap(),
+        "the conversion spelling must not change primitive IR"
+    );
+}
