@@ -264,7 +264,7 @@ fn nested_arrays() {
 }
 
 /// Full SHA-256 single-block compression (`xark-sha256`): 64 rounds + message
-/// schedule fully unrolled. This is a large circuit (~37k constraints) and the
+/// schedule fully unrolled. This is a large circuit (~36k constraints) and the
 /// main stress test for the compiler's inlining/unrolling performance — it
 /// should compile in seconds, not minutes.
 #[test]
@@ -274,7 +274,7 @@ fn sha256_compiles() {
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let constraints = json.matches("\"source_span\"").count();
     // Deterministic circuit; exact counts guard against accidental changes.
-    assert_eq!(constraints, 37922, "SHA-256 constraint count changed");
+    assert_eq!(constraints, 35984, "SHA-256 constraint count changed");
     assert_eq!(
         json.matches("\"name\": \"w").count(),
         7424,
@@ -1399,12 +1399,12 @@ fn blake2s_matches_lean_model() {
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
     assert_eq!(
-        mul, 26720,
+        mul, 26656,
         "BLAKE2s mult-gate count pins blake2s_round_compose_bit; got {mul}"
     );
 }
 
-/// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 156k constraints.
+/// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 154k constraints.
 /// `formal/Formal/Keccak.lean` proves per-bit soundness of one round
 /// `ι∘χ∘π∘ρ∘θ` (`keccakRoundStep_bit_sound`). The ρ·π
 /// permutation index in the Lean model was corrected to `(X+3Y)%5` to match this
@@ -1423,6 +1423,11 @@ fn keccak_matches_lean_model() {
         .iter()
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
+    assert_eq!(
+        r1cs.constraints.len(),
+        153685,
+        "Keccak total constraint count; round-constant XORs must stay linear"
+    );
     assert_eq!(mul, 153664, "Keccak mult-gate count; got {mul}");
 }
 
@@ -2434,6 +2439,79 @@ fn bool_combinators_solve() {
     assert!(
         solver::solve_and_check(&program, &case("2", "0", "0")).is_err(),
         "non-boolean input must reject"
+    );
+}
+
+/// XOR with a compile-time constant is linear: it must not allocate a derived
+/// output, emit an XOR witness operation, or add an XOR constraint. Exercise
+/// both operand orders and a constant-only XOR so the emitter-level fold cannot
+/// regress behind a call-site special case.
+#[test]
+fn xor_with_constant_is_linear() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+
+    let src = write_case(
+        "xor_constant",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, flip: Public<Field>, keep: Public<Field>, constant: Public<Field>) {\n\
+         \x20   x.assert_bool();\n\
+         \x20   assert_eq(x.xor(Field::from(1u8)), flip);\n\
+         \x20   assert_eq(Field::from(0u8).xor(x), keep);\n\
+         \x20   assert_eq(Field::from(1u8).xor(Field::from(0u8)), constant);\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "xor_constant", "bn254");
+    assert!(c.status_success, "constant XOR failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+
+    assert_eq!(
+        program.constraints.len(),
+        4,
+        "only booleanity plus the three public-output bindings remain"
+    );
+    assert!(
+        program
+            .witness_gen
+            .iter()
+            .all(|op| !matches!(op, primitive::WitnessGen::Xor { .. })),
+        "constant XOR must not leave a witness operation"
+    );
+    assert!(
+        program
+            .vars
+            .iter()
+            .all(|v| v.role != primitive::VarRole::Derived),
+        "constant XOR must not allocate a derived output"
+    );
+
+    let id = |name: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == name)
+            .map(|v| v.id)
+            .unwrap()
+    };
+    let case = |x: &str, flip: &str, keep: &str| {
+        let mut inputs = BTreeMap::new();
+        inputs.insert(id("x"), x.to_string());
+        inputs.insert(id("flip"), flip.to_string());
+        inputs.insert(id("keep"), keep.to_string());
+        inputs.insert(id("constant"), "1".to_string());
+        inputs
+    };
+    solver::solve_and_check(&program, &case("0", "1", "0")).expect("0 xor 1 = 1");
+    solver::solve_and_check(&program, &case("1", "0", "1")).expect("1 xor 1 = 0");
+    assert!(
+        solver::solve_and_check(&program, &case("1", "1", "1")).is_err(),
+        "a wrong folded XOR output must be rejected"
+    );
+    assert!(
+        solver::solve_and_check(&program, &case("2", "0", "2")).is_err(),
+        "the optimization must not weaken operand booleanity"
     );
 }
 

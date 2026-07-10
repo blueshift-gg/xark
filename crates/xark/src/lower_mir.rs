@@ -1390,6 +1390,20 @@ impl<'tcx> LoweringEnv<'tcx> {
     fn emit_xor(&mut self, a: LinearCombination, b: LinearCombination) -> LinearCombination {
         self.consume_pending(&a);
         self.consume_pending(&b);
+
+        // `a XOR b = a + b - 2ab`. If either operand is constant, the
+        // polynomial is linear: substitute it directly instead of allocating
+        // an output variable, constraint, and witness operation.
+        let two = xark_ir::FieldConst::from_i64(2);
+        if a.is_constant() {
+            let product = b.clone().scale(&a.constant.mul(&two));
+            return a + b - product;
+        }
+        if b.is_constant() {
+            let product = a.clone().scale(&b.constant.mul(&two));
+            return a + b - product;
+        }
+
         let c = self.alloc_internal();
         let id = self.fresh_constraint_id();
         let a2 = a.clone().scale(&xark_ir::FieldConst::from_i64(2));
