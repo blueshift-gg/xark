@@ -15,23 +15,28 @@ exclude = ["tests", "benches"]
 crate-type = ["lib"]
 
 [features]
-# `solana-nostd-alt-bn128` defaults `static-syscalls` ON, which emits the SBPFv3
-# static-syscall ABI (a `callx` to a murmur-hashed immediate). In an SBPFv0/v2
-# program — still the default `cargo-build-sbf` output on platform-tools v1.53,
-# and what current mainnet + published LiteSVM (solana-sbpf reads the version
-# from ELF e_flags) execute — that instruction decodes as an out-of-bounds
-# relative call and the loader rejects the whole `.so`. So default it OFF
-# (dynamic syscall symbols, which load everywhere today) and expose an opt-in
-# passthrough for when you build for SBPFv3 against a v3-capable loader.
+# `static-syscalls` emits the SBPFv3 static-syscall ABI for the alt_bn128
+# group op (a `callx` to a murmur-hashed immediate). SBPFv3 is the current
+# mainnet ABI, so default to it — a v3 program calls the syscall directly,
+# without a relocation.
+#
+# To target a legacy SBPFv0/v2 loader instead, depend on this crate with
+# `default-features = false`: that swaps back to dynamic syscall symbols
+# (a relocated call to the named symbol), which every loader resolves. Build
+# the program itself as v0 too — a v3 `callx` in a v0 container decodes as an
+# out-of-bounds relative call and the loader rejects the whole `.so`.
 #
 # Caveat: a toolchain that both defaults to v3 AND sets `target_feature =
-# "static-syscalls"` re-activates the crate's static path regardless of this
-# feature (it gates on `any(target_feature, feature)`); there the fix is a
-# v3-enabled VM, not this switch.
-default = []
+# "static-syscalls"` activates the crate's static path regardless of this
+# feature (it gates on `any(target_feature, feature)`), so opting out to v0
+# there also needs a v0 build target, not just this switch.
+default = ["static-syscalls"]
 static-syscalls = ["solana-nostd-alt-bn128/static-syscalls"]
 
 [dependencies]
+# `default-features = false` so the SBPFv3 ABI is controlled by *this* crate's
+# `static-syscalls` feature above (default on), and `xark-verifier`'s own
+# `default-features = false` cleanly opts a dependent down to SBPFv0.
 solana-nostd-alt-bn128 = { version = "0.1.1", default-features = false }
 solana-program-error = { version = "3", default-features = false }
 
