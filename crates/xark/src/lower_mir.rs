@@ -1470,6 +1470,12 @@ impl<'tcx> LoweringEnv<'tcx> {
         }
 
         let diff = lhs - rhs;
+        // Algebraically identical sides are a tautology, regardless of field.
+        // Do not decide non-zero constants here: without a known modulus, a
+        // decimal such as the BN254 modulus itself still represents zero.
+        if diff.is_constant() && diff.constant.is_zero() {
+            return;
+        }
         let id = self.fresh_constraint_id();
         let note = format!("({}) * 1 = 0", self.render_lc(&diff));
         self.push_constraint(
@@ -1525,6 +1531,11 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// `out = 1 − input·inv` with `input·out == 0` (the inverse-or-zero hint
     /// yields `0` when `input == 0`). Backs `==` on `Field`.
     fn emit_is_zero(&mut self, input: LinearCombination) -> LinearCombination {
+        // Exact zero is field-independent. A non-zero decimal cannot be folded
+        // without the modulus because it may be an unreduced representation of 0.
+        if input.is_constant() && input.constant.is_zero() {
+            return LinearCombination::one();
+        }
         let inv = self.alloc_advice();
         self.witness_gen.push(Some(WitnessGen::InverseOrZero {
             out: inv,
@@ -1581,7 +1592,9 @@ impl<'tcx> LoweringEnv<'tcx> {
         let lt = LinearCombination::one() - LinearCombination::var(top);
         // `r = a − b + lt·2ⁿ`; range-proving `r ∈ [0, 2ⁿ)` pins `lt`. The `lt·2ⁿ`
         // product is part of the comparison; the range proof is a RangeCheck.
-        let lt_pow = self.emit_mul(lt.clone(), two_pow_n);
+        // `two_pow_n` is a compile-time constant, so this product is linear and
+        // belongs directly in the LC rather than in a multiplication gate.
+        let lt_pow = lt.clone().scale(&two_pow_n.constant);
         self.kind_stack.pop();
         let r = (a.clone() - b.clone()) + lt_pow;
         self.kind_stack.push(ConstraintKind::RangeCheck);
