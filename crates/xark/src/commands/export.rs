@@ -461,7 +461,9 @@ mod tests {
         assert!(manifest.contains("\n[workspace]\n"));
         // A GitHub git source (bare or rev-pinned) — never a version req the
         // unpublished crate can't resolve, never a local path.
-        assert!(manifest.contains(r#"xark-verifier = { git = "https://github.com/blueshift-gg/xark""#));
+        assert!(
+            manifest.contains(r#"xark-verifier = { git = "https://github.com/blueshift-gg/xark""#)
+        );
     }
 
     #[test]
