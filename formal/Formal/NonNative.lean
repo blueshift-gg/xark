@@ -405,7 +405,8 @@ theorem valOfLimbs_eq_valOfNatLimbs_ext {n : ℕ} (ls : Fin n → ℕ) (β : ℕ
 
 /-- **Limbwise constraints + carry-no-wrap ⇒ modular product (gluing).**
 
-This is the full soundness chain for the non-native `mod_mul` gadget (`crates/xark-bignum/src/lib.rs`):
+This is the full soundness chain for the non-native `mod_mul` gadget
+(`crates/xark-bignum/src/lib.rs`):
 the limb-by-limb `Fr` column constraints, modeled as plain-ℕ equations on the
 extended limbs (which is sound provided the in-circuit carry range gadget
 ensures no carry wraps in `Fr`), force the recomposed value of `c` to be the
@@ -595,7 +596,8 @@ theorem carry_le {n : ℕ} (a b q c m : Fin n → ℕ)
 
 /-! ## Headline theorem: Fr-level limbwise constraints ⇒ modular product
 
-The constraints emitted by the non-native `mod_mul` gadget (`crates/xark-bignum/src/lib.rs`) live in `Fr = ZMod r`. The
+The constraints emitted by the non-native `mod_mul` gadget (`crates/xark-bignum/src/lib.rs`)
+live in `Fr = ZMod r`. The
 column equation we prove sound here is
 
   `(∑ i ∈ [0, k+1), aᵢ · b_{k-i}) + carry k`

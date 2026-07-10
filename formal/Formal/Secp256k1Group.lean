@@ -10,6 +10,11 @@ import Mathlib
 
 set_option linter.style.header false
 set_option linter.style.longLine false
+-- The concrete secp256k1 field/curve facts below (β³ = 1, generator
+-- nonsingularity, the GLV eigenvalue) are 256-bit ZMod equalities the kernel
+-- cannot `decide` in practical time; they are discharged by `native_decide`
+-- (compiled reduction, `Lean.ofReduceBool` axiom). See the per-theorem docs.
+set_option linter.style.nativeDecide false
 
 /-!
 # secp256k1 point group as a concrete `AddCommGroup`

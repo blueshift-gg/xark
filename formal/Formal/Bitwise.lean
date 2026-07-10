@@ -29,8 +29,8 @@ and range gadgets this builds on.
 
 namespace Xark
 
-/-- **AND-bit soundness.** The AND gadget (`crates/xark-bits/src/lib.rs`) emits `aᵢ * bᵢ = outᵢ`. Given the
-inputs are boolean, the output is boolean and equals the logical AND
+/-- **AND-bit soundness.** The AND gadget (`crates/xark-bits/src/lib.rs`) emits `aᵢ * bᵢ = outᵢ`.
+Given the inputs are boolean, the output is boolean and equals the logical AND
 (`out = 1 ↔ a = 1 ∧ b = 1`). -/
 theorem and_sound {F : Type*} [Field F] (a b out : F)
     (ha : a = 0 ∨ a = 1) (hb : b = 0 ∨ b = 1) (h : a * b = out) :
@@ -39,7 +39,8 @@ theorem and_sound {F : Type*} [Field F] (a b out : F)
   refine ⟨?_, ?_⟩ <;>
     rcases ha with rfl | rfl <;> rcases hb with rfl | rfl <;> norm_num
 
-/-- **XOR-bit soundness.** The XOR gadget (`crates/xark-bits/src/lib.rs`) emits `(2·a) · b = a + b − out`
+/-- **XOR-bit soundness.** The XOR gadget (`crates/xark-bits/src/lib.rs`) emits
+`(2·a) · b = a + b − out`
 (with `out` separately boolean-enforced). Given the inputs are boolean, this
 constraint pins `out` to `a + b − 2ab`, which is boolean and is exactly XOR:
 `out = 0 ↔ a = b`. -/
@@ -52,8 +53,8 @@ theorem xor_sound {F : Type*} [Field F] (a b out : F)
     rcases ha with rfl | rfl <;> rcases hb with rfl | rfl <;>
       rw [hout] <;> norm_num
 
-/-- **NOT-bit soundness.** The NOT gadget (`crates/xark-bits/src/lib.rs`) represents the complement as the
-LC `1 − a`. Given `a` is boolean, `1 − a` is boolean and is logical NOT
+/-- **NOT-bit soundness.** The NOT gadget (`crates/xark-bits/src/lib.rs`) represents the complement
+as the LC `1 − a`. Given `a` is boolean, `1 − a` is boolean and is logical NOT
 (`1 − a = 1 ↔ a = 0`). -/
 theorem not_sound {F : Type*} [Field F] (a : F) (ha : a = 0 ∨ a = 1) :
     ((1 - a) = 0 ∨ (1 - a) = 1) ∧ ((1 - a) = 1 ↔ a = 0) := by
