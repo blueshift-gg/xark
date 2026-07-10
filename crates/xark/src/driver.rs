@@ -116,8 +116,9 @@ impl R1csCallbacks {
             .unwrap_or_else(|e| panic!("failed to create output dir {:?}: {e}", self.output_dir));
 
         // Primitive IR — the artifact the backend lowering consumes (and the
-        // sole circuit description now).
-        let circuit = xark_ir::primitive::to_json_pretty(&output.primitive);
+        // sole circuit description now). Emitted as compact JSON: it's machine
+        // consumed, and pretty-printing more than doubled the file for no benefit.
+        let circuit = xark_ir::primitive::to_json(&output.primitive);
         let circuit_path = self.output_dir.join("circuit.json");
         std::fs::write(&circuit_path, format!("{circuit}\n"))
             .unwrap_or_else(|e| panic!("failed to write {circuit_path:?}: {e}"));

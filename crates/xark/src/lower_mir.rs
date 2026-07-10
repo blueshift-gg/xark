@@ -1485,14 +1485,17 @@ impl<'tcx> LoweringEnv<'tcx> {
         let two = xark_ir::FieldConst::from_i64(2);
         let mut pow = xark_ir::FieldConst::from_i64(1);
         let mut recomp = LinearCombination::zero();
-        for i in 0..n {
-            let b = self.alloc_advice();
-            // Witness-gen: bit `i` of the input value.
-            self.witness_gen.push(Some(WitnessGen::Bit {
-                out: b,
-                input: value.clone(),
-                index: i as u32,
-            }));
+        // Allocate all `n` bit variables up front (a contiguous block), then emit
+        // a single batched `Bits` witness-gen op: the shared `input` LC is stored
+        // once instead of re-serialized per bit. The R1CS is unchanged — the same
+        // booleanity + recomposition constraints, in the same order, over the same
+        // var ids — so only `circuit.json`'s hint program shrinks.
+        let bit_vars: Vec<u32> = (0..n).map(|_| self.alloc_advice()).collect();
+        self.witness_gen.push(Some(WitnessGen::Bits {
+            outs: bit_vars.clone(),
+            input: value.clone(),
+        }));
+        for &b in &bit_vars {
             // Booleanity: `b * b = b` (⟺ `b ∈ {0, 1}`).
             let id = self.fresh_constraint_id();
             let note = format!("{} in {{0,1}}", self.var_names[b as usize]);
@@ -3222,6 +3225,9 @@ fn witness_gen_out(op: &WitnessGen) -> VarId {
         | WitnessGen::Inverse { out, .. }
         | WitnessGen::InverseOrZero { out, .. }
         | WitnessGen::Bit { out, .. } => *out,
+        // Multi-output; represented by its first bit for the "is any output still
+        // referenced" filter (all bits of a decomposition are used together).
+        WitnessGen::Bits { outs, .. } => *outs.first().unwrap_or(&0),
         WitnessGen::DivRem { q, .. } => *q,
         // Multi-output; represented by its first output for the "is any output
         // still referenced" filter (all limbs are used together in practice).
