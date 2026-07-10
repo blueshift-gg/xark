@@ -238,7 +238,11 @@ pub fn cmd_test(args: &[String]) -> i32 {
         .unwrap_or_else(|| ".".to_string());
 
     // Build first so the artifacts the tests load are present + up to date.
-    let code = cmd_build(std::slice::from_ref(&crate_dir));
+    // Build *with* `--profile` (it also writes `profile.json`, leaving
+    // `circuit.json` / `r1cs.json` byte-identical): the `xark_prover` test
+    // harness reads it to explain *which* source line / gadget a failing
+    // constraint came from when `c.check(..)` fails.
+    let code = cmd_build_profile(std::slice::from_ref(&crate_dir));
     if code != 0 {
         eprintln!("xark: build failed; skipping tests");
         return code;
@@ -516,13 +520,14 @@ fn tests_template(name: &str, inputs: &str) -> String {
          \x20   #[test]\n\
          \x20   fn prove_valid() {{\n\
          \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       assert!(c.prove({inputs} {{ secret: 2, result: 4 }})); // 2 * 2 == 4\n\
+         \x20       // `.unwrap()` fails the test with the offending constraint + source line.\n\
+         \x20       c.check({inputs} {{ secret: 2, result: 4 }}).unwrap(); // 2 * 2 == 4\n\
          \x20   }}\n\
          \n\
          \x20   #[test]\n\
          \x20   fn prove_invalid() {{\n\
          \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       assert!(!c.prove({inputs} {{ secret: 3, result: 4 }})); // 3 * 3 != 4\n\
+         \x20       assert!(c.check({inputs} {{ secret: 3, result: 4 }}).is_err()); // 3 * 3 != 4\n\
          \x20   }}\n\
          }}\n"
     )
