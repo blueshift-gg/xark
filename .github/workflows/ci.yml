@@ -92,8 +92,9 @@ jobs:
             crates/xark/target
           key: snapshots-${{ hashFiles('Cargo.lock') }}
 
-      - name: cargo test (compiler snapshots)
-        # Runs `crates/xark/tests/snapshot.rs` — the byte-identical count bridges
+      - name: cargo test (compiler and build extraction)
+        # Runs the CLI unit tests, the build-cache regression, and
+        # `crates/xark/tests/snapshot.rs` — the byte-identical count bridges
         # (fp_mul 1154, ec_incomplete 15369/15891, sha256 38602, blake2s 27808,
         # blake3 19792, keccak 153664, aes 145816, poseidon2 240, bignum 1189,
         # struct_point, aggregate-input + int-operator solves, …).
@@ -104,4 +105,8 @@ jobs:
         # compiles each example and diffs its emitted R1CS/IR against the
         # committed snapshots. The heavy `#[ignore]`d known-answer-vector tests
         # run separately in `nightly-kats.yml`.
-        run: cd crates/xark && cargo test --features cli --test snapshot
+        run: |
+          cd crates/xark
+          cargo test --features cli --bin xark
+          cargo test --features cli --test build_cache
+          cargo test --features cli --test snapshot

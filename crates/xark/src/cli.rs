@@ -8,6 +8,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 /// `xark build <crate-dir> [--out DIR] [--field F]`
 ///
 /// Drives `cargo build` on the circuit crate with `xark` itself as `RUSTC`, under
@@ -72,26 +74,32 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
 
     let self_exe = std::env::current_exe().expect("current_exe");
     let toolchain = option_env!("XARK_TOOLCHAIN").unwrap_or("nightly");
-
-    // The emitted artifacts (circuit.json / r1cs.json / graph.dot) are a
-    // side-effect of compilation. If they were deleted but the source is
-    // unchanged, cargo cache-hits and never re-runs the extractor, so they never
-    // come back. Bump the source mtime to force the primary crate to recompile
-    // when the output looks incomplete — but only then, so an unchanged large
-    // circuit (whose r1cs.json/graph.dot are legitimately gated off) is not
-    // needlessly recompiled.
-    let regen_needed = !out_abs.join("circuit.json").exists()
-        || (out_abs.join("r1cs.json").exists() && !out_abs.join("graph.dot").exists())
-        // `xark profile` needs profile.json; force a recompile if it's absent so
-        // an already-built (cache-hit) circuit still produces the attribution.
-        || (profile && !out_abs.join("profile.json").exists());
-    if regen_needed {
-        touch_sources(&crate_abs);
-    }
-
     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| xark_dir.clone());
+    if let Err(e) = std::fs::create_dir_all(&out_abs) {
+        eprintln!("xark: failed to create output directory: {e}");
+        return 1;
+    }
+
+    // Artifact extraction is a rustc side effect, so Cargo does not know when a
+    // new xark binary/field/profile/output must regenerate it. Invalidate only
+    // the primary package in xark's isolated target; never mutate user sources.
+    let fingerprint = match build_fingerprint(&self_exe, &out_abs, &field, profile) {
+        Ok(fingerprint) => fingerprint,
+        Err(e) => {
+            eprintln!("xark: failed to fingerprint artifact extraction: {e}");
+            return 1;
+        }
+    };
+    let stamp_path = out_abs.join(BUILD_STAMP);
+    let stamp_matches =
+        std::fs::read_to_string(&stamp_path).is_ok_and(|stamp| stamp.trim() == fingerprint);
+    if (!stamp_matches || !artifacts_complete(&out_abs, profile))
+        && !clean_primary_package(&crate_dir, &target_dir, &pkg_name)
+    {
+        return 1;
+    }
     eprintln!(
         "{} building circuit `{name}` (toolchain {toolchain})",
         crate::style::tag()
@@ -115,7 +123,21 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
         .status();
 
     match status {
-        Ok(_) if out_abs.join("circuit.json").exists() => {
+        // Check Cargo's result before looking at outputs. Otherwise artifacts
+        // from a previous good build can make a broken source appear successful.
+        Ok(s) if !s.success() => {
+            eprintln!(
+                "xark: circuit compilation failed (cargo exit {:?}); \
+                 previous artifacts left unchanged",
+                s.code()
+            );
+            1
+        }
+        Ok(_) if artifacts_complete(&out_abs, profile) => {
+            if let Err(e) = std::fs::write(&stamp_path, &fingerprint) {
+                eprintln!("xark: build succeeded but failed to record its fingerprint: {e}");
+                return 1;
+            }
             eprintln!(
                 "{} wrote {}",
                 crate::style::tag(),
@@ -130,11 +152,11 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
             );
             0
         }
-        Ok(s) => {
+        Ok(_) => {
+            let missing = missing_artifacts(&out_abs, profile).join(", ");
             eprintln!(
-                "xark: no circuit.json produced (does the crate expose `pub fn circuit(..)`?); \
-                 cargo exit {:?}",
-                s.code()
+                "xark: build succeeded but did not produce {missing} \
+                 (does the crate expose `pub fn circuit(..)`?)"
             );
             1
         }
@@ -145,26 +167,83 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     }
 }
 
-/// Bump the mtime of the crate's `src/*.rs` files so cargo recompiles the primary
-/// crate on the next build (forcing the extractor to re-emit artifacts).
-/// Best-effort: per-file failures are ignored. Content is never modified.
-fn touch_sources(crate_dir: &std::path::Path) {
-    fn walk(dir: &std::path::Path, now: std::time::SystemTime) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, now);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                if let Ok(f) = std::fs::File::options().write(true).open(&path) {
-                    let _ = f.set_modified(now);
-                }
-            }
+const BUILD_STAMP: &str = ".xark-build-stamp";
+const LOWERING_SCHEMA: u32 = 1;
+
+fn required_artifacts(profile: bool) -> &'static [&'static str] {
+    if profile {
+        &["circuit.json", "r1cs.json", "profile.json"]
+    } else {
+        &["circuit.json", "r1cs.json"]
+    }
+}
+
+fn missing_artifacts(out: &std::path::Path, profile: bool) -> Vec<&'static str> {
+    required_artifacts(profile)
+        .iter()
+        .copied()
+        .filter(|name| !out.join(name).is_file())
+        .collect()
+}
+
+fn artifacts_complete(out: &std::path::Path, profile: bool) -> bool {
+    missing_artifacts(out, profile).is_empty()
+}
+
+/// Hash the actual compiler executable, not its path or mtime. Local installs
+/// commonly keep the same `0.0.1` version and destination path across rebuilds.
+fn compiler_digest(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn build_fingerprint(
+    self_exe: &std::path::Path,
+    out: &std::path::Path,
+    field: &str,
+    profile: bool,
+) -> std::io::Result<String> {
+    let compiler = compiler_digest(self_exe)?;
+    let out = out.canonicalize().unwrap_or_else(|_| out.to_path_buf());
+    let raw = format!(
+        "xark={}\nschema={LOWERING_SCHEMA}\ncompiler={compiler}\nfield={field}\nprofile={profile}\nout={}\n",
+        env!("CARGO_PKG_VERSION"),
+        out.display()
+    );
+    Ok(hex::encode(Sha256::digest(raw.as_bytes())))
+}
+
+fn clean_primary_package(crate_dir: &std::path::Path, target: &std::path::Path, pkg: &str) -> bool {
+    match Command::new("cargo")
+        .args(["clean", "--quiet", "--package", pkg])
+        .current_dir(crate_dir)
+        .env("CARGO_TARGET_DIR", target)
+        .status()
+    {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            eprintln!(
+                "xark: failed to invalidate cached circuit build (cargo exit {:?})",
+                status.code()
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("xark: failed to run cargo clean: {e}");
+            false
         }
     }
-    walk(&crate_dir.join("src"), std::time::SystemTime::now());
 }
 
 /// `xark clean` — remove **every** xark output tree under the current directory:
@@ -531,4 +610,60 @@ fn tests_template(name: &str, inputs: &str) -> String {
          \x20   }}\n\
          }}\n"
     )
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "xark-build-key-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn build_fingerprint_tracks_compiler_and_extraction_inputs() {
+        let temp = TempDir::new();
+        let compiler = temp.0.join("xark-bin");
+        let out = temp.0.join("out");
+        std::fs::write(&compiler, b"compiler-v1").unwrap();
+
+        let first = build_fingerprint(&compiler, &out, "bn254", false).unwrap();
+        assert_eq!(
+            first,
+            build_fingerprint(&compiler, &out, "bn254", false).unwrap(),
+            "identical extraction inputs must have a stable fingerprint"
+        );
+
+        std::fs::write(&compiler, b"compiler-v2").unwrap();
+        let compiler_changed = build_fingerprint(&compiler, &out, "bn254", false).unwrap();
+        assert_ne!(first, compiler_changed);
+
+        let field_changed = build_fingerprint(&compiler, &out, "17", false).unwrap();
+        assert_ne!(compiler_changed, field_changed);
+
+        let profile_changed = build_fingerprint(&compiler, &out, "17", true).unwrap();
+        assert_ne!(field_changed, profile_changed);
+
+        let other_out = build_fingerprint(&compiler, &temp.0.join("other"), "17", true).unwrap();
+        assert_ne!(profile_changed, other_out);
+    }
 }
