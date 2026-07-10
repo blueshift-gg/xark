@@ -116,6 +116,16 @@ pub enum WitnessGen {
         input: LinearCombination,
         index: u32,
     },
+    /// Batched bit-decomposition: `outs[i] = the i-th least-significant bit of
+    /// eval(input)`. Semantically identical to emitting `Bit { out: outs[i],
+    /// input, index: i }` for each `i`, but the shared `input` linear combination
+    /// is serialized **once** instead of once per bit — the dominant `circuit.json`
+    /// size win for bit-heavy circuits (range proofs, EC scalar multiplication),
+    /// where the same `input` was previously re-serialized for every bit.
+    Bits {
+        outs: Vec<VarId>,
+        input: LinearCombination,
+    },
     /// `q = eval(num) / eval(den)`, `r = eval(num) % eval(den)` over the
     /// integers on the canonical representatives — quotient/remainder hint.
     DivRem {
@@ -196,11 +206,19 @@ pub struct PrimitiveProgram {
     pub witness_gen: Vec<WitnessGen>,
 }
 
+/// Serialize a primitive program to **compact** JSON (no indentation). This is
+/// the on-disk form for `circuit.json`: a machine-consumed hint/constraint
+/// artifact where pretty-printing more than doubled the file for no benefit.
+/// Round-trips through [`from_json`] identically to [`to_json_pretty`].
+pub fn to_json(program: &PrimitiveProgram) -> String {
+    serde_json::to_string(program).expect("PrimitiveProgram is always serializable")
+}
+
 pub fn to_json_pretty(program: &PrimitiveProgram) -> String {
     serde_json::to_string_pretty(program).expect("PrimitiveProgram is always serializable")
 }
 
-/// Parse a primitive program from JSON (the inverse of [`to_json_pretty`]).
+/// Parse a primitive program from JSON (the inverse of [`to_json`]).
 pub fn from_json(s: &str) -> Result<PrimitiveProgram, serde_json::Error> {
     serde_json::from_str(s)
 }

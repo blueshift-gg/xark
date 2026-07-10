@@ -3,8 +3,8 @@
 //!
 //! Given `pub fn cube(secret: Private<Field>, result: Public<Field>)`, it emits
 //! a `CubeInputs { secret, result }` struct so tests read
-//! `prove(CubeInputs { secret: 2, result: 4 })` instead of positional `[2, 4]`
-//! — named, so parameters can't be transposed by accident.
+//! `check(CubeInputs { secret: 2, result: 4 }).unwrap()` instead of positional
+//! `[2, 4]` — named, so parameters can't be transposed by accident.
 //!
 //! The struct and its `ProveInputs` impl are `#[cfg(test)]`-gated: `xark_prover`
 //! is a dev-dependency, and proving from the circuit crate is a test-time

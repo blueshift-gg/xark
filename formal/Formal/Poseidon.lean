@@ -91,7 +91,8 @@ def applySbox {F : Type*} [CommRing F] {t : ℕ} (s : Fin t → F) : Fin t → F
 
 /-- Apply the S-box only at index `0` (partial-round non-linear layer). The
 canonical Poseidon2 partial round S-boxes the first cell and leaves the rest
-unchanged — the Poseidon gadget (`crates/xark-poseidon/src/lib.rs`) does exactly this in its partial-round loop.
+unchanged — the Poseidon gadget (`crates/xark-poseidon/src/lib.rs`) does exactly this in its
+partial-round loop.
 `[NeZero t]` is the minimum constraint to talk about index `0 : Fin t`. -/
 def applyPartialSbox {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
     (s : Fin t → F) : Fin t → F :=
@@ -225,7 +226,8 @@ def poseidonPermutation {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
 /-- **Full-permutation determinism.** For any fixed initial matrix `Minit` and
 schedule, the Poseidon2 permutation is a function of the input state: two
 prover witnesses for the same input produce the same output. This is the
-end-of-soundness statement for the Poseidon gadget (`crates/xark-poseidon/src/lib.rs`) — combined with `sbox_sound`,
+end-of-soundness statement for the Poseidon gadget (`crates/xark-poseidon/src/lib.rs`) — combined
+with `sbox_sound`,
 which pins each per-cell S-box output, *no* step in the permutation carries
 under-constraint slack. -/
 theorem poseidon_permutation_determined {F : Type*} [CommRing F] {t : ℕ} [NeZero t]

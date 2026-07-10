@@ -20,6 +20,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use xark_ir::primitive::{PrimitiveProgram, VarRole};
+use xark_ir::profile::ProfileProgram;
 use xark_ir::solver::Fp;
 use xark_ir::{R1csProgram, VarId, Visibility};
 
@@ -295,6 +296,15 @@ pub fn load_circuit(path: &std::path::Path) -> Result<PrimitiveProgram> {
     xark_ir::primitive::from_json(&s).with_context(|| format!("parsing {}", path.display()))
 }
 
+/// Best-effort load of `profile.json` (per-constraint source/gadget attribution)
+/// from a build directory, for richer failure diagnostics. Returns `None` when
+/// the circuit was built without `--profile` (or the file is malformed).
+pub fn load_profile(dir: &std::path::Path) -> Option<ProfileProgram> {
+    std::fs::read_to_string(dir.join("profile.json"))
+        .ok()
+        .and_then(|s| xark_ir::profile::from_json(&s).ok())
+}
+
 /// Resolve `--input name=value` pairs to `VarId → decimal` for the solver.
 ///
 /// Shared by `xark prove` and `xark check --input`: applies the same strict
@@ -345,12 +355,16 @@ pub fn resolve_input_ids(
 /// witness-free version at `xark build`/`check` is planned.
 pub fn soundness_check(
     prim: &PrimitiveProgram,
+    r1cs: &R1csProgram,
+    profile: Option<&ProfileProgram>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
     let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs).map_err(|e| {
-        // Translate a bare variable id into the declared input name the user
-        // actually types, e.g. `missing input for variable 1` → `missing
-        // --input for `result``.
+        // A missing input names the *declared* input the user actually types,
+        // e.g. `MissingInput(1)` → "missing --input for `result`". Every other
+        // failure defers to the shared diagnostic, which names the failing
+        // constraint (and its source line / gadget when profiled) — the same
+        // explanation `xark test` surfaces.
         if let xark_ir::solver::SolveError::MissingInput(id) = e {
             if let Some(v) = prim.vars.iter().find(|v| v.id == id) {
                 return anyhow::anyhow!(
@@ -360,7 +374,10 @@ pub fn soundness_check(
                 );
             }
         }
-        anyhow::anyhow!("witness does not satisfy the circuit: {e}")
+        anyhow::anyhow!(
+            "{}",
+            xark_ir::diagnose::describe_unsatisfied(&e, r1cs, profile)
+        )
     })?;
 
     let holes = xark_ir::solver::analyze_underconstrained(prim, &assign_fp);

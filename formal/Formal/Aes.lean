@@ -10,6 +10,10 @@ import Formal.Blake
 
 set_option linter.style.header false
 set_option linter.style.longLine false
+-- The finite GF(256) byte facts below (bit-xor, affine/S-box bounds) are
+-- exhaustive `Fin 256` checks discharged by `native_decide` (compiled
+-- reduction over the full byte range), which the kernel cannot `decide` fast.
+set_option linter.style.nativeDecide false
 set_option linter.style.setOption false
 set_option linter.flexible false
 set_option maxHeartbeats 800000

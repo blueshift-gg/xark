@@ -4,6 +4,7 @@
 //! This crate is deliberately free of any `rustc` dependency so it can be
 //! unit-tested on stable and reused elsewhere.
 
+pub mod diagnose;
 pub mod field;
 pub mod graph;
 pub mod json;

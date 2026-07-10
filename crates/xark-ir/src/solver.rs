@@ -261,6 +261,13 @@ pub fn solve(
                 let v = eval_lc(input, &assign, &modulus);
                 assign.insert(*out, v.bit(*index as usize));
             }
+            WitnessGen::Bits { outs, input } => {
+                // Batched form of `Bit`: `outs[i]` is bit `i` of the input.
+                let v = eval_lc(input, &assign, &modulus);
+                for (i, out) in outs.iter().enumerate() {
+                    assign.insert(*out, v.bit(i));
+                }
+            }
             WitnessGen::DivRem { q, r, num, den } => {
                 let n = eval_lc(num, &assign, &modulus);
                 let d = eval_lc(den, &assign, &modulus);

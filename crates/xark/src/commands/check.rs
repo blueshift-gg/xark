@@ -14,7 +14,10 @@ use anyhow::{bail, Result};
 
 use xark_ir::primitive::VarRole;
 
-use super::{load_circuit, parse_inputs, resolve_input_ids, soundness_check, CheckArgs};
+use super::{
+    load_circuit, load_profile, load_r1cs, parse_inputs, resolve_input_ids, soundness_check,
+    CheckArgs,
+};
 use crate::xark_project::XarkProject;
 
 pub fn run(args: CheckArgs) -> Result<()> {
@@ -34,11 +37,15 @@ pub fn run(args: CheckArgs) -> Result<()> {
     let base = args.out.clone().unwrap_or_else(|| args.crate_dir.clone());
     let project = XarkProject::resolve(Some(base.into()))?;
     let prim = load_circuit(&project.circuit_json())?;
+    let r1cs = load_r1cs(&project.r1cs_json())?;
+    let profile = load_profile(&project.xark_dir);
 
     // Resolve inputs → var ids and run the shared soundness gate (no setup/prove).
+    // The R1CS + best-effort profile let a bad witness name the failing
+    // constraint (and its source line), matching `xark prove` / `xark test`.
     let inputs = parse_inputs(&args.inputs)?;
     let id_inputs = resolve_input_ids(&prim, &inputs)?;
-    let _assign = soundness_check(&prim, &id_inputs)?;
+    let _assign = soundness_check(&prim, &r1cs, profile.as_ref(), &id_inputs)?;
 
     let derived = prim
         .vars

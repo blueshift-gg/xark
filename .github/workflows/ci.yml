@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
       - name: Install pinned compiler toolchain
         uses: dtolnay/rust-toolchain@master
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
       - name: Install pinned nightly (rustc_private) toolchain
         # `crates/xark` is a `rustc_driver` built on nightly with `rustc-dev`;

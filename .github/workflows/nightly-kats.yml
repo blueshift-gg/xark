@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
       - name: Install pinned nightly (rustc_private) toolchain
         # See docs/toolchain.md for the pin and the bump procedure.
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v5
 
       - name: Install pinned nightly (rustc_private) toolchain
         # The ed25519 vec.rs suite drives the same nightly compiler via the

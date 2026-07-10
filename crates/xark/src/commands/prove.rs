@@ -148,8 +148,10 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // This is the *witness-based* check: it needs the solved assignment (hence
     // it runs here, before any key-loading / synthesis), and rejects circuits
     // with a derived variable the constraints fail to pin uniquely. It returns
-    // the solved assignment on success.
-    let assign_fp = soundness_check(&prim, &id_inputs)?;
+    // the solved assignment on success. Pass the R1CS + best-effort profile so an
+    // unsatisfied witness names the failing constraint (and its source line).
+    let profile = crate::commands::load_profile(&project.xark_dir);
+    let assign_fp = soundness_check(&prim, &prog, profile.as_ref(), &id_inputs)?;
 
     let assign: BTreeMap<VarId, ark_bn254::Fr> = assign_fp
         .iter()
