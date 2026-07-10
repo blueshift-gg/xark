@@ -2805,6 +2805,11 @@ fn field_field_lt_method() {
         "cmp_field_field",
         "pub fn circuit(a: Private<Field>, b: Private<Field>) { assert(a.lt::<32>(b)); }",
     );
+    assert_eq!(
+        program.constraints.len(),
+        101,
+        "the comparison borrow bit times 2^32 is linear, not a multiplication gate"
+    );
     assert!(solves(&program, &[("a", "3"), ("b", "5")]), "3 < 5 proves");
     assert!(
         !solves(&program, &[("a", "5"), ("b", "3")]),
@@ -3072,5 +3077,74 @@ fn field_rem_u128_is_not_provided() {
     assert!(
         solves(&rem, &[("x", "103"), ("out", "3")]),
         "103 % 5u64 = 3"
+    );
+}
+
+/// Emitter-level folds must remove field-independent tautologies without making
+/// decisions that require a modulus.
+#[test]
+fn emitter_constant_folds_are_sound_and_conservative() {
+    let tautology = xark_test_harness::compile_source(
+        "emitter_tautology",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) {\n\
+             assert_eq(x + Field::from(1u8), Field::from(1u8) + x);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(
+        tautology.status_success,
+        "should compile: {}",
+        tautology.stderr
+    );
+    assert!(
+        tautology.program().constraints.is_empty(),
+        "an algebraic tautology must emit no equality constraint"
+    );
+
+    let exact_zero = xark_test_harness::compile_source(
+        "emitter_exact_zero",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(out: Public<Field>) {\n\
+             assert_eq(Field::from(0u8).is_zero(), out);\n\
+         }\n",
+        "bn254",
+    );
+    assert!(
+        exact_zero.status_success,
+        "should compile: {}",
+        exact_zero.stderr
+    );
+    let exact_zero = exact_zero.program();
+    assert_eq!(
+        exact_zero.constraints.len(),
+        1,
+        "only the output binding remains"
+    );
+    assert!(
+        exact_zero.witness_gen.is_empty(),
+        "exact zero needs no inverse hint"
+    );
+    assert!(solves(&exact_zero, &[("out", "1")]));
+    assert!(!solves(&exact_zero, &[("out", "0")]));
+
+    // With an unknown field, a non-zero decimal may still be zero modulo the
+    // backend field. Keeping the normal gadget path avoids an unsound `false`.
+    let unreduced_zero = xark_test_harness::compile_source(
+        "emitter_unreduced_zero",
+        "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit() {\n\
+             assert(Field::from(\"21888242871839275222246405745257275088548364400416034343698204186575808495617\").is_zero());\n\
+         }\n",
+        "unknown",
+    );
+    assert!(
+        unreduced_zero.status_success,
+        "should compile: {}",
+        unreduced_zero.stderr
+    );
+    assert!(
+        solves(&unreduced_zero.program(), &[]),
+        "the BN254 modulus represents zero in the default backend field"
     );
 }
