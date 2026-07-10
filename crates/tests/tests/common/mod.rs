@@ -223,14 +223,23 @@ pub fn xark_setup(out: &Path) -> (bool, String) {
     )
 }
 
-/// `xark prove <out-dir> --input k=v ...` (solve witness + Groth16 prove/verify).
+/// Render `[(k, v)]` as a `--inputs` JSON object `{"k": "v", …}` (values quoted
+/// as strings, so arbitrarily large decimals round-trip).
+fn inputs_json(inputs: &[(&str, &str)]) -> String {
+    let body = inputs
+        .iter()
+        .map(|(k, v)| format!("\"{k}\": \"{v}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{{{body}}}")
+}
+
+/// `xark prove <out-dir> --inputs '{...}'` (solve witness + Groth16 prove/verify).
 /// Returns `(success, combined stdout+stderr)`.
 pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
     let mut c = Command::new(xark_bin());
     c.arg("prove").arg(out);
-    for (k, v) in inputs {
-        c.arg("--input").arg(format!("{k}={v}"));
-    }
+    c.arg("--inputs").arg(inputs_json(inputs));
     let o = c
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -244,7 +253,7 @@ pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
     (o.status.success(), combined)
 }
 
-/// `xark check --input k=v … --out <out>` on a circuit crate, with an isolated
+/// `xark check --inputs '{...}' --out <out>` on a circuit crate, with an isolated
 /// `CARGO_TARGET_DIR` (so cargo can't replay a cached, non-extracting compile
 /// and nothing lands in the committed example's `target/`). Runs the
 /// witness-based under-constrained soundness check — build + solve + analyze,
@@ -261,14 +270,12 @@ pub fn xark_check_input(
         .arg("--out")
         .arg(out)
         .env("CARGO_TARGET_DIR", target);
-    for (k, v) in inputs {
-        c.arg("--input").arg(format!("{k}={v}"));
-    }
+    c.arg("--inputs").arg(inputs_json(inputs));
     let o = c
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .expect("spawn xark check --input");
+        .expect("spawn xark check --inputs");
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&o.stdout),

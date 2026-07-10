@@ -434,7 +434,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
                 "generate the proving/verifying keys"
             ),
             (
-                format!("xark prove {where_} --input secret=3 --input result=9"),
+                format!("xark prove {where_} --inputs '{{\"secret\": 3, \"result\": 9}}'"),
                 "produce your first proof",
             ),
         ])
@@ -495,7 +495,7 @@ use xark::prelude::*;
 /// flows through.
 ///
 /// Build with `xark build .`; prove with
-///   `xark prove . --input secret=3 --input result=9`.
+///   `xark prove . --inputs '{\"secret\": 3, \"result\": 9}'`.
 #[circuit]
 pub fn __FN__(secret: Private<Field>, result: Public<Field>) {
     // Prove knowledge of a square root: `secret * secret == result`.

@@ -88,7 +88,7 @@ ordinary Rust that lowers to primitive constraints, with KAT tests.
 
 ### `xark-prover`
 
-`crates/xark-prover`. Solves the witness from `--input` values, synthesizes
+`crates/xark-prover`. Solves the witness from `--inputs` values, synthesizes
 the R1CS as an Arkworks `ConstraintSynthesizer`, and runs Groth16 `prove` /
 `verify` — a *verified* proof, straight from xark's own constraint system.
 

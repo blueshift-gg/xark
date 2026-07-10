@@ -278,7 +278,7 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_i
     // roles that tell them apart; the R1CS marks both `Private`, so falling
     // back to it (older builds without circuit.json) may over-list. Declared
     // inputs come first and in order, so that fallback is still usable.
-    let inputs: String = match super::load_circuit(&project.circuit_json()).ok() {
+    let names: Vec<String> = match super::load_circuit(&project.circuit_json()).ok() {
         Some(prim) => {
             use xark_ir::primitive::VarRole;
             let mut vars: Vec<_> = prim
@@ -287,9 +287,7 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_i
                 .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
                 .collect();
             vars.sort_by_key(|v| v.id);
-            vars.iter()
-                .map(|v| format!(" --input {}=<value>", v.name))
-                .collect()
+            vars.iter().map(|v| v.name.clone()).collect()
         }
         None => {
             let mut vars: Vec<_> = prog
@@ -298,16 +296,16 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_i
                 .filter(|v| v.visibility != Visibility::Internal)
                 .collect();
             vars.sort_by_key(|v| v.id);
-            vars.iter()
-                .map(|v| format!(" --input {}=<value>", v.name))
-                .collect()
+            vars.iter().map(|v| v.name.clone()).collect()
         }
     };
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let hint = super::inputs_hint(&name_refs);
     let p = super::path_arg(path);
     println!(
         "\n{}",
         crate::style::next_steps(&[(
-            format!("xark prove {p}{inputs}"),
+            format!("xark prove {p} {hint}"),
             "solve the witness and produce a proof",
         )])
     );

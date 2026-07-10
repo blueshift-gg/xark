@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! xark build <crate-dir> [--out <dir>] [--field <name>]
-//! xark prove <out-dir>   [--input <name>=<value>]...
+//! xark prove <out-dir>   [--inputs <JSON|FILE>]
 //! ```
 //!
 //! `xark build` runs `cargo build` on the circuit crate with this binary as
@@ -98,7 +98,7 @@ fn print_roadmap() {
         ("xark build .", "compile the circuit → R1CS"),
         ("xark setup .", "generate the proving/verifying keys"),
         (
-            "xark prove . --input …",
+            "xark prove . --inputs …",
             "produce (and self-check) a proof + copy-paste calldata",
         ),
         ("xark verify .", "verify a proof locally"),
