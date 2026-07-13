@@ -1,0 +1,18 @@
+{
+  "name": "@blueshift-gg/xark-wasm",
+  "version": "0.0.1",
+  "license": "MIT",
+  "types": "./pkg-web/xark_wasm.d.ts",
+  "files": [
+    "pkg-node/*",
+    "pkg-web/*"
+  ],
+  "exports": {
+    ".": {
+      "types": "./pkg-web/xark_wasm.d.ts",
+      "node": "./pkg-node/xark_wasm.js",
+      "workerd": "./pkg-web/xark_wasm.js",
+      "default": "./pkg-web/xark_wasm.js"
+    }
+  }
+}
