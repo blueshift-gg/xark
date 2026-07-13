@@ -87,8 +87,9 @@ jobs:
         # job's `cargo test --workspace` never builds it. The harness selects it via
         # `RUSTUP_TOOLCHAIN=nightly-2026-05-03`, so the pin here must match.
         # See docs/toolchain.md for the pin and the bump procedure.
-        uses: dtolnay/rust-toolchain@nightly-2026-05-03
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-05-03
           components: rustc-dev, llvm-tools-preview, clippy
 
       - name: Cache cargo registry, git, and target
