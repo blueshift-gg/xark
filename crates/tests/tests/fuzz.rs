@@ -69,3 +69,25 @@ proptest! {
  );
  }
 }
+
+proptest! {
+ #![proptest_config(ProptestConfig::with_cases(1024))]
+
+ /// The DAG-compact artifact decoder must be TOTAL: arbitrary bytes — a corrupted
+ /// or hostile `circuit.xbc` — return a clean `Err`, never panic. A panic in a
+ /// build/prove tool is a crash; in a shared decoder it's a DoS.
+ #[test]
+ fn function_decode_arbitrary_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..2048)) {
+ let _ = xark_ir::function_decode::expand_function_blob(&bytes);
+ }
+
+ /// Past the version dispatch: a well-formed `XBC`+v1 header with a random body
+ /// exercises the parser interior, not just the magic check.
+ #[test]
+ fn function_decode_body_never_panics(tail in prop::collection::vec(any::<u8>(), 0..2048)) {
+ let mut bytes = xark_ir::bytecode::MAGIC.to_vec();
+ bytes.extend_from_slice(&1u16.to_le_bytes());
+ bytes.extend_from_slice(&tail);
+ let _ = xark_ir::function_decode::expand_function_blob(&bytes);
+ }
+}

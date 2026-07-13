@@ -42,12 +42,12 @@ impl XarkProject {
         })
     }
 
-    pub fn circuit_json(&self) -> PathBuf {
-        self.xark_dir.join("circuit.json")
-    }
-
     pub fn r1cs_json(&self) -> PathBuf {
         self.xark_dir.join("r1cs.json")
+    }
+
+    pub fn circuit_xbc(&self) -> PathBuf {
+        self.xark_dir.join("circuit.xbc")
     }
 
     pub fn proving_key(&self) -> PathBuf {
@@ -148,8 +148,12 @@ impl XarkProject {
 /// resolver mirrors that layout.
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
     // 1. `base` is already a scoped output dir (a `target/xark/<name>/` holding
-    //    r1cs.json / circuit.json) — use it directly.
-    if base.join("r1cs.json").is_file() || base.join("circuit.json").is_file() {
+    //    circuit.xbc — the artifact every build writes — or the `--emit-json`
+    //    JSON siblings) — use it directly.
+    if base.join("circuit.xbc").is_file()
+        || base.join("r1cs.json").is_file()
+        || base.join("circuit.json").is_file()
+    {
         return Ok(base.to_path_buf());
     }
     // 2. `base` is a crate dir → `target/xark/<pkg-name>/`.
@@ -206,7 +210,11 @@ fn single_named_subdir(base: &Path) -> Result<Option<PathBuf>> {
     if let Ok(entries) = std::fs::read_dir(base) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.is_dir() && (p.join("r1cs.json").is_file() || p.join("circuit.json").is_file()) {
+            if p.is_dir()
+                && (p.join("circuit.xbc").is_file()
+                    || p.join("r1cs.json").is_file()
+                    || p.join("circuit.json").is_file())
+            {
                 candidates.push(p);
             }
         }

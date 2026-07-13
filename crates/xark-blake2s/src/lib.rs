@@ -36,7 +36,7 @@
 #![allow(clippy::manual_div_ceil)]
 
 use xark::Field;
-use xark_bits::{add32, read_n, rotr32, sha256_iv, xor32};
+use xark_bits::{add3, add32, read_n, rotr32, sha256_iv, xor32};
 
 // ===========================================================================
 // Small array-extraction helpers.
@@ -77,11 +77,11 @@ fn g(
     x: [Field; 32],
     y: [Field; 32],
 ) -> [[Field; 32]; 4] {
-    let a = add32(add32(a, b), x);
+    let a = add3(a, b, x);
     let d = rotr32(xor32(d, a), 16);
     let c = add32(c, d);
     let b = rotr32(xor32(b, c), 12);
-    let a = add32(add32(a, b), y);
+    let a = add3(a, b, y);
     let d = rotr32(xor32(d, a), 8);
     let c = add32(c, d);
     let b = rotr32(xor32(b, c), 7);

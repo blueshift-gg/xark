@@ -24,6 +24,12 @@ use xark_ir::{
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::find_entry::EntryInfo;
 
+/// A MIR-lowering slot path — the projection into a local (`[]` for a scalar,
+/// `[i]`/`[i, j]` for array/tuple elements). Almost always depth ≤ 2, so inline
+/// `SmallVec` storage keeps every field-slot map key and `resolve_place` result
+/// off the heap — this was the dominant allocation in lowering large circuits.
+type SlotPath = smallvec::SmallVec<[u64; 4]>;
+
 /// A stable, `Ord`-able key for a canonical [`LinearCombination`]: its constant
 /// plus its sorted `(coeff, var)` terms, all as canonical decimal strings
 /// (`FieldConst::decimal` is always `BigInt::to_string()` output, so equal
@@ -34,19 +40,19 @@ type CanonicalLcKey = (String, Vec<(String, VarId)>);
 fn canonical_lc_key(lc: &LinearCombination) -> CanonicalLcKey {
     let lc = lc.clone().simplified();
     (
-        lc.constant.decimal,
+        lc.constant.decimal(),
         lc.terms
             .iter()
-            .map(|t| (t.coeff.decimal.clone(), t.var))
+            .map(|t| (t.coeff.decimal().clone(), t.var))
             .collect(),
     )
 }
 
 /// Is `name` a low-level arithmetic/conversion operator impl method? These are
-/// noise in a profiling gadget chain (`s * a` is a `mul` impl, `a + 3` an `add`
+/// noise in a profiling function chain (`s * a` is a `mul` impl, `a + 3` an `add`
 /// impl, `Field::from(n)` a `from` impl), so they are elided so the chain reads
-/// at gadget granularity. Kept: comparison methods (`lt`/`gt`/…), `to_bits`,
-/// `assert_bool`, `is_zero`, and every user/gadget function.
+/// at function granularity. Kept: comparison methods (`lt`/`gt`/…), `to_bits`,
+/// `assert_bool`, `is_zero`, and every user/library function.
 fn is_operator_impl_name(name: &str) -> bool {
     matches!(
         name,
@@ -54,11 +60,11 @@ fn is_operator_impl_name(name: &str) -> bool {
     )
 }
 
-/// The [`ConstraintKind`] a gadget function *fixes* for every constraint emitted
+/// The [`ConstraintKind`] a function *fixes* for every constraint emitted
 /// inside it (pushed onto `kind_stack` while it is inlined). `assert_bool`'s
 /// `b*b=b` flows through `emit_mul` but must read as a booleanity check, not a
-/// multiplication; the inverse gadget `inv`'s `x·w == 1` pins a hint output.
-fn gadget_kind_hint(name: &str) -> Option<ConstraintKind> {
+/// multiplication; the inverse function `inv`'s `x·w == 1` pins a hint output.
+fn function_kind_hint(name: &str) -> Option<ConstraintKind> {
     Some(match name {
         "assert_bool" => ConstraintKind::Booleanity,
         "inv" => ConstraintKind::HintPin,
@@ -138,6 +144,7 @@ pub(crate) fn resolve_call_def_id<'tcx>(
 /// [`build_call_registry`]. It replaces the old fragile def-path *string*
 /// matching (`s.contains("__xark_add")`, `s.ends_with("::add")`, …) with `DefId`
 /// equality, so a same-named method on another type can never be misclassified.
+#[derive(Clone)]
 pub(crate) struct CallRegistry {
     // `DefId` is deliberately not `Ord`/`Hash`-stable across compiles, so a
     // (small, ≈two-dozen-entry) association list keyed by `Eq` is both correct
@@ -341,13 +348,60 @@ fn range_bound<'tcx>(env: &LoweringEnv<'tcx>, operand: &Operand<'tcx>) -> Compil
 /// tuple fields), so slot lookups/copies stay local to a single variable
 /// instead of scanning a whole-program map. Frames are pushed on inline and
 /// popped on return, so live memory is bounded by call-stack depth.
+/// A map keyed by MIR `Local`, stored as a dense `Vec` indexed by the local's
+/// index. Within a frame, locals are dense small integers, so this is O(1)
+/// get/set instead of the `BTreeMap` log-n + key comparison — and it was the
+/// single biggest lower-phase cost (frame get/set). Iteration yields locals in
+/// index (== ascending `Local`) order, identical to the old `BTreeMap`, so
+/// lowering stays byte-for-byte deterministic.
+#[derive(Clone, Debug, Default)]
+struct LocalMap<V> {
+    slots: Vec<Option<V>>,
+}
+impl<V> LocalMap<V> {
+    #[inline]
+    fn get(&self, local: rustc_middle::mir::Local) -> Option<&V> {
+        self.slots.get(local.as_usize()).and_then(Option::as_ref)
+    }
+    #[inline]
+    fn get_mut(&mut self, local: rustc_middle::mir::Local) -> Option<&mut V> {
+        self.slots
+            .get_mut(local.as_usize())
+            .and_then(Option::as_mut)
+    }
+    #[inline]
+    fn remove(&mut self, local: rustc_middle::mir::Local) -> Option<V> {
+        self.slots.get_mut(local.as_usize()).and_then(Option::take)
+    }
+    /// Get the slot for `local`, inserting `V::default()` if empty (like
+    /// `BTreeMap::entry(local).or_default()`), growing the backing `Vec` as needed.
+    #[inline]
+    fn or_default_mut(&mut self, local: rustc_middle::mir::Local) -> &mut V
+    where
+        V: Default,
+    {
+        let i = local.as_usize();
+        if i >= self.slots.len() {
+            self.slots.resize_with(i + 1, || None);
+        }
+        self.slots[i].get_or_insert_with(V::default)
+    }
+    fn iter(&self) -> impl Iterator<Item = (rustc_middle::mir::Local, &V)> {
+        self.slots.iter().enumerate().filter_map(|(i, o)| {
+            o.as_ref()
+                .map(|v| (rustc_middle::mir::Local::from_usize(i), v))
+        })
+    }
+}
+
 #[derive(Default)]
 struct Frame {
     // Path-keyed slot maps use `BTreeMap` so iteration is deterministic and
     // path-sorted — array/tuple slots reconstruct in index order regardless of
-    // insertion, avoiding order-dependent lowering bugs.
-    field: BTreeMap<rustc_middle::mir::Local, BTreeMap<Vec<u64>, LinearCombination>>,
-    int: BTreeMap<rustc_middle::mir::Local, BTreeMap<Vec<u64>, u128>>,
+    // insertion, avoiding order-dependent lowering bugs. The outer per-`Local`
+    // map is a dense `LocalMap` (the hot path).
+    field: LocalMap<BTreeMap<SlotPath, LinearCombination>>,
+    int: LocalMap<BTreeMap<SlotPath, u128>>,
     str: BTreeMap<rustc_middle::mir::Local, String>,
     // `for` desugaring state, all purely compile-time:
     // - `range_iter`: a local holding a `Range`/`RangeInclusive` iterator's
@@ -422,6 +476,48 @@ struct LoweringEnv<'tcx> {
     /// constraints. Circuit values are immutable in the lowering (each local is a
     /// stable LC), so cached bits never go stale (docs/integer-ops.md § Bit caching).
     bit_cache: BTreeMap<(CanonicalLcKey, usize), Vec<VarId>>,
+    /// Frontend-function memoization: per `(DefId, substs)`, the
+    /// constraints one inline of that monomorphization emits, captured with vars
+    /// classified internal-vs-external, so a later call can be replayed (a `CALL`)
+    /// instead of re-walked. Verified by byte-comparing the replay against the
+    /// real walk.
+    function_templates: BTreeMap<String, FunctionTemplate>,
+    call_memo_total: usize,
+    call_memo_ok: usize,
+    /// Cache of `is_function(def_id)` keyed by `(krate, index)` — the all-Field
+    /// signature check is asked per call site.
+    function_is_cache: BTreeMap<(u32, u32), bool>,
+    /// Nesting depth of function-body lowering. While `> 0`, cross-call caches (the
+    /// bit-decomposition cache) are suppressed so a function body is a pure function
+    /// of its inputs — otherwise a later call sharing a cached value would make
+    /// replay diverge from a walk.
+    function_depth: usize,
+    /// Each function call's `(key, constraint start, end, base var, plug vars,
+    /// witness start, witness end)` — a `CALL` replaces both the constraint range
+    /// and the witness-gen range with one small record; expansion remaps the
+    /// stored def by `(base, plugs)`. Feeds the compact `circuit.xbc` builder; the
+    /// witness bounds let the compact form round-trip the *witness* program, not
+    /// just the constraints (a complete circuit artifact).
+    #[allow(clippy::type_complexity)] // a positional encoding record, not a public type
+    function_calls: Vec<(
+        String,
+        usize,
+        usize,
+        VarId,
+        Vec<LinearCombination>,
+        usize,
+        usize,
+    )>,
+    /// Fold-threshold decisions from the measuring pre-pass, keyed by function key.
+    /// `Some(map)` = pass 2: a function call is treated as a `CALL` only when
+    /// `map[key] == true` (called `>= 2` times and body `>= N` constraints);
+    /// otherwise it is inlined (folded). `None` = single pass / pass 1: template
+    /// every function (original behavior, and how the pre-pass measures).
+    promotions: Option<BTreeMap<String, bool>>,
+    /// Per-key function call counts, tallied during the measuring pass (`lower`
+    /// pass 1). Keys called `>= 2` times become templated `CALL`s; single-use
+    /// functions inline so their `mul→assert_eq` merges and debug notes survive.
+    function_call_counts: BTreeMap<String, u32>,
     /// Exact `DefId → KnownCall` table, resolved once up front (see
     /// [`CallRegistry`]). Replaces def-path string matching in call recognition.
     registry: CallRegistry,
@@ -432,17 +528,77 @@ struct LoweringEnv<'tcx> {
     profile_enabled: bool,
     /// The span of the *top-level* circuit statement/terminator currently being
     /// lowered (set only at inline depth 0, never overwritten during inline
-    /// recursion — so a constraint emitted deep inside an inlined gadget still
+    /// recursion — so a constraint emitted deep inside an inlined function still
     /// attributes to the user's circuit line).
     root_span: Option<rustc_span::Span>,
     /// Parallel to `constraints`: one attribution record per emitted constraint,
     /// pushed alongside it in [`Self::push_constraint`] (only when profiling).
     profile: Vec<ConstraintProfile>,
-    /// Kind-override stack: a gadget (or an emit helper) pushes a kind here so
+    /// Kind-override stack: a function (or an emit helper) pushes a kind here so
     /// every constraint emitted while it is on top is attributed to that kind,
     /// overriding the emit-site's natural kind (e.g. `assert_bool`'s `b*b=b` goes
     /// through `emit_mul` but should read as `Booleanity`, not `Mul`).
     kind_stack: Vec<ConstraintKind>,
+    /// Every var proven boolean by an emitted `v · v = v` constraint (⟺ v ∈
+    /// {0,1}). Populated wherever such a constraint is pushed — range-proof bits,
+    /// comparison borrow bits, `assert_bool`, and any replayed function booleanity —
+    /// so the `to_bits::<N>` bit-sum shortcut can recognize an input `Σ 2ⁱ·bᵢ`
+    /// whose bits are ALREADY booleanity-constrained and return them directly
+    /// instead of emitting a fresh (redundant) decomposition. Only genuine `v·v=v`
+    /// rows enter this set — never a value assumed boolean (see `bit_sum_shortcut`).
+    boolean_vars: BTreeSet<VarId>,
+}
+
+/// If `c` is exactly `v · v = v` (single term `1·v` on all three sides, zero
+/// constants), return `v` — the constraint proves `v ∈ {0,1}`. Used to harvest
+/// genuinely-boolean vars for the `to_bits` bit-sum shortcut.
+fn booleanity_var(c: &R1csConstraint) -> Option<VarId> {
+    let one_var = |lc: &LinearCombination| -> Option<VarId> {
+        if lc.constant.is_zero() && lc.terms.len() == 1 && lc.terms[0].coeff.is_one() {
+            Some(lc.terms[0].var)
+        } else {
+            None
+        }
+    };
+    let a = one_var(&c.a)?;
+    let b = one_var(&c.b)?;
+    let cc = one_var(&c.c)?;
+    (a == b && b == cc).then_some(a)
+}
+
+/// Core of [`LoweringEnv::bit_sum_shortcut`], factored out (no `self`) so it is
+/// unit-testable: if `x` is exactly `Σ_{i=0}^{n-1} 2ⁱ·vᵢ` — zero constant, `n`
+/// terms, each coeff a distinct power of two `2ⁱ` (`0 ≤ i < n`), each `vᵢ`
+/// distinct and `is_boolean(vᵢ)` — return `[v₀..v_{n-1}]`, else `None`. The
+/// `is_boolean` predicate is the *only* thing that makes the rewrite sound (each
+/// `vᵢ` must already be pinned to `{0,1}`), so it is checked for every summand.
+fn bit_sum_match(
+    x: &LinearCombination,
+    n: usize,
+    is_boolean: impl Fn(VarId) -> bool,
+) -> Option<Vec<VarId>> {
+    if n == 0 || !x.constant.is_zero() || x.terms.len() != n {
+        return None;
+    }
+    // Powers of two 2⁰..2^{n-1}; each term's coeff must match exactly one.
+    let two = xark_ir::FieldConst::from_i64(2);
+    let mut pow = xark_ir::FieldConst::one();
+    let mut pows: Vec<xark_ir::FieldConst> = Vec::with_capacity(n);
+    for _ in 0..n {
+        pows.push(pow.clone());
+        pow = pow.mul(&two);
+    }
+    let mut slot: Vec<Option<VarId>> = vec![None; n];
+    let mut seen: BTreeSet<VarId> = BTreeSet::new();
+    for term in &x.terms {
+        let i = pows.iter().position(|p| *p == term.coeff)?;
+        if slot[i].is_some() || !seen.insert(term.var) || !is_boolean(term.var) {
+            return None;
+        }
+        slot[i] = Some(term.var);
+    }
+    // All `n` distinct slots filled (terms.len() == n, each a distinct index).
+    slot.into_iter().collect()
 }
 
 /// A value passed into or returned from an inlined function. `Fields` carries a
@@ -478,6 +634,15 @@ impl<'tcx> LoweringEnv<'tcx> {
             inlining: Vec::new(),
             inline_substs: Vec::new(),
             bit_cache: BTreeMap::new(),
+            function_templates: BTreeMap::new(),
+            call_memo_total: 0,
+            call_memo_ok: 0,
+            function_is_cache: BTreeMap::new(),
+            function_depth: 0,
+            function_calls: Vec::new(),
+            promotions: None,
+            function_call_counts: BTreeMap::new(),
+            boolean_vars: BTreeSet::new(),
         }
     }
 
@@ -498,7 +663,10 @@ impl<'tcx> LoweringEnv<'tcx> {
         local: rustc_middle::mir::Local,
         path: &[u64],
     ) -> Option<LinearCombination> {
-        self.frame().field.get(&local)?.get(path).cloned()
+        self.frame()
+            .field
+            .get(local)
+            .and_then(|m| m.get(path).cloned())
     }
     fn set_field_at(
         &mut self,
@@ -508,9 +676,8 @@ impl<'tcx> LoweringEnv<'tcx> {
     ) {
         self.frame_mut()
             .field
-            .entry(local)
-            .or_default()
-            .insert(path.to_vec(), lc);
+            .or_default_mut(local)
+            .insert(SlotPath::from_slice(path), lc);
     }
 
     /// Resolve a place to `(base local, constant projection path)`.
@@ -520,8 +687,14 @@ impl<'tcx> LoweringEnv<'tcx> {
     fn resolve_place(
         &self,
         place: &Place<'tcx>,
-    ) -> CompileResult<(rustc_middle::mir::Local, Vec<u64>)> {
-        let mut path = Vec::new();
+    ) -> CompileResult<(rustc_middle::mir::Local, SlotPath)> {
+        self.resolve_place_inner(place)
+    }
+    fn resolve_place_inner(
+        &self,
+        place: &Place<'tcx>,
+    ) -> CompileResult<(rustc_middle::mir::Local, SlotPath)> {
+        let mut path = SlotPath::new();
         for elem in place.projection.iter() {
             match elem {
                 rustc_middle::mir::ProjectionElem::Index(idx_local) => {
@@ -572,14 +745,13 @@ impl<'tcx> LoweringEnv<'tcx> {
         self.set_int_at(local, &[], v);
     }
     fn get_int_at(&self, local: rustc_middle::mir::Local, path: &[u64]) -> Option<u128> {
-        self.frame().int.get(&local)?.get(path).copied()
+        self.frame().int.get(local)?.get(path).copied()
     }
     fn set_int_at(&mut self, local: rustc_middle::mir::Local, path: &[u64], v: u128) {
         self.frame_mut()
             .int
-            .entry(local)
-            .or_default()
-            .insert(path.to_vec(), v);
+            .or_default_mut(local)
+            .insert(SlotPath::from_slice(path), v);
     }
     fn get_str(&self, local: rustc_middle::mir::Local) -> Option<String> {
         self.frame().str.get(&local).cloned()
@@ -592,8 +764,8 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// starts clean.
     fn clear_local(&mut self, local: rustc_middle::mir::Local) {
         let f = self.frame_mut();
-        f.field.remove(&local);
-        f.int.remove(&local);
+        f.field.remove(local);
+        f.int.remove(local);
         f.str.remove(&local);
         f.range_iter.remove(&local);
         f.array_iter.remove(&local);
@@ -675,6 +847,217 @@ impl<'tcx> LoweringEnv<'tcx> {
         self.alloc_var(name, Visibility::Internal)
     }
 
+    /// Is `def_id` a user-declared frontend function? Recognized two ways:
+    /// `#[no_mangle]` (a stable symbol, non-generic only), or auto-DAG — any
+    /// non-`#[inline(never)]` function with an all-Field signature. Cached per
+    /// `(krate, index)`.
+    fn is_function(&mut self, def_id: DefId) -> bool {
+        use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
+        let key = (def_id.krate.as_u32(), def_id.index.as_u32());
+        if let Some(&b) = self.function_is_cache.get(&key) {
+            return b;
+        }
+        let b = self
+            .tcx
+            .codegen_fn_attrs(def_id)
+            .flags
+            .contains(CodegenFnAttrFlags::NO_MANGLE)
+            // Auto-DAG: any non-`#[inline(never)]` function with an all-Field
+            // signature. The arithmetic operators (`add`/`sub`/`mul`/`neg`) and the
+            // `__xark_*` intrinsics are all `#[inline(never)]`, so the free/linear
+            // primitives stay inlined and every composite becomes a function.
+            || (auto_dag_enabled() && !self.has_inline_never(def_id) && self.all_field_sig(def_id));
+        self.function_is_cache.insert(key, b);
+        b
+    }
+
+    fn has_inline_never(&self, def_id: DefId) -> bool {
+        use rustc_hir::attrs::InlineAttr;
+        matches!(self.tcx.codegen_fn_attrs(def_id).inline, InlineAttr::Never)
+    }
+
+    /// Are all of `def_id`'s parameters Field-like (Field / arrays / tuples /
+    /// structs of Field), and its return Field-like with at least one leaf? Only
+    /// such functions have materializable plugs.
+    fn all_field_sig(&self, def_id: DefId) -> bool {
+        if !self.tcx.is_mir_available(def_id) {
+            return false;
+        }
+        let sig = self.tcx.fn_sig(def_id).instantiate_identity().skip_binder();
+        let tys = sig.inputs_and_output;
+        let n = tys.len();
+        for (i, ty) in tys.iter().enumerate() {
+            let mut out = Vec::new();
+            let mut path = Vec::new();
+            if flatten_field_leaves(self.tcx, ty, &mut path, "", &mut out).is_err() {
+                return false;
+            }
+            if i == n - 1 && out.is_empty() {
+                return false; // the return must carry at least one Field leaf
+            }
+        }
+        true
+    }
+
+    /// Force `lc` to a single variable (a function plug): if it's already `1·v`,
+    /// return `v`; otherwise allocate `v`, emit `lc·1 = v` and its witness, return
+    /// `v`. The materialization that gives functions stable single-var ports.
+    fn materialize_to_var(&mut self, lc: LinearCombination) -> VarId {
+        if lc.constant.is_zero() && lc.terms.len() == 1 && lc.terms[0].coeff.is_one() {
+            return lc.terms[0].var;
+        }
+        let v = self.alloc_internal();
+        let id = self.fresh_constraint_id();
+        self.witness_gen.push(Some(WitnessGen::Linear {
+            out: v,
+            lc: lc.clone(),
+        }));
+        self.push_constraint(
+            ConstraintKind::Other,
+            R1csConstraint::equal(id, lc, LinearCombination::var(v), ""),
+        );
+        v
+    }
+
+    /// If `x` is exactly the `n`-bit sum `Σ_{i=0}^{n-1} 2ⁱ·vᵢ` — zero constant,
+    /// exactly `n` terms, each coefficient a *distinct* power of two `2ⁱ`
+    /// (`0 ≤ i < n`), and every `vᵢ` a *distinct* var already proven boolean by a
+    /// `v·v=v` row (see `boolean_vars`) — return `[v₀..v_{n-1}]`.
+    ///
+    /// Then `to_bits::<n>(x)` returns those bits directly: with every `vᵢ ∈ {0,1}`
+    /// and `x = Σ 2ⁱ·vᵢ`, the `vᵢ` ARE `x`'s canonical `n`-bit decomposition
+    /// (exact — an `n`-bit sum lives in `[0, 2ⁿ)`, no overflow), so returning them
+    /// is a lossless rewrite, NOT a new constraint. Strictly gated on genuine
+    /// booleanity: a non-boolean summand, a repeated var, or a stray coefficient
+    /// all yield `None` (never assume a value is boolean).
+    fn bit_sum_shortcut(&self, x: &LinearCombination, n: usize) -> Option<Vec<VarId>> {
+        bit_sum_match(x, n, |v| self.boolean_vars.contains(&v))
+    }
+
+    /// Allocate a fresh var `w` constrained equal to `v` (`v · 1 = w`), for
+    /// forcing a distinct plug when the same var would otherwise appear twice.
+    fn copy_var(&mut self, v: VarId) -> VarId {
+        let w = self.alloc_internal();
+        let id = self.fresh_constraint_id();
+        self.witness_gen.push(Some(WitnessGen::Linear {
+            out: w,
+            lc: LinearCombination::var(v),
+        }));
+        self.push_constraint(
+            ConstraintKind::Other,
+            R1csConstraint::equal(id, LinearCombination::var(v), LinearCombination::var(w), ""),
+        );
+        w
+    }
+
+    /// Replay a captured function at this call site by **symbolic substitution**:
+    /// substitute each plug var with the caller's argument linear combination
+    /// (`plugs[i]`) and shift every internal (`>= base_var`) to a fresh block, then
+    /// append the substituted constraints and witness ops. No plug materialization,
+    /// so no `plug = arg` equality rows enter the flat R1CS. Byte-identical to
+    /// re-walking with the args substituted, by construction. Returns the outputs
+    /// as substituted linear combinations (a passthrough output that is an input
+    /// plug returns the plug LC, not the meaningless template plug var).
+    fn replay_function(
+        &mut self,
+        key: &str,
+        plugs: &[LinearCombination],
+    ) -> Vec<(Vec<u64>, LinearCombination)> {
+        let t = self.function_templates.get(key).expect("template present");
+        let base = self.next_var_id;
+        let base_var = t.base_var;
+        // Template plug var → its position, so a plug-var term substitutes the
+        // caller's `plugs[i]` (scaled by the term's coefficient).
+        let plug_index: BTreeMap<VarId, usize> = t
+            .plug_vars
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(i, v)| (v, i))
+            .collect();
+        // Clone the template out of the borrow before mutating self.
+        let t_constraints = t.constraints.clone();
+        let t_witness = t.witness.clone();
+        let var_kinds = t.var_kinds.clone();
+        let t_outputs = t.outputs.clone();
+
+        // Substitute an LC: plug var → caller plug LC (scaled); internal var →
+        // base-shifted var; anything else (defensive) left as-is.
+        let subst_lc = |l: &LinearCombination| -> LinearCombination {
+            let mut constant = l.constant.clone();
+            let mut terms: Vec<xark_ir::Term> = Vec::new();
+            for term in &l.terms {
+                if term.var >= base_var {
+                    terms.push(xark_ir::Term {
+                        coeff: term.coeff.clone(),
+                        var: base + (term.var - base_var),
+                    });
+                } else if let Some(&idx) = plug_index.get(&term.var) {
+                    let piece = plugs[idx].clone().scale(&term.coeff);
+                    constant = constant.add(&piece.constant);
+                    terms.extend(piece.terms);
+                } else {
+                    terms.push(term.clone());
+                }
+            }
+            LinearCombination { constant, terms }.simplified()
+        };
+        // Witness out/id fields are always fresh internals → simple base shift.
+        let remap_id = |v: VarId| -> VarId {
+            if v >= base_var {
+                base + (v - base_var)
+            } else {
+                v
+            }
+        };
+        let cons: Vec<[LinearCombination; 3]> = t_constraints
+            .iter()
+            .map(|c| [subst_lc(&c.a), subst_lc(&c.b), subst_lc(&c.c)])
+            .collect();
+        let mut wits: Vec<WitnessGen> = t_witness;
+        let outputs: Vec<(Vec<u64>, LinearCombination)> = t_outputs
+            .iter()
+            .map(|(p, lc)| (p.clone(), subst_lc(lc)))
+            .collect();
+        for w in &mut wits {
+            subst_witness_vars(w, &remap_id, &subst_lc);
+        }
+        // Re-allocate the body's vars in the SAME order (internal/advice interleave)
+        // so ids, visibilities and t{}/w{} names all match the monotonic walk.
+        for kind in &var_kinds {
+            let name = match kind {
+                Visibility::Private => {
+                    let n = format!("w{}", self.advice_counter);
+                    self.advice_counter += 1;
+                    n
+                }
+                _ => {
+                    let n = format!("t{}", self.internal_counter);
+                    self.internal_counter += 1;
+                    n
+                }
+            };
+            self.var_names.push(name.clone());
+            self.variables.push(Variable {
+                id: self.next_var_id,
+                name,
+                visibility: kind.clone(),
+            });
+            self.next_var_id += 1;
+        }
+        for [a, b, c] in cons {
+            let id = self.fresh_constraint_id();
+            let mut rc = R1csConstraint::general(id, a, b, c, "");
+            rc.debug = None; // function constraints are note-free (match capture)
+            self.push_constraint(ConstraintKind::Other, rc);
+        }
+        for w in wits {
+            self.witness_gen.push(Some(w));
+        }
+        // Outputs are already substituted linear combinations.
+        outputs
+    }
+
     /// Allocate a fresh private *advice* (prover-supplied witness) variable.
     fn alloc_advice(&mut self) -> VarId {
         let name = format!("w{}", self.advice_counter);
@@ -692,7 +1075,7 @@ impl<'tcx> LoweringEnv<'tcx> {
 
     /// Push a constraint into the R1CS *and* (when profiling) record its
     /// attribution — the top-level user source line ([`Self::root_span`]), the
-    /// gadget call-chain, and its kind — into the parallel [`Self::profile`]
+    /// function call-chain, and its kind — into the parallel [`Self::profile`]
     /// buffer. This is the single choke point every emit helper routes through,
     /// so `profile` stays index-aligned with `constraints` (`profile[i].id ==
     /// constraints[i].id == i`). The R1CS constraint itself is untouched by
@@ -702,6 +1085,11 @@ impl<'tcx> LoweringEnv<'tcx> {
             let kind = self.kind_stack.last().copied().unwrap_or(kind);
             let prof = self.constraint_profile(c.id, kind);
             self.profile.push(prof);
+        }
+        // Harvest booleanity: an emitted `v·v=v` (range-proof bits, cmp borrow
+        // bits, replayed-function booleanity) proves `v ∈ {0,1}` (see `boolean_vars`).
+        if let Some(v) = booleanity_var(&c) {
+            self.boolean_vars.insert(v);
         }
         self.constraints.push(c);
     }
@@ -715,7 +1103,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             file,
             line,
             col,
-            chain: self.gadget_chain(),
+            chain: self.function_chain(),
             kind,
         }
     }
@@ -738,11 +1126,11 @@ impl<'tcx> LoweringEnv<'tcx> {
         (file, loc.line as u32, loc.col_display as u32 + 1)
     }
 
-    /// The gadget call-chain (outermost → innermost) at the current emit point:
+    /// The function call-chain (outermost → innermost) at the current emit point:
     /// each inlined callee's short name, with low-level arithmetic/conversion
     /// operator impls (`add`/`sub`/`mul`/`neg`/`bitxor`/`from`/`into`) elided so
-    /// the chain reads at gadget granularity (e.g. `lt → to_bits → assert_bool`).
-    fn gadget_chain(&self) -> Vec<String> {
+    /// the chain reads at function granularity (e.g. `lt → to_bits → assert_bool`).
+    fn function_chain(&self) -> Vec<String> {
         self.inlining
             .iter()
             .map(|&did| self.tcx.item_name(did).to_string())
@@ -781,7 +1169,7 @@ impl<'tcx> LoweringEnv<'tcx> {
         if !lc.constant.is_zero() {
             let (neg, _, mag) = lc.constant.render_parts();
             if first {
-                s.push_str(&lc.constant.decimal);
+                s.push_str(&lc.constant.decimal());
             } else {
                 s.push_str(&format!(" {} {mag}", if neg { "-" } else { "+" }));
             }
@@ -858,9 +1246,9 @@ impl<'tcx> LoweringEnv<'tcx> {
             return Some(s.to_uint(s.size()));
         }
         let typing_env = rustc_middle::ty::TypingEnv::fully_monomorphized();
-        // Substitute const-generic params (e.g. `N` in a `mod_mul::<N>` gadget
+        // Substitute const-generic params (e.g. `N` in a `mod_mul::<N>` function
         // used as a loop bound) with the current inlining frame's args before
-        // evaluating, so const-generic gadgets const-fold instead of looking
+        // evaluating, so const-generic functions const-fold instead of looking
         // witness-dependent.
         let konst = self.tcx.instantiate_and_normalize_erasing_regions(
             self.cur_substs(),
@@ -916,7 +1304,7 @@ impl<'tcx> LoweringEnv<'tcx> {
 
     /// If `c` is a compile-time array of integers (e.g. a `const P: [u128; 3]`
     /// item referenced as `_1 = const P`), populate `dest`'s per-element int
-    /// slots. This lets a curve gadget declare its field constants as ordinary
+    /// slots. This lets a curve function declare its field constants as ordinary
     /// `const` arrays and read them with `Field::from(P[i])` — the index projection
     /// then resolves to a tracked int slot. Returns whether it applied.
     fn try_bind_const_int_array(
@@ -1017,7 +1405,7 @@ impl<'tcx> LoweringEnv<'tcx> {
         Some(limbs_to_decimal(limbs))
     }
 
-    /// If `c` is a `const Field` or `const [Field; N]` (e.g. a curve gadget's
+    /// If `c` is a `const Field` or `const [Field; N]` (e.g. a curve function's
     /// associated `const MODULUS: [Field; 3]`), decode it into `(relative-path,
     /// constant LC)` field slots. Returns `None` if `c` is not a `Field` constant.
     fn const_field_slots(
@@ -1168,7 +1556,7 @@ impl<'tcx> LoweringEnv<'tcx> {
         local: rustc_middle::mir::Local,
         base: &[u64],
     ) -> Vec<(Vec<u64>, LinearCombination)> {
-        let Some(slots) = self.frame().field.get(&local) else {
+        let Some(slots) = self.frame().field.get(local) else {
             return Vec::new();
         };
         slots
@@ -1188,10 +1576,10 @@ impl<'tcx> LoweringEnv<'tcx> {
         local: rustc_middle::mir::Local,
         base: &[u64],
     ) -> Vec<(Vec<u64>, LinearCombination)> {
-        let Some(map) = self.frame_mut().field.get_mut(&local) else {
+        let Some(map) = self.frame_mut().field.get_mut(local) else {
             return Vec::new();
         };
-        let keys: Vec<Vec<u64>> = map
+        let keys: Vec<SlotPath> = map
             .keys()
             .filter(|p| p.len() >= base.len() && p[..base.len()] == *base)
             .cloned()
@@ -1330,7 +1718,7 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// a fresh internal variable `v` (emit `lc - v = 0` and record `v = eval(lc)`)
     /// and return `v`'s LC. This bounds LC size in long bitwise chains (e.g.
     /// Keccak) so lowering stays linear instead of quadratic. Small LCs pass
-    /// through unchanged, so existing gadgets are unaffected.
+    /// through unchanged, so existing functions are unaffected.
     const LC_MATERIALIZE_THRESHOLD: usize = 8;
     fn materialize(&mut self, lc: LinearCombination) -> LinearCombination {
         if lc.terms.len() <= Self::LC_MATERIALIZE_THRESHOLD {
@@ -1380,6 +1768,11 @@ impl<'tcx> LoweringEnv<'tcx> {
             right: rhs,
         }));
         let wg_idx = self.witness_gen.len() - 1;
+        // Always register the mul for the `mul → assert_eq` merge. Intra-function
+        // merges now fold `a*b=t; assert(t==x)` → `a*b=x` *inside* a function body
+        // (the caller's merge state is saved/cleared on entry so cross-boundary
+        // folds stay suppressed, and body-local merges are revived at capture if
+        // still referenced — keeping the template self-contained).
         self.pending_mul.insert(out, (c_idx, wg_idx));
         LinearCombination::var(out)
     }
@@ -1521,7 +1914,7 @@ impl<'tcx> LoweringEnv<'tcx> {
         );
     }
 
-    /// Equality-to-zero gadget: a `{0,1}` lc that is `1` iff `input == 0`.
+    /// Equality-to-zero function: a `{0,1}` lc that is `1` iff `input == 0`.
     /// `out = 1 − input·inv` with `input·out == 0` (the inverse-or-zero hint
     /// yields `0` when `input == 0`). Backs `==` on `Field`.
     fn emit_is_zero(&mut self, input: LinearCombination) -> LinearCombination {
@@ -1616,6 +2009,11 @@ impl<'tcx> LoweringEnv<'tcx> {
             self.render_side(&target),
         );
         self.constraints[idx].c = target;
+        // `assert_bool(b)` folds `b*b=t; assert(t==b)` → `b*b=b` here (an in-place
+        // rewrite, so `push_constraint` never sees the final form): harvest it.
+        if let Some(v) = booleanity_var(&self.constraints[idx]) {
+            self.boolean_vars.insert(v);
+        }
         if let Some(debug) = &mut self.constraints[idx].debug {
             debug.note = Some(note);
         }
@@ -1633,6 +2031,10 @@ pub struct LowerOutput {
     /// `r1cs.constraints`. Empty unless profiling was requested (`--profile`).
     /// Emitted to a **separate** `profile.json`; never mixed into the R1CS.
     pub profile: Vec<ConstraintProfile>,
+    /// When `XARK_FUNCTION_ARTIFACT` is set and the circuit has function calls, the
+    /// complete DAG-compact `VERSION_FUNCTION` container (see [`build_function_blob`]).
+    /// The writer uses this as `circuit.xbc` verbatim instead of `roll_loops`.
+    pub function_xbc: Option<Vec<u8>>,
 }
 
 /// Flatten a circuit parameter type into its `Field` leaves, pairing each with
@@ -1699,7 +2101,65 @@ pub fn lower<'tcx>(
     registry: CallRegistry,
     profile_enabled: bool,
 ) -> CompileResult<LowerOutput> {
+    // Cache-all pre-pass. Pass 1 templates every function (`promotions == None`) to
+    // capture each distinct body once and tally per-key call counts. Pass 2 then
+    // reuses those templates and REPLAYS every function called `>= 2` times as a
+    // SYMBOLIC `CALL` (substituting the caller's arg LCs into the cached body — no
+    // plug materialization, so no `plug = arg` equality rows), while functions called
+    // once inline (fold) so their `mul→assert_eq` merges and debug notes survive.
+    let (mut measure, _) = run_pass(
+        tcx,
+        entry,
+        body,
+        registry.clone(),
+        profile_enabled,
+        None,
+        BTreeMap::new(),
+    )?;
+    let promotions: BTreeMap<String, bool> = measure
+        .function_call_counts
+        .iter()
+        .map(|(k, &c)| (k.clone(), c >= 2))
+        .collect();
+    // Hand pass 1's captured templates to pass 2 so cached calls replay from their
+    // first occurrence.
+    let templates = std::mem::take(&mut measure.function_templates);
+    drop(measure);
+
+    let (env, num_inputs) = run_pass(
+        tcx,
+        entry,
+        body,
+        registry,
+        profile_enabled,
+        Some(promotions),
+        templates,
+    )?;
+    let program = finish(env, field, num_inputs);
+    // reject any hint/advice output or public input left unpinned (see `check_pinning`)
+    check_pinning(&program, num_inputs)?;
+    Ok(program)
+}
+
+/// One lowering pass: bind the circuit inputs, walk the body, return the env and
+/// input count. `promotions` selects function-fold behavior (see [`lower`] and
+/// [`LoweringEnv::promotions`]). Called once normally, or twice under the fold
+/// pre-pass (measure with `None`, then build with `Some`).
+fn run_pass<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    entry: &EntryInfo,
+    body: &Body<'tcx>,
+    registry: CallRegistry,
+    profile_enabled: bool,
+    promotions: Option<BTreeMap<String, bool>>,
+    templates: BTreeMap<String, FunctionTemplate>,
+) -> CompileResult<(LoweringEnv<'tcx>, usize)> {
     let mut env = LoweringEnv::new(tcx, registry, profile_enabled);
+    env.promotions = promotions;
+    // Pre-load templates captured by an earlier pass so every cached call replays
+    // from its first occurrence (no first-call special-case): pass 2 gets pass 1's
+    // templates, so a promoted function is a symbolic `CALL` even the first time.
+    env.function_templates = templates;
 
     // Frame 0: circuit inputs become variables `0..num_inputs`, bound to params
     // `_1.._n`. Each parameter's type is flattened into its `Field` leaves — a
@@ -1720,11 +2180,7 @@ pub fn lower<'tcx>(
     }
 
     walk_body(&mut env, body)?;
-
-    let program = finish(env, field, num_inputs);
-    // reject any hint/advice output or public input left unpinned (see `check_pinning`)
-    check_pinning(&program, num_inputs)?;
-    Ok(program)
+    Ok((env, num_inputs))
 }
 
 /// Build-time structural soundness gate: reject a hint/advice output or a public
@@ -1847,7 +2303,7 @@ fn fallback_witness_control_flow_error(term_span: rustc_span::Span) -> CompileEr
 /// `(local, projection path)`), used to mux converging arms.
 type ArmAssignments = (
     rustc_middle::mir::BasicBlock,
-    BTreeMap<(rustc_middle::mir::Local, Vec<u64>), LinearCombination>,
+    BTreeMap<(rustc_middle::mir::Local, SlotPath), LinearCombination>,
 );
 
 fn collect_arm_assignments<'tcx>(
@@ -1979,11 +2435,11 @@ fn collect_arm_assignments<'tcx>(
 
     // Collect the field slots that were added or changed by this arm.
     let mut map = BTreeMap::new();
-    for (local, slots) in &env.frame().field {
+    for (local, slots) in env.frame().field.iter() {
         match saved_fields.get(local) {
             None => {
                 for (path, lc) in slots {
-                    map.insert((*local, path.clone()), lc.clone());
+                    map.insert((local, path.clone()), lc.clone());
                 }
             }
             Some(old)
@@ -1992,7 +2448,7 @@ fn collect_arm_assignments<'tcx>(
                         != slots.keys().collect::<BTreeSet<_>>() =>
             {
                 for (path, lc) in slots {
-                    map.insert((*local, path.clone()), lc.clone());
+                    map.insert((local, path.clone()), lc.clone());
                 }
             }
             _ => { /* unchanged */ }
@@ -2020,7 +2476,7 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
         for stmt in &data.statements {
             // Track the top-level (depth-0) circuit statement span as the profile
             // "user line" for any constraints it triggers — but never overwrite
-            // it while inlining a gadget, so deep constraints still attribute to
+            // it while inlining a function, so deep constraints still attribute to
             // the user's circuit line (see `LoweringEnv::root_span`).
             if env.inlining.is_empty() {
                 env.root_span = Some(stmt.source_info.span);
@@ -2309,7 +2765,7 @@ fn lower_statement<'tcx>(
                             .with_help(
                                 "bitwise (`& | ^`) and equality (`== !=`) ops on `bool` wires are \
                                  supported; other operators need field arithmetic or a comparison \
-                                 gadget",
+                                 function",
                             ))
                         }
                     }
@@ -2364,7 +2820,7 @@ fn lower_statement<'tcx>(
                 ))
                 .with_help(
                     "a circuit supports field arithmetic (`+ - * ^`), comparisons, and the \
-                     provided gadget calls; references, closures, and heap ops are not lowerable",
+                     provided function calls; references, closures, and heap ops are not lowerable",
                 )),
             }
         }
@@ -2541,7 +2997,7 @@ fn pow2_lc(n: usize) -> LinearCombination {
         p = p.mul(&two);
         i += 1;
     }
-    LinearCombination::constant(p.decimal.clone())
+    LinearCombination::constant(p.decimal().clone())
 }
 
 fn is_with_overflow(op: rustc_middle::mir::BinOp) -> bool {
@@ -2689,7 +3145,7 @@ fn lower_call<'tcx>(
                     )),
                 }
             })?;
-            env.set_field(dest, LinearCombination::constant(field_const.decimal));
+            env.set_field(dest, LinearCombination::constant(field_const.decimal()));
         }
         KnownCall::ConstrainEq => {
             let lhs = env.operand_to_lc(arg(0)?)?;
@@ -2698,7 +3154,7 @@ fn lower_call<'tcx>(
         }
         KnownCall::Advice => {
             // A fresh prover-supplied private witness variable with no hint. The
-            // gadget author constrains it (but the emitted witness-gen program
+            // function author constrains it (but the emitted witness-gen program
             // cannot compute its value — prefer the `hint_*` forms).
             let v = env.alloc_advice();
             env.set_field(dest, LinearCombination::var(v));
@@ -2946,8 +3402,1031 @@ fn lower_call<'tcx>(
 /// Inline an ordinary function call: evaluate the arguments in the caller frame,
 /// lower the callee's MIR body in a fresh frame, and bind its return value.
 ///
-/// This is what makes gadgets "just library code": a call to `poseidon(..)` or a
+/// This is what makes functions "just library code": a call to `poseidon(..)` or a
 /// local helper expands into the same LC/constraint lowering as inline code.
+/// A user-declared **frontend function**, captured once: the constraints and
+/// witness-gen ops one inline of a monomorphization emits, with vars addressed
+/// relative to the call (`Slot`). A later call to the same function is *replayed* —
+/// a bytecode `CALL` — instead of re-walked: internal vars shift by the call's
+/// var base, plug vars (the materialized single-var inputs) map positionally to
+/// the new call's plugs.
+struct FunctionTemplate {
+    /// First-call constraints (notes stripped) — replayed with vars remapped.
+    constraints: Vec<R1csConstraint>,
+    /// First-call witness-gen ops — replayed with vars remapped.
+    witness: Vec<WitnessGen>,
+    /// First call's var base and its plug vars (the materialized single-var
+    /// inputs). On replay, `plug_vars[i]` → the new call's `plugs[i]`, and every
+    /// internal (`>= base_var`) shifts to the new base.
+    base_var: VarId,
+    plug_vars: Vec<VarId>,
+    /// The kind of each var the body allocated, in allocation order (internal vs
+    /// advice interleave as the body runs — replay must reproduce that order so
+    /// var ids, visibilities, and `t{}`/`w{}` names all match the walk).
+    var_kinds: Vec<Visibility>,
+    /// The return, as `(leaf path, first-call output LC)` — substituted on replay.
+    /// Kept as a linear combination (not materialized to a fresh word var) so an
+    /// output that is a bit-sum `Σ 2ⁱ·rᵢ` reaches the caller as that sum, letting
+    /// the caller's `to_bits` bit-sum shortcut fire (no redundant decomposition).
+    /// A single-var output is just the LC `1·v`.
+    outputs: Vec<(Vec<u64>, LinearCombination)>,
+}
+
+/// Apply `f` to every `VarId` a witness-gen op reads or writes.
+fn remap_witness_vars(w: &mut WitnessGen, f: &dyn Fn(VarId) -> VarId) {
+    let lc = |l: &mut LinearCombination, f: &dyn Fn(VarId) -> VarId| {
+        for t in &mut l.terms {
+            t.var = f(t.var);
+        }
+    };
+    let lcs = |v: &mut [LinearCombination], f: &dyn Fn(VarId) -> VarId| {
+        for l in v {
+            lc(l, f);
+        }
+    };
+    let ids = |v: &mut [VarId], f: &dyn Fn(VarId) -> VarId| {
+        for x in v {
+            *x = f(*x);
+        }
+    };
+    match w {
+        WitnessGen::Product { out, left, right } => {
+            *out = f(*out);
+            lc(left, f);
+            lc(right, f);
+        }
+        WitnessGen::Linear { out, lc: l } => {
+            *out = f(*out);
+            lc(l, f);
+        }
+        WitnessGen::Xor { out, a, b } | WitnessGen::Or { out, a, b } => {
+            *out = f(*out);
+            lc(a, f);
+            lc(b, f);
+        }
+        WitnessGen::Inverse { out, input } | WitnessGen::InverseOrZero { out, input } => {
+            *out = f(*out);
+            lc(input, f);
+        }
+        WitnessGen::Bit { out, input, .. } => {
+            *out = f(*out);
+            lc(input, f);
+        }
+        WitnessGen::Bits { outs, input } => {
+            ids(outs, f);
+            lc(input, f);
+        }
+        WitnessGen::DivRem { q, r, num, den } => {
+            *q = f(*q);
+            *r = f(*r);
+            lc(num, f);
+            lc(den, f);
+        }
+        WitnessGen::MulModDivMod {
+            q,
+            r,
+            a,
+            b,
+            modulus,
+            ..
+        } => {
+            ids(q, f);
+            ids(r, f);
+            lcs(a, f);
+            lcs(b, f);
+            lcs(modulus, f);
+        }
+        WitnessGen::ModInverse {
+            out, a, modulus, ..
+        } => {
+            ids(out, f);
+            lcs(a, f);
+            lcs(modulus, f);
+        }
+        WitnessGen::Sub2 {
+            qabs,
+            r,
+            a,
+            b,
+            c,
+            modulus,
+            ..
+        } => {
+            *qabs = f(*qabs);
+            ids(r, f);
+            lcs(a, f);
+            lcs(b, f);
+            lcs(c, f);
+            lcs(modulus, f);
+        }
+    }
+}
+
+/// Like [`remap_witness_vars`], but *substitutes* linear combinations for the LC
+/// input fields (plug vars → caller plug LCs) while var-remapping the `out`/id
+/// fields (always fresh internals). `f` shifts internal out/id vars; `s`
+/// substitutes an LC input. Used by symbolic function replay so witness ops read the
+/// caller's argument LCs directly, with no plug materialization.
+fn subst_witness_vars(
+    w: &mut WitnessGen,
+    f: &dyn Fn(VarId) -> VarId,
+    s: &dyn Fn(&LinearCombination) -> LinearCombination,
+) {
+    let ids = |v: &mut [VarId]| {
+        for x in v {
+            *x = f(*x);
+        }
+    };
+    let subst = |v: &mut [LinearCombination]| {
+        for l in v {
+            *l = s(l);
+        }
+    };
+    match w {
+        WitnessGen::Product { out, left, right } => {
+            *out = f(*out);
+            *left = s(left);
+            *right = s(right);
+        }
+        WitnessGen::Linear { out, lc: l } => {
+            *out = f(*out);
+            *l = s(l);
+        }
+        WitnessGen::Xor { out, a, b } | WitnessGen::Or { out, a, b } => {
+            *out = f(*out);
+            *a = s(a);
+            *b = s(b);
+        }
+        WitnessGen::Inverse { out, input } | WitnessGen::InverseOrZero { out, input } => {
+            *out = f(*out);
+            *input = s(input);
+        }
+        WitnessGen::Bit { out, input, .. } => {
+            *out = f(*out);
+            *input = s(input);
+        }
+        WitnessGen::Bits { outs, input } => {
+            ids(outs);
+            *input = s(input);
+        }
+        WitnessGen::DivRem { q, r, num, den } => {
+            *q = f(*q);
+            *r = f(*r);
+            *num = s(num);
+            *den = s(den);
+        }
+        WitnessGen::MulModDivMod {
+            q,
+            r,
+            a,
+            b,
+            modulus,
+            ..
+        } => {
+            ids(q);
+            ids(r);
+            subst(a);
+            subst(b);
+            subst(modulus);
+        }
+        WitnessGen::ModInverse {
+            out, a, modulus, ..
+        } => {
+            ids(out);
+            subst(a);
+            subst(modulus);
+        }
+        WitnessGen::Sub2 {
+            qabs,
+            r,
+            a,
+            b,
+            c,
+            modulus,
+            ..
+        } => {
+            *qabs = f(*qabs);
+            ids(r);
+            subst(a);
+            subst(b);
+            subst(c);
+            subst(modulus);
+        }
+    }
+}
+
+/// Is a captured function body *pure* — does it reference only its plug vars and
+/// its own freshly-allocated internals (`>= base`)? If it touches any earlier var
+/// (a cached bit-decomposition, a cross-boundary mul-merge, …) it is not a
+/// function of its inputs alone and can't be replayed correctly, so it must stay
+/// walked. This is what makes auto-selected functions safe.
+fn function_is_pure(
+    constraints: &[R1csConstraint],
+    witness: &[Option<WitnessGen>],
+    base: VarId,
+    plugs: &[VarId],
+) -> bool {
+    let plug_set: BTreeSet<VarId> = plugs.iter().copied().collect();
+    let ok = |v: VarId| v >= base || plug_set.contains(&v);
+    for c in constraints {
+        for lc in [&c.a, &c.b, &c.c] {
+            if lc.terms.iter().any(|t| !ok(t.var)) {
+                return false;
+            }
+        }
+    }
+    for w in witness.iter().flatten() {
+        let bad = std::cell::Cell::new(false);
+        let mut wc = w.clone();
+        remap_witness_vars(&mut wc, &|v| {
+            if !ok(v) {
+                bad.set(true);
+            }
+            v
+        });
+        if bad.get() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Compact (DAG/function) codegen — capture reusable functions, replay them, and
+/// write the DAG-compact `circuit.xbc`. This is the primary codegen: it is
+/// R1CS-neutral (the artifact expands byte-identically, so vks/proofs are
+/// unchanged) while cutting build time and artifact size.
+fn compact_enabled() -> bool {
+    true
+}
+fn call_memo_enabled() -> bool {
+    compact_enabled()
+}
+
+// --- FUNCTION/CALL bytecode (constraint stream) --------------------------------
+// A compact DAG encoding: each distinct function body stored once, calls as small
+// records. Expansion (`expand_function_bytecode`) reproduces the flat constraint
+// stream byte-for-byte. Same varint density as the flat `.xbc`, so file sizes are
+// directly comparable.
+fn put_uv(buf: &mut Vec<u8>, mut v: u64) {
+    loop {
+        let b = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            buf.push(b);
+            break;
+        }
+        buf.push(b | 0x80);
+    }
+}
+fn put_iv(buf: &mut Vec<u8>, v: i64) {
+    put_uv(buf, ((v << 1) ^ (v >> 63)) as u64); // zigzag
+}
+fn put_fc(buf: &mut Vec<u8>, fc: &xark_ir::FieldConst) {
+    match fc.as_i64() {
+        Some(v) => {
+            buf.push(0);
+            put_iv(buf, v);
+        }
+        None => {
+            buf.push(1);
+            let s = fc.decimal();
+            put_uv(buf, s.len() as u64);
+            buf.extend_from_slice(s.as_bytes());
+        }
+    }
+}
+fn put_lc_g(buf: &mut Vec<u8>, lc: &LinearCombination) {
+    put_fc(buf, &lc.constant);
+    put_uv(buf, lc.terms.len() as u64);
+    for t in &lc.terms {
+        put_fc(buf, &t.coeff);
+        put_uv(buf, u64::from(t.var));
+    }
+}
+fn put_row_g(buf: &mut Vec<u8>, c: &R1csConstraint) {
+    put_lc_g(buf, &c.a);
+    put_lc_g(buf, &c.b);
+    put_lc_g(buf, &c.c);
+}
+fn put_ids_g(buf: &mut Vec<u8>, ids: &[VarId]) {
+    put_uv(buf, ids.len() as u64);
+    for &v in ids {
+        put_uv(buf, u64::from(v));
+    }
+}
+fn put_lcs_g(buf: &mut Vec<u8>, lcs: &[LinearCombination]) {
+    put_uv(buf, lcs.len() as u64);
+    for lc in lcs {
+        put_lc_g(buf, lc);
+    }
+}
+/// Serialize one `WitnessGen` op with the same local primitives the function
+/// encoder uses for constraints (`put_fc`/`put_lc_g`/`put_uv`), so the compact
+/// blob is self-contained and decodable by [`get_witness_g`].
+fn put_witness_g(buf: &mut Vec<u8>, w: &WitnessGen) {
+    match w {
+        WitnessGen::Product { out, left, right } => {
+            buf.push(0);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, left);
+            put_lc_g(buf, right);
+        }
+        WitnessGen::Linear { out, lc } => {
+            buf.push(1);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, lc);
+        }
+        WitnessGen::Xor { out, a, b } => {
+            buf.push(2);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, a);
+            put_lc_g(buf, b);
+        }
+        WitnessGen::Or { out, a, b } => {
+            buf.push(3);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, a);
+            put_lc_g(buf, b);
+        }
+        WitnessGen::Inverse { out, input } => {
+            buf.push(4);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, input);
+        }
+        WitnessGen::InverseOrZero { out, input } => {
+            buf.push(5);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, input);
+        }
+        WitnessGen::Bit { out, input, index } => {
+            buf.push(6);
+            put_uv(buf, u64::from(*out));
+            put_lc_g(buf, input);
+            put_uv(buf, u64::from(*index));
+        }
+        WitnessGen::Bits { outs, input } => {
+            buf.push(7);
+            put_ids_g(buf, outs);
+            put_lc_g(buf, input);
+        }
+        WitnessGen::DivRem { q, r, num, den } => {
+            buf.push(8);
+            put_uv(buf, u64::from(*q));
+            put_uv(buf, u64::from(*r));
+            put_lc_g(buf, num);
+            put_lc_g(buf, den);
+        }
+        WitnessGen::MulModDivMod {
+            q,
+            r,
+            a,
+            b,
+            modulus,
+            limb_bits,
+        } => {
+            buf.push(9);
+            put_ids_g(buf, q);
+            put_ids_g(buf, r);
+            put_lcs_g(buf, a);
+            put_lcs_g(buf, b);
+            put_lcs_g(buf, modulus);
+            put_uv(buf, u64::from(*limb_bits));
+        }
+        WitnessGen::ModInverse {
+            out,
+            a,
+            modulus,
+            limb_bits,
+        } => {
+            buf.push(10);
+            put_ids_g(buf, out);
+            put_lcs_g(buf, a);
+            put_lcs_g(buf, modulus);
+            put_uv(buf, u64::from(*limb_bits));
+        }
+        WitnessGen::Sub2 {
+            qabs,
+            r,
+            a,
+            b,
+            c,
+            modulus,
+            limb_bits,
+        } => {
+            buf.push(11);
+            put_uv(buf, u64::from(*qabs));
+            put_ids_g(buf, r);
+            put_lcs_g(buf, a);
+            put_lcs_g(buf, b);
+            put_lcs_g(buf, c);
+            put_lcs_g(buf, modulus);
+            put_uv(buf, u64::from(*limb_bits));
+        }
+    }
+}
+
+/// One item in a function body / top-level stream: a flat constraint, or a nested
+/// CALL to another function def (its base/plugs in the *enclosing* def's coords).
+enum GItem {
+    Row(usize), // index into the flat constraint stream
+    Call(u32, VarId, Vec<LinearCombination>),
+}
+
+// --- rolled CALL blocks (Stage 3: loop fusion for calls) ---------------------
+// A loop that invokes cached function(s) each iteration emits one CALL item per
+// invocation. With symbolic plugs those calls are AFFINE in the loop-carried vars
+// (fixed per-iteration var stride), so a periodic run of CALL items compresses to
+// a single rolled-CALL-block token — the CALL analogue of the flat-opcode roll
+// (`bytecode::roll_and_encode_ops`), which only compresses runs of inline rows.
+//
+// A block has a `period` of `p` call templates (the loop body's calls, in order)
+// repeated `count` times. Iteration `k` of template `j` reconstructs a plain CALL
+// whose `base_var` and whose every plug-LC term var advance by that operand's
+// constant step: `operand0 + k·step`. Coeffs and constants are loop-invariant
+// (identical every iteration) so they are stored once. Expansion is BYTE-IDENTICAL
+// to the unrolled CALLs — the encoder only rolls after verifying, iteration by
+// iteration, that every operand reproduces exactly under the affine rule.
+const MAX_CALL_PERIOD: usize = 1024;
+
+/// One affine plug-LC template inside a rolled call: the loop-invariant constant
+/// and, per term, its loop-invariant coeff plus the term var's `(var0, step)`.
+struct PlugTemplate {
+    constant: xark_ir::FieldConst,
+    terms: Vec<(xark_ir::FieldConst, u32, i64)>, // (coeff, var0, var_step)
+}
+/// One call template in a rolled block (one call of the loop body).
+struct CallTemplate {
+    def: u32,
+    base0: u32,
+    base_step: i64,
+    plugs: Vec<PlugTemplate>,
+}
+/// A rolled run of `count` repetitions of a `period`-length body of call templates.
+struct RolledCall {
+    count: u32,
+    body: Vec<CallTemplate>,
+}
+/// The result of rolling a maximal run of consecutive CALL items: either a single
+/// call (index into the enclosing item slice) or a rolled block.
+enum CallTok {
+    Single(usize),
+    Rolled(RolledCall),
+}
+
+/// A call's structural signature (loop-invariant part): `def` + per-plug
+/// `(constant, coeffs)`, serialized to bytes for fast exact comparison. Two calls
+/// can share a rolled template iff their signatures are byte-equal.
+fn call_sig(it: &GItem) -> Vec<u8> {
+    let mut b = Vec::new();
+    if let GItem::Call(d, _, plugs) = it {
+        put_uv(&mut b, u64::from(*d));
+        put_uv(&mut b, plugs.len() as u64);
+        for lc in plugs {
+            put_fc(&mut b, &lc.constant);
+            put_uv(&mut b, lc.terms.len() as u64);
+            for t in &lc.terms {
+                put_fc(&mut b, &t.coeff);
+            }
+        }
+    }
+    b
+}
+/// A call's affine operands, in a fixed order: `base_var` then every plug-LC term
+/// var (plug order, term order). These are the values that step per iteration.
+fn call_operands(it: &GItem) -> Vec<i64> {
+    let mut v = Vec::new();
+    if let GItem::Call(_, base, plugs) = it {
+        v.push(i64::from(*base));
+        for lc in plugs {
+            for t in &lc.terms {
+                v.push(i64::from(t.var));
+            }
+        }
+    }
+    v
+}
+
+/// Try to roll the period-`p` block at `start` (in `sigs`/`ops`, the precomputed
+/// signatures/operands of a maximal call run). Returns the maximal repeat count
+/// (`≥ 2`) whose every operand reproduces `operand0 + k·step` exactly with matching
+/// signatures, or `None`.
+fn try_call_repeat(sigs: &[Vec<u8>], ops: &[Vec<i64>], start: usize, p: usize) -> Option<usize> {
+    let n = sigs.len();
+    if p == 0 || start + 2 * p > n {
+        return None;
+    }
+    // Blocks 0 and 1 must be signature-identical, position by position.
+    for j in 0..p {
+        if sigs[start + p + j] != sigs[start + j]
+            || ops[start + p + j].len() != ops[start + j].len()
+        {
+            return None;
+        }
+    }
+    // Per-position, per-operand step from iteration 0 → 1.
+    let steps: Vec<Vec<i64>> = (0..p)
+        .map(|j| {
+            ops[start + j]
+                .iter()
+                .zip(&ops[start + p + j])
+                .map(|(a, b)| b - a)
+                .collect()
+        })
+        .collect();
+    // Extend while each further block reproduces exactly under the affine rule.
+    let mut count = 2usize;
+    while start + (count + 1) * p <= n {
+        let base = start + count * p;
+        let k = count as i64;
+        let mut ok = true;
+        for j in 0..p {
+            if sigs[base + j] != sigs[start + j] || ops[base + j].len() != ops[start + j].len() {
+                ok = false;
+                break;
+            }
+            let matches = ops[start + j]
+                .iter()
+                .zip(&steps[j])
+                .zip(&ops[base + j])
+                .all(|((o0, s), actual)| o0 + k * s == *actual);
+            if !matches {
+                ok = false;
+                break;
+            }
+        }
+        if !ok {
+            break;
+        }
+        count += 1;
+    }
+    Some(count)
+}
+
+/// Build a [`RolledCall`] for the period-`p`, `count`-repetition block at `start`
+/// of `calls` (references to the run's consecutive CALL items). Iteration 0 gives
+/// the loop-invariant coeffs/constants and the `var0`s; the per-operand step is the
+/// iteration-0→1 delta.
+fn build_rolled_call(calls: &[&GItem], start: usize, p: usize) -> RolledCall {
+    let mut body = Vec::with_capacity(p);
+    for j in 0..p {
+        let GItem::Call(def, base0, plugs0) = calls[start + j] else {
+            unreachable!("call run holds only Call items")
+        };
+        let o0 = call_operands(calls[start + j]);
+        let o1 = call_operands(calls[start + p + j]);
+        let steps: Vec<i64> = o0.iter().zip(&o1).map(|(a, b)| b - a).collect();
+        // Operand index 0 is base; the rest map, in order, to plug term vars.
+        let base_step = steps[0];
+        let mut oi = 1usize;
+        let plug_templates: Vec<PlugTemplate> = plugs0
+            .iter()
+            .map(|lc| {
+                let terms = lc
+                    .terms
+                    .iter()
+                    .map(|t| {
+                        let step = steps[oi];
+                        oi += 1;
+                        (t.coeff.clone(), t.var, step)
+                    })
+                    .collect();
+                PlugTemplate {
+                    constant: lc.constant.clone(),
+                    terms,
+                }
+            })
+            .collect();
+        body.push(CallTemplate {
+            def: *def,
+            base0: *base0,
+            base_step,
+            plugs: plug_templates,
+        });
+    }
+    // count is recovered by the caller; store it there.
+    RolledCall { count: 0, body }
+}
+
+/// Roll a maximal run of consecutive CALL items into `CallTok`s: greedily grab, at
+/// each position, the block whose rolled span (`period · count`) is largest (ties
+/// → smallest period), leaving un-rollable calls as singles. Correctness is
+/// intrinsic: a block is only rolled after `try_call_repeat` proves every operand
+/// reproduces exactly, so expansion is byte-identical to the flat calls.
+fn roll_call_run(calls: &[&GItem]) -> Vec<CallTok> {
+    let n = calls.len();
+    let sigs: Vec<Vec<u8>> = calls.iter().map(|c| call_sig(c)).collect();
+    let ops: Vec<Vec<i64>> = calls.iter().map(|c| call_operands(c)).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let maxp = ((n - i) / 2).min(MAX_CALL_PERIOD);
+        let mut best: Option<(usize, usize)> = None; // (span, period)
+        for p in 1..=maxp {
+            if let Some(count) = try_call_repeat(&sigs, &ops, i, p) {
+                let span = p * count;
+                match best {
+                    Some((bs, _)) if bs >= span => {}
+                    _ => best = Some((span, p)),
+                }
+            }
+        }
+        if let Some((span, p)) = best {
+            let count = span / p;
+            let mut rolled = build_rolled_call(calls, i, p);
+            rolled.count = count as u32;
+            out.push(CallTok::Rolled(rolled));
+            i += span;
+        } else {
+            out.push(CallTok::Single(i));
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Serialize a rolled-CALL-block token body (tag already written): `count`,
+/// `period`, then each call template `(def, base0, base_step, plugs)` where a plug
+/// is `(constant, [(coeff, var0, var_step)])`. Mirrors `function_decode`'s
+/// `parse_rolled_call`.
+fn put_rolled_call(buf: &mut Vec<u8>, r: &RolledCall) {
+    put_uv(buf, u64::from(r.count));
+    put_uv(buf, r.body.len() as u64);
+    for t in &r.body {
+        put_uv(buf, u64::from(t.def));
+        put_uv(buf, u64::from(t.base0));
+        put_iv(buf, t.base_step);
+        put_uv(buf, t.plugs.len() as u64);
+        for pt in &t.plugs {
+            put_fc(buf, &pt.constant);
+            put_uv(buf, pt.terms.len() as u64);
+            for (coeff, var0, step) in &pt.terms {
+                put_fc(buf, coeff);
+                put_uv(buf, u64::from(*var0));
+                put_iv(buf, *step);
+            }
+        }
+    }
+}
+
+// --- Complete DAG-compact circuit artifact (VERSION_FUNCTION = 8) --------------
+// A self-contained container that expands to a full `CircuitProgram` (constraints
+// + witness program + variable table): the sole `circuit.xbc` format.
+// Header `MAGIC + 1u16`; the payload is function defs + top-level item streams
+// (rows, function calls, and rolled periodic runs — see below).
+
+/// The circuit-artifact container version. Version 1 is the sole format: the
+/// DAG-function container that also rolls periodic runs of inline rows. (The former
+/// flat=6 / loop=7 / function=8 encodings were collapsed into this.)
+const VERSION_FUNCTION: u16 = 1;
+
+fn vis_byte(v: &Visibility) -> u8 {
+    match v {
+        Visibility::Public => 0,
+        Visibility::Private => 1,
+        Visibility::Internal => 2,
+    }
+}
+fn put_str(buf: &mut Vec<u8>, s: &str) {
+    put_uv(buf, s.len() as u64);
+    buf.extend_from_slice(s.as_bytes());
+}
+/// Serialize a constraint item stream (`Row` = one flat constraint, `Call` = def ref).
+/// Serialize a constraint item stream. Item tags: `0` = a single inline row,
+/// `1` = a function call, `2` = a **rolled** run of ≥2 consecutive rows (periodic
+/// loops of primitives compress here, so the single container needn't carry them
+/// unrolled). A maximal run of consecutive `Row`s becomes one token: length 1 →
+/// tag 0, length ≥2 → tag 0x02 with a length-prefixed rolled-op blob.
+fn ser_c_items(buf: &mut Vec<u8>, items: &[GItem], flat: &[R1csConstraint]) {
+    // Plan tokens first: maximal Row-runs (each one token) and maximal Call-runs
+    // (each rolled into `CallTok`s — a rolled block is one token, a single call is
+    // one token). The token count must be written before the tokens themselves.
+    enum CTok<'a> {
+        RowRun(usize, usize), // items[start..end], all Row
+        Call(&'a GItem),      // one CALL item
+        Rolled(RolledCall),   // a rolled CALL block
+    }
+    let mut plan: Vec<CTok> = Vec::new();
+    let mut i = 0;
+    while i < items.len() {
+        match &items[i] {
+            GItem::Row(_) => {
+                let start = i;
+                while matches!(items.get(i), Some(GItem::Row(_))) {
+                    i += 1;
+                }
+                plan.push(CTok::RowRun(start, i));
+            }
+            GItem::Call(..) => {
+                let start = i;
+                while matches!(items.get(i), Some(GItem::Call(..))) {
+                    i += 1;
+                }
+                let calls: Vec<&GItem> = items[start..i].iter().collect();
+                for tok in roll_call_run(&calls) {
+                    match tok {
+                        CallTok::Single(k) => plan.push(CTok::Call(calls[k])),
+                        CallTok::Rolled(r) => plan.push(CTok::Rolled(r)),
+                    }
+                }
+            }
+        }
+    }
+    put_uv(buf, plan.len() as u64);
+
+    for tok in &plan {
+        match tok {
+            CTok::Call(GItem::Call(d, base, plugs)) => {
+                buf.push(1);
+                put_uv(buf, u64::from(*d));
+                put_uv(buf, u64::from(*base));
+                put_lcs_g(buf, plugs);
+            }
+            CTok::Call(GItem::Row(_)) => unreachable!("CTok::Call holds a Call item"),
+            CTok::Rolled(r) => {
+                buf.push(3);
+                put_rolled_call(buf, r);
+            }
+            CTok::RowRun(start, end) => {
+                let (start, end) = (*start, *end);
+                if end - start == 1 {
+                    let GItem::Row(idx) = &items[start] else {
+                        unreachable!()
+                    };
+                    buf.push(0);
+                    put_row_g(buf, &flat[*idx]);
+                } else {
+                    let ops: Vec<xark_ir::bytecode::Opcode> = items[start..end]
+                        .iter()
+                        .map(|it| {
+                            let GItem::Row(idx) = it else { unreachable!() };
+                            // v8 rows drop debug notes (decoder sets `note: None`),
+                            // so the rolled form matches the inline form exactly.
+                            let r = &flat[*idx];
+                            xark_ir::bytecode::Opcode::Constraint(xark_ir::R1csRow {
+                                a: r.a.clone(),
+                                b: r.b.clone(),
+                                c: r.c.clone(),
+                                note: None,
+                            })
+                        })
+                        .collect();
+                    let blob = xark_ir::bytecode::roll_and_encode_ops(ops);
+                    buf.push(2);
+                    put_uv(buf, blob.len() as u64);
+                    buf.extend_from_slice(&blob);
+                }
+            }
+        }
+    }
+}
+/// Flush an accumulated run of consecutive witness ops as one token: tag `0` for
+/// a single op, tag `2` for a rolled run of ≥2 (empties `run`).
+fn flush_w_run(buf: &mut Vec<u8>, run: &mut Vec<xark_ir::bytecode::Opcode>) {
+    match run.len() {
+        0 => {}
+        1 => {
+            buf.push(0);
+            if let xark_ir::bytecode::Opcode::Witness(w) = &run[0] {
+                put_witness_g(buf, w);
+            }
+            run.clear();
+        }
+        _ => {
+            let blob = xark_ir::bytecode::roll_and_encode_ops(std::mem::take(run));
+            buf.push(2);
+            put_uv(buf, blob.len() as u64);
+            buf.extend_from_slice(&blob);
+        }
+    }
+}
+
+/// Serialize a witness item stream. Item tags: `0` = one witness op, `1` = a
+/// function call, `2` = a rolled run of ≥2 witness ops, `3` = a rolled CALL block.
+/// `Row`s with no witness-gen are holes (skipped, transparent to a run); a `Call`
+/// ends the current run, and a maximal run of consecutive `Call`s is rolled the
+/// same way the constraint stream rolls them (byte-identical CALL decisions).
+fn ser_w_items_std(buf: &mut Vec<u8>, items: &[GItem], flat_w: &[Option<WitnessGen>]) {
+    enum WTok<'a> {
+        WitRun(Vec<xark_ir::bytecode::Opcode>), // ≥1 witness ops
+        Call(&'a GItem),
+        Rolled(RolledCall),
+    }
+    let mut plan: Vec<WTok> = Vec::new();
+    let mut run: Vec<xark_ir::bytecode::Opcode> = Vec::new();
+    let mut i = 0;
+    while i < items.len() {
+        match &items[i] {
+            GItem::Row(idx) => {
+                if let Some(w) = &flat_w[*idx] {
+                    run.push(xark_ir::bytecode::Opcode::Witness(w.clone()));
+                }
+                i += 1;
+            }
+            GItem::Call(..) => {
+                if !run.is_empty() {
+                    plan.push(WTok::WitRun(std::mem::take(&mut run)));
+                }
+                let start = i;
+                while matches!(items.get(i), Some(GItem::Call(..))) {
+                    i += 1;
+                }
+                let calls: Vec<&GItem> = items[start..i].iter().collect();
+                for tok in roll_call_run(&calls) {
+                    match tok {
+                        CallTok::Single(k) => plan.push(WTok::Call(calls[k])),
+                        CallTok::Rolled(r) => plan.push(WTok::Rolled(r)),
+                    }
+                }
+            }
+        }
+    }
+    if !run.is_empty() {
+        plan.push(WTok::WitRun(std::mem::take(&mut run)));
+    }
+
+    put_uv(buf, plan.len() as u64);
+    for tok in &mut plan {
+        match tok {
+            WTok::WitRun(run) => flush_w_run(buf, run),
+            WTok::Call(GItem::Call(d, base, plugs)) => {
+                buf.push(1);
+                put_uv(buf, u64::from(*d));
+                put_uv(buf, u64::from(*base));
+                put_lcs_g(buf, plugs);
+            }
+            WTok::Call(GItem::Row(_)) => unreachable!("WTok::Call holds a Call item"),
+            WTok::Rolled(r) => {
+                buf.push(3);
+                put_rolled_call(buf, r);
+            }
+        }
+    }
+}
+
+/// Build the complete VERSION_FUNCTION artifact from a finished lowering: header +
+/// field + var table (as call-scattered kinds + a small explicit remainder) +
+/// function defs (each with its var-kinds and both item streams) + top-level
+/// streams. Expands via [`expand_function_blob`] to a byte-identical `CircuitProgram`.
+fn build_function_blob(env: &LoweringEnv, field: &FieldSpec, num_inputs: usize) -> Vec<u8> {
+    let flat = &env.constraints;
+    let flat_w = &env.witness_gen;
+    // Symbolic replays never nest (a replay dumps its template's flat constraints,
+    // making no further calls), so every recorded call range is DISJOINT. Sort by
+    // (constraint start, end) — since constraints and witness ops are appended in
+    // lockstep, this also orders the witness spans.
+    let mut ranges = env.function_calls.clone();
+    ranges.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
+
+    // One def per distinct replayed key. The def BODY is the canonical template (in
+    // its own capture coords: `base_var` + `plug_vars`); each CALL substitutes the
+    // caller's plug LCs into it on expand. Templates are flat (nested functions were
+    // inlined at capture), so a def has no nested calls.
+    let mut def_idx: BTreeMap<String, u32> = BTreeMap::new();
+    let mut def_keys: Vec<String> = Vec::new();
+    for r in &ranges {
+        if env.function_templates.contains_key(&r.0) {
+            def_idx.entry(r.0.clone()).or_insert_with(|| {
+                def_keys.push(r.0.clone());
+                (def_keys.len() - 1) as u32
+            });
+        }
+    }
+
+    let mut b = Vec::new();
+    b.extend_from_slice(&xark_ir::bytecode::MAGIC);
+    b.extend_from_slice(&VERSION_FUNCTION.to_le_bytes());
+    put_str(&mut b, &field.name);
+    put_str(&mut b, field.modulus_decimal.as_deref().unwrap_or(""));
+    put_uv(&mut b, env.variables.len() as u64);
+    // The var *table* is trivial to reconstruct: the first `num_inputs` vars are
+    // the signature inputs (Public/Private, matched by name at prove time), and
+    // EVERY other var is `Derived` — including hint/advice vars, which carry
+    // `Visibility::Private` but are computed by the witness program, not supplied.
+    // So we store only the inputs (role + name); the rest are `v{id}` / Derived.
+    put_uv(&mut b, num_inputs as u64);
+    for id in 0..num_inputs {
+        b.push(vis_byte(&env.variables[id].visibility));
+        put_str(&mut b, &env.variables[id].name);
+    }
+    // --- function defs: one canonical template body each ------------------------
+    put_uv(&mut b, def_keys.len() as u64);
+    for key in &def_keys {
+        let t = env
+            .function_templates
+            .get(key)
+            .expect("def key has a template");
+        put_uv(&mut b, u64::from(t.base_var));
+        put_ids_g(&mut b, &t.plug_vars);
+        // Output vars — the internal vars a caller reads after the call. Recorded
+        // so a per-template R1CS minimizer can PIN them (like plugs) as the def's
+        // interface while eliminating the rest. Outputs are LCs (a bit-sum word is
+        // `Σ 2ⁱ·rᵢ`), so pin every var they reference; the expansion itself does
+        // not consume this field (the top stream references these vars directly).
+        let mut outs: Vec<VarId> = t
+            .outputs
+            .iter()
+            .flat_map(|(_, lc)| lc.terms.iter().map(|t| t.var))
+            .collect();
+        outs.sort_unstable();
+        outs.dedup();
+        put_ids_g(&mut b, &outs);
+        // Body = the template's own constraints / witness ops, as inline rows (they
+        // roll if periodic). No nested CALLs — templates are already flat.
+        let c_items: Vec<GItem> = (0..t.constraints.len()).map(GItem::Row).collect();
+        ser_c_items(&mut b, &c_items, &t.constraints);
+        let w_flat: Vec<Option<WitnessGen>> = t.witness.iter().cloned().map(Some).collect();
+        let w_items: Vec<GItem> = (0..t.witness.len()).map(GItem::Row).collect();
+        ser_w_items_std(&mut b, &w_items, &w_flat);
+    }
+
+    // --- top-level streams: rows interspersed with the disjoint CALLs ----------
+    #[allow(clippy::type_complexity)]
+    let call_ranges: Vec<&(
+        String,
+        usize,
+        usize,
+        VarId,
+        Vec<LinearCombination>,
+        usize,
+        usize,
+    )> = ranges
+        .iter()
+        .filter(|r| def_idx.contains_key(&r.0))
+        .collect();
+    let mut top_c: Vec<GItem> = Vec::new();
+    {
+        let (mut i, mut k) = (0usize, 0usize);
+        while i < flat.len() {
+            if k < call_ranges.len() && call_ranges[k].1 == i {
+                let r = call_ranges[k];
+                top_c.push(GItem::Call(def_idx[&r.0], r.3, r.4.clone()));
+                i = r.2;
+                k += 1;
+            } else {
+                top_c.push(GItem::Row(i));
+                i += 1;
+            }
+        }
+    }
+    let mut top_w: Vec<GItem> = Vec::new();
+    {
+        let (mut i, mut k) = (0usize, 0usize);
+        while i < flat_w.len() {
+            if k < call_ranges.len() && call_ranges[k].5 == i {
+                let r = call_ranges[k];
+                top_w.push(GItem::Call(def_idx[&r.0], r.3, r.4.clone()));
+                i = r.6;
+                k += 1;
+            } else {
+                top_w.push(GItem::Row(i));
+                i += 1;
+            }
+        }
+    }
+    ser_c_items(&mut b, &top_c, flat);
+    ser_w_items_std(&mut b, &top_w, flat_w);
+    // Keep-set exception for the decoder's prune. `finish` drops every UNREFERENCED
+    // `Internal` var but retains `Private` (advice/hint outputs) even unreferenced.
+    // The decoder drops all unreferenced non-input vars, so we hand it the only
+    // exceptions — unreferenced advice — to keep. Almost always empty (a live hint
+    // is pinned by a constraint, hence referenced), so this costs ~1 byte.
+    let mut referenced: BTreeSet<VarId> = BTreeSet::new();
+    for c in flat {
+        for lc in [&c.a, &c.b, &c.c] {
+            for t in &lc.terms {
+                referenced.insert(t.var);
+            }
+        }
+    }
+    let keep_extra: Vec<VarId> = (num_inputs..env.variables.len())
+        .filter(|&id| {
+            env.variables[id].visibility == Visibility::Private
+                && !referenced.contains(&(id as u32))
+        })
+        .map(|id| id as u32)
+        .collect();
+    put_ids_g(&mut b, &keep_extra);
+    b
+}
+
+/// Whether to write the DAG-compact `VERSION_FUNCTION` artifact as `circuit.xbc`
+/// The compact DAG-function container is the sole circuit artifact, built for every
+/// circuit (it rolls periodic runs of inline rows, so it needs no flat fallback).
+/// Retained as a function (always `true`) because function capture is gated on it in
+/// a couple of places.
+fn function_artifact_enabled() -> bool {
+    true
+}
+fn auto_dag_enabled() -> bool {
+    compact_enabled()
+}
+/// Whether to actually *replay* cached functions (skip the walk). Off = still
+/// recognize functions (materialize plugs, strip notes, capture) but walk every
+/// call — the byte-identity reference to diff replay against.
+fn function_replay_enabled() -> bool {
+    compact_enabled()
+}
+
 fn inline_call<'tcx>(
     env: &mut LoweringEnv<'tcx>,
     def_id: DefId,
@@ -2962,7 +4441,7 @@ fn inline_call<'tcx>(
         ))
         .with_note(
             "only xark field operations, assert_eq, and functions whose MIR is available \
-             (build gadget crates with `-Zalways-encode-mir`) can be inlined",
+             (build function crates with `-Zalways-encode-mir`) can be inlined",
         ));
     }
 
@@ -2980,7 +4459,7 @@ fn inline_call<'tcx>(
     // un-cached lowering) and captures the produced bits afterward.
     // Only memoize *witness* decompositions (non-constant LCs). A constant's bits
     // are all pinned to fixed values, so caching them saves little and — crucially
-    // — decomposing the same constant twice is the one repeat some existing gadgets
+    // — decomposing the same constant twice is the one repeat some existing functions
     // do (BLAKE2s/3 decompose `Field::from(0u8)` etc. more than once), which must
     // stay byte-identical. The optimization that matters is amortizing a *witness*
     // value's range check across repeated width-`N` ops (docs/integer-ops.md).
@@ -3009,7 +4488,7 @@ fn inline_call<'tcx>(
             let bits = x.constant.to_bits_le(n).ok_or_else(|| {
                 CompileError::new(format!(
                     "constant `{}` does not fit in {n} bits",
-                    x.constant.decimal
+                    x.constant.decimal()
                 ))
                 .with_note("`Field::to_bits::<N>` of a constant requires `0 <= value < 2^N`")
             })?;
@@ -3023,12 +4502,30 @@ fn inline_call<'tcx>(
             }
             return Ok(());
         } else {
-            let key = (canonical_lc_key(&x), n);
-            if let Some(bits) = env.bit_cache.get(&key).cloned() {
+            // Bit-sum shortcut: if `x` is already `Σ 2ⁱ·bᵢ` over genuinely
+            // booleanity-constrained bits, those bits ARE its canonical `n`-bit
+            // decomposition — bind them directly and emit nothing (no fresh advice,
+            // booleanity, or recomposition). This recovers the redundant
+            // decomposition a caller would otherwise do on a function's recomposed
+            // word output (see `bit_sum_shortcut`; lossless, not a new constraint).
+            if let Some(bits) = env.bit_sum_shortcut(&x, n) {
                 for (i, &v) in bits.iter().enumerate() {
                     env.set_field_at(dest, &[i as u64], LinearCombination::var(v));
                 }
                 return Ok(());
+            }
+            let key = (canonical_lc_key(&x), n);
+            // The bit cache makes a `to_bits` return vars from an *earlier* call —
+            // fine when inlining, but it breaks function purity (a function body would
+            // reference vars outside its own args/internals, which replay can't
+            // reproduce per call). One of several such cross-call memoizations.
+            if env.function_depth == 0 {
+                if let Some(bits) = env.bit_cache.get(&key).cloned() {
+                    for (i, &v) in bits.iter().enumerate() {
+                        env.set_field_at(dest, &[i as u64], LinearCombination::var(v));
+                    }
+                    return Ok(());
+                }
             }
             Some(key)
         }
@@ -3036,11 +4533,122 @@ fn inline_call<'tcx>(
         None
     };
 
-    // Evaluate arguments in the *caller* frame.
-    let mut arg_values: Vec<ArgValue> = Vec::with_capacity(args.len());
-    for a in args {
-        arg_values.push(env.eval_arg(&a.node));
+    // === Frontend-function path ===
+    // A callee whose args are all Field values (auto-DAG, or `#[no_mangle]`)
+    // is a cached function: every field leaf materializes to a single-var plug (a
+    // point / bignum is several leaves), the body is lowered once, and reused calls
+    // REPLAY (a bytecode CALL). Multi-leaf inputs *and* outputs are supported.
+    let is_function_call = call_memo_enabled() && env.is_function(def_id);
+    let mut arg_values: Vec<ArgValue> = args.iter().map(|a| env.eval_arg(&a.node)).collect();
+    // First-occurrence capture materializes single-var plugs (`plug_vars`); a
+    // symbolic replay instead passes the caller's arg LCs straight in (`plug_lcs`).
+    let mut plug_vars: Vec<VarId> = Vec::new();
+    let mut plug_lcs: Vec<LinearCombination> = Vec::new();
+    // A function call is one whose args are all `Field` values. Its key
+    // `def|substs|p<arity>` is fixed by the *arity* (total field leaves), which is
+    // known before materializing plugs — so the fold pre-pass can count/measure a
+    // key and pass 2 can decide whether to template it, both using the same key.
+    let all_fields = is_function_call
+        && arg_values
+            .iter()
+            .all(|av| matches!(av, ArgValue::Fields(_)));
+    let function_key = if all_fields {
+        let plug_arity: usize = arg_values
+            .iter()
+            .map(|av| {
+                if let ArgValue::Fields(l) = av {
+                    l.len()
+                } else {
+                    0
+                }
+            })
+            .sum();
+        let key = format!("{def_id:?}|{call_args:?}|p{plug_arity}");
+        // Tally this call for the fold decision (only in the measuring pass; pass 2
+        // consults the precomputed `promotions`).
+        if env.promotions.is_none() {
+            *env.function_call_counts.entry(key.clone()).or_insert(0) += 1;
+        }
+        // Promote to a CALL only when the pre-pass approved it (called `>= 2`
+        // times). In the measuring pass (`promotions == None`) template everything
+        // so every key is seen. Not promoted → inline (fold) this call: leave args
+        // unmaterialized and fall through to the plain walk below (keeps its
+        // `mul→assert_eq` merges + notes).
+        let promote = match &env.promotions {
+            None => true,
+            Some(p) => p.get(&key).copied().unwrap_or(false),
+        };
+        if promote {
+            // A cached template (pass 2 always, or a later pass-1 occurrence) →
+            // symbolic replay: pass the caller's arg LCs straight in (sorted by
+            // path for a stable plug order), no materialization. Otherwise (first
+            // occurrence, template absent) materialize each leaf to a distinct
+            // single-var plug so the walked body is a pure function of its plugs and
+            // can be captured.
+            let will_replay =
+                function_replay_enabled() && env.function_templates.contains_key(&key);
+            let mut seen: BTreeSet<VarId> = BTreeSet::new();
+            for av in &mut arg_values {
+                if let ArgValue::Fields(leaves) = av {
+                    leaves.sort_by(|x, y| x.0.cmp(&y.0));
+                    for (_, lc) in leaves.iter_mut() {
+                        if will_replay {
+                            plug_lcs.push(lc.clone());
+                        } else {
+                            let mut v = env.materialize_to_var(lc.clone());
+                            // Plugs must be distinct: an aliased plug (the same var
+                            // in two positions — e.g. `xor32(rotr(w,7), rotr(w,18))`
+                            // shares w's bits) would collapse the plug substitution.
+                            // Copy the duplicate so every plug position is unique.
+                            if !seen.insert(v) {
+                                v = env.copy_var(v);
+                                seen.insert(v);
+                            }
+                            plug_vars.push(v);
+                            *lc = LinearCombination::var(v);
+                        }
+                    }
+                }
+            }
+            // `plug_lcs.len()` / `plug_vars.len() == plug_arity`, so this equals `key`.
+            Some(key)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // REPLAY: cached function + replay enabled → substitute the caller's arg LCs into
+    // the template and append it, skipping the walk.
+    if let Some(key) = &function_key {
+        if function_replay_enabled() && env.function_templates.contains_key(key) {
+            let c_start = env.constraints.len();
+            let w_start = env.witness_gen.len();
+            let base = env.next_var_id;
+            let outs = env.replay_function(key, &plug_lcs);
+            if function_artifact_enabled() {
+                env.function_calls.push((
+                    key.clone(),
+                    c_start,
+                    env.constraints.len(),
+                    base,
+                    plug_lcs.clone(),
+                    w_start,
+                    env.witness_gen.len(),
+                ));
+            }
+            env.call_memo_total += 1;
+            env.call_memo_ok += 1;
+            env.bind_value(dest, &[], ArgValue::Fields(outs));
+            return Ok(());
+        }
     }
+
+    // Snapshot resources so a function's body constraints/witness can be captured.
+    let cap_base_var = env.next_var_id;
+    let cap_base_c = env.constraints.len();
+    let cap_base_w = env.witness_gen.len();
 
     // Lower the callee body in a fresh frame with params bound to the args. The
     // callee's generic args are pushed so nested calls in a generic body (e.g.
@@ -3049,19 +4657,78 @@ fn inline_call<'tcx>(
     env.inlining.push(def_id);
     env.inline_substs.push(call_args);
     env.enter_frame();
-    // If this gadget fixes the kind of the constraints it emits (e.g.
+    // If this function fixes the kind of the constraints it emits (e.g.
     // `assert_bool` → Booleanity), push that override for the duration of its
     // body. Only relevant when profiling; harmless otherwise.
     let pushed_kind =
-        gadget_kind_hint(env.tcx.item_name(def_id).as_str()).inspect(|&k| env.kind_stack.push(k));
+        function_kind_hint(env.tcx.item_name(def_id).as_str()).inspect(|&k| env.kind_stack.push(k));
 
     for (i, value) in arg_values.into_iter().enumerate() {
         let param = rustc_middle::mir::Local::from_usize(i + 1);
         env.bind_value(param, &[], value);
     }
 
+    // Inside a function body cross-call caches are suppressed (purity). Nested calls
+    // keep the depth raised, so the whole subtree is cache-free.
+    let is_function_walk = function_key.is_some();
+    // Scope the `mul → assert_eq` merge state to this function body: save + clear the
+    // caller's `pending_mul`/`merged` so a body-local mul can't fold across the
+    // boundary (replayed functions never register for the merge, so a walk must match).
+    // Restored after capture. `bit_cache` stays untouched (that's Stage 2).
+    let saved_pending = if is_function_walk {
+        std::mem::take(&mut env.pending_mul)
+    } else {
+        BTreeMap::new()
+    };
+    let saved_merged = if is_function_walk {
+        std::mem::take(&mut env.merged)
+    } else {
+        BTreeMap::new()
+    };
+    if is_function_walk {
+        env.function_depth += 1;
+    }
     let walk_result = walk_body(env, body);
     let ret = env.frame_return();
+    if is_function_walk {
+        env.function_depth -= 1;
+        // Local revival: an intra-body merge folded `a*b=t; assert(t==x)` → `a*b=x`
+        // and dropped `t`. If `t` is still referenced by a captured body constraint
+        // or a function output, re-emit `a*b=t` so the captured template stays
+        // self-contained (a merged var referenced later must stay defined).
+        let mut ref_now: BTreeSet<VarId> = BTreeSet::new();
+        for c in &env.constraints[cap_base_c..] {
+            for lc in [&c.a, &c.b, &c.c] {
+                for term in &lc.terms {
+                    ref_now.insert(term.var);
+                }
+            }
+        }
+        if let ArgValue::Fields(f) = &ret {
+            for (_, lc) in f {
+                for term in &lc.terms {
+                    ref_now.insert(term.var);
+                }
+            }
+        }
+        for (out, (a, b, wg_idx, _)) in std::mem::take(&mut env.merged) {
+            if ref_now.contains(&out) {
+                let id = env.fresh_constraint_id();
+                env.push_constraint(
+                    ConstraintKind::Mul,
+                    R1csConstraint::mul(id, a.clone(), b.clone(), out, ""),
+                );
+                env.witness_gen[wg_idx] = Some(WitnessGen::Product {
+                    out,
+                    left: a,
+                    right: b,
+                });
+            }
+        }
+        // Restore the caller's merge state; body-local merges never leak out.
+        env.pending_mul = saved_pending;
+        env.merged = saved_merged;
+    }
 
     if pushed_kind.is_some() {
         env.kind_stack.pop();
@@ -3071,12 +4738,86 @@ fn inline_call<'tcx>(
     env.inlining.pop();
     walk_result?;
 
+    // Function capture: keep each output leaf as its linear combination (do NOT
+    // materialize it to a fresh word var), strip notes (so walk-mode is note-free
+    // like replay-mode), and store the template on the first call. Only
+    // Field-returning functions are templated; others keep the walked result.
+    //
+    // Keeping outputs as LCs is what lets a recomposed-word output `Σ 2ⁱ·rᵢ` reach
+    // the caller as that sum (the caller's `to_bits` shortcut then avoids a
+    // redundant decomposition). An output references only plugs + body internals,
+    // so purity is unaffected; a single-var output is just the LC `1·v`.
+    let out_leaves = match &ret {
+        ArgValue::Fields(f) if function_key.is_some() => Some(f.clone()),
+        _ => None,
+    };
+    let ret = if let (Some(key), Some(mut leaves)) = (&function_key, out_leaves) {
+        leaves.sort_by(|x, y| x.0.cmp(&y.0));
+        let outputs: Vec<(Vec<u64>, LinearCombination)> = leaves;
+        for c in &mut env.constraints[cap_base_c..] {
+            c.debug = None;
+        }
+        // Only cache/replay a function that is a pure function of its plugs; an
+        // impure body (bit cache, cross-boundary merge, …) stays walked, so replay
+        // is always byte-identical.
+        let pure = function_is_pure(
+            &env.constraints[cap_base_c..],
+            &env.witness_gen[cap_base_w..],
+            cap_base_var,
+            &plug_vars,
+        );
+        if pure && !env.function_templates.contains_key(key) {
+            let constraints = env.constraints[cap_base_c..].to_vec();
+            let witness: Vec<WitnessGen> = env.witness_gen[cap_base_w..]
+                .iter()
+                .filter_map(|w| w.clone())
+                .collect();
+            let var_kinds: Vec<Visibility> = env.variables[cap_base_var as usize..]
+                .iter()
+                .map(|v| v.visibility.clone())
+                .collect();
+            let t = FunctionTemplate {
+                constraints,
+                witness,
+                base_var: cap_base_var,
+                plug_vars: plug_vars.clone(),
+                var_kinds,
+                outputs: outputs.clone(),
+            };
+            env.function_templates.insert(key.clone(), t);
+        }
+        if pure && function_artifact_enabled() {
+            // The captured body still references the materialized single-var plugs,
+            // so the CALL's plug LCs are just `var(plug)`.
+            let plug_call_lcs: Vec<LinearCombination> = plug_vars
+                .iter()
+                .map(|&v| LinearCombination::var(v))
+                .collect();
+            env.function_calls.push((
+                key.clone(),
+                cap_base_c,
+                env.constraints.len(),
+                cap_base_var,
+                plug_call_lcs,
+                cap_base_w,
+                env.witness_gen.len(),
+            ));
+        }
+        env.call_memo_total += 1;
+        env.call_memo_ok += 1;
+        ArgValue::Fields(outputs)
+    } else {
+        ret
+    };
+
     // Bind the return value into the caller frame.
     env.bind_value(dest, &[], ret);
 
     // Bit-cache miss: capture the freshly produced bit vars (each returned slot
     // is a single `var(bᵢ)` LC) so a later `to_bits::<N>` on the same value hits.
-    if let Some(key) = bit_cache_key {
+    // Never populate the cache from inside a function body — those bits are the
+    // function's own internals and must not leak to other calls.
+    if let Some(key) = bit_cache_key.filter(|_| env.function_depth == 0) {
         let n = key.1;
         let mut bits = Vec::with_capacity(n);
         for i in 0..n {
@@ -3100,9 +4841,23 @@ fn inline_call<'tcx>(
 
 /// Finalize: drop unreferenced internal variables and assemble both programs.
 fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerOutput {
+    // Developer diagnostic only (behind `XARK_BUILD_TIME`); a normal build stays
+    // quiet on stderr rather than printing this on every compile.
+    if crate::dbg_flag("XARK_BUILD_TIME") && call_memo_enabled() && env.call_memo_total > 0 {
+        eprintln!(
+            "CALLMEMO: {}/{} function-call replays byte-exact ({:.1}%); {} distinct function templates captured",
+            env.call_memo_ok,
+            env.call_memo_total,
+            100.0 * env.call_memo_ok as f64 / env.call_memo_total as f64,
+            env.function_templates.len()
+        );
+    }
     // Revive a merged mul output (its `a·b = out` folded into `assert_eq`) if a
     // later constraint still references it, so the reuse stays bound to `a·b`.
-    // Not-reused outputs are pruned below (fast path unchanged).
+    // Not-reused outputs are pruned below (fast path unchanged). This MUST run
+    // before `build_function_blob` below — else the revived rows land in the flat
+    // R1CS but not the artifact, leaving the artifact (what the prover proves)
+    // under-constrained for a reused product (XARK_VERIFY caught exactly this).
     {
         let mut ref_now: BTreeSet<VarId> = BTreeSet::new();
         for c in &env.constraints {
@@ -3139,6 +4894,16 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
             }
         }
     }
+    // Complete DAG-compact artifact — built AFTER the revival above (so the
+    // artifact == the flat R1CS: the reused-product binding is in both) and while
+    // `env`/`field` are still intact. The single container rolls periodic runs of
+    // inline rows (see `ser_c_items`), so it also compresses loops of primitives —
+    // no functions required. Built for EVERY circuit (the sole on-disk format).
+    let function_xbc = if function_artifact_enabled() {
+        Some(build_function_blob(&env, &field, n_inputs))
+    } else {
+        None
+    };
 
     let mut referenced: BTreeSet<VarId> = BTreeSet::new();
     for c in &env.constraints {
@@ -3177,7 +4942,7 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
         .constraints
         .iter()
         .map(|c| {
-            expr_from_r1cs(
+            xark_ir::expr_from_r1cs(
                 &c.a,
                 &c.b,
                 &c.c,
@@ -3212,6 +4977,7 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
         r1cs,
         primitive,
         profile,
+        function_xbc,
     }
 }
 
@@ -3249,65 +5015,6 @@ fn primitive_field(field: &FieldSpec) -> primitive::FieldSpec {
     }
 }
 
-/// Expand an R1CS constraint `a · b = c` (all linear combinations) into an
-/// AssertZero-style expression `a·b − c == 0`.
-fn expr_from_r1cs(
-    a: &LinearCombination,
-    b: &LinearCombination,
-    c: &LinearCombination,
-    note: Option<String>,
-) -> primitive::Expression {
-    use std::collections::BTreeMap;
-    use xark_ir::FieldConst;
-
-    let mut linear: BTreeMap<VarId, FieldConst> = BTreeMap::new();
-    let add_lin = |var: VarId, coeff: FieldConst, linear: &mut BTreeMap<VarId, FieldConst>| {
-        let e = linear.entry(var).or_insert_with(FieldConst::zero);
-        *e = e.add(&coeff);
-    };
-
-    // a·b: constant·constant + a_i·b_const·x_i + a_const·b_j·x_j + a_i·b_j·x_i·x_j
-    let mut constant = a.constant.mul(&b.constant);
-    for ta in &a.terms {
-        add_lin(ta.var, ta.coeff.mul(&b.constant), &mut linear);
-    }
-    for tb in &b.terms {
-        add_lin(tb.var, a.constant.mul(&tb.coeff), &mut linear);
-    }
-    let mut mul_terms = Vec::new();
-    for ta in &a.terms {
-        for tb in &b.terms {
-            let coeff = ta.coeff.mul(&tb.coeff);
-            if !coeff.is_zero() {
-                mul_terms.push(primitive::MulTerm {
-                    coeff,
-                    left: ta.var,
-                    right: tb.var,
-                });
-            }
-        }
-    }
-
-    // − c
-    constant = constant.add(&c.constant.neg());
-    for tc in &c.terms {
-        add_lin(tc.var, tc.coeff.neg(), &mut linear);
-    }
-
-    let linear_terms = linear
-        .into_iter()
-        .filter(|(_, coeff)| !coeff.is_zero())
-        .map(|(var, coeff)| primitive::LinearTerm { coeff, var })
-        .collect();
-
-    primitive::Expression {
-        mul_terms,
-        linear_terms,
-        constant,
-        note,
-    }
-}
-
 fn terminator_name(kind: &TerminatorKind<'_>) -> &'static str {
     match kind {
         TerminatorKind::SwitchInt { .. } => "SwitchInt (control flow)",
@@ -3328,5 +5035,76 @@ fn rvalue_name(rvalue: &Rvalue<'_>) -> &'static str {
         Rvalue::BinaryOp(..) => "BinaryOp",
         Rvalue::UnaryOp(..) => "UnaryOp",
         _ => "unsupported",
+    }
+}
+
+#[cfg(test)]
+mod bit_sum_tests {
+    use super::bit_sum_match;
+    use std::collections::BTreeSet;
+    use xark_ir::{FieldConst, LinearCombination, Term, VarId};
+
+    /// Build `Σ coeffs[i]·vars[i]` (zero constant) for testing.
+    fn lc(pairs: &[(i64, VarId)]) -> LinearCombination {
+        LinearCombination {
+            constant: FieldConst::zero(),
+            terms: pairs
+                .iter()
+                .map(|&(c, v)| Term {
+                    coeff: FieldConst::from_i64(c),
+                    var: v,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn boolean_bit_sum_is_shortcut() {
+        let x = lc(&[(1, 10), (2, 11), (4, 12)]); // 3-bit sum over vars 10,11,12
+        let boolean: BTreeSet<VarId> = [10, 11, 12].into_iter().collect();
+        assert_eq!(
+            bit_sum_match(&x, 3, |v| boolean.contains(&v)),
+            Some(vec![10, 11, 12])
+        );
+    }
+
+    #[test]
+    fn non_boolean_summand_is_not_shortcut() {
+        let x = lc(&[(1, 10), (2, 11), (4, 12)]);
+        // var 12 is NOT booleanity-constrained → must NOT shortcut (would be
+        // unsound: 12 could be any field value, not a genuine bit).
+        let boolean: BTreeSet<VarId> = [10, 11].into_iter().collect();
+        assert_eq!(bit_sum_match(&x, 3, |v| boolean.contains(&v)), None);
+    }
+
+    #[test]
+    fn wrong_coefficients_are_not_shortcut() {
+        // coeffs 1,2,8 (missing the 4-weight, has an 8) — not a clean n-bit sum.
+        let x = lc(&[(1, 10), (2, 11), (8, 12)]);
+        let boolean: BTreeSet<VarId> = [10, 11, 12].into_iter().collect();
+        assert_eq!(bit_sum_match(&x, 3, |v| boolean.contains(&v)), None);
+    }
+
+    #[test]
+    fn repeated_var_is_not_shortcut() {
+        // Same var in two positions: not a distinct-bit decomposition.
+        let x = lc(&[(1, 10), (2, 10), (4, 12)]);
+        let boolean: BTreeSet<VarId> = [10, 12].into_iter().collect();
+        assert_eq!(bit_sum_match(&x, 3, |v| boolean.contains(&v)), None);
+    }
+
+    #[test]
+    fn nonzero_constant_is_not_shortcut() {
+        let mut x = lc(&[(1, 10), (2, 11)]);
+        x.constant = FieldConst::from_i64(1);
+        let boolean: BTreeSet<VarId> = [10, 11].into_iter().collect();
+        assert_eq!(bit_sum_match(&x, 2, |v| boolean.contains(&v)), None);
+    }
+
+    #[test]
+    fn wrong_term_count_is_not_shortcut() {
+        let x = lc(&[(1, 10), (2, 11)]); // 2 terms but asked for width 3
+        let boolean: BTreeSet<VarId> = [10, 11].into_iter().collect();
+        assert_eq!(bit_sum_match(&x, 3, |v| boolean.contains(&v)), None);
     }
 }

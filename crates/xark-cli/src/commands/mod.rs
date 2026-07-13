@@ -24,6 +24,22 @@ use xark_ir::profile::ProfileProgram;
 use xark_ir::solver::Fp;
 use xark_ir::{R1csProgram, VarId, Visibility};
 
+/// Developer-diagnostics env-flag probe. Only reads the environment under the
+/// `debug` feature; a normal release build compiles this to `false` so the
+/// diagnostic branches (and their `XARK_*` knobs) vanish entirely.
+#[inline]
+pub(crate) fn dbg_flag(name: &str) -> bool {
+    #[cfg(feature = "debug")]
+    {
+        std::env::var(name).is_ok()
+    }
+    #[cfg(not(feature = "debug"))]
+    {
+        let _ = name;
+        false
+    }
+}
+
 pub mod ceremony;
 pub mod check;
 pub mod client;
@@ -90,7 +106,7 @@ pub enum Command {
     Ceremony(ceremony::CeremonyArgs),
     /// Print circuit statistics (variables, constraints, public inputs).
     Inspect(inspect::InspectArgs),
-    /// Profile a circuit: attribute each constraint to its source line, gadget
+    /// Profile a circuit: attribute each constraint to its source line, function
     /// chain, and kind, then print a sorted drill-down.
     Profile(profile::ProfileArgs),
     /// Generate shell completion scripts.
@@ -182,6 +198,12 @@ pub struct BuildArgs {
     /// Field the circuit is defined over.
     #[arg(long, default_value = "bn254")]
     pub field: String,
+    /// Also emit the human-readable `circuit.json` (the primitive program as
+    /// JSON). Off by default: `xark prove`/`check` load the compact binary
+    /// `circuit.xbc` instead, so a normal build skips the (multi-GB on large
+    /// circuits) JSON serialization. `r1cs.json` is always written.
+    #[arg(long = "emit-json", default_value_t = false)]
+    pub emit_json: bool,
 }
 
 impl BuildArgs {
@@ -193,6 +215,9 @@ impl BuildArgs {
         }
         v.push("--field".into());
         v.push(self.field.clone());
+        if self.emit_json {
+            v.push("--emit-json".into());
+        }
         v
     }
 }
@@ -356,7 +381,101 @@ pub fn load_circuit(path: &std::path::Path) -> Result<PrimitiveProgram> {
     xark_ir::primitive::from_json(&s).with_context(|| format!("parsing {}", path.display()))
 }
 
-/// Best-effort load of `profile.json` (per-constraint source/gadget attribution)
+/// Read and expand a `circuit.xbc` into the full [`CircuitProgram`] it encodes
+/// (R1CS rows + witness-gen), across rayon's thread pool. The `.xbc` is the
+/// compact binary artifact `xark build` always emits; expanding it in parallel
+/// avoids the `serde_json` parse of a (potentially multi-GB) JSON blob and is
+/// the sole circuit description a build produces.
+/// True if `bytes` is a current `XBC` version-1 circuit container. The magic +
+/// u16 version guard rejects stale/foreign files so every loader can dispatch on
+/// it (version 1 is the only format).
+pub fn is_function_artifact(bytes: &[u8]) -> bool {
+    bytes.len() >= 6 && bytes[0..4] == *b"XBC\0" && u16::from_le_bytes([bytes[4], bytes[5]]) == 1
+}
+
+pub fn load_circuit_program(path: &std::path::Path) -> Result<xark_ir::CircuitProgram> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("reading {} (run `xark build` first?)", path.display()))?;
+    if !is_function_artifact(&bytes) {
+        anyhow::bail!(
+            "{} is not a current circuit artifact — rebuild with `xark build`",
+            path.display()
+        );
+    }
+    xark_ir::function_decode::expand_function_blob(&bytes).map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Load the Groth16 backend's [`R1csProgram`] from a built circuit, preferring
+/// the self-contained `circuit.xbc` (deriving the R1CS from it) and falling back
+/// to `r1cs.json` — either an explicit `--r1cs <path>` override or an
+/// `--emit-json` / legacy build. Also returns the SHA-256 fingerprint of the
+/// bytes it read, used to stamp the proof bundle's `circuit_hash`.
+pub fn load_backend_r1cs(
+    xbc_path: &std::path::Path,
+    r1cs_override: Option<&std::path::Path>,
+    r1cs_default: &std::path::Path,
+) -> Result<(R1csProgram, String)> {
+    if let Some(p) = r1cs_override {
+        let s = std::fs::read_to_string(p)
+            .with_context(|| format!("reading {} (run `xark build` first?)", p.display()))?;
+        let prog =
+            xark_ir::json::from_json(&s).with_context(|| format!("parsing {}", p.display()))?;
+        return Ok((prog, sha256_hex(s.as_bytes())));
+    }
+    if xbc_path.exists() {
+        let bytes =
+            std::fs::read(xbc_path).with_context(|| format!("reading {}", xbc_path.display()))?;
+        let fingerprint = sha256_hex(&bytes);
+        if !is_function_artifact(&bytes) {
+            anyhow::bail!(
+                "{} is not a current circuit artifact — rebuild with `xark build`",
+                xbc_path.display()
+            );
+        }
+        // Groth16 view. By DEFAULT expand the *reduced* R1CS (each template
+        // minimized once) directly — avoiding the full flat expansion + flat
+        // minimize. `XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE` fall back to the full
+        // expand (then flat-minimized / not, in the prover). The solver always
+        // loads the full circuit separately.
+        let use_reduced = !dbg_flag("XARK_FLAT_MINIMIZE") && !dbg_flag("XARK_NO_MINIMIZE");
+        let cp = if use_reduced {
+            xark_ir::function_decode::expand_function_blob_reduced(&bytes)
+        } else {
+            xark_ir::function_decode::expand_function_blob(&bytes)
+        }
+        .map_err(|e| anyhow::anyhow!(e))?;
+        return Ok((cp.into_r1cs(), fingerprint));
+    }
+    let s = std::fs::read_to_string(r1cs_default).with_context(|| {
+        format!(
+            "reading {} (run `xark build` first?)",
+            r1cs_default.display()
+        )
+    })?;
+    let prog = xark_ir::json::from_json(&s)
+        .with_context(|| format!("parsing {}", r1cs_default.display()))?;
+    Ok((prog, sha256_hex(s.as_bytes())))
+}
+
+/// Load the solver-facing [`PrimitiveProgram`] from a `circuit.xbc`.
+pub fn load_circuit_xbc_parallel(path: &std::path::Path) -> Result<PrimitiveProgram> {
+    load_circuit_program(path).map(|cp| cp.to_primitive())
+}
+
+/// Load a [`PrimitiveProgram`] from either the binary `circuit.xbc` (default,
+/// via the parallel bytecode expander) or a `circuit.json` — dispatched on the
+/// path's extension. `xark build` always writes `circuit.xbc` and only writes
+/// `circuit.json` under `--emit-json`, so the default backend path resolves to
+/// the `.xbc`; an explicit `--circuit foo.json` still works.
+pub fn load_circuit_auto(path: &std::path::Path) -> Result<PrimitiveProgram> {
+    if path.extension().is_some_and(|e| e == "xbc") {
+        load_circuit_xbc_parallel(path)
+    } else {
+        load_circuit(path)
+    }
+}
+
+/// Best-effort load of `profile.json` (per-constraint source/function attribution)
 /// from a build directory, for richer failure diagnostics. Returns `None` when
 /// the circuit was built without `--profile` (or the file is malformed).
 pub fn load_profile(dir: &std::path::Path) -> Option<ProfileProgram> {
@@ -372,11 +491,10 @@ pub fn load_profile(dir: &std::path::Path) -> Option<ProfileProgram> {
 /// malformed value into 0) and the same unknown-name error (listing the
 /// circuit's non-derived inputs).
 pub fn resolve_input_ids(
-    prim: &PrimitiveProgram,
+    vars: &[xark_ir::primitive::Var],
     inputs: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<VarId, String>> {
-    let by_name: BTreeMap<&str, VarId> =
-        prim.vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
+    let by_name: BTreeMap<&str, VarId> = vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
     let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
     for (k, v) in inputs {
         match by_name.get(k.as_str()) {
@@ -386,8 +504,7 @@ pub fn resolve_input_ids(
                 id_inputs.insert(id, v.clone());
             }
             None => {
-                let names: Vec<&String> = prim
-                    .vars
+                let names: Vec<&String> = vars
                     .iter()
                     .filter(|v| !matches!(v.role, VarRole::Derived))
                     .map(|v| &v.name)
@@ -414,6 +531,47 @@ pub fn resolve_input_ids(
 /// with a derived variable the constraints fail to pin uniquely. A structural,
 /// witness-free version at `xark build`/`check` is planned.
 pub fn soundness_check(
+    cp: &xark_ir::CircuitProgram,
+    profile: Option<&ProfileProgram>,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<BTreeMap<VarId, Fp>> {
+    // Solve + check directly on the R1CS rows (no `to_primitive` flattening). On
+    // an unsatisfied witness, name *which* constraint (and, when profiled, its
+    // source line / function) failed — the same explanation `xark test` surfaces;
+    // the R1CS is materialized only here, on the (rare) error path.
+    let describe = |e| {
+        let r1cs = cp.to_r1cs();
+        anyhow::anyhow!(
+            "{}",
+            xark_ir::diagnose::describe_unsatisfied(&e, &r1cs, profile)
+        )
+    };
+    let timing = dbg_flag("PROVE_TIME");
+    let t = std::time::Instant::now();
+    let assign_fp = xark_ir::solver::solve_cp(cp, id_inputs).map_err(describe)?;
+    let t_solve = t.elapsed();
+    let t = std::time::Instant::now();
+    xark_ir::solver::check_cp(cp, &assign_fp).map_err(describe)?;
+    let t_check = t.elapsed();
+    let t = std::time::Instant::now();
+    let holes = xark_ir::solver::analyze_underconstrained_cp(cp, &assign_fp);
+    if timing {
+        eprintln!(
+            "PROVE_TIME:   solve={:?}  check={:?}  analyze={:?}",
+            t_solve,
+            t_check,
+            t.elapsed()
+        );
+    }
+    report_underconstrained(holes)?;
+    Ok(assign_fp)
+}
+
+/// The `--r1cs`/`--circuit` override path of `xark prove`: the same gate over a
+/// `PrimitiveProgram` (Expression) + `R1csProgram` loaded from JSON, rather than
+/// a `circuit.xbc`. The default path uses [`soundness_check`] on the
+/// `CircuitProgram` directly.
+pub fn soundness_check_r1cs(
     prim: &PrimitiveProgram,
     r1cs: &R1csProgram,
     profile: Option<&ProfileProgram>,
@@ -438,8 +596,12 @@ pub fn soundness_check(
             xark_ir::diagnose::describe_unsatisfied(&e, r1cs, profile)
         )
     })?;
+    report_underconstrained(xark_ir::solver::analyze_underconstrained(prim, &assign_fp))?;
+    Ok(assign_fp)
+}
 
-    let holes = xark_ir::solver::analyze_underconstrained(prim, &assign_fp);
+/// `bail!` with the shared under-constraint diagnostic if any hole was found.
+fn report_underconstrained(holes: Vec<xark_ir::solver::UnderConstrained>) -> Result<()> {
     if !holes.is_empty() {
         let mut msg = crate::style::err(
             "circuit is under-constrained: a malicious prover could forge the \
@@ -455,7 +617,7 @@ pub fn soundness_check(
         );
         anyhow::bail!(msg);
     }
-    Ok(assign_fp)
+    Ok(())
 }
 
 /// The number of public inputs the circuit exposes.

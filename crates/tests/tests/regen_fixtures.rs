@@ -382,6 +382,9 @@ fn build_circuit(spec: &Spec, out: &Path) {
         .arg(&spec.crate_dir)
         .arg("--out")
         .arg(out)
+        // This regenerates the committed JSON fixtures, so it needs `circuit.json`
+        // (a normal `xark build` writes only `circuit.xbc`).
+        .arg("--emit-json")
         .env("CARGO_TARGET_DIR", &target)
         .status()
         .expect("spawn xark build");
@@ -413,9 +416,9 @@ fn setup(r1cs: &R1csProgram) -> Groth16Keys {
 /// Evaluate an R1CS linear combination in `Fr` against the current assignment
 /// (missing vars treated as zero).
 fn eval_lc(lc: &IrLc, assign: &BTreeMap<VarId, Fr>) -> Fr {
-    let mut acc = fr_from_decimal(&lc.constant.decimal);
+    let mut acc = fr_from_decimal(&lc.constant.decimal());
     for t in &lc.terms {
-        acc += fr_from_decimal(&t.coeff.decimal)
+        acc += fr_from_decimal(&t.coeff.decimal())
             * assign.get(&t.var).copied().unwrap_or_else(Fr::zero);
     }
     acc
@@ -426,7 +429,7 @@ fn coeff_of(lc: &IrLc, p: VarId) -> Fr {
     lc.terms
         .iter()
         .find(|t| t.var == p)
-        .map(|t| fr_from_decimal(&t.coeff.decimal))
+        .map(|t| fr_from_decimal(&t.coeff.decimal()))
         .unwrap_or_else(Fr::zero)
 }
 

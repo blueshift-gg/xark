@@ -1,8 +1,8 @@
 //! Primitive circuit IR ("xark-ir") — the artifact the lowering backend consumes.
 //!
-//! This is a gadget-free representation: every gadget (SHA-256, Keccak, ECDSA,
+//! This is a function-free representation: every function (SHA-256, Keccak, ECDSA,
 //! …) lowers entirely into these primitives, so the backend never needs a
-//! per-gadget solver. It splits a circuit into a constraint program and a
+//! per-function solver. It splits a circuit into a constraint program and a
 //! witness-generation (hint) program, unified into one self-contained artifact:
 //!
 //! * [`Expression`] constraints are `expression == 0` (a degree-≤2 polynomial
@@ -10,7 +10,7 @@
 //! * [`WitnessGen`] ops are the **hint program**: an ordered list that computes
 //!   every derived/hint variable from the inputs, using a small fixed set of
 //!   primitives (products + modular inverse + bit-decomposition + div/rem).
-//!   Running it top-to-bottom yields the full witness — no gadget-specific
+//!   Running it top-to-bottom yields the full witness — no function-specific
 //!   witness logic required.
 //!
 //! The constraints are the *check*; the witness-gen ops are the *hint*. Every
@@ -34,7 +34,7 @@ pub enum VarRole {
     Derived,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Var {
     pub id: VarId,
     pub name: String,
@@ -42,7 +42,7 @@ pub struct Var {
 }
 
 /// A quadratic term `coeff * left * right` in an [`Expression`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MulTerm {
     pub coeff: FieldConst,
     pub left: VarId,
@@ -50,14 +50,14 @@ pub struct MulTerm {
 }
 
 /// A linear term `coeff * var`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearTerm {
     pub coeff: FieldConst,
     pub var: VarId,
 }
 
 /// An AssertZero-style constraint: `Σ mul_terms + Σ linear_terms + constant == 0`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Expression {
     pub mul_terms: Vec<MulTerm>,
     pub linear_terms: Vec<LinearTerm>,
@@ -73,7 +73,7 @@ pub struct Expression {
 /// assignment built so far) fills in its output variable(s).
 ///
 /// Linear combinations reference only already-computed variables.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum WitnessGen {
     /// `out = eval(left) * eval(right)` — a multiplication-gate output.
@@ -104,13 +104,13 @@ pub enum WitnessGen {
         out: VarId,
         input: LinearCombination,
     },
-    /// `out = 1 / eval(input)` if `input ≠ 0`, else `0` — backs the `is_zero` gadget.
+    /// `out = 1 / eval(input)` if `input ≠ 0`, else `0` — backs the `is_zero` function.
     InverseOrZero {
         out: VarId,
         input: LinearCombination,
     },
     /// `out = the `index`-th least-significant bit of eval(input)` — one bit of a
-    /// bit-decomposition hint (gadgets emit one per bit).
+    /// bit-decomposition hint (functions emit one per bit).
     Bit {
         out: VarId,
         input: LinearCombination,
@@ -177,7 +177,7 @@ pub enum WitnessGen {
 }
 
 /// The prime field the circuit is defined over.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldSpec {
     pub name: String,
     pub modulus_decimal: String,
@@ -196,7 +196,7 @@ impl FieldSpec {
 }
 
 /// The whole primitive circuit IR program.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrimitiveProgram {
     pub field: FieldSpec,
     pub vars: Vec<Var>,

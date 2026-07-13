@@ -2,7 +2,7 @@
 //!
 //! Turns a [`SolveError`] into an actionable explanation naming the failing
 //! constraint and — when `profile.json` attribution is available — the source
-//! line and gadget chain it came from. Shared by the `xark_prover` test harness
+//! line and function chain it came from. Shared by the `xark_prover` test harness
 //! ([`Circuit::check`](../../xark_prover/struct.Circuit.html)) and the CLI
 //! soundness gate (`xark prove` / `xark check --inputs`), so both worlds surface
 //! the *same* explanation from one place.
@@ -15,7 +15,7 @@ use crate::solver::SolveError;
 ///
 /// For a constraint violation ([`SolveError::ConstraintFailed`]) this names the
 /// constraint index, its `a·b = c` debug note (from `r1cs`), and — if `profile`
-/// is `Some` — the `file:line:col`, gadget chain, and kind. Constraint ids are
+/// is `Some` — the `file:line:col`, function chain, and kind. Constraint ids are
 /// index-aligned across the primitive IR, `r1cs.json`, and `profile.json` (the
 /// lowering emits them 1:1), so the single failing index resolves all three.
 /// Any other error is rendered via its `Display`.
@@ -41,7 +41,7 @@ pub fn describe_unsatisfied(
         msg.push_str(&format!("\n        {note}"));
     }
 
-    // Full attribution (source line + gadget chain + kind) when the circuit was
+    // Full attribution (source line + function chain + kind) when the circuit was
     // built with `--profile` (as `xark test` does); otherwise a hint on how to
     // get it.
     match profile.and_then(|p| p.constraints.iter().find(|c| c.id as usize == i)) {
@@ -50,13 +50,13 @@ pub fn describe_unsatisfied(
                 msg.push_str(&format!("\n        at {}:{}:{}", p.file, p.line, p.col));
             }
             if !p.chain.is_empty() {
-                msg.push_str(&format!("\n        gadget: {}", p.chain.join(" → ")));
+                msg.push_str(&format!("\n        function: {}", p.chain.join(" → ")));
             }
             msg.push_str(&format!("\n        kind: {}", p.kind.as_str()));
         }
         None => msg.push_str(
             "\n        (build with `--profile`, or run via `xark test`, for the \
-             source line and gadget chain)",
+             source line and function chain)",
         ),
     }
     msg

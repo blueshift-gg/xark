@@ -13,7 +13,7 @@ use clap::Args;
 use xark_backend::serialization::read_public_inputs;
 use xark_backend::{keys::Groth16Keys, proof::ProofBundle, verify};
 
-use super::{load_r1cs, parse_inputs_arg, public_inputs_from_inputs};
+use super::{load_backend_r1cs, parse_inputs_arg, public_inputs_from_inputs};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -78,7 +78,8 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         }
         Some(arg) => {
             let r1cs_path = args.r1cs.clone().unwrap_or_else(|| project.r1cs_json());
-            let prog = load_r1cs(&r1cs_path)?;
+            let (prog, _) =
+                load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
             let inputs = parse_inputs_arg(arg)?;
             public_inputs_from_inputs(&prog, &inputs)?
         }

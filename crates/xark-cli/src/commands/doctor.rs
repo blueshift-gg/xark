@@ -15,9 +15,17 @@ use clap::Args;
 pub struct DoctorArgs {}
 
 pub fn run(_args: DoctorArgs) -> Result<()> {
-    // The exact toolchain this binary was built against (baked by build.rs),
-    // e.g. `nightly-2026-05-03-aarch64-apple-darwin`.
-    let toolchain = option_env!("XARK_TOOLCHAIN").unwrap_or("nightly");
+    // The pinned toolchain, queried from the `xark-rustc` driver — which bakes it
+    // at build time (`--print-toolchain`), the single source of truth. Falls back
+    // to a bare `nightly` if the driver isn't installed (doctor flags that missing
+    // driver separately below).
+    let toolchain_owned = crate::cli::find_rustc_shim()
+        .and_then(|d| Command::new(d).arg("--print-toolchain").output().ok())
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "nightly".to_string());
+    let toolchain = toolchain_owned.as_str();
     let channel = channel_of(toolchain);
     let install_tc = format!(
         "rustup toolchain install {channel} --profile minimal \

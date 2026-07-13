@@ -231,10 +231,21 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
         return Err(fail("tau-link"));
     }
 
-    // Fiat-Shamir challenge and its powers, used to batch each ladder.
+    // Fiat-Shamir challenge and its powers, used to batch each ladder. All four
+    // ladders batch with `[ρ⁰, …, ρ^(m-2)]`; since these are prefixes of one
+    // another, compute the longest once and slice — the G1 ladders alone all
+    // share one length (`power+1`), so this replaces 4 full `powers_of` (each
+    // `O(m)` field muls, `m` up to millions) with one.
     let rho = fiat_shamir_challenge(ptau);
     let tau_lo = ptau.tau_g2[0]; // g2
     let tau_hi = ptau.tau_g2[1]; // τ·g2
+    let max_m = ptau
+        .tau_g1
+        .len()
+        .max(ptau.alpha_tau_g1.len())
+        .max(ptau.beta_tau_g1.len())
+        .max(ptau.tau_g2.len());
+    let all_scalars = powers_of(rho, max_m.saturating_sub(1));
 
     // G1 τ-ladder: A = Σρⁱ Pᵢ, B = Σρⁱ Pᵢ₊₁; e(B, g2) == e(A, τ·g2) ⇔ B = τ·A.
     let g1_ladder_ok = |points: &[G1Affine]| -> bool {
@@ -242,12 +253,12 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
         if m < 2 {
             return true;
         }
-        let scalars = powers_of(rho, m - 1);
-        let a = match G1Projective::msm(&points[..m - 1], &scalars) {
+        let scalars = &all_scalars[..m - 1];
+        let a = match G1Projective::msm(&points[..m - 1], scalars) {
             Ok(a) => a,
             Err(_) => return false,
         };
-        let b = match G1Projective::msm(&points[1..], &scalars) {
+        let b = match G1Projective::msm(&points[1..], scalars) {
             Ok(b) => b,
             Err(_) => return false,
         };
@@ -268,9 +279,9 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
     // (4) G2 τ-ladder: C = Σρⁱ Qᵢ, D = Σρⁱ Qᵢ₊₁; e(g1, D) == e(τ·g1, C) ⇔ D = τ·C.
     {
         let m = ptau.tau_g2.len();
-        let scalars = powers_of(rho, m - 1);
-        let c = G2Projective::msm(&ptau.tau_g2[..m - 1], &scalars).map_err(|_| fail("g2-msm"))?;
-        let d = G2Projective::msm(&ptau.tau_g2[1..], &scalars).map_err(|_| fail("g2-msm"))?;
+        let scalars = &all_scalars[..m - 1];
+        let c = G2Projective::msm(&ptau.tau_g2[..m - 1], scalars).map_err(|_| fail("g2-msm"))?;
+        let d = G2Projective::msm(&ptau.tau_g2[1..], scalars).map_err(|_| fail("g2-msm"))?;
         if Bn254::pairing(ptau.tau_g1[0], d.into_affine())
             != Bn254::pairing(ptau.tau_g1[1], c.into_affine())
         {

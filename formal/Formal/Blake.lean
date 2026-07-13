@@ -367,6 +367,143 @@ theorem addMod32_bit_sound (a b : Word32)
   rw [h_wsum_eq_wcanon i]
   exact h_canon_BitOf i
 
+/-! ## 3-input `addMod32` (single 34-bit range-check) soundness -/
+
+/-- `4 · 2^32 < r`. -/
+private theorem four_times_two_pow_32_lt_r : 4 * (2 : ℕ) ^ 32 < r := by
+  have h := two_pow_lt_r
+  have h_step : 4 * (2 : ℕ) ^ 32 ≤ 2 ^ 253 := by
+    have e : 4 * (2 : ℕ) ^ 32 = 2 ^ 34 := by ring
+    rw [e]
+    exact Nat.pow_le_pow_right (by norm_num) (by norm_num)
+  omega
+
+/-- Spec for a 3-input mod-2³² add (`a + b + c`). The tightened BLAKE `G`
+gadget computes the `a + b + m` mixing step with a single 34-bit range-check
+(`reduce::<34>`, 2 carry bits) instead of two chained `add32`s. -/
+def add3Mod32 (a b c : Word32) : Word32 :=
+  ofNat ((toNat a + toNat b + toNat c) % 2 ^ 32)
+
+/-- `add3Mod32` equals the nested two-add form used by the `blake*G` spec, so
+the tightened gadget is `BitOf`-witnessed by the SAME spec value the round step
+already uses. -/
+theorem add3Mod32_eq_nested (a b c : Word32) :
+    add3Mod32 a b c = addMod32 (addMod32 a b) c := by
+  unfold add3Mod32 addMod32
+  rw [toNat_ofNat_of_lt (Nat.mod_lt _ (by norm_num)), Nat.mod_add_mod]
+
+/-- `add3Mod32 a b c`'s `toNat`. -/
+private theorem toNat_add3Mod32 (a b c : Word32) :
+    toNat (add3Mod32 a b c) = (toNat a + toNat b + toNat c) % 2 ^ 32 := by
+  unfold add3Mod32
+  exact toNat_ofNat_of_lt (Nat.mod_lt _ (by norm_num))
+
+/-- **3-input `addMod32` per-bit gadget soundness.** Same shape as
+`addMod32_bit_sound`, but the gadget sums three input words and decomposes the
+`< 2³⁴` total with two carry bits — so a single `reduce::<34>` replaces two
+chained `add32`s. -/
+theorem add3Mod32_bit_sound (a b c : Word32)
+    (wa wb wc wsum : Fin 32 → ZMod r) (wcarry0 wcarry1 : ZMod r)
+    (ha : ∀ i, BitOf (wa i) (a i)) (hb : ∀ i, BitOf (wb i) (b i))
+    (hc : ∀ i, BitOf (wc i) (c i))
+    (h_wsum_bool : ∀ i, wsum i = 0 ∨ wsum i = 1)
+    (h_wcarry0_bool : wcarry0 = 0 ∨ wcarry0 = 1)
+    (h_wcarry1_bool : wcarry1 = 0 ∨ wcarry1 = 1)
+    (h_sum : (∑ i : Fin 32, (2 : ZMod r) ^ i.val * wa i)
+            + (∑ i : Fin 32, (2 : ZMod r) ^ i.val * wb i)
+            + (∑ i : Fin 32, (2 : ZMod r) ^ i.val * wc i)
+            = (∑ i : Fin 32, (2 : ZMod r) ^ i.val * wsum i)
+              + (2 : ZMod r) ^ 32 * wcarry0
+              + (2 : ZMod r) ^ 33 * wcarry1) :
+    ∀ i, BitOf (wsum i) ((add3Mod32 a b c) i) := by
+  set wcanon : Fin 32 → ZMod r := fun i => if (add3Mod32 a b c) i then 1 else 0 with hwcanon
+  have h_canon_bool : ∀ i, wcanon i = 0 ∨ wcanon i = 1 := by
+    intro i
+    rw [hwcanon]
+    by_cases hbit : (add3Mod32 a b c) i = true <;> simp [hbit]
+  have h_canon_BitOf : ∀ i, BitOf (wcanon i) ((add3Mod32 a b c) i) := by
+    intro i
+    unfold BitOf
+    rw [hwcanon]
+    by_cases hbit : (add3Mod32 a b c) i = true <;> simp [hbit]
+  rw [bitsToFr_eq_toNat_cast a wa ha, bitsToFr_eq_toNat_cast b wb hb,
+      bitsToFr_eq_toNat_cast c wc hc,
+      bitsToFr_eq_wireBitsToNat_cast wsum h_wsum_bool] at h_sum
+  -- Encode the two carry bits as one ℕ value cNat = c0 + 2·c1 ∈ {0,1,2,3}.
+  set c0 : ℕ := if wcarry0 = 1 then 1 else 0 with hc0
+  set c1 : ℕ := if wcarry1 = 1 then 1 else 0 with hc1
+  set cNat : ℕ := c0 + 2 * c1 with hcNat
+  have h_carry0_cast : wcarry0 = ((c0 : ℕ) : ZMod r) := by
+    rcases h_wcarry0_bool with h | h <;> simp [hc0, h]
+  have h_carry1_cast : wcarry1 = ((c1 : ℕ) : ZMod r) := by
+    rcases h_wcarry1_bool with h | h <;> simp [hc1, h]
+  rw [h_carry0_cast, h_carry1_cast] at h_sum
+  have h_sum_zmod :
+      ((toNat a + toNat b + toNat c : ℕ) : ZMod r)
+        = ((wireBitsToNat wsum + 2 ^ 32 * cNat : ℕ) : ZMod r) := by
+    have e33 : (2 : ZMod r) ^ 33 = (2 : ZMod r) ^ 32 * 2 := by ring
+    rw [e33] at h_sum
+    push_cast [hcNat]
+    linear_combination h_sum
+  -- Range bounds.
+  have h_a_lt := toNat_lt a
+  have h_b_lt := toNat_lt b
+  have h_c_lt := toNat_lt c
+  have h_cNat_le : cNat ≤ 3 := by
+    rw [hcNat, hc0, hc1]
+    by_cases h0 : wcarry0 = 1 <;> by_cases h1 : wcarry1 = 1 <;> simp [h0, h1]
+  have h4 := four_times_two_pow_32_lt_r
+  have h_triple_lt_r : toNat a + toNat b + toNat c < r := by omega
+  have h_wsum_lt := wireBitsToNat_lt_2_pow_32 wsum
+  have h_prod : 2 ^ 32 * cNat ≤ 2 ^ 32 * 3 := by
+    apply Nat.mul_le_mul_left
+    exact h_cNat_le
+  have h_rhs_lt_r : wireBitsToNat wsum + 2 ^ 32 * cNat < r := by omega
+  have h_sum_nat : toNat a + toNat b + toNat c = wireBitsToNat wsum + 2 ^ 32 * cNat :=
+    zmod_nat_inj h_triple_lt_r h_rhs_lt_r h_sum_zmod
+  have h_addmod_core : wireBitsToNat wsum = (toNat a + toNat b + toNat c) % 2 ^ 32 :=
+    add_mod_32_core (toNat a + toNat b + toNat c) (wireBitsToNat wsum) cNat
+      h_wsum_lt h_sum_nat
+  rw [← toNat_add3Mod32 a b c] at h_addmod_core
+  have h_canon_wireBitsToNat : wireBitsToNat wcanon = toNat (add3Mod32 a b c) :=
+    wireBitsToNat_eq_toNat h_canon_BitOf
+  have h_wireBitsToNat_eq : wireBitsToNat wsum = wireBitsToNat wcanon := by
+    rw [h_addmod_core, h_canon_wireBitsToNat]
+  have h_ind_eq : (fun i : Fin 32 => (if wsum i = 1 then (1 : ℕ) else 0))
+                = (fun i : Fin 32 => (if wcanon i = 1 then (1 : ℕ) else 0)) := by
+    apply bits_unique
+    · intro i
+      by_cases hwi : wsum i = 1 <;> simp [hwi]
+    · intro i
+      by_cases hwi : wcanon i = 1 <;> simp [hwi]
+    · have h_swap : ∀ (w : Fin 32 → ZMod r),
+          (∑ i : Fin 32, 2 ^ i.val * (if w i = 1 then (1 : ℕ) else 0))
+            = wireBitsToNat w := by
+        intro w
+        unfold wireBitsToNat
+        apply Finset.sum_congr rfl
+        intros; ring
+      rw [h_swap wsum, h_swap wcanon, h_wireBitsToNat_eq]
+  have h_wsum_eq_wcanon : ∀ i, wsum i = wcanon i := by
+    intro i
+    have h_ind := congrFun h_ind_eq i
+    rcases h_wsum_bool i with hw0 | hw1
+    · rcases h_canon_bool i with hc0' | hc1'
+      · rw [hw0, hc0']
+      · rw [hw0] at h_ind
+        rw [hc1'] at h_ind
+        have h_neq : (0 : ZMod r) ≠ 1 := zero_ne_one
+        simp [h_neq] at h_ind
+    · rcases h_canon_bool i with hc0' | hc1'
+      · rw [hw1] at h_ind
+        rw [hc0'] at h_ind
+        have h_neq : (1 : ZMod r) ≠ 0 := one_ne_zero
+        simp at h_ind
+      · rw [hw1, hc1']
+  intro i
+  rw [h_wsum_eq_wcanon i]
+  exact h_canon_BitOf i
+
 /-! ## BLAKE round-step composition (used by `BitwuzlaCompose`) -/
 
 /-- **BLAKE2s round-step composition.** Given per-bit witness wires for

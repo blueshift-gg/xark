@@ -126,6 +126,50 @@ pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
     out
 }
 
+/// `(a + b + c) mod 2^32` — a three-input modular add done as a SINGLE 34-bit
+/// range-check instead of two chained [`add32`]s.
+///
+/// The three words sum to `< 3·2^32 < 2^34`, so decomposing the field sum into
+/// 34 bits (32 result + 2 carry) and returning the low 32 pins `(a+b+c) mod
+/// 2^32` in one gadget. Cost: 34 booleanity gates + 1 recomposition, vs the
+/// chain's `2×(33+1) = 68`. Soundness: `formal/Formal/Blake.lean`
+/// `add3Mod32_bit_sound` (with `add3Mod32_eq_nested` bridging it to the
+/// `addMod32 (addMod32 a b) c` the BLAKE `G` spec uses).
+pub fn add3(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
+    let sum = Field::from_bits::<32>(a) + Field::from_bits::<32>(b) + Field::from_bits::<32>(c);
+
+    // Decompose the 34-bit sum.
+    let mut bits = [Field::from(0u8); 34];
+    let mut i = 0usize;
+    while i < 34 {
+        bits[i] = Field::hint_bit(sum, i); // witness-gen: bits[i] = bit(sum, i)
+        i += 1;
+    }
+    let mut i = 0usize;
+    while i < 34 {
+        bits[i].assert_bool();
+        i += 1;
+    }
+    let mut acc = Field::from(0u8);
+    let mut pow = Field::from(1u8);
+    let mut i = 0usize;
+    while i < 34 {
+        acc = acc + bits[i] * pow;
+        pow = pow + pow;
+        i += 1;
+    }
+    assert_eq(acc, sum);
+
+    // Return the low 32 bits (the 2 carry bits, bits[32..34], are discarded).
+    let mut out = [Field::from(0u8); 32];
+    let mut i = 0usize;
+    while i < 32 {
+        out[i] = bits[i];
+        i += 1;
+    }
+    out
+}
+
 // ===========================================================================
 // 64-bit word layer (for Keccak-f[1600] and other 64-bit-lane primitives).
 // Same conventions as the 32-bit layer: little-endian bit index (bits[i] has

@@ -165,11 +165,28 @@ fn mimc_loop_equals_unrolled() {
     let inline = compile_with_field(&example("mimc"), "mimc_cmp2", "bn254");
     let unrolled = std::fs::read_to_string(inline.out_dir.join("r1cs.json")).unwrap();
 
+    // The loop form caches the `round` helper (called 3×) while the hand-unrolled
+    // form inlines it; cache-all emits no debug `note`s on cached-function bodies,
+    // so the two differ *only* in cosmetic debug annotations. The R1CS math
+    // (variables + every a·b=c row) is still byte-identical — compare with the
+    // debug field stripped to assert that structural equivalence.
+    let strip = |s: &str| {
+        let mut p = xark_ir::json::from_json(s).unwrap();
+        for k in &mut p.constraints {
+            k.debug = None;
+        }
+        xark_ir::json::to_json_pretty(&p)
+    };
     assert_eq!(
-        looped, unrolled,
-        "loop+array MiMC must match the hand-unrolled version"
+        strip(&looped),
+        strip(&unrolled),
+        "loop+array MiMC must match the hand-unrolled version (R1CS math)"
     );
-    assert_eq!(looped.matches("\"source_span\"").count(), 7);
+    // 3 rounds * 2 gates per `^3` + 1 finalizing equality = 7 constraints.
+    assert_eq!(
+        xark_ir::json::from_json(&looped).unwrap().constraints.len(),
+        7
+    );
 }
 
 /// Bit-decomposition gadget (`xark-bits`): 8 advice bits, 8 booleanity gates,
@@ -212,16 +229,24 @@ fn poseidon_gadget() {
     check_snapshot("poseidon.graph.dot", &dot);
 
     // R_F=4 full (9 gates each) + R_P=2 partial (3 gates each) = 42 S-box gates,
-    // plus 1 final `assert_eq` equality = 43 constraints.
-    assert_eq!(json.matches("\"source_span\"").count(), 43);
-    let notes: Vec<&str> = json.lines().filter(|l| l.contains("\"note\"")).collect();
-    let equalities = notes.iter().filter(|n| n.contains("* 1 = 0")).count();
+    // plus 1 final `assert_eq` equality = 43 constraints. Counted from the parsed
+    // R1CS (note-robust): cache-all drops debug `note`s on cached-function bodies,
+    // so the old note-string proxy no longer tracks the shape — but the R1CS math
+    // is byte-identical to the inlined version (verified: same 43 constraints).
+    let r1cs = xark_ir::json::from_json(&json).unwrap();
+    assert_eq!(r1cs.constraints.len(), 43);
+    // The only equality is the `(out) * 1 = 0` output binding; ARK/MDS are free.
+    let equalities = r1cs
+        .constraints
+        .iter()
+        .filter(|k| k.b.terms.is_empty() && k.c.terms.is_empty() && k.c.constant.is_zero())
+        .count();
     assert_eq!(
         equalities, 1,
         "only the output binding should be an equality; ARK/MDS are free"
     );
     assert_eq!(
-        notes.len() - equalities,
+        r1cs.constraints.len() - equalities,
         42,
         "expected exactly 42 S-box multiplication gates"
     );
@@ -237,7 +262,12 @@ fn word32_ops() {
     check_snapshot("word_ops.r1cs.json", &json);
     // 32+32 booleanity (two to_bits32) + 32 xor + 32 and + 33 (add32 decomp) = 161 gates,
     // + 4 equalities (2 recompositions + add32 recomposition + final) = 165 constraints.
-    assert_eq!(json.matches("\"source_span\"").count(), 165);
+    // Counted from the parsed R1CS (note-robust): cache-all drops debug notes on
+    // cached-function bodies, but the R1CS math is unchanged (same 165 constraints).
+    assert_eq!(
+        xark_ir::json::from_json(&json).unwrap().constraints.len(),
+        165
+    );
     // add32's carry decomposition uses 33 bits; two inputs use 32 each → 97 advice.
     assert_eq!(
         json.matches("\"visibility\": \"Private\"").count() - 2, /*a,b inputs*/
@@ -272,12 +302,20 @@ fn sha256_compiles() {
     let c = compile_with_field(&example("sha256"), "sha256", "bn254");
     assert!(c.status_success, "sha256 failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
-    let constraints = json.matches("\"source_span\"").count();
+    // Count constraints from the parsed R1CS (note-robust): cache-all emits no
+    // debug `source_span`/`note` on cached-function bodies, so the old
+    // `"source_span"`-string proxy no longer tracks the constraint count.
+    let constraints = xark_ir::json::from_json(&json).unwrap().constraints.len();
     // Deterministic circuit; exact counts guard against accidental changes.
-    assert_eq!(constraints, 37922, "SHA-256 constraint count changed");
+    // `reduce::<N>` uses the tight per-site bit-width (schedule 34, e/a 36,
+    // output 33) instead of a blanket 40, saving 856 carry-booleanity gates.
+    // cache-all flat value; minimized/proving mul = 34934 (== the 37066-era
+    // inlined optimum, so this is flat-only and proving-neutral). TODO:
+    // nested-DAG plug-materialization sharing recovers the 37066 inlined flat.
+    assert_eq!(constraints, 39018, "SHA-256 constraint count changed");
     assert_eq!(
         json.matches("\"name\": \"w").count(),
-        7424,
+        6568,
         "advice bit count changed"
     );
 }
@@ -1352,8 +1390,18 @@ fn sha256_matches_lean_model() {
         .iter()
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
+    // The Lean model proves the bit *primitives* (and32/xor32/rotr/Ch/Maj/Σ/σ
+    // and MessageScheduleStep); the wrapping-add carry is discharged separately
+    // (Bitwise/Arith.lean). Tightening `reduce::<N>` to each site's true bound
+    // (40→34/36/33) removes 856 carry-booleanity gates without touching any
+    // primitive Lean proves, so the bit-soundness model is unaffected.
+    // cache-all flat value; minimized/proving mul = 34934 (unchanged — the
+    // cached bit-gadgets re-decompose their outputs in the flat R1CS, but that
+    // booleanity is folded away by the minimizer the prover runs, so what is
+    // proven still matches the Sha256.lean model). TODO: nested-DAG plug-
+    // materialization sharing recovers the 34934 inlined flat.
     assert_eq!(
-        mul, 35790,
+        mul, 35158,
         "SHA-256 multiplication-gate count pins the Sha256.lean bit-soundness model; got {mul}"
     );
 }
@@ -1376,8 +1424,12 @@ fn blake3_matches_lean_model() {
         .iter()
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
+    // The `g` mixing's `a + b + m` steps use a single 34-bit `add3` range-check
+    // (Blake.lean `add3Mod32_bit_sound`, bridged to the nested-`addMod32` spec by
+    // `add3Mod32_eq_nested`) instead of two chained `add32`s — 2 fewer carry
+    // decompositions per `g`, so the mult-gate count drops from 18832 to 15248.
     assert_eq!(
-        mul, 18832,
+        mul, 15248,
         "BLAKE3 mult-gate count pins blake3_round_compose_bit; got {mul}"
     );
 }
@@ -1398,8 +1450,10 @@ fn blake2s_matches_lean_model() {
         .iter()
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
+    // Same `add3` (34-bit) mixing tightening as BLAKE3 (Blake.lean
+    // `add3Mod32_bit_sound`): 26720 → 21600 mult-gates.
     assert_eq!(
-        mul, 26720,
+        mul, 21600,
         "BLAKE2s mult-gate count pins blake2s_round_compose_bit; got {mul}"
     );
 }

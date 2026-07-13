@@ -1,11 +1,11 @@
 //! `xark profile <dir>` — attribute every R1CS constraint back to the user's
-//! source line, the gadget call-chain that produced it, and its kind, then print
+//! source line, the function call-chain that produced it, and its kind, then print
 //! a sorted drill-down so the author sees which lines cost the most constraints.
 //!
 //! This builds the circuit with the extractor's `--profile` flag (which writes a
 //! **separate** `profile.json`, leaving `r1cs.json` / `circuit.json`
 //! byte-identical), then aggregates that attribution: group by user `(file,
-//! line)` → within each, by gadget `chain` → by [`ConstraintKind`], summing
+//! line)` → within each, by function `chain` → by [`ConstraintKind`], summing
 //! counts. Lines are sorted by total cost descending; chains within a line
 //! likewise.
 
@@ -76,7 +76,7 @@ pub fn run(args: ProfileArgs) -> Result<()> {
 
 // --- aggregation -------------------------------------------------------------
 
-/// The aggregated drill-down: per user line, per gadget chain, per kind.
+/// The aggregated drill-down: per user line, per function chain, per kind.
 struct Aggregate {
     lines: Vec<LineAgg>,
     total: u64,

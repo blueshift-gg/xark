@@ -18,17 +18,17 @@
 //!
 //! - `+`, `-`, `constant * var` fold into linear combinations: FREE.
 //! - `xor32`/`and32` = 32 gates each; `not32`/`rotr32`/`shr32` = 0 gates.
-//! - `to_bits32` = 32 booleanity gates; `reduce40` = 40 booleanity gates.
+//! - `to_bits32` = 32 booleanity gates; `reduce::<N>` = `N` booleanity gates.
 //! - Adding round constants `K[t]` costs NOTHING — they enter as a field
-//!   constant in a `reduce40` sum, so no bit array is materialised for them.
+//!   constant in a `reduce` sum, so no bit array is materialised for them.
 //!
 //! ## Multi-add strategy
 //!
 //! SHA-256 mixes several 32-bit words with modular (`mod 2^32`) addition.
 //! Rather than chaining `xark_bits::add32` (33 gates apiece), we sum the terms
-//! as *field* elements — free — and decompose the total ONCE with `reduce40`
-//! (40 gates). Up to ~6 added 32-bit words / constants fit under `2^40`, which
-//! covers every SHA-256 addition (max is the 5-term `T1`).
+//! as *field* elements — free — and decompose the total ONCE with `reduce::<N>`,
+//! where `N` is the sum's tight bit-width (a `k`-term 32-bit sum is `< 2^(32 +
+//! ceil(log2 k))`: schedule 34, the compression `e`/`a` 36, output 33).
 
 #![no_std]
 // Circuit-lowered gadget code: the xark compiler rejects compound assignment on
@@ -39,32 +39,37 @@ use xark::{assert_eq, Field};
 use xark_bits::{and32, not32, rotr32, shr32, xor32};
 
 // ===========================================================================
-// Modular reduction: reduce a field sum (< 2^40) to its low 32 bits (mod 2^32).
+// Modular reduction: reduce a field sum (tight width `< 2^N`) to its low 32 bits (mod 2^32).
 // ===========================================================================
 
-/// Reduce a field `sum` (assumed `< 2^40`, i.e. up to ~6 added 32-bit words /
-/// constants) modulo `2^32`, returning the low 32 bits as a word.
+/// Reduce a field `sum` (assumed `< 2^N`) modulo `2^32`, returning the low 32
+/// bits as a word. `N` is the caller-chosen tight bit-width of `sum` (`N ≥ 32`):
+/// a SHA-256 sum of `k` 32-bit terms is `< 2^(32 + ceil(log2 k))`, so most sites
+/// need far fewer than the worst-case 40 bits — and each unneeded bit is one
+/// fewer booleanity gate.
 ///
-/// The prover supplies 40 non-deterministic advice bits; we constrain each to
+/// The prover supplies `N` non-deterministic advice bits; we constrain each to
 /// be boolean and constrain their weighted recomposition to equal `sum`. That
-/// pins the bits to the true 40-bit binary expansion of `sum`, so returning
-/// `bits[0..32]` yields exactly `sum mod 2^32` (the high 8 bits are the carry,
-/// discarded).
+/// pins the bits to the true `N`-bit binary expansion of `sum`, so returning
+/// `bits[0..32]` yields exactly `sum mod 2^32` (the high `N-32` bits are the
+/// carry, discarded). Choosing `N` too small can't forge a witness — the
+/// recomposition `Σ bits·2^i == sum` simply becomes unsatisfiable — so the KATs
+/// pin each bound.
 ///
-/// Cost: 40 booleanity gates + 1 recomposition equality (0 gates).
-fn reduce40(sum: Field) -> [Field; 32] {
-    // 40 DISTINCT advice bits (a `while` loop, not `[Field::advice(); 40]`
+/// Cost: `N` booleanity gates + 1 recomposition equality (0 gates).
+fn reduce<const N: usize>(sum: Field) -> [Field; 32] {
+    // N DISTINCT advice bits (a `while` loop, not `[Field::advice(); N]`
     // which would repeat one variable).
-    let mut bits = [Field::from(0u8); 40];
+    let mut bits = [Field::from(0u8); N];
     let mut i = 0usize;
-    while i < 40usize {
+    while i < N {
         bits[i] = Field::hint_bit(sum, i); // witness-gen: bits[i] = bit(sum, i)
         i += 1;
     }
 
     // Booleanity: every advice bit is 0 or 1.
     let mut i = 0usize;
-    while i < 40usize {
+    while i < N {
         bits[i].assert_bool();
         i += 1;
     }
@@ -75,7 +80,7 @@ fn reduce40(sum: Field) -> [Field; 32] {
     let mut acc = Field::from(0u8);
     let mut pow = Field::from(1u8);
     let mut i = 0usize;
-    while i < 40usize {
+    while i < N {
         acc = acc + bits[i] * pow;
         pow = pow + pow;
         i += 1;
@@ -176,11 +181,11 @@ fn small_sigma1(x: [Field; 32]) -> [Field; 32] {
 /// - `w`:    the 16 message-schedule words `W[0..16]` for this block.
 ///
 /// Returns the 8 updated hash words. All additions are `mod 2^32` via
-/// `reduce40`. The 64-round loop and the 48-step schedule extension are fully
+/// `reduce::<N>`. The 64-round loop and the 48-step schedule extension are fully
 /// unrolled at compile time.
 fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
     // --- Round-constant table K[0..64] (FIPS 180-4 §4.2.2), as field
-    // constants. Adding K[t] into a `reduce40` sum is free (no bit array). ---
+    // constants. Adding K[t] into a `reduce` sum is free (no bit array). ---
     let k: [Field; 64] = [
         Field::from(1116352408u32), // K[0]  = 0x428a2f98
         Field::from(1899447441u32), // K[1]  = 0x71374491
@@ -276,12 +281,12 @@ fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
         let wm16 = read64(sched, t - 16);
         let s1 = small_sigma1(wm2);
         let s0 = small_sigma0(wm15);
-        // Four 32-bit words -> sum < 2^34, safely within reduce40's 2^40 range.
+        // Four 32-bit words -> sum < 2^34, so 34 advice bits suffice.
         let sum = Field::from_bits::<32>(s1)
             + Field::from_bits::<32>(wm7)
             + Field::from_bits::<32>(s0)
             + Field::from_bits::<32>(wm16);
-        let word = reduce40(sum);
+        let word = reduce::<34>(sum);
         let mut j = 0usize;
         while j < 32usize {
             sched[t][j] = word[j];
@@ -314,7 +319,7 @@ fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
     // `a`), never by bitwise ops, so they need NOT be reduced to 32-bit words
     // here. We keep them as raw field sums and reduce ONCE when forming `e` and
     // `a`. This is exact SHA-256 (the mod 2^32 lands at `e`/`a`) but emits two
-    // fewer `reduce40` decompositions per round (more compact R1CS).
+    // fewer `reduce` decompositions per round (more compact R1CS).
     let mut t = 0usize;
     while t < 64usize {
         let wt = read64(sched, t); // W[t] as a flat local
@@ -337,13 +342,13 @@ fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
         h = g;
         g = f;
         f = e;
-        // e = (d + T1) mod 2^32   (d < 2^32, T1 < 2^35 -> sum < 2^36 < 2^40)
-        e = reduce40(Field::from_bits::<32>(d) + t1);
+        // e = (d + T1) mod 2^32   (d < 2^32, T1 < 2^35 -> sum < 2^36)
+        e = reduce::<36>(Field::from_bits::<32>(d) + t1);
         d = c;
         c = b;
         b = a;
-        // a = (T1 + T2) mod 2^32   (< 2^35 + 2^33 < 2^36 < 2^40)
-        a = reduce40(t1 + t2);
+        // a = (T1 + T2) mod 2^32   (< 2^35 + 2^33 < 2^36)
+        a = reduce::<36>(t1 + t2);
 
         t += 1;
     }
@@ -351,14 +356,14 @@ fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
     // --- 4. Add the compressed chunk to the incoming hash (mod 2^32). ---
     // out[i] = (h_in[i] + working_i) mod 2^32, written bit-by-bit into `out`.
     let mut out = [zero; 8];
-    let o0 = reduce40(Field::from_bits::<32>(hi0) + Field::from_bits::<32>(a));
-    let o1 = reduce40(Field::from_bits::<32>(hi1) + Field::from_bits::<32>(b));
-    let o2 = reduce40(Field::from_bits::<32>(hi2) + Field::from_bits::<32>(c));
-    let o3 = reduce40(Field::from_bits::<32>(hi3) + Field::from_bits::<32>(d));
-    let o4 = reduce40(Field::from_bits::<32>(hi4) + Field::from_bits::<32>(e));
-    let o5 = reduce40(Field::from_bits::<32>(hi5) + Field::from_bits::<32>(f));
-    let o6 = reduce40(Field::from_bits::<32>(hi6) + Field::from_bits::<32>(g));
-    let o7 = reduce40(Field::from_bits::<32>(hi7) + Field::from_bits::<32>(h));
+    let o0 = reduce::<33>(Field::from_bits::<32>(hi0) + Field::from_bits::<32>(a));
+    let o1 = reduce::<33>(Field::from_bits::<32>(hi1) + Field::from_bits::<32>(b));
+    let o2 = reduce::<33>(Field::from_bits::<32>(hi2) + Field::from_bits::<32>(c));
+    let o3 = reduce::<33>(Field::from_bits::<32>(hi3) + Field::from_bits::<32>(d));
+    let o4 = reduce::<33>(Field::from_bits::<32>(hi4) + Field::from_bits::<32>(e));
+    let o5 = reduce::<33>(Field::from_bits::<32>(hi5) + Field::from_bits::<32>(f));
+    let o6 = reduce::<33>(Field::from_bits::<32>(hi6) + Field::from_bits::<32>(g));
+    let o7 = reduce::<33>(Field::from_bits::<32>(hi7) + Field::from_bits::<32>(h));
     let mut j = 0usize;
     while j < 32usize {
         out[0][j] = o0[j];

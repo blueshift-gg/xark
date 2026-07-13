@@ -15,7 +15,7 @@ use anyhow::{bail, Result};
 use xark_ir::primitive::VarRole;
 
 use super::{
-    load_circuit, load_profile, load_r1cs, parse_inputs_arg, resolve_input_ids, soundness_check,
+    load_circuit_program, load_profile, parse_inputs_arg, resolve_input_ids, soundness_check,
     CheckArgs,
 };
 use crate::xark_project::XarkProject;
@@ -36,23 +36,24 @@ pub fn run(args: CheckArgs) -> Result<()> {
     // do: from `--out` when given, else the crate's default `target/xark/`.
     let base = args.out.clone().unwrap_or_else(|| args.crate_dir.clone());
     let project = XarkProject::resolve(Some(base.into()))?;
-    let prim = load_circuit(&project.circuit_json())?;
-    let r1cs = load_r1cs(&project.r1cs_json())?;
+    // Expand the self-contained `circuit.xbc` once; the soundness gate solves +
+    // checks directly on its R1CS rows (no `to_primitive` flattening).
+    let cp = load_circuit_program(&project.circuit_xbc())?;
     let profile = load_profile(&project.xark_dir);
 
     // Resolve inputs → var ids and run the shared soundness gate (no setup/prove).
-    // The R1CS + best-effort profile let a bad witness name the failing
-    // constraint (and its source line), matching `xark prove` / `xark test`.
+    // A best-effort profile lets a bad witness name the failing constraint (and
+    // its source line), matching `xark prove` / `xark test`.
     // `check::run` is dispatched only when `--inputs` is present (see `mod::run`).
     let arg = args
         .inputs
         .as_deref()
         .expect("check::run is only reached with --inputs");
     let inputs = parse_inputs_arg(arg)?;
-    let id_inputs = resolve_input_ids(&prim, &inputs)?;
-    let _assign = soundness_check(&prim, &r1cs, profile.as_ref(), &id_inputs)?;
+    let id_inputs = resolve_input_ids(&cp.vars, &inputs)?;
+    let _assign = soundness_check(&cp, profile.as_ref(), &id_inputs)?;
 
-    let derived = prim
+    let derived = cp
         .vars
         .iter()
         .filter(|v| matches!(v.role, VarRole::Derived))

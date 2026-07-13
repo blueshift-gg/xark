@@ -14,6 +14,7 @@ members = [
     "crates/xark-keccak",
     "crates/xark-ir",
     "crates/xark-macros",
+    "crates/xark-cli",
     "crates/xark-prover",
     "crates/xark-mimc",
     "crates/xark-pedersen",
@@ -31,6 +32,7 @@ members = [
 # reproducible-build target. See `docs/reproducible-build.md`.
 exclude = [
     "crates/xark",
+    "crates/xark-rustc",
     "examples",
     "crates/verifier/reference-program",
 ]

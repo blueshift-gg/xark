@@ -1,9 +1,9 @@
 //! Circuit *profiling* data: a per-constraint attribution back to the user's
-//! source line, the gadget call-chain that produced it, and its kind.
+//! source line, the function call-chain that produced it, and its kind.
 //!
 //! This is written to a **separate** `profile.json` (never mixed into
 //! `r1cs.json` / `circuit.json`, whose `debug` slots stay byte-identical). It is
-//! consumed by `xark profile`, which aggregates a per-line / per-gadget /
+//! consumed by `xark profile`, which aggregates a per-line / per-function /
 //! per-kind drill-down so the circuit author can see which source lines cost the
 //! most constraints and what those constraints are.
 
@@ -54,7 +54,7 @@ impl ConstraintKind {
 
 /// One constraint's profile record: which constraint (`id`, matching the
 /// `R1csConstraint::id`), the top-level user source location that triggered it,
-/// the gadget call-chain it expanded through, and its [`ConstraintKind`].
+/// the function call-chain it expanded through, and its [`ConstraintKind`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConstraintProfile {
     /// The R1CS constraint id (identical to its index in `r1cs.json`).
@@ -66,7 +66,7 @@ pub struct ConstraintProfile {
     pub line: u32,
     /// 1-based source column.
     pub col: u32,
-    /// Gadget function names (outermost → innermost) the user line expanded
+    /// Function names (outermost → innermost) the user line expanded
     /// into, with low-level arithmetic operator impls elided.
     pub chain: Vec<String>,
     /// What kind of constraint this is.

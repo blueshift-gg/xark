@@ -9,8 +9,22 @@ repository.workspace = true
 name = "xark_ir"
 path = "src/lib.rs"
 
+[features]
+# Opt-in developer diagnostics (timing eprintlns, minimizer fixpoint assertions,
+# `XARK_*` tuning knobs). A normal release build leaves this off and compiles the
+# env reads out entirely.
+debug = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 num-bigint = "0.4"
 num-traits = "0.2"
+rayon = "1"
+# Fast bincode-compatible binary codec (placement-init reads) for the on-disk
+# minimized-R1CS cache that `xark setup` writes and `xark prove` reloads.
+wincode = { version = "0.5", features = ["derive"] }
+# Fast fixed-width BN254 scalar field (Montgomery) for the reference solver's
+# hot path; the `num-bigint` fallback stays for arbitrary-modulus programs.
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }

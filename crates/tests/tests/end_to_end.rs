@@ -2,8 +2,9 @@
 //! against the purpose-built circuit crates under `examples/`.
 //!
 //! `xark build <crate> --out <dir>` compiles a circuit crate (rustc-MIR →
-//! xark-IR → R1CS) to `<dir>/{circuit,r1cs}.json`; `xark prove <dir> --inputs
-//! k=v` solves the witness and produces + verifies a Groth16 proof in one shot.
+//! xark-IR → R1CS) to the self-contained `<dir>/circuit.xbc`; `xark prove <dir>
+//! --inputs '{...}'` solves the witness and produces + verifies a Groth16 proof
+//! in one shot.
 
 mod common;
 use common::{tempdir, xark_build, xark_check_input, xark_prove, xark_setup};
@@ -16,9 +17,15 @@ fn arithmetic_square_build_prove_verify() {
 
     let (ok, err) = xark_build("arithmetic_square", &out, &target);
     assert!(ok, "build failed: {err}");
+    // A default build writes only the self-contained `circuit.xbc` (the R1CS +
+    // witness-gen); `r1cs.json`/`circuit.json` are `--emit-json`-only now.
     assert!(
-        out.join("r1cs.json").exists() && out.join("circuit.json").exists(),
-        "build produced no JSON"
+        out.join("circuit.xbc").exists(),
+        "build produced no circuit.xbc"
+    );
+    assert!(
+        !out.join("r1cs.json").exists(),
+        "default build should not emit r1cs.json (it's --emit-json only)"
     );
 
     let (ok, err) = xark_setup(&out);

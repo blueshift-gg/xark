@@ -23,6 +23,22 @@ use xark_ir::profile::ProfileProgram;
 use xark_ir::solver;
 use xark_ir::{LinearCombination as IrLc, R1csProgram, VarId, Visibility};
 
+/// Developer-diagnostics env-flag probe. Only reads the environment under the
+/// `debug` feature; a normal release build compiles this to `false` so the
+/// diagnostic branches (and their `XARK_*` knobs) vanish entirely.
+#[inline]
+fn dbg_flag(name: &str) -> bool {
+    #[cfg(feature = "debug")]
+    {
+        std::env::var(name).is_ok()
+    }
+    #[cfg(not(feature = "debug"))]
+    {
+        let _ = name;
+        false
+    }
+}
+
 /// BN254 scalar field modulus (decimal).
 const BN254_MODULUS: &[u8] =
     b"21888242871839275222246405745257275088548364400416034343698204186575808495617";
@@ -33,7 +49,17 @@ const BN254_MODULUS: &[u8] =
 /// integer. Use this on any constant that originates from untrusted input
 /// (e.g. a deserialized `r1cs.json`); it never panics.
 pub fn try_fr_from_decimal(s: &str) -> Result<Fr, String> {
-    let bi = BigInt::parse_bytes(s.as_bytes(), 10)
+    // Fast path: small integer constants (the vast majority — `0`, `±1`, `±2`,
+    // small gadget constants) go straight to `Fr` with no `BigInt` allocation and
+    // no modulus reduction (`Fr::from` handles sign + reduction natively). This is
+    // the hot path in both `validate_program_constants` and the constraint
+    // synthesizer, which parse every R1CS coefficient.
+    let t = s.trim();
+    if let Ok(n) = t.parse::<i64>() {
+        let mag = Fr::from(n.unsigned_abs());
+        return Ok(if n < 0 { -mag } else { mag });
+    }
+    let bi = BigInt::parse_bytes(t.as_bytes(), 10)
         .ok_or_else(|| format!("invalid decimal field constant: {s:?}"))?;
     // The modulus is a compile-time constant known to be a valid decimal.
     let modulus = BigInt::parse_bytes(BN254_MODULUS, 10).expect("BN254_MODULUS is a valid decimal");
@@ -66,19 +92,80 @@ pub struct XarkCircuit {
     assign: BTreeMap<VarId, Fr>,
 }
 
+/// Minimize the R1CS (linear-variable elimination to a fixpoint). **Default ON**;
+/// `XARK_NO_MINIMIZE` (the `--no-minimize` flag) disables it. Both setup and
+/// proving route through here, so both see the *identical* deterministic minimized
+/// circuit — keys and proof stay consistent. Elimination is Gaussian, so
+/// satisfiability is preserved exactly: the witness `assign` (keyed by original
+/// ids, which surviving vars retain) remains a valid superset, and public-input
+/// ids/order are untouched.
+fn maybe_minimize(prog: R1csProgram) -> R1csProgram {
+    // Three modes, chosen the same way in setup and proving so both see the
+    // identical circuit:
+    //  * default — the input is the per-template-reduced R1CS; run an *unguarded*
+    //    boundary pass that eliminates the remaining cross-template plug
+    //    materializations, reaching the same fixpoint as a full flat minimize
+    //    (bounded, because every dense elimination was already done within a small
+    //    template body).
+    //  * `XARK_FLAT_MINIMIZE` — the input is the full (unreduced) expansion; run the
+    //    *guarded* flat minimizer (fill cap, `XARK_MAX_FILL`) so a raw dense circuit
+    //    can't cascade into a superlinear blowup.
+    //  * `XARK_NO_MINIMIZE` — skip entirely.
+    if dbg_flag("XARK_NO_MINIMIZE") {
+        return prog;
+    }
+    let flat = dbg_flag("XARK_FLAT_MINIMIZE");
+    let t = std::time::Instant::now();
+    let out = if flat {
+        xark_ir::minimize::minimize(&prog)
+    } else {
+        xark_ir::minimize::minimize_with_fill(&prog, usize::MAX)
+    };
+    // Reduction stats are diagnostic noise on a normal run; show them only under
+    // the setup/prove timing flags.
+    if dbg_flag("XARK_BUILD_TIME") || dbg_flag("PROVE_TIME") {
+        eprintln!(
+            "MINIMIZE: {} -> {} constraints, {} -> {} vars ({:.2}s)",
+            prog.constraints.len(),
+            out.constraints.len(),
+            prog.variables.len(),
+            out.variables.len(),
+            t.elapsed().as_secs_f64(),
+        );
+    }
+    out
+}
+
 impl XarkCircuit {
     /// For Groth16 setup: only the constraint *shape* is needed (Arkworks calls
     /// the value closures only in proving mode), so the assignment is empty.
     pub fn for_setup(prog: R1csProgram) -> Self {
         Self {
-            prog,
+            prog: maybe_minimize(prog),
             assign: BTreeMap::new(),
         }
     }
 
     /// For proving: the constraints plus the full solved witness (`VarId → Fr`).
     pub fn for_proving(prog: R1csProgram, assign: BTreeMap<VarId, Fr>) -> Self {
+        Self {
+            prog: maybe_minimize(prog),
+            assign,
+        }
+    }
+
+    /// For proving from an **already-minimized** `prog` (e.g. `xark setup`'s
+    /// cached minimized R1CS) — skips `maybe_minimize`, since re-running it would
+    /// just reproduce the same fixpoint. The `prog` must be the exact minimized
+    /// circuit the proving key was generated from.
+    pub fn for_proving_preminimized(prog: R1csProgram, assign: BTreeMap<VarId, Fr>) -> Self {
         Self { prog, assign }
+    }
+
+    /// The (minimized) R1CS this circuit will synthesize — used by `xark setup`
+    /// to cache exactly what the proving key is keyed to.
+    pub fn prog(&self) -> &R1csProgram {
+        &self.prog
     }
 
     /// Public inputs in variable-id (allocation) order — the order Groth16
@@ -109,9 +196,9 @@ fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
     // malformed `r1cs.json` is a clean error, not a crash.
     let valid_ids: BTreeSet<VarId> = prog.variables.iter().map(|v| v.id).collect();
     let check_lc = |lc: &IrLc| -> Result<(), String> {
-        try_fr_from_decimal(&lc.constant.decimal)?;
+        try_fr_from_decimal(&lc.constant.decimal())?;
         for t in &lc.terms {
-            try_fr_from_decimal(&t.coeff.decimal)?;
+            try_fr_from_decimal(&t.coeff.decimal())?;
             if !valid_ids.contains(&t.var) {
                 return Err(format!(
                     "constraint references undefined variable id {}",
@@ -132,27 +219,36 @@ fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
 impl ConstraintSynthesizer<Fr> for XarkCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         // Allocate one arkworks variable per IR var, in id order. Public →
-        // input variable, everything else → witness variable.
-        let mut vars = self.prog.variables.clone();
-        vars.sort_by_key(|v| v.id);
-        let mut map: BTreeMap<VarId, Variable> = BTreeMap::new();
-        for v in &vars {
+        // input variable, everything else → witness variable. Var ids are dense,
+        // so the id→arkworks-var map is a `Vec` (O(1) per-term lookups in `build`,
+        // vs a `BTreeMap`'s O(log n)); we sort a slice of *references*, avoiding a
+        // clone of the whole `variables` vec on every synthesis.
+        let mut order: Vec<_> = self.prog.variables.iter().collect();
+        order.sort_by_key(|v| v.id);
+        let max_id = order.last().map_or(0, |v| v.id) as usize;
+        let mut map: Vec<Option<Variable>> = vec![None; max_id + 1];
+        for v in order {
             let val = self.assign.get(&v.id).copied().unwrap_or_else(Fr::zero);
             let av = match v.visibility {
                 Visibility::Public => cs.new_input_variable(|| Ok(val))?,
                 _ => cs.new_witness_variable(|| Ok(val))?,
             };
-            map.insert(v.id, av);
+            map[v.id as usize] = Some(av);
         }
 
         let build = |lc: &IrLc| -> LinearCombination<Fr> {
             let mut out = LinearCombination::zero();
-            let c = fr_from_decimal(&lc.constant.decimal);
+            let c = fr_from_decimal(&lc.constant.decimal());
             if !c.is_zero() {
                 out += (c, Variable::One);
             }
             for t in &lc.terms {
-                out += (fr_from_decimal(&t.coeff.decimal), map[&t.var]);
+                // `validate_program_constants` guarantees every term var is a
+                // declared (hence allocated) id.
+                out += (
+                    fr_from_decimal(&t.coeff.decimal()),
+                    map[t.var as usize].unwrap(),
+                );
             }
             out
         };
@@ -170,9 +266,10 @@ impl ConstraintSynthesizer<Fr> for XarkCircuit {
 /// Public inputs in variable-id order (the order they are allocated), which is
 /// exactly the order Groth16 verification expects.
 fn public_inputs(prog: &R1csProgram, assign: &BTreeMap<VarId, Fr>) -> Vec<Fr> {
-    let mut vars = prog.variables.clone();
-    vars.sort_by_key(|v| v.id);
-    vars.iter()
+    let mut order: Vec<_> = prog.variables.iter().collect();
+    order.sort_by_key(|v| v.id);
+    order
+        .iter()
         .filter(|v| v.visibility == Visibility::Public)
         .map(|v| assign.get(&v.id).copied().unwrap_or_else(Fr::zero))
         .collect()
@@ -202,7 +299,15 @@ pub fn prove_only(
         .map_err(|e| format!("witness does not satisfy the circuit: {e:?}"))?;
     let assign: BTreeMap<VarId, Fr> = assign_fp
         .iter()
-        .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
+        // BN254 witness values come straight out of the solver as `Fr` (no
+        // decimal-string round-trip); the non-BN254 fallback reparses.
+        .map(|(k, v)| {
+            (
+                *k,
+                v.as_bn254_fr()
+                    .unwrap_or_else(|| fr_from_decimal(&v.to_decimal())),
+            )
+        })
         .collect();
 
     let public = public_inputs(r1cs, &assign);
@@ -244,16 +349,16 @@ pub struct Circuit {
     name: String,
     r1cs: R1csProgram,
     prim: PrimitiveProgram,
-    /// Per-constraint source/gadget attribution, loaded from `profile.json` when
+    /// Per-constraint source/function attribution, loaded from `profile.json` when
     /// present (built by `xark test` or `xark build --profile`). Used to explain
-    /// *which* source line / gadget a failing constraint came from. `None` when
+    /// *which* source line / function a failing constraint came from. `None` when
     /// the circuit was built without `--profile`.
     profile: Option<ProfileProgram>,
 }
 
 /// The error from [`Circuit::check`]: a human-readable, multi-line explanation
 /// of why the witness does not satisfy the circuit (which constraint, and — when
-/// profiled — its source line and gadget chain).
+/// profiled — its source line and function chain).
 ///
 /// Its `Debug` delegates to `Display`, so `c.check(..).unwrap()` prints the
 /// message verbatim (with real newlines) instead of an escaped one-liner — the
@@ -289,24 +394,38 @@ pub trait ProveInputs {
 /// first.
 pub fn circuit(name: &str) -> Circuit {
     let dir = std::path::Path::new("target/xark").join(name);
+    let xbc_path = dir.join("circuit.xbc");
     let circuit_path = dir.join("circuit.json");
     let r1cs_path = dir.join("r1cs.json");
-    let cj = std::fs::read_to_string(&circuit_path).unwrap_or_else(|_| {
-        panic!(
-            "circuit `{name}` not built — run `xark build` first \
-             (expected target/xark/{name}/circuit.json)"
-        )
-    });
-    let rj = std::fs::read_to_string(&r1cs_path).unwrap_or_else(|_| {
-        panic!(
-            "circuit `{name}` not built — run `xark build` first \
-             (expected target/xark/{name}/circuit.json)"
-        )
-    });
-    let prim = xark_ir::primitive::from_json(&cj)
-        .unwrap_or_else(|e| panic!("parsing {}: {e}", circuit_path.display()));
-    let r1cs = xark_ir::json::from_json(&rj)
-        .unwrap_or_else(|e| panic!("parsing {}: {e}", r1cs_path.display()));
+    // The compact binary `circuit.xbc` that `xark build` always writes is
+    // self-contained: expanding it once yields BOTH the solver's primitive view
+    // and the backend's R1CS. Fall back to the JSON pair (`circuit.json` +
+    // `r1cs.json`) only for older / `--emit-json` builds.
+    let (prim, r1cs) = if xbc_path.exists() {
+        let bytes = std::fs::read(&xbc_path)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", xbc_path.display()));
+        let cp = xark_ir::function_decode::expand_function_blob(&bytes)
+            .unwrap_or_else(|e| panic!("expanding {}: {e}", xbc_path.display()));
+        (cp.to_primitive(), cp.to_r1cs())
+    } else {
+        let cj = std::fs::read_to_string(&circuit_path).unwrap_or_else(|_| {
+            panic!(
+                "circuit `{name}` not built — run `xark build` first \
+                 (expected target/xark/{name}/circuit.xbc)"
+            )
+        });
+        let prim = xark_ir::primitive::from_json(&cj)
+            .unwrap_or_else(|e| panic!("parsing {}: {e}", circuit_path.display()));
+        let rj = std::fs::read_to_string(&r1cs_path).unwrap_or_else(|_| {
+            panic!(
+                "circuit `{name}` not built — run `xark build` first \
+                 (expected target/xark/{name}/r1cs.json)"
+            )
+        });
+        let r1cs = xark_ir::json::from_json(&rj)
+            .unwrap_or_else(|e| panic!("parsing {}: {e}", r1cs_path.display()));
+        (prim, r1cs)
+    };
     // Best-effort: load the per-constraint attribution if the circuit was built
     // with `--profile` (as `xark test` does). Absent or malformed → `None`; the
     // failure diagnostic then degrades to the constraint index + its debug note.
@@ -369,7 +488,7 @@ impl Circuit {
     /// circuit.
     ///
     /// The error names the first failing constraint and — when the circuit was
-    /// built with `--profile` (as `xark test` does) — the source line and gadget
+    /// built with `--profile` (as `xark test` does) — the source line and function
     /// chain that produced it. So the idiomatic **positive** test is
     /// `c.check(good).unwrap()`, whose panic message points at the offending
     /// line; for a **negative** test assert the error:
@@ -381,7 +500,7 @@ impl Circuit {
 
         // Solve + check the witness. An unsatisfiable witness means the stated
         // relation is false; explain *which* constraint (and its source line /
-        // gadget, when profiled) failed, via the shared diagnostic.
+        // function, when profiled) failed, via the shared diagnostic.
         let assign_fp = solver::solve_and_check(&self.prim, &id_inputs).map_err(|e| {
             ProveError(xark_ir::diagnose::describe_unsatisfied(
                 &e,
@@ -391,7 +510,15 @@ impl Circuit {
         })?;
         let assign: BTreeMap<VarId, Fr> = assign_fp
             .iter()
-            .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
+            // BN254 witness values come straight out of the solver as `Fr` (no
+            // decimal-string round-trip); the non-BN254 fallback reparses.
+            .map(|(k, v)| {
+                (
+                    *k,
+                    v.as_bn254_fr()
+                        .unwrap_or_else(|| fr_from_decimal(&v.to_decimal())),
+                )
+            })
             .collect();
 
         let public = public_inputs(&self.r1cs, &assign);
@@ -621,19 +748,16 @@ mod tests {
     }
 
     #[test]
-    fn malformed_r1cs_constant_is_rejected_not_panicked() {
-        // A program whose constraint carries a non-numeric coefficient must be
-        // rejected with an Err from the public prove path, not a panic.
-        let (mut r1cs, prim) = demo();
-        // Corrupt the first constraint's `c` linear combination constant.
-        r1cs.constraints[0].c.constant = FieldConst {
-            decimal: "garbage".into(),
-        };
-        let mut inputs = BTreeMap::new();
-        inputs.insert(0u32, "3".to_string());
-        inputs.insert(1u32, "4".to_string());
-        inputs.insert(2u32, "12".to_string());
-        let err = prove_only(&r1cs, &prim, &inputs).unwrap_err();
-        assert!(err.contains("invalid decimal"), "unexpected error: {err}");
+    fn malformed_field_constant_is_rejected_not_panicked() {
+        // A non-numeric coefficient is now *unrepresentable*: `FieldConst` holds
+        // an `i64`/`BigInt`, so the prove path can never receive a malformed
+        // constant. The guard lives at construction / deserialization — parsing a
+        // bad constant must Err, not panic or silently corrupt.
+        assert!(FieldConst::from_decimal("garbage").is_none());
+        let err = serde_json::from_str::<FieldConst>("\"garbage\"").unwrap_err();
+        assert!(
+            err.to_string().contains("invalid field constant"),
+            "unexpected error: {err}"
+        );
     }
 }

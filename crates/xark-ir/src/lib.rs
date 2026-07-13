@@ -4,22 +4,45 @@
 //! This crate is deliberately free of any `rustc` dependency so it can be
 //! unit-tested on stable and reused elsewhere.
 
+pub mod bytecode;
+pub mod circuit;
 pub mod diagnose;
 pub mod field;
+pub mod function_decode;
 pub mod graph;
 pub mod json;
 pub mod linear_combination;
+pub mod minimize;
 pub mod primitive;
 pub mod profile;
 pub mod r1cs;
+pub mod r1cs_cache;
 pub mod solver;
 
+pub use circuit::{expr_from_r1cs, CircuitProgram, R1csRow};
 pub use field::FieldConst;
 pub use graph::to_dot;
 pub use json::to_json_pretty;
 pub use linear_combination::{LinearCombination, Term, VarId};
+pub use minimize::minimize;
 pub use profile::{ConstraintKind, ConstraintProfile, ProfileProgram};
 pub use r1cs::{DebugInfo, FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
+
+/// Developer-diagnostics env-flag probe. Only reads the environment when the
+/// `debug` feature is enabled; a normal release build compiles this to `false`
+/// so the diagnostic branches (and their `XARK_*` knobs) vanish entirely.
+#[inline]
+pub(crate) fn dbg_flag(name: &str) -> bool {
+    #[cfg(feature = "debug")]
+    {
+        std::env::var(name).is_ok()
+    }
+    #[cfg(not(feature = "debug"))]
+    {
+        let _ = name;
+        false
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -347,16 +370,16 @@ mod tests {
         let x = 0u32;
         let lc = (LinearCombination::var(x) + LinearCombination::constant("2"))
             .scale(&FieldConst::from_decimal("3").unwrap());
-        assert_eq!(lc.constant.decimal, "6");
+        assert_eq!(lc.constant.decimal(), "6");
         assert_eq!(lc.terms.len(), 1);
-        assert_eq!(lc.terms[0].coeff.decimal, "3");
+        assert_eq!(lc.terms[0].coeff.decimal(), "3");
 
         // Exact arithmetic on field-sized values (no i64 overflow).
         let big = "21888242871839275222246405745257275088548364400416034343698204186575808495616";
         let a = FieldConst::from_decimal(big).unwrap();
         let sum = a.add(&FieldConst::one());
         assert_eq!(
-            sum.decimal,
+            sum.decimal(),
             "21888242871839275222246405745257275088548364400416034343698204186575808495617"
         );
     }

@@ -24,3 +24,9 @@ pub fn circuit(k: Private<[Field; 3]>, p: Public<Point>, r: Public<Point>) {
         i += 1;
     }
 }
+
+
+
+
+
+

@@ -35,6 +35,23 @@ impl Compiled {
         });
         primitive::from_json(&json).expect("valid circuit.json")
     }
+
+    /// The **minimized** R1CS constraint count — the invariant the prover actually
+    /// proves. Setup and proving both expand `circuit.xbc` and run
+    /// `minimize_with_fill(.., usize::MAX)`; this reproduces that exact pipeline.
+    /// Use it for constraint-count pins instead of the raw `circuit.json`, whose
+    /// flat expansion carries function plug-materialization that minimization
+    /// removes (so a cached vs. inlined circuit differs in the flat count but not
+    /// in what is proven).
+    pub fn minimized_r1cs_len(&self) -> usize {
+        let bytes = std::fs::read(self.out_dir.join("circuit.xbc"))
+            .unwrap_or_else(|e| panic!("read {}: {e}", self.out_dir.join("circuit.xbc").display()));
+        let cp = xark_ir::function_decode::expand_function_blob(&bytes)
+            .unwrap_or_else(|e| panic!("expand circuit.xbc: {e}"));
+        xark_ir::minimize::minimize_with_fill(&cp.to_r1cs(), usize::MAX)
+            .constraints
+            .len()
+    }
 }
 
 /// The workspace root, computed from *this* crate's manifest dir (stable no
@@ -47,10 +64,11 @@ fn workspace_root() -> PathBuf {
         .expect("canonicalize workspace root")
 }
 
-/// The nightly channel the compiler is pinned to (in `crates/xark`, not root).
+/// The nightly channel the compiler is pinned to (in `crates/xark-rustc`, the
+/// rustc-driver crate, not root).
 fn nightly_channel(root: &Path) -> String {
-    let toml =
-        std::fs::read_to_string(root.join("crates/xark/rust-toolchain.toml")).unwrap_or_default();
+    let toml = std::fs::read_to_string(root.join("crates/xark-rustc/rust-toolchain.toml"))
+        .unwrap_or_default();
     for line in toml.lines() {
         let t = line.trim();
         if t.starts_with("channel") {
@@ -83,7 +101,12 @@ fn built() -> &'static (PathBuf, PathBuf) {
                 n.starts_with("xark-")
                     && !matches!(
                         n.as_str(),
-                        "xark" | "xark-ir" | "xark-prover" | "xark-test-harness"
+                        "xark"
+                            | "xark-ir"
+                            | "xark-prover"
+                            | "xark-test-harness"
+                            | "xark-cli"
+                            | "xark-rustc"
                     )
             })
             .collect();
@@ -103,20 +126,25 @@ fn built() -> &'static (PathBuf, PathBuf) {
             .success();
         assert!(ok, "building gadget rlibs failed");
 
-        // 2. Compiler binary in crates/xark's own target (excluded nightly pkg).
+        // 2. The rustc-driver binary in crates/xark-rustc's own target (excluded
+        //    nightly pkg with its own pinned `rust-toolchain.toml`).
         let ok = Command::new("cargo")
-            .args(["build", "--release", "--features", "cli"])
+            // `--features debug` compiles in the diagnostic markers the tests assert
+            // on; a `--features` build still lands at `target/release/xark-rustc`.
+            .args(["build", "--release", "--features", "debug"])
             .env("RUSTUP_TOOLCHAIN", &channel)
             .env("RUSTFLAGS", RUSTFLAGS)
             .env_remove("CARGO_TARGET_DIR")
-            .current_dir(root.join("crates/xark"))
+            .current_dir(root.join("crates/xark-rustc"))
             .status()
             .expect("run cargo build (compiler)")
             .success();
-        assert!(ok, "building the xark compiler failed");
+        assert!(ok, "building the xark-rustc driver failed");
 
+        // The rustc_driver shim (invoked directly with `--r1cs-out`), not the
+        // `xark` CLI — the driver lives in a separate binary/crate now.
         (
-            root.join("crates/xark/target/release/xark"),
+            root.join("crates/xark-rustc/target/release/xark-rustc"),
             target.join("release/deps"),
         )
     })
@@ -177,6 +205,13 @@ pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
     let _ = std::fs::remove_dir_all(&out_dir);
 
     let mut cmd = Command::new(bin);
+    // Routine soundness gate: the harness builds the driver with `--features debug`,
+    // so `XARK_VERIFY=1` makes every compiled circuit self-check that its bytecode
+    // artifact expands byte-identically to the flat R1CS. The prover proves the
+    // artifact, so an artifact≠flat drift (e.g. a revived mul-product missing from
+    // the artifact) is an under-constrained/forgeable circuit — this catches it on
+    // every test build (the drift is invisible to solve tests, which use the flat).
+    cmd.env("XARK_VERIFY", "1");
     cmd.args([
         "--crate-type=lib",
         "--edition=2021",
@@ -191,6 +226,9 @@ pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
         .arg(format!("dependency={}", deps.display()))
         .arg("--field")
         .arg(field)
+        // The snapshot suite and gadget `vec.rs` tests read `circuit.json`, so the
+        // harness opts into it (a normal `xark build` writes only `circuit.xbc`).
+        .arg("--emit-json")
         .arg(src)
         .arg("--r1cs-out")
         .arg(&out_dir)

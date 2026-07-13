@@ -348,6 +348,7 @@ macro_rules! edwards {
         ///   A = x1·y2 ; B = y1·x2 ; C = x1·x2 ; D = y1·y2 ; E = d·C·D
         ///   x3 = (A + B) / (1 + E) ; y3 = (D + C) / (1 − E)
         /// ```
+        #[no_mangle]
         pub fn ec_add(p: Point, q: Point) -> Point {
             let one = fp(1, 0, 0);
             let a = p.x * q.y;
@@ -373,6 +374,7 @@ macro_rules! edwards {
         /// dropping 3 muls each is the main constraint saving. Still **complete**:
         /// for a non-square `d` both denominators (`1 + d·x²y²` and `1 − d·x²y²`)
         /// are never zero, and it correctly doubles the identity `(0, 1)`.
+        #[no_mangle]
         pub fn ec_double(p: Point) -> Point {
             let two = fp(2, 0, 0);
             let xy = p.x * p.y;

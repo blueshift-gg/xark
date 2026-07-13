@@ -1,44 +1,67 @@
 //! Field constants.
 //!
 //! Coefficients live in a prime field `F_p`, but we store them as *exact signed
-//! big integers* (decimal), not reduced to `[0, p)`. This keeps readable
-//! coefficients like `-1` and `2` while still handling full field-sized round
-//! constants (~254-bit) exactly. Because `(a mod p) + (b mod p) ≡ (a + b) mod p`
-//! and likewise for multiplication, exact integer arithmetic preserves the
-//! represented field element; canonical reduction into `[0, p)` is something a
-//! backend does when it knows the modulus.
+//! big integers*, not reduced to `[0, p)`. This keeps readable coefficients like
+//! `-1` and `2` while still handling full field-sized round constants (~254-bit)
+//! exactly. Because `(a mod p) + (b mod p) ≡ (a + b) mod p` and likewise for
+//! multiplication, exact integer arithmetic preserves the represented field
+//! element; canonical reduction into `[0, p)` is something a backend does when it
+//! knows the modulus.
+//!
+//! Representation: coefficients are overwhelmingly tiny (`0`, `1`, `-1`, `2`, …),
+//! so we store an `i64` inline and only fall back to a heap `BigInt` for the rare
+//! field-sized value. This makes cloning a coefficient `Copy`-cheap in the common
+//! case (it was the dominant lower-phase cost when every coefficient was a heap
+//! `String`) and lets linear-combination arithmetic use native `i64` ops instead
+//! of parsing/formatting decimal strings. The `Small`/`Big` split is *canonical*
+//! — a value is `Small` iff it fits in `i64` — so derived `PartialEq`/`Eq` are
+//! correct and the serialized decimal is unchanged (byte-identical output).
 
 use num_bigint::BigInt;
-use num_traits::{One, Signed, Zero};
-use serde::{Deserialize, Serialize};
+use num_traits::{One, Signed, ToPrimitive};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A field constant, stored as a decimal string. Serialized `#[transparent]` —
-/// as the bare `"123"`, not `{"decimal":"123"}` — since the wrapper key is pure
-/// noise in `circuit.json` / `r1cs.json` (every coefficient carries one).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Repr {
+    /// A value that fits in `i64` (the common case: coefficients, small consts).
+    Small(i64),
+    /// A value outside `i64` range (e.g. a ~254-bit round constant). Maintained
+    /// so that it never holds a value representable as `Small` (canonical).
+    Big(BigInt),
+}
+
+/// A field constant. Serialized transparently as the bare decimal string
+/// (`"123"`), since the wrapper key is pure noise in `circuit.json` / `r1cs.json`
+/// (every coefficient carries one).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FieldConst {
-    pub decimal: String,
+    repr: Repr,
+}
+
+/// Normalize a `BigInt` into the canonical `Repr` (`Small` iff it fits in `i64`).
+fn norm(v: BigInt) -> Repr {
+    match v.to_i64() {
+        Some(i) => Repr::Small(i),
+        None => Repr::Big(v),
+    }
 }
 
 impl FieldConst {
-    /// Parse the stored decimal into a `BigInt` (defaults to 0 if malformed,
-    /// which cannot happen for values we construct ourselves).
-    fn big(&self) -> BigInt {
-        self.decimal
-            .parse::<BigInt>()
-            .unwrap_or_else(|_| BigInt::zero())
+    /// The value as a `BigInt` (allocates only for the `Big` case).
+    pub fn big(&self) -> BigInt {
+        match &self.repr {
+            Repr::Small(i) => BigInt::from(*i),
+            Repr::Big(b) => b.clone(),
+        }
     }
 
     pub fn from_bigint(value: BigInt) -> Self {
-        FieldConst {
-            decimal: value.to_string(),
-        }
+        FieldConst { repr: norm(value) }
     }
 
     pub fn from_i64(value: i64) -> Self {
         FieldConst {
-            decimal: value.to_string(),
+            repr: Repr::Small(value),
         }
     }
 
@@ -56,45 +79,81 @@ impl FieldConst {
         FieldConst::from_i64(1)
     }
 
-    /// Best-effort narrow to `i64` (used only where small values are expected).
-    pub fn as_i64(&self) -> Option<i64> {
-        self.decimal.parse::<i64>().ok()
+    /// The canonical decimal string (`BigInt::to_string()` output — unchanged from
+    /// the previous string-backed representation, so serialized bytes match).
+    pub fn decimal(&self) -> String {
+        match &self.repr {
+            Repr::Small(i) => i.to_string(),
+            Repr::Big(b) => b.to_string(),
+        }
     }
 
-    // These check the *canonical* decimal string directly — we always store
-    // `BigInt::to_string()` output, so "0"/"1"/"-1" are unambiguous. Avoiding
-    // the BigInt parse here matters a lot: `simplified()` calls `is_zero` on
-    // every coefficient, and it runs on every linear-combination operation.
+    /// Best-effort narrow to `i64` (used only where small values are expected).
+    pub fn as_i64(&self) -> Option<i64> {
+        match &self.repr {
+            Repr::Small(i) => Some(*i),
+            Repr::Big(_) => None,
+        }
+    }
+
     pub fn is_zero(&self) -> bool {
-        self.decimal == "0"
+        matches!(self.repr, Repr::Small(0))
     }
 
     pub fn is_one(&self) -> bool {
-        self.decimal == "1"
+        matches!(self.repr, Repr::Small(1))
     }
 
     pub fn is_neg_one(&self) -> bool {
-        self.decimal == "-1"
+        matches!(self.repr, Repr::Small(-1))
     }
 
     pub fn is_negative(&self) -> bool {
-        self.big().is_negative()
+        match &self.repr {
+            Repr::Small(i) => *i < 0,
+            Repr::Big(b) => b.is_negative(),
+        }
     }
 
     /// Absolute value, as a decimal string (for rendering `- 5` vs `+ 5`).
     pub fn abs_decimal(&self) -> String {
-        self.big().abs().to_string()
+        match &self.repr {
+            // `unsigned_abs` handles `i64::MIN` without overflow.
+            Repr::Small(i) => i.unsigned_abs().to_string(),
+            Repr::Big(b) => b.abs().to_string(),
+        }
     }
 
     pub fn add(&self, other: &FieldConst) -> FieldConst {
+        if let (Repr::Small(a), Repr::Small(b)) = (&self.repr, &other.repr) {
+            if let Some(s) = a.checked_add(*b) {
+                return FieldConst {
+                    repr: Repr::Small(s),
+                };
+            }
+        }
         FieldConst::from_bigint(self.big() + other.big())
     }
 
     pub fn mul(&self, other: &FieldConst) -> FieldConst {
+        if let (Repr::Small(a), Repr::Small(b)) = (&self.repr, &other.repr) {
+            if let Some(p) = a.checked_mul(*b) {
+                return FieldConst {
+                    repr: Repr::Small(p),
+                };
+            }
+        }
         FieldConst::from_bigint(self.big() * other.big())
     }
 
     pub fn neg(&self) -> FieldConst {
+        if let Repr::Small(a) = &self.repr {
+            if let Some(n) = a.checked_neg() {
+                return FieldConst {
+                    repr: Repr::Small(n),
+                };
+            }
+        }
         FieldConst::from_bigint(-self.big())
     }
 
@@ -114,13 +173,31 @@ impl FieldConst {
     }
 
     /// Single-parse rendering helper: returns `(is_negative, abs_is_one,
-    /// abs_decimal)` with exactly one BigInt parse (vs. calling `is_negative` +
-    /// `is_neg_one` + `is_one` + `abs_decimal` separately, which parse 4×). This
-    /// is on the hot path for debug-note rendering.
+    /// abs_decimal)`. Cheap for the common `Small` case (no BigInt at all).
     pub fn render_parts(&self) -> (bool, bool, String) {
-        let b = self.big();
-        let abs = b.abs();
-        (b.is_negative(), abs.is_one(), abs.to_string())
+        match &self.repr {
+            Repr::Small(i) => (*i < 0, i.unsigned_abs() == 1, i.unsigned_abs().to_string()),
+            Repr::Big(b) => {
+                let abs = b.abs();
+                (b.is_negative(), abs.is_one(), abs.to_string())
+            }
+        }
+    }
+}
+
+// Serialize transparently as the bare decimal string, and parse it back — keeping
+// `circuit.json` / `r1cs.json` byte-identical to the previous representation.
+impl Serialize for FieldConst {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.decimal())
+    }
+}
+
+impl<'de> Deserialize<'de> for FieldConst {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        FieldConst::from_decimal(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid field constant `{s}`")))
     }
 }
 
@@ -132,14 +209,12 @@ impl From<i64> for FieldConst {
 
 impl From<&str> for FieldConst {
     fn from(value: &str) -> Self {
-        FieldConst {
-            decimal: value.to_string(),
-        }
+        FieldConst::from_decimal(value).unwrap_or_else(FieldConst::zero)
     }
 }
 
 impl From<String> for FieldConst {
     fn from(value: String) -> Self {
-        FieldConst { decimal: value }
+        FieldConst::from(value.as_str())
     }
 }

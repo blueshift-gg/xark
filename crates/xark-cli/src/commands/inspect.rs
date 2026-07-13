@@ -10,7 +10,7 @@ use clap::Args;
 use xark_ir::primitive::VarRole;
 use xark_ir::Visibility;
 
-use super::{circuit_hash, load_circuit, load_r1cs};
+use super::{load_backend_r1cs, load_circuit_auto};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -38,16 +38,13 @@ pub fn run(args: InspectArgs) -> Result<()> {
     let circuit_path = args
         .circuit
         .clone()
-        .unwrap_or_else(|| project.circuit_json());
+        .unwrap_or_else(|| project.circuit_xbc());
 
-    let r1cs_str = std::fs::read_to_string(&r1cs_path).map_err(|e| {
-        anyhow::anyhow!(
-            "reading {} (run `xark build` first?): {e}",
-            r1cs_path.display()
-        )
-    })?;
-    let prog = load_r1cs(&r1cs_path)?;
-    let prim = load_circuit(&circuit_path).ok();
+    // Prefer the self-contained `circuit.xbc` (deriving the R1CS + fingerprint
+    // from it); fall back to `r1cs.json` for `--r1cs` / `--emit-json` builds.
+    let (prog, fingerprint) =
+        load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
+    let prim = load_circuit_auto(&circuit_path).ok();
 
     let num_internal = prog
         .variables
@@ -116,7 +113,7 @@ pub fn run(args: InspectArgs) -> Result<()> {
             "public_inputs": public_names,
             "private_inputs": private_names,
             "derived_witnesses": derived_names,
-            "circuit_hash": circuit_hash(&r1cs_str),
+            "circuit_hash": fingerprint,
         });
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -136,7 +133,7 @@ pub fn run(args: InspectArgs) -> Result<()> {
         if let Some(w) = num_witness_gen {
             println!("Witness-gen ops:      {w}");
         }
-        println!("Circuit hash (sha256): {}", circuit_hash(&r1cs_str));
+        println!("Circuit hash (sha256): {fingerprint}");
     }
     Ok(())
 }

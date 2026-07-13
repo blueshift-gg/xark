@@ -19,7 +19,7 @@ use xark_backend::{keys::KeyMetadata, setup};
 use xark_ir::Visibility;
 use xark_prover::XarkCircuit;
 
-use super::{circuit_hash, load_r1cs, num_public_inputs, synth_err};
+use super::{circuit_hash, load_backend_r1cs, num_public_inputs, synth_err};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -58,6 +58,14 @@ pub struct SetupArgs {
     /// Optional — auto-generated via OS RNG when not supplied.
     #[arg(long, value_name = "HEX")]
     pub phase2_seed: Option<String>,
+    /// Cache the minimized R1CS (`r1cs.min.wcz`, the exact circuit this key is
+    /// generated from) next to the keys, so a later `xark prove` reloads it
+    /// instead of re-deriving it — skipping the minimize + `validate()` (~25s on
+    /// a multi-million-constraint circuit). Off by default: the cache can be large
+    /// (hundreds of MB) and only pays off when you prove against this key. Best
+    /// for the produce-many-proofs / production flow.
+    #[arg(long, default_value_t = false)]
+    pub cache: bool,
 }
 
 /// Wrapper RNG threading `CryptoRng + RngCore` through both the OS RNG path and
@@ -98,15 +106,57 @@ impl RngCore for SetupRng {
 
 impl CryptoRng for SetupRng {}
 
+/// Cache the minimized R1CS (tagged with the source `circuit.xbc` fingerprint)
+/// next to the keys, so `xark prove` can reload it and skip re-running the
+/// identical boundary-minimize + `validate()`. Best-effort: a write failure just
+/// forfeits the speedup (prove falls back to recomputing).
+fn write_r1cs_cache(
+    out_dir: &std::path::Path,
+    fingerprint: &str,
+    circuit: &XarkCircuit,
+    prof: bool,
+) {
+    let t = std::time::Instant::now();
+    let bytes = match xark_ir::r1cs_cache::serialize(fingerprint, circuit.prog()) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("warning: could not encode R1CS cache: {e}");
+            return;
+        }
+    };
+    let path = out_dir.join("r1cs.min.wcz");
+    if let Err(e) = fs::write(&path, &bytes) {
+        eprintln!(
+            "warning: could not write R1CS cache {}: {e}",
+            path.display()
+        );
+        return;
+    }
+    if prof {
+        eprintln!(
+            "SETUP_TIME: write r1cs cache      = {:.2}s ({} bytes)",
+            t.elapsed().as_secs_f64(),
+            bytes.len()
+        );
+    }
+}
+
 pub fn run(args: SetupArgs) -> Result<()> {
     let project = XarkProject::resolve(args.path.clone())?;
     let r1cs_path = args.r1cs.clone().unwrap_or_else(|| project.r1cs_json());
     let out_dir = args.out.clone().unwrap_or_else(|| project.xark_dir.clone());
 
-    let r1cs_str = fs::read_to_string(&r1cs_path)
-        .with_context(|| format!("reading {} (run `xark build` first?)", r1cs_path.display()))?;
-    let prog = load_r1cs(&r1cs_path)?;
-    let hash = circuit_hash(&r1cs_str);
+    // Prefer the self-contained `circuit.xbc` (deriving the R1CS from it); fall
+    // back to `r1cs.json` for an explicit `--r1cs` or an `--emit-json` build.
+    let prof = super::dbg_flag("XARK_BUILD_TIME");
+    let t_load = std::time::Instant::now();
+    let (prog, hash) = load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
+    if prof {
+        eprintln!(
+            "SETUP_TIME: load+expand         = {:.2}s",
+            t_load.elapsed().as_secs_f64()
+        );
+    }
     let num_pi = num_public_inputs(&prog);
     let num_constraints = prog.constraints.len();
 
@@ -175,6 +225,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         circuit
             .validate()
             .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
+        if args.cache {
+            write_r1cs_cache(&out_dir, &hash, &circuit, prof);
+        }
         let keys = xark_backend::ptau::setup_from_ptau(circuit, &ptau, &seed_arr)
             .map_err(|e| anyhow::anyhow!("phase-2 setup failed: {e}"))?;
 
@@ -216,10 +269,23 @@ pub fn run(args: SetupArgs) -> Result<()> {
     }
 
     // --- Dev-mode path ---------------------------------------------------
+    // `for_setup` runs the boundary-minimize (self-reported `MINIMIZE:` line);
+    // structural `validate()` on a multi-million-constraint circuit is itself a
+    // non-trivial phase, so time it separately.
     let circuit = XarkCircuit::for_setup(prog.clone());
+    let t_validate = std::time::Instant::now();
     circuit
         .validate()
         .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
+    if prof {
+        eprintln!(
+            "SETUP_TIME: validate             = {:.2}s",
+            t_validate.elapsed().as_secs_f64()
+        );
+    }
+    if args.cache {
+        write_r1cs_cache(&out_dir, &hash, &circuit, prof);
+    }
     // Only explicit `--deterministic-rng <n>` makes the key reproducible. The
     // no-`.ptau` dev fallback uses OsRng: still insecure, but a fixed seed would
     // be worse (every dev key byte-identical with a known trapdoor).
@@ -234,13 +300,27 @@ pub fn run(args: SetupArgs) -> Result<()> {
         }
         None => SetupRng::Os(OsRng),
     };
+    let t_keygen = std::time::Instant::now();
     let keys = setup(circuit, &mut rng).map_err(synth_err)?;
+    if prof {
+        eprintln!(
+            "SETUP_TIME: groth16 keygen       = {:.2}s",
+            t_keygen.elapsed().as_secs_f64()
+        );
+    }
 
+    let t_write = std::time::Instant::now();
     keys.write_proving_key(&pk_path)?;
     keys.write_verifying_key(&vk_path)?;
 
     let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, num_pi);
     fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
+    if prof {
+        eprintln!(
+            "SETUP_TIME: write pk+vk          = {:.2}s",
+            t_write.elapsed().as_secs_f64()
+        );
+    }
 
     let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
     metadata.deterministic_rng_seed = effective_seed;
@@ -276,9 +356,9 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_i
     // Only the *declared* inputs — never the witnesses the solver derives
     // (e.g. `to_bits` range-check bits). The primitive program carries the
     // roles that tell them apart; the R1CS marks both `Private`, so falling
-    // back to it (older builds without circuit.json) may over-list. Declared
-    // inputs come first and in order, so that fallback is still usable.
-    let names: Vec<String> = match super::load_circuit(&project.circuit_json()).ok() {
+    // back to it (if the `circuit.xbc` can't be expanded) may over-list.
+    // Declared inputs come first and in order, so that fallback is still usable.
+    let names: Vec<String> = match super::load_circuit_auto(&project.circuit_xbc()).ok() {
         Some(prim) => {
             use xark_ir::primitive::VarRole;
             let mut vars: Vec<_> = prim

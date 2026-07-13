@@ -24,8 +24,24 @@ use xark_backend::{keys::Groth16Keys, prove};
 use xark_ir::VarId;
 use xark_prover::{fr_from_decimal, XarkCircuit};
 
-use super::{load_circuit, parse_inputs_arg, resolve_input_ids, setup, soundness_check, synth_err};
+use super::{
+    load_backend_r1cs, load_circuit_auto, parse_inputs_arg, resolve_input_ids, setup,
+    soundness_check, soundness_check_r1cs, synth_err,
+};
 use crate::xark_project::XarkProject;
+
+/// Load the minimized-R1CS cache at `path`, but only if it decodes and its stored
+/// fingerprint matches `fingerprint` (the current `circuit.xbc` SHA-256). A
+/// missing, corrupt, or stale cache returns `None` so prove recomputes instead.
+fn try_load_r1cs_cache(
+    path: &std::path::Path,
+    fingerprint: &str,
+) -> Option<xark_ir::r1cs::R1csProgram> {
+    let bytes = std::fs::read(path).ok()?;
+    // Fingerprint is checked (in the header) before the body is decoded, so a
+    // stale or foreign cache is rejected cheaply; corrupt bytes return None too.
+    xark_ir::r1cs_cache::deserialize_if_fingerprint(&bytes, fingerprint)
+}
 
 #[derive(Args, Debug)]
 pub struct ProveArgs {
@@ -46,7 +62,8 @@ pub struct ProveArgs {
     /// Path to `r1cs.json`. Inferred from `target/xark/` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub r1cs: Option<PathBuf>,
-    /// Path to `circuit.json`. Inferred from `target/xark/` when omitted.
+    /// Path to the circuit's primitive program — `circuit.xbc` (default) or a
+    /// `circuit.json`. Inferred as `target/xark/…/circuit.xbc` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub circuit: Option<PathBuf>,
     /// Proving key. Inferred as `target/xark/pk.bin` when omitted.
@@ -60,6 +77,13 @@ pub struct ProveArgs {
     /// information about the witness across proofs.
     #[arg(long, value_name = "SEED")]
     pub deterministic_rng: Option<u64>,
+    /// Warm the minimized-R1CS cache (`r1cs.min.wcz`): on a cache *miss*, write
+    /// the minimized circuit this prove just derived so subsequent proves against
+    /// the same key reload it and skip the ~25s minimize + validate. A hit (cache
+    /// already present and current) is always used regardless of this flag; the
+    /// flag only controls *writing* it. Ideal for producing many proofs.
+    #[arg(long, default_value_t = false)]
+    pub cache: bool,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -105,7 +129,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
     let circuit_path = args
         .circuit
         .clone()
-        .unwrap_or_else(|| project.circuit_json());
+        .unwrap_or_else(|| project.circuit_xbc());
     let pk_path = args
         .proving_key
         .clone()
@@ -122,49 +146,164 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // it just replaces a "run build first" error with actually doing it.
     autobuild_and_setup(&args, &project, &r1cs_path, &pk_path)?;
 
-    // Read the R1CS text once: parse it here, and reuse the same text for the
-    // bundle's circuit hash below (no second read, no silent empty-string hash).
-    let r1cs_str = std::fs::read_to_string(&r1cs_path)
-        .with_context(|| format!("reading {} (run `xark build` first?)", r1cs_path.display()))?;
-    let prog = xark_ir::json::from_json(&r1cs_str)
-        .with_context(|| format!("parsing {}", r1cs_path.display()))?;
-    let prim = load_circuit(&circuit_path)?;
+    // Load the circuit + solve the witness under the soundness gate. The default
+    // path — no `--r1cs`/`--circuit` overrides — expands the self-contained
+    // `circuit.xbc` ONCE into a `CircuitProgram`, solves + checks directly on its
+    // R1CS rows (no `to_primitive` flattening), then *moves* those rows into the
+    // backend `R1csProgram` (`into_r1cs`, no clone). So a proof materializes the
+    // constraint set once, not ~4×. An explicit override falls back to the JSON
+    // loaders + the Expression-based gate.
+    // `PROVE_TIME=1` prints a coarse phase breakdown (load+solve / key-load /
+    // Groth16 prove) so the real bottleneck is measured, not assumed.
+    let timing = super::dbg_flag("PROVE_TIME");
+    let xbc = project.circuit_xbc();
     // Inputs come from `--inputs`: inline JSON or a file path (agnostic).
     let inputs = match &args.inputs {
         Some(arg) => parse_inputs_arg(arg)?,
         None => Default::default(),
     };
-
-    // Resolve input names → variable ids for the solver (shared with `check`).
-    let id_inputs = resolve_input_ids(&prim, &inputs)?;
-
-    // Solve the witness, then run the shared under-constrained soundness gate.
-    // This is the *witness-based* check: it needs the solved assignment (hence
-    // it runs here, before any key-loading / synthesis), and rejects circuits
-    // with a derived variable the constraints fail to pin uniquely. It returns
-    // the solved assignment on success. Pass the R1CS + best-effort profile so an
-    // unsatisfied witness names the failing constraint (and its source line).
     let profile = crate::commands::load_profile(&project.xark_dir);
-    let assign_fp = soundness_check(&prim, &prog, profile.as_ref(), &id_inputs)?;
+    // The minimized-R1CS cache `xark setup` writes next to the proving key.
+    let cache_path = pk_path.with_file_name("r1cs.min.wcz");
 
+    // Load the proving key and load+solve the circuit CONCURRENTLY: they're
+    // independent (only the Groth16 prove below needs both), and the witness
+    // solve is single-threaded — it leaves cores free for the parallel key
+    // deserialization, so the key load is largely hidden under it.
+    let t_conc = std::time::Instant::now();
+    let (pk_res, circuit_res) = rayon::join(
+        || {
+            let tk = std::time::Instant::now();
+            let pk = Groth16Keys::read_proving_key(&pk_path).with_context(|| {
+                format!(
+                    "reading proving key {} (run `xark setup` first?)",
+                    pk_path.display()
+                )
+            });
+            if timing {
+                eprintln!("PROVE_TIME:   [key]     load={:?}", tk.elapsed());
+            }
+            pk
+        },
+        || -> anyhow::Result<_> {
+            if args.r1cs.is_none() && args.circuit.is_none() && xbc.exists() {
+                let tr = std::time::Instant::now();
+                let bytes =
+                    std::fs::read(&xbc).with_context(|| format!("reading {}", xbc.display()))?;
+                let fingerprint = super::sha256_hex(&bytes);
+                let t_read = tr.elapsed();
+                let te = std::time::Instant::now();
+                // Reduced (per-template minimized) R1CS is the default; the flat/off
+                // modes use the full expand for the proof's R1CS too.
+                let template_min =
+                    !super::dbg_flag("XARK_FLAT_MINIMIZE") && !super::dbg_flag("XARK_NO_MINIMIZE");
+                // Full circuit — used to SOLVE the witness (all vars computed).
+                let cp = xark_ir::function_decode::expand_function_blob(&bytes)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let t_expand = te.elapsed();
+                let id_inputs = resolve_input_ids(&cp.vars, &inputs)?;
+                let ts = std::time::Instant::now();
+                let assign_fp = soundness_check(&cp, profile.as_ref(), &id_inputs)?;
+                let t_solve = ts.elapsed();
+                let ti = std::time::Instant::now();
+                // Groth16 R1CS view — the reduced (per-template minimized) circuit,
+                // matching what `xark setup` keyed the proving key to. Prefer the
+                // setup cache (a fingerprint-matched minimized R1CS): loading it
+                // skips the reduced-expand + boundary-minimize + `validate()`
+                // entirely, and the load is hidden under the concurrent pk read.
+                // Fall back to recomputing if the cache is absent or stale.
+                let (prog, preminimized) = if template_min {
+                    match try_load_r1cs_cache(&cache_path, &fingerprint) {
+                        Some(cached) => (cached, true),
+                        None => (
+                            xark_ir::function_decode::expand_function_blob_reduced(&bytes)
+                                .map_err(|e| anyhow::anyhow!(e))?
+                                .into_r1cs(),
+                            false,
+                        ),
+                    }
+                } else {
+                    (cp.into_r1cs(), false)
+                };
+                if timing {
+                    eprintln!(
+                        "PROVE_TIME:   [circuit] read+hash={t_read:?} expand={t_expand:?} \
+                         solve+soundness={t_solve:?} into_r1cs/cache={:?} cached={preminimized}",
+                        ti.elapsed()
+                    );
+                }
+                Ok((prog, assign_fp, fingerprint, preminimized))
+            } else {
+                let (prog, fp) = load_backend_r1cs(&xbc, args.r1cs.as_deref(), &r1cs_path)?;
+                let prim = load_circuit_auto(&circuit_path)?;
+                let id_inputs = resolve_input_ids(&prim.vars, &inputs)?;
+                let assign_fp = soundness_check_r1cs(&prim, &prog, profile.as_ref(), &id_inputs)?;
+                Ok((prog, assign_fp, fp, false))
+            }
+        },
+    );
+    let pk = pk_res?;
+    let (prog, assign_fp, circuit_fingerprint, preminimized) = circuit_res?;
+    let t_load_solve = t_conc.elapsed();
+
+    let t_conv = std::time::Instant::now();
     let assign: BTreeMap<VarId, ark_bn254::Fr> = assign_fp
         .iter()
-        .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
+        .map(|(k, v)| {
+            // BN254 witness values come straight out of the solver as `Fr`; only
+            // the (unprovable-anyway) non-BN254 fallback needs a decimal reparse.
+            (
+                *k,
+                v.as_bn254_fr()
+                    .unwrap_or_else(|| fr_from_decimal(&v.to_decimal())),
+            )
+        })
         .collect();
-
-    let circuit = XarkCircuit::for_proving(prog, assign);
-    // reject a malformed `r1cs.json` before synthesis (clean error, not a panic)
-    circuit
-        .validate()
-        .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
+    if timing {
+        eprintln!("PROVE_TIME: witness->Fr = {:?}", t_conv.elapsed());
+    }
+    let n_constraints = prog.constraints.len();
+    let t_build = std::time::Instant::now();
+    // A cache hit gives the already-minimized circuit `xark setup` keyed to, so
+    // skip re-minimizing; otherwise minimize (matching setup) in `for_proving`.
+    let circuit = if preminimized {
+        XarkCircuit::for_proving_preminimized(prog, assign)
+    } else {
+        XarkCircuit::for_proving(prog, assign)
+    };
+    // Reject a malformed `r1cs.json` before synthesis (clean error, not a panic).
+    // The cached circuit was already validated at setup, so skip the re-validate.
+    if !preminimized {
+        circuit
+            .validate()
+            .map_err(|e| anyhow::anyhow!("malformed circuit: {e}"))?;
+    }
     let public = circuit.public_inputs();
+    if timing {
+        eprintln!(
+            "PROVE_TIME: circuit build+validate = {:?}",
+            t_build.elapsed()
+        );
+    }
 
-    let pk = Groth16Keys::read_proving_key(&pk_path).with_context(|| {
-        format!(
-            "reading proving key {} (run `xark setup` first?)",
-            pk_path.display()
-        )
-    })?;
+    // `--cache` warm-on-miss: we just derived the minimized circuit the hard way,
+    // so persist it (tagged with this circuit's fingerprint) for the next prove.
+    // A hit (`preminimized`) needs no write — it came from the cache already.
+    if args.cache && !preminimized {
+        match xark_ir::r1cs_cache::serialize(&circuit_fingerprint, circuit.prog()) {
+            Ok(bytes) => match std::fs::write(&cache_path, &bytes) {
+                Ok(()) if timing => {
+                    eprintln!("PROVE_TIME: warmed r1cs cache = {} bytes", bytes.len())
+                }
+                Ok(()) => {}
+                Err(e) => eprintln!(
+                    "warning: could not write R1CS cache {}: {e}",
+                    cache_path.display()
+                ),
+            },
+            Err(e) => eprintln!("warning: could not encode R1CS cache: {e}"),
+        }
+    }
 
     // reproducible randomness breaks zero-knowledge on a production key
     if args.deterministic_rng.is_some() && key_is_production_safe(&pk_path) {
@@ -184,7 +323,17 @@ pub fn run(args: ProveArgs) -> Result<()> {
         }
         None => ProveRng::Os(OsRng),
     };
+    let t_prove_start = std::time::Instant::now();
     let proof = prove(&pk, circuit, &public, &mut rng).map_err(synth_err)?;
+    if timing {
+        eprintln!(
+            "PROVE_TIME: load+solve+key (concurrent) = {:?}  groth16-prove = {:?}  \
+             ({} constraints)",
+            t_load_solve,
+            t_prove_start.elapsed(),
+            n_constraints,
+        );
+    }
 
     let bundle = ProofBundle {
         proof,
@@ -234,11 +383,10 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // Self-contained, shareable proof bundle: the snarkjs proof (verify
     // off-chain) plus the verifier calldata, in one file. Named by the entry
     // name so it lines up with the generated client.
-    let circuit_hash = super::circuit_hash(&r1cs_str);
     let name = project.entry_name();
     let bundle_json = serde_json::json!({
         "circuit": name,
-        "circuit_hash": format!("sha256:{circuit_hash}"),
+        "circuit_hash": format!("sha256:{circuit_fingerprint}"),
         "proof_sha256": format!("0x{proof_sha}"),
         "protocol": "groth16",
         "curve": "bn128",
@@ -327,7 +475,10 @@ fn autobuild_and_setup(
     r1cs_path: &std::path::Path,
     pk_path: &std::path::Path,
 ) -> Result<()> {
-    if args.r1cs.is_none() && !r1cs_path.exists() {
+    // "Built" is signalled by `circuit.xbc` (always emitted), not `r1cs.json`
+    // (now `--emit-json`-only): a normal build no longer writes the JSON.
+    let is_built = project.circuit_xbc().exists() || r1cs_path.exists();
+    if args.r1cs.is_none() && !is_built {
         if let Some(dir) = find_crate_dir(args, project) {
             eprintln!(
                 "{} no build found — running `xark build {}` first…",
@@ -341,7 +492,7 @@ fn autobuild_and_setup(
         // If no crate dir is found, fall through: `load_r1cs` emits the usual
         // clear "run `xark build` first" error.
     }
-    if args.proving_key.is_none() && r1cs_path.exists() && !pk_path.exists() {
+    if args.proving_key.is_none() && is_built && !pk_path.exists() {
         eprintln!(
             "{} no proving key found — generating a dev key (use `xark setup --ptau-file` \
              for production)…",
@@ -358,6 +509,9 @@ fn autobuild_and_setup(
             deterministic_rng: None,
             ptau_file: None,
             phase2_seed: None,
+            // `prove --cache` writes the cache during this auto-setup, so the
+            // prove that follows takes the fast (cache-hit) path directly.
+            cache: args.cache,
         })?;
     }
     Ok(())

@@ -1,12 +1,14 @@
 //! Proving and verifying key bundles.
 
-use ark_bn254::Bn254;
+use ark_bn254::{Bn254, G1Affine, G2Affine};
+use ark_ec::AffineRepr;
 use ark_groth16::{ProvingKey, VerifyingKey};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::serialization::canonical_read_from_file;
-use crate::serialization::canonical_write_to_file;
+use crate::serialization::{canonical_read_from_file, canonical_write_to_file};
 
 /// Bundle of Arkworks Groth16 keys for BN254.
 pub struct Groth16Keys {
@@ -23,13 +25,80 @@ impl Groth16Keys {
         canonical_write_to_file(&self.verifying_key, path)
     }
 
+    /// Load the proving key with **parallel** point deserialization. arkworks'
+    /// `deserialize_with_mode` decompresses + subgroup-checks every point
+    /// *sequentially*, and for a large key that (a per-point modular sqrt +
+    /// scalar-mul) dominated `xark prove`. A Groth16 proving key is mostly five
+    /// `Vec`s of independent points, so we parse the struct layout and fan the
+    /// per-point decompress+validate across cores — keeping the key compressed
+    /// (small on disk) and fully validated, just fast.
     pub fn read_proving_key(path: &Path) -> std::io::Result<ProvingKey<Bn254>> {
-        canonical_read_from_file::<ProvingKey<Bn254>>(path)
+        let bytes = std::fs::read(path)?;
+        read_proving_key_parallel(&bytes).map_err(|e| std::io::Error::other(e.to_string()))
     }
 
     pub fn read_verifying_key(path: &Path) -> std::io::Result<VerifyingKey<Bn254>> {
         canonical_read_from_file::<VerifyingKey<Bn254>>(path)
     }
+}
+
+/// Parse the `CanonicalSerialize` layout of `ProvingKey<Bn254>` — `vk`,
+/// `beta_g1`, `delta_g1`, then the five point vectors (field order matches
+/// ark-groth16's `ProvingKey`) — deserializing each vector's points in parallel.
+/// Compressed + validated, just fanned across cores.
+fn read_proving_key_parallel(
+    bytes: &[u8],
+) -> Result<ProvingKey<Bn254>, ark_serialize::SerializationError> {
+    let (c, v) = (Compress::Yes, Validate::Yes);
+    let mut cur: &[u8] = bytes;
+    // The header (verifying key + two points) is small — deserialize sequentially.
+    let vk = VerifyingKey::<Bn254>::deserialize_with_mode(&mut cur, c, v)?;
+    let beta_g1 = G1Affine::deserialize_with_mode(&mut cur, c, v)?;
+    let delta_g1 = G1Affine::deserialize_with_mode(&mut cur, c, v)?;
+    // The bulk: five point vectors, each read in parallel.
+    let a_query = read_point_vec_par::<G1Affine>(&mut cur, c, v)?;
+    let b_g1_query = read_point_vec_par::<G1Affine>(&mut cur, c, v)?;
+    let b_g2_query = read_point_vec_par::<G2Affine>(&mut cur, c, v)?;
+    let h_query = read_point_vec_par::<G1Affine>(&mut cur, c, v)?;
+    let l_query = read_point_vec_par::<G1Affine>(&mut cur, c, v)?;
+    Ok(ProvingKey {
+        vk,
+        beta_g1,
+        delta_g1,
+        a_query,
+        b_g1_query,
+        b_g2_query,
+        h_query,
+        l_query,
+    })
+}
+
+/// Read a `Vec<G>` in the arkworks layout — a `u64` length then `len`
+/// fixed-size points — deserializing (decompress + subgroup-check) the points
+/// across rayon's thread pool.
+fn read_point_vec_par<G>(
+    cur: &mut &[u8],
+    compress: Compress,
+    validate: Validate,
+) -> Result<Vec<G>, ark_serialize::SerializationError>
+where
+    G: AffineRepr + CanonicalDeserialize + CanonicalSerialize + Send,
+{
+    // A `Vec`'s length is serialized as a `u64` (independent of point mode).
+    let len = u64::deserialize_with_mode(&mut *cur, compress, validate)? as usize;
+    let sz = G::generator().serialized_size(compress);
+    let total = len
+        .checked_mul(sz)
+        .ok_or(ark_serialize::SerializationError::InvalidData)?;
+    if cur.len() < total {
+        return Err(ark_serialize::SerializationError::NotEnoughSpace);
+    }
+    let (chunk, rest) = cur.split_at(total);
+    *cur = rest;
+    chunk
+        .par_chunks(sz)
+        .map(|bytes| G::deserialize_with_mode(bytes, compress, validate))
+        .collect()
 }
 
 /// Metadata written alongside the keys so the user (and later, audits) can

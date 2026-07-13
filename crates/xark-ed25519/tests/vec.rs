@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use xark_ir::{primitive, solver};
 
-fn load(example: &str, out: &str) -> primitive::PrimitiveProgram {
+fn load(example: &str, out: &str) -> xark_test_harness::Compiled {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(example)
@@ -23,7 +23,7 @@ fn load(example: &str, out: &str) -> primitive::PrimitiveProgram {
         "compiling examples/{example} failed: {}",
         c.stderr
     );
-    c.program()
+    c
 }
 
 fn id_of(program: &primitive::PrimitiveProgram, name: &str) -> u32 {
@@ -149,16 +149,19 @@ fn smul_inputs(
 
 #[test]
 fn smul_5b_crosscheck_and_analyzer_clean() {
-    let program = load("ed25519_smul", "ed25519_smul");
-    // Constraint-count bridge (pinned invariant). The twisted-Edwards ops this
-    // exercises are proven sound sorry-free in `formal/Formal/Edwards.lean`
+    let c = load("ed25519_smul", "ed25519_smul");
+    let program = c.program();
+    // Constraint-count bridge (pinned invariant), measured on the MINIMIZED R1CS
+    // the prover actually proves (not the raw flat `circuit.json`, which carries
+    // cached-function plug-materialization). The twisted-Edwards ops this exercises
+    // are proven sound sorry-free in `formal/Formal/Edwards.lean`
     // (`edwards_add_on_curve`, `edwards_add_closure`). The dedicated affine
     // doubling (curve identity `d·x²y² = y²−x²−1`, 5 muls + 2 inv) set this count.
-    let n = program.constraints.len();
+    let n = c.minimized_r1cs_len();
     eprintln!("ed25519 scalar_mul: {n} constraints");
     // includes the input-point coordinate range checks `scalar_mul` runs before
     // the group law; confirm before re-pinning if it changes.
-    assert_eq!(n, 3_731_576, "ed25519 scalar_mul constraint count changed");
+    assert_eq!(n, 3_645_100, "ed25519 scalar_mul constraint count changed");
 
     // (1) [5]·B == the hard-coded 5B vector — pins limb order + bit order.
     let inputs = smul_inputs(&program, K5, BX, BY, R5X, R5Y);
@@ -183,7 +186,7 @@ fn smul_5b_crosscheck_and_analyzer_clean() {
 
 #[test]
 fn smul_on_doubled_base_vector() {
-    let program = load("ed25519_smul", "ed25519_smul_c");
+    let program = load("ed25519_smul", "ed25519_smul_c").program();
     // [987654321]·(2B) matches the reference.
     let inputs = smul_inputs(&program, KC, P2X, P2Y, RCX, RCY);
     solver::solve_and_check(&program, &inputs)
@@ -192,16 +195,18 @@ fn smul_on_doubled_base_vector() {
 
 #[test]
 fn eddsa_verify_honest_and_tamper() {
-    let program = load("ed25519_verify", "ed25519_verify");
-    // Constraint-count bridge (pinned). The EdDSA verify relation and the
+    let c = load("ed25519_verify", "ed25519_verify");
+    let program = c.program();
+    // Constraint-count bridge (pinned), measured on the MINIMIZED R1CS the prover
+    // proves (not the raw flat `circuit.json`). The EdDSA verify relation and the
     // scalar-mul composition are proven in `formal/Formal/Edwards.lean`
     // (`eddsa_verify_sound`, `eddsa_verify_compose`).
-    let n = program.constraints.len();
+    let n = c.minimized_r1cs_len();
     eprintln!("ed25519 eddsa_verify: {n} constraints");
     // includes: on-curve checks on a_pub/r_sig, double_scalar_mul input-point
     // range checks, the `S < L` scalar check, and the cofactored `[8]·t == [8]·R`.
     assert_eq!(
-        n, 4_662_466,
+        n, 4_554_355,
         "ed25519 eddsa_verify constraint count changed"
     );
 

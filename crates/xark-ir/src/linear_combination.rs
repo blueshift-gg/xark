@@ -11,13 +11,13 @@ use crate::field::FieldConst;
 
 pub type VarId = u32;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Term {
     pub coeff: FieldConst,
     pub var: VarId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearCombination {
     pub constant: FieldConst,
     pub terms: Vec<Term>,
@@ -50,9 +50,7 @@ impl LinearCombination {
 
     pub fn constant(decimal: impl Into<String>) -> Self {
         LinearCombination {
-            constant: FieldConst {
-                decimal: decimal.into(),
-            },
+            constant: FieldConst::from(decimal.into()),
             terms: Vec::new(),
         }
     }

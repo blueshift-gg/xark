@@ -64,25 +64,25 @@ time of writing resolves to `rustc 1.97.0-nightly (2026-05-02)`.
    `rustup toolchain install nightly --component rustc-dev --component llvm-tools-preview`.
 2. Rebuild the compiler:
    ```bash
-   cd crates/xark && cargo build --features cli
+   cd crates/xark-rustc && cargo build
    ```
    Fix any `rustc_private` API breaks (usually `TyCtxt` queries, MIR variants,
    or the `DiagCtxt`/`Callbacks` shapes — keep the churn behind the small
-   wrappers in `crates/xark/src`).
+   wrappers in `crates/xark-rustc/src`).
 3. Run the compiler snapshot suite (must be **42 passed**):
    ```bash
-   cd crates/xark && cargo test --features cli --test snapshot
+   cd crates/xark && cargo test --test snapshot
    ```
    The `xark-test-harness` builds every gadget crate with `-Zalways-encode-mir`
    into an isolated `target/xark-compile` and the compiler into
-   `crates/xark/target`, then diffs each example's emitted R1CS/IR against the
+   `crates/xark-rustc/target`, then diffs each example's emitted R1CS/IR against the
    committed snapshots (`crates/xark/tests/snapshots/`). If a gate count changed
    intentionally, refresh with `UPDATE_SNAPSHOTS=1` and re-check the Lean-model
    bridges.
 4. Run the heavy known-answer vectors too (they gate real hash/curve
    correctness):
    ```bash
-   cd crates/xark && cargo test --features cli --test snapshot -- --include-ignored
+   cd crates/xark && cargo test --test snapshot -- --include-ignored
    cargo test -p xark-ed25519 --release
    ```
    These also run daily in CI via `.github/workflows/nightly-kats.yml`.

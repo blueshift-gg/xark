@@ -13,13 +13,25 @@ expressive.
 
 ## Installation
 
-First, make sure you have this version of Rust nightly installed:
+xark installs as **two** binaries: `xark` — the CLI, plain **stable** Rust — and
+`xark-rustc`, the `rustc_driver` shim `xark build` runs to extract MIR, which needs
+a **pinned nightly**. `xark build` invokes `xark-rustc` as a sibling of `xark`, so
+install both into the same bin directory (`cargo install` uses `~/.cargo/bin`).
+
+First install the pinned nightly the driver needs:
 
 `rustup toolchain install nightly-2026-05-03 --profile minimal --component rust-src --component rustc-dev --component llvm-tools`
 
-Then install `xark` with the following command:
+Then install both binaries from GitHub:
 
-`cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark --branch=lang xark --force --features=cli`
+```bash
+# the rustc-driver shim (pinned nightly)
+cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark xark-rustc --force
+# the CLI (stable Rust)
+cargo install --git https://github.com/blueshift-gg/xark xark-cli --force
+```
+
+Only `xark-rustc` touches nightly — you write **stable Rust** in your circuits.
 
 ## Two faces: a language *and* a toolchain
 
@@ -76,7 +88,9 @@ toolchain fork required.
 `xark init` writes this wiring for you. To add it to an existing crate, point
 `rust-analyzer`'s check command at `xark` via a `rust-analyzer.toml` at the crate
 root (or the equivalent `.vscode/settings.json`) — `xark` must be on `PATH`
-(`cargo +nightly-2026-05-03 install --path crates/xark --features cli`):
+(`cargo install --path crates/xark-cli` for the stable CLI, plus
+`cargo +nightly-2026-05-03 install --path crates/xark-rustc` for the driver into
+the same bin dir):
 
 ```toml
 # rust-analyzer.toml
@@ -132,12 +146,11 @@ and compatibility with the snarkjs/circom ecosystem.
 
 ## How it uses MIR
 
-The `xark` binary is both the CLI and, when `cargo` invokes it as `RUSTC` during
-`xark build`, a `rustc_driver` on a pinned nightly. `xark build` runs `cargo
-build` on your circuit crate with itself as the compiler, so every dependency
+`xark build` runs `cargo build` on your circuit crate with `xark-rustc` (the
+`rustc_driver` shim, on a pinned nightly) as the compiler, so every dependency
 (the `xark` lib and any gadget crates) is compiled with matching MIR-encoded
 rlibs. rustc does the hard work — parse, type-check, borrow-check,
-monomorphize — and xark then:
+monomorphize — and `xark-rustc` then:
 
 1. finds `pub fn circuit(..)` in the primary crate,
 2. reads its signature to recover `Private` / `Public` visibility,
@@ -152,15 +165,17 @@ Signalling intrinsics recognised in MIR are named `__xark_*` (`__xark_add`,
 
 ## A note on nightly
 
-MIR access has no stable API, so the tool uses a **pinned nightly** toolchain
-(`rust-toolchain.toml`) internally. That nightly is invisible to circuit
-authors: **you write stable Rust**; only the `xark` tool touches nightly.
+MIR access has no stable API, so `xark-rustc` uses a **pinned nightly** toolchain
+(`rust-toolchain.toml`) internally. That nightly is invisible to circuit authors:
+**you write stable Rust**, the `xark` CLI is stable, and only the `xark-rustc`
+driver touches nightly.
 
 ## Crates and gadgets
 
-* **`xark`** — the language + CLI. Its `prelude` provides the marker
-  primitives (`Field`, `assert_eq`, `Private`/`Public`) from its `lang` module.
-  The compiler/CLI is the binary, feature-gated behind `cli`.
+* **`xark`** — the language library (`#![no_std]`, stable). Its `prelude` provides
+  the marker primitives (`Field`, `assert_eq`, `Private`/`Public`) from its `lang`
+  module. The CLI is the separate **`xark-cli`** crate (stable, binary `xark`) and
+  the MIR-extraction driver is **`xark-rustc`** (pinned nightly).
 * **Backend** — `xark-backend` (Groth16 setup/prove/verify, trusted setup,
   serialization) and `xark-verifier` (the `no_std` on-chain Solana verifier).
   Both are frontend-agnostic.
@@ -170,7 +185,7 @@ gadgets are **separate crates you add only when you need them**: `xark-bignum`
 (non-native / foreign-field arithmetic, used by the EC gadgets) and the gadgets
 `xark-poseidon`, `xark-poseidon2`, `xark-sha256`, `xark-keccak`, `xark-mimc`,
 `xark-blake3`, `xark-blake2s`, `xark-aes`, `xark-pedersen`, `xark-grumpkin`,
-`xark-secp256k1`, `xark-secp256r1`.
+`xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`.
 
 Adding a gadget is just a Cargo dependency:
 
@@ -221,8 +236,10 @@ audit has been performed; the "experimental" label stays until that changes.
 
 ```bash
 # Install the CLI (puts `xark` on PATH — needed for `xark init`/`build`/`prove`
-# and the rust-analyzer integration):
-cargo +nightly-2026-05-03 install --path crates/xark --features cli
+# and the rust-analyzer integration). The stable CLI and the nightly rustc-driver
+# are two crates; install both into the same bin dir so `xark` finds `xark-rustc`:
+cargo install --path crates/xark-cli
+cargo +nightly-2026-05-03 install --path crates/xark-rustc
 
 cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
@@ -230,12 +247,15 @@ cargo fmt --all -- --check
 
 # The compiler (`crates/xark`) is a nightly `rustc_driver`, excluded from the
 # root workspace, so its snapshot suite runs separately:
-cd crates/xark && cargo test --features cli --test snapshot          # fast, 42 tests
-cd crates/xark && cargo test --features cli --test snapshot -- --include-ignored  # + heavy KATs
+cd crates/xark && cargo test --test snapshot          # fast, 42 tests
+cd crates/xark && cargo test --test snapshot -- --include-ignored  # + heavy KATs
 ```
 
 The nightly pin the compiler needs (and how to bump it) is documented in
 [`docs/toolchain.md`](docs/toolchain.md).
+
+Writing circuits — the supported Rust subset, the rejections you'll hit, and what
+to write instead: [`docs/subset.md`](docs/subset.md).
 
 Architecture: [`docs/architecture.md`](docs/architecture.md). Security
 walkthrough: [`docs/security.md`](docs/security.md).
