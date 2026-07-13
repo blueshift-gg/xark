@@ -4821,10 +4821,12 @@ name = "xark-prover"
 version = "0.2.1"
 dependencies = [
  "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-relations",
  "ark-snark",
+ "ark-std 0.6.0",
  "num-bigint 0.4.8",
  "rand 0.8.6",
  "serde_json",
