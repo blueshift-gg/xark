@@ -200,6 +200,7 @@ fn built() -> &'static (PathBuf, PathBuf) {
                             | "xark-test-harness"
                             | "xark-cli"
                             | "xark-rustc"
+                            | "xark-wasm"
                     )
             })
             .collect();
