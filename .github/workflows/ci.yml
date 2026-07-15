@@ -130,9 +130,26 @@ jobs:
 
       # ---- xark-wasm smoke test ----
       # Reuse the nightly toolchain and xark-rustc binary already built above.
-      # The snapshot test compiled the cube example into `target/test-out/cube/`
-      # (including `circuit.xbc`). Switch to stable for the CLI / wasm steps
-      # (the wasm crate explicitly targets stable, single-threaded builds).
+      # The snapshot test compiled cube with field="unknown" (field-independent
+      # gate counts), producing a circuit.xbc whose modulus_decimal is None —
+      # unsolvable by the prover. Rebuild cube with field=bn254 so the solver
+      # has a valid modulus, then run setup + prove on the already-active
+      # nightly so cargo doesn't rebuild everything after the toolchain switch.
+
+      - name: Rebuild cube with bn254 field
+        # The snapshot test built xark-rustc; point the CLI at it via env var.
+        run: |
+          export XARK_RUSTC="$PWD/crates/xark-rustc/target/release/xark-rustc"
+          cargo run --release -p xark-cli -- build examples/cube --out target/test-out/cube
+
+      - name: Generate proving + verifying keys for cube
+        run: cargo run --release -p xark-cli -- setup target/test-out/cube
+
+      - name: Generate host proof + public inputs for cube
+        # The smoke test cross-checks the wasm-generated public inputs against
+        # the host's (same circuit, same witness — must be byte-identical).
+        run: cargo run --release -p xark-cli -- prove target/test-out/cube --inputs '{"secret":"3","result":"27"}'
+
       - name: Activate stable Rust for wasm steps
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -140,12 +157,6 @@ jobs:
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
-
-      - name: Generate proving + verifying keys for cube
-        # `xark setup --path <dir>` resolves the project dir from `<dir>` when
-        # it contains `circuit.xbc`; the snapshot test left cube's circuit.xbc at
-        # `target/test-out/cube/`.
-        run: cargo run --release -p xark-cli -- setup --path target/test-out/cube
 
       - name: Build xark-wasm node package
         run: cd crates/wasm && wasm-pack build --target nodejs --dev --out-dir pkg-node
