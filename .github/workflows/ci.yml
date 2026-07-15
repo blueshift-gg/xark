@@ -104,7 +104,7 @@ jobs:
             target
             crates/lang/target
             crates/rustc/target
-          key: snapshots-${{ hashFiles('Cargo.lock') }}
+          key: snapshots-${{ hashFiles('Cargo.lock', 'crates/wasm/Cargo.lock') }}
 
       - name: cargo clippy (xark-rustc driver)
         # The workspace `check` job runs on stable and excludes this nightly
@@ -127,3 +127,28 @@ jobs:
         # committed snapshots. The heavy `#[ignore]`d known-answer-vector tests
         # run separately in `nightly-kats.yml`.
         run: cd crates/lang && cargo test --test snapshot
+
+      # ---- xark-wasm smoke test ----
+      # Reuse the nightly toolchain and xark-rustc binary already built above.
+      # The snapshot test compiled the cube example into `target/test-out/cube/`
+      # (including `circuit.xbc`). Switch to stable for the CLI / wasm steps
+      # (the wasm crate explicitly targets stable, single-threaded builds).
+      - name: Activate stable Rust for wasm steps
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Generate proving + verifying keys for cube
+        # `xark setup --path <dir>` resolves the project dir from `<dir>` when
+        # it contains `circuit.xbc`; the snapshot test left cube's circuit.xbc at
+        # `target/test-out/cube/`.
+        run: cargo run --release -p xark-cli -- setup --path target/test-out/cube
+
+      - name: Build xark-wasm node package
+        run: cd crates/wasm && wasm-pack build --target nodejs --dev --out-dir pkg-node
+
+      - name: Run xark-wasm smoke test
+        run: CIRCUIT_ARTIFACTS_DIR=target/test-out/cube node crates/wasm/smoke.cjs

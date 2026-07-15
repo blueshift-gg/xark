@@ -4636,6 +4636,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.18",
+ "xark-snarkjs",
 ]
 
 [[package]]
@@ -4870,6 +4871,17 @@ dependencies = [
  "xark",
  "xark-bits",
  "xark-hash",
+]
+
+[[package]]
+name = "xark-snarkjs"
+version = "0.2.0"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
+ "ark-groth16",
+ "num-bigint 0.4.8",
+ "serde_json",
 ]
 
 [[package]]

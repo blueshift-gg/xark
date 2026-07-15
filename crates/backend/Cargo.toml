@@ -33,6 +33,7 @@ num-bigint.workspace = true
 chrono.workspace = true
 sha2.workspace = true
 rayon = "1"
+xark-snarkjs = { path = "../snarkjs" }
 
 [features]
 default = []

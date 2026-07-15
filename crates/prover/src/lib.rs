@@ -17,7 +17,7 @@ use num_bigint::{BigInt, Sign};
 
 use xark_ir::primitive::{PrimitiveProgram, Var, VarRole};
 use xark_ir::profile::ProfileProgram;
-use xark_ir::solver;
+use xark_ir::solver::{self, Fp};
 use xark_ir::{FieldConst, LinearCombination as IrLc, R1csProgram, VarId, Visibility};
 
 /// Developer-diagnostics env-flag probe. Only reads the environment under the
@@ -113,6 +113,19 @@ pub fn hex_to_field_decimal(s: &str) -> Result<String, String> {
     Ok(r.to_str_radix(10))
 }
 
+/// Lower a solved witness (`VarId → Fp`) to Groth16 scalars (`VarId → Fr`).
+pub fn lower_witness(assign_fp: &BTreeMap<VarId, Fp>) -> BTreeMap<VarId, Fr> {
+    assign_fp
+        .iter()
+        .map(|(k, v)| {
+            let fr = v
+                .as_bn254_fr()
+                .unwrap_or_else(|| fr_from_decimal(&v.to_decimal()));
+            (*k, fr)
+        })
+        .collect()
+}
+
 /// A synthesizable circuit over the xark-lang IR: our R1CS constraints plus a
 /// variable assignment. Implements Arkworks `gr1cs` [`ConstraintSynthesizer`],
 /// so it drops directly into the `xark` backend's generic `setup_from_ptau` /
@@ -141,9 +154,10 @@ fn maybe_minimize(prog: R1csProgram) -> R1csProgram {
     if dbg_flag("XARK_NO_MINIMIZE") {
         return prog;
     }
-    let t = std::time::Instant::now();
+    let timed = dbg_flag("XARK_BUILD_TIME") || dbg_flag("PROVE_TIME");
+    let t = timed.then(std::time::Instant::now);
     let out = xark_ir::minimize::minimize(&prog);
-    if dbg_flag("XARK_BUILD_TIME") || dbg_flag("PROVE_TIME") {
+    if let Some(t) = t {
         eprintln!(
             "MINIMIZE: {} -> {} constraints, {} -> {} vars ({:.2}s)",
             prog.constraints.len(),
@@ -344,18 +358,7 @@ pub fn prove_only(
     validate_program_constants(r1cs)?;
     let assign_fp = solver::solve_and_check(circuit, inputs)
         .map_err(|e| format!("witness does not satisfy the circuit: {e:?}"))?;
-    let assign: BTreeMap<VarId, Fr> = assign_fp
-        .iter()
-        // BN254 witness values come straight out of the solver as `Fr` (no
-        // decimal-string round-trip); the non-BN254 fallback reparses.
-        .map(|(k, v)| {
-            (
-                *k,
-                v.as_bn254_fr()
-                    .unwrap_or_else(|| fr_from_decimal(&v.to_decimal())),
-            )
-        })
-        .collect();
+    let assign = lower_witness(&assign_fp);
 
     let public = public_inputs(r1cs, &assign);
     let circ = XarkCircuit::for_proving(r1cs.clone(), assign);
@@ -760,18 +763,7 @@ impl Circuit {
                 self.profile.as_ref(),
             ))
         })?;
-        let assign: BTreeMap<VarId, Fr> = assign_fp
-            .iter()
-            // BN254 witness values come straight out of the solver as `Fr` (no
-            // decimal-string round-trip); the non-BN254 fallback reparses.
-            .map(|(k, v)| {
-                (
-                    *k,
-                    v.as_bn254_fr()
-                        .unwrap_or_else(|| fr_from_decimal(&v.to_decimal())),
-                )
-            })
-            .collect();
+        let assign = lower_witness(&assign_fp);
 
         let public = public_inputs(&self.r1cs, &assign);
         let circ = XarkCircuit::for_proving(self.r1cs.clone(), assign);

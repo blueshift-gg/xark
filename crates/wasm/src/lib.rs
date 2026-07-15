@@ -6,16 +6,29 @@
 //!
 //! ## What you need (produced offline by the host toolchain)
 //!
-//! | artifact       | produced by    | passed as                                     |
-//! |----------------|----------------|-----------------------------------------------|
-//! | `r1cs.json`    | `xark build`   | `r1cs_json: string`                           |
-//! | `circuit.json` | `xark build`   | `circuit_json: string`                        |
-//! | `pk.bin`       | `xark setup`   | `pk_bytes: Uint8Array`                        |
+//! | artifact       | produced by    | passed as                          |
+//! |----------------|----------------|-----------------------------------|
+//! | `circuit.xbc`  | `xark build`   | `circuit_xbc: Uint8Array` (binary) |
+//! | `pk.bin`       | `xark setup`   | `pk_bytes: Uint8Array`             |
 //! | witness inputs | (your circuit) | `inputs_json: string` (`{"name":"value", …}`) |
 //!
 //! The compile (`xark build`) and setup (`xark setup`) steps require the host
 //! rustc driver / ceremony tooling and cannot run in wasm — produce those
 //! artifacts on the server, ship them to the client, and prove client-side.
+//!
+//! `circuit.xbc` is the self-contained binary artifact `xark build` always
+//! writes. From it we derive *both* views the prover needs, exactly as `xark
+//! prove` does:
+//!
+//! * [`expand_function_blob_reduced`] → the **minimized R1CS** the proving key
+//!   was generated from (the key from `xark setup` is keyed to this circuit).
+//! * [`expand_function_blob`] → the full circuit **with its witness-generation
+//!   program**, used to solve the witness. (The reduced variant leaves witness
+//!   generation empty by design, so it cannot solve.)
+//!
+//! So every heavy artifact — circuit, proving/verifying key, proof, public
+//! inputs — is binary. Only the witness inputs (a tiny `name → value` map) stay
+//! JSON, matching `xark prove --inputs`.
 //!
 //! ## JS usage (`--target web`)
 //!
@@ -23,137 +36,188 @@
 //! import init, { prove } from "./pkg/xark_wasm.js";
 //! await init();    // instantiate the module
 //!
-//! const r1csJson   = await (await fetch("/circuit/r1cs.json")).text();
-//! const circuitJson= await (await fetch("/circuit/circuit.json")).text();
+//! const xbc        = new Uint8Array(await (await fetch("/circuit/circuit.xbc")).arrayBuffer());
 //! const pkBytes    = new Uint8Array(await (await fetch("/circuit/pk.bin")).arrayBuffer());
 //! const inputsJson = JSON.stringify({ secret: "3", result: "27" });
 //!
-//! const out = prove(r1csJson, circuitJson, pkBytes, inputsJson);
-//! // => {
+//! const out = prove(xbc, pkBytes, inputsJson);
+//! // => ProveResult {
 //! //   proof:            Uint8Array,   // canonical compressed bytes (== proof.bin)
 //! //   publicInputs:     Uint8Array,   // canonical compressed bytes (== public_inputs.bin)
-//! //   snarkjsProof:     string,       // == snarkjs-proof.json
-//! //   snarkjsPublic:    string,       // == snarkjs-public.json
 //! //   numPublicInputs:  number,
 //! // }
+//! //
+//! // snarkjs-compatible JSON is opt-in (most callers only need the bytes):
+//! //   proof_to_snarkjs_json(out.proof)                 // == snarkjs-proof.json
+//! //   public_inputs_to_snarkjs_json(out.publicInputs)  // == snarkjs-public.json
 //! ```
 //!
 //! ## Security
 //!
 //! Prover randomness is drawn from the platform CSPRNG (`OsRng`, backed by
-//! `crypto.getRandomValues`) — the same source the host `xark prove`
-//! production path uses. There is **no**
-//! deterministic-RNG escape hatch here on purpose: reproducible prover
-//! randomness breaks zero-knowledge.
-
-#![allow(clippy::needless_borrow)]
+//! `crypto.getRandomValues`) — the same source the host `xark prove` production
+//! path uses. There is **no** deterministic-RNG escape hatch here on purpose:
+//! reproducible prover randomness breaks zero-knowledge.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
-use ark_ec::AffineRepr;
+use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Groth16, Proof, ProvingKey, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
 use ark_snark::SNARK;
-use num_bigint::BigUint;
 use wasm_bindgen::prelude::*;
 
-use xark_ir::primitive::{self, PrimitiveProgram, VarRole};
-use xark_ir::{json as ir_json, solver, VarId};
-use xark_prover::{fr_from_decimal, try_fr_from_decimal, XarkCircuit};
+use xark_ir::function_decode::{
+    expand_function_blob, expand_function_blob_reduced,
+};
+use xark_ir::primitive::{Var, VarRole};
+use xark_ir::solver;
+use xark_ir::{CircuitProgram, R1csProgram, VarId};
+use xark_prover::{lower_witness, try_fr_from_decimal, XarkCircuit};
+use xark_snarkjs::{proof_to_snarkjs, public_inputs_to_snarkjs};
 
 // ---- preload: parse the heavy artifacts once, prove many times -------------
 
 struct PreState {
-    prog: xark_ir::R1csProgram,
-    prim: PrimitiveProgram,
+    /// Full circuit (witness-gen intact) — solved on every [`prove_preloaded`] call.
+    full: CircuitProgram,
+    /// The **minimized** backend R1CS the proving key is keyed to — already run
+    /// through the boundary minimize in [`preload`] (identically to how `xark
+    /// setup` keyed the pk), so [`prove_preloaded`] can prove against it directly
+    /// without re-minimizing on every call.
+    prog: R1csProgram,
     by_name: BTreeMap<String, VarId>,
     pk: ProvingKey<Bn254>,
 }
 
 thread_local! {
-    static PRESTATE: RefCell<Option<PreState>> = RefCell::new(None);
+    static PRESTATE: RefCell<Option<PreState>> = const { RefCell::new(None) };
 }
 
-/// Parse a circuit's `r1cs.json` + `circuit.json` + `pk.bin` once so
-/// subsequent calls to [`prove_fast`] skip all heavy deserialization.
-/// Call once per circuit; subsequent calls silently replace the cached state.
-#[wasm_bindgen]
-pub fn preload(r1cs_json: &str, circuit_json: &str, pk_bytes: &[u8]) -> Result<(), JsValue> {
-    console_error_panic_hook::set_once();
-    let prog = ir_json::from_json(r1cs_json)
-        .map_err(|e| js(&format!("parsing r1cs.json: {e}")))?;
-    let prim = primitive::from_json(circuit_json)
-        .map_err(|e| js(&format!("parsing circuit.json: {e}")))?;
-    let by_name: BTreeMap<String, VarId> = prim
-        .vars
-        .iter()
-        .map(|v| (v.name.clone(), v.id))
-        .collect();
-    let pk = ProvingKey::<Bn254>::deserialize_with_mode(pk_bytes, Compress::Yes, Validate::Yes)
-        .map_err(|e| js(&format!("deserializing proving key: {e}")))?;
-    PRESTATE.with(|cell| {
-        *cell.borrow_mut() = Some(PreState { prog, prim, by_name, pk });
-    });
-    Ok(())
-}
-
-/// Like [`prove`], but uses the parsed artifacts cached by a prior [`preload`]
-/// call — skipping the ~7 MB JSON + 537 KB pk.bin deserialization on every cell.
+/// Derive the two views the prover needs from one self-contained `circuit.xbc`,
+/// mirroring `xark prove`:
 ///
-/// Returns the same shape as [`prove`]. Throws if [`preload`] hasn't been
-/// called for this circuit.
-#[wasm_bindgen]
-pub fn prove_fast(inputs_json: &str) -> Result<JsValue, JsValue> {
-    console_error_panic_hook::set_once();
+/// * the full `CircuitProgram` (witness-gen present) for the solver, and
+/// * the minimized `R1csProgram` the proving key was generated against.
+///
+/// `expand_function_blob_reduced` is the *only* correct source for the backend
+/// R1CS — the proving key is keyed to exactly that circuit (`xark setup` builds
+/// `for_setup(expand_function_blob_reduced(...).into_r1cs())`). Using the full
+/// expand's R1CS instead would produce a different constraint set and the proof
+/// would not verify.
+fn expand_xbc(
+    circuit_xbc: &[u8],
+) -> Result<(CircuitProgram, R1csProgram), String> {
+    let full = expand_function_blob(circuit_xbc)?;
+    let prog = expand_function_blob_reduced(circuit_xbc)?.into_r1cs();
+    Ok((full, prog))
+}
 
-    // Take ownership of the pre-loaded state (clone on the way out so
-    // subsequent calls can still use it).
-    let (prog, prim, by_name, pk) = PRESTATE.with(|cell| {
-        let state = cell.borrow();
-        let s = state.as_ref().ok_or_else(|| js("call preload() first"))?;
-        Ok::<_, JsValue>((s.prog.clone(), s.prim.clone(), s.by_name.clone(), s.pk.clone()))
-    })?;
+/// Solve the witness on the full circuit and lower field-prime values → `Fr`.
+///
+/// The solver checks the assignment against the *full* constraint set (a
+/// satisfying witness satisfies the minimized set too), so an unsatisfiable
+/// input is rejected here rather than producing a proof that fails to verify.
+fn solve_witness(
+    full: &CircuitProgram,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<BTreeMap<VarId, Fr>, String> {
+    let assign_fp = solver::solve_and_check_cp(full, id_inputs)
+        .map_err(|e| format!("witness does not satisfy the circuit: {e:?}"))?;
+    // Lower the solved witness (`VarId → Fp`) to Groth16 scalars via the shared
+    // `xark-prover` helper — the same lowering `xark prove` uses on the host.
+    Ok(lower_witness(&assign_fp))
+}
 
-    // Parse inputs (small — only ~87 key-value pairs).
+/// Resolve a `name → value` JSON object to `VarId → decimal` for the solver,
+/// validating each value as a field element (mirrors `xark prove --inputs`).
+/// `by_name` is the circuit's `name → VarId` map (built once in [`preload`]).
+fn resolve_inputs(
+    by_name: &BTreeMap<String, VarId>,
+    inputs_json: &str,
+) -> Result<BTreeMap<VarId, String>, String> {
     let inputs: BTreeMap<String, String> = serde_json::from_str(inputs_json)
-        .map_err(|e| js(&format!("parsing inputs JSON: {e}")))?;
+        .map_err(|e| format!("parsing inputs JSON (expect object name→value): {e}"))?;
     let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
     for (k, v) in &inputs {
-        let id = *by_name
-            .get(k.as_str())
-            .ok_or_else(|| js(&format!("unknown input `{k}`")))?;
+        let &id = by_name
+            .get(k)
+            .ok_or_else(|| format!("unknown input `{k}`"))?;
+        // Strict decimal validation (mirrors `xark prove`): a malformed value is
+        // a clean error, not a silently-zeroed witness.
         try_fr_from_decimal(v)
-            .map_err(|e| js(&format!("invalid value for input `{k}`: {e}")))?;
+            .map_err(|e| format!("invalid value for input `{k}`: {e}"))?;
         id_inputs.insert(id, v.clone());
     }
+    Ok(id_inputs)
+}
 
-    // Solve the witness and lower field-prime values → arkworks `Fr`.
-    let assign_fp = solver::solve_and_check(&prim, &id_inputs)
-        .map_err(|e| js(&format!("witness does not satisfy the circuit: {e:?}")))?;
-    let assign: BTreeMap<VarId, Fr> = assign_fp
-        .iter()
-        .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
-        .collect();
+/// Prove given already-expanded circuit views + the proving key. `prog` must be
+/// the **pre-minimized** backend R1CS the pk is keyed to (callers run the
+/// boundary minimize once, up-front, and pass the result).
+///
+/// Does **not** self-verify — matching snarkjs / arkworks / gnark, where
+/// proving and verifying are separate steps. A self-verify would only catch
+/// your own witness/circuit bugs (it's a dev/QA aid, never an adversarial
+/// safeguard), so it belongs in the consumer's [`verify`] call, not baked into
+/// every production proof. Verify a returned proof with [`verify`] when needed.
+fn prove_with(
+    full: &CircuitProgram,
+    prog: &R1csProgram,
+    pk: &ProvingKey<Bn254>,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<ProveResult, JsValue> {
+    let assign = solve_witness(full, id_inputs)
+        .map_err(|e| js(&e))?;
 
-    let circuit = XarkCircuit::for_proving(prog, assign);
+    // The `prog` passed in is already the **minimized** backend R1CS the pk is
+    // keyed to (both call sites run the boundary minimize once, up-front:
+    // `preload` caches it, `prove` does it inline). So prove against it directly
+    // — re-minimizing here would just reproduce the same fixpoint per proof.
+    let circuit = XarkCircuit::for_proving_preminimized(prog.clone(), assign);
     circuit
         .validate()
         .map_err(|e| js(&format!("malformed circuit: {e}")))?;
     let public = circuit.public_inputs();
 
     let mut rng = rand::rngs::OsRng;
-    let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng)
+    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
         .map_err(|e| js(&format!("proving: {e}")))?;
 
-    // Self-check.
-    let ok = Groth16::<Bn254>::verify(&pk.vk, &public, &proof)
-        .map_err(|e| js(&format!("self-verify: {e}")))?;
-    if !ok {
-        return Err(js("proof did not self-verify (witness does not satisfy the circuit)"));
-    }
+    encode_result(&proof, &public)
+}
 
+/// Serialize the proof + public inputs into a [`ProveResult`] of canonical
+/// binary — exactly the `.bin` files `xark prove` writes, and the inputs
+/// [`verify`] expects.
+///
+/// snarkjs-compatible JSON is **not** produced here: it's a lossless view of
+/// these same bytes that most callers never need, so deriving it on every proof
+/// would be wasted work. Callers who want it opt in via [`proof_to_snarkjs_json`]
+/// / [`public_inputs_to_snarkjs_json`] on the returned `proof` / `publicInputs`.
+///
+/// The result of [`prove`] / [`prove_preloaded`]: the canonical compressed
+/// proof + public-input bytes (identical to the host's `proof.bin` /
+/// `public_inputs.bin`), plus the public-input count.
+///
+/// A typed struct (rather than an untyped JS object) so wasm-bindgen emits real
+/// `.d.ts` types and the fields cross the boundary as `Uint8Array` / `number`
+/// without manual `Reflect` plumbing. Field getters clone, so the JS caller owns
+/// the returned arrays.
+#[wasm_bindgen(getter_with_clone)]
+pub struct ProveResult {
+    /// Canonical compressed proof bytes (`== proof.bin`).
+    pub proof: Vec<u8>,
+    /// Canonical compressed public-input bytes (`== public_inputs.bin`).
+    #[wasm_bindgen(js_name = publicInputs)]
+    pub public_inputs: Vec<u8>,
+    /// Number of public inputs.
+    #[wasm_bindgen(js_name = numPublicInputs)]
+    pub num_public_inputs: usize,
+}
+
+fn encode_result(proof: &Proof<Bn254>, public: &[Fr]) -> Result<ProveResult, JsValue> {
     let mut proof_buf = Vec::new();
     proof
         .serialize_with_mode(&mut proof_buf, Compress::Yes)
@@ -162,121 +226,84 @@ pub fn prove_fast(inputs_json: &str) -> Result<JsValue, JsValue> {
     public
         .serialize_with_mode(&mut public_buf, Compress::Yes)
         .map_err(|e| js(&format!("serializing public inputs: {e}")))?;
-    let snarkjs_proof = serde_json::to_string_pretty(&proof_to_snarkjs(&proof))
-        .map_err(|e| js(&format!("encoding snarkjs proof: {e}")))?;
-    let snarkjs_public = serde_json::to_string_pretty(&public_inputs_to_snarkjs(&public))
-        .map_err(|e| js(&format!("encoding snarkjs public inputs: {e}")))?;
 
-    let obj = js_sys::Object::new();
-    set(&obj, "proof", &js_sys::Uint8Array::from(&proof_buf[..]))?;
-    set(
-        &obj,
-        "publicInputs",
-        &js_sys::Uint8Array::from(&public_buf[..]),
-    )?;
-    set(&obj, "snarkjsProof", &JsValue::from_str(&snarkjs_proof))?;
-    set(&obj, "snarkjsPublic", &JsValue::from_str(&snarkjs_public))?;
-    set(
-        &obj,
-        "numPublicInputs",
-        &JsValue::from_f64(public.len() as f64),
-    )?;
-    Ok(obj.into())
+    Ok(ProveResult {
+        proof: proof_buf,
+        public_inputs: public_buf,
+        num_public_inputs: public.len(),
+    })
 }
-///
-/// See the crate docs for the shape of each argument and the return object.
-/// Throws a `JsValue` (string) on any error: bad JSON, unknown input, an
-/// unsatisfiable witness, a malformed proving key, or a proof that fails to
-/// self-verify.
-#[wasm_bindgen]
-pub fn prove(
-    r1cs_json: &str,
-    circuit_json: &str,
-    pk_bytes: &[u8],
-    inputs_json: &str,
-) -> Result<JsValue, JsValue> {
-    console_error_panic_hook::set_once();
 
-    // 1. Parse the compiled artifacts (produced by `xark build`).
-    let prog = ir_json::from_json(r1cs_json)
-        .map_err(|e| js(&format!("parsing r1cs.json: {e}")))?;
-    let prim = primitive::from_json(circuit_json)
-        .map_err(|e| js(&format!("parsing circuit.json: {e}")))?;
-
-    // 2. Parse inputs (`{"name":"value", …}`) and resolve names → variable ids.
-    let inputs: BTreeMap<String, String> = serde_json::from_str(inputs_json)
-        .map_err(|e| js(&format!("parsing inputs JSON (expect object name→value): {e}")))?;
-    let by_name: BTreeMap<&str, VarId> =
-        prim.vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
-    let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
-    for (k, v) in &inputs {
-        let &id = by_name
-            .get(k.as_str())
-            .ok_or_else(|| js(&format!("unknown input `{k}`")))?;
-        // strict decimal validation (mirrors `xark prove`): a malformed value
-        // is a clean error, not a silently-zeroed witness.
-        try_fr_from_decimal(v)
-            .map_err(|e| js(&format!("invalid value for input `{k}`: {e}")))?;
-        id_inputs.insert(id, v.clone());
-    }
-
-    // 3. Solve the witness and lower field-prime values → arkworks `Fr`.
-    let assign_fp = solver::solve_and_check(&prim, &id_inputs)
-        .map_err(|e| js(&format!("witness does not satisfy the circuit: {e:?}")))?;
-    let assign: BTreeMap<VarId, Fr> = assign_fp
-        .iter()
-        .map(|(k, v)| (*k, fr_from_decimal(&v.to_decimal())))
-        .collect();
-
-    // 4. Build the synthesizable circuit + pre-flight validation of constants.
-    let circuit = XarkCircuit::for_proving(prog, assign);
-    circuit.validate().map_err(|e| js(&format!("malformed circuit: {e}")))?;
-    let public = circuit.public_inputs();
-
-    // 5. Read the proving key (canonical compressed bytes, exactly what
-    //    `xark setup` writes to `pk.bin`).
+/// Load + prepare every artifact from the raw bytes: expand the two `.xbc`
+/// views, build the `name → VarId` map, minimize the backend R1CS the pk is
+/// keyed to, and deserialize the proving key. Shared by [`prove`] and
+/// [`preload`] so the one-shot and preloaded paths prepare artifacts identically.
+fn load_artifacts(circuit_xbc: &[u8], pk_bytes: &[u8]) -> Result<PreState, JsValue> {
+    let (full, reduced) =
+        expand_xbc(circuit_xbc).map_err(|e| js(&format!("parsing circuit.xbc: {e}")))?;
+    let by_name: BTreeMap<String, VarId> =
+        full.vars.iter().map(|v| (v.name.clone(), v.id)).collect();
+    // Minimize the backend R1CS **once**, exactly as `xark setup` did when it
+    // keyed the proving key (`for_setup` runs the same boundary minimize).
+    // Caching the minimized form lets [`prove_preloaded`] use
+    // `for_proving_preminimized` and skip re-minimizing on every proof — the
+    // dominant per-proof cost on large circuits.
+    let prog = XarkCircuit::for_setup(reduced).prog().clone();
     let pk = ProvingKey::<Bn254>::deserialize_with_mode(pk_bytes, Compress::Yes, Validate::Yes)
         .map_err(|e| js(&format!("deserializing proving key: {e}")))?;
+    Ok(PreState {
+        full,
+        prog,
+        by_name,
+        pk,
+    })
+}
 
-    // 6. Prove. Prover randomness comes straight from the platform CSPRNG
-    //    (`OsRng`), exactly as the host `xark prove` production path does —
-    //    no DRBG, no deterministic option (reproducible randomness breaks ZK).
-    let mut rng = rand::rngs::OsRng;
-    let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng)
-        .map_err(|e| js(&format!("proving: {e}")))?;
+/// Parse a circuit's `circuit.xbc` + `pk.bin` once so subsequent calls to
+/// [`prove_preloaded`] skip all heavy deserialization. Call once per circuit;
+/// subsequent calls silently replace the cached state.
+///
+/// `circuit_xbc` is the self-contained binary artifact `xark build` always
+/// writes; `pk_bytes` is the `pk.bin` from `xark setup`.
+#[wasm_bindgen]
+pub fn preload(circuit_xbc: &[u8], pk_bytes: &[u8]) -> Result<(), JsValue> {
+    let state = load_artifacts(circuit_xbc, pk_bytes)?;
+    PRESTATE.with(|cell| *cell.borrow_mut() = Some(state));
+    Ok(())
+}
 
-    // 7. Self-check (matches `xark_backend::prove`): a proof for an
-    //    unsatisfying assignment would otherwise only fail downstream at
-    //    verify time. A handful of pairings — negligible next to proving.
-    let ok = Groth16::<Bn254>::verify(&pk.vk, &public, &proof)
-        .map_err(|e| js(&format!("self-verify: {e}")))?;
-    if !ok {
-        return Err(js("proof did not self-verify (witness does not satisfy the circuit)"));
-    }
+/// Prove using the artifacts cached by a prior [`preload`] call — skipping the
+/// `.xbc` expansion, `pk.bin` deserialization, and R1CS minimize on every call.
+///
+/// Does not self-verify; verify a returned proof with [`verify`] when needed.
+/// Returns the same shape as [`prove`]. Throws if [`preload`] hasn't been called.
+#[wasm_bindgen]
+pub fn prove_preloaded(inputs_json: &str) -> Result<ProveResult, JsValue> {
+    PRESTATE.with(|cell| -> Result<ProveResult, JsValue> {
+        let state = cell.borrow();
+        let s = state
+            .as_ref()
+            .ok_or_else(|| js("call preload() first"))?;
+        let id_inputs = resolve_inputs(&s.by_name, inputs_json)
+            .map_err(|e| js(&e))?;
+        prove_with(&s.full, &s.prog, &s.pk, &id_inputs)
+    })
+}
 
-    // 8. Serialize: canonical binary (== the .bin files `xark prove` writes)
-    //    and snarkjs-compatible JSON (== the snarkjs-*.json files).
-    let mut proof_buf = Vec::new();
-    proof
-        .serialize_with_mode(&mut proof_buf, Compress::Yes)
-        .map_err(|e| js(&format!("serializing proof: {e}")))?;
-    let mut public_buf = Vec::new();
-    public
-        .serialize_with_mode(&mut public_buf, Compress::Yes)
-        .map_err(|e| js(&format!("serializing public inputs: {e}")))?;
-    let snarkjs_proof = serde_json::to_string_pretty(&proof_to_snarkjs(&proof))
-        .map_err(|e| js(&format!("encoding snarkjs proof: {e}")))?;
-    let snarkjs_public = serde_json::to_string_pretty(&public_inputs_to_snarkjs(&public))
-        .map_err(|e| js(&format!("encoding snarkjs public inputs: {e}")))?;
-
-    // 9. Assemble the return object.
-    let obj = js_sys::Object::new();
-    set(&obj, "proof", &js_sys::Uint8Array::from(&proof_buf[..]))?;
-    set(&obj, "publicInputs", &js_sys::Uint8Array::from(&public_buf[..]))?;
-    set(&obj, "snarkjsProof", &JsValue::from_str(&snarkjs_proof))?;
-    set(&obj, "snarkjsPublic", &JsValue::from_str(&snarkjs_public))?;
-    set(&obj, "numPublicInputs", &JsValue::from_f64(public.len() as f64))?;
-    Ok(obj.into())
+/// Generate a Groth16 proof entirely in memory.
+///
+/// See the crate docs for the shape of each argument and the return object.
+/// Throws a `JsValue` (string) on any error: a malformed `.xbc`, unknown input,
+/// an unsatisfiable witness, or a malformed proving key.
+///
+/// Does not self-verify (matching snarkjs / arkworks / gnark) — verify a
+/// returned proof with [`verify`] when needed.
+#[wasm_bindgen]
+pub fn prove(circuit_xbc: &[u8], pk_bytes: &[u8], inputs_json: &str) -> Result<ProveResult, JsValue> {
+    let s = load_artifacts(circuit_xbc, pk_bytes)?;
+    let id_inputs = resolve_inputs(&s.by_name, inputs_json)
+        .map_err(|e| js(&e))?;
+    prove_with(&s.full, &s.prog, &s.pk, &id_inputs)
 }
 
 /// Verify a Groth16 proof against its public inputs, in memory.
@@ -295,7 +322,6 @@ pub fn verify(
     proof_bytes: &[u8],
     public_inputs_bytes: &[u8],
 ) -> Result<bool, JsValue> {
-    console_error_panic_hook::set_once();
     let vk = VerifyingKey::<Bn254>::deserialize_with_mode(vk_bytes, Compress::Yes, Validate::Yes)
         .map_err(|e| js(&format!("deserializing verifying key: {e}")))?;
     let proof = Proof::<Bn254>::deserialize_with_mode(proof_bytes, Compress::Yes, Validate::Yes)
@@ -306,15 +332,43 @@ pub fn verify(
     Groth16::<Bn254>::verify(&vk, &public, &proof).map_err(|e| js(&format!("verifying: {e}")))
 }
 
-/// List a circuit's declared inputs (the values `prove`'s `inputs_json` must
+/// Convert a binary proof (the `proof` `Uint8Array` from [`prove`], == `proof.bin`)
+/// to snarkjs-compatible JSON — the same shape the host writes to
+/// `snarkjs-proof.json`. Opt-in: [`prove`] returns only the canonical bytes, so
+/// callers who need snarkjs interop derive the JSON here.
+#[wasm_bindgen]
+pub fn proof_to_snarkjs_json(proof_bytes: &[u8]) -> Result<String, JsValue> {
+    let proof = Proof::<Bn254>::deserialize_with_mode(proof_bytes, Compress::Yes, Validate::Yes)
+        .map_err(|e| js(&format!("deserializing proof: {e}")))?;
+    serde_json::to_string(&proof_to_snarkjs(&proof))
+        .map_err(|e| js(&format!("encoding snarkjs proof: {e}")))
+}
+
+/// Convert binary public inputs (the `publicInputs` `Uint8Array` from [`prove`],
+/// == `public_inputs.bin`) to the snarkjs `public.json` array of decimal strings.
+/// Opt-in, mirroring [`proof_to_snarkjs_json`].
+#[wasm_bindgen]
+pub fn public_inputs_to_snarkjs_json(public_inputs_bytes: &[u8]) -> Result<String, JsValue> {
+    let public: Vec<Fr> =
+        Vec::<Fr>::deserialize_with_mode(public_inputs_bytes, Compress::Yes, Validate::Yes)
+            .map_err(|e| js(&format!("deserializing public inputs: {e}")))?;
+    serde_json::to_string(&public_inputs_to_snarkjs(&public))
+        .map_err(|e| js(&format!("encoding snarkjs public inputs: {e}")))
+}
+
+/// List a circuit's declared inputs (the values [`prove`]'s `inputs_json` must
 /// supply) as a JSON string: `[{"name":"…","role":"public"|"private"}, …]` in
 /// declaration (variable-id) order. Convenience for the JS caller.
+///
+/// `circuit_xbc` is the binary `circuit.xbc`.
 #[wasm_bindgen]
-pub fn circuit_inputs(circuit_json: &str) -> Result<String, JsValue> {
-    console_error_panic_hook::set_once();
-    let prim: PrimitiveProgram = primitive::from_json(circuit_json)
-        .map_err(|e| js(&format!("parsing circuit.json: {e}")))?;
-    let mut vars: Vec<&xark_ir::primitive::Var> = prim
+pub fn circuit_inputs(circuit_xbc: &[u8]) -> Result<String, JsValue> {
+    // TODO: switch to a header-only parse (variable metadata only) when
+    // `xark-ir` exposes one — expanding the full circuit just to list declared
+    // inputs is heavier than necessary.
+    let full = expand_function_blob(circuit_xbc)
+        .map_err(|e| js(&format!("parsing circuit.xbc: {e}")))?;
+    let mut vars: Vec<&Var> = full
         .vars
         .iter()
         .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
@@ -328,7 +382,7 @@ pub fn circuit_inputs(circuit_json: &str) -> Result<String, JsValue> {
                 "role": match v.role {
                     VarRole::PublicInput => "public",
                     VarRole::PrivateInput => "private",
-                    _ => "other",
+                    VarRole::Derived => "other",
                 },
             })
         })
@@ -346,68 +400,15 @@ pub fn version() -> String {
 // helpers
 // ---------------------------------------------------------------------------
 
+/// Runs once when the wasm module is instantiated (after `await init()` on the
+/// `web` target; on `require`/`import` for node/bundler). Installs the panic
+/// hook here so every export gets readable panic messages without each one
+/// re-arming it.
+#[wasm_bindgen(start)]
+pub fn start() {
+    console_error_panic_hook::set_once();
+}
+
 fn js(msg: &str) -> JsValue {
     JsValue::from_str(msg)
-}
-
-fn set(obj: &js_sys::Object, key: &str, val: &JsValue) -> Result<(), JsValue> {
-    js_sys::Reflect::set(obj.as_ref(), &JsValue::from_str(key), val).map(|_| ())
-}
-
-// ---------------------------------------------------------------------------
-// snarkjs-compatible serialization (mirrored from `xark_backend::serialization`
-// so we don't pull `xark-backend` — and its `parallel`/rayon + `chrono` deps —
-// into the wasm build graph). Keep in sync if that module changes.
-// ---------------------------------------------------------------------------
-
-fn fq_to_decimal(value: &Fq) -> String {
-    let big: BigUint = (*value).into();
-    big.to_str_radix(10)
-}
-
-/// `[x, y, "1"]` — G1 affine point. `["0","0","0"]` at infinity.
-fn g1_snarkjs(p: &G1Affine) -> serde_json::Value {
-    if p.is_zero() {
-        serde_json::json!(["0", "0", "0"])
-    } else {
-        let (x, y) = p.xy().expect("g1 not at infinity");
-        serde_json::json!([fq_to_decimal(&x), fq_to_decimal(&y), "1"])
-    }
-}
-
-/// `[[x0,x1],[y0,y1],["1","0"]]` — G2 affine point. All zeros at infinity.
-fn g2_snarkjs(p: &G2Affine) -> serde_json::Value {
-    if p.is_zero() {
-        serde_json::json!([["0", "0"], ["0", "0"], ["0", "0"]])
-    } else {
-        let (x, y) = p.xy().expect("g2 not at infinity");
-        let (Fq2 { c0: x0, c1: x1 }, Fq2 { c0: y0, c1: y1 }) = (x, y);
-        serde_json::json!([
-            [fq_to_decimal(&x0), fq_to_decimal(&x1)],
-            [fq_to_decimal(&y0), fq_to_decimal(&y1)],
-            ["1", "0"],
-        ])
-    }
-}
-
-fn proof_to_snarkjs(proof: &Proof<Bn254>) -> serde_json::Value {
-    serde_json::json!({
-        "pi_a": g1_snarkjs(&proof.a),
-        "pi_b": g2_snarkjs(&proof.b),
-        "pi_c": g1_snarkjs(&proof.c),
-        "protocol": "groth16",
-        "curve": "bn128",
-    })
-}
-
-fn public_inputs_to_snarkjs(inputs: &[Fr]) -> serde_json::Value {
-    serde_json::Value::Array(
-        inputs
-            .iter()
-            .map(|f| {
-                let big: BigUint = (*f).into();
-                serde_json::Value::String(big.to_str_radix(10))
-            })
-            .collect(),
-    )
 }

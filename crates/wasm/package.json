@@ -5,14 +5,28 @@
   "types": "./pkg-web/xark_wasm.d.ts",
   "files": [
     "pkg-node/*",
-    "pkg-web/*"
+    "pkg-web/*",
+    "pkg-bundler/*",
+    "pkg-module/*"
   ],
   "exports": {
     ".": {
-      "types": "./pkg-web/xark_wasm.d.ts",
-      "node": "./pkg-node/xark_wasm.js",
-      "workerd": "./pkg-web/xark_wasm.js",
-      "default": "./pkg-web/xark_wasm.js"
+      "node": {
+        "types": "./pkg-node/xark_wasm.d.ts",
+        "default": "./pkg-node/xark_wasm.js"
+      },
+      "workerd": {
+        "types": "./pkg-module/xark_wasm.d.ts",
+        "default": "./pkg-module/xark_wasm.js"
+      },
+      "browser": {
+        "types": "./pkg-web/xark_wasm.d.ts",
+        "default": "./pkg-web/xark_wasm.js"
+      },
+      "default": {
+        "types": "./pkg-web/xark_wasm.d.ts",
+        "default": "./pkg-web/xark_wasm.js"
+      }
     }
   }
 }

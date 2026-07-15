@@ -25,6 +25,7 @@ members = [
     "gadgets/xark-secp256k1",
     "gadgets/xark-secp256r1",
     "gadgets/xark-sha256",
+    "crates/snarkjs",
     "crates/test-harness",
     "gadgets/xark-curve",
 ]
