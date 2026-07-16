@@ -228,13 +228,11 @@ fn poseidon_gadget() {
     check_snapshot("poseidon.r1cs.json", &json);
     check_snapshot("poseidon.graph.dot", &dot);
 
-    // R_F=4 full (9 gates each) + R_P=2 partial (3 gates each) = 42 S-box gates,
-    // plus 1 final `assert_eq` equality = 43 constraints. Counted from the parsed
-    // R1CS (note-robust): cache-all drops debug `note`s on cached-function bodies,
-    // so the old note-string proxy no longer tracks the shape — but the R1CS math
-    // is byte-identical to the inlined version (verified: same 43 constraints).
+    // Real HorizenLabs BN256 instance: R_F=8 full (3 S-boxes each) + R_P=56 partial
+    // (1 S-box each) = 80 S-boxes × 3 gates (`x^2, x^4, x^5`) = 240 S-box gates,
+    // plus 1 final `assert_eq` equality = 241 constraints. ARK/MDS fold for free.
     let r1cs = xark_ir::json::from_json(&json).unwrap();
-    assert_eq!(r1cs.constraints.len(), 43);
+    assert_eq!(r1cs.constraints.len(), 241);
     // The only equality is the `(out) * 1 = 0` output binding; ARK/MDS are free.
     let equalities = r1cs
         .constraints
@@ -247,8 +245,8 @@ fn poseidon_gadget() {
     );
     assert_eq!(
         r1cs.constraints.len() - equalities,
-        42,
-        "expected exactly 42 S-box multiplication gates"
+        240,
+        "expected exactly 240 S-box multiplication gates"
     );
 }
 
@@ -1927,6 +1925,55 @@ fn sha256_varlen_matches_real_vector() {
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
         "wrong digest must reject"
+    );
+}
+
+/// **`Digest` ergonomics POC — KAT-validated.** Compiles the `sha256_consume`
+/// example (the 3-line "hash bytes, then assert the digest equals a known value"
+/// form): its body bakes in `sha256("abc")` as a `const [u8; 32]` and pins it to
+/// `Digest::from(sha256(msg))`. Solving with `msg = [97, 98, 99]` (`"abc"`) is
+/// the proof the `From<[u8; 32]>` word/byte/bit ordering matches the gadget: if
+/// the layout were off, the real KAT would not satisfy the constraints. A wrong
+/// first byte must be rejected, and no derived var may be under-constrained.
+#[test]
+#[ignore = "heavy: full padded SHA-256 circuit (~15s compile)"]
+fn digest_consume_matches_abc_vector() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile(&example("sha256_consume"), "sha256_consume");
+    assert!(c.status_success, "sha256_consume failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    let id = |n: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == n)
+            .map(|v| v.id)
+            .unwrap()
+    };
+    // The expected digest is a compile-time constant, so the only inputs are the
+    // 3 private message bytes.
+    let mut inputs = BTreeMap::new();
+    inputs.insert(id("msg[0]"), "97".to_string()); // 'a'
+    inputs.insert(id("msg[1]"), "98".to_string()); // 'b'
+    inputs.insert(id("msg[2]"), "99".to_string()); // 'c'
+
+    // KAT: sha256("abc") == baked-in constant ⇒ every constraint holds. This
+    // passing IS the proof the `From<[u8; 32]>` endianness/ordering is correct.
+    let assign = solver::solve_and_check(&program, &inputs)
+        .expect("sha256(\"abc\") must match the baked-in Digest constant");
+    assert!(
+        solver::analyze_underconstrained(&program, &assign).is_empty(),
+        "sha256_consume under-constrained"
+    );
+
+    // Negative control: a different preimage cannot hash to sha256("abc").
+    inputs.insert(id("msg[0]"), "65".to_string()); // 'A' ≠ 'a'
+    assert!(
+        solver::solve_and_check(&program, &inputs).is_err(),
+        "wrong preimage must be rejected"
     );
 }
 

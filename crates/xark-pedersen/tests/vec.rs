@@ -21,12 +21,13 @@ fn load_program() -> primitive::PrimitiveProgram {
     c.program()
 }
 
-// Python reference vector (pedersen_ref.py), same generators G0(x=1), G1(x=2),
-// offset O(x=5), N_BITS = 128.
+// Reference vector `H = M0·G0 + M1·G1` over the nothing-up-my-sleeve hash-to-curve
+// generators (see `generators()`), computed with `ark-grumpkin`. The live
+// derivation-and-check against `ark-grumpkin` lives in `examples/pedersen`'s test.
 const M0: &str = "1512366075204170929049582354406559215";
 const M1: &str = "338770000845734292534325025077361652240";
-const HX: &str = "12247237786869595489850512927190383698331231276000700903834140832957657947403";
-const HY: &str = "4919624278251879523047591843909313891382871438111885565699071497313999041142";
+const HX: &str = "56611582869820574239993287487223071380142614942819473392064448158736499405";
+const HY: &str = "14972036576598595980490710075994278492926559370076661242801210938371392582550";
 
 #[test]
 fn pedersen_matches_reference_vector() {

@@ -607,6 +607,11 @@ fn bit_sum_match(
 enum ArgValue {
     Fields(Vec<(Vec<u64>, LinearCombination)>),
     Int(u128),
+    /// A whole *integer* array/tuple, as `(relative-path, value)` slots — the int
+    /// analogue of `Fields`. Lets a `const [uN; M]` be passed into an inlined
+    /// function and read back with native-int ops (e.g. `Field::from(bytes[i])`),
+    /// mirroring how `Fields` carries a whole `Field` array across the boundary.
+    Ints(Vec<(Vec<u64>, u128)>),
     Str(String),
     Unit,
 }
@@ -1312,12 +1317,26 @@ impl<'tcx> LoweringEnv<'tcx> {
         dest: rustc_middle::mir::Local,
         c: &ConstOperand<'tcx>,
     ) -> bool {
-        use rustc_middle::ty::{self, TyKind};
-        let TyKind::Array(elem_ty, _) = c.const_.ty().kind() else {
+        let Some(slots) = self.const_int_array_slots(c) else {
             return false;
         };
+        for (i, v) in slots {
+            self.set_int_at(dest, &[i as u64], v);
+        }
+        true
+    }
+
+    /// The per-element `(index, value)` int slots of a compile-time integer array
+    /// constant (e.g. a `const P: [u128; 3]`), or `None` if `c` is not one. Shared
+    /// by [`Self::try_bind_const_int_array`] (assignment binding) and [`Self::eval_arg`]
+    /// (so a `const [uN; M]` can also be passed *by value* into an inlined helper).
+    fn const_int_array_slots(&self, c: &ConstOperand<'tcx>) -> Option<Vec<(usize, u128)>> {
+        use rustc_middle::ty::{self, TyKind};
+        let TyKind::Array(elem_ty, _) = c.const_.ty().kind() else {
+            return None;
+        };
         if !elem_ty.is_integral() {
-            return false;
+            return None;
         }
         let typing_env = ty::TypingEnv::fully_monomorphized();
         let konst = self.tcx.instantiate_and_normalize_erasing_regions(
@@ -1341,20 +1360,16 @@ impl<'tcx> LoweringEnv<'tcx> {
                 .and_then(|r| r.ok()),
             Const::Val(..) => None,
         };
-        let Some(valtree) = valtree else { return false };
-        let Some(branch) = valtree.try_to_branch() else {
-            return false;
-        };
+        let branch = valtree?.try_to_branch()?;
+        let mut out = Vec::with_capacity(branch.len());
         for (i, elem) in branch.iter().enumerate() {
             let ty::ConstKind::Value(v) = elem.kind() else {
-                return false;
+                return None;
             };
-            let Some(scalar) = v.valtree.try_to_leaf() else {
-                return false;
-            };
-            self.set_int_at(dest, &[i as u64], scalar.to_uint(scalar.size()));
+            let scalar = v.valtree.try_to_leaf()?;
+            out.push((i, scalar.to_uint(scalar.size())));
         }
-        true
+        Some(out)
     }
 
     /// The interned value-tree of a (possibly const-generic) constant operand.
@@ -1622,6 +1637,23 @@ impl<'tcx> LoweringEnv<'tcx> {
         Ok(())
     }
 
+    /// Collect a whole integer array/tuple's slots (int analogue of
+    /// [`Self::collect_field_slots`]), as `(path-relative-to-`base`, value)`.
+    fn collect_int_slots(
+        &self,
+        local: rustc_middle::mir::Local,
+        base: &[u64],
+    ) -> Vec<(Vec<u64>, u128)> {
+        let Some(slots) = self.frame().int.get(local) else {
+            return Vec::new();
+        };
+        slots
+            .iter()
+            .filter(|(p, _)| p.len() >= base.len() && p[..base.len()] == *base)
+            .map(|(p, v)| (p[base.len()..].to_vec(), *v))
+            .collect()
+    }
+
     /// Evaluate a call argument in the current frame into a passable value.
     /// Handles whole `Field` arrays, not just scalars.
     fn eval_arg(&mut self, operand: &Operand<'tcx>) -> ArgValue {
@@ -1633,6 +1665,12 @@ impl<'tcx> LoweringEnv<'tcx> {
                 }
                 if let Some(v) = self.get_int_at(local, &base) {
                     return ArgValue::Int(v);
+                }
+                // A whole integer array/tuple (slots at `base + [i]`) — e.g. a
+                // `const [u8; 32]` passed by value into a helper that indexes it.
+                let int_slots = self.collect_int_slots(local, &base);
+                if !int_slots.is_empty() {
+                    return ArgValue::Ints(int_slots);
                 }
                 if base.is_empty() {
                     if let Some(s) = self.get_str(local) {
@@ -1647,6 +1685,16 @@ impl<'tcx> LoweringEnv<'tcx> {
             // (e.g. `mod_mul(.., P::MODULUS)` with an associated-const modulus).
             if let Some(slots) = self.const_field_slots(c) {
                 return ArgValue::Fields(slots);
+            }
+            // A `const [uN; M]` passed by value into an inlined helper that
+            // indexes it (e.g. `Digest::from(SHA256_ABC)` for `const [u8; 32]`).
+            if let Some(slots) = self.const_int_array_slots(c) {
+                return ArgValue::Ints(
+                    slots
+                        .into_iter()
+                        .map(|(i, v)| (vec![i as u64], v))
+                        .collect(),
+                );
             }
         }
         if let Ok(n) = self.operand_to_u128(operand) {
@@ -1669,6 +1717,13 @@ impl<'tcx> LoweringEnv<'tcx> {
                 }
             }
             ArgValue::Int(n) => self.set_int_at(local, dest_path, n),
+            ArgValue::Ints(slots) => {
+                for (rel, v) in slots {
+                    let mut path = dest_path.to_vec();
+                    path.extend(rel);
+                    self.set_int_at(local, &path, v);
+                }
+            }
             ArgValue::Str(s) => {
                 if dest_path.is_empty() {
                     self.set_str(local, s)
@@ -2086,8 +2141,11 @@ fn flatten_field_leaves<'tcx>(
             Ok(())
         }
         _ => Err(
-            CompileError::new(format!("unsupported circuit input type `{ty}`"))
-                .with_help("circuit inputs must be `Field`, or arrays/tuples/structs of `Field`"),
+            CompileError::new(format!("unsupported circuit input type `{ty}`")).with_help(
+                "a circuit input must satisfy the `CircuitInput` contract — be convertible to \
+                 `[Field; N]` as a zero-cost move, i.e. a `Field` or an array/tuple/struct of \
+                 `Field`. `#[derive(CircuitInput)]` implements it for a Field-composed struct.",
+            ),
         ),
     }
 }

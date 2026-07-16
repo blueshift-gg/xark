@@ -80,6 +80,17 @@ impl Field {
         }
     }
 
+    /// The little-endian 4×64-bit limbs of a **compile-time-constant** `Field`.
+    /// Meaningful only for constants (`Field::from` / `Field::constant` values);
+    /// for witnesses the compiler tracks the value symbolically and these limbs
+    /// are unspecified. Exposed for *tooling* — a host-side input builder reads a
+    /// host-built constant's value back to a decimal so a typed input can be
+    /// fanned out into its leaf witness. Circuit authors never need it.
+    #[doc(hidden)]
+    pub const fn to_limbs(self) -> [u64; 4] {
+        self._limbs
+    }
+
     /// A `const`-context constructor from a `u128` value. Unlike `From<u128>`
     /// (a non-`const` trait method), this is usable in `const` items — it exists
     /// so field-parameter derivation (`xark_bignum`'s limb splitting) can build
@@ -705,6 +716,48 @@ pub fn assert_eq<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
 /// `assert(cond)` decomposes into `assert_eq(cond, true)` at lowering time.
 pub fn assert(cond: bool) {
     assert_eq(cond, true);
+}
+
+/// Trait-dispatched equality for `#[circuit]` bodies.
+///
+/// The plain [`assert_eq`] intrinsic only compares values that collapse to a
+/// single `Field` (its `L: Into<Field>` / `R: Into<Field>` bounds), and the
+/// compiler lowers it with a fixed two-scalar rule. Composite circuit outputs —
+/// a SHA-256 digest (`[[Field; 32]; 8]`) compared against a [`Digest`] — don't
+/// fit that shape. `#[circuit]` shadows `assert_eq` in the body with
+/// [`__circuit_assert_eq`], which dispatches through this trait: the scalar impls
+/// bottom out at the recognized `assert_eq` intrinsic, and composite impls (see
+/// [`Digest`](crate::Digest)) loop it element-wise. Existing plain-`fn circuit`
+/// bodies are unaffected — they keep calling the intrinsic directly.
+pub trait AssertEqCircuit<Rhs> {
+    /// Emit the equality constraint(s) for `self == rhs`.
+    fn assert_eq_circuit(self, rhs: Rhs);
+}
+
+impl<R: Into<Field>> AssertEqCircuit<R> for Field {
+    #[inline]
+    fn assert_eq_circuit(self, rhs: R) {
+        assert_eq(self, rhs);
+    }
+}
+
+impl<R: Into<Field>> AssertEqCircuit<R> for bool {
+    #[inline]
+    fn assert_eq_circuit(self, rhs: R) {
+        assert_eq(self, rhs);
+    }
+}
+
+/// The dispatcher a `#[circuit]` body sees as `assert_eq` — brought into scope by
+/// a generated `use ::xark::__circuit_assert_eq as assert_eq;` that shadows the
+/// [`assert_eq`] intrinsic. It forwards to [`AssertEqCircuit`], so `assert_eq`
+/// inside a `#[circuit]` works for both scalars and composite types like
+/// [`Digest`](crate::Digest). The name is `#[doc(hidden)]` plumbing; authors just
+/// write `assert_eq`.
+#[doc(hidden)]
+#[inline]
+pub fn __circuit_assert_eq<A: AssertEqCircuit<B>, B>(a: A, b: B) {
+    a.assert_eq_circuit(b);
 }
 
 /// Emit a circuit constraint `a < b` (less than).

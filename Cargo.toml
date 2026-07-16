@@ -50,25 +50,15 @@ ark-ff = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-ec = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-groth16 = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-relations = { version = "0.6", default-features = false }
-ark-r1cs-std = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-poly = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
 ark-std = { version = "0.6", default-features = false, features = ["parallel"] }
 ark-snark = { version = "0.6", default-features = false }
-
-
-anyhow = "1"
 thiserror = "2"
-clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
-base64 = "0.22"
 num-bigint = "0.4"
-num-traits = "0.2"
 sha2 = "0.11.0"
 # Pinned to 0.8 / 0.3 to match arkworks 0.6, which depends on rand 0.8
 # (rand_core 0.6). RNGs handed to `Groth16::prove` / `circuit_specific_setup`

@@ -1,0 +1,21 @@
+[package]
+name = "blake3_test"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/xark", default-features = false }
+xark-blake3 = { path = "../../crates/xark-blake3" }
+
+xark-prover = { path = "../../crates/xark-prover", optional = true }
+
+[dev-dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+blake3 = "1"
+
+[features]
+host = ["dep:xark-prover"]

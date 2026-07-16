@@ -12,3 +12,10 @@ path = "src/lib.rs"
 xark = { path = "../xark", default-features = false }
 xark-bignum = { path = "../xark-bignum" }
 xark-curve = { path = "../xark-curve" }
+
+[dev-dependencies]
+num-bigint = "0.4"
+p256 = "0.13"
+sha2 = "0.10"
+xark-ir = { path = "../xark-ir" }
+xark-test-harness = { path = "../xark-test-harness" }

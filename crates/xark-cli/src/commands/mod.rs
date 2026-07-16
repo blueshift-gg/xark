@@ -484,34 +484,150 @@ pub fn load_profile(dir: &std::path::Path) -> Option<ProfileProgram> {
         .and_then(|s| xark_ir::profile::from_json(&s).ok())
 }
 
+/// A `0x`-prefixed hex string → raw bytes (rejects a missing prefix / odd length).
+fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
+    let h = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .ok_or_else(|| anyhow::anyhow!("expected a 0x-prefixed hex string, got `{s}`"))?;
+    hex::decode(h).map_err(|e| anyhow::anyhow!("invalid hex `{s}`: {e}"))
+}
+
+/// A byte-array leaf `name[i]` → its index `i` (only a flat 1-D index; nested /
+/// multi-dim names like `x.bits[0][1]` return `None`).
+fn array_index(leaf: &str, name: &str) -> Option<usize> {
+    let inner = leaf
+        .strip_prefix(name)?
+        .strip_prefix('[')?
+        .strip_suffix(']')?;
+    if inner.contains('[') {
+        return None;
+    }
+    inner.parse().ok()
+}
+
+/// A SHA-256 digest leaf `name.bits[w][j]` → `(word, bit)`.
+fn digest_index(leaf: &str, name: &str) -> Option<(usize, usize)> {
+    let rest = leaf.strip_prefix(name)?.strip_prefix(".bits[")?;
+    let (w, rest) = rest.split_once("][")?;
+    let j = rest.strip_suffix(']')?;
+    Some((w.parse().ok()?, j.parse().ok()?))
+}
+
+/// The logical input a leaf belongs to (`input[3]` → `input`, `d.bits[0][1]` → `d`).
+fn logical_root(leaf: &str) -> &str {
+    let cut = leaf.find(['[', '.']).unwrap_or(leaf.len());
+    &leaf[..cut]
+}
+
 /// Resolve `name → value` inputs to `VarId → decimal` for the solver.
 ///
-/// Shared by `xark prove` and `xark check --inputs`: applies the same strict
-/// decimal validation (the solver's lenient parse would silently turn a
-/// malformed value into 0) and the same unknown-name error (listing the
-/// circuit's non-derived inputs).
+/// Shared by `xark prove` and `xark check --inputs`. A name may be a single leaf
+/// or a **logical input** that fans out to its leaves:
+///   * scalar `Field` → decimal, or `0x`-hex (reduced mod p);
+///   * byte array `[u8; N]` (leaves `name[i]`) → a `0x`-hex string of exactly `N`
+///     bytes, one byte per leaf;
+///   * hash (leaves `name.hi` / `name.lo`) → a `0x`-hex string of 32 bytes packed
+///     into two 128-bit field halves (top 16 bytes → `hi`, low 16 → `lo`);
+///   * SHA-256 digest (leaves `name.bits[w][j]`) → a `0x`-hex string of 32 bytes,
+///     decomposed into the 256 bit leaves in the gadget's word/byte/bit layout.
+///
+/// A wrong value can only yield an unsatisfiable witness (a clear failure), never
+/// a false proof, so this stays a convenience over the always-safe flat form.
 pub fn resolve_input_ids(
     vars: &[xark_ir::primitive::Var],
     inputs: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<VarId, String>> {
     let by_name: BTreeMap<&str, VarId> = vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
+    let is_hex = |s: &str| s.starts_with("0x") || s.starts_with("0X");
     let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
+
     for (k, v) in inputs {
-        match by_name.get(k.as_str()) {
-            Some(&id) => {
+        // 1. Exact leaf — a scalar value (decimal, or `0x`-hex reduced mod p).
+        if let Some(&id) = by_name.get(k.as_str()) {
+            let dec = if is_hex(v) {
+                xark_prover::hex_to_field_decimal(v)
+                    .map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?
+            } else {
                 xark_prover::try_fr_from_decimal(v)
                     .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
-                id_inputs.insert(id, v.clone());
-            }
-            None => {
-                let names: Vec<&String> = vars
-                    .iter()
-                    .filter(|v| !matches!(v.role, VarRole::Derived))
-                    .map(|v| &v.name)
-                    .collect();
-                anyhow::bail!("unknown input `{k}` (circuit inputs: {names:?})");
-            }
+                v.clone()
+            };
+            id_inputs.insert(id, dec);
+            continue;
         }
+
+        // 2. Byte array `name[i]` — a `0x`-hex string, one byte per leaf.
+        let mut arr: Vec<(usize, VarId)> = vars
+            .iter()
+            .filter_map(|var| array_index(&var.name, k).map(|i| (i, var.id)))
+            .collect();
+        if !arr.is_empty() {
+            arr.sort_unstable_by_key(|(i, _)| *i);
+            let bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
+            if bytes.len() != arr.len() {
+                anyhow::bail!(
+                    "input `{k}` is a {}-byte array, but the hex value has {} bytes",
+                    arr.len(),
+                    bytes.len()
+                );
+            }
+            for ((_, id), byte) in arr.iter().zip(bytes) {
+                id_inputs.insert(*id, byte.to_string());
+            }
+            continue;
+        }
+
+        // 3. Packed hash `name.hi` / `name.lo` — a 32-byte `0x`-hex value split into
+        //    two 128-bit field halves (top 16 bytes → hi, low 16 → lo, big-endian).
+        if let (Some(&hi_id), Some(&lo_id)) = (
+            by_name.get(format!("{k}.hi").as_str()),
+            by_name.get(format!("{k}.lo").as_str()),
+        ) {
+            let bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
+            if bytes.len() != 32 {
+                anyhow::bail!(
+                    "hash input `{k}` needs a 32-byte hex value, but got {} bytes",
+                    bytes.len()
+                );
+            }
+            let pack = |chunk: &[u8]| chunk.iter().fold(0u128, |acc, &b| (acc << 8) | b as u128);
+            id_inputs.insert(hi_id, pack(&bytes[..16]).to_string());
+            id_inputs.insert(lo_id, pack(&bytes[16..]).to_string());
+            continue;
+        }
+
+        // 4. SHA-256 digest `name.bits[w][j]` — a 32-byte `0x`-hex hash. Byte `idx`
+        //    occupies word `idx/4`, big-endian slot within the word; leaf bit `j`
+        //    of word `w` is bit `j%8` of hash byte `4w + (3 - j/8)`.
+        let dig: Vec<((usize, usize), VarId)> = vars
+            .iter()
+            .filter_map(|var| digest_index(&var.name, k).map(|wj| (wj, var.id)))
+            .collect();
+        if !dig.is_empty() {
+            let bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
+            if bytes.len() != 32 {
+                anyhow::bail!(
+                    "digest input `{k}` needs a 32-byte hex value, but got {} bytes",
+                    bytes.len()
+                );
+            }
+            for ((w, j), id) in dig {
+                let byte = bytes[4 * w + (3 - j / 8)];
+                id_inputs.insert(id, ((byte >> (j % 8)) & 1).to_string());
+            }
+            continue;
+        }
+
+        // Unknown — list the circuit's logical inputs (deduped roots, not leaves).
+        let mut roots: Vec<&str> = vars
+            .iter()
+            .filter(|v| !matches!(v.role, VarRole::Derived))
+            .map(|v| logical_root(&v.name))
+            .collect();
+        roots.sort_unstable();
+        roots.dedup();
+        anyhow::bail!("unknown input `{k}` (circuit inputs: {roots:?})");
     }
     Ok(id_inputs)
 }

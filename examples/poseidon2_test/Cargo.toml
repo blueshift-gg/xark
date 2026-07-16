@@ -1,0 +1,21 @@
+[package]
+name = "poseidon2_test"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/xark", default-features = false }
+xark-poseidon2 = { path = "../../crates/xark-poseidon2" }
+
+xark-prover = { path = "../../crates/xark-prover", optional = true }
+
+[dev-dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+zkhash = "0.2"
+
+[features]
+host = ["dep:xark-prover"]

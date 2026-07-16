@@ -279,7 +279,7 @@ pub fn cmd_clean(_args: &[String]) -> i32 {
 ///
 /// One-shot circuit testing: build the crate (`xark build`) so its
 /// `target/xark/<pkg>/` artifacts exist, then run `cargo test` in the crate so
-/// the in-crate `xark_prover::circuit(..).prove(..)` tests can load them.
+/// the in-crate `xark_prover::circuit(..).check(..)` tests can load them.
 pub fn cmd_test(args: &[String]) -> i32 {
     // Split at `--`: everything before is ours (the crate dir); everything
     // after is forwarded verbatim to `cargo test`.
@@ -304,9 +304,15 @@ pub fn cmd_test(args: &[String]) -> i32 {
         return code;
     }
 
-    eprintln!("xark: running `cargo test` in {crate_dir}");
+    // Run in `--release`: circuit tests drive a full Groth16 setup+prove+verify,
+    // which is 10–50× slower in debug — a large hash/EC circuit takes *minutes*
+    // unoptimized versus seconds optimized. Proving is the whole point of a
+    // circuit test, so release is the sensible default (the same reason CI runs
+    // these `--release`). Anything after `--` still forwards to the test harness.
+    eprintln!("xark: running `cargo test --release` in {crate_dir}");
     let status = Command::new("cargo")
         .arg("test")
+        .arg("--release")
         .args(forwarded)
         .current_dir(&crate_dir)
         .status();
@@ -540,21 +546,9 @@ const LIB_TEMPLATE: &str = "\
 #![cfg_attr(not(test), no_std)]
 use xark::prelude::*;
 
-/// A circuit proves a statement about its inputs without revealing the private
-/// ones. `Private<Field>` values form the secret witness; `Public<Field>` values
-/// are known to the verifier. `assert_eq` emits an equality *constraint* (not a
-/// native `bool`), and `Field` supports `+ - * ^` (with `^ n` = exponentiation).
-///
-/// The entry function is auto-detected (its parameters are all `Public`/
-/// `Private`), and its name names the circuit everywhere — the generated
-/// `<Fn>Inputs` struct, the proof bundle, the client. Rename `__FN__` and it
-/// flows through.
-///
-/// Build with `xark build .`; prove with
-///   `xark prove . --inputs '{\"secret\": 3, \"result\": 9}'`.
 #[circuit]
 pub fn __FN__(secret: Private<Field>, result: Public<Field>) {
-    // Prove knowledge of a square root: `secret * secret == result`.
+    // prove knowledge of a square root: secret * secret == result
     assert_eq(secret * secret, result);
 }
 ";
@@ -570,20 +564,17 @@ fn tests_template(name: &str, inputs: &str) -> String {
          #[cfg(test)]\n\
          mod tests {{\n\
          \x20   use super::*;\n\
-         \x20   // These tests load the built circuit — run `xark build .` first\n\
-         \x20   // (or `xark test`, which builds then runs `cargo test`).\n\
          \n\
          \x20   #[test]\n\
-         \x20   fn prove_valid() {{\n\
+         \x20   fn accepts_valid() {{\n\
          \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       // `.unwrap()` fails the test with the offending constraint + source line.\n\
-         \x20       c.check({inputs} {{ secret: 2, result: 4 }}).unwrap(); // 2 * 2 == 4\n\
+         \x20       c.check({inputs} {{ secret: \"2\".into(), result: \"4\".into() }}).unwrap(); // 2 * 2 == 4\n\
          \x20   }}\n\
          \n\
          \x20   #[test]\n\
-         \x20   fn prove_invalid() {{\n\
+         \x20   fn rejects_invalid() {{\n\
          \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       assert!(c.check({inputs} {{ secret: 3, result: 4 }}).is_err()); // 3 * 3 != 4\n\
+         \x20       assert!(c.check({inputs} {{ secret: \"3\".into(), result: \"4\".into() }}).is_err()); // 3 * 3 != 4\n\
          \x20   }}\n\
          }}\n"
     )

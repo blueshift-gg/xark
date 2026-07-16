@@ -1,0 +1,24 @@
+[package]
+name = "pedersen_test"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/xark", default-features = false }
+xark-pedersen = { path = "../../crates/xark-pedersen" }
+
+xark-prover = { path = "../../crates/xark-prover", optional = true }
+
+[dev-dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+ark-grumpkin = "0.6"
+ark-ec = "0.6"
+ark-ff = "0.6"
+sha2 = "0.10"
+
+[features]
+host = ["dep:xark-prover"]

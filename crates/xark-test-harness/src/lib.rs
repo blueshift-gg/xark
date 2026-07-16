@@ -20,6 +20,8 @@ use std::sync::{Mutex, OnceLock};
 
 use xark_ir::primitive::{self, PrimitiveProgram};
 
+pub mod bignum;
+
 /// The result of compiling one circuit source.
 pub struct Compiled {
     pub status_success: bool,
@@ -51,6 +53,58 @@ impl Compiled {
         xark_ir::minimize::minimize_with_fill(&cp.to_r1cs(), usize::MAX)
             .constraints
             .len()
+    }
+
+    /// Check that native `inputs` **satisfy** this compiled circuit — the
+    /// in-memory analogue of [`xark_prover::Circuit::check`], for a circuit
+    /// compiled straight from source with [`compile_file`] (no `xark build`).
+    ///
+    /// Each `(name, value)` fans out to its witness leaves via
+    /// [`bignum::LeafInput`], the names are resolved against the *actual* compiled
+    /// program (an unknown or missing leaf is a loud `Err`, never a silent skip),
+    /// the witness is solved, and the circuit is confirmed fully constrained
+    /// (analyzer-clean). Returns `Ok(())` when the inputs satisfy every constraint,
+    /// or a descriptive `Err` — so a genuine signature is `check(..).unwrap()` and a
+    /// tampered one is `assert!(check(..).is_err())`.
+    pub fn check(&self, inputs: &[(&str, &dyn bignum::LeafInput)]) -> Result<(), String> {
+        use xark_ir::primitive::VarRole;
+
+        let program = self.program();
+        let input_vars: Vec<&primitive::Var> = program
+            .vars
+            .iter()
+            .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
+            .collect();
+        let by_name: std::collections::BTreeMap<&str, u32> =
+            input_vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
+
+        let pairs: Vec<(String, String)> =
+            inputs.iter().flat_map(|(name, v)| v.leaves(name)).collect();
+        if pairs.len() != input_vars.len() {
+            let expected: Vec<&str> = input_vars.iter().map(|v| v.name.as_str()).collect();
+            return Err(format!(
+                "circuit expects {} input leaf(s) {:?}, got {} from these values",
+                input_vars.len(),
+                expected,
+                pairs.len(),
+            ));
+        }
+        let mut id_inputs: std::collections::BTreeMap<u32, String> =
+            std::collections::BTreeMap::new();
+        for (name, val) in pairs {
+            let id = by_name.get(name.as_str()).ok_or_else(|| {
+                let expected: Vec<&str> = input_vars.iter().map(|v| v.name.as_str()).collect();
+                format!("unknown circuit input leaf `{name}`; expected one of {expected:?}")
+            })?;
+            id_inputs.insert(*id, val);
+        }
+
+        let assign = xark_ir::solver::solve_and_check(&program, &id_inputs)
+            .map_err(|e| format!("inputs do not satisfy the circuit: {e:?}"))?;
+        if !xark_ir::solver::analyze_underconstrained(&program, &assign).is_empty() {
+            return Err("circuit is under-constrained (a witness var is unconstrained)".into());
+        }
+        Ok(())
     }
 }
 

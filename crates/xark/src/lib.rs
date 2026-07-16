@@ -34,6 +34,11 @@
 
 #![no_std]
 
+// Self-alias so the `#[derive(CircuitInput)]` macro's generated `::xark::Field`
+// paths resolve *inside* this crate (where the derive is used on `Digest`), the
+// same way they resolve in downstream circuit crates. Standard proc-macro pattern.
+extern crate self as xark;
+
 /// The `xark` language markers (`Field`, `Private`, `Public`, `assert_eq`, the
 /// `Field` methods and operator impls, and the recognized intrinsics). Formerly
 /// the standalone `xark-lang` crate, now an in-crate module so that circuit
@@ -46,6 +51,15 @@ pub mod lang;
 /// `Field` impls; circuit authors use the `Field` methods, not these directly.
 pub mod intrinsics;
 
+/// The [`Digest`] wrapper — an ergonomic 256-bit SHA-256 digest that hides the
+/// gadget's word/byte/bit layout so "hash bytes, then assert the digest equals a
+/// known value" is a three-line circuit. See the module docs.
+pub mod digest;
+
+/// The [`Hash`] wrapper — a 256-bit hash packed into 2 field elements, for a
+/// compact `Public<Hash>` input (2 public inputs instead of 256). See the docs.
+pub mod hash;
+
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{
@@ -56,7 +70,15 @@ pub mod prelude {
 
 // The same surface as `prelude`, re-exported at the crate root so both
 // `use xark::prelude::*;` and `use xark::{assert, Field, ...};` work.
+pub use crate::digest::Digest;
+pub use crate::hash::{Blake256, Hash};
 pub use crate::lang::{
     assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public,
 };
-pub use xark_macros::circuit;
+// `#[circuit]` bodies shadow `assert_eq` with this trait-dispatched version so it
+// also compares composite circuit types (e.g. a SHA-256 digest vs a `Digest`).
+#[doc(hidden)]
+pub use crate::lang::{__circuit_assert_eq, AssertEqCircuit};
+// `#[circuit]` and the `#[derive(CircuitInput)]` that generates a struct's
+// `Into<[Field; N]>` in the compiler's structural-flatten order.
+pub use xark_macros::{circuit, CircuitInput};

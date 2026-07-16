@@ -60,17 +60,19 @@
 //! on `N_BITS`); the generators are unchanged. It costs ~`12·N_BITS` gates per
 //! scalar.
 //!
-//! ## Generators (ILLUSTRATIVE)
+//! ## Generators (nothing-up-my-sleeve)
 //!
-//! The generators below are a **self-consistent illustrative set**: the smallest
-//! on-curve Grumpkin points with `x = 1, 2` (`Gᵢ`) and `x = 5` (the offset `O`),
-//! computed by solving `y² = x³ - 17` over `r`. They are **not** a
-//! domain-separated hash-to-curve generator set (the standard way to derive
-//! Pedersen generators). Correctness here means: the circuit output matches an
-//! independent Python reference computed with the *same* generators (see
-//! `tests/vec.rs`). Swapping in a production generator set is documented
-//! follow-up work; only the generator constants would change, not the circuit
-//! structure.
+//! The generators `Gᵢ` are derived by hash-to-curve — `Gᵢ = try-and-increment from
+//! x = SHA256("xark-pedersen:generator:i")` on Grumpkin (`y² = x³ - 17`), taking
+//! the smaller `y`. This fixed, reproducible, domain-separated derivation gives
+//! generators with no known discrete-log relation, which is the security
+//! requirement a Pedersen hash needs. `examples/pedersen` reproduces the exact
+//! derivation with `ark-grumpkin` and checks the circuit output equals
+//! `m0·G0 + m1·G1` (see also `tests/vec.rs`).
+//!
+//! The offset seed `O` is an internal device (it makes the incomplete-addition
+//! accumulator non-degenerate and is corrected out of the result), so it does not
+//! affect the hash value or its security and can be any fixed non-identity point.
 
 #![no_std]
 // Circuit-lowered gadget code: the xark compiler rejects compound assignment on
@@ -87,21 +89,34 @@ const N_BITS: usize = 128;
 const K: usize = 2;
 
 // ===========================================================================
-// Curve constants (illustrative Grumpkin generators; see module docs).
+// Curve constants (nothing-up-my-sleeve Grumpkin generators; see module docs).
 // ===========================================================================
 
-/// Generators `G[0..K]`, one per message scalar.
+/// Generators `G[0..K]`, one per message scalar. **Nothing-up-my-sleeve**: each
+/// `Gᵢ = hash_to_curve("xark-pedersen:generator:i")` — try-and-increment from
+/// `x = SHA256(domain)` on Grumpkin, taking the smaller `y`. This fixed,
+/// reproducible derivation gives generators with no known discrete-log relation
+/// (the security requirement a Pedersen hash needs); `examples/pedersen`
+/// reproduces it with `ark-grumpkin` and checks the output matches `M0·G0 + M1·G1`.
 fn generators() -> [[Field; 2]; K] {
     [
-        // G0: x = 1
+        // G0 = hash_to_curve("xark-pedersen:generator:0")
         [
-            Field::from(1u8),
-            Field::from("17631683881184975370165255887551781615748388533673675138860"),
+            Field::from(
+                "5083206013960444200279950714875343028998509784402499812888938851520740463864",
+            ),
+            Field::from(
+                "2865765882798453005924934609198434488689574281003992091311004806791329233019",
+            ),
         ],
-        // G1: x = 2
+        // G1 = hash_to_curve("xark-pedersen:generator:1")
         [
-            Field::from(2u8),
-            Field::from("13223762910888731527623941915663836211811291400255256354145"),
+            Field::from(
+                "6702321717701145156728393535503061021609887341049508944231879352606054294317",
+            ),
+            Field::from(
+                "6805153572597533704290353269906054575543118937636820472181004119224603304535",
+            ),
         ],
     ]
 }
