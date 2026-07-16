@@ -2,6 +2,9 @@
   "name": "@blueshift-gg/xark-wasm",
   "version": "0.0.1",
   "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/wasm-smoke.test.cjs"
+  },
   "types": "./pkg-web/xark_wasm.d.ts",
   "files": [
     "pkg-node/*",

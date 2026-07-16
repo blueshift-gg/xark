@@ -12,9 +12,9 @@ wasm:
 wasm-dev:
 	cd $(WASM_DIR) && wasm-pack build --target nodejs --dev --out-dir pkg-node
 
-# Run the smoke test (builds wasm-dev first if needed).
+# Run the xark-wasm smoke tests (builds wasm-dev first if needed).
 smoke: wasm-dev
-	cd $(WASM_DIR) && node smoke.cjs
+	cd $(WASM_DIR) && node --test tests/wasm-smoke.test.cjs
 
 # Remove wasm-pack output dirs.
 clean:

@@ -162,4 +162,4 @@ jobs:
         run: cd crates/wasm && wasm-pack build --target nodejs --dev --out-dir pkg-node
 
       - name: Run xark-wasm smoke test
-        run: CIRCUIT_ARTIFACTS_DIR=target/test-out/cube node crates/wasm/smoke.cjs
+        run: CIRCUIT_ARTIFACTS_DIR=target/test-out/cube node --test crates/wasm/tests/wasm-smoke.test.cjs
