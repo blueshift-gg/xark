@@ -14,10 +14,10 @@ use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use xark_backend::serialization::vk_to_snarkjs;
 use xark_backend::{keys::KeyMetadata, setup};
 use xark_ir::Visibility;
 use xark_prover::XarkCircuit;
+use xark_snarkjs::vk_to_snarkjs;
 
 use super::{circuit_hash, load_backend_r1cs, num_public_inputs, synth_err};
 use crate::xark_project::XarkProject;

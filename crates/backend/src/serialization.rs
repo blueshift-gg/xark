@@ -1,16 +1,10 @@
-//! Arkworks canonical (binary) and JSON serialization helpers.
+//! Arkworks canonical (binary) serialization helpers.
 
 use std::fs;
 use std::path::Path;
 
 use ark_bn254::Fr;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
-
-// snarkjs-compatible JSON encodings live in the wasm-safe leaf crate
-// `xark-snarkjs` so the host backend and `xark-wasm` share one source of truth.
-// Re-exported here so existing `xark_backend::serialization::{proof_to_snarkjs,
-// vk_to_snarkjs, public_inputs_to_snarkjs}` call sites keep working unchanged.
-pub use xark_snarkjs::{proof_to_snarkjs, public_inputs_to_snarkjs, vk_to_snarkjs};
 
 pub fn canonical_write_to_file<T: CanonicalSerialize>(
     value: &T,

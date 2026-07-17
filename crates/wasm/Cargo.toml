@@ -24,8 +24,6 @@ crate-type = ["cdylib", "rlib"]
 # panic the prover.
 xark-ir = { path = "../ir", default-features = false }
 xark-prover = { path = "../prover", default-features = false }
-# snarkjs JSON encodings, shared with the host `xark-backend`. A tiny wasm-safe
-# leaf crate (no rayon/chrono), so it drops straight into the wasm build graph.
 xark-snarkjs = { path = "../snarkjs" }
 
 # Only the arkworks crates actually named in `lib.rs`. `ark-ff` / `ark-ec` /

@@ -14,10 +14,11 @@
 //!   object, so callers would need `.get(...)` instead of property access).
 //!
 //! It is a deliberately tiny, wasm-safe leaf crate — pure `arkworks type → typed
-//! struct` construction with no `rayon` / `std::time` / `chrono` — so both the
-//! host `xark-backend` (which pulls those host-only deps) and `xark-wasm` (which
-//! compiles for `wasm32-unknown-unknown` and cannot) can depend on it without
-//! duplicating the encodings.
+//! struct` construction with no `rayon` / `std::time` / `chrono` — so the wasm
+//! build (`xark-wasm`, which compiles for `wasm32-unknown-unknown` and cannot
+//! pull those host-only deps) and the host toolchain (`xark-cli`, the
+//! `to_snarkjs` example) can share one source of truth for the encodings
+//! without the wasm build inheriting host-only dependencies.
 
 use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
@@ -106,10 +107,7 @@ pub struct SnarkjsVerifyingKey {
 /// Build the snarkjs `verification_key.json` object for a Groth16/BN254
 /// verifying key. `n_public` is the number of public inputs (snarkjs's
 /// `nPublic`), i.e. `vk.gamma_abc_g1.len() - 1`.
-pub fn vk_to_snarkjs(
-    vk: &VerifyingKey<Bn254>,
-    n_public: usize,
-) -> SnarkjsVerifyingKey {
+pub fn vk_to_snarkjs(vk: &VerifyingKey<Bn254>, n_public: usize) -> SnarkjsVerifyingKey {
     SnarkjsVerifyingKey {
         protocol: "groth16",
         curve: "bn128",

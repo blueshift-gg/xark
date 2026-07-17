@@ -96,11 +96,11 @@ Frontend-agnostic Groth16 over BN254:
 * Groth16 setup / prove / verify. `setup`/`prove` take explicit `CryptoRng + RngCore`
   bounds; `prove` self-verifies before returning.
 * `ptau.rs` / `setup_phase2.rs` / `ceremony.rs` — the real trusted-setup path:
-  ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup, run a
-  multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency pairing checks
-  (see `docs/trusted-setup.md`).
-* `keys.rs`, `proof.rs`, `serialization.rs` — binary (`CanonicalSerialize`) and JSON
-  encodings (see `docs/serialization.md`).
+  ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup,
+  run a multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency
+  pairing checks (see `docs/trusted-setup.md`).
+* `keys.rs`, `proof.rs`, `serialization.rs` — binary (`CanonicalSerialize`)
+  encoding of keys, proofs, and public inputs.
 * `solana.rs` — the little-endian wire encoder for the on-chain verifier.
 
 ### `xark-verifier` — `crates/verifier`

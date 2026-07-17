@@ -25,6 +25,7 @@ xark = { path = "../lang", version = "0.2.1" }
 xark-ir = { path = "../ir", version = "0.2.1" }
 xark-prover = { path = "../prover", version = "0.2.1" }
 xark-backend = { path = "../backend", version = "0.2.1" }
+xark-snarkjs = { path = "../snarkjs", version = "0.2.1" }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"

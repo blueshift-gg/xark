@@ -16,13 +16,12 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::{
-    proof_to_snarkjs, public_inputs_to_snarkjs, write_public_inputs,
-};
+use xark_backend::serialization::write_public_inputs;
 use xark_backend::solana::{assemble_proof_bytes_le, assemble_public_inputs_bytes_le};
 use xark_backend::{keys::Groth16Keys, prove};
 use xark_ir::VarId;
 use xark_prover::{XarkCircuit, fr_from_decimal};
+use xark_snarkjs::{proof_to_snarkjs, public_inputs_to_snarkjs};
 
 use super::{
     load_backend_r1cs, load_circuit_auto, parse_inputs_arg, resolve_input_ids, setup,
