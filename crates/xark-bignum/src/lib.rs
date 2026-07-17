@@ -700,6 +700,253 @@ pub fn mul_lazy_25519(a: [Field; 3], b: [Field; 3]) -> [Field; 3] {
 /// SOUND weak reduce: carry-normalize a positive limb array (limbs < 2^89) to a
 /// loosely-reduced 3x85 value (limbs < 2^86, ≡ input mod p). Carries range-checked
 /// (deterministic). NO canonical reduce. Used after biased subtractions.
+pub const M_K1: [Field; 4] =
+    modulus_limbs::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+
+/// Sound 4×64 lazy multiply mod secp256k1 p (fold ×c, c=2^32+977). Inputs <2^70;
+/// carries range-checked (sound); output ≡ a·b (mod p), limbs <2^65.
+pub fn mul_lazy_k1(a: [Field; 4], b: [Field; 4]) -> [Field; 4] {
+    let two64 = Field::from(1u128 << 64);
+    let c = Field::from(4294968273u128);
+    let mut cols = [Field::from(0u8); 7];
+    let mut i = 0usize;
+    while i < 4usize {
+        let mut j = 0usize;
+        while j < 4usize {
+            cols[i + j] = cols[i + j] + a[i] * b[j];
+            j += 1;
+        }
+        i += 1;
+    }
+    let t0 = cols[0] + c * cols[4];
+    let t1 = cols[1] + c * cols[5];
+    let t2 = cols[2] + c * cols[6];
+    let t3 = cols[3];
+    let d0 = Field::hint_div_rem(t0, two64);
+    let c0 = d0[0];
+    let r0 = d0[1];
+    assert_eq(t0, two64 * c0 + r0);
+    range_bits::<64>(r0);
+    range_bits::<112>(c0);
+    let x1 = t1 + c0;
+    let d1 = Field::hint_div_rem(x1, two64);
+    let c1 = d1[0];
+    let r1 = d1[1];
+    assert_eq(x1, two64 * c1 + r1);
+    range_bits::<64>(r1);
+    range_bits::<112>(c1);
+    let x2 = t2 + c1;
+    let d2 = Field::hint_div_rem(x2, two64);
+    let c2 = d2[0];
+    let r2 = d2[1];
+    assert_eq(x2, two64 * c2 + r2);
+    range_bits::<64>(r2);
+    range_bits::<112>(c2);
+    let x3 = t3 + c2;
+    let d3 = Field::hint_div_rem(x3, two64);
+    let c3 = d3[0];
+    let r3 = d3[1];
+    assert_eq(x3, two64 * c3 + r3);
+    range_bits::<64>(r3);
+    range_bits::<82>(c3);
+    let u0 = r0 + c * c3;
+    let e0 = Field::hint_div_rem(u0, two64);
+    let k0 = e0[0];
+    let s0 = e0[1];
+    assert_eq(u0, two64 * k0 + s0);
+    range_bits::<64>(s0);
+    range_bits::<52>(k0);
+    let s1 = r1 + k0;
+    [s0, s1, r2, r3]
+}
+
+/// Sound weak reduce for secp256k1: positive limbs < 2^72 → loosely-reduced <2^65.
+pub fn weak_reduce_k1(v: [Field; 4]) -> [Field; 4] {
+    let two64 = Field::from(1u128 << 64);
+    let c = Field::from(4294968273u128);
+    let d0 = Field::hint_div_rem(v[0], two64);
+    let c0 = d0[0];
+    let r0 = d0[1];
+    assert_eq(v[0], two64 * c0 + r0);
+    range_bits::<64>(r0);
+    range_bits::<10>(c0);
+    let x1 = v[1] + c0;
+    let d1 = Field::hint_div_rem(x1, two64);
+    let c1 = d1[0];
+    let r1 = d1[1];
+    assert_eq(x1, two64 * c1 + r1);
+    range_bits::<64>(r1);
+    range_bits::<10>(c1);
+    let x2 = v[2] + c1;
+    let d2 = Field::hint_div_rem(x2, two64);
+    let c2 = d2[0];
+    let r2 = d2[1];
+    assert_eq(x2, two64 * c2 + r2);
+    range_bits::<64>(r2);
+    range_bits::<10>(c2);
+    let x3 = v[3] + c2;
+    let d3 = Field::hint_div_rem(x3, two64);
+    let c3 = d3[0];
+    let r3 = d3[1];
+    assert_eq(x3, two64 * c3 + r3);
+    range_bits::<64>(r3);
+    range_bits::<10>(c3);
+    let u0 = r0 + c * c3;
+    let e0 = Field::hint_div_rem(u0, two64);
+    let k0 = e0[0];
+    let s0 = e0[1];
+    assert_eq(u0, two64 * k0 + s0);
+    range_bits::<64>(s0);
+    range_bits::<40>(k0);
+    let s1 = r1 + k0;
+    [s0, s1, r2, r3]
+}
+
+/// Canonical (< p) reduction of a loosely-reduced secp256k1 value.
+pub fn finalize_k1(v: [Field; 4]) -> [Field; 4] {
+    reduce_once::<4, 64>(v, M_K1)
+}
+
+/// Sound lazy modular inverse mod secp256k1 p: hint w, range-check canonical,
+/// assert a·w ≡ 1 (mod p) via lazy multiply. `a` may be loosely-reduced (≠ 0).
+pub fn inv_lazy_k1(a: [Field; 4]) -> [Field; 4] {
+    let w = Field::hint_mod_inverse::<4>(a, M_K1, 64);
+    range_check_limbs::<4, 64>(w);
+    let prod = finalize_k1(mul_lazy_k1(a, w));
+    assert_eq(prod[0], Field::from(1u8));
+    assert_eq(prod[1], Field::from(0u8));
+    assert_eq(prod[2], Field::from(0u8));
+    assert_eq(prod[3], Field::from(0u8));
+    w
+}
+
+/// Sound lazy incomplete affine doubling on secp256k1 (a=0). Loosely-reduced in/out.
+pub fn ec_double_k1(x: [Field; 4], y: [Field; 4]) -> ([Field; 4], [Field; 4]) {
+    let two = Field::from(2u8);
+    let three = Field::from(3u8);
+    let b8 = [
+        Field::from(8u8) * M_K1[0],
+        Field::from(8u8) * M_K1[1],
+        Field::from(8u8) * M_K1[2],
+        Field::from(8u8) * M_K1[3],
+    ];
+    let x2 = mul_lazy_k1(x, x);
+    let num = [three * x2[0], three * x2[1], three * x2[2], three * x2[3]];
+    let two_y = [two * y[0], two * y[1], two * y[2], two * y[3]];
+    let inv = inv_lazy_k1(two_y);
+    let lam = mul_lazy_k1(num, inv);
+    let lam2 = mul_lazy_k1(lam, lam);
+    let x3 = weak_reduce_k1([
+        b8[0] + lam2[0] - two * x[0],
+        b8[1] + lam2[1] - two * x[1],
+        b8[2] + lam2[2] - two * x[2],
+        b8[3] + lam2[3] - two * x[3],
+    ]);
+    let xmx3 = weak_reduce_k1([
+        b8[0] + x[0] - x3[0],
+        b8[1] + x[1] - x3[1],
+        b8[2] + x[2] - x3[2],
+        b8[3] + x[3] - x3[3],
+    ]);
+    let lt = mul_lazy_k1(lam, xmx3);
+    let y3 = weak_reduce_k1([
+        b8[0] + lt[0] - y[0],
+        b8[1] + lt[1] - y[1],
+        b8[2] + lt[2] - y[2],
+        b8[3] + lt[3] - y[3],
+    ]);
+    (x3, y3)
+}
+
+/// Sound lazy incomplete affine addition on secp256k1 (px ≠ qx). Loosely-reduced.
+pub fn ec_add_k1(
+    px: [Field; 4],
+    py: [Field; 4],
+    qx: [Field; 4],
+    qy: [Field; 4],
+) -> ([Field; 4], [Field; 4]) {
+    let b8 = [
+        Field::from(8u8) * M_K1[0],
+        Field::from(8u8) * M_K1[1],
+        Field::from(8u8) * M_K1[2],
+        Field::from(8u8) * M_K1[3],
+    ];
+    let dx = weak_reduce_k1([
+        b8[0] + qx[0] - px[0],
+        b8[1] + qx[1] - px[1],
+        b8[2] + qx[2] - px[2],
+        b8[3] + qx[3] - px[3],
+    ]);
+    let dy = weak_reduce_k1([
+        b8[0] + qy[0] - py[0],
+        b8[1] + qy[1] - py[1],
+        b8[2] + qy[2] - py[2],
+        b8[3] + qy[3] - py[3],
+    ]);
+    let inv = inv_lazy_k1(dx);
+    let lam = mul_lazy_k1(dy, inv);
+    let lam2 = mul_lazy_k1(lam, lam);
+    let x3 = weak_reduce_k1([
+        b8[0] + lam2[0] - px[0] - qx[0],
+        b8[1] + lam2[1] - px[1] - qx[1],
+        b8[2] + lam2[2] - px[2] - qx[2],
+        b8[3] + lam2[3] - px[3] - qx[3],
+    ]);
+    let xmx3 = weak_reduce_k1([
+        b8[0] + px[0] - x3[0],
+        b8[1] + px[1] - x3[1],
+        b8[2] + px[2] - x3[2],
+        b8[3] + px[3] - x3[3],
+    ]);
+    let lt = mul_lazy_k1(lam, xmx3);
+    let y3 = weak_reduce_k1([
+        b8[0] + lt[0] - py[0],
+        b8[1] + lt[1] - py[1],
+        b8[2] + lt[2] - py[2],
+        b8[3] + lt[3] - py[3],
+    ]);
+    (x3, y3)
+}
+
+/// Sound on-curve check for secp256k1 (y² = x³ + 7), loosely-reduced coords.
+pub fn on_curve_k1(x: [Field; 4], y: [Field; 4]) {
+    range_check_limbs::<4, 64>(x);
+    range_check_limbs::<4, 64>(y);
+    let y2 = mul_lazy_k1(y, y);
+    let x2 = mul_lazy_k1(x, x);
+    let x3 = mul_lazy_k1(x2, x);
+    let rhs = [x3[0] + Field::from(7u8), x3[1], x3[2], x3[3]];
+    let lf = finalize_k1(y2);
+    let rf = finalize_k1(rhs);
+    let mut i = 0usize;
+    while i < 4usize {
+        assert_eq(lf[i], rf[i]);
+        i += 1;
+    }
+}
+
+/// Decompose a 4×64-bit value into 256 little-endian pinned bits (`< 2^256`).
+pub fn scalar_to_bits_256(u: [Field; 4]) -> [Field; 256] {
+    let mut bits = [Field::from(0u8); 256];
+    let mut l = 0usize;
+    while l < 4usize {
+        let mut acc = Field::from(0u8);
+        let mut pow = Field::from(1u8);
+        let mut j = 0usize;
+        while j < 64usize {
+            let b = Field::hint_bit(u[l], j);
+            b.assert_bool();
+            bits[l * 64 + j] = b;
+            acc = acc + b * pow;
+            pow = pow + pow;
+            j += 1;
+        }
+        assert_eq(acc, u[l]);
+        l += 1;
+    }
+    bits
+}
+
 pub fn weak_reduce_25519(v: [Field; 3]) -> [Field; 3] {
     let two85 = Field::from(1u128 << 85);
     let c19 = Field::from(19u8);
