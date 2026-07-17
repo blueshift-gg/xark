@@ -12,13 +12,13 @@
 use ed25519_dalek::{Signer, SigningKey};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha512};
-use xark_test_harness::bignum::{Point, Scalar};
+use xark_test_harness::bignum::{Point85, Scalar};
 
 /// Recover the affine `(x, y)` of a 32-byte RFC-8032 compressed Edwards point.
 /// `y` is the compressed bytes (LE, top bit cleared); `x` is the one value dalek
 /// computes but hides — `x² = (y²−1)/(d·y²+1)`, `x = ·^((p+3)/8)` with the `√−1`
 /// branch, sign-fixed from the top bit. All curve constants are local.
-fn decompress(bytes: &[u8; 32]) -> Point {
+fn decompress(bytes: &[u8; 32]) -> Point85 {
     let p = (BigUint::from(1u8) << 255u32) - 19u8; // 2^255 − 19
     let d = BigUint::parse_bytes(
         b"37095705934669439343138083508754565189542113879843219016388785533085940283555",
@@ -45,7 +45,7 @@ fn decompress(bytes: &[u8; 32]) -> Point {
     if &x % 2u8 != BigUint::from(sign) {
         x = &p - x;
     }
-    Point {
+    Point85 {
         x: Scalar::from(x),
         y: Scalar::from(y),
     }
@@ -85,10 +85,11 @@ fn eddsa_verify_matches_dalek() {
     );
 
     // Constraint-count regression pin (minimized R1CS, what the prover proves).
+    // Sound lazy extended-coordinate path (was 4_554_355 affine).
     let n = c.minimized_r1cs_len();
-    eprintln!("ed25519 eddsa_verify: {n} constraints");
+    eprintln!("ed25519 eddsa_verify (lazy): {n} constraints");
     assert_eq!(
-        n, 4_554_355,
+        n, 2_358_142,
         "ed25519 eddsa_verify constraint count changed"
     );
 

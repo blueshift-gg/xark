@@ -120,6 +120,23 @@ use xark_bignum::{
 type L3 = [Field; 3];
 type Ext = [L3; 4];
 
+// A base-field element in the lazy path's 3×85-bit limb layout (distinct from the
+// affine gadget's `Fp` at 3×86). Only used as the input-flatten wrapper so the
+// `ed25519_verify` example can take aggregate `Point` coordinates.
+xark_bignum::fp!(
+    pub FpL,
+    "57896044618658097711785492504343953926634992332820282019728792003956564819949",
+    3,
+    85
+);
+/// An Ed25519 affine point with 3×85-bit coordinates — the lazy path's public
+/// input type (`x`/`y` each flatten to `<name>.x.limbs[0..2]` / `<name>.y.limbs`).
+#[derive(Clone, Copy)]
+pub struct PointL {
+    pub x: FpL,
+    pub y: FpL,
+}
+
 const BX85: L3 = modulus_limbs::<3, 85>(
     "15112221349535400772501151409588531511454012693041857206046113283949847762202",
 );

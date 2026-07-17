@@ -168,6 +168,29 @@ impl LeafInput for Point {
     }
 }
 
+/// An affine point whose coordinates flatten as **3×85-bit** limbs — the layout of
+/// the lazy Ed25519 path's `PointL`, distinct from the default 3×86 [`Point`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Point85 {
+    pub x: Uint256,
+    pub y: Uint256,
+}
+
+impl LeafInput for Point85 {
+    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
+        let coord = |v: &Uint256, name: &str| -> Vec<(String, String)> {
+            v.limbs(3, 85)
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| (format!("{prefix}.{name}.limbs[{i}]"), l))
+                .collect()
+        };
+        let mut out = coord(&self.x, "x");
+        out.extend(coord(&self.y, "y"));
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -21,12 +21,6 @@ fn limbs85(v: &BigUint) -> Vec<String> {
         .map(|i| ((v >> (i as u32 * 85)) & &m).to_string())
         .collect()
 }
-fn limbs86(v: &BigUint) -> Vec<String> {
-    let m = (BigUint::from(1u8) << 86u32) - 1u8;
-    (0..3)
-        .map(|i| ((v >> (i as u32 * 86)) & &m).to_string())
-        .collect()
-}
 
 #[test]
 fn mul_lazy_is_correct() {
@@ -165,103 +159,4 @@ pub fn circuit(bx0:Private<Field>,bx1:Private<Field>,bx2:Private<Field>,by0:Priv
     }
     let assign = xark_ir::solver::solve_and_check(&prog, &inp).expect("ext_add: B + 2B == 3B");
     assert!(xark_ir::solver::analyze_underconstrained(&prog, &assign).is_empty());
-}
-
-fn decompress_bg(bytes: &[u8; 32]) -> (BigUint, BigUint) {
-    let pp = p();
-    let d = BigUint::parse_bytes(
-        b"37095705934669439343138083508754565189542113879843219016388785533085940283555",
-        10,
-    )
-    .unwrap();
-    let sqrt_m1 = BigUint::parse_bytes(
-        b"19681161376707505956807079304988542015446066515923890162744021073123829784752",
-        10,
-    )
-    .unwrap();
-    let mut b = *bytes;
-    let sign = b[31] >> 7;
-    b[31] &= 0x7f;
-    let y = BigUint::from_bytes_le(&b);
-    let y2 = &y * &y % &pp;
-    let uv = (&y2 + &pp - 1u8) * (&d * &y2 + 1u8).modpow(&(&pp - 2u8), &pp) % &pp;
-    let mut x = uv.modpow(&((&pp + 3u8) / 8u8), &pp);
-    if &x * &x % &pp != uv {
-        x = x * &sqrt_m1 % &pp;
-    }
-    assert_eq!(&x * &x % &pp, uv, "invalid point");
-    if &x % 2u8 != BigUint::from(sign) {
-        x = &pp - x;
-    }
-    (x, y)
-}
-
-/// Full sound lazy EdDSA verification against a real `ed25519-dalek` signature:
-/// valid verifies, tampered rejected, analyzer-clean; pins the minimized count.
-#[test]
-fn verify_lazy_matches_dalek() {
-    use ed25519_dalek::{Signer, SigningKey};
-    use sha2::{Digest, Sha512};
-    let sk = SigningKey::from_bytes(&[0x42u8; 32]);
-    let vk = sk.verifying_key();
-    let msg = b"xark ed25519 lazy vector";
-    let sig = sk.sign(msg);
-    let a_bytes = vk.to_bytes();
-    let sig_bytes = sig.to_bytes();
-    let r_bytes: [u8; 32] = sig_bytes[..32].try_into().unwrap();
-    let (ax, ay) = decompress_bg(&a_bytes);
-    let (rx, ry) = decompress_bg(&r_bytes);
-    let s = BigUint::from_bytes_le(&sig_bytes[32..]);
-    let mut h = Sha512::new();
-    h.update(r_bytes);
-    h.update(a_bytes);
-    h.update(msg);
-    let l = (BigUint::from(1u8) << 252u32)
-        + BigUint::parse_bytes(b"27742317777372353535851937790883648493", 10).unwrap();
-    let k = BigUint::from_bytes_le(&h.finalize()) % &l;
-
-    let src = r#"#![no_std]
-use xark::{Field, Public};
-use xark_bignum::scalar_to_bits;
-use xark_ed25519::eddsa_verify_lazy;
-pub fn circuit(
-  ax0:Public<Field>,ax1:Public<Field>,ax2:Public<Field>, ay0:Public<Field>,ay1:Public<Field>,ay2:Public<Field>,
-  rx0:Public<Field>,rx1:Public<Field>,rx2:Public<Field>, ry0:Public<Field>,ry1:Public<Field>,ry2:Public<Field>,
-  s0:Public<Field>,s1:Public<Field>,s2:Public<Field>, k0:Public<Field>,k1:Public<Field>,k2:Public<Field>){
-    let sb = scalar_to_bits([s0,s1,s2]);
-    let kb = scalar_to_bits([k0,k1,k2]);
-    eddsa_verify_lazy([ax0,ax1,ax2],[ay0,ay1,ay2],[rx0,rx1,rx2],[ry0,ry1,ry2],sb,kb);
-}"#;
-    let c = xark_test_harness::compile_source("verify_lazy_vec", src, "bn254");
-    assert!(c.status_success, "{}", c.stderr);
-    let prog = c.program();
-    let id = |n: &str| prog.vars.iter().find(|v| v.name == n).unwrap().id;
-    let build = |s_val: &BigUint| {
-        let mut inp = BTreeMap::new();
-        for (pfx, v) in [("ax", &ax), ("ay", &ay), ("rx", &rx), ("ry", &ry)] {
-            for (i, sv) in limbs85(v).iter().enumerate() {
-                inp.insert(id(&format!("{pfx}{i}")), sv.clone());
-            }
-        }
-        for (i, sv) in limbs86(s_val).iter().enumerate() {
-            inp.insert(id(&format!("s{i}")), sv.clone());
-        }
-        for (i, sv) in limbs86(&k).iter().enumerate() {
-            inp.insert(id(&format!("k{i}")), sv.clone());
-        }
-        inp
-    };
-    let good = build(&s);
-    let assign =
-        xark_ir::solver::solve_and_check(&prog, &good).expect("valid dalek signature must verify");
-    assert!(xark_ir::solver::analyze_underconstrained(&prog, &assign).is_empty());
-    let bad = build(&BigUint::from(1u8));
-    assert!(
-        xark_ir::solver::solve_and_check(&prog, &bad).is_err(),
-        "tampered signature must be rejected"
-    );
-
-    let n = c.minimized_r1cs_len();
-    eprintln!("lazy eddsa_verify: {n} constraints (affine baseline 4_554_355)");
-    assert_eq!(n, 2_358_142, "lazy eddsa_verify constraint count changed");
 }
