@@ -100,3 +100,24 @@ test("verify throws on a malformed proof (does not silently return false)", () =
 test("prove throws on an unsatisfiable witness", () => {
   assert.throws(() => prove(xbc, pk, { secret: "3", result: "26" }));
 });
+
+test("byte args accept a raw ArrayBuffer (browser response.arrayBuffer() flow)", () => {
+  const ab = (u8) => new Uint8Array(u8).buffer;
+  const { proof, publicInputs } = prove(ab(xbc), ab(pk), { secret: "3", result: "27" });
+  assert.ok(proof.length > 0, "ArrayBuffer circuit/pk must still prove");
+  assert.strictEqual(
+    verify(ab(vk), ab(proof), ab(publicInputs)), true,
+    "verify must accept ArrayBuffer vk/proof/publicInputs",
+  );
+});
+
+test("byte args reject a non-bytes value with a clear message", () => {
+  assert.throws(
+    () => prove("not-bytes", pk, { secret: "3", result: "27" }),
+    /Uint8Array or ArrayBuffer/,
+  );
+  assert.throws(
+    () => verify({}, p27.proof, p27.publicInputs),
+    /Uint8Array or ArrayBuffer/,
+  );
+});

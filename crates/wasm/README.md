@@ -1,38 +1,42 @@
 # xark-wasm
 
-Generate and verify **Groth16 (BN254) proofs in the browser or Node.js**.
+Generate and verify **Groth16 (BN254) zero knowledge proofs in the browser or Node.js**.
 
 ```js
 import init, { prove, verify } from "@blueshift-gg/xark-wasm";
+
 await init();
 
-const xbc = new Uint8Array(await (await fetch("/circuit/circuit.xbc")).arrayBuffer());
-const pk  = new Uint8Array(await (await fetch("/circuit/pk.bin")).arrayBuffer());
+const [circuit, pk, vk] = await Promise.all([
+  fetch("/circuit/circuit.xbc").then((r) => r.arrayBuffer()),
+  fetch("/circuit/pk.bin").then((r) => r.arrayBuffer()),
+  fetch("/circuit/vk.bin").then((r) => r.arrayBuffer()),
+]);
 
-const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
-verify(vkBytes, proof, publicInputs); // true
+const { proof, publicInputs } = prove(circuit, pk, { secret: "3", result: "27" });
+verify(vk, proof, publicInputs); // true
 ```
 
 Runs anywhere with Web Crypto: **browsers**, **Node 20+**, **Cloudflare Workers**,
 **Vercel Edge**, **Deno**. The circuit, proving/verifying keys, proof, and public
 inputs are all **binary** — only the witness inputs (a tiny `name → value` map)
-cross the boundary as a plain object.
+cross the boundary as a plain object. Every binary argument accepts a
+`Uint8Array` **or** an `ArrayBuffer`, so the result of `response.arrayBuffer()`
+(or a Node `Buffer`) can be passed straight in — no `new Uint8Array(...)` wrap.
 
 ## Producing circuit artifacts
 
-Before proving, you need the circuit bytecode and proving/verifying keys. Produce
-them once with the `xark` CLI and ship to your client:
+Before proving, you need the circuit bytecode and proving/verifying keys.
+Produce them with the `xark` CLI:
 
 ```sh
-xark build  my_circuit    # → my_circuit/target/xark/<name>/circuit.xbc   (binary, self-contained)
-xark setup  my_circuit    # → my_circuit/target/xark/<name>/{pk.bin, vk.bin}
+xark build    # → target/xark/<name>/circuit.xbc   (binary, self-contained)
+xark setup    # → target/xark/<name>/{pk.bin, vk.bin}
 ```
 
 `circuit.xbc` is the single self-contained build artifact: it encodes both the
 solver view (witness generation) and the backend view (the minimized R1CS the
-proving key is keyed to). No JSON circuit files are required. (`xark build
---emit-json` still writes `circuit.json`/`r1cs.json` for debugging, but the wasm
-bindings consume the binary.)
+proving key is keyed to)
 
 ## Usage
 
@@ -40,57 +44,52 @@ bindings consume the binary.)
 
 ```js
 import init, { prove, verify, circuit_inputs } from "@blueshift-gg/xark-wasm";
+
 await init();
 
-const [xbc, pk, vk] = await Promise.all([
-  fetch("/circuit/circuit.xbc").then(r => r.arrayBuffer()).then(b => new Uint8Array(b)),
-  fetch("/circuit/pk.bin").then(r => r.arrayBuffer()).then(b => new Uint8Array(b)),
-  fetch("/circuit/vk.bin").then(r => r.arrayBuffer()).then(b => new Uint8Array(b)),
+const [circuit, pk, vk] = await Promise.all([
+  fetch("/circuit/circuit.xbc").then((r) => r.arrayBuffer()),
+  fetch("/circuit/pk.bin").then((r) => r.arrayBuffer()),
+  fetch("/circuit/vk.bin").then((r) => r.arrayBuffer()),
 ]);
 
-console.log(circuit_inputs(xbc));
+console.log(circuit_inputs(circuit));
 // → [{ name: "secret", role: "private" }, { name: "result", role: "public" }]
+
+const { proof, publicInputs } = prove(circuit, pk, { secret: "3", result: "27" });
+
+console.log(verify(vk, proof, publicInputs)); // true
+```
+
+### Node.js
+
+The Node build does not require a separate `init()` step.
+
+```js
+import { readFileSync } from "node:fs";
+import { prove, verify } from "@blueshift-gg/xark-wasm";
+
+// `readFileSync` returns a Buffer, which is a Uint8Array — pass it straight in.
+const xbc = readFileSync("examples/cube/target/xark/cube/circuit.xbc");
+const pk  = readFileSync("examples/cube/target/xark/cube/pk.bin");
+const vk  = readFileSync("examples/cube/target/xark/cube/vk.bin");
 
 const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
 
 console.log(verify(vk, proof, publicInputs)); // true
 ```
 
-### Proving many times (preload)
+### Performance optimization (preloading)
 
 `prove` re-expands the `.xbc` and re-minimizes the R1CS on every call. For
 repeated proofs against the same circuit + key, parse them once with `preload`
 and call `prove_preloaded`:
 
 ```js
-preload(xbc, pk);                                        // once
+preload(circuit, pk);
 const a = prove_preloaded({ secret: "3", result: "27" });
 const b = prove_preloaded({ secret: "2", result: "8" });
 ```
-
-### Node.js
-
-```js
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import init, { prove, verify } from "@blueshift-gg/xark-wasm";
-
-// Node.js: pass the wasm bytes explicitly (fetch can't read file:// URLs).
-const wasmPath = fileURLToPath(new URL("../node_modules/@blueshift-gg/xark-wasm/xark_wasm_bg.wasm", import.meta.url));
-const wasmBytes = readFileSync(wasmPath);
-await init({ module_or_path: wasmBytes });
-
-const xbc = new Uint8Array(readFileSync("../../examples/cube/target/xark/cube/circuit.xbc"));
-const pk  = new Uint8Array(readFileSync("../../examples/cube/target/xark/cube/pk.bin"));
-const vk  = new Uint8Array(readFileSync("../../examples/cube/target/xark/cube/vk.bin"));
-
-const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
-
-console.log(verify(vk, proof, publicInputs)); // true
-```
-
-On Edge runtimes (Workers, Deno), import the `.wasm` via a `CompiledWasm` rule
-or pass a `WebAssembly.Module` to `init({ module_or_path })`.
 
 ## API
 
@@ -98,11 +97,11 @@ or pass a `WebAssembly.Module` to `init({ module_or_path })`.
 
 Generates a Groth16 proof entirely in memory.
 
-| argument      | type         | description                                          |
-|---------------|--------------|------------------------------------------------------|
-| `circuitXbc`  | `Uint8Array` | `circuit.xbc` (binary, self-contained build artifact)|
-| `pkBytes`     | `Uint8Array` | Proving key (`pk.bin`, binary)                       |
-| `inputs`      | `object`     | Witness values as `{ name: "value" }` (decimal strs) |
+| argument     | type                          | description                                           |
+|--------------|-------------------------------|-------------------------------------------------------|
+| `circuitXbc` | `Uint8Array` \| `ArrayBuffer` | `circuit.xbc` (binary, self-contained build artifact) |
+| `pkBytes`    | `Uint8Array` \| `ArrayBuffer` | Proving key (`pk.bin`, binary)                        |
+| `inputs`     | `object`                      | Witness values as `{ name: "value" }`                 |
 
 Returns a `ProveResult`:
 
@@ -120,9 +119,8 @@ witness, or malformed key.
 host's `proof.bin` / `public_inputs.bin`) — pass them straight to `verify`. For
 snarkjs interop, convert them on demand (see `proof_to_snarkjs` below).
 
-> `prove` does **not** self-verify (matching snarkjs / arkworks / gnark, where
-> proving and verifying are separate steps). Call `verify` on the result if you
-> want that check.
+> `prove` does **not** self-verify. Call `verify` on the result if you want
+> that check.
 
 ### `preload(circuitXbc, pkBytes)`
 
@@ -135,25 +133,23 @@ hasn't been called.
 
 ### `verify(vkBytes, proofBytes, publicInputsBytes)`
 
-| argument            | type         |
-|---------------------|--------------|
-| `vkBytes`           | `Uint8Array` |
-| `proofBytes`        | `Uint8Array` |
-| `publicInputsBytes` | `Uint8Array` |
+| argument            | type                          |
+|---------------------|-------------------------------|
+| `vkBytes`           | `Uint8Array` \| `ArrayBuffer` |
+| `proofBytes`        | `Uint8Array` \| `ArrayBuffer` |
+| `publicInputsBytes` | `Uint8Array` \| `ArrayBuffer` |
 
 Returns `true` if valid, `false` if well-formed but not verifying. Throws on
 deserialization errors.
 
 ### `proof_to_snarkjs(proofBytes)` → `object`
 
-Converts the `proof` `Uint8Array` from `prove` into the snarkjs proof object (the
-same shape as the host's `snarkjs-proof.json`). Opt-in: `prove` returns only the
-canonical bytes, so you build the snarkjs view only when you need it.
+Converts the `proof` `Uint8Array` from `prove()` into the snarkjs proof object.
 
 ### `public_inputs_to_snarkjs(publicInputsBytes)` → `string[]`
 
-Converts the `publicInputs` `Uint8Array` from `prove` into the snarkjs `public.json`
-array of decimal strings.
+Converts the `publicInputs` `Uint8Array` from `prove()` into the snarkjs
+`public.json` array of decimal strings.
 
 ```js
 const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
@@ -169,23 +165,9 @@ Returns `[{ name: "…", role: "public" | "private" }, …]` in declaration orde
 
 Package version.
 
-## How the circuit is consumed
-
-A single `circuit.xbc` is sufficient because it encodes both views the prover
-needs — mirroring `xark prove`:
-
-* **`expand_function_blob_reduced`** → the **minimized R1CS** the proving key was
-  generated against (`xark setup` keys the pk to exactly this circuit). Using any
-  other R1CS would make the proof fail to verify.
-* **`expand_function_blob`** (full) → the circuit **with its witness-generation
-  program**, used to solve the witness. (The reduced variant deliberately leaves
-  witness generation empty.)
-
 ## Security
 
 Prover randomness comes from the platform CSPRNG (`crypto.getRandomValues`).
-No deterministic-RNG option: reproducible prover randomness breaks
-zero-knowledge.
 
 ## Build
 
@@ -197,8 +179,7 @@ rustup target add wasm32-unknown-unknown
 ```
 
 The `module` target (Cloudflare Workers / `workerd`) is built with
-`wasm-bindgen` directly, since wasm-pack can't emit `--target module`. To reuse
-wasm-pack's `wasm-opt` pass without a separate `wasm-opt` install, a release
-`module` build **also rebuilds `dist/bundler/`** and copies its optimized wasm
-(the raw wasm is byte-identical across targets — only the JS glue differs). So
-don't be surprised if `./build.sh module` refreshes `dist/bundler/` too.
+`wasm-bindgen` directly, since wasm-pack can't emit `--target module`. A
+`release` build of the `module` target will **also rebuilds `dist/bundler/`**
+and copies its optimized wasm (the raw wasm is byte-identical across targets —
+only the JS glue differs).

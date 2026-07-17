@@ -36,8 +36,10 @@
 //! import init, { prove } from "./dist/web/xark_wasm.js";
 //! await init();    // instantiate the module
 //!
-//! const xbc        = new Uint8Array(await (await fetch("/circuit/circuit.xbc")).arrayBuffer());
-//! const pkBytes    = new Uint8Array(await (await fetch("/circuit/pk.bin")).arrayBuffer());
+//! // byte args accept a Uint8Array OR an ArrayBuffer, so the result of
+//! // `response.arrayBuffer()` can be passed straight through (no wrapping):
+//! const xbc        = await (await fetch("/circuit/circuit.xbc")).arrayBuffer();
+//! const pkBytes    = await (await fetch("/circuit/pk.bin")).arrayBuffer();
 //! const out = prove(xbc, pkBytes, { secret: "3", result: "27" });
 //! // => ProveResult {
 //! //   proof:            Uint8Array,   // canonical compressed bytes (== proof.bin)
@@ -74,6 +76,29 @@ use xark_ir::solver;
 use xark_ir::{CircuitProgram, R1csProgram, VarId};
 use xark_prover::{lower_witness, try_fr_from_decimal, XarkCircuit};
 use xark_snarkjs::{proof_to_snarkjs as snarkjs_proof, public_inputs_to_snarkjs as snarkjs_public};
+
+// ---- byte inputs: accept a `Uint8Array` or a raw `ArrayBuffer` -------------
+
+/// The input type for every binary argument (`circuit.xbc`, `pk.bin`, `vk.bin`,
+/// a proof, …). Accepting an [`ArrayBuffer`] in addition to a `Uint8Array` lets
+/// callers hand the result of `await response.arrayBuffer()` straight to
+/// `prove` / `verify` without the `new Uint8Array(…)` wrap — that wrap is pure
+/// ceremony the library can absorb itself.
+///
+/// (`typescript_type` points the generated `.d.ts` at the union declared in the
+/// custom section below; at the wasm boundary the value is just a `JsValue`
+/// that [`into_bytes`] coerces.)
+#[wasm_bindgen(typescript_custom_section)]
+const BYTES_TS: &str = r#"
+/** A binary payload: a `Uint8Array`, or a raw `ArrayBuffer` (e.g. from `response.arrayBuffer()`). */
+export type Bytes = Uint8Array | ArrayBuffer;
+"#;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "Bytes")]
+    pub type Bytes;
+}
 
 // ---- preload: parse the heavy artifacts once, prove many times -------------
 
@@ -264,8 +289,10 @@ fn load_artifacts(circuit_xbc: &[u8], pk_bytes: &[u8]) -> Result<PreState, JsVal
 /// `circuit_xbc` is the self-contained binary artifact `xark build` always
 /// writes; `pk_bytes` is the `pk.bin` from `xark setup`.
 #[wasm_bindgen]
-pub fn preload(circuit_xbc: &[u8], pk_bytes: &[u8]) -> Result<(), JsValue> {
-    let state = load_artifacts(circuit_xbc, pk_bytes)?;
+pub fn preload(circuit_xbc: &Bytes, pk_bytes: &Bytes) -> Result<(), JsValue> {
+    let circuit_xbc = into_bytes(circuit_xbc, "circuit.xbc")?;
+    let pk_bytes = into_bytes(pk_bytes, "pk.bin")?;
+    let state = load_artifacts(&circuit_xbc, &pk_bytes)?;
     PRESTATE.with(|cell| *cell.borrow_mut() = Some(state));
     Ok(())
 }
@@ -291,14 +318,19 @@ pub fn prove_preloaded(inputs: JsValue) -> Result<ProveResult, JsValue> {
 /// Generate a Groth16 proof entirely in memory.
 ///
 /// See the crate docs for the shape of each argument and the return object.
+/// Every byte argument accepts a `Uint8Array` **or** an `ArrayBuffer` — so the
+/// result of `await response.arrayBuffer()` can be passed directly.
+///
 /// Throws a `JsValue` (string) on any error: a malformed `.xbc`, unknown input,
 /// an unsatisfiable witness, or a malformed proving key.
 ///
 /// Does not self-verify (matching snarkjs / arkworks / gnark) — verify a
 /// returned proof with [`verify`] when needed.
 #[wasm_bindgen]
-pub fn prove(circuit_xbc: &[u8], pk_bytes: &[u8], inputs: JsValue) -> Result<ProveResult, JsValue> {
-    let s = load_artifacts(circuit_xbc, pk_bytes)?;
+pub fn prove(circuit_xbc: &Bytes, pk_bytes: &Bytes, inputs: JsValue) -> Result<ProveResult, JsValue> {
+    let circuit_xbc = into_bytes(circuit_xbc, "circuit.xbc")?;
+    let pk_bytes = into_bytes(pk_bytes, "pk.bin")?;
+    let s = load_artifacts(&circuit_xbc, &pk_bytes)?;
     let id_inputs = resolve_inputs(&s.by_name, inputs)
         .map_err(|e| js(&e))?;
     prove_with(&s.full, &s.prog, &s.pk, &id_inputs)
@@ -316,16 +348,19 @@ pub fn prove(circuit_xbc: &[u8], pk_bytes: &[u8], inputs: JsValue) -> Result<Pro
 /// deserialization error (malformed key / proof / public inputs).
 #[wasm_bindgen]
 pub fn verify(
-    vk_bytes: &[u8],
-    proof_bytes: &[u8],
-    public_inputs_bytes: &[u8],
+    vk_bytes: &Bytes,
+    proof_bytes: &Bytes,
+    public_inputs_bytes: &Bytes,
 ) -> Result<bool, JsValue> {
-    let vk = VerifyingKey::<Bn254>::deserialize_with_mode(vk_bytes, Compress::Yes, Validate::Yes)
+    let vk_bytes = into_bytes(vk_bytes, "verifying key")?;
+    let proof_bytes = into_bytes(proof_bytes, "proof")?;
+    let public_inputs_bytes = into_bytes(public_inputs_bytes, "public inputs")?;
+    let vk = VerifyingKey::<Bn254>::deserialize_with_mode(&vk_bytes[..], Compress::Yes, Validate::Yes)
         .map_err(|e| js(&format!("deserializing verifying key: {e}")))?;
-    let proof = Proof::<Bn254>::deserialize_with_mode(proof_bytes, Compress::Yes, Validate::Yes)
+    let proof = Proof::<Bn254>::deserialize_with_mode(&proof_bytes[..], Compress::Yes, Validate::Yes)
         .map_err(|e| js(&format!("deserializing proof: {e}")))?;
     let public: Vec<Fr> =
-        Vec::<Fr>::deserialize_with_mode(public_inputs_bytes, Compress::Yes, Validate::Yes)
+        Vec::<Fr>::deserialize_with_mode(&public_inputs_bytes[..], Compress::Yes, Validate::Yes)
             .map_err(|e| js(&format!("deserializing public inputs: {e}")))?;
     Groth16::<Bn254>::verify(&vk, &public, &proof).map_err(|e| js(&format!("verifying: {e}")))
 }
@@ -335,8 +370,9 @@ pub fn verify(
 /// `snarkjs-proof.json`. Opt-in: [`prove`] returns only the canonical bytes, so
 /// callers who need snarkjs interop build the object here.
 #[wasm_bindgen]
-pub fn proof_to_snarkjs(proof_bytes: &[u8]) -> Result<JsValue, JsValue> {
-    let proof = Proof::<Bn254>::deserialize_with_mode(proof_bytes, Compress::Yes, Validate::Yes)
+pub fn proof_to_snarkjs(proof_bytes: &Bytes) -> Result<JsValue, JsValue> {
+    let proof_bytes = into_bytes(proof_bytes, "proof")?;
+    let proof = Proof::<Bn254>::deserialize_with_mode(&proof_bytes[..], Compress::Yes, Validate::Yes)
         .map_err(|e| js(&format!("deserializing proof: {e}")))?;
     serde_wasm_bindgen::to_value(&snarkjs_proof(&proof))
         .map_err(|e| js(&format!("encoding snarkjs proof: {e}")))
@@ -346,9 +382,10 @@ pub fn proof_to_snarkjs(proof_bytes: &[u8]) -> Result<JsValue, JsValue> {
 /// == `public_inputs.bin`) to the snarkjs `public.json` array of decimal strings.
 /// Opt-in, mirroring [`proof_to_snarkjs`].
 #[wasm_bindgen]
-pub fn public_inputs_to_snarkjs(public_inputs_bytes: &[u8]) -> Result<JsValue, JsValue> {
+pub fn public_inputs_to_snarkjs(public_inputs_bytes: &Bytes) -> Result<JsValue, JsValue> {
+    let public_inputs_bytes = into_bytes(public_inputs_bytes, "public inputs")?;
     let public: Vec<Fr> =
-        Vec::<Fr>::deserialize_with_mode(public_inputs_bytes, Compress::Yes, Validate::Yes)
+        Vec::<Fr>::deserialize_with_mode(&public_inputs_bytes[..], Compress::Yes, Validate::Yes)
             .map_err(|e| js(&format!("deserializing public inputs: {e}")))?;
     serde_wasm_bindgen::to_value(&snarkjs_public(&public))
         .map_err(|e| js(&format!("encoding snarkjs public inputs: {e}")))
@@ -369,11 +406,12 @@ struct CircuitInput {
 ///
 /// `circuit_xbc` is the binary `circuit.xbc`.
 #[wasm_bindgen]
-pub fn circuit_inputs(circuit_xbc: &[u8]) -> Result<JsValue, JsValue> {
+pub fn circuit_inputs(circuit_xbc: &Bytes) -> Result<JsValue, JsValue> {
+    let circuit_xbc = into_bytes(circuit_xbc, "circuit.xbc")?;
     // TODO: switch to a header-only parse (variable metadata only) when
     // `xark-ir` exposes one — expanding the full circuit just to list declared
     // inputs is heavier than necessary.
-    let full = expand_function_blob(circuit_xbc)
+    let full = expand_function_blob(&circuit_xbc)
         .map_err(|e| js(&format!("parsing circuit.xbc: {e}")))?;
     let mut vars: Vec<&Var> = full
         .vars
@@ -415,6 +453,23 @@ pub fn version() -> String {
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+}
+
+/// Coerce a [`Bytes`] payload (`Uint8Array` or `ArrayBuffer`) into owned bytes,
+/// so callers can pass `await response.arrayBuffer()` straight through without
+/// wrapping it in `new Uint8Array(…)`. Anything else (a `Response`, a `string`,
+/// …) is a clean error rather than a silent zero-length buffer.
+fn into_bytes(v: &Bytes, what: &'static str) -> Result<Vec<u8>, JsValue> {
+    let raw: &JsValue = v.as_ref();
+    if let Some(arr) = raw.dyn_ref::<js_sys::Uint8Array>() {
+        return Ok(arr.to_vec());
+    }
+    if let Some(buf) = raw.dyn_ref::<js_sys::ArrayBuffer>() {
+        return Ok(js_sys::Uint8Array::new(buf.as_ref()).to_vec());
+    }
+    Err(js(&format!(
+        "{what} must be a Uint8Array or ArrayBuffer (e.g. `await response.arrayBuffer()`)"
+    )))
 }
 
 fn js(msg: &str) -> JsValue {

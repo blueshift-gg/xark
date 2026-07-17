@@ -1442,6 +1442,7 @@ dependencies = [
  "ark-snark",
  "console_error_panic_hook",
  "getrandom",
+ "js-sys",
  "rand",
  "serde",
  "serde-wasm-bindgen",
