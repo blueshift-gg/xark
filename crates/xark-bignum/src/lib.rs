@@ -643,6 +643,200 @@ fn mulmod_columns<const LIMBS: usize, const BITS: usize>(
 /// `< 2^(2·BITS)`; summed across a column with carry/bias headroom, `2·BITS + slack`
 /// bits must stay below the field. The `const` assertion below fails to compile for
 /// any unsound `(LIMBS, BITS)`. For `<3, 86>`: `172 + 8 = 180 < 253`.
+pub const P_25519_L: [Field; 3] = modulus_limbs::<3, 85>(
+    "57896044618658097711785492504343953926634992332820282019728792003956564819949",
+);
+
+/// SOUND lazy multiply mod (2^255-19), 3x85. Pseudo-Mersenne fold with carries
+/// range-checked (deterministic — NO free choice), NO quotient, NO canonical
+/// reduce. Output ≡ a·b (mod p), limbs < 2^86. Accepts inputs up to < 2^88.
+pub fn mul_lazy_25519(a: [Field; 3], b: [Field; 3]) -> [Field; 3] {
+    let two85 = Field::from(1u128 << 85);
+    let c19 = Field::from(19u8);
+    let mut cols = [Field::from(0u8); 5];
+    let mut i = 0usize;
+    while i < 3usize {
+        let mut j = 0usize;
+        while j < 3usize {
+            cols[i + j] = cols[i + j] + a[i] * b[j];
+            j += 1;
+        }
+        i += 1;
+    }
+    let t0 = cols[0] + c19 * cols[3];
+    let t1 = cols[1] + c19 * cols[4];
+    let t2 = cols[2];
+    let d0 = Field::hint_div_rem(t0, two85);
+    let c0 = d0[0];
+    let r0 = d0[1];
+    assert_eq(t0, two85 * c0 + r0);
+    range_bits::<85>(r0);
+    range_bits::<101>(c0);
+    let x1 = t1 + c0;
+    let d1 = Field::hint_div_rem(x1, two85);
+    let c1 = d1[0];
+    let r1 = d1[1];
+    assert_eq(x1, two85 * c1 + r1);
+    range_bits::<85>(r1);
+    range_bits::<101>(c1);
+    let x2 = t2 + c1;
+    let d2 = Field::hint_div_rem(x2, two85);
+    let c2 = d2[0];
+    let r2 = d2[1];
+    assert_eq(x2, two85 * c2 + r2);
+    range_bits::<85>(r2);
+    range_bits::<96>(c2);
+    let u0 = r0 + c19 * c2;
+    let e0 = Field::hint_div_rem(u0, two85);
+    let k0 = e0[0];
+    let s0 = e0[1];
+    assert_eq(u0, two85 * k0 + s0);
+    range_bits::<85>(s0);
+    range_bits::<16>(k0);
+    let s1 = r1 + k0;
+    [s0, s1, r2]
+}
+
+/// SOUND weak reduce: carry-normalize a positive limb array (limbs < 2^89) to a
+/// loosely-reduced 3x85 value (limbs < 2^86, ≡ input mod p). Carries range-checked
+/// (deterministic). NO canonical reduce. Used after biased subtractions.
+pub fn weak_reduce_25519(v: [Field; 3]) -> [Field; 3] {
+    let two85 = Field::from(1u128 << 85);
+    let c19 = Field::from(19u8);
+    let d0 = Field::hint_div_rem(v[0], two85);
+    let c0 = d0[0];
+    let r0 = d0[1];
+    assert_eq(v[0], two85 * c0 + r0);
+    range_bits::<85>(r0);
+    range_bits::<8>(c0);
+    let x1 = v[1] + c0;
+    let d1 = Field::hint_div_rem(x1, two85);
+    let c1 = d1[0];
+    let r1 = d1[1];
+    assert_eq(x1, two85 * c1 + r1);
+    range_bits::<85>(r1);
+    range_bits::<8>(c1);
+    let x2 = v[2] + c1;
+    let d2 = Field::hint_div_rem(x2, two85);
+    let c2 = d2[0];
+    let r2 = d2[1];
+    assert_eq(x2, two85 * c2 + r2);
+    range_bits::<85>(r2);
+    range_bits::<8>(c2);
+    let u0 = r0 + c19 * c2;
+    let e0 = Field::hint_div_rem(u0, two85);
+    let k0 = e0[0];
+    let s0 = e0[1];
+    assert_eq(u0, two85 * k0 + s0);
+    range_bits::<85>(s0);
+    range_bits::<8>(k0);
+    let s1 = r1 + k0;
+    [s0, s1, r2]
+}
+
+/// Canonical (< p) reduction of a loosely-reduced value — the BOUNDARY reduce.
+pub fn finalize_25519(v: [Field; 3]) -> [Field; 3] {
+    reduce_once::<3, 85>(v, P_25519_L)
+}
+
+/// SOUND lazy extended-coordinate doubling, twisted Edwards a=-1 (dbl-2008-hwcd,
+/// d-independent). Inputs/outputs loosely-reduced (limbs < 2^86). Only the final
+/// coordinates need a boundary reduce; per-op there is NONE.
+pub fn ext_double_25519(
+    x: [Field; 3],
+    y: [Field; 3],
+    z: [Field; 3],
+) -> ([Field; 3], [Field; 3], [Field; 3], [Field; 3]) {
+    let two = Field::from(2u8);
+    // bias = 8p (limbs < 2^88, ≡ 0 mod p) to keep every subtraction positive.
+    let b8 = [
+        Field::from(8u8) * P_25519_L[0],
+        Field::from(8u8) * P_25519_L[1],
+        Field::from(8u8) * P_25519_L[2],
+    ];
+    let aa = mul_lazy_25519(x, x); // A = X^2
+    let bb = mul_lazy_25519(y, y); // B = Y^2
+    let zz = mul_lazy_25519(z, z); // Z^2
+    let xy = mul_lazy_25519(x, y); // XY
+    let e = [two * xy[0], two * xy[1], two * xy[2]]; // E = 2XY
+    let c = [two * zz[0], two * zz[1], two * zz[2]]; // C = 2Z^2
+                                                     // G = B - A
+    let g = [
+        b8[0] + bb[0] - aa[0],
+        b8[1] + bb[1] - aa[1],
+        b8[2] + bb[2] - aa[2],
+    ];
+    // H = -(A + B)
+    let h = [
+        b8[0] - aa[0] - bb[0],
+        b8[1] - aa[1] - bb[1],
+        b8[2] - aa[2] - bb[2],
+    ];
+    // F = G - C  (bias twice since G is already at 8p)
+    let f = [
+        b8[0] + g[0] - c[0],
+        b8[1] + g[1] - c[1],
+        b8[2] + g[2] - c[2],
+    ];
+    let x3 = mul_lazy_25519(e, f);
+    let y3 = mul_lazy_25519(g, h);
+    let t3 = mul_lazy_25519(e, h);
+    let z3 = mul_lazy_25519(f, g);
+    (x3, y3, z3, t3)
+}
+
+pub const D_25519: [Field; 3] = modulus_limbs::<3, 85>(
+    "37095705934669439343138083508754565189542113879843219016388785533085940283555",
+);
+
+/// SOUND lazy extended-coordinate addition, twisted Edwards a=-1 (add-2008-hwcd).
+/// Inputs/outputs loosely-reduced (limbs < 2^86). 10 lazy muls + 2 weak reduces,
+/// NO per-op canonical reduction.
+#[allow(clippy::too_many_arguments)]
+pub fn ext_add_25519(
+    x1: [Field; 3],
+    y1: [Field; 3],
+    z1: [Field; 3],
+    t1: [Field; 3],
+    x2: [Field; 3],
+    y2: [Field; 3],
+    z2: [Field; 3],
+    t2: [Field; 3],
+) -> ([Field; 3], [Field; 3], [Field; 3], [Field; 3]) {
+    let b8 = [
+        Field::from(8u8) * P_25519_L[0],
+        Field::from(8u8) * P_25519_L[1],
+        Field::from(8u8) * P_25519_L[2],
+    ];
+    let a = mul_lazy_25519(x1, x2); // A = X1·X2
+    let b = mul_lazy_25519(y1, y2); // B = Y1·Y2
+    let d = mul_lazy_25519(z1, z2); // D = Z1·Z2
+    let tt = mul_lazy_25519(t1, t2); // T1·T2
+    let c = mul_lazy_25519(D_25519, tt); // C = d·T1·T2
+    let x1y1 = [x1[0] + y1[0], x1[1] + y1[1], x1[2] + y1[2]];
+    let x2y2 = [x2[0] + y2[0], x2[1] + y2[1], x2[2] + y2[2]];
+    let xy = mul_lazy_25519(x1y1, x2y2); // (X1+Y1)(X2+Y2)
+                                         // E = xy - A - B
+    let e = [
+        b8[0] + xy[0] - a[0] - b[0],
+        b8[1] + xy[1] - a[1] - b[1],
+        b8[2] + xy[2] - a[2] - b[2],
+    ];
+    // F = D - C
+    let f = [
+        b8[0] + d[0] - c[0],
+        b8[1] + d[1] - c[1],
+        b8[2] + d[2] - c[2],
+    ];
+    let g = [d[0] + c[0], d[1] + c[1], d[2] + c[2]]; // G = D + C
+    let h = [b[0] + a[0], b[1] + a[1], b[2] + a[2]]; // H = B + A (a=-1)
+    let x3 = mul_lazy_25519(e, f);
+    let y3 = mul_lazy_25519(g, h);
+    let t3 = mul_lazy_25519(e, h);
+    let z3 = mul_lazy_25519(f, g);
+    (x3, y3, z3, t3)
+}
+
 pub fn mod_mul<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     b: [Field; LIMBS],
