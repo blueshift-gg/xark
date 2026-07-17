@@ -68,9 +68,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate
 use ark_snark::SNARK;
 use wasm_bindgen::prelude::*;
 
-use xark_ir::function_decode::{
-    expand_function_blob, expand_function_blob_reduced,
-};
+use xark_ir::function_decode::{expand_function_blob, expand_function_blob_reduced};
 use xark_ir::primitive::{Var, VarRole};
 use xark_ir::solver;
 use xark_ir::{CircuitProgram, R1csProgram, VarId};
@@ -129,9 +127,7 @@ thread_local! {
 /// `for_setup(expand_function_blob_reduced(...).into_r1cs())`). Using the full
 /// expand's R1CS instead would produce a different constraint set and the proof
 /// would not verify.
-fn expand_xbc(
-    circuit_xbc: &[u8],
-) -> Result<(CircuitProgram, R1csProgram), String> {
+fn expand_xbc(circuit_xbc: &[u8]) -> Result<(CircuitProgram, R1csProgram), String> {
     let full = expand_function_blob(circuit_xbc)?;
     let prog = expand_function_blob_reduced(circuit_xbc)?.into_r1cs();
     Ok((full, prog))
@@ -169,8 +165,7 @@ fn resolve_inputs(
             .ok_or_else(|| format!("unknown input `{k}`"))?;
         // Strict decimal validation (mirrors `xark prove`): a malformed value is
         // a clean error, not a silently-zeroed witness.
-        try_fr_from_decimal(v)
-            .map_err(|e| format!("invalid value for input `{k}`: {e}"))?;
+        try_fr_from_decimal(v).map_err(|e| format!("invalid value for input `{k}`: {e}"))?;
         id_inputs.insert(id, v.clone());
     }
     Ok(id_inputs)
@@ -191,8 +186,7 @@ fn prove_with(
     pk: &ProvingKey<Bn254>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<ProveResult, JsValue> {
-    let assign = solve_witness(full, id_inputs)
-        .map_err(|e| js(&e))?;
+    let assign = solve_witness(full, id_inputs).map_err(|e| js(&e))?;
 
     // The `prog` passed in is already the **minimized** backend R1CS the pk is
     // keyed to (both call sites run the boundary minimize once, up-front:
@@ -205,8 +199,8 @@ fn prove_with(
     let public = circuit.public_inputs();
 
     let mut rng = rand::rngs::OsRng;
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
-        .map_err(|e| js(&format!("proving: {e}")))?;
+    let proof =
+        Groth16::<Bn254>::prove(pk, circuit, &mut rng).map_err(|e| js(&format!("proving: {e}")))?;
 
     encode_result(&proof, &public)
 }
@@ -306,11 +300,8 @@ pub fn preload(circuit_xbc: &Bytes, pk_bytes: &Bytes) -> Result<(), JsValue> {
 pub fn prove_preloaded(inputs: JsValue) -> Result<ProveResult, JsValue> {
     PRESTATE.with(|cell| -> Result<ProveResult, JsValue> {
         let state = cell.borrow();
-        let s = state
-            .as_ref()
-            .ok_or_else(|| js("call preload() first"))?;
-        let id_inputs = resolve_inputs(&s.by_name, inputs)
-            .map_err(|e| js(&e))?;
+        let s = state.as_ref().ok_or_else(|| js("call preload() first"))?;
+        let id_inputs = resolve_inputs(&s.by_name, inputs).map_err(|e| js(&e))?;
         prove_with(&s.full, &s.prog, &s.pk, &id_inputs)
     })
 }
@@ -327,12 +318,15 @@ pub fn prove_preloaded(inputs: JsValue) -> Result<ProveResult, JsValue> {
 /// Does not self-verify (matching snarkjs / arkworks / gnark) — verify a
 /// returned proof with [`verify`] when needed.
 #[wasm_bindgen]
-pub fn prove(circuit_xbc: &Bytes, pk_bytes: &Bytes, inputs: JsValue) -> Result<ProveResult, JsValue> {
+pub fn prove(
+    circuit_xbc: &Bytes,
+    pk_bytes: &Bytes,
+    inputs: JsValue,
+) -> Result<ProveResult, JsValue> {
     let circuit_xbc = into_bytes(circuit_xbc, "circuit.xbc")?;
     let pk_bytes = into_bytes(pk_bytes, "pk.bin")?;
     let s = load_artifacts(&circuit_xbc, &pk_bytes)?;
-    let id_inputs = resolve_inputs(&s.by_name, inputs)
-        .map_err(|e| js(&e))?;
+    let id_inputs = resolve_inputs(&s.by_name, inputs).map_err(|e| js(&e))?;
     prove_with(&s.full, &s.prog, &s.pk, &id_inputs)
 }
 
@@ -355,10 +349,12 @@ pub fn verify(
     let vk_bytes = into_bytes(vk_bytes, "verifying key")?;
     let proof_bytes = into_bytes(proof_bytes, "proof")?;
     let public_inputs_bytes = into_bytes(public_inputs_bytes, "public inputs")?;
-    let vk = VerifyingKey::<Bn254>::deserialize_with_mode(&vk_bytes[..], Compress::Yes, Validate::Yes)
-        .map_err(|e| js(&format!("deserializing verifying key: {e}")))?;
-    let proof = Proof::<Bn254>::deserialize_with_mode(&proof_bytes[..], Compress::Yes, Validate::Yes)
-        .map_err(|e| js(&format!("deserializing proof: {e}")))?;
+    let vk =
+        VerifyingKey::<Bn254>::deserialize_with_mode(&vk_bytes[..], Compress::Yes, Validate::Yes)
+            .map_err(|e| js(&format!("deserializing verifying key: {e}")))?;
+    let proof =
+        Proof::<Bn254>::deserialize_with_mode(&proof_bytes[..], Compress::Yes, Validate::Yes)
+            .map_err(|e| js(&format!("deserializing proof: {e}")))?;
     let public: Vec<Fr> =
         Vec::<Fr>::deserialize_with_mode(&public_inputs_bytes[..], Compress::Yes, Validate::Yes)
             .map_err(|e| js(&format!("deserializing public inputs: {e}")))?;
@@ -372,8 +368,9 @@ pub fn verify(
 #[wasm_bindgen]
 pub fn proof_to_snarkjs(proof_bytes: &Bytes) -> Result<JsValue, JsValue> {
     let proof_bytes = into_bytes(proof_bytes, "proof")?;
-    let proof = Proof::<Bn254>::deserialize_with_mode(&proof_bytes[..], Compress::Yes, Validate::Yes)
-        .map_err(|e| js(&format!("deserializing proof: {e}")))?;
+    let proof =
+        Proof::<Bn254>::deserialize_with_mode(&proof_bytes[..], Compress::Yes, Validate::Yes)
+            .map_err(|e| js(&format!("deserializing proof: {e}")))?;
     serde_wasm_bindgen::to_value(&snarkjs_proof(&proof))
         .map_err(|e| js(&format!("encoding snarkjs proof: {e}")))
 }
@@ -411,8 +408,8 @@ pub fn circuit_inputs(circuit_xbc: &Bytes) -> Result<JsValue, JsValue> {
     // TODO: switch to a header-only parse (variable metadata only) when
     // `xark-ir` exposes one — expanding the full circuit just to list declared
     // inputs is heavier than necessary.
-    let full = expand_function_blob(&circuit_xbc)
-        .map_err(|e| js(&format!("parsing circuit.xbc: {e}")))?;
+    let full =
+        expand_function_blob(&circuit_xbc).map_err(|e| js(&format!("parsing circuit.xbc: {e}")))?;
     let mut vars: Vec<&Var> = full
         .vars
         .iter()
