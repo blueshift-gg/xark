@@ -18,7 +18,7 @@ const { readFileSync } = require("node:fs");
 
 const {
   prove, verify, circuit_inputs, version, preload, prove_preloaded,
-  proof_to_snarkjs_json, public_inputs_to_snarkjs_json,
+  proof_to_snarkjs, public_inputs_to_snarkjs,
 } = require("../dist/node/xark_wasm.js");
 
 const D = process.env.CIRCUIT_ARTIFACTS_DIR
@@ -30,8 +30,8 @@ const hostPublic = readFileSync(join(D, "public_inputs.bin"));
 const hostSnarkPublic = readFileSync(join(D, "snarkjs-public.json"), "utf8").trim();
 
 // Prove two satisfiable instances once and reuse them across cases.
-const p27 = prove(xbc, pk, JSON.stringify({ secret: "3", result: "27" }));
-const p8 = prove(xbc, pk, JSON.stringify({ secret: "2", result: "8" }));
+const p27 = prove(xbc, pk, { secret: "3", result: "27" });
+const p8 = prove(xbc, pk, { secret: "2", result: "8" });
 
 test("version() returns a non-empty string", () => {
   assert.ok(version().length > 0, "version string should be non-empty");
@@ -41,7 +41,7 @@ test("circuit_inputs lists declared inputs in order with roles", () => {
   // Uses the lightweight header-only parser; must return the declared inputs in
   // declaration order with correct roles.
   assert.deepStrictEqual(
-    JSON.parse(circuit_inputs(xbc)),
+    circuit_inputs(xbc),
     [{ name: "secret", role: "private" }, { name: "result", role: "public" }],
   );
 });
@@ -57,20 +57,20 @@ test("wasm publicInputs are byte-identical to the host public_inputs.bin", () =>
 
 test("wasm snarkjs public inputs match the host snarkjs-public.json", () => {
   assert.deepStrictEqual(
-    JSON.parse(public_inputs_to_snarkjs_json(p27.publicInputs)),
+    public_inputs_to_snarkjs(p27.publicInputs),
     JSON.parse(hostSnarkPublic),
   );
 });
 
-test("proof_to_snarkjs_json emits a groth16/bn128 proof with a G1 pi_a", () => {
-  const sj = JSON.parse(proof_to_snarkjs_json(p27.proof));
+test("proof_to_snarkjs emits a groth16/bn128 proof with a G1 pi_a", () => {
+  const sj = proof_to_snarkjs(p27.proof);
   assert.strictEqual(sj.protocol, "groth16");
   assert.strictEqual(sj.curve, "bn128");
   assert.ok(Array.isArray(sj.pi_a) && sj.pi_a.length === 3, "pi_a is a G1 point");
 });
 
 test("prove(2->8) public inputs are ['8']", () => {
-  assert.deepStrictEqual(JSON.parse(public_inputs_to_snarkjs_json(p8.publicInputs)), ["8"]);
+  assert.deepStrictEqual(public_inputs_to_snarkjs(p8.publicInputs), ["8"]);
 });
 
 test("verify round-trips under the host vk.bin (both 27 and 8)", () => {
@@ -80,7 +80,7 @@ test("verify round-trips under the host vk.bin (both 27 and 8)", () => {
 
 test("preload + prove_preloaded produce a proof that verifies under the same vk", () => {
   preload(xbc, pk);
-  const pf = prove_preloaded(JSON.stringify({ secret: "3", result: "27" }));
+  const pf = prove_preloaded({ secret: "3", result: "27" });
   assert.deepStrictEqual(
     Buffer.from(pf.publicInputs), Buffer.from(p27.publicInputs),
     "prove_preloaded public inputs match one-shot prove",
@@ -98,5 +98,5 @@ test("verify throws on a malformed proof (does not silently return false)", () =
 });
 
 test("prove throws on an unsatisfiable witness", () => {
-  assert.throws(() => prove(xbc, pk, JSON.stringify({ secret: "3", result: "26" })));
+  assert.throws(() => prove(xbc, pk, { secret: "3", result: "26" }));
 });

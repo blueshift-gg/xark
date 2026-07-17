@@ -383,6 +383,11 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // Self-contained, shareable proof bundle: the snarkjs proof (verify
     // off-chain) plus the verifier calldata, in one file. Named by the entry
     // name so it lines up with the generated client.
+    //
+    // `proof_to_snarkjs` returns a typed struct (the shared snarkjs wire shape);
+    // convert it to a `Value` once so it can be embedded into the bundle object
+    // below and serialized standalone above.
+    let snarkjs_proof_value = serde_json::to_value(&snarkjs_proof)?;
     let name = project.entry_name();
     let bundle_json = serde_json::json!({
         "circuit": name,
@@ -391,7 +396,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         "protocol": "groth16",
         "curve": "bn128",
         "public_signals": snarkjs_public,
-        "proof": snarkjs_proof,
+        "proof": snarkjs_proof_value,
         "calldata": {
             "endianness": "little",
             "hex": calldata_hex,

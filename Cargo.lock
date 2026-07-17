@@ -4881,7 +4881,7 @@ dependencies = [
  "ark-ec 0.6.0",
  "ark-groth16",
  "num-bigint 0.4.8",
- "serde_json",
+ "serde",
 ]
 
 [[package]]

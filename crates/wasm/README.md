@@ -9,14 +9,14 @@ await init();
 const xbc = new Uint8Array(await (await fetch("/circuit/circuit.xbc")).arrayBuffer());
 const pk  = new Uint8Array(await (await fetch("/circuit/pk.bin")).arrayBuffer());
 
-const { proof, publicInputs } = prove(xbc, pk, JSON.stringify({ secret: "3", result: "27" }));
+const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
 verify(vkBytes, proof, publicInputs); // true
 ```
 
 Runs anywhere with Web Crypto: **browsers**, **Node 20+**, **Cloudflare Workers**,
 **Vercel Edge**, **Deno**. The circuit, proving/verifying keys, proof, and public
 inputs are all **binary** — only the witness inputs (a tiny `name → value` map)
-are JSON.
+cross the boundary as a plain object.
 
 ## Producing circuit artifacts
 
@@ -49,12 +49,9 @@ const [xbc, pk, vk] = await Promise.all([
 ]);
 
 console.log(circuit_inputs(xbc));
-// → [{"name":"secret","role":"private"}, {"name":"result","role":"public"}]
+// → [{ name: "secret", role: "private" }, { name: "result", role: "public" }]
 
-const { proof, publicInputs } = prove(
-  xbc, pk,
-  JSON.stringify({ secret: "3", result: "27" })
-);
+const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
 
 console.log(verify(vk, proof, publicInputs)); // true
 ```
@@ -67,8 +64,8 @@ and call `prove_preloaded`:
 
 ```js
 preload(xbc, pk);                                        // once
-const a = prove_preloaded(JSON.stringify({ secret: "3", result: "27" }));
-const b = prove_preloaded(JSON.stringify({ secret: "2", result: "8" }));
+const a = prove_preloaded({ secret: "3", result: "27" });
+const b = prove_preloaded({ secret: "2", result: "8" });
 ```
 
 ### Node.js
@@ -87,8 +84,7 @@ const xbc = new Uint8Array(readFileSync("../../examples/cube/target/xark/cube/ci
 const pk  = new Uint8Array(readFileSync("../../examples/cube/target/xark/cube/pk.bin"));
 const vk  = new Uint8Array(readFileSync("../../examples/cube/target/xark/cube/vk.bin"));
 
-const { proof, publicInputs } = prove(xbc, pk,
-  JSON.stringify({ secret: "3", result: "27" }));
+const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
 
 console.log(verify(vk, proof, publicInputs)); // true
 ```
@@ -98,15 +94,15 @@ or pass a `WebAssembly.Module` to `init({ module_or_path })`.
 
 ## API
 
-### `prove(circuitXbc, pkBytes, inputsJson)`
+### `prove(circuitXbc, pkBytes, inputs)`
 
 Generates a Groth16 proof entirely in memory.
 
-| argument      | type         | description                                       |
-|---------------|--------------|---------------------------------------------------|
-| `circuitXbc`  | `Uint8Array` | `circuit.xbc` (binary, self-contained build artifact) |
-| `pkBytes`     | `Uint8Array` | Proving key (`pk.bin`, binary)                    |
-| `inputsJson`  | `string`     | Witness values as `{"name":"value"}`              |
+| argument      | type         | description                                          |
+|---------------|--------------|------------------------------------------------------|
+| `circuitXbc`  | `Uint8Array` | `circuit.xbc` (binary, self-contained build artifact)|
+| `pkBytes`     | `Uint8Array` | Proving key (`pk.bin`, binary)                       |
+| `inputs`      | `object`     | Witness values as `{ name: "value" }` (decimal strs) |
 
 Returns a `ProveResult`:
 
@@ -122,7 +118,7 @@ witness, or malformed key.
 
 `proof` and `publicInputs` are the canonical compressed bytes (identical to the
 host's `proof.bin` / `public_inputs.bin`) — pass them straight to `verify`. For
-snarkjs interop, convert them on demand (see `proof_to_snarkjs_json` below).
+snarkjs interop, convert them on demand (see `proof_to_snarkjs` below).
 
 > `prove` does **not** self-verify (matching snarkjs / arkworks / gnark, where
 > proving and verifying are separate steps). Call `verify` on the result if you
@@ -132,7 +128,7 @@ snarkjs interop, convert them on demand (see `proof_to_snarkjs_json` below).
 
 Parse + cache the `.xbc` and proving key once (replaces prior cached state).
 
-### `prove_preloaded(inputsJson)`
+### `prove_preloaded(inputs)`
 
 Like `prove` but reuses the artifacts cached by `preload`. Throws if `preload`
 hasn't been called.
@@ -148,26 +144,26 @@ hasn't been called.
 Returns `true` if valid, `false` if well-formed but not verifying. Throws on
 deserialization errors.
 
-### `proof_to_snarkjs_json(proofBytes)` → `string`
+### `proof_to_snarkjs(proofBytes)` → `object`
 
-Converts the `proof` `Uint8Array` from `prove` into snarkjs-compatible JSON (the
+Converts the `proof` `Uint8Array` from `prove` into the snarkjs proof object (the
 same shape as the host's `snarkjs-proof.json`). Opt-in: `prove` returns only the
-canonical bytes, so you derive the snarkjs view only when you need it.
+canonical bytes, so you build the snarkjs view only when you need it.
 
-### `public_inputs_to_snarkjs_json(publicInputsBytes)` → `string`
+### `public_inputs_to_snarkjs(publicInputsBytes)` → `string[]`
 
 Converts the `publicInputs` `Uint8Array` from `prove` into the snarkjs `public.json`
 array of decimal strings.
 
 ```js
-const { proof, publicInputs } = prove(xbc, pk, inputsJson);
-const snarkjsProof  = JSON.parse(proof_to_snarkjs_json(proof));
-const snarkjsPublic = JSON.parse(public_inputs_to_snarkjs_json(publicInputs));
+const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
+const snarkjsProof  = proof_to_snarkjs(proof);
+const snarkjsPublic = public_inputs_to_snarkjs(publicInputs);
 ```
 
-### `circuit_inputs(circuitXbc)` → `string`
+### `circuit_inputs(circuitXbc)` → `object[]`
 
-Returns `[{"name":"…","role":"public"|"private"}, …]` in declaration order.
+Returns `[{ name: "…", role: "public" | "private" }, …]` in declaration order.
 
 ### `version()` → `string`
 
