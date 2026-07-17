@@ -33,7 +33,7 @@
 //! ## JS usage (`--target web`)
 //!
 //! ```js,ignore
-//! import init, { prove } from "./pkg/xark_wasm.js";
+//! import init, { prove } from "./dist/web/xark_wasm.js";
 //! await init();    // instantiate the module
 //!
 //! const xbc        = new Uint8Array(await (await fetch("/circuit/circuit.xbc")).arrayBuffer());

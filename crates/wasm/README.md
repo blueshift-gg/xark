@@ -196,13 +196,13 @@ zero-knowledge.
 ```sh
 cargo install wasm-pack
 rustup target add wasm32-unknown-unknown
-./build.sh                 # default target: module (Cloudflare Workers)
+./build.sh                 # default target: bundler (webpack, vite, …)
 ./build.sh web             # or: nodejs | bundler | module
 ```
 
-The default `module` target (Cloudflare Workers / `workerd`) is built with
+The `module` target (Cloudflare Workers / `workerd`) is built with
 `wasm-bindgen` directly, since wasm-pack can't emit `--target module`. To reuse
 wasm-pack's `wasm-opt` pass without a separate `wasm-opt` install, a release
-`module` build **also rebuilds `pkg-bundler/`** and copies its optimized wasm
+`module` build **also rebuilds `dist/bundler/`** and copies its optimized wasm
 (the raw wasm is byte-identical across targets — only the JS glue differs). So
-don't be surprised if `./build.sh module` refreshes `pkg-bundler/` too.
+don't be surprised if `./build.sh module` refreshes `dist/bundler/` too.

@@ -1,7 +1,7 @@
 // xark-wasm smoke test: `prove()` + `verify()` (+ preloading + snarkjs interop)
 // against the pre-built `cube` example (secret^3 == result). Run from anywhere
 // after:
-//   wasm-pack build crates/wasm --target nodejs --dev --out-dir crates/wasm/pkg-node
+//   wasm-pack build crates/wasm --target nodejs --dev --out-dir crates/wasm/dist/node
 //   node --test crates/wasm/tests/wasm-smoke.test.cjs
 //
 // Uses Node's built-in test runner (`node:test`) — no JS dependencies. Reads
@@ -19,7 +19,7 @@ const { readFileSync } = require("node:fs");
 const {
   prove, verify, circuit_inputs, version, preload, prove_preloaded,
   proof_to_snarkjs_json, public_inputs_to_snarkjs_json,
-} = require("../pkg-node/xark_wasm.js");
+} = require("../dist/node/xark_wasm.js");
 
 const D = process.env.CIRCUIT_ARTIFACTS_DIR
   || join(__dirname, "..", "..", "..", "examples", "cube", "target", "xark", "cube");

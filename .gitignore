@@ -10,15 +10,8 @@ Cargo.lock.bak
 /target/test-out/
 examples/*/Cargo.lock
 
-# xark-wasm build output (wasm-pack targets + the wasm-bindgen `module` target).
-# wasm-pack drops a `*` .gitignore into pkg-node/pkg-bundler/pkg-web, but the
-# `module` target is built via wasm-bindgen directly (no auto-ignore), so list
-# every output dir here.
-crates/wasm/pkg/
-crates/wasm/pkg-node/
-crates/wasm/pkg-bundler/
-crates/wasm/pkg-web/
-crates/wasm/pkg-module/
+# xark-wasm packages
+crates/wasm/dist/
 
 # Python bytecode (reference scripts)
 __pycache__/
