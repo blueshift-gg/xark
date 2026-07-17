@@ -1,6 +1,7 @@
 # xark-wasm
 
-Generate and verify **Groth16 (BN254) zero knowledge proofs in the browser or Node.js**.
+Generate and verify **Groth16 (BN254) zero knowledge proofs** in the browser
+or other JavaScript environments with [xark](https://github.com/blueshift-gg/xark).
 
 ```js
 import init, { prove, verify } from "@blueshift-gg/xark-wasm";
