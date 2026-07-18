@@ -171,7 +171,7 @@ pub mod fixtures {
     }
 
     // One per committed circuit; `N` is the public-input count reported by
-    // `xark export`. Spanning N = 0 (ecdsa) to N = 32 (aes128, blake).
+    // `xark export` (e.g. ecdsa's aggregate `Point`/`Fq` inputs flatten to 15).
     typed_fixture!(
         ARITHMETIC_SQUARE_VK,
         ARITHMETIC_SQUARE_PROOF,
@@ -225,14 +225,14 @@ pub mod fixtures {
         ECDSA_BASIC_VK,
         ECDSA_BASIC_PROOF,
         ECDSA_BASIC_INPUTS,
-        0,
+        15,
         "ecdsa_basic"
     );
     typed_fixture!(
         ECDSA_R1_BASIC_VK,
         ECDSA_R1_BASIC_PROOF,
         ECDSA_R1_BASIC_INPUTS,
-        0,
+        15,
         "ecdsa_r1_basic"
     );
     typed_fixture!(

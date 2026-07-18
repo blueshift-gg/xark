@@ -25,13 +25,17 @@ impl Groth16Keys {
         canonical_write_to_file(&self.verifying_key, path)
     }
 
-    /// Load the proving key with **parallel** point deserialization. arkworks'
-    /// `deserialize_with_mode` decompresses + subgroup-checks every point
-    /// *sequentially*, and for a large key that (a per-point modular sqrt +
-    /// scalar-mul) dominated `xark prove`. A Groth16 proving key is mostly five
-    /// `Vec`s of independent points, so we parse the struct layout and fan the
-    /// per-point decompress+validate across cores — keeping the key compressed
-    /// (small on disk) and fully validated, just fast.
+    /// Load the proving key with **parallel, unchecked** point deserialization.
+    /// arkworks' `deserialize_with_mode` decompresses + subgroup-checks every point
+    /// *sequentially*, and for a large key that dominated `xark prove`. Two wins:
+    /// (1) a Groth16 proving key is mostly five `Vec`s of independent points, so we
+    /// parse the struct layout and fan the per-point work across cores; (2) we load
+    /// with `Validate::No`, skipping the per-point subgroup check (a scalar-mul —
+    /// the dominant cost, ~4.5× the rest). That is sound here because the *proving*
+    /// key is our own setup output, not untrusted input: a malformed key can only
+    /// yield a proof that fails verification, and soundness is enforced on the
+    /// *verifying* key (loaded fully-validated by verifiers). Decompression's
+    /// on-curve check still runs, so a corrupt point is still rejected.
     pub fn read_proving_key(path: &Path) -> std::io::Result<ProvingKey<Bn254>> {
         let bytes = std::fs::read(path)?;
         read_proving_key_parallel(&bytes).map_err(|e| std::io::Error::other(e.to_string()))
@@ -45,11 +49,12 @@ impl Groth16Keys {
 /// Parse the `CanonicalSerialize` layout of `ProvingKey<Bn254>` — `vk`,
 /// `beta_g1`, `delta_g1`, then the five point vectors (field order matches
 /// ark-groth16's `ProvingKey`) — deserializing each vector's points in parallel.
-/// Compressed + validated, just fanned across cores.
+/// Compressed (small on disk), `Validate::No` (see `read_proving_key`), fanned
+/// across cores.
 fn read_proving_key_parallel(
     bytes: &[u8],
 ) -> Result<ProvingKey<Bn254>, ark_serialize::SerializationError> {
-    let (c, v) = (Compress::Yes, Validate::Yes);
+    let (c, v) = (Compress::Yes, Validate::No);
     let mut cur: &[u8] = bytes;
     // The header (verifying key + two points) is small — deserialize sequentially.
     let vk = VerifyingKey::<Bn254>::deserialize_with_mode(&mut cur, c, v)?;

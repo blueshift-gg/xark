@@ -21,7 +21,7 @@ use num_bigint::{BigInt, Sign};
 use xark_ir::primitive::{PrimitiveProgram, Var, VarRole};
 use xark_ir::profile::ProfileProgram;
 use xark_ir::solver;
-use xark_ir::{LinearCombination as IrLc, R1csProgram, VarId, Visibility};
+use xark_ir::{FieldConst, LinearCombination as IrLc, R1csProgram, VarId, Visibility};
 
 /// Developer-diagnostics env-flag probe. Only reads the environment under the
 /// `debug` feature; a normal release build compiles this to `false` so the
@@ -78,6 +78,28 @@ pub fn try_fr_from_decimal(s: &str) -> Result<Fr, String> {
 /// use [`try_fr_from_decimal`] there instead.
 pub fn fr_from_decimal(s: &str) -> Fr {
     try_fr_from_decimal(s).expect("valid decimal")
+}
+
+/// Convert a [`FieldConst`] straight to `Fr`, skipping the decimal string that the
+/// `fr_from_decimal(&fc.decimal())` path formats and reparses. The small-integer
+/// fast path (the vast majority of coefficients) matches [`try_fr_from_decimal`];
+/// the big path reduces the stored `BigInt`'s little-endian bytes directly
+/// (`from_le_bytes_mod_order` handles the mod-p reduction). The Groth16 synthesizer
+/// parses *every* coefficient of a dense minimized R1CS at both setup and prove, so
+/// eliminating the `BigInt→String→BigInt` round-trip is the dominant synthesis
+/// speedup. Infallible — a `FieldConst` is already a validated field value.
+pub fn fr_from_fieldconst(fc: &FieldConst) -> Fr {
+    if let Some(n) = fc.as_i64() {
+        let mag = Fr::from(n.unsigned_abs());
+        return if n < 0 { -mag } else { mag };
+    }
+    let (sign, bytes) = fc.big().to_bytes_le();
+    let mag = Fr::from_le_bytes_mod_order(&bytes);
+    if sign == Sign::Minus {
+        -mag
+    } else {
+        mag
+    }
 }
 
 /// Parse a `0x`-prefixed hex value as a field element (big-endian, reduced mod p)
@@ -208,18 +230,18 @@ impl XarkCircuit {
     }
 }
 
-/// Parse every field constant / coefficient decimal in `prog`, returning a
-/// descriptive error on the first malformed value. Used to fail gracefully on
-/// an untrusted R1CS program before the panicking synthesis path runs.
+/// Reject an R1CS program that would crash the synthesizer, returning a
+/// descriptive error. Used to fail gracefully on an untrusted program before the
+/// panicking synthesis path runs.
 fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
     // Every term must reference a declared variable: `generate_constraints`
     // indexes `map[&t.var]`, which panics on a dangling id. Reject it here so a
-    // malformed `r1cs.json` is a clean error, not a crash.
+    // malformed `r1cs.json` is a clean error, not a crash. Coefficients need no
+    // check: a `FieldConst` is already a validated field value (an invalid decimal
+    // fails at deserialization), and `fr_from_fieldconst` reduces any value mod p.
     let valid_ids: BTreeSet<VarId> = prog.variables.iter().map(|v| v.id).collect();
     let check_lc = |lc: &IrLc| -> Result<(), String> {
-        try_fr_from_decimal(&lc.constant.decimal())?;
         for t in &lc.terms {
-            try_fr_from_decimal(&t.coeff.decimal())?;
             if !valid_ids.contains(&t.var) {
                 return Err(format!(
                     "constraint references undefined variable id {}",
@@ -259,17 +281,14 @@ impl ConstraintSynthesizer<Fr> for XarkCircuit {
 
         let build = |lc: &IrLc| -> LinearCombination<Fr> {
             let mut out = LinearCombination::zero();
-            let c = fr_from_decimal(&lc.constant.decimal());
+            let c = fr_from_fieldconst(&lc.constant);
             if !c.is_zero() {
                 out += (c, Variable::One);
             }
             for t in &lc.terms {
                 // `validate_program_constants` guarantees every term var is a
                 // declared (hence allocated) id.
-                out += (
-                    fr_from_decimal(&t.coeff.decimal()),
-                    map[t.var as usize].unwrap(),
-                );
+                out += (fr_from_fieldconst(&t.coeff), map[t.var as usize].unwrap());
             }
             out
         };

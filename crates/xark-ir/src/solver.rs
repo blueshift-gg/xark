@@ -38,7 +38,7 @@ fn is_bn254(modulus: &BigUint) -> bool {
 }
 
 impl Fp {
-    fn new(value: BigUint, modulus: &BigUint) -> Self {
+    pub(crate) fn new(value: BigUint, modulus: &BigUint) -> Self {
         if is_bn254(modulus) {
             Fp::Bn254(Fr::from_le_bytes_mod_order(&value.to_bytes_le()))
         } else {
@@ -49,7 +49,7 @@ impl Fp {
         }
     }
 
-    fn zero(modulus: &BigUint) -> Self {
+    pub(crate) fn zero(modulus: &BigUint) -> Self {
         if is_bn254(modulus) {
             Fp::Bn254(Fr::from(0u64))
         } else {
@@ -61,7 +61,7 @@ impl Fp {
     }
 
     /// Reduce a signed decimal string into the field.
-    fn from_decimal(s: &str, modulus: &BigUint) -> Self {
+    pub(crate) fn from_decimal(s: &str, modulus: &BigUint) -> Self {
         let trimmed = s.trim();
         // Fast path: the overwhelming majority of circuit coefficients are small
         // integers (`0`, `±1`, `±2`, small constants). Parsing as `i64` skips the
@@ -83,8 +83,20 @@ impl Fp {
         }
     }
 
+    /// Reduce a signed `BigInt` into the field without a decimal round-trip
+    /// (`to_bytes_le` avoids the `to_string`/parse the string path would do).
+    pub(crate) fn from_bigint(v: &num_bigint::BigInt, modulus: &BigUint) -> Self {
+        let (sign, mag) = v.to_bytes_le();
+        let f = Fp::new(BigUint::from_bytes_le(&mag), modulus);
+        if sign == num_bigint::Sign::Minus {
+            f.neg()
+        } else {
+            f
+        }
+    }
+
     /// Allocation-free small-integer constructor (the `from_decimal` fast path).
-    fn from_i64(n: i64, modulus: &BigUint) -> Self {
+    pub(crate) fn from_i64(n: i64, modulus: &BigUint) -> Self {
         if is_bn254(modulus) {
             let mag = Fr::from(n.unsigned_abs());
             Fp::Bn254(if n < 0 { -mag } else { mag })
@@ -98,7 +110,7 @@ impl Fp {
         }
     }
 
-    fn add(&self, other: &Fp) -> Fp {
+    pub(crate) fn add(&self, other: &Fp) -> Fp {
         match (self, other) {
             (Fp::Bn254(a), Fp::Bn254(b)) => Fp::Bn254(*a + *b),
             (Fp::Generic { value: a, modulus }, Fp::Generic { value: b, .. }) => Fp::Generic {
@@ -109,7 +121,7 @@ impl Fp {
         }
     }
 
-    fn mul(&self, other: &Fp) -> Fp {
+    pub(crate) fn mul(&self, other: &Fp) -> Fp {
         match (self, other) {
             (Fp::Bn254(a), Fp::Bn254(b)) => Fp::Bn254(*a * *b),
             (Fp::Generic { value: a, modulus }, Fp::Generic { value: b, .. }) => Fp::Generic {
@@ -120,14 +132,14 @@ impl Fp {
         }
     }
 
-    fn sub(&self, other: &Fp) -> Fp {
+    pub(crate) fn sub(&self, other: &Fp) -> Fp {
         match (self, other) {
             (Fp::Bn254(a), Fp::Bn254(b)) => Fp::Bn254(*a - *b),
             _ => self.add(&other.neg()),
         }
     }
 
-    fn neg(&self) -> Fp {
+    pub(crate) fn neg(&self) -> Fp {
         match self {
             Fp::Bn254(a) => Fp::Bn254(-*a),
             Fp::Generic { value, modulus } => Fp::Generic {
@@ -143,7 +155,7 @@ impl Fp {
 
     /// Multiplicative inverse (`None` for zero). BN254 uses the field's own
     /// inversion; the generic path uses Fermat `a^(p-2)`.
-    fn inverse(&self) -> Option<Fp> {
+    pub(crate) fn inverse(&self) -> Option<Fp> {
         match self {
             Fp::Bn254(a) => a.inverse().map(Fp::Bn254),
             Fp::Generic { value, modulus } => {
@@ -159,7 +171,7 @@ impl Fp {
         }
     }
 
-    fn is_zero(&self) -> bool {
+    pub(crate) fn is_zero(&self) -> bool {
         match self {
             Fp::Bn254(a) => *a == Fr::from(0u64),
             Fp::Generic { value, .. } => value.is_zero(),
@@ -196,7 +208,7 @@ impl Fp {
         }
     }
 
-    fn to_biguint(&self) -> BigUint {
+    pub(crate) fn to_biguint(&self) -> BigUint {
         match self {
             Fp::Bn254(a) => BigUint::from_bytes_le(&a.into_bigint().to_bytes_le()),
             Fp::Generic { value, .. } => value.clone(),
@@ -845,77 +857,76 @@ pub fn analyze_underconstrained(
         }
     }
 
-    let mut out = Vec::new();
-    for var in &program.vars {
-        if !matches!(var.role, VarRole::Derived) {
-            continue;
-        }
-        let v = var.id;
-        let alpha = assign
-            .get(&v)
-            .cloned()
-            .unwrap_or_else(|| Fp::zero(&modulus));
-        let Some(cons) = refs.get(&v) else {
-            out.push(UnderConstrained {
-                var: v,
-                name: var.name.clone(),
-                reason: "no constraint references this variable".into(),
-            });
-            continue;
-        };
-
-        let mut pinned_linear = false;
-        let mut restricted = false;
-        let mut candidates: Vec<Fp> = Vec::new();
-        for &ci in cons {
-            let (a, b, c) = univariate(&program.constraints[ci], v, assign, &modulus);
-            let _ = &c;
-            if a.is_zero() && b.is_zero() {
-                continue; // this constraint does not restrict v
+    // Each Derived var's analysis is independent (read-only shared state) —
+    // parallelize with rayon. `filter_map().collect()` preserves order, so the
+    // result is deterministic (each var yields at most one finding).
+    use rayon::prelude::*;
+    program
+        .vars
+        .par_iter()
+        .filter_map(|var| {
+            if !matches!(var.role, VarRole::Derived) {
+                return None;
             }
-            restricted = true;
-            if a.is_zero() {
-                pinned_linear = true; // linear (b != 0): unique root
-                break;
-            }
-            // Quadratic: the other root is (-b/a) - alpha (Vieta).
-            let inv_a = a.inverse().expect("a != 0 in quadratic branch");
-            candidates.push(b.neg().mul(&inv_a).sub(&alpha));
-        }
-        if pinned_linear {
-            continue;
-        }
-        if !restricted {
-            out.push(UnderConstrained {
-                var: v,
-                name: var.name.clone(),
-                reason: "variable's coefficient is zero in every referencing constraint (free)"
-                    .into(),
-            });
-            continue;
-        }
-        // Only quadratic pins: does any second root satisfy ALL referencing
-        // constraints? If so, v is two-valued (under-constrained).
-        for beta in &candidates {
-            if *beta == alpha {
-                continue;
-            }
-            let satisfies_all = cons.iter().all(|&ci| {
-                let (a, b, c) = univariate(&program.constraints[ci], v, assign, &modulus);
-                a.mul(beta).mul(beta).add(&b.mul(beta)).add(&c).is_zero()
-            });
-            if satisfies_all {
-                out.push(UnderConstrained {
+            let v = var.id;
+            let alpha = assign
+                .get(&v)
+                .cloned()
+                .unwrap_or_else(|| Fp::zero(&modulus));
+            let Some(cons) = refs.get(&v) else {
+                return Some(UnderConstrained {
                     var: v,
                     name: var.name.clone(),
-                    reason: "a different value also satisfies all its constraints (two-valued)"
+                    reason: "no constraint references this variable".into(),
+                });
+            };
+            let mut pinned_linear = false;
+            let mut restricted = false;
+            let mut candidates: Vec<Fp> = Vec::new();
+            for &ci in cons {
+                let (a, b, _c) = univariate(&program.constraints[ci], v, assign, &modulus);
+                if a.is_zero() && b.is_zero() {
+                    continue;
+                }
+                restricted = true;
+                if a.is_zero() {
+                    pinned_linear = true;
+                    break;
+                }
+                let inv_a = a.inverse().expect("a != 0 in quadratic branch");
+                candidates.push(b.neg().mul(&inv_a).sub(&alpha));
+            }
+            if pinned_linear {
+                return None;
+            }
+            if !restricted {
+                return Some(UnderConstrained {
+                    var: v,
+                    name: var.name.clone(),
+                    reason: "variable's coefficient is zero in every referencing constraint (free)"
                         .into(),
                 });
-                break;
             }
-        }
-    }
-    out
+            for beta in &candidates {
+                if *beta == alpha {
+                    continue;
+                }
+                let satisfies_all = cons.iter().all(|&ci| {
+                    let (a, b, c) = univariate(&program.constraints[ci], v, assign, &modulus);
+                    a.mul(beta).mul(beta).add(&b.mul(beta)).add(&c).is_zero()
+                });
+                if satisfies_all {
+                    return Some(UnderConstrained {
+                        var: v,
+                        name: var.name.clone(),
+                        reason: "a different value also satisfies all its constraints (two-valued)"
+                            .into(),
+                    });
+                }
+            }
+            None
+        })
+        .collect()
 }
 
 // ===========================================================================

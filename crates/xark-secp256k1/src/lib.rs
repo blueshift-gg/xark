@@ -41,8 +41,8 @@ xark_curve::weierstrass! {
 use xark::{assert_eq as aeq, Field};
 use xark_bignum::{
     assert_lt, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
-    modulus_limbs, modulus_minus_1, on_curve_k1, range_check_limbs, reduce_once,
-    scalar_to_bits_256, weak_reduce_k1,
+    modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
+    scalar_to_bits_256, weak_reduce_k1, M_K1,
 };
 
 type L4 = [Field; 4];
@@ -171,6 +171,156 @@ fn dsm_lazy_k1(u1b: [Field; 256], u2b: [Field; 256], qx: L4, qy: L4) -> Pt {
     }
     let (fx, fy) = ec_add_k1(acc[0], acc[1], CX, CY);
     [fx, fy]
+}
+
+// ===========================================================================
+// GLV-accelerated verify (endomorphism φ(x,y)=(βx,y)=λ·P halves the doublings).
+// ===========================================================================
+use xark_bignum::{complement, mod_neg, mod_sub};
+const LAM: L4 =
+    modulus_limbs::<4, 64>("0x5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b23bd72");
+const BETA: L4 =
+    modulus_limbs::<4, 64>("0x7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
+const COMPN: L4 =
+    complement::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+const OX: L4 = modulus_limbs::<4, 64>(
+    "89565891926547004231252920425935692360644145829622209833684329913297188986597",
+);
+const OY: L4 = modulus_limbs::<4, 64>(
+    "12158399299693830322967808612713398636155367887041628176798871954788371653930",
+);
+const CORRX: L4 = modulus_limbs::<4, 64>(
+    "60853107477169765182989770797083903619426259615380584983853919641424871422399",
+);
+const CORRY: L4 = modulus_limbs::<4, 64>(
+    "41161306400859365992137843649963616879210116114343429764926620426514952863053",
+);
+const PHIGX: L4 = modulus_limbs::<4, 64>(
+    "85340279321737800624759429340272274763154997815782306132637707972559913914315",
+);
+const PHIGY: L4 = modulus_limbs::<4, 64>(
+    "32670510020758816978083085130507043184471273380659243275938904335757337482424",
+);
+
+/// Verify GLV decomposition u ≡ (±m1) + λ·(±m2) mod n via carry-safe mod_sub.
+fn glv_decomp(u: L4, m1lo: Field, m1hi: Field, s1: Field, m2lo: Field, m2hi: Field, s2: Field) {
+    let z = Field::from(0u8);
+    let m1 = [m1lo, m1hi, z, z];
+    let m2 = [m2lo, m2hi, z, z];
+    range_check_limbs::<4, 64>(m1);
+    range_check_limbs::<4, 64>(m2);
+    let sk1 = muxc(s1, mod_neg::<4, 64>(m1, NN), m1);
+    let sk2 = muxc(s2, mod_neg::<4, 64>(m2, NN), m2);
+    let lhs = mod_mul::<4, 64>(LAM, sk2, NN, NN1);
+    let rhs = mod_sub::<4, 64>(u, sk1, COMPN);
+    let mut i = 0usize;
+    while i < 4usize {
+        aeq(lhs[i], rhs[i]);
+        i += 1;
+    }
+}
+
+/// Sign-conditional point negation: s ? (x, p−y) : (x, y).
+fn negp(s: Field, x: L4, y: L4) -> Pt {
+    [x, muxc(s, mod_neg::<4, 64>(y, M_K1), y)]
+}
+
+/// SOUND GLV-accelerated secp256k1 ECDSA verify. Magnitudes are 2×64-bit (<2^128);
+/// signs are bits. The 4 decomposed half-scalars drive a 4-dim Shamir (128 doublings).
+#[allow(clippy::too_many_arguments)]
+pub fn ecdsa_verify_glv(
+    qx: L4,
+    qy: L4,
+    r: L4,
+    s: L4,
+    e: L4,
+    m11: [Field; 2],
+    s11: Field,
+    m12: [Field; 2],
+    s12: Field,
+    m21: [Field; 2],
+    s21: Field,
+    m22: [Field; 2],
+    s22: Field,
+) {
+    range_check_limbs::<4, 64>(r);
+    range_check_limbs::<4, 64>(s);
+    range_check_limbs::<4, 64>(e);
+    assert_lt::<4, 64>(r, NN1);
+    assert_lt::<4, 64>(s, NN1);
+    assert_lt::<4, 64>(e, NN1);
+    assert_nonzero_limbs(r);
+    s11.assert_bool();
+    s12.assert_bool();
+    s21.assert_bool();
+    s22.assert_bool();
+    let s_inv = mod_inverse::<4, 64>(s, NN);
+    let u1 = mod_mul::<4, 64>(e, s_inv, NN, NN1);
+    let u2 = mod_mul::<4, 64>(r, s_inv, NN, NN1);
+    glv_decomp(u1, m11[0], m11[1], s11, m12[0], m12[1], s12);
+    glv_decomp(u2, m21[0], m21[1], s21, m22[0], m22[1], s22);
+    on_curve_k1(qx, qy);
+    let phiqx = mul_lazy_k1(BETA, qx);
+    // signed bases: ±G, ±φG, ±Q, ±φQ
+    let gs = negp(s11, G0X, G0Y);
+    let pgs = negp(s12, PHIGX, PHIGY);
+    let qs = negp(s21, qx, qy);
+    let pqs = negp(s22, phiqx, qy);
+    let z: Pt = [[Field::from(0u8); 4]; 2];
+    let mut t = [z; 16];
+    t[0] = [weak_reduce_k1(OX), weak_reduce_k1(OY)];
+    let (x1, y1) = ec_add_k1(t[0][0], t[0][1], gs[0], gs[1]);
+    t[1] = [x1, y1];
+    let (x2, y2) = ec_add_k1(t[0][0], t[0][1], pgs[0], pgs[1]);
+    t[2] = [x2, y2];
+    let (x3, y3) = ec_add_k1(t[1][0], t[1][1], pgs[0], pgs[1]);
+    t[3] = [x3, y3];
+    let (x4, y4) = ec_add_k1(t[0][0], t[0][1], qs[0], qs[1]);
+    t[4] = [x4, y4];
+    let (x5, y5) = ec_add_k1(t[1][0], t[1][1], qs[0], qs[1]);
+    t[5] = [x5, y5];
+    let (x6, y6) = ec_add_k1(t[2][0], t[2][1], qs[0], qs[1]);
+    t[6] = [x6, y6];
+    let (x7, y7) = ec_add_k1(t[3][0], t[3][1], qs[0], qs[1]);
+    t[7] = [x7, y7];
+    let (x8, y8) = ec_add_k1(t[0][0], t[0][1], pqs[0], pqs[1]);
+    t[8] = [x8, y8];
+    let (x9, y9) = ec_add_k1(t[1][0], t[1][1], pqs[0], pqs[1]);
+    t[9] = [x9, y9];
+    let (x10, y10) = ec_add_k1(t[2][0], t[2][1], pqs[0], pqs[1]);
+    t[10] = [x10, y10];
+    let (x11, y11) = ec_add_k1(t[3][0], t[3][1], pqs[0], pqs[1]);
+    t[11] = [x11, y11];
+    let (x12, y12) = ec_add_k1(t[4][0], t[4][1], pqs[0], pqs[1]);
+    t[12] = [x12, y12];
+    let (x13, y13) = ec_add_k1(t[5][0], t[5][1], pqs[0], pqs[1]);
+    t[13] = [x13, y13];
+    let (x14, y14) = ec_add_k1(t[6][0], t[6][1], pqs[0], pqs[1]);
+    t[14] = [x14, y14];
+    let (x15, y15) = ec_add_k1(t[7][0], t[7][1], pqs[0], pqs[1]);
+    t[15] = [x15, y15];
+    let u1b1 = scalar_to_bits_256([m11[0], m11[1], Field::from(0u8), Field::from(0u8)]);
+    let u1b2 = scalar_to_bits_256([m12[0], m12[1], Field::from(0u8), Field::from(0u8)]);
+    let u2b1 = scalar_to_bits_256([m21[0], m21[1], Field::from(0u8), Field::from(0u8)]);
+    let u2b2 = scalar_to_bits_256([m22[0], m22[1], Field::from(0u8), Field::from(0u8)]);
+    let mut acc: Pt = [weak_reduce_k1(OX), weak_reduce_k1(OY)];
+    let mut w = 0usize;
+    while w < 128usize {
+        let (dx, dy) = ec_double_k1(acc[0], acc[1]);
+        acc = [dx, dy];
+        let pos = 127 - w;
+        let sel = select16_k1(t, u2b2[pos], u2b1[pos], u1b2[pos], u1b1[pos]);
+        let (nx, ny) = ec_add_k1(acc[0], acc[1], sel[0], sel[1]);
+        acc = [nx, ny];
+        w += 1;
+    }
+    let (fx, _fy) = ec_add_k1(acc[0], acc[1], CORRX, CORRY);
+    let rxn = reduce_once::<4, 64>(finalize_k1(fx), NN);
+    let mut i = 0usize;
+    while i < 4usize {
+        aeq(rxn[i], r[i]);
+        i += 1;
+    }
 }
 
 /// SOUND lazy secp256k1 ECDSA verification. `qx`/`qy` are the public key (4×64

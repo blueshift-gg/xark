@@ -118,6 +118,34 @@ fn cache_hit_fallback_and_warm_all_verify() {
     );
 }
 
+/// The common newcomer flow: `xark prove` with no prior `setup`. The auto-setup
+/// it triggers now always warms the R1CS cache (its output feeds this same prove),
+/// so the minimize runs ONCE — the prove takes the cache-HIT path instead of
+/// re-minimizing the identical circuit.
+#[test]
+fn bare_prove_auto_setup_warms_cache_and_hits() {
+    let tmp = tempdir();
+    let out = tmp.path().join("out");
+    let target = tmp.path().join("target");
+    let (ok, err) = xark_build("bignum_ops", &out, &target);
+    assert!(ok, "build failed: {err}");
+    let cache = out.join("r1cs.min.wcz");
+
+    // No explicit setup — a plain `prove` (no `--cache`). Auto-setup runs because
+    // no proving key exists yet.
+    let (ok, o) = prove(&out, false);
+    assert!(ok, "bare auto-setup prove failed: {o}");
+    assert!(
+        cache.exists(),
+        "auto-setup should have warmed the cache at {}",
+        cache.display()
+    );
+    assert!(
+        o.contains("cached=true"),
+        "expected the first prove after auto-setup to be a cache hit (minimize once), got:\n{o}"
+    );
+}
+
 #[test]
 fn corrupt_cache_is_ignored_and_recomputes() {
     let tmp = tempdir();

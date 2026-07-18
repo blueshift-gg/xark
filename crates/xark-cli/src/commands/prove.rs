@@ -509,9 +509,13 @@ fn autobuild_and_setup(
             deterministic_rng: None,
             ptau_file: None,
             phase2_seed: None,
-            // `prove --cache` writes the cache during this auto-setup, so the
-            // prove that follows takes the fast (cache-hit) path directly.
-            cache: args.cache,
+            // Always cache here: this auto-setup exists only to feed the prove that
+            // immediately follows in the same process, and that prove reads the
+            // cache (fingerprint-gated). Without it, setup and prove would each run
+            // the (expensive) boundary minimize on the identical circuit — the whole
+            // point of the cache. Independent of the user's `--cache` (which governs
+            // whether a *standalone* `xark setup` persists it for later proofs).
+            cache: true,
         })?;
     }
     Ok(())
