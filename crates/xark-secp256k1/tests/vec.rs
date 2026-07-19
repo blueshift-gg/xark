@@ -1,5 +1,5 @@
 //! Validate the secp256k1 ECDSA gadget against the `k256` reference crate: sign a
-//! message with `k256`, feed the real `(q, r, s, e)` into `examples/ecdsa_basic`,
+//! message with `k256`, feed the real `(q, r, s, e)` into `examples/secp256k1_ecdsa`,
 //! and confirm the circuit accepts it — and rejects a tampered signature. The
 //! cross-implementation guarantee sha256 gets from `sha2`, for ECDSA.
 //!
@@ -11,7 +11,9 @@
 use k256::ecdsa::{signature::Signer, Signature, SigningKey};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
-use xark_test_harness::bignum::{Point, Scalar};
+// The GLV `ecdsa_verify` packs each 256-bit value as 2×128-bit limbs (`Point4`/`Fq4`),
+// so use the 2×128 leaf layout (`PointPacked`/`ScalarPacked`), not the default 3×86.
+use xark_test_harness::bignum::{PointPacked as Point, ScalarPacked as Scalar, Uint256};
 
 #[test]
 fn ecdsa_verify_matches_k256() {
@@ -32,14 +34,14 @@ fn ecdsa_verify_matches_k256() {
         16,
     )
     .unwrap();
-    let e = Scalar::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n);
+    let e = Scalar(Uint256::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n));
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/ecdsa_basic/src/lib.rs");
+        .join("../../examples/secp256k1_ecdsa/src/lib.rs");
     let c = xark_test_harness::compile_file(&src, "ecdsa_k256_vec", "bn254");
     assert!(
         c.status_success,
-        "compiling ecdsa_basic failed: {}",
+        "compiling secp256k1_ecdsa failed: {}",
         c.stderr
     );
 
@@ -48,7 +50,7 @@ fn ecdsa_verify_matches_k256() {
         .expect("a valid k256 ECDSA signature must verify");
 
     // A tampered signature (any wrong `r`) is rejected.
-    let bad_r = Scalar::from(1u128);
+    let bad_r = Scalar(Uint256::from(1u128));
     assert!(
         c.check(&[("q", &q), ("r", &bad_r), ("s", &s), ("e", &e)])
             .is_err(),

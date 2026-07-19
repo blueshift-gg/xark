@@ -21,7 +21,7 @@ use num_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Repr {
     /// A value that fits in `i64` (the common case: coefficients, small consts).
     Small(i64),
@@ -33,7 +33,7 @@ enum Repr {
 /// A field constant. Serialized transparently as the bare decimal string
 /// (`"123"`), since the wrapper key is pure noise in `circuit.json` / `r1cs.json`
 /// (every coefficient carries one).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FieldConst {
     repr: Repr,
 }

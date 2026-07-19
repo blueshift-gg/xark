@@ -631,19 +631,26 @@ fn read_g1_section(
             actual: payload.len(),
         });
     }
-    let mut out = Vec::with_capacity(count);
-    for i in 0..count {
-        let off = i * point_size;
-        let nc = || PtauError::InvalidPoint {
-            section: name,
-            index: i,
-            detail: "non-canonical coordinate",
-        };
-        let x = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
-        let y = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
-        let p = if x.is_zero() && y.is_zero() {
-            G1Affine::zero()
-        } else {
+    // Deserialize + validate points in parallel — each point is independent, so a
+    // large ptau otherwise pins a single core (see the parallelized G2 subgroup
+    // check below). `collect` into `Result` short-circuits on the first bad point
+    // and preserves index order.
+    use rayon::prelude::*;
+    (0..count)
+        .into_par_iter()
+        .map(|i| -> Result<G1Affine, PtauError> {
+            let off = i * point_size;
+            let nc = || PtauError::InvalidPoint {
+                section: name,
+                index: i,
+                detail: "non-canonical coordinate",
+            };
+            let x = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
+            let y =
+                fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
+            if x.is_zero() && y.is_zero() {
+                return Ok(G1Affine::zero());
+            }
             let candidate = G1Affine::new_unchecked(x, y);
             if !candidate.is_on_curve() {
                 return Err(PtauError::InvalidPoint {
@@ -653,11 +660,9 @@ fn read_g1_section(
                 });
             }
             // BN254 G1 has cofactor 1, so on-curve implies in-subgroup.
-            candidate
-        };
-        out.push(p);
-    }
-    Ok(out)
+            Ok(candidate)
+        })
+        .collect()
 }
 
 fn read_g2_section(
@@ -676,26 +681,32 @@ fn read_g2_section(
             actual: payload.len(),
         });
     }
-    let mut out = Vec::with_capacity(count);
-    for i in 0..count {
-        let off = i * point_size;
-        let nc = || PtauError::InvalidPoint {
-            section: name,
-            index: i,
-            detail: "non-canonical coordinate",
-        };
-        let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
-        let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES])
-            .ok_or_else(nc)?;
-        let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES])
-            .ok_or_else(nc)?;
-        let y_c1 =
-            fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size]).ok_or_else(nc)?;
-        let x = Fq2::new(x_c0, x_c1);
-        let y = Fq2::new(y_c0, y_c1);
-        let p = if x.is_zero() && y.is_zero() {
-            G2Affine::zero()
-        } else {
+    // Parallel: the G2 subgroup check (`is_in_correct_subgroup_assuming_on_curve`)
+    // is a scalar-mul by the group order *per point* — single-threaded, a large
+    // ptau spends minutes here on one core. Points are independent; `collect` into
+    // `Result` short-circuits on error and preserves order.
+    use rayon::prelude::*;
+    (0..count)
+        .into_par_iter()
+        .map(|i| -> Result<G2Affine, PtauError> {
+            let off = i * point_size;
+            let nc = || PtauError::InvalidPoint {
+                section: name,
+                index: i,
+                detail: "non-canonical coordinate",
+            };
+            let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
+            let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES])
+                .ok_or_else(nc)?;
+            let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES])
+                .ok_or_else(nc)?;
+            let y_c1 = fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size])
+                .ok_or_else(nc)?;
+            let x = Fq2::new(x_c0, x_c1);
+            let y = Fq2::new(y_c0, y_c1);
+            if x.is_zero() && y.is_zero() {
+                return Ok(G2Affine::zero());
+            }
             let candidate = G2Affine::new_unchecked(x, y);
             if !candidate.is_on_curve() {
                 return Err(PtauError::InvalidPoint {
@@ -711,11 +722,9 @@ fn read_g2_section(
                     detail: "G2 point not in prime-order subgroup",
                 });
             }
-            candidate
-        };
-        out.push(p);
-    }
-    Ok(out)
+            Ok(candidate)
+        })
+        .collect()
 }
 
 /// Re-encode an [`Fq`] element back into the snarkjs ptau

@@ -1,6 +1,6 @@
 //! Validate the secp256r1 (NIST P-256) ECDSA gadget against the `p256` reference
 //! crate: sign a message with `p256`, feed the real `(q, r, s, e)` into
-//! `examples/ecdsa_r1_basic`, and confirm the circuit accepts it — and rejects a
+//! `examples/secp256r1_ecdsa`, and confirm the circuit accepts it — and rejects a
 //! tampered signature.
 //!
 //! Native `p256` values drive the circuit directly: `Point`/`Scalar` own the
@@ -34,11 +34,11 @@ fn ecdsa_verify_matches_p256() {
     let e = Scalar::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n);
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/ecdsa_r1_basic/src/lib.rs");
+        .join("../../examples/secp256r1_ecdsa/src/lib.rs");
     let c = xark_test_harness::compile_file(&src, "ecdsa_p256_vec", "bn254");
     assert!(
         c.status_success,
-        "compiling ecdsa_r1_basic failed: {}",
+        "compiling secp256r1_ecdsa failed: {}",
         c.stderr
     );
 

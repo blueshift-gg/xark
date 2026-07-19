@@ -1,5 +1,5 @@
 [package]
-name = "ecdsa_verify_r1"
+name = "secp256r1_ecdsa"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"

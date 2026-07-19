@@ -143,27 +143,21 @@ pub struct XarkCircuit {
 /// ids, which surviving vars retain) remains a valid superset, and public-input
 /// ids/order are untouched.
 fn maybe_minimize(prog: R1csProgram) -> R1csProgram {
-    // Three modes, chosen the same way in setup and proving so both see the
-    // identical circuit:
-    //  * default — the input is the per-template-reduced R1CS; run an *unguarded*
-    //    boundary pass that eliminates the remaining cross-template plug
-    //    materializations, reaching the same fixpoint as a full flat minimize
-    //    (bounded, because every dense elimination was already done within a small
-    //    template body).
-    //  * `XARK_FLAT_MINIMIZE` — the input is the full (unreduced) expansion; run the
-    //    *guarded* flat minimizer (fill cap, `XARK_MAX_FILL`) so a raw dense circuit
-    //    can't cascade into a superlinear blowup.
+    // The guarded minimizer (fill cap `MAX_FILL_DEFAULT`, overridable via
+    // `XARK_MAX_FILL`) is the default for both setup and proving, so both see the
+    // identical circuit. The cap is deliberately low: it does the cheap,
+    // strictly-shrinking eliminations (plug/copy collapse, dead-var pruning) that
+    // reduce the circuit, and stops before the dense substitutions that inflate the
+    // nonzero count — which is what Groth16 prove/setup actually cost within a
+    // power-of-two FFT domain. An unguarded pass (`XARK_MAX_FILL` huge) reduces a few
+    // more constraints but explodes nonzeros on non-native circuits (secp256k1:
+    // 6.6M→47M) and can OOM on large flat ones, so it is opt-in, not the default.
     //  * `XARK_NO_MINIMIZE` — skip entirely.
     if dbg_flag("XARK_NO_MINIMIZE") {
         return prog;
     }
-    let flat = dbg_flag("XARK_FLAT_MINIMIZE");
     let t = std::time::Instant::now();
-    let out = if flat {
-        xark_ir::minimize::minimize(&prog)
-    } else {
-        xark_ir::minimize::minimize_with_fill(&prog, usize::MAX)
-    };
+    let out = xark_ir::minimize::minimize(&prog);
     // Reduction stats are diagnostic noise on a normal run; show them only under
     // the setup/prove timing flags.
     if dbg_flag("XARK_BUILD_TIME") || dbg_flag("PROVE_TIME") {
@@ -194,6 +188,19 @@ impl XarkCircuit {
         Self {
             prog: maybe_minimize(prog),
             assign,
+        }
+    }
+
+    /// For Groth16 setup from an **already-minimized** `prog` — skips
+    /// `maybe_minimize`. Pair with [`Self::for_proving_preminimized`] so setup and
+    /// prove synthesize the *identical* circuit: re-running `maybe_minimize` here on a
+    /// circuit the caller already minimized (possibly under a different `XARK_MAX_FILL`)
+    /// could reduce it further and desync the proving key from the proof. The caller
+    /// owns the minimization policy; both sides consume its exact result.
+    pub fn for_setup_preminimized(prog: R1csProgram) -> Self {
+        Self {
+            prog,
+            assign: BTreeMap::new(),
         }
     }
 
@@ -279,16 +286,38 @@ impl ConstraintSynthesizer<Fr> for XarkCircuit {
             map[v.id as usize] = Some(av);
         }
 
-        let build = |lc: &IrLc| -> LinearCombination<Fr> {
+        // Cache large-coefficient → `Fr` conversions. A non-native circuit (ECDSA,
+        // hashes) carries thousands of ~254-bit constants (limb weights, field
+        // moduli, reduction factors) that recur across millions of constraints;
+        // converting each occurrence via `big().to_bytes_le()` (num_bigint) was the
+        // dominant synthesis cost, and arkworks runs `generate_constraints` *twice*
+        // (setup `to_matrices` + prove). Interning by value collapses that to one
+        // conversion per *distinct* big coeff. Small coeffs (the `Repr::Small` fast
+        // path, incl. the ubiquitous ±1) skip the cache entirely — no allocation.
+        let mut big_cache: BTreeMap<FieldConst, Fr> = BTreeMap::new();
+        let mut fr_of = |fc: &FieldConst| -> Fr {
+            if let Some(n) = fc.as_i64() {
+                let mag = Fr::from(n.unsigned_abs());
+                return if n < 0 { -mag } else { mag };
+            }
+            if let Some(f) = big_cache.get(fc) {
+                return *f;
+            }
+            let f = fr_from_fieldconst(fc);
+            big_cache.insert(fc.clone(), f);
+            f
+        };
+
+        let mut build = |lc: &IrLc| -> LinearCombination<Fr> {
             let mut out = LinearCombination::zero();
-            let c = fr_from_fieldconst(&lc.constant);
+            let c = fr_of(&lc.constant);
             if !c.is_zero() {
                 out += (c, Variable::One);
             }
             for t in &lc.terms {
                 // `validate_program_constants` guarantees every term var is a
                 // declared (hence allocated) id.
-                out += (fr_from_fieldconst(&t.coeff), map[t.var as usize].unwrap());
+                out += (fr_of(&t.coeff), map[t.var as usize].unwrap());
             }
             out
         };

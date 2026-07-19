@@ -222,18 +222,18 @@ pub mod fixtures {
         "curve_basic"
     );
     typed_fixture!(
-        ECDSA_BASIC_VK,
-        ECDSA_BASIC_PROOF,
-        ECDSA_BASIC_INPUTS,
-        15,
-        "ecdsa_basic"
+        SECP256K1_ECDSA_VK,
+        SECP256K1_ECDSA_PROOF,
+        SECP256K1_ECDSA_INPUTS,
+        10,
+        "secp256k1_ecdsa"
     );
     typed_fixture!(
-        ECDSA_R1_BASIC_VK,
-        ECDSA_R1_BASIC_PROOF,
-        ECDSA_R1_BASIC_INPUTS,
+        SECP256R1_ECDSA_VK,
+        SECP256R1_ECDSA_PROOF,
+        SECP256R1_ECDSA_INPUTS,
         15,
-        "ecdsa_r1_basic"
+        "secp256r1_ecdsa"
     );
     typed_fixture!(
         KECCAK_BASIC_VK,

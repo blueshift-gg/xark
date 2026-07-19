@@ -44,7 +44,7 @@
 
 use ark_bn254::{Bn254, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{Field, Zero};
+use ark_ff::{Field, One, Zero};
 use ark_groth16::{ProvingKey, VerifyingKey};
 use ark_poly::{EvaluationDomain, GeneralEvaluationDomain};
 use ark_relations::gr1cs::{
@@ -143,26 +143,80 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
         beta_a_g1[i] += lambda_beta_g1[row];
     }
 
-    // For each constraint row, the row's sparse contributions to A, B, C
-    // affect the corresponding column's Lagrange-weighted sum.
-    for (row_idx, row) in mat_a.iter().enumerate() {
-        for (coeff, col) in row {
-            a_g1[*col] += lambda_g1[row_idx] * coeff;
-            beta_a_g1[*col] += lambda_beta_g1[row_idx] * coeff;
+    // For each constraint row, the row's sparse contributions to A, B, C affect
+    // the corresponding column's Lagrange-weighted sum. The row-major scatter
+    // writes to shared columns, so it can't be parallelized over rows without
+    // races; transpose each matrix to column-major once (cheap — one entry per
+    // nonzero), then compute every column's group sum independently across the
+    // rayon pool. This is the dominant cost of setup (millions of curve
+    // scalar-muls), so parallelizing it is what makes setup use all cores.
+    use rayon::prelude::*;
+    let transpose = |mat: &[Vec<(Fr, usize)>]| -> Vec<Vec<(usize, Fr)>> {
+        let mut cols: Vec<Vec<(usize, Fr)>> = vec![Vec::new(); total_vars];
+        for (row_idx, row) in mat.iter().enumerate() {
+            for (coeff, col) in row {
+                cols[*col].push((row_idx, *coeff));
+            }
         }
-    }
-    for (row_idx, row) in mat_b.iter().enumerate() {
-        for (coeff, col) in row {
-            b_g1[*col] += lambda_g1[row_idx] * coeff;
-            b_g2[*col] += lambda_g2[row_idx] * coeff;
-            alpha_b_g1[*col] += lambda_alpha_g1[row_idx] * coeff;
+        cols
+    };
+    let (cols_a, cols_b, cols_c) = (transpose(mat_a), transpose(mat_b), transpose(mat_c));
+
+    // The overwhelming majority of R1CS coefficients are ±1 (booleanity, copy,
+    // selection rows), and `Projective * Fr::ONE` still runs a full 254-bit
+    // double-and-add. Special-case ±1 to a plain group add/sub — skipping that
+    // scalar-mul for ~90%+ of nonzeros is the dominant speedup here. `weight`
+    // applies the same rule to a single (base, coeff) contribution.
+    let neg_one = -Fr::one();
+    let weight = |base: G1Projective, coeff: &Fr| -> G1Projective {
+        if coeff.is_one() {
+            base
+        } else if *coeff == neg_one {
+            -base
+        } else {
+            base * coeff
         }
-    }
-    for (row_idx, row) in mat_c.iter().enumerate() {
-        for (coeff, col) in row {
-            w_g1[*col] += lambda_g1[row_idx] * coeff;
+    };
+    let weight_g2 = |base: G2Projective, coeff: &Fr| -> G2Projective {
+        if coeff.is_one() {
+            base
+        } else if *coeff == neg_one {
+            -base
+        } else {
+            base * coeff
         }
-    }
+    };
+
+    // mat_a → a_g1 (already seeded with the pad-row contributions above), beta_a_g1
+    a_g1.par_iter_mut()
+        .zip(beta_a_g1.par_iter_mut())
+        .zip(cols_a.par_iter())
+        .for_each(|((a, ba), col)| {
+            for (row, coeff) in col {
+                *a += weight(lambda_g1[*row], coeff);
+                *ba += weight(lambda_beta_g1[*row], coeff);
+            }
+        });
+    // mat_b → b_g1, b_g2, alpha_b_g1
+    b_g1.par_iter_mut()
+        .zip(b_g2.par_iter_mut())
+        .zip(alpha_b_g1.par_iter_mut())
+        .zip(cols_b.par_iter())
+        .for_each(|(((bg1, bg2), abg1), col)| {
+            for (row, coeff) in col {
+                *bg1 += weight(lambda_g1[*row], coeff);
+                *bg2 += weight_g2(lambda_g2[*row], coeff);
+                *abg1 += weight(lambda_alpha_g1[*row], coeff);
+            }
+        });
+    // mat_c → w_g1
+    w_g1.par_iter_mut()
+        .zip(cols_c.par_iter())
+        .for_each(|(w, col)| {
+            for (row, coeff) in col {
+                *w += weight(lambda_g1[*row], coeff);
+            }
+        });
 
     // -------------------------------------------------------------------
     // 5) Sample γ, δ from the user-supplied seed.
@@ -177,41 +231,44 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     // 6) Compose `combined[i] = β·a + α·b + w`, then split into γ-scaled
     // public-input batch and δ-scaled private-witness batch.
     // -------------------------------------------------------------------
-    let mut combined: Vec<G1Projective> = Vec::with_capacity(total_vars);
-    for i in 0..total_vars {
-        combined.push(beta_a_g1[i] + alpha_b_g1[i] + w_g1[i]);
-    }
+    let combined: Vec<G1Projective> = (0..total_vars)
+        .into_par_iter()
+        .map(|i| beta_a_g1[i] + alpha_b_g1[i] + w_g1[i])
+        .collect();
 
-    let mut gamma_abc_g1: Vec<G1Affine> = Vec::with_capacity(num_instance);
-    for c in combined.iter().take(num_instance) {
-        gamma_abc_g1.push(((*c) * gamma_inv).into_affine());
-    }
+    // Scale (γ⁻¹ / δ⁻¹) in parallel, then convert to affine with ONE batched field
+    // inversion (Montgomery's trick) per vector instead of one per point — the
+    // per-point `into_affine` inversions dominated the single-threaded setup.
+    let gamma_abc_proj: Vec<G1Projective> = combined[..num_instance]
+        .par_iter()
+        .map(|c| *c * gamma_inv)
+        .collect();
+    let gamma_abc_g1 = G1Projective::normalize_batch(&gamma_abc_proj);
 
-    let mut l_query: Vec<G1Affine> = Vec::with_capacity(num_witness);
-    for c in combined.iter().take(total_vars).skip(num_instance) {
-        l_query.push(((*c) * delta_inv).into_affine());
-    }
+    let l_query_proj: Vec<G1Projective> = combined[num_instance..total_vars]
+        .par_iter()
+        .map(|c| *c * delta_inv)
+        .collect();
+    let l_query = G1Projective::normalize_batch(&l_query_proj);
 
     // -------------------------------------------------------------------
     // 7) `h_query[k] = δ⁻¹ · (τ^{N+k} - τ^k) G1` for k = 0..N-1.
     // `t(τ) = τ^N - 1`, so `τ^k · t(τ) = τ^{N+k} - τ^k`.
     // -------------------------------------------------------------------
     let h_len = n - 1; // m_raw - 1 in ark-groth16 terms (number of h coeffs)
-    let mut h_query: Vec<G1Affine> = Vec::with_capacity(h_len);
-    for k in 0..h_len {
-        let upper: G1Projective = ptau.tau_g1[n + k].into_group();
-        let lower: G1Projective = ptau.tau_g1[k].into_group();
-        let diff = upper - lower;
-        h_query.push((diff * delta_inv).into_affine());
-    }
+    let h_query_proj: Vec<G1Projective> = (0..h_len)
+        .into_par_iter()
+        .map(|k| (ptau.tau_g1[n + k].into_group() - ptau.tau_g1[k].into_group()) * delta_inv)
+        .collect();
+    let h_query = G1Projective::normalize_batch(&h_query_proj);
 
     // -------------------------------------------------------------------
     // 8) Variable-batch queries: a_g1, b_g1, b_g2 cover ALL variables
-    // (index 0..total_vars) projected onto the affine form.
+    // (index 0..total_vars) projected onto the affine form (batch-normalized).
     // -------------------------------------------------------------------
-    let a_query: Vec<G1Affine> = a_g1.iter().map(|p| p.into_affine()).collect();
-    let b_g1_query: Vec<G1Affine> = b_g1.iter().map(|p| p.into_affine()).collect();
-    let b_g2_query: Vec<G2Affine> = b_g2.iter().map(|p| p.into_affine()).collect();
+    let a_query = G1Projective::normalize_batch(&a_g1);
+    let b_g1_query = G1Projective::normalize_batch(&b_g1);
+    let b_g2_query = G2Projective::normalize_batch(&b_g2);
 
     // -------------------------------------------------------------------
     // 9) Assemble the keys. The α, β, δ G1/G2 elements come from ptau and

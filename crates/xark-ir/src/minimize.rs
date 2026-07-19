@@ -33,11 +33,20 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Fill-in guard: a variable is only eliminated when its replacement linear
-/// combination has at most this many terms. Bounds the substitution cascade that
-/// makes elimination superlinear on dense non-native (limb) arithmetic, while
-/// leaving the overwhelmingly common cheap eliminations (plugs, copies, mul→eq
-/// merges — a handful of terms) untouched.
-const MAX_FILL_DEFAULT: usize = 32;
+/// combination has at most this many terms.
+///
+/// Set low (2) because Groth16 prove/setup cost tracks the total number of *nonzero
+/// terms*, not the constraint count (the FFT domain is power-of-two-quantized, so a
+/// sub-1% constraint reduction that stays in the same bucket is free to the prover).
+/// A higher cap does *more* eliminations but each dense substitution splices its
+/// replacement LC into every referencing constraint, inflating nonzeros: measured
+/// across the gadget suite, fill=2 keeps every circuit at raw sparsity, while fill=32
+/// leaves it unchanged on hash/EC circuits (±few %) but explodes non-native ones —
+/// secp256k1 goes 6.6M→47M nonzeros (+615%) for a 0.9% constraint drop that doesn't
+/// even cross an FFT boundary. fill=2 still captures the cheap, strictly-shrinking
+/// eliminations (plugs, copies, dead-var pruning, mul→eq merges). A boundary-crossing
+/// reduction (the one case a higher cap wins) can be requested via `XARK_MAX_FILL`.
+const MAX_FILL_DEFAULT: usize = 2;
 
 /// Fill-in threshold, overridable via `XARK_MAX_FILL` (higher = more reductions at
 /// the cost of denser substitutions). Read once.

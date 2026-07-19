@@ -1,7 +1,7 @@
 //! Validate the Ed25519 EdDSA gadget end to end against `ed25519-dalek`: sign a
 //! real message with a fixed-seed keypair, feed the public key `A`, signature
 //! point `R`, scalar `S`, and challenge `k = SHA-512(R‖A‖M) mod L` into
-//! `examples/ed25519_verify`, and confirm the circuit accepts it and rejects a
+//! `examples/ed25519`, and confirm the circuit accepts it and rejects a
 //! tampered signature. Also pins the minimized constraint count.
 //!
 //! dalek does keygen + signing (the real cross-check) but its `EdwardsPoint`
@@ -76,11 +76,11 @@ fn eddsa_verify_matches_dalek() {
     let k = Scalar::from(BigUint::from_bytes_le(&h.finalize()) % l);
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/ed25519_verify/src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "ed25519_verify", "bn254");
+        .join("../../examples/ed25519/src/lib.rs");
+    let c = xark_test_harness::compile_file(&src, "ed25519", "bn254");
     assert!(
         c.status_success,
-        "compiling ed25519_verify failed: {}",
+        "compiling ed25519 failed: {}",
         c.stderr
     );
 

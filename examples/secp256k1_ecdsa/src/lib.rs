@@ -14,13 +14,13 @@ use xark::{circuit, Public};
 use xark_secp256k1::{ecdsa_verify as verify_gadget, Fq4, Point4};
 
 #[circuit]
-pub fn ecdsa_verify(q: Public<Point4>, r: Public<Fq4>, s: Public<Fq4>, e: Public<Fq4>) {
+pub fn secp256k1_ecdsa(q: Public<Point4>, r: Public<Fq4>, s: Public<Fq4>, e: Public<Fq4>) {
     verify_gadget(q.x.limbs, q.y.limbs, r.limbs, s.limbs, e.limbs);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ecdsa_verify;
+    use super::secp256k1_ecdsa;
     use k256::ecdsa::{signature::Signer, Signature, SigningKey};
     use sha2::{Digest, Sha256};
     use xark_secp256k1::reduce_scalar;
@@ -42,7 +42,7 @@ mod tests {
     #[test]
     fn accepts_valid() {
         let (q, r, s, e) = parts();
-        ecdsa_verify(q, r, s, e).unwrap();
+        secp256k1_ecdsa(q, r, s, e).unwrap();
     }
 
     #[test]
@@ -50,7 +50,7 @@ mod tests {
         let (q, _r, s, e) = parts();
         let mut bad_r = [0u8; 32];
         bad_r[31] = 1; // wrong r
-        assert!(ecdsa_verify(q, bad_r, s, e).is_err());
+        assert!(secp256k1_ecdsa(q, bad_r, s, e).is_err());
     }
 
     #[test]
@@ -60,6 +60,6 @@ mod tests {
         // standalone `on_curve_k1` example gave, but on the gadget's real 4×64 check.
         let (mut q, r, s, e) = parts();
         q[63] ^= 1;
-        assert!(ecdsa_verify(q, r, s, e).is_err());
+        assert!(secp256k1_ecdsa(q, r, s, e).is_err());
     }
 }

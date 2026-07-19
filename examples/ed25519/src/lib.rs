@@ -14,7 +14,7 @@ use xark_bignum::scalar_to_bits;
 use xark_ed25519::{eddsa_verify, Fq, PointL};
 
 #[circuit]
-pub fn ed25519_verify(a: Public<PointL>, r: Public<PointL>, s: Public<Fq>, k: Public<Fq>) {
+pub fn ed25519(a: Public<PointL>, r: Public<PointL>, s: Public<Fq>, k: Public<Fq>) {
     eddsa_verify(
         a.x.limbs,
         a.y.limbs,
@@ -27,7 +27,7 @@ pub fn ed25519_verify(a: Public<PointL>, r: Public<PointL>, s: Public<Fq>, k: Pu
 
 #[cfg(test)]
 mod tests {
-    use super::ed25519_verify;
+    use super::ed25519;
     use ed25519_dalek::{Signer, SigningKey};
     use xark_ed25519::{challenge, scalar_le_to_be};
 
@@ -48,7 +48,7 @@ mod tests {
     fn accepts_valid() {
         let (a, r, s) = parts();
         let k = challenge(&r, &a, MSG);
-        ed25519_verify(a, r, s, k).unwrap();
+        ed25519(a, r, s, k).unwrap();
     }
 
     #[test]
@@ -57,6 +57,6 @@ mod tests {
         // Challenge for a different message → the EdDSA equation fails while `S`
         // stays canonical (so this exercises the equation, not the range check).
         let bad_k = challenge(&r, &a, b"tampered message");
-        assert!(ed25519_verify(a, r, s, bad_k).is_err());
+        assert!(ed25519(a, r, s, bad_k).is_err());
     }
 }

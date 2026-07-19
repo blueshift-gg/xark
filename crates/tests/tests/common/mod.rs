@@ -37,38 +37,46 @@ pub fn build_valid_ptau(power: u32) -> Vec<u8> {
     let g1 = ark_bn254::G1Projective::generator();
     let g2 = ark_bn254::G2Projective::generator();
 
-    // [τ^0]G1... [τ^(2·2^p - 2)]G1
+    // The regen driver calls this with `power` up to ~21 (a 2^21 domain for the
+    // 1.6M-constraint ECDSA circuit), i.e. ~10M points. Computing each as a fresh
+    // sequential `(G * scalar).into_affine()` — a full scalar-mul plus a per-point
+    // field inversion — was the dominant single-threaded cost of a fixture regen.
+    // Instead: derive the field powers τ^i once (cheap), fan the group scalar-muls
+    // across all cores with rayon, and batch-normalize to affine with ONE inversion
+    // per section (Montgomery's trick) rather than one per point.
+    use rayon::prelude::*;
+    // τ^0, τ^1, … τ^(count-1). Sequential is fine: field muls are ~free.
+    let field_powers = |count: usize| -> Vec<Fr> {
+        let mut v = Vec::with_capacity(count);
+        let mut acc = Fr::ONE;
+        for _ in 0..count {
+            v.push(acc);
+            acc *= tau;
+        }
+        v
+    };
+    let g1_batch = |scalars: &[Fr]| -> Vec<G1Affine> {
+        let proj: Vec<_> = scalars.par_iter().map(|s| g1 * s).collect();
+        ark_bn254::G1Projective::normalize_batch(&proj)
+    };
+    let g2_batch = |scalars: &[Fr]| -> Vec<G2Affine> {
+        let proj: Vec<_> = scalars.par_iter().map(|s| g2 * s).collect();
+        ark_bn254::G2Projective::normalize_batch(&proj)
+    };
+
+    // [τ^0]G1 … [τ^(2·2^p - 2)]G1
     let n_tau_g1 = 2 * two_to_p - 1;
-    let mut tau_g1 = Vec::with_capacity(n_tau_g1);
-    let mut acc = Fr::ONE;
-    for _ in 0..n_tau_g1 {
-        tau_g1.push((g1 * acc).into_affine());
-        acc *= tau;
-    }
+    let tau_pows = field_powers(n_tau_g1);
+    let tau_g1 = g1_batch(&tau_pows);
 
-    // [τ^0]G2... [τ^(2^p - 1)]G2
-    let mut tau_g2 = Vec::with_capacity(two_to_p);
-    acc = Fr::ONE;
-    for _ in 0..two_to_p {
-        tau_g2.push((g2 * acc).into_affine());
-        acc *= tau;
-    }
+    // [τ^0]G2 … [τ^(2^p - 1)]G2 — τ powers are a prefix of `tau_pows`.
+    let tau_g2 = g2_batch(&tau_pows[..two_to_p]);
 
-    // [α·τ^i]G1
-    let mut alpha_tau_g1 = Vec::with_capacity(two_to_p);
-    acc = alpha;
-    for _ in 0..two_to_p {
-        alpha_tau_g1.push((g1 * acc).into_affine());
-        acc *= tau;
-    }
-
-    // [β·τ^i]G1
-    let mut beta_tau_g1 = Vec::with_capacity(two_to_p);
-    acc = beta;
-    for _ in 0..two_to_p {
-        beta_tau_g1.push((g1 * acc).into_affine());
-        acc *= tau;
-    }
+    // [α·τ^i]G1 and [β·τ^i]G1 for i ∈ [0, 2^p).
+    let alpha_scalars: Vec<Fr> = tau_pows[..two_to_p].iter().map(|t| alpha * t).collect();
+    let alpha_tau_g1 = g1_batch(&alpha_scalars);
+    let beta_scalars: Vec<Fr> = tau_pows[..two_to_p].iter().map(|t| beta * t).collect();
+    let beta_tau_g1 = g1_batch(&beta_scalars);
 
     let beta_g2 = (g2 * beta).into_affine();
 

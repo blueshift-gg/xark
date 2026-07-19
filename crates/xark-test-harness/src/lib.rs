@@ -101,8 +101,26 @@ impl Compiled {
 
         let assign = xark_ir::solver::solve_and_check(&program, &id_inputs)
             .map_err(|e| format!("inputs do not satisfy the circuit: {e:?}"))?;
-        if !xark_ir::solver::analyze_underconstrained(&program, &assign).is_empty() {
-            return Err("circuit is under-constrained (a witness var is unconstrained)".into());
+        // `analyze_underconstrained` only inspects `Derived` (advice/internal) vars.
+        // A `witness_only` derivation (e.g. the secp256k1 GLV lattice reduction)
+        // computes advice through SCRATCH vars that no constraint references — they
+        // exist only to derive the pinned outputs and are removed by `minimize`
+        // before proving. Such a var is causally disconnected from the circuit: it
+        // appears in no constraint, so changing it alters no constraint's
+        // satisfaction and no public output — it cannot be a forgery vector. Ignore
+        // that (benign) reason; still fail on a var that IS referenced but left free
+        // (a genuine, forgeable under-constraint).
+        const UNREFERENCED: &str = "no constraint references this variable";
+        let real: Vec<_> = xark_ir::solver::analyze_underconstrained(&program, &assign)
+            .into_iter()
+            .filter(|u| u.reason != UNREFERENCED)
+            .collect();
+        if !real.is_empty() {
+            return Err(format!(
+                "circuit is under-constrained ({} forgeable witness var(s): {:?})",
+                real.len(),
+                real.iter().take(12).collect::<Vec<_>>()
+            ));
         }
         Ok(())
     }

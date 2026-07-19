@@ -191,6 +191,69 @@ impl LeafInput for Point85 {
     }
 }
 
+/// secp256k1's GLV ECDSA path packs each 256-bit value into **2×128-bit** limbs
+/// (`Fq4`/`Point4` — 10 public leaves instead of the default 3×86's 15). A distinct
+/// type, like [`Point85`], so a value's leaf layout stays the single source of truth.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScalarPacked(pub Uint256);
+
+impl ScalarPacked {
+    /// From a big-endian byte string (e.g. a signature scalar off the k256 wire).
+    pub fn from_bytes_be(bytes: &[u8]) -> Self {
+        Self(Uint256::from_bytes_be(bytes))
+    }
+}
+
+impl LeafInput for ScalarPacked {
+    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
+        self.0
+            .limbs(2, 128)
+            .into_iter()
+            .enumerate()
+            .map(|(i, l)| (format!("{prefix}.limbs[{i}]"), l))
+            .collect()
+    }
+}
+
+/// An affine point whose coordinates flatten as **2×128-bit** limbs — the layout of
+/// the secp256k1 GLV path's `Point4`, distinct from the default 3×86 [`Point`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PointPacked {
+    pub x: Uint256,
+    pub y: Uint256,
+}
+
+impl PointPacked {
+    /// From a SEC1 encoding: 65-byte uncompressed (`0x04 ‖ x ‖ y`) or bare 64-byte
+    /// `x ‖ y` (both big-endian). Panics on any other length.
+    pub fn from_sec1(bytes: &[u8]) -> Self {
+        let body = match bytes.len() {
+            65 if bytes[0] == 0x04 => &bytes[1..],
+            64 => bytes,
+            n => panic!("PointPacked::from_sec1: expected 64 or 65 (0x04-prefixed) bytes, got {n}"),
+        };
+        Self {
+            x: Uint256::from_bytes_be(&body[..32]),
+            y: Uint256::from_bytes_be(&body[32..]),
+        }
+    }
+}
+
+impl LeafInput for PointPacked {
+    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
+        let coord = |v: &Uint256, name: &str| -> Vec<(String, String)> {
+            v.limbs(2, 128)
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| (format!("{prefix}.{name}.limbs[{i}]"), l))
+                .collect()
+        };
+        let mut out = coord(&self.x, "x");
+        out.extend(coord(&self.y, "y"));
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

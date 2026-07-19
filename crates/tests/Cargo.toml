@@ -38,6 +38,7 @@ ark-snark.workspace = true
 ark-std.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
+rayon = "1"
 sha2.workspace = true
 hex.workspace = true
 num-bigint.workspace = true

@@ -114,16 +114,18 @@ fn curve_basic() {
 }
 
 #[svm_test]
-fn ecdsa_basic() {
-    assert!(fixtures::ECDSA_BASIC_VK
-        .verify(&fixtures::ECDSA_BASIC_PROOF, &fixtures::ECDSA_BASIC_INPUTS));
+fn secp256k1_ecdsa() {
+    assert!(fixtures::SECP256K1_ECDSA_VK.verify(
+        &fixtures::SECP256K1_ECDSA_PROOF,
+        &fixtures::SECP256K1_ECDSA_INPUTS
+    ));
 }
 
 #[svm_test]
-fn ecdsa_r1_basic() {
-    assert!(fixtures::ECDSA_R1_BASIC_VK.verify(
-        &fixtures::ECDSA_R1_BASIC_PROOF,
-        &fixtures::ECDSA_R1_BASIC_INPUTS
+fn secp256r1_ecdsa() {
+    assert!(fixtures::SECP256R1_ECDSA_VK.verify(
+        &fixtures::SECP256R1_ECDSA_PROOF,
+        &fixtures::SECP256R1_ECDSA_INPUTS
     ));
 }
 
