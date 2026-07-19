@@ -3,8 +3,21 @@ name = "ec_incomplete_r1"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+
 [lib]
 path = "src/lib.rs"
+
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-secp256r1 = { path = "../../crates/xark-secp256r1" }
+xark-prover = { path = "../../crates/xark-prover", optional = true }
+
+[dev-dependencies]
+xark-secp256r1 = { path = "../../crates/xark-secp256r1", features = ["host"] }
+xark-prover = { path = "../../crates/xark-prover" }
+p256 = "0.13"
+
+[features]
+host = ["dep:xark-prover", "xark-secp256r1/host"]
+
+[workspace]

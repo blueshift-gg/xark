@@ -11,6 +11,12 @@ path = "src/lib.rs"
 
 [dependencies]
 xark = { path = "../xark", default-features = false }
+# `host` enables the `NativeInput` impl (native field strings → circuit inputs)
+# for `Affine`; off, the crate stays lean `no_std` for the compiler.
+xark-prover = { path = "../xark-prover", optional = true }
+
+[features]
+host = ["dep:xark-prover"]
 
 [dev-dependencies]
 xark-test-harness = { path = "../xark-test-harness" }

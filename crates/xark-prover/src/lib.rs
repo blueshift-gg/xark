@@ -436,6 +436,26 @@ pub trait ProveInputs {
     fn into_inputs(self) -> Vec<(String, String)>;
 }
 
+/// A **transparent gadget input type** — a type that is field-element limbs
+/// in-circuit (e.g. `Fq { limbs: [Field; 4] }`, `Point { x, y }`) but has a
+/// *native* host form (`[u8; 32]`, `[u8; 65]`, …) a caller actually holds.
+///
+/// A `#[circuit]` parameter of such a type takes its [`Native`](Self::Native) form
+/// in the generated `<Fn>Inputs` struct (and the host validator), and this impl's
+/// [`leaves`](Self::leaves) fans that native value out to the circuit's witness
+/// leaves — the same structural-flatten names (`q.x.limbs[i]`) the compiler gives
+/// the circuit type. So a gadget exposes one type usable on both sides: the user
+/// passes bytes, the circuit sees limbs.
+pub trait NativeInput {
+    /// The native host value (what a normal crate emits: a SEC1 point, a scalar's
+    /// bytes, …). This is the type the `#[circuit]` `<Fn>Inputs` field holds.
+    type Native;
+
+    /// Fan a native value out to `(leaf-name, decimal)` pairs under `prefix`,
+    /// matching the compiler's flatten names for this circuit type.
+    fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)>;
+}
+
 /// The "circuit not built" failure: an actionable message with the fix command
 /// on its own line. Colorized (brand green for the command, red for the header)
 /// when stderr is a terminal, matching the `xark` CLI palette; plain text when

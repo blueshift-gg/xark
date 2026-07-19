@@ -2563,49 +2563,10 @@ fn rejections_carry_actionable_help() {
     );
 }
 
-/// The secp256k1 on-curve gadget accepts a real pubkey and rejects a perturbed
-/// coordinate (validates `b = 7`, `y² = x³ + 7`).
-#[test]
-fn secp256k1_on_curve_accepts_real_rejects_perturbed() {
-    use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
-    let c = compile_with_field(&example("on_curve_k1"), "on_curve_k1", "bn254");
-    assert!(c.status_success, "on_curve_k1 failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |n: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == n)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    // Real secp256k1 pubkey (86-bit limbs), on y² = x³ + 7.
-    let kat = [
-        ("qx0", "36791928440626258064573199"),
-        ("qx1", "61528703143672418979960783"),
-        ("qx2", "14747486129163242114008648"),
-        ("qy0", "76282327881385977091575450"),
-        ("qy1", "51294842334813218325050598"),
-        ("qy2", "6439864854718902709630533"),
-    ];
-    let base = || {
-        let mut m = BTreeMap::new();
-        for (k, v) in kat.iter() {
-            m.insert(id(k), v.to_string());
-        }
-        m
-    };
-    solver::solve_and_check(&program, &base()).expect("on-curve pubkey must be accepted");
-    let mut bad = base();
-    bad.insert(id("qy0"), "1".to_string());
-    assert!(
-        solver::solve_and_check(&program, &bad).is_err(),
-        "an off-curve pubkey must be rejected by enforce_on_curve"
-    );
-}
+// (The standalone secp256k1 on-curve snapshot test was removed with the
+// `on_curve_k1` example; secp256k1's on-curve check is now exercised by the
+// `ecdsa_verify` example's off-curve-pubkey reject test, on the 4×64 path the GLV
+// gadget actually uses.)
 
 /// The secp256r1 (a = −3) on-curve gadget: real pubkey accepted, perturbed rejected.
 #[test]
@@ -2626,12 +2587,12 @@ fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
             .unwrap()
     };
     let kat = [
-        ("qx0", "67266088408721815440178629"),
-        ("qx1", "32122441355340553600857496"),
-        ("qx2", "8254854985909125326758352"),
-        ("qy0", "20513967152570891030533053"),
-        ("qy1", "70247732038174899916449580"),
-        ("qy2", "15284152633358001387265917"),
+        ("q.x.limbs[0]", "67266088408721815440178629"),
+        ("q.x.limbs[1]", "32122441355340553600857496"),
+        ("q.x.limbs[2]", "8254854985909125326758352"),
+        ("q.y.limbs[0]", "20513967152570891030533053"),
+        ("q.y.limbs[1]", "70247732038174899916449580"),
+        ("q.y.limbs[2]", "15284152633358001387265917"),
     ];
     let base = || {
         let mut m = BTreeMap::new();
@@ -2642,7 +2603,7 @@ fn secp256r1_on_curve_accepts_real_rejects_perturbed() {
     };
     solver::solve_and_check(&program, &base()).expect("on-curve P-256 pubkey must be accepted");
     let mut bad = base();
-    bad.insert(id("qy0"), "1".to_string());
+    bad.insert(id("q.y.limbs[0]"), "1".to_string());
     assert!(
         solver::solve_and_check(&program, &bad).is_err(),
         "an off-curve P-256 pubkey must be rejected"
@@ -2670,12 +2631,12 @@ fn ed25519_on_curve_accepts_real_rejects_perturbed() {
     };
     // Ed25519 base point B, as 86-bit limbs (from xark_ed25519::base()).
     let kat = [
-        ("qx0", "45522188556658772877366554"),
-        ("qx1", "10615720421966981067801172"),
-        ("qx2", "2524463244633754693274190"),
-        ("qy0", "46422751473201760308717144"),
-        ("qy1", "30948500982134506872478105"),
-        ("qy2", "7737125245533626718119526"),
+        ("q.x.limbs[0]", "45522188556658772877366554"),
+        ("q.x.limbs[1]", "10615720421966981067801172"),
+        ("q.x.limbs[2]", "2524463244633754693274190"),
+        ("q.y.limbs[0]", "46422751473201760308717144"),
+        ("q.y.limbs[1]", "30948500982134506872478105"),
+        ("q.y.limbs[2]", "7737125245533626718119526"),
     ];
     let base = || {
         let mut m = BTreeMap::new();
@@ -2686,7 +2647,7 @@ fn ed25519_on_curve_accepts_real_rejects_perturbed() {
     };
     solver::solve_and_check(&program, &base()).expect("on-curve Ed25519 point must be accepted");
     let mut bad = base();
-    bad.insert(id("qy0"), "1".to_string());
+    bad.insert(id("q.y.limbs[0]"), "1".to_string());
     assert!(
         solver::solve_and_check(&program, &bad).is_err(),
         "an off-curve Ed25519 point must be rejected"
@@ -3173,5 +3134,56 @@ fn field_rem_u128_is_not_provided() {
     assert!(
         solves(&rem, &[("x", "103"), ("out", "3")]),
         "103 % 5u64 = 3"
+    );
+}
+
+/// `witness_only` regions: multiplications inside `witness_begin()`/`witness_end()`
+/// emit witness-gen but **no constraints**, the unreferenced `x²` scratch is
+/// exempt from `check_pinning` (so the circuit even compiles), and the derived
+/// result stays sound because it's pinned to a constrained recompute.
+#[test]
+fn witness_only_derives_without_constraints() {
+    use std::collections::BTreeMap;
+    use xark_ir::{primitive, solver};
+    let c = compile_with_field(
+        &example("witness_only_check"),
+        "witness_only_check",
+        "bn254",
+    );
+    // Compiling at all proves the exemption: without it, the unreferenced `x²`
+    // scratch would be rejected as an unpinned hint output.
+    assert!(c.status_success, "witness_only_check failed: {}", c.stderr);
+    let program =
+        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
+            .unwrap();
+    // The two witness-only muls (`x²`, `d`) emit zero constraints; only the
+    // constrained `x·x·x·x` and the equality pins remain. Constraining them
+    // naively would add two mul gates.
+    let n = program.constraints.len();
+    // Only the constrained `x·x·x·x` (3 muls) + 2 equality pins remain; the two
+    // witness-only muls emit nothing. Constraining them naively would add two.
+    assert!(
+        n <= 5,
+        "witness-only muls must not each emit a constraint (got {n})"
+    );
+    let id = |name: &str| {
+        program
+            .vars
+            .iter()
+            .find(|v| v.name == name)
+            .unwrap_or_else(|| panic!("missing var `{name}`"))
+            .id
+    };
+    let inputs = |claim: &str| {
+        let mut m = BTreeMap::new();
+        m.insert(id("x"), "3".to_string());
+        m.insert(id("claim"), claim.to_string());
+        m
+    };
+    // 3⁴ = 81 accepts; a wrong claim is rejected (the pinned result is sound).
+    solver::solve_and_check(&program, &inputs("81")).expect("3⁴ = 81 must accept");
+    assert!(
+        solver::solve_and_check(&program, &inputs("80")).is_err(),
+        "claim ≠ x⁴ must be rejected"
     );
 }

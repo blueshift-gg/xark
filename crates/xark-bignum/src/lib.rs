@@ -574,6 +574,36 @@ pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
     assert_eq(borrow, Field::from(0u8));
 }
 
+/// Return a pinned boolean `lt ∈ {0,1}` with `lt == 1` **iff** `a < b`, comparing
+/// two canonical `LIMBS × BITS`-bit limb vectors (each limb assumed `< 2^BITS`).
+///
+/// Same sound subtract-with-borrow as [`assert_lt`] — it computes `a − b` limb by
+/// limb, where each `d_i = a[i] − b[i] − borrow + 2^BITS ∈ [0, 2^(BITS+1))` is
+/// bit-decomposed (`decompose_top` pins it) and its top bit is `no_borrow`. Every
+/// term stays `< 2^(BITS+1)`, so nothing wraps the field, and the final borrow is
+/// exactly the `a < b` bit — no full-width value is ever reconstructed. Unlike
+/// `assert_lt` (which asserts the borrow is `0`), this **returns** it, so a caller
+/// can branch/mux on the comparison and derive advice (rounding carries, GLV
+/// signs) in-circuit instead of passing it as a witness input.
+pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field; LIMBS]) -> Field {
+    let two_b = two_pow::<BITS>();
+    let mut borrow = Field::from(0u8);
+    let mut i = 0usize;
+    while i < LIMBS {
+        let d_i = a[i] - b[i] - borrow + two_b;
+        let bits = decompose_top::<BITS, 1>(d_i);
+        let no_borrow = bits[BITS];
+        borrow = Field::from(1u8) - no_borrow;
+        i += 1;
+    }
+    borrow
+}
+
+/// Pinned `a ≥ b` bit (`1 − is_lt`). Canonical limb-vector precondition as [`is_lt`].
+pub fn is_ge<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field; LIMBS]) -> Field {
+    Field::from(1u8) - is_lt::<LIMBS, BITS>(a, b)
+}
+
 /// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
     // all_zero = AND of isZero(limbᵢ); assert it is 0 to forbid value 0
@@ -1090,6 +1120,24 @@ pub fn mod_mul<const LIMBS: usize, const BITS: usize>(
     m: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
 ) -> [Field; LIMBS] {
+    mul_divmod::<LIMBS, BITS>(a, b, m, m_minus_1).1
+}
+
+/// Non-native `a·b` exposing **both** halves of the division: returns
+/// `(q, r)` with `q = ⌊a·b / m⌋` and `r = a·b mod m`. Both are range-checked to
+/// `LIMBS × BITS` bits, `r` is `assert_lt`'d canonical, and the pair is pinned by
+/// `mulmod_columns` (`a·b == q·m + r`), so the quotient is as sound as the
+/// remainder. [`mod_mul`] is `.1` of this.
+///
+/// The quotient is what lets a scaled-division advice (e.g. a GLV lattice
+/// reduction's `⌊b·u / n⌋`) be *derived in-circuit* from its inputs rather than
+/// supplied as a witness input.
+pub fn mul_divmod<const LIMBS: usize, const BITS: usize>(
+    a: [Field; LIMBS],
+    b: [Field; LIMBS],
+    m: [Field; LIMBS],
+    m_minus_1: [Field; LIMBS],
+) -> ([Field; LIMBS], [Field; LIMBS]) {
     const {
         assert!(
             2 * BITS + 8 < 253,
@@ -1105,7 +1153,7 @@ pub fn mod_mul<const LIMBS: usize, const BITS: usize>(
     }
     assert_lt::<LIMBS, BITS>(r, m_minus_1);
     mulmod_columns::<LIMBS, BITS>(a, b, q, r, m);
-    r
+    (q, r)
 }
 
 /// Non-native modular inverse `a⁻¹ mod m` over `LIMBS` × `BITS`-bit limbs. Output

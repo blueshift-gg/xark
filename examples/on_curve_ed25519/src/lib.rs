@@ -1,20 +1,32 @@
-#![no_std]
-
 //! Assert an Ed25519 point `q = (x, y)` lies on the twisted-Edwards curve
-//! `−x² + y² = 1 + d·x²·y²`. This is the `enforce_on_curve` check `eddsa_verify`
-//! now runs on its `A` and `R` point inputs.
+//! `−x² + y² = 1 + d·x²·y²`, as a `#[circuit]`. This is the `enforce_on_curve`
+//! check `eddsa_verify` runs on its `A`/`R` point inputs. `Point` is the
+//! transparent compact uncompressed `[u8; 64]` (`x ‖ y`) type; the test uses the
+//! Ed25519 basepoint as a known on-curve point.
+#![cfg_attr(not(any(test, feature = "host")), no_std)]
 
-use xark::{Field, Private};
-use xark_ed25519::{enforce_on_curve, Fp, Point};
+use xark::{circuit, Public};
+use xark_ed25519::{enforce_on_curve, Point};
 
-pub fn circuit(
-    qx0: Private<Field>,
-    qx1: Private<Field>,
-    qx2: Private<Field>,
-    qy0: Private<Field>,
-    qy1: Private<Field>,
-    qy2: Private<Field>,
-) {
-    let q = Point::new(Fp::new([qx0, qx1, qx2]), Fp::new([qy0, qy1, qy2]));
+#[circuit]
+pub fn on_curve_ed25519(q: Public<Point>) {
     enforce_on_curve(q);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::on_curve_ed25519;
+    use xark_ed25519::base_be;
+
+    #[test]
+    fn accepts_on_curve() {
+        on_curve_ed25519(base_be()).unwrap();
+    }
+
+    #[test]
+    fn rejects_off_curve() {
+        let mut q = base_be();
+        q[63] ^= 1; // perturb y → off the curve
+        assert!(on_curve_ed25519(q).is_err());
+    }
 }

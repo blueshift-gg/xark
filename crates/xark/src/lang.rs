@@ -718,6 +718,28 @@ pub fn assert(cond: bool) {
     assert_eq(cond, true);
 }
 
+/// Open a **witness-only** region. Until [`witness_end`], value-producing ops
+/// (multiplications, `hint_*` calls) still fill their witness — so the solver
+/// computes them — but emit **no R1CS constraints**, and the vars they allocate
+/// are pinning-exempt. This lets a gadget *derive* advice (a modular inverse
+/// chain, a GLV lattice reduction, a decompressed coordinate) at **zero
+/// constraint cost**, then pin only the final result with normal constrained code
+/// after `witness_end` (e.g. an existing equality/range check).
+///
+/// Soundness is the caller's: nothing inside the region is constrained, so every
+/// value that must be trusted has to be pinned afterwards. A marker — the compiler
+/// acts on it; it never executes.
+#[inline(never)]
+pub fn witness_begin() {
+    loop {}
+}
+
+/// Close a [`witness_begin`] region — subsequent ops emit constraints again.
+#[inline(never)]
+pub fn witness_end() {
+    loop {}
+}
+
 /// Trait-dispatched equality for `#[circuit]` bodies.
 ///
 /// The plain [`assert_eq`] intrinsic only compares values that collapse to a

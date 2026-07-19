@@ -10,3 +10,13 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-grumpkin = { path = "../../crates/xark-grumpkin" }
+xark-prover = { path = "../../crates/xark-prover", optional = true }
+
+[dev-dependencies]
+xark-grumpkin = { path = "../../crates/xark-grumpkin", features = ["host"] }
+xark-prover = { path = "../../crates/xark-prover" }
+
+[features]
+host = ["dep:xark-prover", "xark-grumpkin/host"]
+
+[workspace]

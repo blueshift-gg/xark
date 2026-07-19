@@ -63,6 +63,10 @@ enum Fanout {
     /// `[u8; 32]` → `Hash`: 2 packed leaves `name.hi` / `name.lo`, the top and low
     /// 16 bytes of the hash read big-endian. Two field public inputs, not 256 bits.
     Hash,
+    /// A custom transparent gadget type (e.g. `Fq`, `Point`) that implements
+    /// [`xark_prover::NativeInput`]: the fan-out delegates to its `leaves`, and the
+    /// native struct field is its `NativeInput::Native` associated type.
+    Native,
 }
 
 /// One resolved entry parameter.
@@ -272,10 +276,22 @@ fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> 
             }
         }
     }
+    // Fallback: any other named type is treated as a **transparent gadget type**
+    // (e.g. a curve `Fq`/`Point`) that implements `xark_prover::NativeInput`. Its
+    // `<Ty as NativeInput>::Native` associated type is the native struct field, and
+    // its `leaves` produce the compiler's flatten names. A type that doesn't impl
+    // the trait is a (reasonably clear) compile error at the delegation site.
+    if let Type::Path(_) = inner {
+        return Ok((
+            quote! { <#inner as ::xark_prover::NativeInput>::Native },
+            quote! { #inner },
+            Fanout::Native,
+        ));
+    }
     Err(syn::Error::new_spanned(
         inner,
-        "unsupported #[circuit] parameter type; supported: `Field`, `[u8; N]` \
-         (and `[u8; 32]`, taken as a SHA-256 digest)",
+        "unsupported #[circuit] parameter type; supported: `Field`, `[u8; N]`, \
+         `[u8; 32]` (a SHA-256 digest), or a gadget type implementing `NativeInput`",
     ))
 }
 
@@ -332,6 +348,16 @@ fn fanout_code(p: &CircuitParam) -> TokenStream2 {
                 ));
             }
         },
+        // A transparent gadget type: delegate to its `NativeInput::leaves`, which
+        // produces the compiler's flatten names (`name.x.limbs[i]`, `name[i]`, …).
+        Fanout::Native => {
+            let ty = &p.circuit_ty;
+            quote! {
+                out.extend(
+                    <#ty as ::xark_prover::NativeInput>::leaves(&self.#name, #name_lit),
+                );
+            }
+        }
     }
 }
 

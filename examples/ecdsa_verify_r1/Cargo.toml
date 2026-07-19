@@ -3,8 +3,25 @@ name = "ecdsa_verify_r1"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+
 [lib]
 path = "src/lib.rs"
+
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
+# lean (no host) for the xark compiler's circuit extraction.
 xark-secp256r1 = { path = "../../crates/xark-secp256r1" }
+# `host` pulls the prover + the gadget's NativeInput impls so the circuit fn is
+# callable with native bytes on the host / in tests.
+xark-prover = { path = "../../crates/xark-prover", optional = true }
+
+[dev-dependencies]
+xark-secp256r1 = { path = "../../crates/xark-secp256r1", features = ["host"] }
+xark-prover = { path = "../../crates/xark-prover" }
+p256 = "0.13"
+sha2 = "0.10"
+
+[features]
+host = ["dep:xark-prover", "xark-secp256r1/host"]
+
+[workspace]

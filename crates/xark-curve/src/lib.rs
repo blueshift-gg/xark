@@ -215,26 +215,83 @@ macro_rules! weierstrass {
             acc.add_incomplete(neg_k_g())
         }
 
-        /// ECDSA verification, 3-limb (86-bit) path.
-        pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
-            // canonical `< n`, not just limb-bounded — a non-canonical `s` is
-            // signature malleability
-            r.assert_canonical();
-            s.assert_canonical();
-            e.assert_canonical();
-            // r ≠ 0 (s ≠ 0 already enforced by `s.inverse()` below)
-            r.assert_nonzero();
-            let s_inv = s.inverse();
-            let u1 = e * s_inv;
-            let u2 = r * s_inv;
-            let rr = double_scalar_mul_incomplete(xark_bignum::scalar_to_bits(u1.limbs), xark_bignum::scalar_to_bits(u2.limbs), q);
-            let rx_mod_n = Fq::new(rr.x.limbs).reduce();
-            let mut i = 0usize;
-            while i < 3usize {
-                xark::assert_eq(rx_mod_n.limbs[i], r.limbs[i]);
-                i += 1;
+        // NOTE: the ECDSA verify entry is intentionally NOT emitted here. Each
+        // curve owns its single `ecdsa_verify` (secp256k1 the GLV gadget, secp256r1
+        // a hand-written affine one over these primitives), so this macro emits only
+        // the shared field/point/group-law primitives.
+
+        $crate::curve_host_inputs!($scalar);
+    };
+}
+
+/// Emit the host-side `NativeInput` impls for the macro-generated `Fq`/`Point`
+/// (3 × 86-bit limbs), behind the caller crate's `host` feature. Shared by the
+/// `weierstrass!` and `edwards!` gadgets so every curve gets transparent types:
+/// a scalar is 32 big-endian bytes, a point is the compact uncompressed 64-byte
+/// `x ‖ y` form. Requires the caller to depend (host-gated) on `num-bigint` and
+/// `xark-prover`.
+#[macro_export]
+macro_rules! curve_host_inputs {
+    ($scalar:literal) => {
+        #[cfg(feature = "host")]
+        mod __curve_host {
+            extern crate std;
+            use super::{Fq, Point};
+            use ::num_bigint::BigUint;
+            use std::{format, string::String, string::ToString, vec::Vec};
+
+            /// The scalar field order (group order `n` / `L`) as a big integer.
+            pub fn order() -> BigUint {
+                let hex = $scalar.strip_prefix("0x").unwrap_or($scalar);
+                BigUint::parse_bytes(hex.as_bytes(), 16).unwrap()
+            }
+
+            /// Reduce a big-endian integer modulo the scalar order, returned as a
+            /// big-endian 32-byte scalar — e.g. `reduce_scalar(&Sha256::digest(msg))`
+            /// yields an ECDSA message scalar `e`.
+            pub fn reduce_scalar(be: &[u8]) -> [u8; 32] {
+                let v = BigUint::from_bytes_be(be) % order();
+                let b = v.to_bytes_be();
+                let mut out = [0u8; 32];
+                out[32 - b.len()..].copy_from_slice(&b);
+                out
+            }
+
+            /// Little-endian 3 × 86-bit limbs of a big-endian integer, named
+            /// `<prefix>.limbs[i]` (matching the compiler's aggregate flattening).
+            fn limbs86(be: &[u8], prefix: &str) -> Vec<(String, String)> {
+                let v = BigUint::from_bytes_be(be);
+                let mask = (BigUint::from(1u8) << 86u32) - 1u8;
+                (0..3)
+                    .map(|i| {
+                        (
+                            format!("{prefix}.limbs[{i}]"),
+                            ((&v >> (i as u32 * 86)) & &mask).to_string(),
+                        )
+                    })
+                    .collect()
+            }
+
+            impl ::xark_prover::NativeInput for Fq {
+                type Native = [u8; 32];
+                fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
+                    limbs86(native, prefix)
+                }
+            }
+
+            impl ::xark_prover::NativeInput for Point {
+                /// Compact uncompressed point: `x(32) ‖ y(32)` big-endian.
+                type Native = [u8; 64];
+                fn leaves(native: &[u8; 64], prefix: &str) -> Vec<(String, String)> {
+                    let mut out = limbs86(&native[0..32], &format!("{prefix}.x"));
+                    out.extend(limbs86(&native[32..64], &format!("{prefix}.y")));
+                    out
+                }
             }
         }
+
+        #[cfg(feature = "host")]
+        pub use __curve_host::{order, reduce_scalar};
     };
 }
 
@@ -471,5 +528,7 @@ macro_rules! edwards {
             }
             acc
         }
+
+        $crate::curve_host_inputs!($scalar);
     };
 }

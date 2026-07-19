@@ -63,7 +63,8 @@ pub mod hash;
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{
-        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public,
+        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, witness_begin, witness_end,
+        Field, Private, Public,
     };
     pub use xark_macros::circuit;
 }
@@ -73,7 +74,8 @@ pub mod prelude {
 pub use crate::digest::Digest;
 pub use crate::hash::{Blake256, Hash};
 pub use crate::lang::{
-    assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, Field, Private, Public,
+    assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, witness_begin, witness_end,
+    Field, Private, Public,
 };
 // `#[circuit]` bodies shadow `assert_eq` with this trait-dispatched version so it
 // also compares composite circuit types (e.g. a SHA-256 digest vs a `Digest`).

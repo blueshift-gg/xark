@@ -13,6 +13,13 @@ path = "src/lib.rs"
 xark = { path = "../xark", default-features = false }
 xark-bignum = { path = "../xark-bignum" }
 xark-curve = { path = "../xark-curve" }
+# `host` enables the `NativeInput` impls (native bytes → circuit inputs) for
+# `Fq4`/`Point4`; off, the crate stays lean `no_std` for the xark compiler.
+num-bigint = { version = "0.4", optional = true }
+xark-prover = { path = "../xark-prover", optional = true }
+
+[features]
+host = ["dep:xark-prover", "dep:num-bigint"]
 
 [dev-dependencies]
 k256 = "0.13"

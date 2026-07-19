@@ -38,7 +38,7 @@ xark_curve::weierstrass! {
 // SOUND LAZY ECDSA verify (4×64 lazy-affine point arithmetic + eager 4×64
 // scalar ops). Alongside the macro's eager 3×86 gadget. ~30% fewer constraints.
 // ===========================================================================
-use xark::{assert_eq as aeq, Field};
+use xark::{assert_eq as aeq, witness_begin, witness_end, Field};
 use xark_bignum::{
     assert_lt, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
     modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
@@ -47,6 +47,72 @@ use xark_bignum::{
 
 type L4 = [Field; 4];
 type Pt = [L4; 2];
+
+/// A secp256k1 field element as the compact **2×128-bit half** public-input form —
+/// `{ limbs: [Field; 2] }` = `[lo128, hi128]` in-circuit (2 public field elements,
+/// vs 4 raw 64-bit limbs), `[u8; 32]` on the host. The gadget recomposes it to the
+/// internal 4×64 limbs (see [`ecdsa_verify`]). Access `.limbs` to hand to a gadget.
+#[derive(Clone, Copy)]
+pub struct Fq4 {
+    pub limbs: [Field; 2],
+}
+
+/// An affine secp256k1 point as two [`Fq4`] coordinates — compact uncompressed
+/// `[u8; 64]` (`x ‖ y`) on the host, `{ x, y }` (flattening to `<name>.x.limbs[i]`
+/// / `<name>.y.limbs[i]`, 4 public field elements total) in-circuit.
+#[derive(Clone, Copy)]
+pub struct Point4 {
+    pub x: Fq4,
+    pub y: Fq4,
+}
+
+/// Host-side `NativeInput` impls: convert native `[u8; 32]` scalars / compact
+/// uncompressed `[u8; 64]` points (`x ‖ y`) into the circuit's 4×64 limb leaves.
+/// Compiled only for the `host` feature / tests.
+#[cfg(feature = "host")]
+mod host_inputs {
+    extern crate std;
+    use crate::{Fq4, Point4};
+    use num_bigint::BigUint;
+    use std::{format, string::String, string::ToString, vec::Vec};
+    use xark_prover::NativeInput;
+
+    /// The two 128-bit halves `[lo, hi]` of a big-endian 32-byte value, named
+    /// `<prefix>.limbs[0]` / `<prefix>.limbs[1]` (the compact public-input form the
+    /// gadget recomposes to 4×64 limbs).
+    fn limb_leaves(be_bytes: &[u8], prefix: &str) -> Vec<(String, String)> {
+        let v = BigUint::from_bytes_be(be_bytes);
+        let mask = (BigUint::from(1u8) << 128u32) - 1u8;
+        (0..2)
+            .map(|i| {
+                (
+                    format!("{prefix}.limbs[{i}]"),
+                    ((&v >> (i as u32 * 128)) & &mask).to_string(),
+                )
+            })
+            .collect()
+    }
+
+    impl NativeInput for Fq4 {
+        type Native = [u8; 32];
+        fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
+            limb_leaves(native, prefix)
+        }
+    }
+
+    impl NativeInput for Point4 {
+        /// Compact uncompressed point: `x(32) ‖ y(32)` big-endian. This is SEC1
+        /// uncompressed minus the `0x04` tag byte — the tag carries no information
+        /// for an uncompressed point, and the circuit needs both coordinates anyway,
+        /// so compressing to `x`-only would only add a host sqrt for no circuit gain.
+        type Native = [u8; 64];
+        fn leaves(native: &[u8; 64], prefix: &str) -> Vec<(String, String)> {
+            let mut out = limb_leaves(&native[0..32], &format!("{prefix}.x"));
+            out.extend(limb_leaves(&native[32..64], &format!("{prefix}.y")));
+            out
+        }
+    }
+}
 
 const NN: L4 =
     modulus_limbs::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
@@ -59,34 +125,6 @@ const G0X: L4 = modulus_limbs::<4, 64>(
 const G0Y: L4 = modulus_limbs::<4, 64>(
     "32670510020758816978083085130507043184471273380659243275938904335757337482424",
 );
-const G1X: L4 = modulus_limbs::<4, 64>(
-    "89565891926547004231252920425935692360644145829622209833684329913297188986597",
-);
-const G1Y: L4 = modulus_limbs::<4, 64>(
-    "12158399299693830322967808612713398636155367887041628176798871954788371653930",
-);
-const G2X: L4 = modulus_limbs::<4, 64>(
-    "112711660439710606056748659173929673102114977341539408544630613555209775888121",
-);
-const G2Y: L4 = modulus_limbs::<4, 64>(
-    "25583027980570883691656905877401976406448868254816295069919888960541586679410",
-);
-const G3X: L4 = modulus_limbs::<4, 64>(
-    "103388573995635080359749164254216598308788835304023601477803095234286494993683",
-);
-const G3Y: L4 = modulus_limbs::<4, 64>(
-    "37057141145242123013015316630864329550140216928701153669873286428255828810018",
-);
-const CX: L4 = modulus_limbs::<4, 64>(
-    "38520798663562926792944031864649027925169018349022333225915301796724429459302",
-);
-const CY: L4 = modulus_limbs::<4, 64>(
-    "87033237048797207701170633904307172638944778279500768066120558132238250062903",
-);
-
-fn gen0() -> Pt {
-    [weak_reduce_k1(G0X), weak_reduce_k1(G0Y)]
-}
 fn muxc(s: Field, a: L4, b: L4) -> L4 {
     [
         b[0] + s * (a[0] - b[0]),
@@ -121,62 +159,10 @@ fn select16_k1(t: [Pt; 16], b3: Field, b2: Field, b1: Field, b0: Field) -> Pt {
     muxp(b3, l3[1], l3[0])
 }
 
-/// Strauss–Shamir `u1·G + u2·Q` with the offset-accumulator (incomplete-add safe),
-/// all lazy 4×64. Returns the resulting affine point.
-fn dsm_lazy_k1(u1b: [Field; 256], u2b: [Field; 256], qx: L4, qy: L4) -> Pt {
-    on_curve_k1(qx, qy);
-    let (q2x, q2y) = ec_double_k1(qx, qy);
-    let (q3x, q3y) = ec_add_k1(q2x, q2y, qx, qy);
-    let z: Pt = [[Field::from(0u8); 4]; 2];
-    let mut table = [z; 16];
-    table[0] = [weak_reduce_k1(G0X), weak_reduce_k1(G0Y)];
-    let (a1, b1) = ec_add_k1(G0X, G0Y, qx, qy);
-    table[1] = [a1, b1];
-    let (a2, b2) = ec_add_k1(G0X, G0Y, q2x, q2y);
-    table[2] = [a2, b2];
-    let (a3, b3) = ec_add_k1(G0X, G0Y, q3x, q3y);
-    table[3] = [a3, b3];
-    table[4] = [weak_reduce_k1(G1X), weak_reduce_k1(G1Y)];
-    let (a5, b5) = ec_add_k1(G1X, G1Y, qx, qy);
-    table[5] = [a5, b5];
-    let (a6, b6) = ec_add_k1(G1X, G1Y, q2x, q2y);
-    table[6] = [a6, b6];
-    let (a7, b7) = ec_add_k1(G1X, G1Y, q3x, q3y);
-    table[7] = [a7, b7];
-    table[8] = [weak_reduce_k1(G2X), weak_reduce_k1(G2Y)];
-    let (a9, b9) = ec_add_k1(G2X, G2Y, qx, qy);
-    table[9] = [a9, b9];
-    let (a10, b10) = ec_add_k1(G2X, G2Y, q2x, q2y);
-    table[10] = [a10, b10];
-    let (a11, b11) = ec_add_k1(G2X, G2Y, q3x, q3y);
-    table[11] = [a11, b11];
-    table[12] = [weak_reduce_k1(G3X), weak_reduce_k1(G3Y)];
-    let (a13, b13) = ec_add_k1(G3X, G3Y, qx, qy);
-    table[13] = [a13, b13];
-    let (a14, b14) = ec_add_k1(G3X, G3Y, q2x, q2y);
-    table[14] = [a14, b14];
-    let (a15, b15) = ec_add_k1(G3X, G3Y, q3x, q3y);
-    table[15] = [a15, b15];
-    let mut acc: Pt = gen0();
-    let mut win = 0usize;
-    while win < 128usize {
-        let (dx, dy) = ec_double_k1(acc[0], acc[1]);
-        let (ddx, ddy) = ec_double_k1(dx, dy);
-        acc = [ddx, ddy];
-        let top = 255 - win * 2;
-        let sel = select16_k1(table, u1b[top], u1b[top - 1], u2b[top], u2b[top - 1]);
-        let (nx, ny) = ec_add_k1(acc[0], acc[1], sel[0], sel[1]);
-        acc = [nx, ny];
-        win += 1;
-    }
-    let (fx, fy) = ec_add_k1(acc[0], acc[1], CX, CY);
-    [fx, fy]
-}
-
 // ===========================================================================
 // GLV-accelerated verify (endomorphism φ(x,y)=(βx,y)=λ·P halves the doublings).
 // ===========================================================================
-use xark_bignum::{complement, mod_neg, mod_sub};
+use xark_bignum::{complement, is_ge, mod_add, mod_neg, mod_sub, mul_divmod, sub2};
 const LAM: L4 =
     modulus_limbs::<4, 64>("0x5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b23bd72");
 const BETA: L4 =
@@ -225,38 +211,109 @@ fn negp(s: Field, x: L4, y: L4) -> Pt {
     [x, muxc(s, mod_neg::<4, 64>(y, M_K1), y)]
 }
 
-/// SOUND GLV-accelerated secp256k1 ECDSA verify. Magnitudes are 2×64-bit (<2^128);
-/// signs are bits. The 4 decomposed half-scalars drive a 4-dim Shamir (128 doublings).
-#[allow(clippy::too_many_arguments)]
-pub fn ecdsa_verify_glv(
-    qx: L4,
-    qy: L4,
-    r: L4,
-    s: L4,
-    e: L4,
-    m11: [Field; 2],
-    s11: Field,
-    m12: [Field; 2],
-    s12: Field,
-    m21: [Field; 2],
-    s21: Field,
-    m22: [Field; 2],
-    s22: Field,
-) {
-    range_check_limbs::<4, 64>(r);
-    range_check_limbs::<4, 64>(s);
-    range_check_limbs::<4, 64>(e);
+// GLV lattice basis (short vectors of the endomorphism sublattice): the
+// decomposition `u ↦ (k1, k2)` with `k1 + λ·k2 ≡ u (mod n)` uses
+// `c_i = ⌊(b_i·u + n/2)/n⌉` then `k1 = u − c1·a1 − c2·a2`, `k2 = c1·b1 − c2·b2`
+// (with `b2 = a1`). All magnitudes stay `< 2^128`.
+const A1: L4 = modulus_limbs::<4, 64>("0x3086d221a7d46bcde86c90e49284eb15");
+const B1: L4 = modulus_limbs::<4, 64>("0xe4437ed6010e88286f547fa90abfe4c3");
+const A2: L4 = modulus_limbs::<4, 64>("0x114ca50f7a8e2f3f657c1108d9d44cfd8");
+// (n+1)/2 — the round-half-up threshold and the sign-split boundary (`k > n/2`).
+const NHALF1: L4 = modulus_limbs::<4, 64>(
+    "57896044618658097711785492504343953926418782139537452191302581570759080747169",
+);
+
+/// Split a scalar `k ∈ [0, n)` into `(magnitude < 2^128, sign)`: the "short"
+/// signed form, `k` if `k ≤ n/2` else `−(n−k)`.
+fn signed_short(k: L4) -> (L4, Field) {
+    let s = is_ge::<4, 64>(k, NHALF1); // k > n/2  ⇔  k ≥ (n+1)/2
+    (muxc(s, mod_neg::<4, 64>(k, NN), k), s)
+}
+
+/// Derive one GLV half-decomposition of `u`: the two signed ~128-bit half-scalars
+/// `(±m1, ±m2)` with `±m1 + λ·(±m2) ≡ u (mod n)`. Returns `(m1lo2, s1, m2lo2, s2)`
+/// — the low two limbs of each magnitude and its sign bit. **Call inside a
+/// `witness_only` region:** every op here emits witness-gen but no constraints, so
+/// the whole reduction is free; the caller pins the result with `glv_decomp`.
+fn glv_split(u: L4) -> ([Field; 2], Field, [Field; 2], Field) {
+    let z = Field::from(0u8);
+    // rounded quotients c_i = ⌊(b_i·u + n/2)/n⌉  (b2 = a1)
+    let (q1, r1) = mul_divmod::<4, 64>(A1, u, NN, NN1);
+    let (q2, r2) = mul_divmod::<4, 64>(B1, u, NN, NN1);
+    let c1 = mod_add::<4, 64>(q1, [is_ge::<4, 64>(r1, NHALF1), z, z, z], NN);
+    let c2 = mod_add::<4, 64>(q2, [is_ge::<4, 64>(r2, NHALF1), z, z, z], NN);
+    // k1 = u − c1·a1 − c2·a2  (mod n)
+    let k1 = sub2::<4, 64>(
+        u,
+        mod_mul::<4, 64>(c1, A1, NN, NN1),
+        mod_mul::<4, 64>(c2, A2, NN, NN1),
+        NN,
+        NN1,
+    );
+    // k2 = c1·b1 − c2·b2  (mod n),  b2 = a1
+    let k2 = mod_sub::<4, 64>(
+        mod_mul::<4, 64>(c1, B1, NN, NN1),
+        mod_mul::<4, 64>(c2, A1, NN, NN1),
+        COMPN,
+    );
+    let (m1, s1) = signed_short(k1);
+    let (m2, s2) = signed_short(k2);
+    ([m1[0], m1[1]], s1, [m2[0], m2[1]], s2)
+}
+
+fn two64() -> Field {
+    Field::from(1u128 << 64)
+}
+
+/// Recompose a 256-bit value from its two **128-bit halves** `[lo, hi]` (the compact
+/// public-input form) into the 4×64-bit limbs the lazy arithmetic uses. Each half
+/// is split by a `div_rem` hint into two range-checked 64-bit limbs and pinned to
+/// the half — so the halves are implicitly constrained `< 2^128` and no separate
+/// `range_check_limbs` is needed downstream.
+fn unpack(packed: [Field; 2]) -> L4 {
+    let two64 = two64();
+    let lo = Field::hint_div_rem(packed[0], two64); // [hi64, lo64]
+    let hi = Field::hint_div_rem(packed[1], two64);
+    let limbs = [lo[1], lo[0], hi[1], hi[0]];
+    range_check_limbs::<4, 64>(limbs);
+    aeq(packed[0], limbs[0] + limbs[1] * two64);
+    aeq(packed[1], limbs[2] + limbs[3] * two64);
+    limbs
+}
+
+/// secp256k1 ECDSA verification — the GLV-accelerated 4×64 lazy gadget (128-window
+/// 4-dim Shamir via the λ-endomorphism), the fastest sound variant (~1.64M
+/// constraints). Each of `q.x`, `q.y`, `r`, `s`, `e` is a 256-bit value passed as
+/// its two **128-bit halves** `[lo, hi]` — 10 public field elements for the whole
+/// signature (vs 20 as raw 4×64 limbs), recomposed to 4×64 internally. The
+/// endomorphism decomposition is derived in-circuit at zero constraint cost (see
+/// [`glv_split`]) and pinned by [`glv_decomp`]. secp256k1's single `ecdsa_verify`.
+pub fn ecdsa_verify(qx: [Field; 2], qy: [Field; 2], r: [Field; 2], s: [Field; 2], e: [Field; 2]) {
+    let qx = unpack(qx);
+    let qy = unpack(qy);
+    let r = unpack(r);
+    let s = unpack(s);
+    let e = unpack(e);
     assert_lt::<4, 64>(r, NN1);
     assert_lt::<4, 64>(s, NN1);
     assert_lt::<4, 64>(e, NN1);
     assert_nonzero_limbs(r);
+    let s_inv = mod_inverse::<4, 64>(s, NN);
+    let u1 = mod_mul::<4, 64>(e, s_inv, NN, NN1);
+    let u2 = mod_mul::<4, 64>(r, s_inv, NN, NN1);
+    // Derive the two GLV decompositions in-circuit at ZERO constraint cost, then
+    // pin them exactly as before with `glv_decomp` — so the caller supplies only
+    // the signature `(q, r, s, e)`, no hint inputs, and the constraint count is
+    // unchanged. A wrong derivation can only fail `glv_decomp` (completeness),
+    // never forge (soundness is the pin, not the derivation).
+    witness_begin();
+    let (m11, s11, m12, s12) = glv_split(u1);
+    let (m21, s21, m22, s22) = glv_split(u2);
+    witness_end();
     s11.assert_bool();
     s12.assert_bool();
     s21.assert_bool();
     s22.assert_bool();
-    let s_inv = mod_inverse::<4, 64>(s, NN);
-    let u1 = mod_mul::<4, 64>(e, s_inv, NN, NN1);
-    let u2 = mod_mul::<4, 64>(r, s_inv, NN, NN1);
     glv_decomp(u1, m11[0], m11[1], s11, m12[0], m12[1], s12);
     glv_decomp(u2, m21[0], m21[1], s21, m22[0], m22[1], s22);
     on_curve_k1(qx, qy);
@@ -316,31 +373,6 @@ pub fn ecdsa_verify_glv(
     }
     let (fx, _fy) = ec_add_k1(acc[0], acc[1], CORRX, CORRY);
     let rxn = reduce_once::<4, 64>(finalize_k1(fx), NN);
-    let mut i = 0usize;
-    while i < 4usize {
-        aeq(rxn[i], r[i]);
-        i += 1;
-    }
-}
-
-/// SOUND lazy secp256k1 ECDSA verification. `qx`/`qy` are the public key (4×64
-/// limbs); `r`/`s`/`e` are the signature and message scalars (4×64 limbs, < n).
-pub fn ecdsa_verify_lazy(qx: L4, qy: L4, r: L4, s: L4, e: L4) {
-    range_check_limbs::<4, 64>(r);
-    range_check_limbs::<4, 64>(s);
-    range_check_limbs::<4, 64>(e);
-    assert_lt::<4, 64>(r, NN1);
-    assert_lt::<4, 64>(s, NN1);
-    assert_lt::<4, 64>(e, NN1);
-    assert_nonzero_limbs(r);
-    let s_inv = mod_inverse::<4, 64>(s, NN);
-    let u1 = mod_mul::<4, 64>(e, s_inv, NN, NN1);
-    let u2 = mod_mul::<4, 64>(r, s_inv, NN, NN1);
-    let u1b = scalar_to_bits_256(u1);
-    let u2b = scalar_to_bits_256(u2);
-    let rr = dsm_lazy_k1(u1b, u2b, qx, qy);
-    // r == rr.x mod n  (rr.x < p < 2n, one conditional subtract)
-    let rxn = reduce_once::<4, 64>(finalize_k1(rr[0]), NN);
     let mut i = 0usize;
     while i < 4usize {
         aeq(rxn[i], r[i]);

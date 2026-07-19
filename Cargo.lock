@@ -4608,6 +4608,8 @@ name = "xark-bignum"
 version = "0.0.1"
 dependencies = [
  "xark",
+ "xark-ir",
+ "xark-test-harness",
 ]
 
 [[package]]
@@ -4676,6 +4678,7 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
+ "xark-prover",
  "xark-test-harness",
 ]
 
@@ -4685,6 +4688,7 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-ir",
+ "xark-prover",
  "xark-test-harness",
 ]
 
@@ -4779,6 +4783,7 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
+ "xark-prover",
  "xark-test-harness",
 ]
 
@@ -4793,6 +4798,7 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
+ "xark-prover",
  "xark-test-harness",
 ]
 

@@ -51,39 +51,6 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
     scalar_mul(k_bits, base())
 }
 
-/// Verify the Ed25519 signature equation `[S]·B == R + [k]·A`.
-///
-/// `a_pub` is the public key `A`, `r_sig` the signature's `R` point, `s_bits` the
-/// 256-bit decomposition of the signature scalar `S`, and `k_bits` the 256-bit
-/// decomposition of the challenge `k = H(R‖A‖M)` (supplied as a witness — the
-/// hash itself is not constrained here). Fails (unsatisfiable) if the equation
-/// does not hold.
-pub fn eddsa_verify(a_pub: Point, r_sig: Point, s_bits: [Field; 256], k_bits: [Field; 256]) {
-    // pin A and R to the curve (range-checks limbs) before the group law
-    enforce_on_curve(a_pub);
-    enforce_on_curve(r_sig);
-
-    // canonical scalar `S < L`, else S, S+L, S+2L, … all verify (EdDSA malleability)
-    assert_scalar_below_order(s_bits);
-
-    // Rewrite `[S]·B == R + [k]·A` as `[S]·B + [k]·(−A) == R`, so the two scalar
-    // multiplications share one windowed Strauss–Shamir pass. Twisted-Edwards
-    // negation is `(−x, y)`.
-    let neg_a = Point::new(fp(0, 0, 0) - a_pub.x, a_pub.y);
-    let t = double_scalar_mul(s_bits, base(), k_bits, neg_a);
-
-    // cofactored verification: assert `[8]·t == [8]·R` (×8 clears any small-order
-    // component of A/R — the RFC 8032 cofactored equation)
-    let t8 = t.double().double().double();
-    let r8 = r_sig.double().double().double();
-    let mut i = 0usize;
-    while i < 3usize {
-        assert_eq(t8.x.limbs[i], r8.x.limbs[i]);
-        assert_eq(t8.y.limbs[i], r8.y.limbs[i]);
-        i += 1;
-    }
-}
-
 /// Assert `Σ bits[i]·2^i < L` (the ed25519 group order): recompose the bits into
 /// the scalar field's `3 × 86`-bit limbs and assert canonical. `bits` must be
 /// caller-constrained boolean.
@@ -286,17 +253,12 @@ fn dsm_l(bits1: [Field; 256], p1: Ext, bits2: [Field; 256], p2: Ext) -> Ext {
     acc
 }
 
-/// SOUND lazy Ed25519 verification `[S]·B == R + [k]·A`, extended coords.
-/// Point coords are raw 3×85 limbs; scalars are 256 caller-decomposed bits.
+/// Ed25519 signature verification `[S]·B == R + [k]·A` — the sound lazy
+/// extended-coordinate gadget (3×85 limbs, ~2.40M constraints), ed25519's single
+/// `eddsa_verify` (the affine variant was ~4.55M). Point coords are raw 3×85
+/// limbs; scalars are 256 caller-decomposed bits.
 #[allow(clippy::too_many_arguments)]
-pub fn eddsa_verify_lazy(
-    ax: L3,
-    ay: L3,
-    rx: L3,
-    ry: L3,
-    s_bits: [Field; 256],
-    k_bits: [Field; 256],
-) {
+pub fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits: [Field; 256]) {
     // canonical scalar S < L (else S, S+L, … all verify — EdDSA malleability)
     assert_scalar_below_order(s_bits);
     on_curve_l(ax, ay);
@@ -317,3 +279,174 @@ pub fn eddsa_verify_lazy(
     eq_mod_p(mul(t8[0], r8[2]), mul(r8[0], t8[2]));
     eq_mod_p(mul(t8[1], r8[2]), mul(r8[1], t8[2]));
 }
+
+/// Host-side `NativeInput` + EdDSA helpers, behind the `host` feature. Ed25519
+/// points are natively **compressed** (32-byte little-endian `y` + `x`-sign bit);
+/// these recover the affine `(x, y)` per RFC 8032 §5.1.3 so the circuit's
+/// transparent types take the exact bytes `ed25519-dalek` emits. Signatures use
+/// **little-endian** scalars, so `S`/`k` are byte-reversed to the big-endian form
+/// the macro-generated `Fq` `NativeInput` expects.
+#[cfg(feature = "host")]
+mod host {
+    extern crate std;
+    use super::PointL;
+    use num_bigint::BigUint;
+    use sha2::{Digest, Sha512};
+    use std::{format, string::String, string::ToString, vec::Vec};
+
+    fn dec(s: &str) -> BigUint {
+        BigUint::parse_bytes(s.as_bytes(), 10).unwrap()
+    }
+    // p = 2²⁵⁵−19 ; d = −121665/121666 ; L = group order ; √−1 = 2^((p−1)/4).
+    fn p() -> BigUint {
+        dec("57896044618658097711785492504343953926634992332820282019728792003956564819949")
+    }
+    fn d() -> BigUint {
+        dec("37095705934669439343138083508754565189542113879843219016388785533085940283555")
+    }
+    fn order() -> BigUint {
+        dec("7237005577332262213973186563042994240857116359379907606001950938285454250989")
+    }
+    fn sqrt_m1() -> BigUint {
+        dec("19681161376707505956807079304988542015446066515923890162744021073123829784752")
+    }
+
+    /// Big-endian 32-byte encoding of a scalar/coordinate.
+    fn be32(v: &BigUint) -> [u8; 32] {
+        let b = v.to_bytes_be();
+        let mut out = [0u8; 32];
+        out[32 - b.len()..].copy_from_slice(&b);
+        out
+    }
+
+    /// Decompress an Ed25519 point (32-byte compressed) to affine `(x, y)`.
+    fn decompress(comp: &[u8; 32]) -> (BigUint, BigUint) {
+        let p = p();
+        let mut yb = *comp;
+        let sign = (yb[31] >> 7) & 1;
+        yb[31] &= 0x7f;
+        let y = BigUint::from_bytes_le(&yb) % &p;
+        let y2 = (&y * &y) % &p;
+        let u = (&y2 + &p - 1u32) % &p; // y² − 1
+        let v = (&d() * &y2 + 1u32) % &p; // d·y² + 1
+                                          // x = (u/v)^((p+3)/8) via x = u·v³·(u·v⁷)^((p−5)/8)
+        let v3 = v.modpow(&BigUint::from(3u32), &p);
+        let v7 = v.modpow(&BigUint::from(7u32), &p);
+        let pw = ((&u * &v7) % &p).modpow(&((&p - 5u32) / 8u32), &p);
+        let mut x = (((&u * &v3) % &p) * pw) % &p;
+        if (&v * (&x * &x % &p)) % &p != u {
+            x = (x * sqrt_m1()) % &p; // v·x² == −u → multiply by √−1
+        }
+        if (x.bit(0) as u8) != sign {
+            x = (&p - &x) % &p;
+        }
+        (x, y)
+    }
+
+    /// Little-endian 3 × 85-bit limbs of a value, named `<prefix>.limbs[i]`.
+    fn limbs85(v: &BigUint, prefix: &str) -> Vec<(String, String)> {
+        let mask = (BigUint::from(1u8) << 85u32) - 1u8;
+        (0..3)
+            .map(|i| {
+                (
+                    format!("{prefix}.limbs[{i}]"),
+                    ((v >> (i as u32 * 85)) & &mask).to_string(),
+                )
+            })
+            .collect()
+    }
+
+    impl xark_prover::NativeInput for PointL {
+        /// Ed25519 compressed point (`y` little-endian + `x`-sign bit).
+        type Native = [u8; 32];
+        fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
+            let (x, y) = decompress(native);
+            let mut out = limbs85(&x, &format!("{prefix}.x"));
+            out.extend(limbs85(&y, &format!("{prefix}.y")));
+            out
+        }
+    }
+
+    /// Decompress a compressed point to the compact uncompressed `[u8; 64]`
+    /// (`x ‖ y` big-endian) form the macro-generated 3×86-bit `Point` takes.
+    pub fn point_be(comp: &[u8; 32]) -> [u8; 64] {
+        let (x, y) = decompress(comp);
+        let mut out = [0u8; 64];
+        out[..32].copy_from_slice(&be32(&x));
+        out[32..].copy_from_slice(&be32(&y));
+        out
+    }
+
+    /// The EdDSA challenge `k = SHA-512(R ‖ A ‖ M) mod L`, big-endian (for `Fq`).
+    pub fn challenge(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> [u8; 32] {
+        let mut h = Sha512::new();
+        h.update(r);
+        h.update(a);
+        h.update(msg);
+        let k = BigUint::from_bytes_le(&h.finalize()) % order();
+        be32(&k)
+    }
+
+    /// Reverse a little-endian signature scalar `S` to the big-endian form `Fq` takes.
+    pub fn scalar_le_to_be(le: &[u8; 32]) -> [u8; 32] {
+        let mut b = *le;
+        b.reverse();
+        b
+    }
+
+    // --- affine twisted-Edwards arithmetic (host, for `ed25519_smul` vectors) ---
+
+    fn inv(a: &BigUint, p: &BigUint) -> BigUint {
+        a.modpow(&(p - 2u32), p) // p prime → a⁻¹ = a^(p−2)
+    }
+
+    /// Complete affine addition on Ed25519 (`a = −1`), mod `p`.
+    fn ed_add(pt1: &(BigUint, BigUint), pt2: &(BigUint, BigUint)) -> (BigUint, BigUint) {
+        let p = p();
+        let (x1, y1) = pt1;
+        let (x2, y2) = pt2;
+        let x1x2 = (x1 * x2) % &p;
+        let y1y2 = (y1 * y2) % &p;
+        let dt = (&d() * &x1x2 % &p * &y1y2) % &p; // d·x1x2·y1y2
+        let xnum = (x1 * y2 + y1 * x2) % &p;
+        let ynum = (&y1y2 + &x1x2) % &p;
+        let xden = (1u32 + &dt) % &p;
+        let yden = (&p + 1u32 - &dt) % &p; // 1 − dt
+        ((xnum * inv(&xden, &p)) % &p, (ynum * inv(&yden, &p)) % &p)
+    }
+
+    /// `[k]·B` on the Ed25519 basepoint, returned compact `x ‖ y` big-endian.
+    pub fn base_mul_be(k_be: &[u8; 32]) -> [u8; 64] {
+        let base = (
+            dec("15112221349535400772501151409588531511454012693041857206046113283949847762202"),
+            dec("46316835694926478169428394003475163141307993866256225615783033603165251855960"),
+        );
+        let mut acc = (BigUint::from(0u32), BigUint::from(1u32)); // identity (0, 1)
+        let mut addend = base;
+        let mut k = BigUint::from_bytes_be(k_be);
+        while k > BigUint::from(0u32) {
+            if k.bit(0) {
+                acc = ed_add(&acc, &addend);
+            }
+            addend = ed_add(&addend, &addend);
+            k >>= 1;
+        }
+        let mut out = [0u8; 64];
+        out[..32].copy_from_slice(&be32(&acc.0));
+        out[32..].copy_from_slice(&be32(&acc.1));
+        out
+    }
+
+    /// The Ed25519 basepoint `B` as compact `x ‖ y` big-endian.
+    pub fn base_be() -> [u8; 64] {
+        let one = {
+            let mut b = [0u8; 32];
+            b[31] = 1;
+            b
+        };
+        base_mul_be(&one)
+    }
+}
+
+#[cfg(feature = "host")]
+pub use host::{base_be, base_mul_be, challenge, point_be, scalar_le_to_be};

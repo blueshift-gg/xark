@@ -85,6 +85,13 @@ pub enum KnownCall {
     FieldConstantU128,
     FieldConstantDecimal,
     Advice,
+    /// `witness_begin()` / `witness_end()` — open/close a **witness-only** region.
+    /// Inside it, value-producing ops still emit their witness-gen (so the solver
+    /// fills them) but emit **no constraints**; the vars they allocate are exempt
+    /// from `check_pinning`. Used to *derive* advice (e.g. a GLV decomposition)
+    /// with zero constraint cost, pinning only the final result downstream.
+    WitnessBegin,
+    WitnessEnd,
     HintInverse,
     HintInverseOrZero,
     HintBit,
@@ -266,6 +273,13 @@ pub(crate) fn build_call_registry(tcx: TyCtxt<'_>) -> CallRegistry {
                 // The free `assert_eq` function (re-exported at the crate root).
                 Res::Def(DefKind::Fn, def_id) if name.as_str() == "assert_eq" => {
                     reg.insert(def_id, KnownCall::ConstrainEq);
+                }
+                // Witness-only region markers (re-exported at the crate root).
+                Res::Def(DefKind::Fn, def_id) if name.as_str() == "witness_begin" => {
+                    reg.insert(def_id, KnownCall::WitnessBegin);
+                }
+                Res::Def(DefKind::Fn, def_id) if name.as_str() == "witness_end" => {
+                    reg.insert(def_id, KnownCall::WitnessEnd);
                 }
                 // The `Field` type: register its constant constructors (inherent
                 // methods with no `__xark_*` intrinsic backing).
@@ -492,6 +506,13 @@ struct LoweringEnv<'tcx> {
     /// of its inputs — otherwise a later call sharing a cached value would make
     /// replay diverge from a walk.
     function_depth: usize,
+    /// Inside a `witness_begin()`/`witness_end()` region: value-producing ops emit
+    /// their witness-gen but no constraints, and every var allocated is added to
+    /// `witness_only_vars` (exempt from `check_pinning`).
+    witness_only: bool,
+    /// Vars allocated inside a witness-only region — pinning-exempt (their only
+    /// role is to feed the witness-gen of a downstream, separately-pinned result).
+    witness_only_vars: BTreeSet<VarId>,
     /// Each function call's `(key, constraint start, end, base var, plug vars,
     /// witness start, witness end)` — a `CALL` replaces both the constraint range
     /// and the witness-gen range with one small record; expansion remaps the
@@ -644,6 +665,8 @@ impl<'tcx> LoweringEnv<'tcx> {
             call_memo_ok: 0,
             function_is_cache: BTreeMap::new(),
             function_depth: 0,
+            witness_only: false,
+            witness_only_vars: BTreeSet::new(),
             function_calls: Vec::new(),
             promotions: None,
             function_call_counts: BTreeMap::new(),
@@ -843,6 +866,9 @@ impl<'tcx> LoweringEnv<'tcx> {
             visibility,
         });
         self.var_names.push(name);
+        if self.witness_only {
+            self.witness_only_vars.insert(id);
+        }
         id
     }
 
@@ -1086,6 +1112,12 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// constraints[i].id == i`). The R1CS constraint itself is untouched by
     /// profiling, so `r1cs.json` / `circuit.json` stay byte-identical.
     fn push_constraint(&mut self, kind: ConstraintKind, c: R1csConstraint) {
+        // Witness-only region: suppress every constraint (any op reached here is a
+        // pin we deliberately omit — the derived result is pinned downstream). The
+        // constraint-free `emit_mul` path handles the mul-merge bookkeeping.
+        if self.witness_only {
+            return;
+        }
         if self.profile_enabled {
             let kind = self.kind_stack.last().copied().unwrap_or(kind);
             let prof = self.constraint_profile(c.id, kind);
@@ -1804,6 +1836,16 @@ impl<'tcx> LoweringEnv<'tcx> {
         let lhs = self.materialize(lhs);
         let rhs = self.materialize(rhs);
         let out = self.alloc_internal();
+        // Witness-only: compute the product (so the solver fills `out`) but emit
+        // no product constraint and no merge state — `out` is pinning-exempt scratch.
+        if self.witness_only {
+            self.witness_gen.push(Some(WitnessGen::Product {
+                out,
+                left: lhs,
+                right: rhs,
+            }));
+            return LinearCombination::var(out);
+        }
         let id = self.fresh_constraint_id();
         let note = format!(
             "{} * {} = {}",
@@ -1906,15 +1948,32 @@ impl<'tcx> LoweringEnv<'tcx> {
         }
     }
 
+    /// Whether `lc` references any witness-only var (a mul must not be merged so as
+    /// to output such a var — see [`Self::emit_assert_eq`]).
+    fn is_witness_only_lc(&self, lc: &LinearCombination) -> bool {
+        !self.witness_only_vars.is_empty()
+            && lc
+                .terms
+                .iter()
+                .any(|t| self.witness_only_vars.contains(&t.var))
+    }
+
     fn emit_assert_eq(&mut self, lhs: LinearCombination, rhs: LinearCombination) {
-        // Merge `t = a * b; assert_eq(t, target)` into `a * b = target`.
+        // Merge `t = a * b; assert_eq(t, target)` into `a * b = target` — but never
+        // when `target` is a witness-only var: it already has a witness-gen op, so
+        // rewriting a constraint to output it would doubly-define it (the value
+        // from its own witness-gen vs. from `a·b`). Fall through to a clean equality.
         if let Some(v) = self.as_pending_var(&lhs) {
-            self.merge_mul(v, rhs);
-            return;
+            if !self.is_witness_only_lc(&rhs) {
+                self.merge_mul(v, rhs);
+                return;
+            }
         }
         if let Some(v) = self.as_pending_var(&rhs) {
-            self.merge_mul(v, lhs);
-            return;
+            if !self.is_witness_only_lc(&lhs) {
+                self.merge_mul(v, lhs);
+                return;
+            }
         }
 
         let diff = lhs - rhs;
@@ -2090,6 +2149,9 @@ pub struct LowerOutput {
     /// complete DAG-compact `VERSION_FUNCTION` container (see [`build_function_blob`]).
     /// The writer uses this as `circuit.xbc` verbatim instead of `roll_loops`.
     pub function_xbc: Option<Vec<u8>>,
+    /// Vars allocated inside a `witness_only` region — exempt from `check_pinning`
+    /// (pure witness-gen scratch feeding a downstream, separately-pinned result).
+    pub witness_only_vars: BTreeSet<VarId>,
 }
 
 /// Flatten a circuit parameter type into its `Field` leaves, pairing each with
@@ -2256,6 +2318,12 @@ fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
     }
     for v in &out.r1cs.variables {
         if referenced.contains(&v.id) {
+            continue;
+        }
+        // Witness-only scratch: intentionally unpinned. Safe to exempt — a var in
+        // zero constraints cannot affect proof validity (its only use is in the
+        // witness-gen program that computes a downstream, pinned result).
+        if out.witness_only_vars.contains(&v.id) {
             continue;
         }
         let is_input = (v.id as usize) < n_inputs;
@@ -3209,6 +3277,13 @@ fn lower_call<'tcx>(
             let lhs = env.operand_to_lc(arg(0)?)?;
             let rhs = env.operand_to_lc(arg(1)?)?;
             env.emit_assert_eq(lhs, rhs);
+        }
+        // Open/close a witness-only region (both return `()`, so no `dest`).
+        KnownCall::WitnessBegin => {
+            env.witness_only = true;
+        }
+        KnownCall::WitnessEnd => {
+            env.witness_only = false;
         }
         KnownCall::Advice => {
             // A fresh prover-supplied private witness variable with no hint. The
@@ -4458,8 +4533,11 @@ fn build_function_blob(env: &LoweringEnv, field: &FieldSpec, num_inputs: usize) 
     }
     let keep_extra: Vec<VarId> = (num_inputs..env.variables.len())
         .filter(|&id| {
-            env.variables[id].visibility == Visibility::Private
-                && !referenced.contains(&(id as u32))
+            !referenced.contains(&(id as u32))
+                // unreferenced advice, or witness-only scratch (Internal but live
+                // via the witness-gen program) — both retained by `finish`.
+                && (env.variables[id].visibility == Visibility::Private
+                    || env.witness_only_vars.contains(&(id as u32)))
         })
         .map(|id| id as u32)
         .collect();
@@ -4632,10 +4710,16 @@ fn inline_call<'tcx>(
         // so every key is seen. Not promoted → inline (fold) this call: leave args
         // unmaterialized and fall through to the plain walk below (keeps its
         // `mul→assert_eq` merges + notes).
-        let promote = match &env.promotions {
-            None => true,
-            Some(p) => p.get(&key).copied().unwrap_or(false),
-        };
+        // Never promote inside a witness-only region: a symbolic replay bypasses
+        // the normal emit path (its constraints/vars are remapped directly), so the
+        // constraint-suppression + var-recording hooks wouldn't fire. Inlining
+        // (the fold path) walks the body through those hooks — the region stays
+        // constraint-free and every var is recorded pinning-exempt.
+        let promote = !env.witness_only
+            && match &env.promotions {
+                None => true,
+                Some(p) => p.get(&key).copied().unwrap_or(false),
+            };
         if promote {
             // A cached template (pass 2 always, or a later pass-1 occurrence) →
             // symbolic replay: pass the caller's arg LCs straight in (sorted by
@@ -4952,6 +5036,54 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
             }
         }
     }
+    // Witness-only dead-code elimination. A `witness_only` region emits value ops
+    // (kept) alongside pin-only ops — range-check bit decompositions, carry hints —
+    // whose only consumer, a constraint, was suppressed. Those are dead weight in
+    // the witness program. Prune them by transitive liveness: a var is live if a
+    // constraint references it, or a live op reads it; keep only live witness-only
+    // ops/vars. (No-op for ordinary circuits — `check_pinning` guarantees every
+    // non-witness-only hint output is constraint-referenced, hence already live.)
+    // Runs BEFORE `build_function_blob` so the flat R1CS and the artifact prune
+    // identically (XARK_VERIFY). Merged ops (`None`) are left untouched.
+    if !env.witness_only_vars.is_empty() {
+        let mut live: BTreeSet<VarId> = BTreeSet::new();
+        for c in &env.constraints {
+            for lc in [&c.a, &c.b, &c.c] {
+                for t in &lc.terms {
+                    live.insert(t.var);
+                }
+            }
+        }
+        // Witness-gen is in dependency order, so one reverse pass reaches fixpoint:
+        // a live output pulls in the op's sibling outputs and its inputs.
+        for op in env.witness_gen.iter().flatten().rev() {
+            let outs = witness_gen_outs(op);
+            if outs.iter().any(|o| live.contains(o)) {
+                for o in outs {
+                    live.insert(o);
+                }
+                for v in witness_gen_input_vars(op) {
+                    live.insert(v);
+                }
+            }
+        }
+        let dead: Vec<usize> = (0..env.witness_gen.len())
+            .filter(|&i| {
+                env.witness_gen[i].as_ref().is_some_and(|op| {
+                    let outs = witness_gen_outs(op);
+                    outs.iter().any(|o| env.witness_only_vars.contains(o))
+                        && outs.iter().all(|o| !live.contains(o))
+                })
+            })
+            .collect();
+        // Drop the dead ops (the witness-gen saving). The dead output vars stay
+        // declared + pinning-exempt (in `witness_only_vars`) — harmless, unreferenced
+        // scratch — so `finish` and `build_function_blob` keep the same var/exempt
+        // sets and only the (now-`None`) ops differ, which both already skip.
+        for i in dead {
+            env.witness_gen[i] = None;
+        }
+    }
     // Complete DAG-compact artifact — built AFTER the revival above (so the
     // artifact == the flat R1CS: the reused-product binding is in both) and while
     // `env`/`field` are still intact. The single container rolls periodic runs of
@@ -4971,11 +5103,18 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
             }
         }
     }
+    // Witness-only vars carry no constraint but ARE live: they feed the witness-gen
+    // of a downstream, pinned result (e.g. `x²` feeding `d = x²·x²`). Keeping them —
+    // and their witness-gen — is required, or the derived value computes from an
+    // uncomputed (zero) input.
+    let wo = core::mem::take(&mut env.witness_only_vars);
 
     let variables: Vec<Variable> = env
         .variables
         .into_iter()
-        .filter(|v| v.visibility != Visibility::Internal || referenced.contains(&v.id))
+        .filter(|v| {
+            v.visibility != Visibility::Internal || referenced.contains(&v.id) || wo.contains(&v.id)
+        })
         .collect();
     let kept: BTreeSet<VarId> = variables.iter().map(|v| v.id).collect();
 
@@ -5036,7 +5175,75 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
         primitive,
         profile,
         function_xbc,
+        witness_only_vars: wo,
     }
+}
+
+/// All output variables of a witness-gen op (multi-output ops list every limb/bit).
+fn witness_gen_outs(op: &WitnessGen) -> Vec<VarId> {
+    match op {
+        WitnessGen::Product { out, .. }
+        | WitnessGen::Linear { out, .. }
+        | WitnessGen::Xor { out, .. }
+        | WitnessGen::Or { out, .. }
+        | WitnessGen::Inverse { out, .. }
+        | WitnessGen::InverseOrZero { out, .. }
+        | WitnessGen::Bit { out, .. } => vec![*out],
+        WitnessGen::Bits { outs, .. } => outs.clone(),
+        WitnessGen::DivRem { q, r, .. } => vec![*q, *r],
+        WitnessGen::MulModDivMod { q, r, .. } => q.iter().chain(r).copied().collect(),
+        WitnessGen::ModInverse { out, .. } => out.clone(),
+        WitnessGen::Sub2 { qabs, r, .. } => {
+            let mut v = vec![*qabs];
+            v.extend(r);
+            v
+        }
+    }
+}
+
+/// All input variables a witness-gen op reads (from its input linear combinations).
+fn witness_gen_input_vars(op: &WitnessGen) -> Vec<VarId> {
+    fn add(lc: &LinearCombination, v: &mut Vec<VarId>) {
+        v.extend(lc.terms.iter().map(|t| t.var));
+    }
+    let mut v = Vec::new();
+    match op {
+        WitnessGen::Product { left, right, .. } => {
+            add(left, &mut v);
+            add(right, &mut v);
+        }
+        WitnessGen::Linear { lc, .. } => add(lc, &mut v),
+        WitnessGen::Xor { a, b, .. } | WitnessGen::Or { a, b, .. } => {
+            add(a, &mut v);
+            add(b, &mut v);
+        }
+        WitnessGen::Inverse { input, .. }
+        | WitnessGen::InverseOrZero { input, .. }
+        | WitnessGen::Bit { input, .. }
+        | WitnessGen::Bits { input, .. } => add(input, &mut v),
+        WitnessGen::DivRem { num, den, .. } => {
+            add(num, &mut v);
+            add(den, &mut v);
+        }
+        WitnessGen::MulModDivMod { a, b, modulus, .. } => {
+            for l in a.iter().chain(b).chain(modulus) {
+                add(l, &mut v);
+            }
+        }
+        WitnessGen::ModInverse { a, modulus, .. } => {
+            for l in a.iter().chain(modulus) {
+                add(l, &mut v);
+            }
+        }
+        WitnessGen::Sub2 {
+            a, b, c, modulus, ..
+        } => {
+            for l in a.iter().chain(b).chain(c).chain(modulus) {
+                add(l, &mut v);
+            }
+        }
+    }
+    v
 }
 
 /// The primary output variable of a witness-gen op.

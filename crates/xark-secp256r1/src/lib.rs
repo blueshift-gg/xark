@@ -32,3 +32,29 @@ xark_curve::weierstrass! {
     ],
     correction = [73008335506530070440987265, 52113507725237922464657843, 1975229404901465064722683, 4808832657966113361640839, 48622947606618793931251433, 9925785685835320508030124],
 }
+
+/// P-256 ECDSA verification (3×86-bit incomplete-affine path). This is
+/// secp256r1's single verify gadget — P-256 has no efficient endomorphism, so
+/// there's no GLV variant as on secp256k1. Built on the macro's shared primitives
+/// (`double_scalar_mul_incomplete`, `Fq`, `Point`).
+pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
+    // canonical `< n`, not just limb-bounded — a non-canonical `s`/`r` is malleability
+    r.assert_canonical();
+    s.assert_canonical();
+    e.assert_canonical();
+    r.assert_nonzero(); // r ≠ 0 (s ≠ 0 is enforced by `s.inverse()` below)
+    let s_inv = s.inverse();
+    let u1 = e * s_inv;
+    let u2 = r * s_inv;
+    let rr = double_scalar_mul_incomplete(
+        xark_bignum::scalar_to_bits(u1.limbs),
+        xark_bignum::scalar_to_bits(u2.limbs),
+        q,
+    );
+    let rx_mod_n = Fq::new(rr.x.limbs).reduce();
+    let mut i = 0usize;
+    while i < 3usize {
+        xark::assert_eq(rx_mod_n.limbs[i], r.limbs[i]);
+        i += 1;
+    }
+}

@@ -219,3 +219,34 @@ pub fn multi_scalar_mul(scalars: [Field; K], points: [[Field; 2]; K]) -> [Field;
     }
     acc
 }
+
+/// A Grumpkin affine point as two native `Field` coordinates. Grumpkin's base
+/// field is exactly BN254's scalar field (the circuit `Field`), so a point needs
+/// no non-native limbs — `x`/`y` are ordinary field elements. Flattens to the
+/// leaves `<name>.x` / `<name>.y`.
+#[derive(Clone, Copy)]
+pub struct Affine {
+    pub x: Field,
+    pub y: Field,
+}
+
+/// Host-side `NativeInput` for [`Affine`], behind the `host` feature: the two
+/// coordinates are full field elements, taken as decimal (or `0x`-hex) strings.
+#[cfg(feature = "host")]
+mod host {
+    extern crate std;
+    use super::Affine;
+    use std::string::String;
+    use std::vec::Vec;
+
+    impl xark_prover::NativeInput for Affine {
+        type Native = [String; 2];
+        fn leaves(native: &[String; 2], prefix: &str) -> Vec<(String, String)> {
+            use std::format;
+            let mut out = Vec::new();
+            out.push((format!("{prefix}.x"), native[0].clone()));
+            out.push((format!("{prefix}.y"), native[1].clone()));
+            out
+        }
+    }
+}

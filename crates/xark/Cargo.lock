@@ -1428,6 +1428,7 @@ dependencies = [
 name = "xark-test-harness"
 version = "0.0.0"
 dependencies = [
+ "num-bigint",
  "xark-ir",
 ]
 

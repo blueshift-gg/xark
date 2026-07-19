@@ -47,14 +47,14 @@ fn msm_matches_reference_vector() {
     };
 
     let mut inputs = BTreeMap::new();
-    inputs.insert(id("scalars[0]"), S0.to_string());
-    inputs.insert(id("scalars[1]"), S1.to_string());
-    inputs.insert(id("points[0][0]"), P0X.to_string());
-    inputs.insert(id("points[0][1]"), P0Y.to_string());
-    inputs.insert(id("points[1][0]"), P1X.to_string());
-    inputs.insert(id("points[1][1]"), P1Y.to_string());
-    inputs.insert(id("r[0]"), RX.to_string());
-    inputs.insert(id("r[1]"), RY.to_string());
+    inputs.insert(id("s0"), S0.to_string());
+    inputs.insert(id("s1"), S1.to_string());
+    inputs.insert(id("p0.x"), P0X.to_string());
+    inputs.insert(id("p0.y"), P0Y.to_string());
+    inputs.insert(id("p1.x"), P1X.to_string());
+    inputs.insert(id("p1.y"), P1Y.to_string());
+    inputs.insert(id("r.x"), RX.to_string());
+    inputs.insert(id("r.y"), RY.to_string());
 
     // (1) satisfiable on the honest vector.
     let assign = solver::solve_and_check(&program, &inputs)
@@ -65,7 +65,7 @@ fn msm_matches_reference_vector() {
     assert!(holes.is_empty(), "MSM under-constrained: {holes:?}");
 
     // (3) a wrong claimed output is rejected.
-    inputs.insert(id("r[0]"), "123".to_string());
+    inputs.insert(id("r.x"), "123".to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
         "wrong output x must be rejected"
@@ -87,15 +87,15 @@ fn off_curve_point_is_rejected() {
             .id
     };
     let mut inputs = BTreeMap::new();
-    inputs.insert(id("scalars[0]"), S0.to_string());
-    inputs.insert(id("scalars[1]"), S1.to_string());
+    inputs.insert(id("s0"), S0.to_string());
+    inputs.insert(id("s1"), S1.to_string());
     // (P0X, 1) does not satisfy y² = x³ − 17.
-    inputs.insert(id("points[0][0]"), P0X.to_string());
-    inputs.insert(id("points[0][1]"), "1".to_string());
-    inputs.insert(id("points[1][0]"), P1X.to_string());
-    inputs.insert(id("points[1][1]"), P1Y.to_string());
-    inputs.insert(id("r[0]"), RX.to_string());
-    inputs.insert(id("r[1]"), RY.to_string());
+    inputs.insert(id("p0.x"), P0X.to_string());
+    inputs.insert(id("p0.y"), "1".to_string());
+    inputs.insert(id("p1.x"), P1X.to_string());
+    inputs.insert(id("p1.y"), P1Y.to_string());
+    inputs.insert(id("r.x"), RX.to_string());
+    inputs.insert(id("r.y"), RY.to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
         "an off-curve point must be rejected by enforce_on_curve"
