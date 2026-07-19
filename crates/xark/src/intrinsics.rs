@@ -89,11 +89,11 @@ pub fn __xark_neg(_value: Field) -> Field {
     loop {}
 }
 
-/// Exponentiation `base^n` for a compile-time `n`. Maps to
+/// Exponentiation `base.pow(n)` for a compile-time `n`. Maps to
 /// [`KnownCall::PowU64`]; lowers to repeated multiplications by
 /// exponentiation-by-squaring (special-cased `n = 0,1,2,3`), so roughly
-/// `⌊log₂ n⌋ + popcount(n) − 1` multiplication constraints. Backs the `^`
-/// operator (`BitXor<u64>`) on `Field`.
+/// `⌊log₂ n⌋ + popcount(n) − 1` multiplication constraints. Backs the
+/// [`Field::pow`](crate::Field::pow) method (the `^` operator now means XOR).
 ///
 /// [`KnownCall::PowU64`]: crate::lower_mir::KnownCall::PowU64
 #[inline(never)]

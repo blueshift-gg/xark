@@ -146,9 +146,22 @@ fn check_terminator<'tcx>(
             // Bodies of inlined callees are validated by lowering as walked.
             let resolved = crate::lower_mir::resolve_call_def_id(tcx, def_id, generic_args);
             if registry.classify(def_id).is_none() && !tcx.is_mir_available(resolved) {
+                let path = tcx.def_path_str(resolved);
+                // `assert!`/`assert_eq!`/`panic!` expand to a `core::panicking::panic*`
+                // call — the most common "I wrote normal Rust" mistake. Steer to the
+                // circuit primitive rather than the generic MIR-availability note.
+                if path.contains("panic") {
+                    return Err(CompileError::new(
+                        "native `assert!` / `panic!` don't constrain a circuit",
+                    )
+                    .with_help(
+                        "use `assert_eq(a, b)` to constrain equality (it emits an R1CS \
+                         constraint); `assert!(a == b)` instead computes a `bool` wire and then \
+                         panics, which a circuit can't do",
+                    ));
+                }
                 return Err(CompileError::new(format!(
-                    "unsupported function call inside circuit: `{}`",
-                    tcx.def_path_str(resolved)
+                    "unsupported function call inside circuit: `{path}`"
                 ))
                 .with_note(
                     "only xark field operations, assert_eq, and functions whose MIR is \

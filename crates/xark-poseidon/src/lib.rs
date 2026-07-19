@@ -66,7 +66,7 @@ fn c(decimal: &str) -> Field {
 ///
 /// Lowers to 3 multiplication gates via repeated squaring.
 fn sbox(x: Field) -> Field {
-    x ^ 5
+    x.pow(5)
 }
 
 /// ARK (add round key): add the round key `c` to the state element-wise.

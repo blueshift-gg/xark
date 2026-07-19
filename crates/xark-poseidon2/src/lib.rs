@@ -47,7 +47,7 @@ const T: usize = 3;
 /// The Poseidon2 S-box for `alpha = 5`: `x^5`. Lowers to 3 gates via repeated
 /// squaring (`x2`, `x4`, `x5`).
 fn sbox(x: Field) -> Field {
-    x ^ 5
+    x.pow(5)
 }
 
 /// External linear layer `M_E = circ(2,1,1) = [[2,1,1],[1,2,1],[1,1,2]]`.

@@ -2488,7 +2488,8 @@ fn collect_arm_assignments<'tcx>(
                         }
                         _ => {
                             return Err(CompileError::new(format!(
-                                "unsupported operation `{rvalue:?}` inside a conditional arm",
+                                "{} inside a conditional arm is not supported",
+                                rvalue_name(rvalue)
                             ))
                             .with_help(
                                 "only plain value copies and tuple/struct aggregates are allowed; \
@@ -2724,11 +2725,23 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                 }
             }
             other => {
-                return Err(CompileError::new(format!(
-                    "unsupported terminator `{}` inside circuit",
+                let err = CompileError::new(format!(
+                    "{} is not supported inside a circuit",
                     terminator_name(other)
-                ))
-                .or_span(term_span))
+                ));
+                let err = match other {
+                    TerminatorKind::SwitchInt { .. } => err.with_help(
+                        "a circuit can't branch on a witness value — use a branchless \
+                         select, e.g. `if_false + Field::from(cond) * (if_true - if_false)`, \
+                         or make the condition a compile-time constant",
+                    ),
+                    TerminatorKind::Assert { .. } => err.with_help(
+                        "native `assert!` / `assert_eq!` don't constrain the circuit — call \
+                         `assert_eq(a, b)` (the circuit primitive) to emit an equality constraint",
+                    ),
+                    _ => err,
+                };
+                return Err(err.or_span(term_span));
             }
         }
     }
@@ -2886,7 +2899,8 @@ fn lower_statement<'tcx>(
                         }
                         _ => {
                             return Err(CompileError::new(format!(
-                                "binary op `{op:?}` on witness values is not a circuit operation"
+                                "the `{}` operator on witness values is not a circuit operation",
+                                binop_symbol(*op)
                             ))
                             .with_help(
                                 "bitwise (`& | ^`) and equality (`== !=`) ops on `bool` wires are \
@@ -2914,7 +2928,8 @@ fn lower_statement<'tcx>(
                         return Ok(());
                     }
                     Err(CompileError::new(format!(
-                        "unary op `{op:?}` on a witness value is not a circuit operation"
+                        "the `{}` operator on a witness value is not a circuit operation",
+                        unop_symbol(*op)
                     )))
                 }
                 // `discriminant(_opt)` on a modeled `Option` from a range `next`:
@@ -2941,12 +2956,13 @@ fn lower_statement<'tcx>(
                     Ok(())
                 }
                 other => Err(CompileError::new(format!(
-                    "unsupported rvalue `{}` inside circuit",
+                    "{} is not supported inside a circuit",
                     rvalue_name(other)
                 ))
                 .with_help(
-                    "a circuit supports field arithmetic (`+ - * ^`), comparisons, and the \
-                     provided function calls; references, closures, and heap ops are not lowerable",
+                    "a circuit supports field arithmetic (`+` `-` `*` `/`, `.pow(n)`), comparisons, \
+                     and the provided gadget calls; references, closures, casts, and heap ops \
+                     are not lowerable",
                 )),
             }
         }
@@ -4571,9 +4587,23 @@ fn inline_call<'tcx>(
     dest: rustc_middle::mir::Local,
 ) -> CompileResult<()> {
     if !env.tcx.is_mir_available(def_id) {
+        let path = env.tcx.def_path_str(def_id);
+        // `assert!`/`assert_eq!`/`panic!` expand to a `core::panicking::panic*` call.
+        // Those are the single most common "I wrote normal Rust" mistake, so steer
+        // the author to the circuit primitive instead of the generic MIR-availability
+        // note (which is really about calling into un-encoded gadget crates).
+        if path.contains("panic") {
+            return Err(CompileError::new(
+                "native `assert!` / `panic!` don't constrain a circuit",
+            )
+            .with_help(
+                "use `assert_eq(a, b)` to constrain equality (it emits an R1CS constraint); \
+                 `assert!(a == b)` instead computes a `bool` wire and then panics, which a \
+                 circuit can't do",
+            ));
+        }
         return Err(CompileError::new(format!(
-            "unsupported function call inside circuit: `{}`",
-            env.tcx.def_path_str(def_id)
+            "unsupported function call inside circuit: `{path}`"
         ))
         .with_note(
             "only xark field operations, assert_eq, and functions whose MIR is available \
@@ -5280,26 +5310,66 @@ fn primitive_field(field: &FieldSpec) -> primitive::FieldSpec {
     }
 }
 
-fn terminator_name(kind: &TerminatorKind<'_>) -> &'static str {
-    match kind {
-        TerminatorKind::SwitchInt { .. } => "SwitchInt (control flow)",
-        TerminatorKind::Assert { .. } => "Assert",
-        TerminatorKind::Drop { .. } => "Drop",
-        TerminatorKind::Unreachable => "Unreachable",
-        TerminatorKind::InlineAsm { .. } => "InlineAsm",
-        _ => "unsupported",
+/// The Rust source spelling of a MIR `BinOp`, for diagnostics (never the raw
+/// `BitAnd`/`Shl`/… debug name the author never typed).
+fn binop_symbol(op: rustc_middle::mir::BinOp) -> &'static str {
+    use rustc_middle::mir::BinOp::*;
+    match op {
+        Add | AddUnchecked | AddWithOverflow => "+",
+        Sub | SubUnchecked | SubWithOverflow => "-",
+        Mul | MulUnchecked | MulWithOverflow => "*",
+        Div => "/",
+        Rem => "%",
+        BitXor => "^",
+        BitAnd => "&",
+        BitOr => "|",
+        Shl | ShlUnchecked => "<<",
+        Shr | ShrUnchecked => ">>",
+        Eq => "==",
+        Lt => "<",
+        Le => "<=",
+        Ne => "!=",
+        Ge => ">=",
+        Gt => ">",
+        Cmp => "cmp",
+        Offset => "offset",
     }
 }
 
+/// The Rust source spelling of a MIR `UnOp`, for diagnostics.
+fn unop_symbol(op: rustc_middle::mir::UnOp) -> &'static str {
+    use rustc_middle::mir::UnOp::*;
+    match op {
+        Not => "!",
+        Neg => "-",
+        PtrMetadata => "&-metadata",
+    }
+}
+
+/// A user-facing description of an unsupported terminator, in Rust-source terms
+/// (never the raw MIR variant name). The circuit author never wrote "SwitchInt".
+fn terminator_name(kind: &TerminatorKind<'_>) -> &'static str {
+    match kind {
+        TerminatorKind::SwitchInt { .. } => "a branch (`if`/`match`) on a witness value",
+        TerminatorKind::Assert { .. } => "a runtime `assert!` / overflow check",
+        TerminatorKind::Drop { .. } => "dropping an owned value",
+        TerminatorKind::Unreachable => "an unreachable branch",
+        TerminatorKind::InlineAsm { .. } => "inline assembly (`asm!`)",
+        _ => "an unsupported control-flow construct",
+    }
+}
+
+/// A user-facing description of an unsupported rvalue, in Rust-source terms
+/// (never the raw MIR variant name).
 fn rvalue_name(rvalue: &Rvalue<'_>) -> &'static str {
     match rvalue {
-        Rvalue::Ref(..) => "Ref",
-        Rvalue::RawPtr(..) => "RawPtr",
-        Rvalue::Cast(..) => "Cast",
-        Rvalue::Aggregate(..) => "Aggregate",
-        Rvalue::BinaryOp(..) => "BinaryOp",
-        Rvalue::UnaryOp(..) => "UnaryOp",
-        _ => "unsupported",
+        Rvalue::Ref(..) => "taking a reference (`&` / `&mut`)",
+        Rvalue::RawPtr(..) => "a raw pointer",
+        Rvalue::Cast(..) => "a cast (`as`)",
+        Rvalue::Aggregate(..) => "building a struct / array / tuple value",
+        Rvalue::BinaryOp(..) => "a native integer / bool operation",
+        Rvalue::UnaryOp(..) => "a native unary operation",
+        _ => "an unsupported operation",
     }
 }
 

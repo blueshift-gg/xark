@@ -159,7 +159,8 @@ fn check_unit_return(output: &FnRetTy<'_>) -> CompileResult<()> {
         FnRetTy::Return(ty) => match ty.kind {
             TyKind::Tup([]) => Ok(()),
             _ => Err(CompileError::new("circuit function must return `()`")
-                .with_help("remove the return type; circuits only emit constraints")),
+                .with_help("remove the return type; circuits only emit constraints")
+                .with_span(ty.span)),
         },
     }
 }
@@ -172,14 +173,17 @@ fn parse_visibility(ty: &Ty<'_>) -> CompileResult<Visibility> {
         Some("Public") => Ok(Visibility::Public),
         Some("Field") => Err(
             CompileError::new("bare `Field` circuit parameter is not allowed")
-                .with_help("wrap it in `Private<Field>` or `Public<Field>`"),
+                .with_help("wrap it in `Private<Field>` or `Public<Field>`")
+                .with_span(ty.span),
         ),
         Some(other) => Err(CompileError::new(format!(
             "unsupported circuit parameter type `{other}`"
         ))
-        .with_help("use `Private<Field>` or `Public<Field>`")),
+        .with_help("use `Private<Field>` or `Public<Field>`")
+        .with_span(ty.span)),
         None => Err(CompileError::new("unsupported circuit parameter type")
-            .with_help("use `Private<Field>` or `Public<Field>`")),
+            .with_help("use `Private<Field>` or `Public<Field>`")
+            .with_span(ty.span)),
     }
 }
 

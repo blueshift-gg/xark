@@ -5,7 +5,7 @@ use xark::{assert_eq, Field, Private, Public};
 /// One MiMC round: `(state + key + round_constant)^3`.
 fn round(state: Field, key: Field, c: Field) -> Field {
     let t = state + key + c;
-    t ^ 3
+    t.pow(3)
 }
 
 /// MiMC written idiomatically with a `while` loop over an array of round

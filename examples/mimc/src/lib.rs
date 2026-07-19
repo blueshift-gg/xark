@@ -25,15 +25,15 @@ pub fn circuit(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
 
     // round 0 (c_0 = 0)
     let mut s = x + k;
-    s = s ^ 3;
+    s = s.pow(3);
 
     // round 1
     s = s + k + c1;
-    s = s ^ 3;
+    s = s.pow(3);
 
     // round 2
     s = s + k + c2;
-    s = s ^ 3;
+    s = s.pow(3);
 
     // finalize with a key addition and constrain to the public digest
     s = s + k;

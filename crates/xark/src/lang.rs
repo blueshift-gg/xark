@@ -80,6 +80,19 @@ impl Field {
         }
     }
 
+    /// The additive identity `0`. `const fn`, so it works in circuit bodies and
+    /// `const` items alike — `let mut acc = Field::zero();`. Prefer this (and
+    /// [`Field::one`]) over `Field::from(0u8)` / `Field::constant("0")` for the
+    /// common small constants.
+    pub const fn zero() -> Field {
+        Field::constant_u64(0)
+    }
+
+    /// The multiplicative identity `1`. See [`Field::zero`].
+    pub const fn one() -> Field {
+        Field::constant_u64(1)
+    }
+
     /// The little-endian 4×64-bit limbs of a **compile-time-constant** `Field`.
     /// Meaningful only for constants (`Field::from` / `Field::constant` values);
     /// for witnesses the compiler tracks the value symbolically and these limbs
@@ -219,6 +232,16 @@ impl Field {
             i += 1;
         }
         acc
+    }
+
+    /// Exponentiation by a compile-time exponent: `x.pow(3)` is `x³`, lowered to
+    /// repeated multiplication (exponentiation-by-squaring). The exponent is a
+    /// native `u64` constant — a circuit has no runtime integers. This replaces the
+    /// old `x ^ 3` spelling: `^` is Rust's XOR, so overloading it for `pow` silently
+    /// reversed the meaning of valid-looking code. Use [`Field::xor`] for boolean XOR.
+    #[inline(never)]
+    pub fn pow(self, exp: u64) -> Field {
+        __xark_pow_u64(self, exp)
     }
 
     /// Boolean XOR: for `self, rhs ∈ {0,1}`, returns `self ^ rhs` as a single
@@ -482,12 +505,16 @@ impl DivAssign for Field {
     }
 }
 
-impl BitXor<u64> for Field {
+/// Bitwise XOR `^` on `Field`, matching Rust's meaning: for `self, rhs ∈ {0,1}`
+/// this is boolean XOR, one fused R1CS constraint (sugar for [`Field::xor`]).
+/// Exponentiation is now [`Field::pow`] (`x.pow(3)`), *not* `^` — overloading `^`
+/// for powers silently reversed the meaning of valid-looking Rust.
+impl BitXor for Field {
     type Output = Field;
 
     #[inline(never)]
-    fn bitxor(self, rhs: u64) -> Field {
-        __xark_pow_u64(self, rhs)
+    fn bitxor(self, rhs: Field) -> Field {
+        __xark_xor(self, rhs)
     }
 }
 
@@ -495,7 +522,7 @@ impl BitXor<u64> for Field {
 /// `a * 3`, `a - 2` — as sugar for `a op Field::from(n)`. Each forwards to the
 /// recognized `Field`-`Field` operator, so it lowers to the exact same R1CS; the
 /// integer must be a compile-time constant (a circuit has no runtime integers).
-/// (`^` stays the `pow` operator — see [`BitXor<u64>`].)
+/// (Exponentiation is [`Field::pow`], not `^` — `^` is Rust's XOR.)
 macro_rules! impl_field_int_ops {
     ($($t:ty),+ $(,)?) => {$(
         impl Add<$t> for Field {

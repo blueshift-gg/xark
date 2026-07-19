@@ -232,10 +232,10 @@ fn round_constants() -> [Field; 91] {
 /// `noir-lang/mimc`'s `mimc`.
 pub fn mimc(x: Field, k: Field) -> Field {
     let c = round_constants();
-    let mut h = (x + k) ^ 7;
+    let mut h = (x + k).pow(7);
     let mut i = 1usize;
     while i < 91 {
-        h = (h + k + c[i]) ^ 7;
+        h = (h + k + c[i]).pow(7);
         i += 1;
     }
     h + k
