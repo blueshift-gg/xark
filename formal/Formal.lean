@@ -25,3 +25,4 @@ import Formal.Poseidon2Bn254T3
 
 import Formal.Merkle
 import Formal.Lazy25519
+import Formal.LazyK1
