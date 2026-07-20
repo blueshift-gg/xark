@@ -6,7 +6,7 @@
 #![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Public};
-use xark_secp256r1::{enforce_on_curve, Point};
+use xark_secp256r1::affine::{enforce_on_curve, Point};
 
 #[circuit]
 pub fn on_curve_r1(q: Public<Point>) {

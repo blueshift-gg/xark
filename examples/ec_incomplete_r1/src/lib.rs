@@ -5,7 +5,7 @@
 #![cfg_attr(xark, no_std)]
 
 use xark::{assert_eq, circuit, Private, Public};
-use xark_secp256r1::{ec_add_incomplete, ec_double_incomplete, Point};
+use xark_secp256r1::affine::{ec_add_incomplete, ec_double_incomplete, Point};
 
 fn ceq(got: Point, want: Point) {
     let mut i = 0;

@@ -43,10 +43,22 @@ use xark_prover::{fr_from_decimal, XarkCircuit};
 /// `ecdsa_verify` takes each 256-bit value as two 128-bit halves `[lo, hi]`
 /// (10 public inputs) — see `xark_secp256k1::Fq4`.
 const ECDSA_K1_KAT: &[(&str, &str)] = &[
-    ("pubkey.x.limbs[0]", "117299088799582250395560111034933314319"),
-    ("pubkey.x.limbs[1]", "259440519671684123545587916950343488600"),
-    ("pubkey.y.limbs[0]", "197533179544423103898009492159805902490"),
-    ("pubkey.y.limbs[1]", "113291300625110951570919122229184586675"),
+    (
+        "pubkey.x.limbs[0]",
+        "117299088799582250395560111034933314319",
+    ),
+    (
+        "pubkey.x.limbs[1]",
+        "259440519671684123545587916950343488600",
+    ),
+    (
+        "pubkey.y.limbs[0]",
+        "197533179544423103898009492159805902490",
+    ),
+    (
+        "pubkey.y.limbs[1]",
+        "113291300625110951570919122229184586675",
+    ),
     ("sig.r.limbs[0]", "315003556148935348562556824676081698499"),
     ("sig.r.limbs[1]", "305224178580023842502765843531985788795"),
     ("sig.s.limbs[0]", "34739722103927784686836260377017762291"),
@@ -55,24 +67,32 @@ const ECDSA_K1_KAT: &[(&str, &str)] = &[
     ("digest.limbs[1]", "308604824281941425083684239850222646004"),
 ];
 
-/// secp256r1 (P-256) ECDSA known-answer vector (86-bit limbs), generated with
-/// `p256` and verified off-circuit (`R.x mod n == r`).
+/// secp256r1 (P-256) ECDSA known-answer vector, generated with `p256` and
+/// verified off-circuit (`R.x mod n == r`). Compact **2×128-bit half** public form
+/// (10 public inputs) — the repack of the earlier 3×86 vector; same signature.
 const ECDSA_R1_KAT: &[(&str, &str)] = &[
-    ("pubkey.x.limbs[0]", "67266088408721815440178629"),
-    ("pubkey.x.limbs[1]", "32122441355340553600857496"),
-    ("pubkey.x.limbs[2]", "8254854985909125326758352"),
-    ("pubkey.y.limbs[0]", "20513967152570891030533053"),
-    ("pubkey.y.limbs[1]", "70247732038174899916449580"),
-    ("pubkey.y.limbs[2]", "15284152633358001387265917"),
-    ("sig.r.limbs[0]", "49451236000969469476990837"),
-    ("sig.r.limbs[1]", "62400969000040298138363671"),
-    ("sig.r.limbs[2]", "6553742065852096704011868"),
-    ("sig.s.limbs[0]", "40903658636701347218934538"),
-    ("sig.s.limbs[1]", "19605469382599579414449386"),
-    ("sig.s.limbs[2]", "15625853121683634975831368"),
-    ("digest.limbs[0]", "59421540702102980326124340"),
-    ("digest.limbs[1]", "74576772474745118892088547"),
-    ("digest.limbs[2]", "17542153289124452446895033"),
+    (
+        "pubkey.x.limbs[0]",
+        "155980732500594415992756698020363615685",
+    ),
+    (
+        "pubkey.x.limbs[1]",
+        "145220944681788350899783423254568517605",
+    ),
+    (
+        "pubkey.y.limbs[0]",
+        "38871051169009026178808143761631908797",
+    ),
+    (
+        "pubkey.y.limbs[1]",
+        "268881656657284688356269048913849994543",
+    ),
+    ("sig.r.limbs[0]", "118329509033871567403237738633297129333"),
+    ("sig.r.limbs[1]", "115294649709585341303850469457176801846"),
+    ("sig.s.limbs[0]", "142917374223568687255232207162823887626"),
+    ("sig.s.limbs[1]", "274892915219377031903631266034741673399"),
+    ("digest.limbs[0]", "156129739268667827118276520739168643892"),
+    ("digest.limbs[1]", "308604824281941425083684239850222646004"),
 ];
 
 /// secp256k1 generator `G` (2G / 3G KAT private inputs) as 3×86-bit limbs — the
@@ -334,7 +354,7 @@ fn specs() -> Vec<Spec> {
     });
     v.push(Spec {
         name: "secp256r1_ecdsa",
-        n: 15,
+        n: 10,
         crate_dir: local_dir("secp256r1_ecdsa"),
         private: BTreeMap::new(),
         public_in: map(ECDSA_R1_KAT),
@@ -536,7 +556,10 @@ fn regen_one(spec: &Spec, work: &Path) {
             assign.insert(v.id, val);
         }
     }
-    eprintln!("  [timing] derive_public: {:.1}s", t.elapsed().as_secs_f64());
+    eprintln!(
+        "  [timing] derive_public: {:.1}s",
+        t.elapsed().as_secs_f64()
+    );
 
     // Minimize the flat R1CS to the form the real prover uses, so setup AND prove
     // run over the SAME minimized circuit. The regen previously set up Groth16 over

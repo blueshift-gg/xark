@@ -232,7 +232,7 @@ pub mod fixtures {
         SECP256R1_ECDSA_VK,
         SECP256R1_ECDSA_PROOF,
         SECP256R1_ECDSA_INPUTS,
-        15,
+        10,
         "secp256r1_ecdsa"
     );
     typed_fixture!(

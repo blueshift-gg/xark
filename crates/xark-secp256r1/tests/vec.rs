@@ -12,8 +12,11 @@ use num_bigint::BigUint;
 use p256::ecdsa::{signature::Signer, Signature as P256Sig, SigningKey};
 use sha2::{Digest, Sha256};
 // The circuit takes the transparent compound types `Point` (pubkey), `Signature`
-// (r‖s), `Scalar` (digest), all in the default 3×86 limb layout.
-use xark_test_harness::bignum::{Point, Scalar, Signature as Sig, Uint256};
+// (r‖s), `Scalar` (digest), all in the 2×128-bit leaf layout — mirror them with the
+// `*Packed` harness types.
+use xark_test_harness::bignum::{
+    PointPacked as Point, ScalarPacked as Scalar, SignaturePacked as Sig, Uint256,
+};
 
 #[test]
 fn ecdsa_verify_matches_p256() {
@@ -31,7 +34,9 @@ fn ecdsa_verify_matches_p256() {
         16,
     )
     .unwrap();
-    let digest = Scalar::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n);
+    let digest = Scalar(Uint256::from(
+        BigUint::from_bytes_be(&Sha256::digest(msg)) % &n,
+    ));
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/secp256r1_ecdsa/src/lib.rs");

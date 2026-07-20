@@ -38,8 +38,7 @@ fn analyze(label: &str, xbc_path: &PathBuf) {
         eprintln!("[{label}] SKIP — no xbc at {}", xbc_path.display());
         return;
     };
-    let cp = xark_ir::function_decode::expand_function_blob(&bytes)
-        .expect("expand circuit.xbc");
+    let cp = xark_ir::function_decode::expand_function_blob(&bytes).expect("expand circuit.xbc");
     let raw = cp.to_r1cs();
     let fft = |n: usize| n.next_power_of_two().trailing_zeros();
 
