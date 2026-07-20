@@ -277,6 +277,46 @@ fn merkle_membership_gadget() {
     assert_eq!(nonzeros, 25_330, "depth-4 Poseidon Merkle nonzero count");
 }
 
+/// **R1CS ↔ Lean bridge (Merkle membership).**
+///
+/// `formal/Formal/Merkle.lean` proves the soundness fact a Merkle fold adds over
+/// the Poseidon compression: `merkle_level_swap_sound` shows that with the
+/// position bit constrained boolean (`b·b = b`), each level's `(left, right)` is
+/// exactly the input pair `(node, sib)` in one of its two orders — a genuine
+/// conditional swap, no third value reachable, so the only prover freedom is the
+/// position bit itself. Poseidon's own determinacy is `poseidon_permutation_determined`
+/// (`Formal/Poseidon.lean`); the full root is their composition.
+///
+/// This is the bridge to the actual `xark-merkle` gadget: it pins the per-level
+/// multiplication shape the Lean model is stated over — one Poseidon `hash2`
+/// (240 S-box muls) + one booleanity gate (`b·b`) + two select muxes (`b·(t−f)`)
+/// — across the depth-4 path: 4 × (240 + 1 + 2) = 972. Any drift in the fold's
+/// mux/booleanity shape or the compression changes this and fails here.
+#[test]
+fn merkle_matches_lean_model() {
+    let c = compile_with_field(&example("merkle"), "merkle_lean_bridge", "bn254");
+    assert!(c.status_success, "merkle gadget compiles: {}", c.stderr);
+    let r1cs = xark_ir::json::from_json(
+        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
+    )
+    .expect("parse r1cs.json");
+
+    let mul_gates = r1cs
+        .constraints
+        .iter()
+        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
+        .count();
+
+    // 4 levels × (240 Poseidon S-box muls + 1 booleanity + 2 select muxes) = 972.
+    // The shape `merkle_level_swap_sound` + `poseidon_permutation_determined` are
+    // stated over. If this fails, reconcile the gadget with the Lean model.
+    assert_eq!(
+        mul_gates, 972,
+        "depth-4 Merkle must emit 972 multiplication gates (matches \
+         Xark.merkle_level_swap_sound ∘ poseidon compression); got {mul_gates}"
+    );
+}
+
 /// 32-bit word gadget layer (`xark-bits`): xor/and/rotr/add32. Rotations are
 /// free re-wiring; the mul gates come only from bitwise ops + bit-decompositions.
 #[test]

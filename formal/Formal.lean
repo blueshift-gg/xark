@@ -22,3 +22,5 @@ import Formal.Wrappers
 import Formal.Bookkeeping
 import Formal.AdvancedGadgets
 import Formal.Poseidon2Bn254T3
+
+import Formal.Merkle
