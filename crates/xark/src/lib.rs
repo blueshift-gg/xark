@@ -81,6 +81,8 @@ pub use crate::lang::{
 // also compares composite circuit types (e.g. a SHA-256 digest vs a `Digest`).
 #[doc(hidden)]
 pub use crate::lang::{__circuit_assert_eq, AssertEqCircuit};
-// `#[circuit]` and the `#[derive(CircuitInput)]` that generates a struct's
-// `Into<[Field; N]>` in the compiler's structural-flatten order.
-pub use xark_macros::{circuit, CircuitInput};
+// `#[circuit]`, the `#[derive(CircuitInput)]` that generates a struct's
+// `Into<[Field; N]>` in the compiler's structural-flatten order, and
+// `#[derive(Transparent)]` that generates a transparent type's host `NativeInput`
+// leaf fan-out (matching that same flatten order).
+pub use xark_macros::{circuit, CircuitInput, Transparent};

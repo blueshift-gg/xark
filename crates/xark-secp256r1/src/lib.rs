@@ -33,10 +33,47 @@ xark_curve::weierstrass! {
     correction = [73008335506530070440987265, 52113507725237922464657843, 1975229404901465064722683, 4808832657966113361640839, 48622947606618793931251433, 9925785685835320508030124],
 }
 
-/// P-256 ECDSA verification (3×86-bit incomplete-affine path). This is
-/// secp256r1's single verify gadget — P-256 has no efficient endomorphism, so
-/// there's no GLV variant as on secp256k1. Built on the macro's shared primitives
-/// (`double_scalar_mul_incomplete`, `Fq`, `Point`).
+use xark::Transparent;
+
+/// A P-256 ECDSA signature `(r, s)` — `[u8; 64]` (`r ‖ s`) on the host, `{ r, s }`
+/// in-circuit. Pass it to [`Point::verify`] with the message digest. The
+/// `#[derive(Transparent)]` host `NativeInput` is composed from the two `Scalar`
+/// coordinate leaves (which the curve macro provides).
+#[derive(Clone, Copy, Transparent)]
+pub struct Signature {
+    pub r: Scalar,
+    pub s: Scalar,
+}
+
+/// Everything to write a secp256r1-ECDSA circuit in one import:
+/// `use xark_secp256r1::prelude::*;` re-exports the `xark` essentials (`circuit`,
+/// `Public`, `Field`, `assert_eq`, …) plus the transparent input types [`Point`],
+/// [`Signature`], [`Scalar`]. Verify with `pubkey.verify(sig, digest)`.
+pub mod prelude {
+    pub use crate::{Point, Scalar, Signature};
+    pub use xark::prelude::*;
+}
+
+impl Point {
+    /// Verify an ECDSA signature against this public key and message `digest`
+    /// (`digest = int(hash(msg)) mod n`, a [`Scalar`]). The transparent-type entry
+    /// point — the caller never touches limbs:
+    ///
+    /// ```ignore
+    /// #[circuit]
+    /// fn secp256r1_ecdsa(pubkey: Public<Point>, sig: Public<Signature>, digest: Public<Scalar>) {
+    ///     pubkey.verify(sig, digest);
+    /// }
+    /// ```
+    pub fn verify(self, sig: Signature, digest: Scalar) {
+        ecdsa_verify(self, sig.r, sig.s, digest);
+    }
+}
+
+/// P-256 ECDSA verification core (3×86-bit incomplete-affine path). P-256 has no
+/// efficient endomorphism, so there's no GLV variant as on secp256k1. Built on the
+/// macro's shared primitives (`double_scalar_mul_incomplete`, `Fq`, `Point`).
+/// Wrapped by [`Point::verify`] — callers use that.
 pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
     // canonical `< n`, not just limb-bounded — a non-canonical `s`/`r` is malleability
     r.assert_canonical();

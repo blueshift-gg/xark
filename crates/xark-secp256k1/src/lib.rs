@@ -8,37 +8,45 @@
 //! constants and the incomplete-affine group law — with `a = 0` the doubling
 //! slope is just `3x²/2y` (no `a` term).
 //!
-//! The whole gadget (`Fp`/`Fq`, `Point`, `ec_add_incomplete`,
-//! `ec_double_incomplete`, `double_scalar_mul_incomplete`, `ecdsa_verify`) is
-//! emitted by the shared [`xark_curve::weierstrass!`] macro — this
-//! file is just the curve's constants. secp256r1 differs only in its moduli,
-//! `a = -3`, and these tables.
-//!
-//! Every arithmetic building block is individually solver-validated; see the
-//! `xark` compiler snapshot tests. `ecdsa_verify` composes them (structural
-//! capstone; not solved end-to-end due to size).
+//! The shipped verifier is the GLV-accelerated 4×64 lazy gadget below
+//! ([`Point::verify`]); the non-native field / EC arithmetic lives in [`xark_bignum`]
+//! (shared with secp256r1, parameterized by modulus). Inputs are the transparent
+//! compound types [`Point`] / [`Signature`] / [`Scalar`] — the caller never touches
+//! limbs. Every arithmetic building block is individually solver-validated (see the
+//! `xark` compiler snapshot tests).
 
 #![no_std]
 
-xark_curve::weierstrass! {
-    base = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F",
-    scalar = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141",
-    a = 0,
-    b = [7, 0, 0],
-    generators = [
-        [17117865558768631194064792, 12501176021340589225372855, 9198697782662356105779718, 6441780312434748884571320, 57953919405111227542741658, 5457536640262350763842127],
-        [57105948487393027623526117, 2088890992725950981549619, 14961784698075395646489684, 46925586441427271765976362, 19820246243853867596485833, 2031033786214458435714136],
-        [57545291876987742944507641, 75066192660561802595210765, 18828234277447069677687620, 2583640362791394057184882, 38197615293098406611150035, 4273588397735691711217203],
-        [39240586505594730384248083, 43607737248441145767116859, 17270833250143069575414244, 74945151656403808399104290, 9851937081784665158242046, 6190313694369289866667054],
-    ],
-    correction = [50013525532261609533771622, 33977132216705809345294891, 6434814454533600219945686, 34870826494395841319973943, 37401083326380650972982394, 14538710286819613138477839],
+/// The eager **3×86-bit** incomplete-affine curve gadget (`Point`, `Fq`,
+/// `ec_add_incomplete`, `ec_double_incomplete`, …) emitted by the shared
+/// [`xark_curve::weierstrass!`] macro. Kept in its own module because its `Point` /
+/// `Scalar` use a different limb layout (3×86) than the shipped GLV verifier's
+/// transparent [`Point`] / [`Scalar`] (2×128) below — so they'd collide at the crate
+/// root. Used by the `ec_incomplete` example and the field-arithmetic snapshot tests;
+/// the host `order` / `reduce_scalar` helpers it derives are re-exported at the root.
+pub mod affine {
+    xark_curve::weierstrass! {
+        base = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F",
+        scalar = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141",
+        a = 0,
+        b = [7, 0, 0],
+        generators = [
+            [17117865558768631194064792, 12501176021340589225372855, 9198697782662356105779718, 6441780312434748884571320, 57953919405111227542741658, 5457536640262350763842127],
+            [57105948487393027623526117, 2088890992725950981549619, 14961784698075395646489684, 46925586441427271765976362, 19820246243853867596485833, 2031033786214458435714136],
+            [57545291876987742944507641, 75066192660561802595210765, 18828234277447069677687620, 2583640362791394057184882, 38197615293098406611150035, 4273588397735691711217203],
+            [39240586505594730384248083, 43607737248441145767116859, 17270833250143069575414244, 74945151656403808399104290, 9851937081784665158242046, 6190313694369289866667054],
+        ],
+        correction = [50013525532261609533771622, 33977132216705809345294891, 6434814454533600219945686, 34870826494395841319973943, 37401083326380650972982394, 14538710286819613138477839],
+    }
 }
+#[cfg(feature = "host")]
+pub use affine::{order, reduce_scalar};
 
 // ===========================================================================
 // SOUND LAZY ECDSA verify (4×64 lazy-affine point arithmetic + eager 4×64
 // scalar ops). Alongside the macro's eager 3×86 gadget. ~30% fewer constraints.
 // ===========================================================================
-use xark::{assert_eq as aeq, witness_begin, witness_end, Field};
+use xark::{assert_eq as aeq, witness_begin, witness_end, Field, Transparent};
 use xark_bignum::{
     assert_lt, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
     modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
@@ -48,70 +56,43 @@ use xark_bignum::{
 type L4 = [Field; 4];
 type Pt = [L4; 2];
 
-/// A secp256k1 field element as the compact **2×128-bit half** public-input form —
-/// `{ limbs: [Field; 2] }` = `[lo128, hi128]` in-circuit (2 public field elements,
-/// vs 4 raw 64-bit limbs), `[u8; 32]` on the host. The gadget recomposes it to the
-/// internal 4×64 limbs (see [`ecdsa_verify`]). Access `.limbs` to hand to a gadget.
-#[derive(Clone, Copy)]
-pub struct Fq4 {
+/// A secp256k1 256-bit value (a scalar `r`/`s`/`e`, or a point coordinate) in the
+/// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =
+/// `[lo128, hi128]` in-circuit (2 public field elements vs 4 raw 64-bit limbs),
+/// `[u8; 32]` big-endian on the host. Recomposed to the internal 4×64 limbs by the
+/// gadget. `#[derive(Transparent)]` derives the host `NativeInput` (`[u8; 32]` →
+/// `<name>.limbs[0..2]`) from this declaration.
+#[derive(Clone, Copy, Transparent)]
+#[transparent(bits = 128)]
+pub struct Scalar {
     pub limbs: [Field; 2],
 }
 
-/// An affine secp256k1 point as two [`Fq4`] coordinates — compact uncompressed
-/// `[u8; 64]` (`x ‖ y`) on the host, `{ x, y }` (flattening to `<name>.x.limbs[i]`
-/// / `<name>.y.limbs[i]`, 4 public field elements total) in-circuit.
-#[derive(Clone, Copy)]
-pub struct Point4 {
-    pub x: Fq4,
-    pub y: Fq4,
+/// An affine secp256k1 public key as its two coordinates — compact uncompressed
+/// `[u8; 64]` (`x ‖ y`, SEC1 minus the `0x04` tag) on the host, `{ x, y }`
+/// (flattening to `<name>.x.limbs[i]` / `<name>.y.limbs[i]`) in-circuit. Verify a
+/// signature against it with [`Point::verify`].
+#[derive(Clone, Copy, Transparent)]
+pub struct Point {
+    pub x: Scalar,
+    pub y: Scalar,
 }
 
-/// Host-side `NativeInput` impls: convert native `[u8; 32]` scalars / compact
-/// uncompressed `[u8; 64]` points (`x ‖ y`) into the circuit's 4×64 limb leaves.
-/// Compiled only for the `host` feature / tests.
-#[cfg(feature = "host")]
-mod host_inputs {
-    extern crate std;
-    use crate::{Fq4, Point4};
-    use num_bigint::BigUint;
-    use std::{format, string::String, string::ToString, vec::Vec};
-    use xark_prover::NativeInput;
+/// An ECDSA signature `(r, s)` — `[u8; 64]` (`r ‖ s`) on the host, `{ r, s }`
+/// in-circuit. Pass it to [`Point::verify`] with the message digest.
+#[derive(Clone, Copy, Transparent)]
+pub struct Signature {
+    pub r: Scalar,
+    pub s: Scalar,
+}
 
-    /// The two 128-bit halves `[lo, hi]` of a big-endian 32-byte value, named
-    /// `<prefix>.limbs[0]` / `<prefix>.limbs[1]` (the compact public-input form the
-    /// gadget recomposes to 4×64 limbs).
-    fn limb_leaves(be_bytes: &[u8], prefix: &str) -> Vec<(String, String)> {
-        let v = BigUint::from_bytes_be(be_bytes);
-        let mask = (BigUint::from(1u8) << 128u32) - 1u8;
-        (0..2)
-            .map(|i| {
-                (
-                    format!("{prefix}.limbs[{i}]"),
-                    ((&v >> (i as u32 * 128)) & &mask).to_string(),
-                )
-            })
-            .collect()
-    }
-
-    impl NativeInput for Fq4 {
-        type Native = [u8; 32];
-        fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
-            limb_leaves(native, prefix)
-        }
-    }
-
-    impl NativeInput for Point4 {
-        /// Compact uncompressed point: `x(32) ‖ y(32)` big-endian. This is SEC1
-        /// uncompressed minus the `0x04` tag byte — the tag carries no information
-        /// for an uncompressed point, and the circuit needs both coordinates anyway,
-        /// so compressing to `x`-only would only add a host sqrt for no circuit gain.
-        type Native = [u8; 64];
-        fn leaves(native: &[u8; 64], prefix: &str) -> Vec<(String, String)> {
-            let mut out = limb_leaves(&native[0..32], &format!("{prefix}.x"));
-            out.extend(limb_leaves(&native[32..64], &format!("{prefix}.y")));
-            out
-        }
-    }
+/// Everything to write a secp256k1-ECDSA circuit in one import:
+/// `use xark_secp256k1::prelude::*;` re-exports the `xark` essentials (`circuit`,
+/// `Public`, `Field`, `assert_eq`, …) plus the transparent input types [`Point`],
+/// [`Signature`], [`Scalar`]. Verify with `pubkey.verify(sig, digest)`.
+pub mod prelude {
+    pub use crate::{Point, Scalar, Signature};
+    pub use xark::prelude::*;
 }
 
 const NN: L4 =
@@ -281,14 +262,42 @@ fn unpack(packed: [Field; 2]) -> L4 {
     limbs
 }
 
-/// secp256k1 ECDSA verification — the GLV-accelerated 4×64 lazy gadget (128-window
-/// 4-dim Shamir via the λ-endomorphism), the fastest sound variant (~1.64M
-/// constraints). Each of `q.x`, `q.y`, `r`, `s`, `e` is a 256-bit value passed as
-/// its two **128-bit halves** `[lo, hi]` — 10 public field elements for the whole
-/// signature (vs 20 as raw 4×64 limbs), recomposed to 4×64 internally. The
-/// endomorphism decomposition is derived in-circuit at zero constraint cost (see
-/// [`glv_split`]) and pinned by [`glv_decomp`]. secp256k1's single `ecdsa_verify`.
-pub fn ecdsa_verify(qx: [Field; 2], qy: [Field; 2], r: [Field; 2], s: [Field; 2], e: [Field; 2]) {
+impl Point {
+    /// Verify an ECDSA signature against this public key and message `digest`
+    /// (`digest = int(hash(msg)) mod n`, supplied as a [`Scalar`]). Emits the whole
+    /// constraint system; a wrong signature makes the circuit unsatisfiable. This is
+    /// the transparent-type entry point — the caller never touches limbs:
+    ///
+    /// ```ignore
+    /// #[circuit]
+    /// fn secp256k1_ecdsa(pubkey: Public<Point>, sig: Public<Signature>, digest: Public<Scalar>) {
+    ///     pubkey.verify(sig, digest);
+    /// }
+    /// ```
+    pub fn verify(self, sig: Signature, digest: Scalar) {
+        ecdsa_verify_packed(
+            self.x.limbs,
+            self.y.limbs,
+            sig.r.limbs,
+            sig.s.limbs,
+            digest.limbs,
+        );
+    }
+}
+
+/// secp256k1 ECDSA verification core — the GLV-accelerated 4×64 lazy gadget
+/// (128-window 4-dim Shamir via the λ-endomorphism), the fastest sound variant
+/// (~1.64M constraints). Each of `qx`, `qy`, `r`, `s`, `e` is a 256-bit value as its
+/// two **128-bit halves** `[lo, hi]`, recomposed to 4×64 internally. The endomorphism
+/// decomposition is derived in-circuit at zero constraint cost (see [`glv_split`]) and
+/// pinned by [`glv_decomp`]. Wrapped by [`Point::verify`] — callers use that.
+fn ecdsa_verify_packed(
+    qx: [Field; 2],
+    qy: [Field; 2],
+    r: [Field; 2],
+    s: [Field; 2],
+    e: [Field; 2],
+) {
     let qx = unpack(qx);
     let qy = unpack(qy);
     let r = unpack(r);

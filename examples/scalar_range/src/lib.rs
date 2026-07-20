@@ -6,7 +6,7 @@
 //! non-canonical or zero `s` makes the circuit unsatisfiable.
 
 use xark::{Field, Private};
-use xark_secp256k1::Fq;
+use xark_secp256k1::affine::Fq;
 
 pub fn circuit(s0: Private<Field>, s1: Private<Field>, s2: Private<Field>) {
     let s = Fq::new([s0, s1, s2]);

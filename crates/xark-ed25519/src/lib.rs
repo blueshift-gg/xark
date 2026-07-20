@@ -18,7 +18,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{assert_eq, Field};
+use xark::{assert_eq, Field, Transparent};
 
 // The Ed25519 curve: base field p = 2^255 − 19, scalar order L, constant d.
 xark_curve::edwards! {
@@ -258,6 +258,52 @@ fn dsm_l(bits1: [Field; 256], p1: Ext, bits2: [Field; 256], p2: Ext) -> Ext {
 /// `eddsa_verify` (the affine variant was ~4.55M). Point coords are raw 3×85
 /// limbs; scalars are 256 caller-decomposed bits.
 #[allow(clippy::too_many_arguments)]
+/// An Ed25519 signature `(R, S)` — a curve point `R` (compressed `[u8; 32]` on the
+/// host) and a scalar `S`. Its `#[derive(Transparent)]` host `NativeInput` composes
+/// `PointL`'s (decompressing) leaves with `Scalar`'s, so the host native form is
+/// `[u8; 64]` = compressed `R ‖ big-endian S`. Pass it to [`PointL::verify`].
+#[derive(Clone, Copy, Transparent)]
+pub struct Signature {
+    pub r: PointL,
+    pub s: Scalar,
+}
+
+/// Everything to write an Ed25519 circuit in one import:
+/// `use xark_ed25519::prelude::*;` re-exports the `xark` essentials (`circuit`,
+/// `Public`, `Field`, `assert_eq`, …) plus the transparent input types [`PointL`],
+/// [`Signature`], [`Scalar`]. Verify with `pubkey.verify(sig, digest)`.
+pub mod prelude {
+    pub use crate::{PointL, Scalar, Signature};
+    pub use xark::prelude::*;
+}
+
+impl PointL {
+    /// Verify an Ed25519 signature against this public key `A` and the challenge
+    /// `digest = k = H(R ‖ A ‖ M) mod L` (a [`Scalar`]). Checks the EdDSA equation
+    /// `[S]·B == R + [k]·A`. The transparent-type entry point — no limbs:
+    ///
+    /// ```ignore
+    /// #[circuit]
+    /// fn ed25519(pubkey: Public<PointL>, sig: Public<Signature>, digest: Public<Scalar>) {
+    ///     pubkey.verify(sig, digest);
+    /// }
+    /// ```
+    pub fn verify(self, sig: Signature, digest: Scalar) {
+        eddsa_verify(
+            self.x.limbs,
+            self.y.limbs,
+            sig.r.x.limbs,
+            sig.r.y.limbs,
+            xark_bignum::scalar_to_bits(sig.s.limbs),
+            xark_bignum::scalar_to_bits(digest.limbs),
+        );
+    }
+}
+
+/// Ed25519 signature verification core: the EdDSA equation `[S]·B == R + [k]·A`
+/// (sound lazy extended-coordinate path, 3×85 limbs). Wrapped by [`PointL::verify`]
+/// — callers use that (it takes the transparent [`Signature`] and decomposes the
+/// scalars to bits).
 pub fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits: [Field; 256]) {
     // canonical scalar S < L (else S, S+L, … all verify — EdDSA malleability)
     assert_scalar_below_order(s_bits);

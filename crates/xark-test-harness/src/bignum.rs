@@ -168,6 +168,34 @@ impl LeafInput for Point {
     }
 }
 
+/// An ECDSA signature `(r, s)` in the default 3×86 limb layout — `prefix.r.limbs[..]`
+/// then `prefix.s.limbs[..]` (secp256r1's `Signature` compound; secp256k1's 2×128
+/// one is [`SignaturePacked`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Signature {
+    pub r: Uint256,
+    pub s: Uint256,
+}
+
+impl Signature {
+    /// From a 64-byte big-endian `r ‖ s`.
+    pub fn from_rs(bytes: &[u8]) -> Self {
+        assert_eq!(bytes.len(), 64, "Signature::from_rs expects 64 bytes");
+        Self {
+            r: Uint256::from_bytes_be(&bytes[..32]),
+            s: Uint256::from_bytes_be(&bytes[32..]),
+        }
+    }
+}
+
+impl LeafInput for Signature {
+    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
+        let mut out = self.r.leaves(&format!("{prefix}.r"));
+        out.extend(self.s.leaves(&format!("{prefix}.s")));
+        out
+    }
+}
+
 /// An affine point whose coordinates flatten as **3×85-bit** limbs — the layout of
 /// the lazy Ed25519 path's `PointL`, distinct from the default 3×86 [`Point`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -216,11 +244,46 @@ impl LeafInput for ScalarPacked {
 }
 
 /// An affine point whose coordinates flatten as **2×128-bit** limbs — the layout of
-/// the secp256k1 GLV path's `Point4`, distinct from the default 3×86 [`Point`].
+/// the secp256k1 GLV path's `Point`, distinct from the default 3×86 [`Point`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PointPacked {
     pub x: Uint256,
     pub y: Uint256,
+}
+
+/// An ECDSA signature `(r, s)` flattening as **2×128-bit** limbs under
+/// `<prefix>.r.limbs[i]` / `<prefix>.s.limbs[i]` — secp256k1's `Signature` compound.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignaturePacked {
+    pub r: Uint256,
+    pub s: Uint256,
+}
+
+impl SignaturePacked {
+    /// From a 64-byte big-endian `r ‖ s` (the form `k256`'s `Signature::to_bytes`
+    /// produces). Panics on any other length.
+    pub fn from_rs(bytes: &[u8]) -> Self {
+        assert_eq!(bytes.len(), 64, "SignaturePacked::from_rs expects 64 bytes");
+        Self {
+            r: Uint256::from_bytes_be(&bytes[..32]),
+            s: Uint256::from_bytes_be(&bytes[32..]),
+        }
+    }
+}
+
+impl LeafInput for SignaturePacked {
+    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
+        let field = |v: &Uint256, name: &str| -> Vec<(String, String)> {
+            v.limbs(2, 128)
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| (format!("{prefix}.{name}.limbs[{i}]"), l))
+                .collect()
+        };
+        let mut out = field(&self.r, "r");
+        out.extend(field(&self.s, "s"));
+        out
+    }
 }
 
 impl PointPacked {

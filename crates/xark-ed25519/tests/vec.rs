@@ -12,7 +12,22 @@
 use ed25519_dalek::{Signer, SigningKey};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha512};
-use xark_test_harness::bignum::{Point85, Scalar};
+use xark_test_harness::bignum::{LeafInput, Point85, Scalar};
+
+/// The ed25519 `Signature` compound: the point `R` (3×85) then the scalar `S`
+/// (3×86), flattening to `sig.r.x.limbs` / `sig.r.y.limbs` / `sig.s.limbs`.
+struct EddsaSig {
+    r: Point85,
+    s: Scalar,
+}
+
+impl LeafInput for EddsaSig {
+    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
+        let mut out = self.r.leaves(&format!("{prefix}.r"));
+        out.extend(self.s.leaves(&format!("{prefix}.s")));
+        out
+    }
+}
 
 /// Recover the affine `(x, y)` of a 32-byte RFC-8032 compressed Edwards point.
 /// `y` is the compressed bytes (LE, top bit cleared); `x` is the one value dalek
@@ -94,13 +109,20 @@ fn eddsa_verify_matches_dalek() {
     );
 
     // A genuine ed25519-dalek signature satisfies the circuit (fully constrained).
-    c.check(&[("a", &a), ("r", &r), ("s", &s), ("k", &k)])
+    let sig = EddsaSig {
+        r: r.clone(),
+        s: s.clone(),
+    };
+    c.check(&[("pubkey", &a), ("sig", &sig), ("digest", &k)])
         .expect("a valid ed25519-dalek signature must verify");
 
     // A tampered signature (any wrong `s`) is rejected.
-    let bad_s = Scalar::from(1u128);
+    let bad_sig = EddsaSig {
+        r: r.clone(),
+        s: Scalar::from(1u128),
+    };
     assert!(
-        c.check(&[("a", &a), ("r", &r), ("s", &bad_s), ("k", &k)])
+        c.check(&[("pubkey", &a), ("sig", &bad_sig), ("digest", &k)])
             .is_err(),
         "a tampered signature must be rejected"
     );

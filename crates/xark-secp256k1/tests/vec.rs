@@ -11,9 +11,12 @@
 use k256::ecdsa::{signature::Signer, Signature, SigningKey};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
-// The GLV `ecdsa_verify` packs each 256-bit value as 2×128-bit limbs (`Point4`/`Fq4`),
-// so use the 2×128 leaf layout (`PointPacked`/`ScalarPacked`), not the default 3×86.
-use xark_test_harness::bignum::{PointPacked as Point, ScalarPacked as Scalar, Uint256};
+// The circuit takes the transparent compound types `Point` (pubkey), `Signature`
+// (r‖s), `Scalar` (digest), all in the 2×128-bit leaf layout — mirror them with the
+// harness's packed leaf types.
+use xark_test_harness::bignum::{
+    PointPacked as Point, ScalarPacked as Scalar, SignaturePacked as Sig, Uint256,
+};
 
 #[test]
 fn ecdsa_verify_matches_k256() {
@@ -24,17 +27,15 @@ fn ecdsa_verify_matches_k256() {
     let sig: Signature = sk.sign(msg);
 
     // Native inputs, straight from the k256 wire encodings.
-    let q = Point::from_sec1(vk.to_encoded_point(false).as_bytes());
-    let sig_bytes = sig.to_bytes();
-    let r = Scalar::from_bytes_be(&sig_bytes[..32]);
-    let s = Scalar::from_bytes_be(&sig_bytes[32..]);
+    let pubkey = Point::from_sec1(vk.to_encoded_point(false).as_bytes());
+    let sig_leaf = Sig::from_rs(sig.to_bytes().as_slice());
     // ECDSA challenge e = int(SHA-256(msg)) mod n (n = secp256k1 group order).
     let n = BigUint::parse_bytes(
         b"fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
         16,
     )
     .unwrap();
-    let e = Scalar(Uint256::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n));
+    let digest = Scalar(Uint256::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n));
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/secp256k1_ecdsa/src/lib.rs");
@@ -46,13 +47,16 @@ fn ecdsa_verify_matches_k256() {
     );
 
     // A genuine k256 signature satisfies the circuit (and it is fully constrained).
-    c.check(&[("q", &q), ("r", &r), ("s", &s), ("e", &e)])
+    c.check(&[("pubkey", &pubkey), ("sig", &sig_leaf), ("digest", &digest)])
         .expect("a valid k256 ECDSA signature must verify");
 
-    // A tampered signature (any wrong `r`) is rejected.
-    let bad_r = Scalar(Uint256::from(1u128));
+    // A tampered signature (wrong `r`) is rejected.
+    let bad_sig = Sig {
+        r: Uint256::from(1u128),
+        s: sig_leaf.s.clone(),
+    };
     assert!(
-        c.check(&[("q", &q), ("r", &bad_r), ("s", &s), ("e", &e)])
+        c.check(&[("pubkey", &pubkey), ("sig", &bad_sig), ("digest", &digest)])
             .is_err(),
         "a tampered signature must be rejected"
     );

@@ -39,8 +39,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Data, DeriveInput, Expr, ExprLit, FnArg, GenericArgument, ItemFn, Lit,
-    LitStr, Pat, PathArguments, Type,
+    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Expr, ExprLit, FnArg,
+    GenericArgument, ItemFn, Lit, LitInt, LitStr, Pat, PathArguments, Type,
 };
 
 #[proc_macro_attribute]
@@ -492,6 +492,154 @@ fn walk_type(ty: &Type, access: &TokenStream2, depth: usize) -> syn::Result<(usi
              (nesting allowed); array lengths must be integer literals",
         )),
     }
+}
+
+/// `#[derive(Transparent)]` — generate the host-side [`NativeInput`] fan-out for a
+/// transparent circuit type, so a gadget author declares the type once and the
+/// leaf-name / limb contract (which must match the compiler's structural flatten)
+/// is *generated*, not hand-written and hand-duplicated across gadgets.
+///
+/// Two shapes:
+///  * a **leaf** field element `{ limbs: [Field; N] }` marked `#[transparent(bits = B)]`:
+///    native form `[u8; N*B/8]` (big-endian), flattening to `<prefix>.limbs[i]`.
+///  * a **composite** of transparent fields (e.g. `{ x: Fq, y: Fq }`): native form is
+///    the fields' native bytes concatenated, flattening by recursing into each field
+///    under `<prefix>.<field>`.
+///
+/// The generated impl is `#[cfg(feature = "host")]` — `NativeInput` is host-only.
+///
+/// [`NativeInput`]: xark_prover::NativeInput
+#[proc_macro_derive(Transparent, attributes(transparent))]
+pub fn derive_transparent(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match transparent_impl(&input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Parse `#[transparent(bits = B)]` → `Some(B)` (leaf mode); `None` = composite.
+fn parse_transparent_bits(attrs: &[Attribute]) -> syn::Result<Option<u32>> {
+    for attr in attrs {
+        if attr.path().is_ident("transparent") {
+            let mut bits = None;
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("bits") {
+                    let lit: LitInt = meta.value()?.parse()?;
+                    bits = Some(lit.base10_parse::<u32>()?);
+                    Ok(())
+                } else {
+                    Err(meta.error("expected `bits = <n>`"))
+                }
+            })?;
+            return Ok(bits);
+        }
+    }
+    Ok(None)
+}
+
+/// A leaf transparent type is `{ limbs: [Field; N] }`; return `N`.
+fn leaf_limb_count(data: &DataStruct) -> syn::Result<usize> {
+    let field = data.fields.iter().next().ok_or_else(|| {
+        syn::Error::new_spanned(
+            &data.fields,
+            "a `#[transparent(bits = ..)]` leaf needs a `limbs: [Field; N]` field",
+        )
+    })?;
+    match &field.ty {
+        Type::Array(arr) => eval_usize_lit(&arr.len),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "a `#[transparent(bits = ..)]` leaf's field must be `[Field; N]`",
+        )),
+    }
+}
+
+fn transparent_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
+    let name = &input.ident;
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "#[derive(Transparent)] does not support generic types",
+        ));
+    }
+    let data = match &input.data {
+        Data::Struct(d) => d,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                name,
+                "#[derive(Transparent)] only supports structs",
+            ))
+        }
+    };
+
+    let (native_ty, leaves_body) = if let Some(bits) = parse_transparent_bits(&input.attrs)? {
+        // LEAF: `{ limbs: [Field; N] }`, native = big-endian `[u8; N*B/8]`.
+        let n = leaf_limb_count(data)?;
+        let bytes = n * (bits as usize) / 8;
+        (
+            quote! { [u8; #bytes] },
+            quote! { ::xark_prover::limb_leaves(native, prefix, #n, #bits) },
+        )
+    } else {
+        // COMPOSITE: native = concatenation of the fields' native bytes; recurse.
+        let field_size = |fty: &Type| {
+            quote! { ::core::mem::size_of::<<#fty as ::xark_prover::NativeInput>::Native>() }
+        };
+        let sizes: Vec<_> = data.fields.iter().map(|f| field_size(&f.ty)).collect();
+        let native_ty = quote! { [u8; { 0usize #( + #sizes )* }] };
+
+        let mut stmts = Vec::new();
+        let mut offset = quote! { 0usize };
+        for (i, field) in data.fields.iter().enumerate() {
+            let fty = &field.ty;
+            let fname = match &field.ident {
+                Some(id) => id.to_string(),
+                None => i.to_string(),
+            };
+            let size = field_size(fty);
+            stmts.push(quote! {
+                {
+                    let __start = #offset;
+                    let __end = __start + #size;
+                    let __chunk: &<#fty as ::xark_prover::NativeInput>::Native =
+                        ::core::convert::TryFrom::try_from(&native[__start..__end]).unwrap();
+                    __out.extend(<#fty as ::xark_prover::NativeInput>::leaves(
+                        __chunk,
+                        &std::format!("{}.{}", prefix, #fname),
+                    ));
+                }
+            });
+            offset = quote! { #offset + #size };
+        }
+        (
+            native_ty,
+            quote! {
+                let mut __out = Vec::new();
+                #( #stmts )*
+                __out
+            },
+        )
+    };
+
+    // `NativeInput` lives in `xark_prover` (a `std` crate), but a gadget crate is
+    // `#![no_std]` — so bring `std` in inside an anonymous const (the hygienic-derive
+    // pattern), mirroring what the hand-written host modules did with `extern crate std`.
+    Ok(quote! {
+        #[cfg(feature = "host")]
+        const _: () = {
+            extern crate std;
+            use std::string::String;
+            use std::vec::Vec;
+            #[automatically_derived]
+            impl ::xark_prover::NativeInput for #name {
+                type Native = #native_ty;
+                fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
+                    #leaves_body
+                }
+            }
+        };
+    })
 }
 
 /// A `usize` from an integer-literal length expression (`[Field; 32]` → `32`).
