@@ -11,14 +11,18 @@ path = "src/lib.rs"
 xark = { path = "../../crates/xark", default-features = false }
 xark-bignum = { path = "../../crates/xark-bignum" }
 xark-ed25519 = { path = "../../crates/xark-ed25519" }
-xark-prover = { path = "../../crates/xark-prover", optional = true }
 
 [dev-dependencies]
-xark-ed25519 = { path = "../../crates/xark-ed25519", features = ["host"] }
-xark-prover = { path = "../../crates/xark-prover" }
+xark-ed25519 = { path = "../../crates/xark-ed25519" }
 ed25519-dalek = "2"
 
-[features]
-host = ["dep:xark-prover", "xark-ed25519/host"]
+[target.'cfg(not(xark))'.dependencies]
+# Host-only prover so downstream crates (and this crate's tests) can call
+# the generated native validator; gated on `cfg(not(xark))` so a circuit
+# build stays lean `no_std` with no feature flag.
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
 
 [workspace]

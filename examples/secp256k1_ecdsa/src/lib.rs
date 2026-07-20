@@ -13,7 +13,7 @@
 //! algorithm needs is **derived inside the circuit** (a `witness_only` region at
 //! zero constraint cost, pinned by `glv_decomp`), so the caller supplies only the
 //! signature — no hint inputs, nothing derivable in the public statement.
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark_secp256k1::prelude::*;
 

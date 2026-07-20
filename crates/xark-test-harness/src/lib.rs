@@ -162,8 +162,31 @@ fn built() -> &'static (PathBuf, PathBuf) {
         let target = root.join("target/xark-compile");
         let channel = nightly_channel(&root);
 
-        // 1. Gadget rlibs → isolated target (all root-member `xark-*` crates
-        //    except the non-circuit libraries and the excluded packages).
+        // 1. The rustc-driver binary in crates/xark-rustc's own target (excluded
+        //    nightly pkg with its own pinned `rust-toolchain.toml`). Built *first*
+        //    so it can serve as `RUSTC` for the gadget rlibs below.
+        let ok = Command::new("cargo")
+            // `--features debug` compiles in the diagnostic markers the tests assert
+            // on; a `--features` build still lands at `target/release/xark-rustc`.
+            .args(["build", "--release", "--features", "debug"])
+            .env("RUSTUP_TOOLCHAIN", &channel)
+            .env("RUSTFLAGS", RUSTFLAGS)
+            .env_remove("CARGO_TARGET_DIR")
+            .current_dir(root.join("crates/xark-rustc"))
+            .status()
+            .expect("run cargo build (compiler)")
+            .success();
+        assert!(ok, "building the xark-rustc driver failed");
+        let driver = root.join("crates/xark-rustc/target/release/xark-rustc");
+
+        // 2. Gadget rlibs → isolated target (all root-member `xark-*` crates
+        //    except the non-circuit libraries and the excluded packages). Built
+        //    with the driver as `RUSTC` (like the real `xark build`): it reports
+        //    the `xark` cfg on `--print cfg`, so Cargo gates each crate's
+        //    `[target.'cfg(not(xark))'.dependencies]` (the host prover/num-bigint)
+        //    *out* and the sources compile their lean `#[cfg(not(xark))]`-free
+        //    circuit shape — exactly what links into the circuit crate. No
+        //    `RUSTUP_TOOLCHAIN`: the driver resolves its own pinned sysroot.
         let mut args = vec!["build".to_string(), "--release".to_string()];
         let mut names: Vec<String> = std::fs::read_dir(root.join("crates"))
             .expect("read crates/")
@@ -189,7 +212,7 @@ fn built() -> &'static (PathBuf, PathBuf) {
         }
         let ok = Command::new("cargo")
             .args(&args)
-            .env("RUSTUP_TOOLCHAIN", &channel)
+            .env("RUSTC", &driver)
             .env("RUSTFLAGS", RUSTFLAGS)
             .env("CARGO_TARGET_DIR", &target)
             .current_dir(&root)
@@ -198,27 +221,9 @@ fn built() -> &'static (PathBuf, PathBuf) {
             .success();
         assert!(ok, "building gadget rlibs failed");
 
-        // 2. The rustc-driver binary in crates/xark-rustc's own target (excluded
-        //    nightly pkg with its own pinned `rust-toolchain.toml`).
-        let ok = Command::new("cargo")
-            // `--features debug` compiles in the diagnostic markers the tests assert
-            // on; a `--features` build still lands at `target/release/xark-rustc`.
-            .args(["build", "--release", "--features", "debug"])
-            .env("RUSTUP_TOOLCHAIN", &channel)
-            .env("RUSTFLAGS", RUSTFLAGS)
-            .env_remove("CARGO_TARGET_DIR")
-            .current_dir(root.join("crates/xark-rustc"))
-            .status()
-            .expect("run cargo build (compiler)")
-            .success();
-        assert!(ok, "building the xark-rustc driver failed");
-
         // The rustc_driver shim (invoked directly with `--r1cs-out`), not the
         // `xark` CLI — the driver lives in a separate binary/crate now.
-        (
-            root.join("crates/xark-rustc/target/release/xark-rustc"),
-            target.join("release/deps"),
-        )
+        (driver, target.join("release/deps"))
     })
 }
 

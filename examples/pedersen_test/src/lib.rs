@@ -8,7 +8,7 @@
 //! The output is a curve point `[x, y]`, so `result` is two public field
 //! coordinates rather than a packed `Hash`.
 
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Private, Public};
 use xark_pedersen::pedersen_hash;

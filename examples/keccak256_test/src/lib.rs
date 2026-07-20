@@ -7,7 +7,7 @@
 //! `Hash` (2 field public inputs), and the Keccak output's four 64-bit lanes are
 //! packed into the same two halves via each lane's little-endian byte order.
 
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Private, Public};
 use xark_keccak::keccak256;

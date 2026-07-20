@@ -233,7 +233,7 @@ macro_rules! weierstrass {
 #[macro_export]
 macro_rules! curve_host_inputs {
     ($scalar:literal) => {
-        #[cfg(feature = "host")]
+        #[cfg(not(xark))]
         mod __curve_host {
             extern crate std;
             use super::{Fq, Point};
@@ -290,7 +290,7 @@ macro_rules! curve_host_inputs {
             }
         }
 
-        #[cfg(feature = "host")]
+        #[cfg(not(xark))]
         pub use __curve_host::{order, reduce_scalar};
     };
 }

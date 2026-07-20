@@ -116,7 +116,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     // downstream crate calls `mycircuit::<fn>(a, b, c)` to check inputs without a
     // rename. The two are `cfg`-exclusive, so there is never a name collision.
     let entry = quote! {
-        #[cfg(not(any(test, feature = "host")))]
+        #[cfg(xark)]
         #(#attrs)*
         #vis fn #fn_ident(#(#sig_params),*) {
             #[allow(unused_imports)]
@@ -132,7 +132,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     let circuit_def_ident = format_ident!("__{}_circuit_def", fn_ident);
     let sig_params_def = sig_params.clone();
     let circuit_def = quote! {
-        #[cfg(any(test, feature = "host"))]
+        #[cfg(not(xark))]
         #[doc(hidden)]
         #[allow(dead_code, unused_imports)]
         fn #circuit_def_ident(#(#sig_params_def),*) {
@@ -169,7 +169,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         /// xark compiler): it takes the entry's native inputs, loads the built
         /// circuit from `target/xark/<name>/`, and returns `Ok(())` if they satisfy
         /// it (else an actionable `Err`). So `mycircuit::<fn>(a, b, c).unwrap()`.
-        #[cfg(any(test, feature = "host"))]
+        #[cfg(not(xark))]
         #(#attrs)*
         #vis fn #fn_ident(#(#host_params),*) -> ::core::result::Result<(), ::xark_prover::ProveError> {
             ::xark_prover::circuit(#fn_name_lit).check(#struct_name { #(#host_ctor),* })
@@ -179,13 +179,13 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         /// entry parameter with its **native** type. For a custom artifact location
         /// (e.g. a downstream crate), use it directly:
         /// `xark_prover::circuit_at(dir).check(<Fn>Inputs { .. })` — or `.prove(..)`.
-        #[cfg(any(test, feature = "host"))]
+        #[cfg(not(xark))]
         #[derive(Clone, Debug)]
         pub struct #struct_name {
             #(#field_defs,)*
         }
 
-        #[cfg(any(test, feature = "host"))]
+        #[cfg(not(xark))]
         impl ::xark_prover::ProveInputs for #struct_name {
             fn into_inputs(self) -> ::std::vec::Vec<(::std::string::String, ::std::string::String)> {
                 let mut out: ::std::vec::Vec<(::std::string::String, ::std::string::String)> =
@@ -506,7 +506,7 @@ fn walk_type(ty: &Type, access: &TokenStream2, depth: usize) -> syn::Result<(usi
 ///    the fields' native bytes concatenated, flattening by recursing into each field
 ///    under `<prefix>.<field>`.
 ///
-/// The generated impl is `#[cfg(feature = "host")]` — `NativeInput` is host-only.
+/// The generated impl is `#[cfg(not(xark))]` — `NativeInput` is host-only.
 ///
 /// [`NativeInput`]: xark_prover::NativeInput
 #[proc_macro_derive(Transparent, attributes(transparent))]
@@ -626,7 +626,7 @@ fn transparent_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     // `#![no_std]` — so bring `std` in inside an anonymous const (the hygienic-derive
     // pattern), mirroring what the hand-written host modules did with `extern crate std`.
     Ok(quote! {
-        #[cfg(feature = "host")]
+        #[cfg(not(xark))]
         const _: () = {
             extern crate std;
             use std::string::String;

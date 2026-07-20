@@ -11,11 +11,14 @@ path = "src/lib.rs"
 xark = { path = "../../crates/xark", default-features = false }
 xark-poseidon2 = { path = "../../crates/xark-poseidon2" }
 
-xark-prover = { path = "../../crates/xark-prover", optional = true }
-
 [dev-dependencies]
-xark-prover = { path = "../../crates/xark-prover" }
 zkhash = "0.2"
 
-[features]
-host = ["dep:xark-prover"]
+[target.'cfg(not(xark))'.dependencies]
+# Host-only prover so downstream crates (and this crate's tests) can call
+# the generated native validator; gated on `cfg(not(xark))` so a circuit
+# build stays lean `no_std` with no feature flag.
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

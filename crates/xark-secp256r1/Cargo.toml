@@ -12,13 +12,14 @@ path = "src/lib.rs"
 xark = { path = "../xark", default-features = false }
 xark-bignum = { path = "../xark-bignum" }
 xark-curve = { path = "../xark-curve" }
-# `host` enables the macro-emitted `NativeInput` impls (native bytes → circuit
-# inputs) for `Point`/`Fq`; off, the crate stays lean `no_std` for the compiler.
-num-bigint = { version = "0.4", optional = true }
-xark-prover = { path = "../xark-prover", optional = true }
 
-[features]
-host = ["dep:xark-prover", "dep:num-bigint"]
+# Host-only deps for the macro-emitted `NativeInput` impls (native bytes →
+# circuit inputs). Gated on `cfg(not(xark))`: a circuit build (driver reports the
+# `xark` cfg) drops them and stays lean `no_std`; a host build pulls them in with
+# no feature flag.
+[target.'cfg(not(xark))'.dependencies]
+num-bigint = "0.4"
+xark-prover = { path = "../xark-prover" }
 
 [dev-dependencies]
 num-bigint = "0.4"
@@ -26,3 +27,6 @@ p256 = "0.13"
 sha2 = "0.10"
 xark-ir = { path = "../xark-ir" }
 xark-test-harness = { path = "../xark-test-harness" }
+
+[lints]
+workspace = true

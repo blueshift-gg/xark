@@ -7,7 +7,7 @@
 //! `poseidon2_perm([a, b, 0])[0]`, so the reference is that permutation over `[a,
 //! b, 0]`, element 0.
 
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Private, Public};
 use xark_poseidon2::hash2;

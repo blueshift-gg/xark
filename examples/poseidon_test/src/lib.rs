@@ -5,7 +5,7 @@
 //! (whose BN256 parameters `xark-poseidon` transcribes), like the SHA-256 example
 //! checks against `sha2`. `hash2(a, b)` is `poseidon_perm([0, a, b])[0]`.
 
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Private, Public};
 use xark_poseidon::hash2;

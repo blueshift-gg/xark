@@ -1,7 +1,7 @@
 //! Native-typed `#[circuit]` inputs over a MiMC hash — prove knowledge of the four
 //! field pre-images of a MiMC-BN254 Feistel hash.
 
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Private, Public};
 use xark_mimc::mimc_bn254;

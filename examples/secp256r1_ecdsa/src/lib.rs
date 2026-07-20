@@ -9,7 +9,7 @@
 //! `Point` = compact uncompressed public key (`[u8; 64]` `x ‖ y`), `Signature` =
 //! `(r, s)` (`[u8; 64]` `r ‖ s`), `Scalar` = the message digest `int(hash(msg)) mod n`
 //! (`[u8; 32]`) — the exact bytes `p256` emits.
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark_secp256r1::prelude::*;
 

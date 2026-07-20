@@ -2,7 +2,7 @@
 //! twisted-Edwards gadget. `Point` is the transparent compact uncompressed
 //! `[u8; 64]` (`x ‖ y`) type and `Fq` the `[u8; 32]` scalar, so the test passes
 //! the basepoint `P = B`, a scalar `k`, and `R = [k]·B` as raw bytes.
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{assert_eq, circuit, Public};
 use xark_bignum::scalar_to_bits;

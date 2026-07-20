@@ -5,7 +5,7 @@
 //! point is just two native field coordinates — the transparent `Affine` type
 //! (`x`/`y` as decimal strings on the host, no limbs). A test/prover passes the
 //! scalars and points as native field values.
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{assert_eq, circuit, Field, Public};
 use xark_grumpkin::{multi_scalar_mul, Affine};

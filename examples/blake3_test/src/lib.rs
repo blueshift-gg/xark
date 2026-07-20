@@ -5,7 +5,7 @@
 //! output is wrapped in [`xark::Blake256`] to select the LE `Hash` packing (vs
 //! SHA-256's big-endian).
 
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Blake256, Private, Public};
 use xark_blake3::blake3;

@@ -12,7 +12,7 @@
 //! `R ‖ big-endian S`), `Scalar` = the challenge `k = SHA-512(R ‖ A ‖ M) mod L`
 //! (a prover-supplied witness derived from the signature, so a prover still
 //! provides only the signature).
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark_ed25519::prelude::*;
 

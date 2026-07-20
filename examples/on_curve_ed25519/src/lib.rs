@@ -3,7 +3,7 @@
 //! check `eddsa_verify` runs on its `A`/`R` point inputs. `Point` is the
 //! transparent compact uncompressed `[u8; 64]` (`x ‖ y`) type; the test uses the
 //! Ed25519 basepoint as a known on-curve point.
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Public};
 use xark_ed25519::{enforce_on_curve, Point};

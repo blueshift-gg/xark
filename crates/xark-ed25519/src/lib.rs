@@ -332,7 +332,7 @@ pub fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits
 /// transparent types take the exact bytes `ed25519-dalek` emits. Signatures use
 /// **little-endian** scalars, so `S`/`k` are byte-reversed to the big-endian form
 /// the macro-generated `Fq` `NativeInput` expects.
-#[cfg(feature = "host")]
+#[cfg(not(xark))]
 mod host {
     extern crate std;
     use super::PointL;
@@ -494,5 +494,5 @@ mod host {
     }
 }
 
-#[cfg(feature = "host")]
+#[cfg(not(xark))]
 pub use host::{base_be, base_mul_be, challenge, point_be, scalar_le_to_be};

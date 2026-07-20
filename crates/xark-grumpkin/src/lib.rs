@@ -232,7 +232,7 @@ pub struct Affine {
 
 /// Host-side `NativeInput` for [`Affine`], behind the `host` feature: the two
 /// coordinates are full field elements, taken as decimal (or `0x`-hex) strings.
-#[cfg(feature = "host")]
+#[cfg(not(xark))]
 mod host {
     extern crate std;
     use super::Affine;

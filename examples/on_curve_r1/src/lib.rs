@@ -3,7 +3,7 @@
 //! the ECDSA gadget runs on its public-key input (the `a = −3` curve). `Point`
 //! is the transparent compact uncompressed `[u8; 64]` (`x ‖ y`) type, so the test
 //! passes the raw coordinate bytes `p256` emits.
-#![cfg_attr(not(any(test, feature = "host")), no_std)]
+#![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Public};
 use xark_secp256r1::{enforce_on_curve, Point};

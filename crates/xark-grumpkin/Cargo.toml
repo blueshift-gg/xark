@@ -11,13 +11,16 @@ path = "src/lib.rs"
 
 [dependencies]
 xark = { path = "../xark", default-features = false }
-# `host` enables the `NativeInput` impl (native field strings → circuit inputs)
-# for `Affine`; off, the crate stays lean `no_std` for the compiler.
-xark-prover = { path = "../xark-prover", optional = true }
 
-[features]
-host = ["dep:xark-prover"]
+# Host-only dep for the `NativeInput` impl (native field strings → circuit
+# inputs) for `Affine`. Gated on `cfg(not(xark))`: a circuit build drops it and
+# stays lean `no_std`; a host build pulls it in with no feature flag.
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../xark-prover" }
 
 [dev-dependencies]
 xark-test-harness = { path = "../xark-test-harness" }
 xark-ir = { path = "../xark-ir" }
+
+[lints]
+workspace = true

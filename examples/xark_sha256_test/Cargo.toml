@@ -10,15 +10,17 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-sha256 = { path = "../../crates/xark-sha256" }
-# `host` pulls in the prover so downstream crates can call `xark_sha256_test(..)`
-# to check inputs; left off, the crate stays `no_std` for the xark compiler.
-xark-prover = { path = "../../crates/xark-prover", optional = true }
 
 [dev-dependencies]
-xark-prover = { path = "../../crates/xark-prover" }
 sha2 = "0.10"
 
-[features]
-host = ["dep:xark-prover"]
+[target.'cfg(not(xark))'.dependencies]
+# Host-only prover so downstream crates (and this crate's tests) can call
+# the generated native validator; gated on `cfg(not(xark))` so a circuit
+# build stays lean `no_std` with no feature flag.
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
 
 [workspace]
