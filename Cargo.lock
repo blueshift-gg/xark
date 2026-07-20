@@ -4724,6 +4724,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xark-merkle"
+version = "0.0.1"
+dependencies = [
+ "num-bigint 0.4.8",
+ "xark",
+ "xark-ir",
+ "xark-poseidon",
+ "xark-test-harness",
+]
+
+[[package]]
 name = "xark-mimc"
 version = "0.0.1"
 dependencies = [

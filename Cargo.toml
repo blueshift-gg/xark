@@ -16,6 +16,7 @@ members = [
     "crates/xark-macros",
     "crates/xark-cli",
     "crates/xark-prover",
+    "crates/xark-merkle",
     "crates/xark-mimc",
     "crates/xark-pedersen",
     "crates/xark-poseidon",

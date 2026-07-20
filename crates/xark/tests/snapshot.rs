@@ -250,6 +250,33 @@ fn poseidon_gadget() {
     );
 }
 
+/// Merkle membership (`xark-merkle`): a depth-4 Poseidon path fold. Each level is
+/// one `hash2` (240 S-box gates) plus one booleanity gate for the direction bit
+/// and two sibling muxes (each a single mul); the direction bits let the sibling
+/// ordering fold as free linear combinations. The whole path is proven against
+/// the public root with a single final equality.
+#[test]
+fn merkle_membership_gadget() {
+    let c = compile_with_field(&example("merkle"), "merkle", "bn254");
+    assert!(c.status_success, "merkle failed: {}", c.stderr);
+    let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
+    let r1cs = xark_ir::json::from_json(&json).unwrap();
+
+    // 4 levels × (241 Poseidon `hash2` gates [240 S-box + 1 output binding] + 1
+    // booleanity + 2 sibling muxes) + 1 final root equality = 4×244 + 1 = 977.
+    // (No `r1cs.json` snapshot: Poseidon's full-field round-constant coefficients
+    // make it ~40 MB — the count + nonzero pins below catch a lowering change, and
+    // `xark-merkle`'s `vec` KAT covers the values. The gadget's cost is linear in
+    // depth: exactly 4× the single-`hash2` `poseidon` circuit, no LC blow-up.)
+    assert_eq!(r1cs.constraints.len(), 977);
+    let nonzeros: usize = r1cs
+        .constraints
+        .iter()
+        .map(|k| k.a.terms.len() + k.b.terms.len() + k.c.terms.len())
+        .sum();
+    assert_eq!(nonzeros, 25_330, "depth-4 Poseidon Merkle nonzero count");
+}
+
 /// 32-bit word gadget layer (`xark-bits`): xor/and/rotr/add32. Rotations are
 /// free re-wiring; the mul gates come only from bitwise ops + bit-decompositions.
 #[test]
