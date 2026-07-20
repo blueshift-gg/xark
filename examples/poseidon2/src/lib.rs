@@ -7,11 +7,12 @@
 //! inlined by the compiler. ARK (constant adds) and both linear layers (`M_E`,
 //! `M_I`, constant-matrix products) fold into linear combinations for free;
 //! every R1CS multiplication gate comes from an S-box (`x^5`).
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
 use xark_poseidon2::prelude::*;
 
-pub fn circuit(
+#[circuit]
+pub fn poseidon2(
     in0: Private<Field>,
     in1: Private<Field>,
     in2: Private<Field>,
@@ -23,4 +24,20 @@ pub fn circuit(
     assert_eq(out[0], out0);
     assert_eq(out[1], out1);
     assert_eq(out[2], out2);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::poseidon2;
+
+    #[test]
+    fn accepts_valid() {
+        // poseidon2_perm([1,2,3])
+        poseidon2("1".into(), "2".into(), "3".into(), "4737982494702600552753609419126955242994596445692557044681458296415162795880".into(), "9698155156890762076414037574068404457164720954413259397447872502075783415658".into(), "18259628997120261506554896720810362547891614655348127750921457211768261324825".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(poseidon2("1".into(), "2".into(), "3".into(), "1".into(), "9698155156890762076414037574068404457164720954413259397447872502075783415658".into(), "18259628997120261506554896720810362547891614655348127750921457211768261324825".into()).is_err());
+    }
 }

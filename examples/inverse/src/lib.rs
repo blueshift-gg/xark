@@ -1,6 +1,6 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
 /// Field inverse as an *advice* gadget.
 ///
@@ -14,6 +14,23 @@ fn inv(x: Field) -> Field {
 }
 
 /// Prove that the public `x_inv` really is the inverse of the private `x`.
-pub fn circuit(x: Private<Field>, x_inv: Public<Field>) {
+#[circuit]
+pub fn inverse(x: Private<Field>, x_inv: Public<Field>) {
     assert_eq(inv(x), x_inv);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inverse;
+
+    #[test]
+    fn accepts_valid() {
+        // 1⁻¹ = 1
+        inverse("1".into(), "1".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(inverse("1".into(), "2".into()).is_err());
+    }
 }

@@ -41,7 +41,7 @@ use xark_prover::{fr_from_decimal, XarkCircuit};
 
 /// secp256k1 ECDSA known-answer vector, generated with `k256`. The GLV
 /// `ecdsa_verify` takes each 256-bit value as two 128-bit halves `[lo, hi]`
-/// (10 public inputs) — see `xark_secp256k1::Fq4`.
+/// (10 public inputs) — the compact `xark_secp256k1::Scalar` / `Point` form.
 const ECDSA_K1_KAT: &[(&str, &str)] = &[
     (
         "pubkey.x.limbs[0]",

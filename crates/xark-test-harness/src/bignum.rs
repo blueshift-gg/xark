@@ -219,9 +219,10 @@ impl LeafInput for Point85 {
     }
 }
 
-/// secp256k1's GLV ECDSA path packs each 256-bit value into **2×128-bit** limbs
-/// (`Fq4`/`Point4` — 10 public leaves instead of the default 3×86's 15). A distinct
-/// type, like [`Point85`], so a value's leaf layout stays the single source of truth.
+/// The secp curves' ECDSA path packs each 256-bit value into **2×128-bit** halves
+/// (`[lo128, hi128]` — 10 public leaves instead of the default 3×86's 15), matching
+/// `xark_secp256k1::Scalar` / `xark_secp256r1::Scalar`. A distinct type, like
+/// [`Point85`], so a value's leaf layout stays the single source of truth.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScalarPacked(pub Uint256);
 

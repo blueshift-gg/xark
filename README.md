@@ -26,9 +26,9 @@ Then install both binaries from GitHub:
 
 ```bash
 # the rustc-driver shim (pinned nightly)
-cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark xark-rustc --force
+cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark xark-rustc
 # the CLI (stable Rust)
-cargo install --git https://github.com/blueshift-gg/xark xark-cli --force
+cargo install --git https://github.com/blueshift-gg/xark xark-cli
 ```
 
 Only `xark-rustc` touches nightly — you write **stable Rust** in your circuits.

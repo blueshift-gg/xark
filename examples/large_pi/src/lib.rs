@@ -1,13 +1,14 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Public};
+use xark::{assert_eq, circuit, Field, Public};
 
 // large_pi: main(xs: pub [Field; 16]) { assert(xs[0] + xs[15] == 30) }.
 // The 16 public inputs are all referenced (the running sum keeps every element
 // allocated as a public input) and the faithful `xs[0] + xs[15] == 30`
 // constraint is enforced.
 #[allow(clippy::too_many_arguments)]
-pub fn circuit(
+#[circuit]
+pub fn large_pi(
     x0: Public<Field>,
     x1: Public<Field>,
     x2: Public<Field>,
@@ -30,4 +31,20 @@ pub fn circuit(
     // Reference every element so all 16 stay allocated as public inputs.
     let sum = x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 + x12 + x13 + x14 + x15;
     assert_eq(sum, Field::constant("44"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::large_pi;
+
+    #[test]
+    fn accepts_valid() {
+        // x0+x15 = 30, total sum = 44
+        large_pi("10".into(), "14".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "20".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(large_pi("10".into(), "14".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "0".into(), "21".into()).is_err());
+    }
 }

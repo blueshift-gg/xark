@@ -10,12 +10,28 @@
 //!
 //! Contrast with `examples/to_bits`, which additionally recomposes the bits
 //! (`Σ bitᵢ·2ⁱ == x`) — that recomposition pins every bit and proves clean.
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
-pub fn circuit(x: Private<Field>, out: Public<Field>) {
+#[circuit]
+pub fn underconstrained_bit(x: Private<Field>, out: Public<Field>) {
     let b = Field::hint_bit(x, 0);
     b.assert_bool(); // booleanity only: references `b` but leaves it two-valued
     assert_eq(x, out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::underconstrained_bit;
+
+    // Intentionally unsound (see the module doc): `b` is pinned boolean but not
+    // tied to the real bit of `x`. `check` verifies constraint *satisfaction*, not
+    // uniqueness, so the two-valued `b` is caught by `xark prove`'s under-constraint
+    // analyzer — see the `underconstrained_bit` snapshot test. What `check` asserts
+    // here is that a mismatched output still fails, the *expected* rejection.
+    #[test]
+    fn rejects_mismatched_output() {
+        assert!(underconstrained_bit("5".into(), "6".into()).is_err());
+    }
 }

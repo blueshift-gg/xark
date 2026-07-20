@@ -493,6 +493,52 @@ fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
     hex::decode(h).map_err(|e| anyhow::anyhow!("invalid hex `{s}`: {e}"))
 }
 
+/// A 256-bit input value → big-endian bytes: a `0x`-hex string (the natural form
+/// of a crypto scalar/coordinate) or a plain decimal.
+fn value_to_be_bytes(v: &str) -> Result<Vec<u8>> {
+    if v.starts_with("0x") || v.starts_with("0X") {
+        parse_hex_bytes(v)
+    } else {
+        num_bigint::BigUint::parse_bytes(v.trim().as_bytes(), 10)
+            .map(|n| n.to_bytes_be())
+            .ok_or_else(|| anyhow::anyhow!("expected a decimal or `0x`-hex value, got `{v}`"))
+    }
+}
+
+/// The limb bit-width for an `N`-limb non-native value: 2×128 (the packed secp
+/// half form) or 3×86 (the default field-element layout).
+fn limb_bits(n_limbs: usize) -> Result<u32> {
+    match n_limbs {
+        2 => Ok(128),
+        3 => Ok(86),
+        n => anyhow::bail!("unsupported {n}-limb layout (expected 2×128 or 3×86)"),
+    }
+}
+
+/// Count the `prefix.limbs[i]` leaves present in `vars` (`0` if none).
+fn count_limbs(vars: &[xark_ir::primitive::Var], prefix: &str) -> usize {
+    let key = format!("{prefix}.limbs");
+    vars.iter()
+        .filter(|v| array_index(&v.name, &key).is_some())
+        .count()
+}
+
+/// The distinct `<field>` names of a compound input `prefix.<field>.limbs[i]`
+/// (e.g. `["x", "y"]` for a point, `["r", "s"]` for a signature), name-sorted.
+fn sub_fields(vars: &[xark_ir::primitive::Var], prefix: &str) -> Vec<String> {
+    let pre = format!("{prefix}.");
+    let mut fs: Vec<String> = vars
+        .iter()
+        .filter_map(|v| {
+            let (f, tail) = v.name.strip_prefix(&pre)?.split_once('.')?;
+            tail.starts_with("limbs[").then(|| f.to_string())
+        })
+        .collect();
+    fs.sort_unstable();
+    fs.dedup();
+    fs
+}
+
 /// A byte-array leaf `name[i]` → its index `i` (only a flat 1-D index; nested /
 /// multi-dim names like `x.bits[0][1]` return `None`).
 fn array_index(leaf: &str, name: &str) -> Option<usize> {
@@ -615,6 +661,56 @@ pub fn resolve_input_ids(
             for ((w, j), id) in dig {
                 let byte = bytes[4 * w + (3 - j / 8)];
                 id_inputs.insert(id, ((byte >> (j % 8)) & 1).to_string());
+            }
+            continue;
+        }
+
+        // 5. Non-native scalar `name.limbs[i]` — a 256-bit value (a `0x`-hex crypto
+        //    scalar or a decimal) fanned out to its `N` little-endian limbs via the
+        //    same `limb_leaves` the gadget's host `NativeInput` uses. `N` picks the
+        //    layout: 2 → 128-bit halves (packed secp), 3 → 86-bit limbs.
+        let n_scalar = count_limbs(vars, k);
+        if n_scalar > 0 {
+            let be = value_to_be_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
+            let bits = limb_bits(n_scalar)?;
+            for (name, dec) in xark_prover::limb_leaves(&be, k, n_scalar, bits) {
+                if let Some(&id) = by_name.get(name.as_str()) {
+                    id_inputs.insert(id, dec);
+                }
+            }
+            continue;
+        }
+
+        // 6. Non-native compound `name.<field>.limbs[i]` (an affine point `x ‖ y`,
+        //    an ECDSA signature `r ‖ s`, …) — a big-endian concatenation of its
+        //    32-byte fields (with an optional SEC1 `0x04` tag), each field fanned
+        //    out like case 5. Fields are taken in name order (`r`<`s`, `x`<`y`),
+        //    matching the wire concatenation.
+        let fields = sub_fields(vars, k);
+        if !fields.is_empty() {
+            let mut bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
+            let want = fields.len() * 32;
+            if bytes.len() == want + 1 && bytes[0] == 0x04 {
+                bytes.remove(0); // strip the SEC1 uncompressed-point tag
+            }
+            if bytes.len() != want {
+                anyhow::bail!(
+                    "compound input `{k}` ({} fields: {fields:?}) needs a {want}-byte \
+                     big-endian value{}, but got {} bytes",
+                    fields.len(),
+                    if fields.len() == 2 { " (or 65 with the 0x04 SEC1 tag)" } else { "" },
+                    bytes.len()
+                );
+            }
+            for (i, f) in fields.iter().enumerate() {
+                let chunk = &bytes[i * 32..(i + 1) * 32];
+                let n = count_limbs(vars, &format!("{k}.{f}"));
+                for (name, dec) in xark_prover::limb_leaves(chunk, &format!("{k}.{f}"), n, limb_bits(n)?)
+                {
+                    if let Some(&id) = by_name.get(name.as_str()) {
+                        id_inputs.insert(id, dec);
+                    }
+                }
             }
             continue;
         }

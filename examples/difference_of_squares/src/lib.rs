@@ -1,7 +1,24 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
-pub fn circuit(x: Private<Field>, y: Private<Field>, z: Public<Field>) {
+#[circuit]
+pub fn difference_of_squares(x: Private<Field>, y: Private<Field>, z: Public<Field>) {
     assert_eq((x + y) * (x - y), z);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::difference_of_squares;
+
+    #[test]
+    fn accepts_valid() {
+        // (5+3)·(5−3) = 8·2 = 16
+        difference_of_squares("5".into(), "3".into(), "16".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(difference_of_squares("5".into(), "3".into(), "17".into()).is_err());
+    }
 }

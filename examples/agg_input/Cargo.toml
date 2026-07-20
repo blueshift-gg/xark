@@ -6,3 +6,9 @@ publish = false
 [lib]
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
+
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

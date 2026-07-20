@@ -16,6 +16,7 @@ path = "src/main.rs"
 debug = ["xark-ir/debug", "xark-prover/debug"]
 
 [dependencies]
+num-bigint = "0.4"
 # The circuit-author prelude — `cli.rs` scaffolds crates that `use xark::prelude`.
 xark = { path = "../xark" }
 xark-ir = { path = "../xark-ir" }

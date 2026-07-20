@@ -1,6 +1,6 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
 /// One MiMC round: `(state + key + round_constant)^3`.
 fn round(state: Field, key: Field, c: Field) -> Field {
@@ -15,7 +15,8 @@ fn round(state: Field, key: Field, c: Field) -> Field {
 /// The loop is unrolled at compile time (`while i < 3`), the round constants are
 /// a fixed `[Field; 3]` array indexed by the loop counter, and `round` inlines
 /// per iteration.
-pub fn circuit(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
+#[circuit]
+pub fn mimc_loop(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     let cs = [
         Field::constant("0"),
         Field::constant(
@@ -34,4 +35,20 @@ pub fn circuit(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     }
 
     assert_eq(s + k, h);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mimc_loop;
+
+    #[test]
+    fn accepts_valid() {
+        // same 3-round MiMC as `mimc`
+        mimc_loop("3".into(), "5".into(), "20571574433789244246851793328630243816385775205591326058386183977315966726389".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(mimc_loop("3".into(), "5".into(), "1".into()).is_err());
+    }
 }

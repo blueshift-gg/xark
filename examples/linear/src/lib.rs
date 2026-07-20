@@ -1,13 +1,30 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
 /// Purely linear relation: `3*x + 2*y == z`.
 ///
 /// Constant-by-variable products fold into linear-combination coefficients, so
 /// this emits a single equality constraint and *no* multiplication gates.
-pub fn circuit(x: Private<Field>, y: Private<Field>, z: Public<Field>) {
+#[circuit]
+pub fn linear(x: Private<Field>, y: Private<Field>, z: Public<Field>) {
     let three = Field::constant("3");
     let two = Field::constant("2");
     assert_eq(three * x + two * y, z);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::linear;
+
+    #[test]
+    fn accepts_valid() {
+        // 3·4 + 2·5 = 22
+        linear("4".into(), "5".into(), "22".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(linear("4".into(), "5".into(), "23".into()).is_err());
+    }
 }

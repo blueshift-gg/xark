@@ -1,14 +1,31 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
 /// Iterate a fixed-size array by value (`for x in arr`). Lowers byte-for-byte
 /// identically to the equivalent `while i < N { let x = arr[i]; .. }`.
-pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {
+#[circuit]
+pub fn for_array(a: Private<Field>, b: Private<Field>, c: Public<Field>) {
     let arr = [a, b, a];
     let mut acc = Field::constant("0");
     for x in arr {
         acc = acc + x;
     }
     assert_eq(acc, c);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::for_array;
+
+    #[test]
+    fn accepts_valid() {
+        // [3,4,3] sum = 10
+        for_array("3".into(), "4".into(), "10".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(for_array("3".into(), "4".into(), "11".into()).is_err());
+    }
 }

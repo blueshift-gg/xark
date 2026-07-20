@@ -2,10 +2,27 @@
 //! operation (composed from `hint_bit` + arithmetic + `assert_eq`, no extra
 //! crate). `to_bits::<N>()` pins each bit boolean and proves `self < 2^N`;
 //! `from_bits` recomposes.
-#![no_std]
-use xark::{assert_eq, Field, Private, Public};
+#![cfg_attr(xark, no_std)]
+use xark::{assert_eq, circuit, Field, Private, Public};
 
-pub fn circuit(x: Private<Field>, out: Public<Field>) {
+#[circuit]
+pub fn to_bits(x: Private<Field>, out: Public<Field>) {
     let bits = x.to_bits::<8>(); // decompose into 8 bits (proves x < 256)
     assert_eq(Field::from_bits::<8>(bits), out); // recompose == out == x
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_bits;
+
+    #[test]
+    fn accepts_valid() {
+        // 8-bit value round-trips
+        to_bits("200".into(), "200".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(to_bits("200".into(), "201".into()).is_err());
+    }
 }

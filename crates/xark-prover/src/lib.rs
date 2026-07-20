@@ -536,11 +536,41 @@ fn not_built_message(name: &str, xbc_path: &std::path::Path) -> String {
     )
 }
 
+/// Best-effort auto-build: when a `#[circuit]` test finds its circuit missing,
+/// build it in place so `cargo test` works without a separate `xark build` step.
+/// Runs the `xark` CLI (`$XARK`, else `xark` on `PATH`) on the crate directory
+/// (`target/xark/<name>` → up three to the crate root; empty ⇒ the current dir).
+/// Silently no-ops if `xark` isn't reachable or the build fails — the caller then
+/// re-checks the artifact and prints the "run `xark build`" guidance. Only fires
+/// when the artifact is *absent*, so it never masks a stale one (rebuild after
+/// editing the circuit, exactly as with a manual `xark build`).
+fn try_autobuild(dir: &std::path::Path) {
+    // Serialize across the test binary's threads: parallel `#[circuit]` tests
+    // would otherwise each launch a build and race on the output files. After
+    // taking the lock, re-check — another thread may have just built it.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if dir.join("circuit.xbc").exists() || dir.join("circuit.json").exists() {
+        return;
+    }
+    let crate_dir = dir
+        .ancestors()
+        .nth(3)
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let xark = std::env::var("XARK").unwrap_or_else(|_| "xark".to_string());
+    let _ = std::process::Command::new(xark)
+        .arg("build")
+        .arg(&crate_dir)
+        .status();
+}
+
 /// Load a circuit built by `xark build` from `target/xark/<name>/`, relative to
 /// the current directory (where `cargo test` runs, i.e. the crate root).
 ///
-/// Panics with a clear message if the artifacts are missing — run `xark build`
-/// first.
+/// Missing artifacts trigger a best-effort [`try_autobuild`]; if that can't run,
+/// panics with a clear message — run `xark build` first.
 pub fn circuit(name: &str) -> Circuit {
     circuit_at(std::path::Path::new("target/xark").join(name))
 }
@@ -560,9 +590,13 @@ pub fn circuit_at(dir: impl AsRef<std::path::Path>) -> Circuit {
     let circuit_path = dir.join("circuit.json");
     let r1cs_path = dir.join("r1cs.json");
 
-    // The common failure is "forgot to build". Check for the artifact up front and
-    // explain exactly what to do — with the fix command on its own line — rather
-    // than surfacing a raw file/parse error from deeper in the load.
+    // The common failure is "forgot to build". Try a best-effort auto-build so
+    // `cargo test` on a `#[circuit]` example just works; if that can't run (no
+    // `xark` on `PATH`/`$XARK`), fall through to the clear "run `xark build`"
+    // guidance rather than a raw file/parse error from deeper in the load.
+    if !xbc_path.exists() && !circuit_path.exists() {
+        try_autobuild(dir);
+    }
     if !xbc_path.exists() && !circuit_path.exists() {
         panic!("{}", not_built_message(&name, &xbc_path));
     }

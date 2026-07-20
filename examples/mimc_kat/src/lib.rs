@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
 use xark_mimc::prelude::*;
 
@@ -8,7 +8,8 @@ use xark_mimc::prelude::*;
 /// KAT value is
 /// `18226366069841799622585958305961373004333097209608110160936134895615261821931`.
 /// Solving with that value must succeed; any other value must be rejected.
-pub fn circuit(out: Public<Field>) {
+#[circuit]
+pub fn mimc_kat(out: Public<Field>) {
     assert_eq(
         mimc_bn254([
             Field::from(12u8),
@@ -18,4 +19,20 @@ pub fn circuit(out: Public<Field>) {
         ]),
         out,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mimc_kat;
+
+    #[test]
+    fn accepts_valid() {
+        // mimc_bn254([12,45,78,41])
+        mimc_kat("18226366069841799622585958305961373004333097209608110160936134895615261821931".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(mimc_kat("1".into()).is_err());
+    }
 }

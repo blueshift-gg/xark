@@ -10,3 +10,9 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-poseidon = { path = "../../crates/xark-poseidon" }
+
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

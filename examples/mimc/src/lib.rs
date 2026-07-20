@@ -1,6 +1,6 @@
-#![no_std]
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{assert_eq, circuit, Field, Private, Public};
 
 /// A small 3-round MiMC-structured permutation (exponent 3) with key addition,
 /// hand-unrolled. This is a *compiler-feature demo*, not the real hash — for a
@@ -15,7 +15,8 @@ use xark::{assert_eq, Field, Private, Public};
 /// It is deliberately hand-unrolled so the snapshot suite can check that the
 /// loop form (`examples/mimc_loop`) and cross-crate gadget inlining lower to the
 /// exact same R1CS.
-pub fn circuit(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
+#[circuit]
+pub fn mimc(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     let c1 = Field::constant(
         "7120861356467033611736373842526102177239622603558704633600844922174959859415",
     );
@@ -38,4 +39,20 @@ pub fn circuit(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     // finalize with a key addition and constrain to the public digest
     s = s + k;
     assert_eq(s, h);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mimc;
+
+    #[test]
+    fn accepts_valid() {
+        // MiMC(x=3, k=5)
+        mimc("3".into(), "5".into(), "20571574433789244246851793328630243816385775205591326058386183977315966726389".into()).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong() {
+        assert!(mimc("3".into(), "5".into(), "1".into()).is_err());
+    }
 }
