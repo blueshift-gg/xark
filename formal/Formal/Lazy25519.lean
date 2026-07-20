@@ -142,4 +142,41 @@ theorem weak_reduce_25519_value_correct
     v0 + v1 * β + v2 * β ^ 2 = s0 + (r1 + k0) * β + r2 * β ^ 2 := by
   linear_combination c2 * hβ + hv0 + β * hv1 + β ^ 2 * hv2 + hu0
 
+/-! ## No-wrap magnitude bounds
+
+The value-correctness theorems above hold in `ZMod p25519`; they are the true
+statement only if the gadget's `Field` (BN254 `Fr = ZMod r`) arithmetic does not
+*wrap* before the carry decompositions pin it — i.e. every schoolbook column and
+biased intermediate, as a natural number, stays below `r`. `Formal.NonNative`
+proves `2²⁵³ < r`; the lemmas here bound the lazy intermediates below `2²⁵³`, so
+the `ZMod r ↔ ℕ` bridge (`NonNative.mul_val_no_wrap` / `add_val_no_wrap`) applies
+and the lifted integer identities the value theorems assume are faithful. -/
+
+/-- A single schoolbook product of two `< 2⁸⁸` limbs is `< 2¹⁷⁶`. -/
+theorem lazy_prod_lt {a b : ℕ} (ha : a < 2 ^ 88) (hb : b < 2 ^ 88) : a * b < 2 ^ 176 := by
+  calc a * b < 2 ^ 88 * 2 ^ 88 := by
+        exact mul_lt_mul'' ha hb (Nat.zero_le _) (Nat.zero_le _)
+    _ = 2 ^ 176 := by rw [← pow_add]
+
+/-- A lazy column (≤ 3 products, each `< 2¹⁷⁶`) is `< 2¹⁷⁸`. -/
+theorem lazy_col_lt {p0 p1 p2 : ℕ} (h0 : p0 < 2 ^ 176) (h1 : p1 < 2 ^ 176)
+    (h2 : p2 < 2 ^ 176) : p0 + p1 + p2 < 2 ^ 178 := by
+  have hb : (2 : ℕ) ^ 178 = 2 ^ 176 + 2 ^ 176 + 2 ^ 176 + 2 ^ 176 := by
+    rw [show (178 : ℕ) = 176 + 2 from rfl, pow_add]; ring
+  omega
+
+/-- The largest lazy intermediate `t = col₀ + 19·col₃` (a folded column, each
+    `< 2¹⁷⁸`) is `< 2¹⁸³` — hence `< 2²⁵³ < r`, so it never wraps `Fr`. This is the
+    magnitude the range-checked carry decompositions rest on. -/
+theorem lazy_t_no_wrap {col0 col3 : ℕ} (h0 : col0 < 2 ^ 178) (h3 : col3 < 2 ^ 178) :
+    col0 + 19 * col3 < 2 ^ 253 := by
+  have hpos : 0 < (2 : ℕ) ^ 178 := by positivity
+  have h183 : (2 : ℕ) ^ 183 = 32 * 2 ^ 178 := by
+    rw [show (183 : ℕ) = 178 + 5 from rfl, pow_add]; ring
+  have hlt : col0 + 19 * col3 < 2 ^ 183 := by omega
+  calc col0 + 19 * col3 < 2 ^ 183 := hlt
+    _ < 2 ^ 253 := by
+        apply Nat.pow_lt_pow_right (by norm_num)
+        norm_num
+
 end Xark
