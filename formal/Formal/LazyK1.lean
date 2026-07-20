@@ -91,4 +91,27 @@ theorem lazy_s1_lt_k1 (r1 k0 : ℕ) (hr1 : r1 < 2 ^ 64) (hk0 : k0 < 2 ^ 52) :
   have h65 : (2 : ℕ) ^ 65 = 2 ^ 64 + 2 ^ 64 := by rw [pow_succ]; ring
   omega
 
+/-- **End-to-end `mul_lazy_k1` value-correctness.** Given the five carry-chain
+    equalities the gadget pins with `assert_eq` — the base-`2⁶⁴` division relations
+    for the four columns and the top-carry refold `u0` — the recomposed output
+    `s0 + s1·β + r2·β² + r3·β³` (with `s1 = r1 + k0`) equals the product `a·b` in
+    `ZMod pK1`. Chains the schoolbook product, the ×c high-limb fold, the carry
+    normalization, and the ×c top-carry refold into "the gadget outputs `a·b mod
+    p`". Only hypotheses: the pinned constraints plus `β⁴ = c` (`beta64_pow4_eq_c`);
+    no value assumed. Mirrors `mul_lazy_25519_value_correct`. -/
+theorem mul_lazy_k1_value_correct
+    (β a0 a1 a2 a3 b0 b1 b2 b3 c0 r0 c1 r1 c2 r2 c3 r3 k0 s0 : ZMod pK1)
+    (hβ : β ^ 4 = 4294968273)
+    (ht0 : a0 * b0 + 4294968273 * (a1 * b3 + a2 * b2 + a3 * b1) = β * c0 + r0)
+    (ht1 : a0 * b1 + a1 * b0 + 4294968273 * (a2 * b3 + a3 * b2) + c0 = β * c1 + r1)
+    (ht2 : a0 * b2 + a1 * b1 + a2 * b0 + 4294968273 * (a3 * b3) + c1 = β * c2 + r2)
+    (ht3 : a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0 + c2 = β * c3 + r3)
+    (hu0 : r0 + 4294968273 * c3 = β * k0 + s0) :
+    (a0 + a1 * β + a2 * β ^ 2 + a3 * β ^ 3) *
+        (b0 + b1 * β + b2 * β ^ 2 + b3 * β ^ 3)
+      = s0 + (r1 + k0) * β + r2 * β ^ 2 + r3 * β ^ 3 := by
+  linear_combination
+    ((a1 * b3 + a2 * b2 + a3 * b1) + (a2 * b3 + a3 * b2) * β + a3 * b3 * β ^ 2 + c3) * hβ
+      + ht0 + β * ht1 + β ^ 2 * ht2 + β ^ 3 * ht3 + hu0
+
 end Xark
