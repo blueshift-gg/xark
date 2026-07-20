@@ -114,4 +114,22 @@ theorem mul_lazy_k1_value_correct
     ((a1 * b3 + a2 * b2 + a3 * b1) + (a2 * b3 + a3 * b2) * β + a3 * b3 * β ^ 2 + c3) * hβ
       + ht0 + β * ht1 + β ^ 2 * ht2 + β ^ 3 * ht3 + hu0
 
+/-- **`weak_reduce_k1` value-correctness.** The k1 carry-normalize op (positive
+    4-limb value, limbs `< 2⁷²`, to a loosely reduced one `< 2⁶⁵`, `≡` input mod
+    `p`): given the base-`2⁶⁴` division equalities and the ×c top-carry refold, the
+    output recomposes to the input value in `ZMod pK1`. Same Mersenne top-carry
+    refold as `mul_lazy_k1_value_correct`, without the columns. Mirrors
+    `weak_reduce_25519_value_correct`. -/
+theorem weak_reduce_k1_value_correct
+    (β v0 v1 v2 v3 c0 r0 c1 r1 c2 r2 c3 r3 k0 s0 : ZMod pK1)
+    (hβ : β ^ 4 = 4294968273)
+    (hv0 : v0 = β * c0 + r0)
+    (hv1 : v1 + c0 = β * c1 + r1)
+    (hv2 : v2 + c1 = β * c2 + r2)
+    (hv3 : v3 + c2 = β * c3 + r3)
+    (hu0 : r0 + 4294968273 * c3 = β * k0 + s0) :
+    v0 + v1 * β + v2 * β ^ 2 + v3 * β ^ 3
+      = s0 + (r1 + k0) * β + r2 * β ^ 2 + r3 * β ^ 3 := by
+  linear_combination c3 * hβ + hv0 + β * hv1 + β ^ 2 * hv2 + β ^ 3 * hv3 + hu0
+
 end Xark
