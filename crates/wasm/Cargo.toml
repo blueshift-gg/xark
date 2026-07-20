@@ -38,12 +38,7 @@ ark-snark = { version = "0.6", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 
-# wasm glue. `getrandom`'s `js` feature makes `OsRng` work in the browser/Node
-# (it backs onto `crypto.getRandomValues` / `require('crypto')`).
 wasm-bindgen = "0.2"
-# js-sys for `Uint8Array` / `ArrayBuffer` at the byte-input boundary: the
-# `Bytes` type coerces either to `Vec<u8>` so callers can pass the result of
-# `await response.arrayBuffer()` straight through (no `new Uint8Array(…)` wrap).
 js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 rand = "0.8"
