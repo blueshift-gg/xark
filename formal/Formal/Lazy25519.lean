@@ -83,4 +83,26 @@ theorem lazy_fold_value_preserving (c0 c1 c2 c3 c4 : ZMod p25519) :
     rw [this, h3]
   rw [h3, h4]; ring
 
+/-- **Top-carry refold.** `mul_lazy_25519`'s carry chain finishes by folding the
+    top carry `c2` — which sits at position `2^170 · 2^85 = 2²⁵⁵` — back into the
+    low limb as `u0 = r0 + 19·c2`. That refold is value-preserving mod `p` for the
+    same Mersenne reason (`2²⁵⁵ = 19`): a carry out of the top is congruent to `19`
+    at position `0`. So the whole normalization, not just the column fold,
+    preserves the represented value mod `p`. -/
+theorem lazy_topcarry_refold (r0 c2 : ZMod p25519) :
+    r0 + c2 * 2 ^ 255 = r0 + 19 * c2 := by
+  rw [two255_eq_nineteen]; ring
+
+/-- **Output limb bound.** The gadget claims `mul_lazy_25519`'s output limbs are
+    `< 2⁸⁶`. Two of the three come straight from a `range_bits::<85>` check
+    (`s0, r2 < 2⁸⁵`); the third is `s1 = r1 + k0` with `r1 < 2⁸⁵` (a 85-bit
+    remainder) and `k0 < 2¹⁶` (a range-checked top carry), so `s1 < 2⁸⁵ + 2¹⁶ <
+    2⁸⁶`. This is what lets the output feed the next lazy op (whose precondition is
+    `< 2⁸⁸`) without a canonical reduction. -/
+theorem lazy_s1_lt (r1 k0 : ℕ) (hr1 : r1 < 2 ^ 85) (hk0 : k0 < 2 ^ 16) :
+    r1 + k0 < 2 ^ 86 := by
+  have hk : (2 : ℕ) ^ 16 ≤ 2 ^ 85 := Nat.pow_le_pow_right (by norm_num) (by norm_num)
+  have h86 : (2 : ℕ) ^ 86 = 2 ^ 85 + 2 ^ 85 := by rw [pow_succ]; ring
+  omega
+
 end Xark
