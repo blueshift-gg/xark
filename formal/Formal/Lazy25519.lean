@@ -125,4 +125,21 @@ theorem mul_lazy_25519_value_correct
   linear_combination
     (a1 * b2 + a2 * b1 + a2 * b2 * β + c2) * hβ + ht0 + β * ht1 + β ^ 2 * ht2 + hu0
 
+/-- **`weak_reduce_25519` value-correctness.** The other lazy op the ed25519 path
+    uses: carry-normalize a positive 3-limb value (limbs `< 2⁸⁹`) to a loosely
+    reduced one (limbs `< 2⁸⁶`, `≡` input mod `p`), with no product and no
+    canonical reduce. Given the base-`2⁸⁵` division equalities the gadget pins and
+    the top-carry refold, the output recomposes to the input value in `ZMod p25519`
+    — so the deferred normalization is value-preserving, not assumed. Same Mersenne
+    top-carry ×19 refold as `mul_lazy_25519_value_correct`, without the columns. -/
+theorem weak_reduce_25519_value_correct
+    (β v0 v1 v2 c0 r0 c1 r1 c2 r2 k0 s0 : ZMod p25519)
+    (hβ : β ^ 3 = 19)
+    (hv0 : v0 = β * c0 + r0)
+    (hv1 : v1 + c0 = β * c1 + r1)
+    (hv2 : v2 + c1 = β * c2 + r2)
+    (hu0 : r0 + 19 * c2 = β * k0 + s0) :
+    v0 + v1 * β + v2 * β ^ 2 = s0 + (r1 + k0) * β + r2 * β ^ 2 := by
+  linear_combination c2 * hβ + hv0 + β * hv1 + β ^ 2 * hv2 + hu0
+
 end Xark
