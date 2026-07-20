@@ -1,7 +1,6 @@
 #![no_std]
 
-use xark::{assert_eq, Field, Public};
-use xark_mimc::mimc_bn254;
+use xark_mimc::prelude::*;
 
 /// Known-answer circuit for the real MiMC-BN254 hash (port of `noir-lang/mimc`).
 ///

@@ -250,3 +250,10 @@ mod host {
         }
     }
 }
+/// Bring the gadget's public API into scope alongside the xark circuit
+/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// circuit crate needs a single `use xark_grumpkin::prelude::*;`.
+pub mod prelude {
+    pub use crate::*;
+    pub use xark::prelude::*;
+}

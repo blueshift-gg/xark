@@ -2,8 +2,7 @@
 //! is fixed-size, so the element count `N` is a compile-time constant and the
 //! absorb loop unrolls. Here we hash 5 private inputs and expose the digest.
 #![no_std]
-use xark::{assert_eq, Field, Private, Public};
-use xark_poseidon2::hash;
+use xark_poseidon2::prelude::*;
 
 pub fn circuit(
     a: Private<Field>, b: Private<Field>, c: Private<Field>,

@@ -12,8 +12,7 @@
 
 #![no_std]
 
-use xark_blake3::blake3;
-use xark::{assert_eq, Field, Private, Public};
+use xark_blake3::prelude::*;
 
 pub fn circuit(msg: Private<[Field; 100]>, d: Public<[Field; 8]>) {
     let hash = blake3::<100>(msg);

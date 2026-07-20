@@ -1,7 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{circuit, Private, Public};
-use xark_sha256::sha256;
+use xark_sha256::prelude::*;
 
 #[circuit]
 pub fn xark_sha256_test(input: Private<[u8; 4]>, result: Public<[u8; 32]>) {

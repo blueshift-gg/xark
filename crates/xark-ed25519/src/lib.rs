@@ -440,7 +440,7 @@ mod host {
         b
     }
 
-    // --- affine twisted-Edwards arithmetic (host, for `ed25519_smul` vectors) ---
+    // --- affine twisted-Edwards arithmetic (host, for the ed25519 vectors) ---
 
     fn inv(a: &BigUint, p: &BigUint) -> BigUint {
         a.modpow(&(p - 2u32), p) // p prime → a⁻¹ = a^(p−2)

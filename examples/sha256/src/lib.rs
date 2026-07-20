@@ -13,8 +13,7 @@
 
 #![no_std]
 
-use xark::{assert_eq, Field, Private, Public};
-use xark_sha256::sha256_block;
+use xark_sha256::prelude::*;
 
 pub fn circuit(m: Private<[Field; 2]>, d: Public<[Field; 8]>) {
     // Build the 16-word message block: first two words are the private inputs

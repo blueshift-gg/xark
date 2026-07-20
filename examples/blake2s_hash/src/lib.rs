@@ -9,8 +9,7 @@
 
 #![no_std]
 
-use xark_blake2s::blake2s;
-use xark::{assert_eq, Field, Private, Public};
+use xark_blake2s::prelude::*;
 
 pub fn circuit(msg: Private<[Field; 100]>, d: Public<[Field; 8]>) {
     let hash = blake2s::<100>(msg);

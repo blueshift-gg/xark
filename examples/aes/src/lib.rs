@@ -8,8 +8,7 @@
 //! addition chain), then the fixed GF(2)-affine map + `0x63`. See `xark_aes`.
 #![no_std]
 
-use xark_aes::aes128_constrain;
-use xark::{Field, Private, Public};
+use xark_aes::prelude::*;
 
 pub fn circuit(
     pt: Private<[Field; 16]>,

@@ -597,3 +597,10 @@ pub fn blake2s<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 32]; 8] 
 
     h
 }
+/// Bring the gadget's public API into scope alongside the xark circuit
+/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// circuit crate needs a single `use xark_blake2s::prelude::*;`.
+pub mod prelude {
+    pub use crate::*;
+    pub use xark::prelude::*;
+}

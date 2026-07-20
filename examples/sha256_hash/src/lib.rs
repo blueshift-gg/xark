@@ -17,8 +17,7 @@
 
 #![no_std]
 
-use xark::{assert_eq, Field, Private, Public};
-use xark_sha256::sha256;
+use xark_sha256::prelude::*;
 
 /// The message length in bytes (compile-time constant: a circuit is fixed-size).
 const N_BYTES: usize = 8;

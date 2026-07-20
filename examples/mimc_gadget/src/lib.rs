@@ -1,7 +1,6 @@
 #![no_std]
 
-use xark::{assert_eq, Field, Private, Public};
-use xark_mimc::mimc_bn254;
+use xark_mimc::prelude::*;
 
 /// Prove knowledge of a MiMC-BN254 hash preimage: `mimc_bn254([x, k]) == h`.
 ///

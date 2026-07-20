@@ -12,8 +12,7 @@
 
 #![no_std]
 
-use xark_blake3::blake3_hash_one_block;
-use xark::{assert_eq, Field, Private, Public};
+use xark_blake3::prelude::*;
 
 pub fn circuit(m: Private<[Field; 16]>, len: Public<Field>, d: Public<[Field; 8]>) {
     // Assemble the 16-word message block, decomposing each word to bits (scalar

@@ -1342,3 +1342,15 @@ pub fn point_select_affine(
     }
     out
 }
+/// Bring the gadget's public API into scope alongside the xark circuit
+/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// circuit crate needs a single `use xark_bignum::prelude::*;`. `Field` comes via
+/// `crate::*` (this crate re-exports it for the [`fp!`] macro), so the `xark`
+/// essentials are listed explicitly to avoid a duplicate-`Field` glob.
+pub mod prelude {
+    pub use crate::*;
+    pub use xark::prelude::{
+        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, circuit, witness_begin,
+        witness_end, Private, Public,
+    };
+}

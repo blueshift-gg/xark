@@ -595,3 +595,10 @@ pub fn blake3<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 32]; 8] {
     // After the final block, `cv` holds the first 8 output words = the digest.
     cv
 }
+/// Bring the gadget's public API into scope alongside the xark circuit
+/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// circuit crate needs a single `use xark_blake3::prelude::*;`.
+pub mod prelude {
+    pub use crate::*;
+    pub use xark::prelude::*;
+}

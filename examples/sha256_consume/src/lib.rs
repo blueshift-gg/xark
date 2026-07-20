@@ -13,8 +13,8 @@
 
 #![no_std]
 
-use xark::{Digest, Field, Private};
-use xark_sha256::sha256;
+use xark_sha256::prelude::*;
+use xark::Digest;
 
 /// The known digest: `sha256("abc")`, standard big-endian hex, one byte per entry.
 /// `ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad`.

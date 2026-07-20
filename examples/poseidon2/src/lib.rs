@@ -9,8 +9,7 @@
 //! every R1CS multiplication gate comes from an S-box (`x^5`).
 #![no_std]
 
-use xark::{assert_eq, Field, Private, Public};
-use xark_poseidon2::poseidon2_perm;
+use xark_poseidon2::prelude::*;
 
 pub fn circuit(
     in0: Private<Field>,

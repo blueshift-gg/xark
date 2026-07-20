@@ -7,8 +7,7 @@
 //! scalars and points as native field values.
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Public};
-use xark_grumpkin::{multi_scalar_mul, Affine};
+use xark_grumpkin::prelude::*;
 
 #[circuit]
 pub fn grumpkin(

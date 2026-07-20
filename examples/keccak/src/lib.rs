@@ -15,8 +15,7 @@
 #![no_std]
 
 use xark_bits::{from_bits64, to_bits64};
-use xark_keccak::keccak256_block;
-use xark::{assert_eq, Field, Private, Public};
+use xark_keccak::prelude::*;
 
 pub fn circuit(words: Private<[Field; 17]>, d: Public<[Field; 4]>) {
     // Decompose each block word into a 64-bit lane. Each `to_bits64`

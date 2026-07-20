@@ -5,8 +5,7 @@
 //! to equal the claimed public output.
 #![no_std]
 
-use xark::{assert_eq, Field, Private, Public};
-use xark_pedersen::pedersen_hash;
+use xark_pedersen::prelude::*;
 
 pub fn circuit(m0: Private<Field>, m1: Private<Field>, hx: Public<Field>, hy: Public<Field>) {
     let h = pedersen_hash([m0, m1]);

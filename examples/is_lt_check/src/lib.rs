@@ -4,8 +4,7 @@
 //! and the derived comparison bit is fully pinned (analyzer-clean).
 #![no_std]
 
-use xark::{assert_eq, Field, Public};
-use xark_bignum::is_lt;
+use xark_bignum::prelude::*;
 
 pub fn circuit(a: Public<[Field; 2]>, b: Public<[Field; 2]>, claim: Public<Field>) {
     assert_eq(is_lt::<2, 64>(a, b), claim);

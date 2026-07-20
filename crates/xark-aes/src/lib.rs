@@ -518,3 +518,10 @@ pub fn aes128_constrain(pt: [Field; 16], key: [Field; 16], ct: [Field; 16]) {
         i += 1;
     }
 }
+/// Bring the gadget's public API into scope alongside the xark circuit
+/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// circuit crate needs a single `use xark_aes::prelude::*;`.
+pub mod prelude {
+    pub use crate::*;
+    pub use xark::prelude::*;
+}

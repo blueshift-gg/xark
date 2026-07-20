@@ -11,8 +11,7 @@
 #![no_std]
 
 use xark_bits::from_bits64;
-use xark_keccak::keccak256;
-use xark::{assert_eq, Field, Private, Public};
+use xark_keccak::prelude::*;
 
 pub fn circuit(msg: Private<[Field; 200]>, d: Public<[Field; 4]>) {
     // Variable-length sponge: absorb (2 blocks) + squeeze 256 bits (4 lanes).
