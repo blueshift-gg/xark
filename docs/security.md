@@ -64,7 +64,7 @@ We are explicitly *not* defending against:
 * **A circuit or gadget that leaves a hint/advice output unconstrained.**
  Our hint model assumes every `hint_*` output witness is pinned by
  surrounding R1CS constraints; see
- [§2.15](#215-hint-outputs-advice) below. It is the circuit author's and
+ [§2.16](#216-hint-outputs-advice) below. It is the circuit author's and
  gadget's responsibility to constrain every hint value.
 * **A future Arkworks Groth16 implementation regression.** We pin via
  Cargo.lock; bumping `ark-groth16` requires re-verifying the byte-level
@@ -424,7 +424,36 @@ MSM uses double-and-add over the bit decomposition of each scalar limb pair
 `msm_in_circuit_two_points`,
 `random_scalars_match_native`.
 
-### 2.13 xark-IR arithmetic → R1CS lowering
+### 2.13 Merkle membership (Poseidon)
+
+**File.** `crates/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression
+(`xark-poseidon`) up an authentication path; the position bits and the sibling
+mux are the only Merkle-specific logic — the compression is reused verbatim.
+
+**Relation.** For a `leaf`, siblings `s[0..DEPTH]`, and LSB-first position bits
+`b[0..DEPTH]`: `node₀ = leaf`, `nodeᵢ₊₁ = hash2(select bᵢ sᵢ nodeᵢ, select bᵢ
+nodeᵢ sᵢ)`, and `merkle_verify` asserts `node_DEPTH == root`.
+
+**Argument.** Each `bᵢ` is boolean-constrained (`bᵢ·bᵢ == bᵢ`) before it gates
+the sibling mux `select b t f = f + b·(t − f)`. Given a boolean bit, that mux is
+a genuine conditional swap: the level's `(left, right)` is exactly the input
+pair `(node, sib)` in one of its two orders, with no third value reachable — so
+the only prover freedom is the position bit itself (which sibling side the node
+is on), the intended Merkle-membership freedom. The compression's determinacy is
+Poseidon's (field-native, no bit decomposition); the fold allocates no advice.
+
+**FV.** `formal/Formal/Merkle.lean` mechanises the mux soundness:
+`merkle_level_swap_sound` (boolean bit ⇒ the pair is a swap of `(node, sib)`, no
+under-constraint slack) and `merkle_select_pair_preserved`. The full root is that
+composed with `poseidon_permutation_determined` (`formal/Formal/Poseidon.lean`).
+The Rust↔Lean bridge is `merkle_matches_lean_model` (pins the per-level shape —
+one Poseidon `hash2` + one booleanity + two selects — across the path).
+
+**KAT.** `xark-merkle`'s `tests/vec.rs`: an honest path to the correct root is
+accepted and analyzer-clean; a wrong root, a tampered sibling, and a non-boolean
+position bit are each rejected.
+
+### 2.14 xark-IR arithmetic → R1CS lowering
 
 **Files.** `crates/xark-ir/` (the xark-IR arithmetic ops the MIR
 lowering emits) and `crates/xark-prover/` (R1CS synthesis).
@@ -451,7 +480,7 @@ the final linear row evaluates to the original expression. Because R1CS
 rows are evaluated as field-element identities, satisfaction of the rows is
 equivalent to satisfaction of the original expression over `Fr`.
 
-### 2.14 Public input ordering
+### 2.15 Public input ordering
 
 **Files.** `crates/xark-prover/` (R1CS synthesis) and
 `crates/xark-ir/` (the variable table, where each `Public` variable is
@@ -473,7 +502,7 @@ the public-input ordering into the circuit hash. (A prior end-to-end
 public-input tamper matrix was removed on this branch; restoring it is tracked
 as a follow-up — see the audit notes.)
 
-### 2.15 Hint outputs (advice)
+### 2.16 Hint outputs (advice)
 
 **Where.** The `hint_*` primitives (e.g. `Field::hint_inverse`,
 `hint_bits`) in `crates/xark/` (the `lang` module) and their witness-solver

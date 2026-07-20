@@ -123,7 +123,19 @@ Coverage (theorem names → modules):
   lands on the curve with a unique slope (no prover freedom), from the generic
   `Curve` algebra at `(a,b) = (0,7)` and `a = −3` (`Formal.Secp256k1 /
   Secp256r1`).
-* **R1CS ↔ Lean bridge** — nine snapshot tests in
+* **Lazy non-native reduction** — `mul_lazy_25519_value_correct` /
+  `mul_lazy_k1_value_correct` and `weak_reduce_*_value_correct`: the
+  quotient-free pseudo-Mersenne multiply / normalise the ed25519 and secp256k1
+  incomplete-add paths use compute `a·b mod p` correctly, from the Mersenne
+  relations (`2²⁵⁵ ≡ 19`, `2²⁵⁶ ≡ 2³²+977`) via the ×c high-limb fold + carry
+  chain + ×c top-carry refold; `lazy_t_no_wrap` bounds every intermediate
+  `< 2²⁵³ < r`, so the `Fr` arithmetic lifts faithfully to ℕ
+  (`Formal.Lazy25519 / LazyK1`). Discharges the "non-native limb bridge" trust
+  boundary `Formal.Edwards` names for the lazy path.
+* **Merkle membership** — `merkle_level_swap_sound`: a boolean position bit makes
+  the per-level sibling mux a genuine conditional swap (no under-constraint, no
+  off-pair value), composed with Poseidon determinacy (`Formal.Merkle`).
+* **R1CS ↔ Lean bridge** — ten snapshot tests in
   `crates/xark/tests/snapshot.rs` compile each frontend gadget and pin its R1CS
   multiplication-gate count to the corresponding Lean soundness model, so any
   drift in the Rust gadget forces the proof to be re-checked against the new
