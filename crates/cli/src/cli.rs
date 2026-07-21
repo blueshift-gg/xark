@@ -398,18 +398,14 @@ pub fn cmd_init(args: &[String]) -> i32 {
          [lib]\n\
          crate-type = [\"lib\"]\n\n\
          [dependencies]\n\
-         # Once xark is published:  xark = \"{ver}\"\n\
-         # From git:
-         xark = {{ git = \"https://github.com/blueshift-gg/xark\", default-features = false }}\n\
-         # From a local checkout:   xark = {{ path = \"../xark/crates/lang\", default-features = false }}\n\
-         # xark = \"{ver}\"\n\n\
+         xark = {{ version = \"{ver}\", default-features = false }}\n\
+         # From git:               xark = {{ git = \"https://github.com/blueshift-gg/xark\", default-features = false }}\n\
+         # From a local checkout:  xark = {{ path = \"../xark/crates/lang\", default-features = false }}\n\n\
          # `xark-prover` powers the in-crate `cargo test` circuit tests below.\n\
          [dev-dependencies]\n\
-         # Once xark is published:  xark-prover = \"{ver}\"\n\
-         # From git:
-         xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\" }}\n\
-         # From a local checkout:   xark-prover = {{ path = \"../xark/crates/prover\" }}\n\
-         # xark-prover = \"{ver}\"\n"
+         xark-prover = \"{ver}\"\n\
+         # From git:               xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\" }}\n\
+         # From a local checkout:  xark-prover = {{ path = \"../xark/crates/prover\" }}\n"
     );
     let fn_ident = ident_of(&name);
     let inputs_struct = format!("{}Inputs", pascal_of(&fn_ident));
@@ -469,7 +465,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
     } else {
         "."
     };
-    eprintln!("  1. set the `xark` dependency in Cargo.toml (see its comments)");
+    eprintln!("  1. `xark` defaults to the published crate; see Cargo.toml comments for git/local");
     eprintln!("  2. install the CLI so editors can find it:");
     eprintln!(
         "       cargo +{} install --path <xark-repo>/crates/lang --features cli",
