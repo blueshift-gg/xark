@@ -17,17 +17,19 @@ xark installs as **two** binaries: `xark` — the CLI, plain **stable** Rust —
 a **pinned nightly**. `xark build` invokes `xark-rustc` as a sibling of `xark`, so
 install both into the same bin directory (`cargo install` uses `~/.cargo/bin`).
 
-Install the pinned nightly the driver needs, then both binaries:
+Install the pinned nightly the driver needs, then both binaries from crates.io:
 
 ```bash
 rustup toolchain install nightly-2026-05-03 --profile minimal --component rust-src --component rustc-dev --component llvm-tools
 # the rustc-driver shim (pinned nightly)
-cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark xark-rustc
+cargo +nightly-2026-05-03 install xark-rustc
 # the CLI (stable Rust)
-cargo install --git https://github.com/blueshift-gg/xark xark-cli
+cargo install xark-cli
 ```
 
-Only `xark-rustc` touches nightly — you write **stable Rust** in your circuits.
+Only `xark-rustc` touches nightly — you write **stable Rust** in your circuits. To
+build from source instead, append `--git https://github.com/blueshift-gg/xark` to
+each `cargo install`.
 
 ## As a language (library)
 

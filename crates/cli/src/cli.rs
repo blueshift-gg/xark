@@ -27,7 +27,7 @@ fn rustc_shim() -> PathBuf {
     find_rustc_shim().unwrap_or_else(|| {
         panic!(
             "xark-rustc not found next to the `xark` binary (or set XARK_RUSTC) — install \
-             it: `cargo +{} install --git https://github.com/blueshift-gg/xark xark-rustc`",
+             it: `cargo +{} install xark-rustc`",
             env!("XARK_NIGHTLY")
         )
     })
