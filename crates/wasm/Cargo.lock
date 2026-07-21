@@ -1444,7 +1444,6 @@ dependencies = [
  "getrandom",
  "js-sys",
  "rand",
- "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
  "xark-ir",

@@ -17,7 +17,7 @@ const { join } = require("node:path");
 const { readFileSync } = require("node:fs");
 
 const {
-  prove, verify, circuit_inputs, version, preload, prove_preloaded,
+  prove, verify, version, preload, prove_preloaded,
   proof_to_snarkjs, public_inputs_to_snarkjs,
 } = require("../dist/node/xark_wasm.js");
 
@@ -35,15 +35,6 @@ const p8 = prove(xbc, pk, { secret: "2", result: "8" });
 
 test("version() returns a non-empty string", () => {
   assert.ok(version().length > 0, "version string should be non-empty");
-});
-
-test("circuit_inputs lists declared inputs in order with roles", () => {
-  // Uses the lightweight header-only parser; must return the declared inputs in
-  // declaration order with correct roles.
-  assert.deepStrictEqual(
-    circuit_inputs(xbc),
-    [{ name: "secret", role: "private" }, { name: "result", role: "public" }],
-  );
 });
 
 test("prove(3->27) yields a non-empty proof with exactly 1 public input", () => {

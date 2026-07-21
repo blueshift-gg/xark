@@ -44,7 +44,7 @@ proving key is keyed to)
 ### Browser
 
 ```js
-import init, { prove, verify, circuit_inputs } from "@blueshift-gg/xark-wasm";
+import init, { prove, verify } from "@blueshift-gg/xark-wasm";
 
 await init();
 
@@ -53,9 +53,6 @@ const [circuit, pk, vk] = await Promise.all([
   fetch("/circuit/pk.bin").then((r) => r.arrayBuffer()),
   fetch("/circuit/vk.bin").then((r) => r.arrayBuffer()),
 ]);
-
-console.log(circuit_inputs(circuit));
-// → [{ name: "secret", role: "private" }, { name: "result", role: "public" }]
 
 const { proof, publicInputs } = prove(circuit, pk, { secret: "3", result: "27" });
 
@@ -104,7 +101,7 @@ Generates a Groth16 proof entirely in memory.
 | `pkBytes`    | `Uint8Array` \| `ArrayBuffer` | Proving key (`pk.bin`, binary)                        |
 | `inputs`     | `object`                      | Witness values as `{ name: "value" }`                 |
 
-Returns a `ProveResult`:
+Returns a `ProofBundle`:
 
 | field             | type         |
 |-------------------|--------------|
@@ -157,10 +154,6 @@ const { proof, publicInputs } = prove(xbc, pk, { secret: "3", result: "27" });
 const snarkjsProof  = proof_to_snarkjs(proof);
 const snarkjsPublic = public_inputs_to_snarkjs(publicInputs);
 ```
-
-### `circuit_inputs(circuitXbc)` → `object[]`
-
-Returns `[{ name: "…", role: "public" | "private" }, …]` in declaration order.
 
 ### `version()` → `string`
 
