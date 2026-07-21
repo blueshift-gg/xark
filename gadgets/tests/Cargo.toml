@@ -17,7 +17,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-xark-verifier = { path = "../../crates/verifier", version = "0.0.1" }
+xark-verifier = { path = "../../crates/verifier", version = "0.2.0" }
 # Direct dep so the `#[svm_test]` cdylibs in `tests/differential_alt_bn128.rs`
 # can reach the BN254 group-op API. Already pulled in transitively via
 # `xark-verifier`; promoting to a top-level dep keeps the import path stable
@@ -25,9 +25,9 @@ xark-verifier = { path = "../../crates/verifier", version = "0.0.1" }
 solana-nostd-alt-bn128 = "0.1.1"
 
 [dev-dependencies]
-xark-backend = { path = "../../crates/backend", version = "0.0.1", features = ["test-deterministic"] }
-xark-prover = { path = "../../crates/prover", version = "0.0.1" }
-xark-ir = { path = "../../crates/ir", version = "0.0.1" }
+xark-backend = { path = "../../crates/backend", version = "0.2.0", features = ["test-deterministic"] }
+xark-prover = { path = "../../crates/prover", version = "0.2.0" }
+xark-ir = { path = "../../crates/ir", version = "0.2.0" }
 ark-bn254.workspace = true
 ark-ec.workspace = true
 ark-ff.workspace = true

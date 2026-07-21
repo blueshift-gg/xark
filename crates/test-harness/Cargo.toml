@@ -8,4 +8,4 @@ version.workspace = true
 edition = "2024"
 [dependencies]
 num-bigint = "0.4"
-xark-ir = { path = "../ir", version = "0.0.1" }
+xark-ir = { path = "../ir", version = "0.2.0" }

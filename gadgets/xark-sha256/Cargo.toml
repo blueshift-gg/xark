@@ -14,6 +14,6 @@ name = "xark_sha256"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
-xark-bits = { path = "../xark-bits", version = "0.0.1" }
-xark-hash = { path = "../xark-hash", version = "0.0.1" }
+xark = { path = "../../crates/lang", version = "0.2.0", default-features = false }
+xark-bits = { path = "../xark-bits", version = "0.2.0" }
+xark-hash = { path = "../xark-hash", version = "0.2.0" }

@@ -8,10 +8,10 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
+xark = { path = "../../crates/lang", version = "0.2.0", default-features = false }
 
 [target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/prover", version = "0.0.1" }
+xark-prover = { path = "../../crates/prover", version = "0.2.0" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

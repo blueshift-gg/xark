@@ -21,10 +21,10 @@ debug = ["xark-ir/debug", "xark-prover/debug"]
 [dependencies]
 num-bigint = "0.4"
 # The circuit-author prelude — `cli.rs` scaffolds crates that `use xark::prelude`.
-xark = { path = "../lang", version = "0.0.1" }
-xark-ir = { path = "../ir", version = "0.0.1" }
-xark-prover = { path = "../prover", version = "0.0.1" }
-xark-backend = { path = "../backend", version = "0.0.1" }
+xark = { path = "../lang", version = "0.2.0" }
+xark-ir = { path = "../ir", version = "0.2.0" }
+xark-prover = { path = "../prover", version = "0.2.0" }
+xark-backend = { path = "../backend", version = "0.2.0" }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"

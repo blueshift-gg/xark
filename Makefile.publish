@@ -1,4 +1,4 @@
-# Auto-generated publish orchestration for xark (v0.0.1).
+# Auto-generated publish orchestration for xark (v0.2.0).
 # Publishes every crate to crates.io in dependency order (leaves first).
 # `cargo publish` waits for each crate to index before the next, so deps
 # are always available when a dependent is published.
@@ -23,13 +23,13 @@ publish:
 	@echo ">>> publishing xark-prover"
 	cargo publish -p xark-prover
 	@echo ">>> publishing xark-rustc"
-	cargo publish --manifest-path crates/rustc/Cargo.toml
+	(cd crates/rustc && cargo publish)
 	@echo ">>> publishing xark-test-harness"
 	cargo publish -p xark-test-harness
 	@echo ">>> publishing xark-verifier"
 	cargo publish -p xark-verifier
 	@echo ">>> publishing xark"
-	cargo publish --manifest-path crates/lang/Cargo.toml
+	(cd crates/lang && cargo publish)
 	@echo ">>> publishing xark-aes"
 	cargo publish -p xark-aes
 	@echo ">>> publishing xark-bignum"
@@ -80,13 +80,13 @@ publish-dry:
 	@echo ">>> dry-run xark-prover"
 	cargo publish --dry-run -p xark-prover
 	@echo ">>> dry-run xark-rustc"
-	cargo publish --dry-run --manifest-path crates/rustc/Cargo.toml
+	(cd crates/rustc && cargo publish --dry-run)
 	@echo ">>> dry-run xark-test-harness"
 	cargo publish --dry-run -p xark-test-harness
 	@echo ">>> dry-run xark-verifier"
 	cargo publish --dry-run -p xark-verifier
 	@echo ">>> dry-run xark"
-	cargo publish --dry-run --manifest-path crates/lang/Cargo.toml
+	(cd crates/lang && cargo publish --dry-run)
 	@echo ">>> dry-run xark-aes"
 	cargo publish --dry-run -p xark-aes
 	@echo ">>> dry-run xark-bignum"

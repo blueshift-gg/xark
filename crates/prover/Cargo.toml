@@ -17,7 +17,7 @@ path = "src/lib.rs"
 debug = ["xark-ir/debug"]
 
 [dependencies]
-xark-ir = { path = "../ir", version = "0.0.1" }
+xark-ir = { path = "../ir", version = "0.2.0" }
 # Use the workspace arkworks deps (which enable `parallel`) so the prover fans
 # MSM/FFT across cores even when this crate is built in isolation — not only when
 # Cargo feature-unification happens to pull `parallel` in via `xark-backend`.

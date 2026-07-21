@@ -14,4 +14,4 @@ name = "xark_bits"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
+xark = { path = "../../crates/lang", version = "0.2.0", default-features = false }

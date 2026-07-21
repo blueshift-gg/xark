@@ -4596,14 +4596,14 @@ dependencies = [
 
 [[package]]
 name = "xark"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark-macros",
 ]
 
 [[package]]
 name = "xark-aes"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "ghash",
  "xark",
@@ -4613,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "xark-backend"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4638,7 +4638,7 @@ dependencies = [
 
 [[package]]
 name = "xark-bignum"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4648,14 +4648,14 @@ dependencies = [
 
 [[package]]
 name = "xark-bits"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-blake2s"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4666,7 +4666,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake3"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4677,7 +4677,7 @@ dependencies = [
 
 [[package]]
 name = "xark-cli"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
@@ -4702,11 +4702,11 @@ dependencies = [
 
 [[package]]
 name = "xark-curve"
-version = "0.0.1"
+version = "0.2.0"
 
 [[package]]
 name = "xark-ed25519"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "ed25519-dalek",
  "num-bigint 0.4.8",
@@ -4721,7 +4721,7 @@ dependencies = [
 
 [[package]]
 name = "xark-grumpkin"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4731,7 +4731,7 @@ dependencies = [
 
 [[package]]
 name = "xark-hash"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-prover",
@@ -4739,7 +4739,7 @@ dependencies = [
 
 [[package]]
 name = "xark-ir"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4753,7 +4753,7 @@ dependencies = [
 
 [[package]]
 name = "xark-keccak"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4762,7 +4762,7 @@ dependencies = [
 
 [[package]]
 name = "xark-macros"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4771,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "xark-merkle"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
@@ -4782,7 +4782,7 @@ dependencies = [
 
 [[package]]
 name = "xark-mimc"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4791,7 +4791,7 @@ dependencies = [
 
 [[package]]
 name = "xark-pedersen"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4800,14 +4800,14 @@ dependencies = [
 
 [[package]]
 name = "xark-poseidon"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-poseidon2"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4816,7 +4816,7 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4831,7 +4831,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256k1"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "k256",
  "num-bigint 0.4.8",
@@ -4846,7 +4846,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256r1"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "num-bigint 0.4.8",
  "p256",
@@ -4861,7 +4861,7 @@ dependencies = [
 
 [[package]]
 name = "xark-sha256"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4870,7 +4870,7 @@ dependencies = [
 
 [[package]]
 name = "xark-test-harness"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "num-bigint 0.4.8",
  "xark-ir",
@@ -4878,7 +4878,7 @@ dependencies = [
 
 [[package]]
 name = "xark-tests"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "aes",
  "ark-bn254 0.6.0",
@@ -4911,7 +4911,7 @@ dependencies = [
 
 [[package]]
 name = "xark-verifier"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",

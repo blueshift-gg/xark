@@ -14,10 +14,10 @@ name = "xark_blake2s"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
-xark-bits = { path = "../xark-bits", version = "0.0.1" }
-xark-hash = { path = "../xark-hash", version = "0.0.1" }
+xark = { path = "../../crates/lang", version = "0.2.0", default-features = false }
+xark-bits = { path = "../xark-bits", version = "0.2.0" }
+xark-hash = { path = "../xark-hash", version = "0.2.0" }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.0.1" }
-xark-ir = { path = "../../crates/ir", version = "0.0.1" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.0" }
+xark-ir = { path = "../../crates/ir", version = "0.2.0" }
