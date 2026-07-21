@@ -780,13 +780,13 @@ pub fn soundness_check_r1cs(
         // defers to the shared diagnostic, which names the failing constraint
         // (and its source line / gadget when profiled) — the same explanation
         // `xark test` surfaces.
-        if let xark_ir::solver::SolveError::MissingInput(id) = e {
-            if let Some(v) = prim.vars.iter().find(|v| v.id == id) {
-                return anyhow::anyhow!(
-                    "missing input `{0}` (add it to --inputs, e.g. --inputs '{{\"{0}\": <value>}}')",
-                    v.name
-                );
-            }
+        if let xark_ir::solver::SolveError::MissingInput(id) = e
+            && let Some(v) = prim.vars.iter().find(|v| v.id == id)
+        {
+            return anyhow::anyhow!(
+                "missing input `{0}` (add it to --inputs, e.g. --inputs '{{\"{0}\": <value>}}')",
+                v.name
+            );
         }
         anyhow::anyhow!(
             "{}",

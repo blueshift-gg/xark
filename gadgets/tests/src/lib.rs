@@ -28,10 +28,10 @@ fn nightly_channel(rustc_crate: &std::path::Path) -> String {
     let toml = std::fs::read_to_string(rustc_crate.join("rust-toolchain.toml")).unwrap_or_default();
     for line in toml.lines() {
         let t = line.trim();
-        if t.starts_with("channel") {
-            if let Some(v) = t.split('"').nth(1) {
-                return v.to_string();
-            }
+        if t.starts_with("channel")
+            && let Some(v) = t.split('"').nth(1)
+        {
+            return v.to_string();
         }
     }
     "nightly".to_string()

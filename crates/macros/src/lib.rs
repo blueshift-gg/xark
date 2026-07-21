@@ -201,16 +201,13 @@ fn resolve_param(arg: &FnArg) -> syn::Result<CircuitParam> {
 /// Peel `Private<Inner>` / `Public<Inner>`, returning the wrapper ident and inner
 /// type. A circuit input must declare visibility, so anything else is an error.
 fn unwrap_visibility(ty: &Type) -> syn::Result<(syn::Ident, Type)> {
-    if let Type::Path(tp) = ty {
-        if let Some(seg) = tp.path.segments.last() {
-            if seg.ident == "Private" || seg.ident == "Public" {
-                if let PathArguments::AngleBracketed(ab) = &seg.arguments {
-                    if let Some(GenericArgument::Type(inner)) = ab.args.first() {
-                        return Ok((seg.ident.clone(), inner.clone()));
-                    }
-                }
-            }
-        }
+    if let Type::Path(tp) = ty
+        && let Some(seg) = tp.path.segments.last()
+        && (seg.ident == "Private" || seg.ident == "Public")
+        && let PathArguments::AngleBracketed(ab) = &seg.arguments
+        && let Some(GenericArgument::Type(inner)) = ab.args.first()
+    {
+        return Ok((seg.ident.clone(), inner.clone()));
     }
     Err(syn::Error::new_spanned(
         ty,
@@ -221,39 +218,39 @@ fn unwrap_visibility(ty: &Type) -> syn::Result<(syn::Ident, Type)> {
 /// Map a native inner type to `(native struct-field type, circuit inner type, fanout)`.
 /// Supported: `Field`, `[u8; N]`, `[Field; N]`, or a type implementing `NativeInput`.
 fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> {
-    if let Type::Path(tp) = inner {
-        if tp.path.segments.last().is_some_and(|s| s.ident == "Field") {
-            // A `Field` is a full field element (~254 bits, past `i128`), so the
-            // struct takes it as a `String` (decimal or `0x`-hex), matching how the
-            // CLI `--inputs` takes scalars.
-            return Ok((quote! { String }, quote! { ::xark::Field }, Fanout::Scalar));
-        }
+    if let Type::Path(tp) = inner
+        && tp.path.segments.last().is_some_and(|s| s.ident == "Field")
+    {
+        // A `Field` is a full field element (~254 bits, past `i128`), so the
+        // struct takes it as a `String` (decimal or `0x`-hex), matching how the
+        // CLI `--inputs` takes scalars.
+        return Ok((quote! { String }, quote! { ::xark::Field }, Fanout::Scalar));
     }
-    if let Type::Array(arr) = inner {
-        if let Type::Path(elem) = &*arr.elem {
-            if elem.path.segments.last().is_some_and(|s| s.ident == "u8") {
-                let n = eval_usize_lit(&arr.len)?;
-                return Ok((
-                    quote! { [u8; #n] },
-                    quote! { [::xark::Field; #n] },
-                    Fanout::ByteArray(n),
-                ));
-            }
-            if elem
-                .path
-                .segments
-                .last()
-                .is_some_and(|s| s.ident == "Field")
-            {
-                // A field-valued array (hash siblings, bignum limbs, …): native form
-                // is `[String; N]` of decimals, the array analogue of `Field` → `String`.
-                let n = eval_usize_lit(&arr.len)?;
-                return Ok((
-                    quote! { [::std::string::String; #n] },
-                    quote! { [::xark::Field; #n] },
-                    Fanout::FieldArray(n),
-                ));
-            }
+    if let Type::Array(arr) = inner
+        && let Type::Path(elem) = &*arr.elem
+    {
+        if elem.path.segments.last().is_some_and(|s| s.ident == "u8") {
+            let n = eval_usize_lit(&arr.len)?;
+            return Ok((
+                quote! { [u8; #n] },
+                quote! { [::xark::Field; #n] },
+                Fanout::ByteArray(n),
+            ));
+        }
+        if elem
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "Field")
+        {
+            // A field-valued array (hash siblings, bignum limbs, …): native form
+            // is `[String; N]` of decimals, the array analogue of `Field` → `String`.
+            let n = eval_usize_lit(&arr.len)?;
+            return Ok((
+                quote! { [::std::string::String; #n] },
+                quote! { [::xark::Field; #n] },
+                Fanout::FieldArray(n),
+            ));
         }
     }
     // Fallback: any other named type is a transparent gadget type (`Fq`/`Point`)

@@ -85,11 +85,11 @@ impl LinearCombination {
 
         let mut merged: Vec<Term> = Vec::with_capacity(self.terms.len());
         for term in self.terms.drain(..) {
-            if let Some(last) = merged.last_mut() {
-                if last.var == term.var {
-                    last.coeff = last.coeff.add(&term.coeff);
-                    continue;
-                }
+            if let Some(last) = merged.last_mut()
+                && last.var == term.var
+            {
+                last.coeff = last.coeff.add(&term.coeff);
+                continue;
             }
             merged.push(term);
         }

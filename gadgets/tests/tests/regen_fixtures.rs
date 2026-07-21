@@ -653,10 +653,10 @@ fn regenerate_all_groth16_fixtures() {
         .ok()
         .map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
     for spec in specs() {
-        if let Some(list) = &only {
-            if !list.iter().any(|n| n == spec.name) {
-                continue;
-            }
+        if let Some(list) = &only
+            && !list.iter().any(|n| n == spec.name)
+        {
+            continue;
         }
         regen_one(&spec, &work);
     }

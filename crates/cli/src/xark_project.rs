@@ -235,14 +235,12 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
             in_package = line == "[package]";
             continue;
         }
-        if in_package {
-            if let Some(rest) = line.strip_prefix("name") {
-                let rest = rest.trim_start();
-                if let Some(val) = rest.strip_prefix('=') {
-                    let val = val.trim().trim_matches('"').trim_matches('\'');
-                    if !val.is_empty() {
-                        return Some(val.to_string());
-                    }
+        if in_package && let Some(rest) = line.strip_prefix("name") {
+            let rest = rest.trim_start();
+            if let Some(val) = rest.strip_prefix('=') {
+                let val = val.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(val.to_string());
                 }
             }
         }

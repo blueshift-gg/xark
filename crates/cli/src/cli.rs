@@ -203,10 +203,10 @@ fn touch_sources(crate_dir: &std::path::Path) {
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, now);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                if let Ok(f) = std::fs::File::options().write(true).open(&path) {
-                    let _ = f.set_modified(now);
-                }
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(f) = std::fs::File::options().write(true).open(&path)
+            {
+                let _ = f.set_modified(now);
             }
         }
     }
@@ -443,11 +443,11 @@ pub fn cmd_init(args: &[String]) -> i32 {
             eprintln!("xark: keeping existing {rel}");
             continue;
         }
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("xark: failed to create {}: {e}", parent.display());
-                return 1;
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            eprintln!("xark: failed to create {}: {e}", parent.display());
+            return 1;
         }
         if let Err(e) = std::fs::write(&path, contents) {
             eprintln!("xark: failed to write {rel}: {e}");

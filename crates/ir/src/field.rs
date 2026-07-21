@@ -117,34 +117,34 @@ impl FieldConst {
     }
 
     pub fn add(&self, other: &FieldConst) -> FieldConst {
-        if let (Repr::Small(a), Repr::Small(b)) = (&self.repr, &other.repr) {
-            if let Some(s) = a.checked_add(*b) {
-                return FieldConst {
-                    repr: Repr::Small(s),
-                };
-            }
+        if let (Repr::Small(a), Repr::Small(b)) = (&self.repr, &other.repr)
+            && let Some(s) = a.checked_add(*b)
+        {
+            return FieldConst {
+                repr: Repr::Small(s),
+            };
         }
         FieldConst::from_bigint(self.big() + other.big())
     }
 
     pub fn mul(&self, other: &FieldConst) -> FieldConst {
-        if let (Repr::Small(a), Repr::Small(b)) = (&self.repr, &other.repr) {
-            if let Some(p) = a.checked_mul(*b) {
-                return FieldConst {
-                    repr: Repr::Small(p),
-                };
-            }
+        if let (Repr::Small(a), Repr::Small(b)) = (&self.repr, &other.repr)
+            && let Some(p) = a.checked_mul(*b)
+        {
+            return FieldConst {
+                repr: Repr::Small(p),
+            };
         }
         FieldConst::from_bigint(self.big() * other.big())
     }
 
     pub fn neg(&self) -> FieldConst {
-        if let Repr::Small(a) = &self.repr {
-            if let Some(n) = a.checked_neg() {
-                return FieldConst {
-                    repr: Repr::Small(n),
-                };
-            }
+        if let Repr::Small(a) = &self.repr
+            && let Some(n) = a.checked_neg()
+        {
+            return FieldConst {
+                repr: Repr::Small(n),
+            };
         }
         FieldConst::from_bigint(-self.big())
     }

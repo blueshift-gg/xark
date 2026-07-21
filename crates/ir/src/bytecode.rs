@@ -1236,16 +1236,14 @@ fn roll_pass(items: Vec<Item>, hashes: Vec<u64>) -> (Vec<Item>, Vec<u64>, bool) 
         if p != usize::MAX {
             // Defer if a strictly finer run starts inside the first block.
             let finer_inside = rmq.min(i + 1, i + p) < p;
-            if !finer_inside {
-                if let Some(rep) = try_build_repeat(&items, &hashes, i, p, n) {
-                    let span = p * rep.count as usize;
-                    let item = Item::Repeat(rep);
-                    out_hashes.push(item_hash(&item));
-                    out.push(item);
-                    i += span;
-                    changed = true;
-                    rolled = true;
-                }
+            if !finer_inside && let Some(rep) = try_build_repeat(&items, &hashes, i, p, n) {
+                let span = p * rep.count as usize;
+                let item = Item::Repeat(rep);
+                out_hashes.push(item_hash(&item));
+                out.push(item);
+                i += span;
+                changed = true;
+                rolled = true;
             }
         }
         if !rolled {

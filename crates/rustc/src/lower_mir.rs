@@ -306,11 +306,10 @@ pub(crate) fn build_call_registry(tcx: TyCtxt<'_>) -> CallRegistry {
                 // The `intrinsics` module: map each `__xark_*` stub by name.
                 Res::Def(DefKind::Mod, mod_did) if name.as_str() == "intrinsics" => {
                     for item in tcx.module_children(mod_did) {
-                        if let Res::Def(DefKind::Fn, def_id) = item.res {
-                            if let Some(kc) = intrinsic_known_call(item.ident.name.as_str()) {
+                        if let Res::Def(DefKind::Fn, def_id) = item.res
+                            && let Some(kc) = intrinsic_known_call(item.ident.name.as_str()) {
                                 reg.insert(def_id, kc);
                             }
-                        }
                     }
                 }
                 _ => {}
@@ -1681,8 +1680,8 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Evaluate a call argument in the current frame into a passable value.
     /// Handles whole `Field` arrays, not just scalars.
     fn eval_arg(&mut self, operand: &Operand<'tcx>) -> ArgValue {
-        if let Operand::Copy(place) | Operand::Move(place) = operand {
-            if let Ok((local, base)) = self.resolve_place(place) {
+        if let Operand::Copy(place) | Operand::Move(place) = operand
+            && let Ok((local, base)) = self.resolve_place(place) {
                 let slots = self.collect_field_slots(local, &base);
                 if !slots.is_empty() {
                     return ArgValue::Fields(slots);
@@ -1696,14 +1695,12 @@ impl<'tcx> LoweringEnv<'tcx> {
                 if !int_slots.is_empty() {
                     return ArgValue::Ints(int_slots);
                 }
-                if base.is_empty() {
-                    if let Some(s) = self.get_str(local) {
+                if base.is_empty()
+                    && let Some(s) = self.get_str(local) {
                         return ArgValue::Str(s);
                     }
-                }
                 return ArgValue::Unit;
             }
-        }
         if let Operand::Constant(c) = operand {
             // A `const Field` / `[Field; N]` passed directly as an argument
             // (e.g. `mod_mul(.., P::MODULUS)` with an associated-const modulus).
@@ -1955,18 +1952,16 @@ impl<'tcx> LoweringEnv<'tcx> {
         // when `target` is a witness-only var: it already has a witness-gen op, so
         // rewriting a constraint to output it would doubly-define it (the value
         // from its own witness-gen vs. from `a·b`). Fall through to a clean equality.
-        if let Some(v) = self.as_pending_var(&lhs) {
-            if !self.is_witness_only_lc(&rhs) {
+        if let Some(v) = self.as_pending_var(&lhs)
+            && !self.is_witness_only_lc(&rhs) {
                 self.merge_mul(v, rhs);
                 return;
             }
-        }
-        if let Some(v) = self.as_pending_var(&rhs) {
-            if !self.is_witness_only_lc(&lhs) {
+        if let Some(v) = self.as_pending_var(&rhs)
+            && !self.is_witness_only_lc(&lhs) {
                 self.merge_mul(v, lhs);
                 return;
             }
-        }
 
         let diff = lhs - rhs;
         let id = self.fresh_constraint_id();
@@ -2159,12 +2154,11 @@ fn flatten_field_leaves<'tcx>(
     out: &mut Vec<(Vec<u64>, String)>,
 ) -> CompileResult<()> {
     // `Field` is the opaque leaf — never recurse into its private limbs.
-    if let Some(d) = ty.ty_adt_def() {
-        if tcx.item_name(d.did()).as_str() == "Field" {
+    if let Some(d) = ty.ty_adt_def()
+        && tcx.item_name(d.did()).as_str() == "Field" {
             out.push((path.clone(), name.to_string()));
             return Ok(());
         }
-    }
     match ty.kind() {
         rustc_middle::ty::TyKind::Array(elem, len) => {
             let n = len
@@ -2775,8 +2769,8 @@ fn lower_statement<'tcx>(
                     // `for i in a..b`: the exclusive `Range { start, end }` literal.
                     // Model it as a compile-time range-iterator on `dest` (bounds
                     // must be constants) rather than a struct of int fields.
-                    if let rustc_middle::mir::AggregateKind::Adt(did, ..) = &**kind {
-                        if env.registry.is_exclusive_range_ty(*did) {
+                    if let rustc_middle::mir::AggregateKind::Adt(did, ..) = &**kind
+                        && env.registry.is_exclusive_range_ty(*did) {
                             let mut it = operands.iter();
                             let start = range_bound(env, it.next().expect("Range.start"))?;
                             let end = range_bound(env, it.next().expect("Range.end"))?;
@@ -2791,7 +2785,6 @@ fn lower_statement<'tcx>(
                             );
                             return Ok(());
                         }
-                    }
                     // Arrays, tuples, and plain structs all lay their components
                     // out by index: operand `i` goes to slot `[dest_path, i]`. For
                     // a struct the operands are the fields in declaration
@@ -3037,11 +3030,10 @@ fn bind_use<'tcx>(
                         path.extend(rel);
                         env.set_field_at(dest, &path, lc);
                     }
-                } else if src_path.is_empty() && dest_path.is_empty() {
-                    if let Some(s) = env.get_str(src) {
+                } else if src_path.is_empty() && dest_path.is_empty()
+                    && let Some(s) = env.get_str(src) {
                         env.set_str(dest, s);
                     }
-                }
                 // Otherwise a non-circuit temporary (e.g. unit) — ignore.
             }
             Ok(())
@@ -4674,14 +4666,13 @@ fn inline_call<'tcx>(
             // fine when inlining, but it breaks function purity (a function body would
             // reference vars outside its own args/internals, which replay can't
             // reproduce per call). One of several such cross-call memoizations.
-            if env.function_depth == 0 {
-                if let Some(bits) = env.bit_cache.get(&key).cloned() {
+            if env.function_depth == 0
+                && let Some(bits) = env.bit_cache.get(&key).cloned() {
                     for (i, &v) in bits.iter().enumerate() {
                         env.set_field_at(dest, &[i as u64], LinearCombination::var(v));
                     }
                     return Ok(());
                 }
-            }
             Some(key)
         }
     } else {
@@ -4782,8 +4773,8 @@ fn inline_call<'tcx>(
 
     // REPLAY: cached function + replay enabled → substitute the caller's arg LCs into
     // the template and append it, skipping the walk.
-    if let Some(key) = &function_key {
-        if function_replay_enabled() && env.function_templates.contains_key(key) {
+    if let Some(key) = &function_key
+        && function_replay_enabled() && env.function_templates.contains_key(key) {
             let c_start = env.constraints.len();
             let w_start = env.witness_gen.len();
             let base = env.next_var_id;
@@ -4804,7 +4795,6 @@ fn inline_call<'tcx>(
             env.bind_value(dest, &[], ArgValue::Fields(outs));
             return Ok(());
         }
-    }
 
     // Snapshot resources so a function's body constraints/witness can be captured.
     let cap_base_var = env.next_var_id;

@@ -222,8 +222,8 @@ fn aes256_matches_fips_kat() {
         inputs.insert(id_of(&p, &format!("p{i}")), pt[i].to_string());
         inputs.insert(id_of(&p, &format!("c{i}")), ct[i].to_string());
     }
-    for i in 0..32 {
-        inputs.insert(id_of(&p, &format!("k{i}")), key[i].to_string());
+    for (i, k) in key.iter().enumerate() {
+        inputs.insert(id_of(&p, &format!("k{i}")), k.to_string());
     }
     let assign = solver::solve_and_check(&p, &inputs).expect("AES-256 FIPS KAT must verify");
     assert!(

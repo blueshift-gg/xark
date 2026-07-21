@@ -15,8 +15,8 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
-    if let Ok(out) = Command::new(&rustc).args(["--print", "sysroot"]).output() {
-        if out.status.success() {
+    if let Ok(out) = Command::new(&rustc).args(["--print", "sysroot"]).output()
+        && out.status.success() {
             let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let tc = std::path::Path::new(&sysroot)
                 .file_name()
@@ -47,7 +47,6 @@ fn main() {
                 );
             }
         }
-    }
     // Stamp the git revision so `xark --version` identifies the exact build
     // (a stale `~/.cargo/bin/xark` vs a fresh `--path` install are otherwise
     // indistinguishable — both just say the crate version).
@@ -61,9 +60,8 @@ fn main() {
     if let Some(head) = git(&["rev-parse", "--git-path", "HEAD"]) {
         println!("cargo:rerun-if-changed={head}");
     }
-    if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
-        if let Some(path) = git(&["rev-parse", "--git-path", &reference]) {
+    if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"])
+        && let Some(path) = git(&["rev-parse", "--git-path", &reference]) {
             println!("cargo:rerun-if-changed={path}");
         }
-    }
 }

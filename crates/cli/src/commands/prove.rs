@@ -478,20 +478,21 @@ fn autobuild_and_setup(
     // "Built" is signalled by `circuit.xbc` (always emitted), not `r1cs.json`
     // (now `--emit-json`-only): a normal build no longer writes the JSON.
     let is_built = project.circuit_xbc().exists() || r1cs_path.exists();
-    if args.r1cs.is_none() && !is_built {
-        if let Some(dir) = find_crate_dir(args, project) {
-            eprintln!(
-                "{} no build found — running `xark build {}` first…",
-                crate::style::tag(),
-                dir.display()
-            );
-            if crate::cli::cmd_build(&[dir.display().to_string()]) != 0 {
-                anyhow::bail!("auto-build failed (build the circuit with `xark build` first)");
-            }
+    if args.r1cs.is_none()
+        && !is_built
+        && let Some(dir) = find_crate_dir(args, project)
+    {
+        eprintln!(
+            "{} no build found — running `xark build {}` first…",
+            crate::style::tag(),
+            dir.display()
+        );
+        if crate::cli::cmd_build(&[dir.display().to_string()]) != 0 {
+            anyhow::bail!("auto-build failed (build the circuit with `xark build` first)");
         }
-        // If no crate dir is found, fall through: `load_r1cs` emits the usual
-        // clear "run `xark build` first" error.
     }
+    // If no crate dir is found, fall through: `load_r1cs` emits the usual
+    // clear "run `xark build` first" error.
     if args.proving_key.is_none() && is_built && !pk_path.exists() {
         eprintln!(
             "{} no proving key found — generating a dev key (use `xark setup --ptau-file` \
@@ -528,15 +529,15 @@ fn find_crate_dir(args: &ProveArgs, project: &XarkProject) -> Option<PathBuf> {
     // Try each source independently: an explicit crate path, then the cwd, then
     // walking up from the resolved output dir. (Independent `if`s, not else-if,
     // so an explicit *non-crate* path still falls back to cwd.)
-    if let Some(p) = &args.path {
-        if p.join("Cargo.toml").is_file() {
-            return Some(p.clone());
-        }
+    if let Some(p) = &args.path
+        && p.join("Cargo.toml").is_file()
+    {
+        return Some(p.clone());
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        if cwd.join("Cargo.toml").is_file() {
-            return Some(cwd);
-        }
+    if let Ok(cwd) = std::env::current_dir()
+        && cwd.join("Cargo.toml").is_file()
+    {
+        return Some(cwd);
     }
     let mut d = project.xark_dir.clone();
     while d.pop() {

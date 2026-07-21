@@ -396,24 +396,23 @@ pub fn minimize_with_fill(prog: &R1csProgram, fill: usize) -> R1csProgram {
     // elimination and the output isn't optimal. Makes optimality a checked property.
     if crate::dbg_flag("XARK_VERIFY") {
         for c in cons.iter().flatten() {
-            if let Some(rel) = relation(&c[0], &c[1], &c[2], &modulus) {
-                if let Some((&v, coeff)) = rel.t.iter().find(|(var, _)| is_internal[**var as usize])
-                {
-                    // Fixpoint is relative to the fill-in guard: a survivor is a
-                    // missed elimination only if its replacement LC is within budget.
-                    let mut rest = rel.clone();
-                    rest.t.remove(&v);
-                    let factor = coeff
-                        .inverse()
-                        .expect("nonzero field coeff is invertible")
-                        .neg();
-                    let vlc = rest.scale(&factor);
-                    if vlc.t.len() <= fill {
-                        panic!(
-                            "XARK_VERIFY: minimizer not at fixpoint — a cheap-to-eliminate \
+            if let Some(rel) = relation(&c[0], &c[1], &c[2], &modulus)
+                && let Some((&v, coeff)) = rel.t.iter().find(|(var, _)| is_internal[**var as usize])
+            {
+                // Fixpoint is relative to the fill-in guard: a survivor is a
+                // missed elimination only if its replacement LC is within budget.
+                let mut rest = rel.clone();
+                rest.t.remove(&v);
+                let factor = coeff
+                    .inverse()
+                    .expect("nonzero field coeff is invertible")
+                    .neg();
+                let vlc = rest.scale(&factor);
+                if vlc.t.len() <= fill {
+                    panic!(
+                        "XARK_VERIFY: minimizer not at fixpoint — a cheap-to-eliminate \
                              Internal variable survives"
-                        );
-                    }
+                    );
                 }
             }
         }

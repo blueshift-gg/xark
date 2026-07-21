@@ -27,7 +27,7 @@ fn ecdsa_verify_matches_p256() {
 
     // Native inputs, straight from the p256 wire encodings.
     let pubkey = Point::from_sec1(vk.to_encoded_point(false).as_bytes());
-    let sig_leaf = Sig::from_rs(sig.to_bytes().as_slice());
+    let sig_leaf = Sig::from_rs(sig.to_bytes().as_ref());
     // ECDSA challenge e = int(SHA-256(msg)) mod n (n = P-256 group order).
     let n = BigUint::parse_bytes(
         b"ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
