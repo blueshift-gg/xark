@@ -26,5 +26,5 @@ xark-prover = { path = "../../crates/prover", version = "0.2.0" }
 xark-test-harness = { path = "../../crates/test-harness", version = "0.2.0" }
 xark-ir = { path = "../../crates/ir", version = "0.2.0" }
 
-[lints]
-workspace = true
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

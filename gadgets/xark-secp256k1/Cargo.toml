@@ -33,5 +33,5 @@ sha2 = "0.10"
 xark-ir = { path = "../../crates/ir", version = "0.2.0" }
 xark-test-harness = { path = "../../crates/test-harness", version = "0.2.0" }
 
-[lints]
-workspace = true
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
