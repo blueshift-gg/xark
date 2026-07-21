@@ -141,8 +141,9 @@ snarkjs groth16 verify \
 
 * **`xark`** (`crates/lang`, `#![no_std]`, stable) — the language library; its
   `prelude` provides the marker primitives (`Field`, `require_eq`,
-  `Private`/`Public`). The CLI is **`xark-cli`** (stable, binary `xark`) and the
-  MIR-extraction driver is **`xark-rustc`** (pinned nightly).
+  `Private`/`Public`). The CLI is the **`xark`** binary (stable; published as the
+  `xark-cli` crate) and the MIR-extraction driver is **`xark-rustc`** (pinned
+  nightly).
 * **Backend** — `xark-backend` (Groth16 setup/prove/verify, trusted setup,
   serialization) and `xark-verifier` (the `no_std` on-chain Solana verifier).
   Both are frontend-agnostic.
