@@ -1,0 +1,20 @@
+[package]
+name = "xark-aes"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_aes"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/lang", default-features = false }
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness" }
+xark-ir = { path = "../../crates/ir" }
+# Independent reference for the GCM GF(2^128) field (GHASH): `GHash::new(H).update(Y)`
+# = Y·H, exactly the `gf128_mul` we validate.
+ghash = "0.5"

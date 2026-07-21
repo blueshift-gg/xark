@@ -1,0 +1,17 @@
+[package]
+name = "xark-pedersen"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_pedersen"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/lang", default-features = false }
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness" }
+xark-ir = { path = "../../crates/ir" }

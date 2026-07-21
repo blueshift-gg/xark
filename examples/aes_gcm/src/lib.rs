@@ -22,16 +22,8 @@ pub fn aes_gcm(
     tag: Public<[u8; 16]>,
 ) {
     let (c, t) = aes128_gcm::<13, 20>(aad, pt, key, nonce);
-    let mut i = 0usize;
-    while i < 20usize {
-        require_eq(c[i], ct[i]);
-        i += 1;
-    }
-    let mut i = 0usize;
-    while i < 16usize {
-        require_eq(t[i], tag[i]);
-        i += 1;
-    }
+    require_eq(c, ct);
+    require_eq(t, tag);
 }
 
 #[cfg(test)]

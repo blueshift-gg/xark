@@ -22,7 +22,7 @@ set_option maxHeartbeats 400000
 # xark Keccak-f[1600] structural soundness — mechanised in Lean 4 / mathlib
 
 This file builds the **structural** soundness layer for the Keccak-f[1600]
-permutation in `crates/xark-keccak/src/lib.rs`. It is the Keccak
+permutation in `gadgets/xark-keccak/src/lib.rs`. It is the Keccak
 analogue of `Formal/Sha256.lean`: the per-bit gadgets (`and`, `xor`, `not`,
 boolean range checks) are proven sound in `Formal/Bitwise.lean` over the
 BN254 scalar field; this file lifts those per-bit lemmas to the per-`Word64`
@@ -70,7 +70,7 @@ Each lemma mirrors the corresponding `Word32` lemma in `Formal.Sha256`,
 restated at width 64. The hypotheses say each input bit-wire `wA i : F` is
 `BitOf` the corresponding spec bit `a i`; the conclusion is that the
 gadget's per-bit output witness (a simple LC over the inputs, exactly as
-emitted by `crates/xark-bits/src/lib.rs`) is `BitOf` the
+emitted by `gadgets/xark-bits/src/lib.rs`) is `BitOf` the
 spec-level output bit.
 -/
 
@@ -259,7 +259,7 @@ theorem not64_BitOf {F : Type*} [Ring F]
 For each of the five Keccak layers, given per-bit `BitOf` witnesses for the
 input lanes, we exhibit an explicit field-level witness for the output bit
 and prove it `BitOf` the spec-level output bit. The witnesses match the LCs
-that `crates/xark-keccak/src/lib.rs` emits: parity carries unfolded
+that `gadgets/xark-keccak/src/lib.rs` emits: parity carries unfolded
 to nested binary XORs, ANDs as field products, NOTs as `1 − w`, rotations
 as bit-wire relabels.
 

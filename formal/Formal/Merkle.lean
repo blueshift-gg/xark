@@ -12,7 +12,7 @@ set_option linter.style.header false
 /-!
 # xark Merkle-membership soundness — mechanised in Lean 4 / mathlib
 
-`crates/xark-merkle/src/lib.rs` verifies a Merkle authentication path by folding
+`gadgets/xark-merkle/src/lib.rs` verifies a Merkle authentication path by folding
 it upward with the Poseidon 2-to-1 compression. At each level the running node is
 combined with its sibling in the order dictated by a position bit `b`, using the
 linear select
@@ -35,7 +35,7 @@ a deterministic function of that pair.
 The gadget pins `b` boolean with `b·b = b` (`assert_bool`), which is the sole
 hypothesis of `merkle_level_swap_sound` below. The Rust↔Lean bridge test
 `merkle_membership_gadget` / `merkle_matches_lean_model`
-(`crates/xark/tests/snapshot.rs`) pins the gadget's per-level shape (one Poseidon
+(`crates/lang/tests/snapshot.rs`) pins the gadget's per-level shape (one Poseidon
 `hash2`, one booleanity gate, two select muxes) to this model.
 
 * `merkle_select_pair_preserved` — the two selects always partition the pair:

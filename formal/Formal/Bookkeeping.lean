@@ -132,7 +132,7 @@ For `Read`: the gadget emits `value = arr_pre[k]`, a direct copy.
 For `Write`: the gadget emits `arr_post[k] = new_value`, and
 `arr_post[j] = arr_pre[j]` for `j ≠ k`. Both reduce to one R1CS row each
 under the constant-index path in the xark compiler's array-indexing
-lowering (`crates/xark/src/lower_mir.rs`). -/
+lowering (`crates/lang/src/lower_mir.rs`). -/
 
 /-- **Const-index `MemoryOp::Read` soundness.** When the index `k` is a
 literal, the gadget skips the selector layer and emits `value = arr[k]`

@@ -8,17 +8,17 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/xark", default-features = false }
-xark-grumpkin = { path = "../../crates/xark-grumpkin" }
+xark = { path = "../../crates/lang", default-features = false }
+xark-grumpkin = { path = "../../gadgets/xark-grumpkin" }
 
 [dev-dependencies]
-xark-grumpkin = { path = "../../crates/xark-grumpkin" }
+xark-grumpkin = { path = "../../gadgets/xark-grumpkin" }
 
 [target.'cfg(not(xark))'.dependencies]
 # Host-only prover so downstream crates (and this crate's tests) can call
 # the generated native validator; gated on `cfg(not(xark))` so a circuit
 # build stays lean `no_std` with no feature flag.
-xark-prover = { path = "../../crates/xark-prover" }
+xark-prover = { path = "../../crates/prover" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

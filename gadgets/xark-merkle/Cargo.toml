@@ -1,0 +1,22 @@
+[package]
+name = "xark-merkle"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_merkle"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/lang", default-features = false }
+xark-poseidon = { path = "../xark-poseidon" }
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness" }
+xark-ir = { path = "../../crates/ir" }
+num-bigint = "0.4"
+
+[lints]
+workspace = true

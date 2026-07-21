@@ -69,7 +69,7 @@ We are explicitly *not* defending against:
 * **A future Arkworks Groth16 implementation regression.** We pin via
  Cargo.lock; bumping `ark-groth16` requires re-verifying the byte-level
  serialization round-trip test
- (`crates/tests/tests/serialization.rs`).
+ (`gadgets/tests/tests/serialization.rs`).
 * **Side-channel leakage in the prover.** No constant-time guarantees are
  made; the prover should not run on untrusted hardware.
 * **Side-channel leakage in trusted-setup randomness.** `OsRng` is treated as
@@ -88,7 +88,7 @@ the argument that the rows imply the relation over `Fr = BN254 scalar field`.
 
 ### 2.1 `enforce_boolean`
 
-**File.** `crates/xark-bits/src/lib.rs`.
+**File.** `gadgets/xark-bits/src/lib.rs`.
 
 **Relation.** For input variable `x`, after this gadget runs, any satisfying
 assignment has `x ∈ {0, 1}` as field elements.
@@ -107,7 +107,7 @@ divisors). The polynomial `X * (X - 1) ∈ Fr[X]` has degree 2 and roots exactly
 
 ### 2.2 `decompose_into_bits` (range gadget)
 
-**File.** `crates/xark-bits/src/lib.rs`. Constant
+**File.** `gadgets/xark-bits/src/lib.rs`. Constant
 `MAX_BITS = 253`.
 
 **Relation.** For input variable `value_var` and width `n ≤ MAX_BITS`,
@@ -147,7 +147,7 @@ constant is therefore load-bearing; do not raise it.
 
 ### 2.3 32-bit XOR (`xor`)
 
-**File.** `crates/xark-bits/src/lib.rs`.
+**File.** `gadgets/xark-bits/src/lib.rs`.
 
 **Relation.** Inputs `a, b: Word32` (each `Word32` is 32 LCs, each LC's value
 in `{0, 1}` by prior bit-decomposition). Output `out: Word32` such that
@@ -180,7 +180,7 @@ because composability is cheaper than re-auditing.
 
 ### 2.4 32-bit AND (`and`)
 
-**File.** `crates/xark-bits/src/lib.rs`.
+**File.** `gadgets/xark-bits/src/lib.rs`.
 
 **Relation.** Same shape as XOR: `out.bits[i] = a.bits[i] AND b.bits[i]`.
 
@@ -197,7 +197,7 @@ boolean (so we save a redundant boolean check that XOR has to pay).
 
 ### 2.5 32-bit ADD mod 2^32 (`add_mod_32`)
 
-**File.** `crates/xark-bits/src/lib.rs`.
+**File.** `gadgets/xark-bits/src/lib.rs`.
 
 **Relation.** Given up to `MAX_TERMS = 8` 32-bit input words, returns a
 `Word32` equal to the `mod 2^32` sum of the inputs.
@@ -227,7 +227,7 @@ adversarial counterpart `add_mod_32_constraint_fails_on_bad_witness`.
 
 ### 2.6 SHA-256 compression
 
-**File.** `crates/xark-sha256/src/lib.rs`. Round constants
+**File.** `gadgets/xark-sha256/src/lib.rs`. Round constants
 `K256[0..64]` and the schedule mirror NIST FIPS 180-4 §6.2.
 
 **Relation.** Given a 16-word message block and 8-word state, returns the
@@ -263,7 +263,7 @@ against the `sha2` crate's `compress256`.
 
 ### 2.7 Keccak-f[1600]
 
-**File.** `crates/xark-keccak/src/lib.rs`.
+**File.** `gadgets/xark-keccak/src/lib.rs`.
 
 **Relation.** Implements the Keccak-f[1600] permutation as 24 rounds over a
 5×5 array of 64-bit lanes. Each lane is held as a `WordN` of width 64; each
@@ -282,7 +282,7 @@ the `keccak` crate on the all-zeros block) and
 
 ### 2.8 Blake2s
 
-**File.** `crates/xark-blake2s/src/lib.rs`.
+**File.** `gadgets/xark-blake2s/src/lib.rs`.
 
 **Relation.** Implements the Blake2s compression (10 rounds, 32-bit lanes,
 G mixing function) plus the streaming wrapper (variable-length
@@ -299,7 +299,7 @@ plus `blake2s_in_circuit_matches_native_on_abc`,
 
 ### 2.9 Blake3
 
-**File.** `crates/xark-blake3/src/lib.rs`. Supports both single-chunk
+**File.** `gadgets/xark-blake3/src/lib.rs`. Supports both single-chunk
 (`inputs.len() ≤ CHUNK_BYTES = 1024`) and multi-chunk inputs via the standard
 binary-tree CV combination.
 
@@ -316,7 +316,7 @@ and combines them via a binary tree per the BLAKE3 spec.
 
 ### 2.10 Poseidon2 permutation
 
-**File.** `crates/xark-poseidon2/src/lib.rs`. Constants match the standard
+**File.** `gadgets/xark-poseidon2/src/lib.rs`. Constants match the standard
 reference Poseidon2-BN254 parameter set; they are vendored verbatim into the
 crate rather than re-derived.
 
@@ -343,7 +343,7 @@ soundness bug, we inherit the same bug.
 
 ### 2.11 AES-128 encryption
 
-**File.** `crates/xark-aes/src/lib.rs`. CBC mode, no padding —
+**File.** `gadgets/xark-aes/src/lib.rs`. CBC mode, no padding —
 input length must be a positive multiple of 16; PKCS#7 padding (if needed)
 is the caller's responsibility before invoking the gadget.
 
@@ -382,7 +382,7 @@ and the GF(2^8) inverse helper).
 
 ### 2.12 Grumpkin curve (point add + MSM)
 
-**File.** `crates/xark-grumpkin/src/lib.rs`.
+**File.** `gadgets/xark-grumpkin/src/lib.rs`.
 
 **Relation.** Affine `(x, y, is_infinity)` points on Grumpkin (whose base
 field is BN254 `Fr`). `ec_add_in_circuit` enforces affine addition with
@@ -426,7 +426,7 @@ MSM uses double-and-add over the bit decomposition of each scalar limb pair
 
 ### 2.13 Merkle membership (Poseidon)
 
-**File.** `crates/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression
+**File.** `gadgets/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression
 (`xark-poseidon`) up an authentication path; the position bits and the sibling
 mux are the only Merkle-specific logic — the compression is reused verbatim.
 
@@ -455,8 +455,8 @@ position bit are each rejected.
 
 ### 2.14 xark-IR arithmetic → R1CS lowering
 
-**Files.** `crates/xark-ir/` (the xark-IR arithmetic ops the MIR
-lowering emits) and `crates/xark-prover/` (R1CS synthesis).
+**Files.** `crates/ir/` (the xark-IR arithmetic ops the MIR
+lowering emits) and `crates/prover/` (R1CS synthesis).
 
 **Relation.** Each arithmetic assertion asserts
 `q_c + Σ_k coef_k * w_k + Σ_i q_M_i * a_i * b_i = 0` for the linear
@@ -482,8 +482,8 @@ equivalent to satisfaction of the original expression over `Fr`.
 
 ### 2.15 Public input ordering
 
-**Files.** `crates/xark-prover/` (R1CS synthesis) and
-`crates/xark-ir/` (the variable table, where each `Public` variable is
+**Files.** `crates/prover/` (R1CS synthesis) and
+`crates/ir/` (the variable table, where each `Public` variable is
 recorded in declaration order).
 
 **Relation.** The verifier consumes public inputs in the *exact same order*
@@ -505,8 +505,8 @@ as a follow-up — see the audit notes.)
 ### 2.16 Hint outputs (advice)
 
 **Where.** The `hint_*` primitives (e.g. `Field::hint_inverse`,
-`hint_bits`) in `crates/xark/` (the `lang` module) and their witness-solver
-counterparts in `crates/xark-prover/`.
+`hint_bits`) in `crates/lang/` (the `lang` module) and their witness-solver
+counterparts in `crates/prover/`.
 
 **Relation.** A hint allocates a fresh witness that the prover fills during
 witness generation but for which the circuit emits **no constraint at the
@@ -599,20 +599,20 @@ Working list; update as work lands.
 * **Lowering pipeline not formally verified end to end.** Gadget *relations*
  are mechanised in Lean (`formal/` — non-native field arithmetic, the curve
  laws, ECDSA/EdDSA soundness, on-curve membership), and a cargo-fuzz harness
- (`crates/tests/tests/fuzz.rs`) covers the parsers and the IR→R1CS lowering.
+ (`gadgets/tests/tests/fuzz.rs`) covers the parsers and the IR→R1CS lowering.
  But the MIR→xark-IR→R1CS *pipeline itself* is not proof-assistant-verified;
  it rests on unit tests, KAT cross-checks against reference crates (`sha2`,
  `keccak`, `blake2`, `blake3`, `aes`, arkworks Grumpkin), and adversarial
  forged-witness tests.
 
 * **Solana on-chain verifier.** `crates/verifier/` is tested in Mollusk
- on the real `alt_bn128` syscalls (`crates/tests/tests/sbpf.rs` — positive
+ on the real `alt_bn128` syscalls (`gadgets/tests/tests/sbpf.rs` — positive
  across every committed circuit plus on-chain negative tests) and with
- adversarial fuzzing (`crates/tests/tests/fuzz.rs`).
+ adversarial fuzzing (`gadgets/tests/tests/fuzz.rs`).
  **Never deployed to mainnet**; not externally audited.
 
 * **Poseidon2 parameters.** Vendored verbatim from the standard reference
- Poseidon2-BN254 parameter set into `crates/xark-poseidon2`.
+ Poseidon2-BN254 parameter set into `gadgets/xark-poseidon2`.
  **Not independently re-derived.** A regression in the upstream reference
  table ships here unchanged.
 
@@ -624,7 +624,7 @@ Working list; update as work lands.
 
 * **Grumpkin embedded-curve arithmetic.** The shipped `scalar_mul` /
  `multi_scalar_mul` use an **offset double-and-add** accumulator over the
- incomplete affine `ec_add` / `ec_double` (`crates/xark-grumpkin`) — sidestepping
+ incomplete affine `ec_add` / `ec_double` (`gadgets/xark-grumpkin`) — sidestepping
  the exceptional cases rather than a complete-addition selector polynomial. The
  curve algebra and on-curve membership are mechanised in `formal/Formal/Curve.lean`
  (`enforce_on_curve_grumpkin_sound`), and inputs are now range-/on-curve-checked
@@ -691,9 +691,9 @@ before tagging a production release of a circuit deployed via xark.
 
 External auditors should focus first on:
 
-1. **The lowering layer** — `crates/xark-ir/` and
- `crates/xark-prover/` (MIR → xark-IR → R1CS) plus every gadget crate
- (`crates/xark-*`). This is the layer that turns circuit
+1. **The lowering layer** — `crates/ir/` and
+ `crates/prover/` (MIR → xark-IR → R1CS) plus every gadget crate
+ (`crates/lang-*`). This is the layer that turns circuit
  semantics into R1CS rows; a bug here is a soundness break in every
  downstream circuit. The load-bearing sub-claims are
  [§2.2](#22-decompose_into_bits-range-gadget) (the 253-bit boundary),

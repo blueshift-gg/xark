@@ -12,7 +12,7 @@ set_option linter.style.header false
 /-!
 # xark ed25519 lazy-reduction soundness — the Mersenne fold — in Lean 4 / mathlib
 
-`crates/xark-bignum/src/lib.rs`'s `mul_lazy_25519` multiplies two 3×85-bit
+`gadgets/xark-bignum/src/lib.rs`'s `mul_lazy_25519` multiplies two 3×85-bit
 values mod `p = 2²⁵⁵ − 19` **without** a quotient hint: it forms the schoolbook
 column products `cols[0..4]` (positions `2^(85·k)`), then *folds* the high
 columns into the low ones by multiplying by 19 —

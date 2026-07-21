@@ -15,7 +15,7 @@ frontend gadget implements, matching Circom's circomlib Poseidon2 (t = 3).
 
 Instantiates the width-polymorphic framework in `Formal.Poseidon` at `t = 3`
 with `M_E = circ(2,1,1)`, internal diagonal `[1,1,2]`, and the Horizen BN254
-round constants used by `crates/xark-poseidon2/src/lib.rs`. The determinism
+round constants used by `gadgets/xark-poseidon2/src/lib.rs`. The determinism
 (soundness) theorem is an immediate specialisation of
 `Xark.poseidon_permutation_determined` — only the concrete parameters change
 from the (deleted) `t = 4` instance.

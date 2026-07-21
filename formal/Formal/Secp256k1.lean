@@ -13,7 +13,7 @@ set_option linter.style.longLine false
 /-!
 # secp256k1 in-circuit point-addition soundness
 
-The secp256k1 point-addition gadget (`crates/xark-secp256k1/src/lib.rs`)
+The secp256k1 point-addition gadget (`gadgets/xark-secp256k1/src/lib.rs`)
 adds points on
 
     y² = x³ + 7

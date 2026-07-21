@@ -61,14 +61,14 @@ jobs:
         # timeout; exclude that package here rather than terminating mid-test.
         #
         # The `sbpf` and `differential_alt_bn128` integration tests under
-        # `crates/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
+        # `gadgets/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
         # they need the Anza toolchain and run in `solana-ci.yml`.
         # Build one xark-tests test list excluding those, then test.
         run: |
           cargo test --workspace --release --exclude xark-tests --exclude xark-ed25519
           cargo test -p xark-tests --release --lib
           tests_args=()
-          for t in $(ls crates/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
+          for t in $(ls gadgets/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
                       | grep -vE '^(sbpf|differential_alt_bn128)'); do
             tests_args+=(--test "$t")
           done
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install pinned nightly (rustc_private) toolchain
-        # `crates/xark-rustc` is the `rustc_driver`, built on this pinned nightly
+        # `crates/rustc` is the `rustc_driver`, built on this pinned nightly
         # with `rustc-dev`; it is excluded from the root workspace, so the `check`
         # job's `cargo test --workspace` never builds it. The harness selects it via
         # `RUSTUP_TOOLCHAIN=nightly-2026-05-03`, so the pin here must match.
@@ -99,8 +99,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            crates/xark/target
-            crates/xark-rustc/target
+            crates/lang/target
+            crates/rustc/target
           key: snapshots-${{ hashFiles('Cargo.lock') }}
 
       - name: cargo clippy (xark-rustc driver)
@@ -108,10 +108,10 @@ jobs:
         # `rustc_private` crate, so lint it here where the pinned nightly +
         # `rustc-dev` are available. `--features debug` covers the diagnostic
         # paths (timing / XARK_VERIFY) too.
-        run: cd crates/xark-rustc && cargo clippy --all-targets --features debug -- -D warnings
+        run: cd crates/rustc && cargo clippy --all-targets --features debug -- -D warnings
 
       - name: cargo test (compiler snapshots)
-        # Runs `crates/xark/tests/snapshot.rs` — the byte-identical count bridges
+        # Runs `crates/lang/tests/snapshot.rs` — the byte-identical count bridges
         # (fp_mul 1154, ec_incomplete 15369/15891, sha256 39018, blake2s 21600,
         # blake3 15248, keccak 153664, aes 145816, poseidon2 240, bignum 1189,
         # struct_point, aggregate-input + int-operator solves, …).
@@ -119,8 +119,8 @@ jobs:
         # The `xark-test-harness` builds every gadget crate with
         # `-Zalways-encode-mir` into an isolated `target/xark-compile` (so their
         # MIR is inlinable) and the `xark-rustc` compiler into
-        # `crates/xark-rustc/target`, then
+        # `crates/rustc/target`, then
         # compiles each example and diffs its emitted R1CS/IR against the
         # committed snapshots. The heavy `#[ignore]`d known-answer-vector tests
         # run separately in `nightly-kats.yml`.
-        run: cd crates/xark && cargo test --test snapshot
+        run: cd crates/lang && cargo test --test snapshot

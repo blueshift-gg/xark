@@ -1,0 +1,19 @@
+[package]
+name = "xark-blake2s"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "xark_blake2s"
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/lang", default-features = false }
+xark-bits = { path = "../xark-bits" }
+xark-hash = { path = "../xark-hash" }
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness" }
+xark-ir = { path = "../../crates/ir" }

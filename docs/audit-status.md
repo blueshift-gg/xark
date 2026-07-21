@@ -29,7 +29,7 @@ external auditor should focus on first. Pairs with
   with a hash-verification step in CI.
 
 ### Test suite
-Integration tests in `crates/tests/tests/` (`differential_alt_bn128`,
+Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128`,
 `end_to_end`, `fuzz`, `host`, `multi_function`, `ptau`, `randomness`,
 `sbpf`, `serialization`, `solana_format`, `xark_ir_e2e`) plus unit
 tests across the workspace crates, including:
@@ -46,7 +46,7 @@ tests across the workspace crates, including:
 * **NIST/RFC official vectors** — FIPS 180-4 §B (SHA-256), FIPS 202 §C
   (SHA-3), RFC 7693 §B (BLAKE2s), official BLAKE3 `test_vectors.json`,
   FIPS 197 §B + CAVP (AES-128).
-* **Lean ↔ R1CS bridge** (`crates/xark/tests/snapshot.rs`) — for each
+* **Lean ↔ R1CS bridge** (`crates/lang/tests/snapshot.rs`) — for each
   frontend gadget, materialises the R1CS and pins its
   multiplication-gate count to the corresponding Lean soundness model,
   so any drift in the Rust gadget forces the proof to be re-checked
@@ -60,7 +60,7 @@ tests across the workspace crates, including:
 * **Ceremony enforcement** — the `CeremonyError` rejection paths
   (Schnorr-PoK, transcript hash chain, δ-consistency between G1/G2,
   dev-mode guards) are exercised by the ptau/setup test paths.
-* **cargo-fuzz smoke** (`crates/tests/tests/fuzz.rs`) — fuzz over the
+* **cargo-fuzz smoke** (`gadgets/tests/tests/fuzz.rs`) — fuzz over the
   artifact parser, witness parser, and the xark-IR→R1CS lowering. Run
   manually; there is no CI workflow gating it yet. Production fuzzing
   campaigns are CPU-weeks.
@@ -136,7 +136,7 @@ Coverage (theorem names → modules):
   the per-level sibling mux a genuine conditional swap (no under-constraint, no
   off-pair value), composed with Poseidon determinacy (`Formal.Merkle`).
 * **R1CS ↔ Lean bridge** — ten snapshot tests in
-  `crates/xark/tests/snapshot.rs` compile each frontend gadget and pin its R1CS
+  `crates/lang/tests/snapshot.rs` compile each frontend gadget and pin its R1CS
   multiplication-gate count to the corresponding Lean soundness model, so any
   drift in the Rust gadget forces the proof to be re-checked against the new
   shape.
@@ -190,7 +190,7 @@ deterministically evaluates.
 ### AES S-box bit-level soundness
 
 The AES S-box gadget uses a **GF(2^8) multiplicative-inverse trick +
-affine transform** (`s_box_in_circuit` in `crates/xark-aes/src/lib.rs`). The
+affine transform** (`s_box_in_circuit` in `gadgets/xark-aes/src/lib.rs`). The
 gadget allocates `x_inv` and `is_zero` boolean wires, enforces the
 multiplicative-inverse identity via cross-product/XOR constraints,
 and emits the FIPS-197 affine transform as a per-bit XOR chain.
@@ -240,7 +240,7 @@ prover-supplied output wires to satisfy `IsValidSBoxByteWitness`
 Rust gadget actually emits) rests on:
 
 * the Rust exhaustive unit test `sbox_all_inputs_match_table` in
-  `crates/xark-aes/src/lib.rs` tests (every input byte → gadget output
+  `gadgets/xark-aes/src/lib.rs` tests (every input byte → gadget output
   equals `SBOX[x]`);
 * the pure-Lean per-bit composition proofs in `Formal.Aes`,
   discharged structurally against FIPS-197 through
@@ -259,7 +259,7 @@ stays.
 
 Listed in rough order of "biggest blast radius if wrong":
 
-### 1. Non-native arithmetic over secp curves (`crates/xark-secp256k1/src/lib.rs`, `crates/xark-bignum/src/lib.rs`)
+### 1. Non-native arithmetic over secp curves (`gadgets/xark-secp256k1/src/lib.rs`, `gadgets/xark-bignum/src/lib.rs`)
 
 The single largest soundness surface. Every ECDSA proof depends on the
 correctness of:
@@ -316,7 +316,7 @@ An auditor should:
 * Construct adversarial circuits where a hint output is **not** pinned and
   confirm `solve_and_check` still rejects a bad witness.
 
-### 3. xark-IR → R1CS lowering (`crates/xark-ir/`, `crates/xark/src/lower_mir.rs`)
+### 3. xark-IR → R1CS lowering (`crates/ir/`, `crates/lang/src/lower_mir.rs`)
 
 The lowering surface is deliberately small: there is **no opcode
 dispatch and no predication**. The accepted rustc-MIR subset
@@ -352,7 +352,7 @@ lowers directly to R1CS. The auditable points are:
 
 All four enforcement paths (Schnorr-PoK, transcript chain, δ
 consistency, dev-mode guard) are exercised by the ptau/setup test
-paths in `crates/tests/tests/`.
+paths in `gadgets/tests/tests/`.
 
 ### 5. Serialisation boundaries (`crates/backend/src/{serialization,solana}.rs`)
 
@@ -395,7 +395,7 @@ SHA-256 in `expected.sha256` verified in CI by
 | Component | Mitigation |
 |---|---|
 | `rustc` MIR shape (nightly) | Pin the nightly toolchain, validate the accepted MIR subset and reject everything else, fuzz the lowering. |
-| `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test: `crates/tests/tests/differential_alt_bn128.rs` evaluates the same fixed test vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change. Each new vector in either `G1_ADD_VECTORS` / `G1_MUL_VECTORS` / `G2_ADD_VECTORS` / `PAIRING_2_VECTORS` adds a differential anchor without changing the scaffolding. Extending to CPU-weeks of OSS-Fuzz is a follow-up. |
+| `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test: `gadgets/tests/tests/differential_alt_bn128.rs` evaluates the same fixed test vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change. Each new vector in either `G1_ADD_VECTORS` / `G1_MUL_VECTORS` / `G2_ADD_VECTORS` / `PAIRING_2_VECTORS` adds a differential anchor without changing the scaffolding. Extending to CPU-weeks of OSS-Fuzz is a follow-up. |
 | Arkworks Groth16 | Cite published Groth16 mechanisations (e.g. Microsoft's verified Groth16 in F*); no in-repo proof. |
 | Lean kernel + mathlib | Trusted base; replace via Coq cross-check if extreme confidence requires. |
 | `rustc` / `cargo` / `lake` / `Kani` / CBMC | Toolchain trust. |

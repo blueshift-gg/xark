@@ -20,11 +20,7 @@ pub fn aes_ctr(
     ct: Public<[u8; 20]>,
 ) {
     let out = aes128_ctr::<20>(msg, key, nonce);
-    let mut i = 0usize;
-    while i < 20usize {
-        require_eq(out[i], ct[i]);
-        i += 1;
-    }
+    require_eq(out, ct);
 }
 
 #[cfg(test)]

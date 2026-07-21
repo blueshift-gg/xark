@@ -52,7 +52,7 @@ intrinsics recognised in MIR are named `__xark_*` (`__xark_add`, `__xark_mul`,
 
 Nightly is required only because there is no stable API for MIR access. It is
 hidden inside the tool: **circuit authors write stable Rust**; only the tool
-touches nightly (pinned in `crates/xark/rust-toolchain.toml`). The pin, its
+touches nightly (pinned in `crates/lang/rust-toolchain.toml`). The pin, its
 fragility, and the bump procedure are documented in
 [`docs/toolchain.md`](toolchain.md).
 
@@ -60,35 +60,39 @@ fragility, and the bump procedure are documented in
 
 ### `xark` (the language + CLI)
 
-`crates/xark`. The library defines the marker primitives — `Field`, `require_eq`,
+`crates/lang`. The library defines the marker primitives — `Field`, `require_eq`,
 `Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics the compiler
 recognises in MIR — in its `lang` module, re-exported via its `prelude`, so a
 circuit author only needs `use xark::prelude::*`. (The marker function bodies
 never run; the tool stops after MIR extraction.) The binary (feature-gated
 behind `cli`) is the `xark` command — `build`, `prove`/`verify` — and doubles as
 the `rustc_driver` that extracts each circuit's R1CS. Compiler internals live in
-`crates/xark/src/{driver,find_entry,validate,lower_mir,diagnostics}.rs`.
+`crates/rustc/src/{driver,find_entry,validate,lower_mir,diagnostics}.rs`.
 
-### `xark-bits`, `xark-ir`
+### `xark-ir`
 
-* `xark-bits` — bit / word building blocks (`to_bits32`, `xor32`, `rotr32`,
-  `add32`, …) usable to hand-write gadgets.
 * `xark-ir` — the xark-IR data structures (variables, linear
   combinations, R1CS constraints, the primitive/hint program) plus JSON
   serialization.
 
-### Gadget crates (add individually)
+### Gadget crates (in `gadgets/`, add individually)
 
-Specialized building blocks are *separate crates* you depend on only when you
-need them: `xark-bignum` (non-native / foreign-field arithmetic, used by the EC
-gadgets) and the gadgets `xark-poseidon`, `xark-poseidon2`, `xark-sha256`,
-`xark-keccak`, `xark-mimc`, `xark-blake3`, `xark-blake2s`, `xark-aes`,
-`xark-pedersen`, `xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`. Each is
-ordinary Rust that lowers to primitive constraints, with KAT tests.
+The circuit-library surface lives under **`gadgets/`**, deliberately separate from
+the core toolchain in `crates/` so it can be forked, modified, or used on its own.
+Everything here is ordinary Rust that lowers to the same primitive constraint set —
+the backend needs no per-gadget support — and each ships KAT tests.
+
+Shared circuit libraries the gadgets build on: `xark-bits` (bit / word building
+blocks — `to_bits32`, `xor32`, `rotr32`, `add32`, …), `xark-bignum` (non-native /
+foreign-field arithmetic, used by the EC gadgets), `xark-curve` (shared curve
+macros), and `xark-hash` (the `Hash`/`Digest` types). The gadgets themselves:
+`xark-poseidon`, `xark-poseidon2`, `xark-sha256`, `xark-keccak`, `xark-mimc`,
+`xark-blake3`, `xark-blake2s`, `xark-aes`, `xark-pedersen`, `xark-grumpkin`,
+`xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`.
 
 ### `xark-prover`
 
-`crates/xark-prover`. Solves the witness from `--inputs` values, synthesizes
+`crates/prover`. Solves the witness from `--inputs` values, synthesizes
 the R1CS as an Arkworks `ConstraintSynthesizer`, and runs Groth16 `prove` /
 `verify` — a *verified* proof, straight from xark's own constraint system.
 

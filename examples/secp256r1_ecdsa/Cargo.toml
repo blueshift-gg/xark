@@ -8,12 +8,12 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/xark", default-features = false }
+xark = { path = "../../crates/lang", default-features = false }
 # lean (no host) for the xark compiler's circuit extraction.
-xark-secp256r1 = { path = "../../crates/xark-secp256r1" }
+xark-secp256r1 = { path = "../../gadgets/xark-secp256r1" }
 
 [dev-dependencies]
-xark-secp256r1 = { path = "../../crates/xark-secp256r1" }
+xark-secp256r1 = { path = "../../gadgets/xark-secp256r1" }
 p256 = "0.13"
 sha2 = "0.10"
 
@@ -21,7 +21,7 @@ sha2 = "0.10"
 # Host-only prover so downstream crates (and this crate's tests) can call
 # the generated native validator; gated on `cfg(not(xark))` so a circuit
 # build stays lean `no_std` with no feature flag.
-xark-prover = { path = "../../crates/xark-prover" }
+xark-prover = { path = "../../crates/prover" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

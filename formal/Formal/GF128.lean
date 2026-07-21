@@ -31,7 +31,7 @@ polynomial product reduced modulo the GCM polynomial, on `ℕ` bit representatio
   emission (each output bit is the GF(2) parity-sum of cross-products).
 * `gf128_mul_lt_two128` — the product is closed in `[0, 2¹²⁸)` (well-defined).
 
-The gadget (`crates/xark-aes::gf128_mul`) computes this same product bit-serially
+The gadget (`gadgets/xark-aes::gf128_mul`) computes this same product bit-serially
 (NIST Algorithm 1); its mult-gate shape is pinned to this model by the
 `gf128_mul_matches_lean_model` R1CS↔Lean bridge test.
 -/

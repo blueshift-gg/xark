@@ -13,7 +13,7 @@ set_option linter.style.header false
 /-!
 # xark non-native modular-product soundness — mechanised in Lean 4 / mathlib
 
-The ECDSA verifier in `crates/xark-secp256k1/src/lib.rs` evaluates the
+The ECDSA verifier in `gadgets/xark-secp256k1/src/lib.rs` evaluates the
 secp256k1 base- and scalar-field arithmetic *inside* a BN254 R1CS. Both
 secp256k1 moduli are 256 bits wide and do not fit in BN254 `Fr` (~254 bits),
 so every non-native multiplication `c = a · b mod m` is lowered via the
@@ -71,7 +71,7 @@ limb-by-limb `Fr` constraints emitted by `mul_mod` to the integer identity over
   per-column equations together with `valOfLimbs c β < valOfLimbs m β` and
   `0 < valOfLimbs m β`, then `valOfLimbs c β = (valOfLimbs a β · valOfLimbs b β) % valOfLimbs m β`.
   This is the **full soundness chain** for the non-native `mod_mul` gadget
-  (`crates/xark-bignum/src/lib.rs`): limb-by-limb
+  (`gadgets/xark-bignum/src/lib.rs`): limb-by-limb
   constraints + carry-no-wrap ⇒ modular product is correct.
 
 The "no carry wrap" hypothesis is captured by the carries being natural numbers
@@ -107,7 +107,7 @@ satisfying the *integer* identity `a · b = q · m + c` and the gadget's bit
 decomposition pins `c < m` (with `m` positive — vacuous for the secp256k1
 base / scalar moduli, which are large primes), then `c` is exactly the modular
 product `(a · b) % m`. This is the abstract content of what the non-native
-`mod_mul` gadget (`crates/xark-bignum/src/lib.rs`) enforces. -/
+`mod_mul` gadget (`gadgets/xark-bignum/src/lib.rs`) enforces. -/
 theorem mul_mod_sound (a b q c m : ℕ) (hc : c < m)
     (h : a * b = q * m + c) :
     c = (a * b) % m := by
@@ -128,7 +128,7 @@ theorem mul_mod_complete (a b m : ℕ) (hm : 0 < m) :
 
 /-- The integer value of an `n`-limb little-endian vector with limb base `β`:
 `valOfLimbs ls β = Σᵢ ls i · β^i`. Models the in-circuit reconstruction
-`Σᵢ β^i · limbᵢ` emitted by the limb recomposition in `crates/xark-bignum/src/lib.rs`, but
+`Σᵢ β^i · limbᵢ` emitted by the limb recomposition in `gadgets/xark-bignum/src/lib.rs`, but
 phrased generically over the number of limbs and over an arbitrary base.
 The secp256k1 lowering instantiates `n = 3`, `β = 2 ^ 86`. -/
 def valOfLimbs {n : ℕ} (ls : Fin n → ℕ) (β : ℕ) : ℕ :=
@@ -406,7 +406,7 @@ theorem valOfLimbs_eq_valOfNatLimbs_ext {n : ℕ} (ls : Fin n → ℕ) (β : ℕ
 /-- **Limbwise constraints + carry-no-wrap ⇒ modular product (gluing).**
 
 This is the full soundness chain for the non-native `mod_mul` gadget
-(`crates/xark-bignum/src/lib.rs`):
+(`gadgets/xark-bignum/src/lib.rs`):
 the limb-by-limb `Fr` column constraints, modeled as plain-ℕ equations on the
 extended limbs (which is sound provided the in-circuit carry range gadget
 ensures no carry wraps in `Fr`), force the recomposed value of `c` to be the
@@ -596,7 +596,7 @@ theorem carry_le {n : ℕ} (a b q c m : Fin n → ℕ)
 
 /-! ## Headline theorem: Fr-level limbwise constraints ⇒ modular product
 
-The constraints emitted by the non-native `mod_mul` gadget (`crates/xark-bignum/src/lib.rs`)
+The constraints emitted by the non-native `mod_mul` gadget (`gadgets/xark-bignum/src/lib.rs`)
 live in `Fr = ZMod r`. The
 column equation we prove sound here is
 

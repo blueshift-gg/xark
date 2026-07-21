@@ -1,0 +1,25 @@
+[package]
+name = "xark-rustc"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/blueshift-gg/xark"
+description = "The `rustc_driver` half of the xark toolchain — a `RUSTC` shim (nightly)."
+
+# The `rustc_driver` shim, invoked as `RUSTC` by `xark build`. A separate binary
+# so the CLI (`xark`) can host a fast global allocator — a `rustc_driver` process
+# aborts under one, so this binary keeps the system allocator.
+[[bin]]
+name = "xark-rustc"
+path = "src/main.rs"
+
+[features]
+# Opt-in developer diagnostics — forwards to `xark-ir`'s `debug` feature.
+debug = ["xark-ir/debug"]
+
+[dependencies]
+xark-ir = { path = "../ir" }
+serde_json = "1"
+# Inline storage for MIR-lowering projection paths (`[]`, `[i]`, `[i,j]`), the
+# hot slot-map keys — avoids a heap alloc per field access during lowering.
+smallvec = "1"

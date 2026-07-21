@@ -12,9 +12,9 @@ set_option linter.style.header false
 /-!
 # xark double-and-add ladder soundness — mechanised in Lean 4 / mathlib
 
-The scalar-mul gadget (`crates/xark-grumpkin/src/lib.rs`) (and the
+The scalar-mul gadget (`gadgets/xark-grumpkin/src/lib.rs`) (and the
 MSM gadget that calls it, plus the ECDSA verifier in
-`crates/xark-secp256k1/src/lib.rs`) computes `s · P` in-circuit by the
+`gadgets/xark-secp256k1/src/lib.rs`) computes `s · P` in-circuit by the
 standard LSB-first **double-and-add** ladder:
 
     acc      := 0                       -- point at infinity

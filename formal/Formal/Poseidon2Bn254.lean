@@ -14,7 +14,7 @@ set_option linter.style.header false
 
 The shared BN254 scalar field definition, used by the Poseidon2 gadget
 soundness proof (`Formal.Poseidon2Bn254T3` — the `t = 3` permutation matching
-the in-circuit gadget `crates/xark-poseidon2/src/lib.rs`). This is the field the
+the in-circuit gadget `gadgets/xark-poseidon2/src/lib.rs`). This is the field the
 Rust gadgets compute in: `ZMod bn254FrModulus`.
 -/
 

@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/xark", default-features = false }
-xark-sha256 = { path = "../../crates/xark-sha256" }
+xark = { path = "../../crates/lang", default-features = false }
+xark-sha256 = { path = "../../gadgets/xark-sha256" }
 
 [dev-dependencies]
 sha2 = "0.10"
@@ -17,7 +17,7 @@ sha2 = "0.10"
 [target.'cfg(not(xark))'.dependencies]
 # Host-only prover so the generated native validator (and this crate's tests)
 # can run; gated on `cfg(not(xark))` so a circuit build stays lean `no_std`.
-xark-prover = { path = "../../crates/xark-prover" }
+xark-prover = { path = "../../crates/prover" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

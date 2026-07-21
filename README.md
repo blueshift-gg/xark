@@ -38,7 +38,7 @@ Only `xark-rustc` touches nightly — you write **stable Rust** in your circuits
 ### As a language (library)
 
 Write a circuit as a `#![no_std]` Rust function over `Field` values, using the
-`xark` prelude. `assert_eq` emits a circuit equality constraint (not a native
+`xark` prelude. `require_eq` emits a circuit equality constraint (not a native
 `bool`); `Private<T>` / `Public<T>` mark input visibility; `Field` supports
 `+ - * ^` (with `^ n` meaning exponentiation).
 
@@ -48,7 +48,7 @@ use xark::prelude::*;
 
 /// Prove knowledge of a cube root: `secret^3 == result`.
 pub fn circuit(secret: Private<Field>, result: Public<Field>) {
-    assert_eq(secret ^ 3, result);
+    require_eq(secret ^ 3, result);
 }
 ```
 
@@ -88,8 +88,8 @@ toolchain fork required.
 `xark init` writes this wiring for you. To add it to an existing crate, point
 `rust-analyzer`'s check command at `xark` via a `rust-analyzer.toml` at the crate
 root (or the equivalent `.vscode/settings.json`) — `xark` must be on `PATH`
-(`cargo install --path crates/xark-cli` for the stable CLI, plus
-`cargo +nightly-2026-05-03 install --path crates/xark-rustc` for the driver into
+(`cargo install --path crates/cli` for the stable CLI, plus
+`cargo +nightly-2026-05-03 install --path crates/rustc` for the driver into
 the same bin dir):
 
 ```toml
@@ -173,34 +173,37 @@ driver touches nightly.
 ## Crates and gadgets
 
 * **`xark`** — the language library (`#![no_std]`, stable). Its `prelude` provides
-  the marker primitives (`Field`, `assert_eq`, `Private`/`Public`) from its `lang`
+  the marker primitives (`Field`, `require_eq`, `Private`/`Public`) from its `lang`
   module. The CLI is the separate **`xark-cli`** crate (stable, binary `xark`) and
   the MIR-extraction driver is **`xark-rustc`** (pinned nightly).
 * **Backend** — `xark-backend` (Groth16 setup/prove/verify, trusted setup,
   serialization) and `xark-verifier` (the `no_std` on-chain Solana verifier).
   Both are frontend-agnostic.
 
-**Basic building blocks (bits) ship in `xark`.** Specialized building blocks and
-gadgets are **separate crates you add only when you need them**: `xark-bignum`
-(non-native / foreign-field arithmetic, used by the EC gadgets) and the gadgets
-`xark-poseidon`, `xark-poseidon2`, `xark-sha256`, `xark-keccak`, `xark-mimc`,
-`xark-blake3`, `xark-blake2s`, `xark-aes`, `xark-pedersen`, `xark-grumpkin`,
-`xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`.
+Gadgets are **separate crates you add only when you need them**, and they all live
+under **`gadgets/`** — kept apart from the core toolchain in `crates/` so they're
+easy to fork, modify, or use on their own. Alongside the leaf gadgets sit the shared
+circuit libraries they build on: `xark-bits` (booleanity / bit-decomposition),
+`xark-bignum` (non-native / foreign-field arithmetic, used by the EC gadgets),
+`xark-curve` (the shared curve macros), and `xark-hash` (the `Hash`/`Digest` types).
+The gadgets themselves: `xark-poseidon`, `xark-poseidon2`, `xark-sha256`,
+`xark-keccak`, `xark-mimc`, `xark-blake3`, `xark-blake2s`, `xark-aes`,
+`xark-pedersen`, `xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`.
 
 Adding a gadget is just a Cargo dependency:
 
 ```toml
 # examples/poseidon/Cargo.toml
 [dependencies]
-xark = { path = "../../crates/xark" }
-xark-poseidon = { path = "../../crates/xark-poseidon" }
+xark = { path = "../../crates/lang" }
+xark-poseidon = { path = "../../gadgets/xark-poseidon" }
 ```
 
 ```rust
 #![no_std]
 use xark::prelude::*;
 use xark_poseidon::hash;
-// ... call `hash(..)` inside `circuit` and `assert_eq` the result.
+// ... call `hash(..)` inside `circuit` and `require_eq` the result.
 ```
 
 Because gadgets are ordinary Rust, the backend never needs per-gadget support —
@@ -238,17 +241,17 @@ audit has been performed; the "experimental" label stays until that changes.
 # Install the CLI (puts `xark` on PATH — needed for `xark init`/`build`/`prove`
 # and the rust-analyzer integration). The stable CLI and the nightly rustc-driver
 # are two crates; install both into the same bin dir so `xark` finds `xark-rustc`:
-cargo install --path crates/xark-cli
-cargo +nightly-2026-05-03 install --path crates/xark-rustc
+cargo install --path crates/cli
+cargo +nightly-2026-05-03 install --path crates/rustc
 
 cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 
-# The compiler (`crates/xark`) is a nightly `rustc_driver`, excluded from the
+# The compiler (`crates/lang`) is a nightly `rustc_driver`, excluded from the
 # root workspace, so its snapshot suite runs separately:
-cd crates/xark && cargo test --test snapshot          # fast, 42 tests
-cd crates/xark && cargo test --test snapshot -- --include-ignored  # + heavy KATs
+cd crates/lang && cargo test --test snapshot          # fast, ~78 tests
+cd crates/lang && cargo test --test snapshot -- --include-ignored  # + heavy KATs
 ```
 
 The nightly pin the compiler needs (and how to bump it) is documented in

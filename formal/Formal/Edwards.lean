@@ -13,8 +13,8 @@ set_option linter.style.longLine false
 /-!
 # Ed25519 twisted-Edwards addition & EdDSA-verification soundness
 
-The Ed25519 gadget (`crates/xark-ed25519/src/lib.rs`, group law emitted by the
-shared `xark_curve::edwards!` macro in `crates/xark-curve/src/lib.rs`) works on
+The Ed25519 gadget (`gadgets/xark-ed25519/src/lib.rs`, group law emitted by the
+shared `xark_curve::edwards!` macro in `gadgets/xark-curve/src/lib.rs`) works on
 the **twisted-Edwards** curve with `a = −1`
 
     −x² + y² = 1 + d · x² · y²
@@ -34,7 +34,7 @@ soundness model with a **sorry-free** complete-addition soundness theorem.
 
 ## Key simplification vs. secp256k1
 
-The macro comment (`ec_add` in `crates/xark-curve/src/lib.rs`) records the
+The macro comment (`ec_add` in `gadgets/xark-curve/src/lib.rs`) records the
 in-circuit addition as
 
 ```text
@@ -224,7 +224,7 @@ theorem edwards_add_comm {F : Type*} [Field F] (d x1 y1 x2 y2 : F) :
 
 /-! ## Part 2 — EdDSA verification relation
 
-`eddsa_verify` (`crates/xark-ed25519/src/lib.rs`) checks the Ed25519 signature
+`eddsa_verify` (`gadgets/xark-ed25519/src/lib.rs`) checks the Ed25519 signature
 equation `[S]·B == R + [k]·A`, which it rearranges to `[S]·B + [k]·(−A) == R`
 so a single windowed Strauss–Shamir pass computes both scalar products. We model
 the relation abstractly over the Ed25519 point group `G` (as an `AddCommGroup`;
@@ -306,7 +306,7 @@ theorem edwards_scalar_mul_ladder {G : Type*} [AddCommGroup G]
 Strauss–Shamir pass produces. Both scalar products are LSB double-and-add
 ladders, so this is two applications of `ladder_correct`.
 
-Note on scope: `double_scalar_mul` (`crates/xark-curve/src/lib.rs`) computes this
+Note on scope: `double_scalar_mul` (`gadgets/xark-curve/src/lib.rs`) computes this
 value via a *windowed* Strauss–Shamir pass (16-entry combined table, 2+2-bit
 windows, `select16`) as an optimisation. That the windowed accumulator equals
 this ladder value is a value-preserving equivalence layered on the limb-level

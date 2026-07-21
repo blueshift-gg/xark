@@ -168,7 +168,7 @@ def IsValidSha256CompressionWitness
     (∀ i : Fin 8, output i = addMod32 (state_in i) (rounds ⟨64, by decide⟩ i))
 
 /-- **End-to-end soundness wrapper for the SHA-256 compression gadget
-(`crates/xark-sha256/src/lib.rs`).**
+(`gadgets/xark-sha256/src/lib.rs`).**
 The witness's per-round structural equalities are precisely those the
 gadget enforces (one `add_mod_32`/`Ch`/`Maj`/`Σ` per round). The
 wrapper packages them into the spec relation's existential. -/
@@ -323,7 +323,7 @@ def IsValidKeccakf1600Witness
     output = rounds ⟨24, by decide⟩
 
 /-- **End-to-end soundness wrapper for the Keccak-f[1600] gadget
-(`crates/xark-keccak/src/lib.rs`).** -/
+(`gadgets/xark-keccak/src/lib.rs`).** -/
 theorem lowerKeccakf1600_sound
     {state_in output : Fin 25 → Word64} {rc : Fin 24 → Word64}
     (h : IsValidKeccakf1600Witness state_in output rc) :
@@ -494,7 +494,7 @@ def IsValidBlake2sWitness
     (t_lo = t_lo) ∧ (t_hi = t_hi) ∧ (last_block = last_block) ∧ (h_out = h_out)
 
 /-- **End-to-end soundness wrapper for the Blake2s gadget
-(`crates/xark-blake2s/src/lib.rs`).** -/
+(`gadgets/xark-blake2s/src/lib.rs`).** -/
 theorem lowerBlake2s_sound
     {h_in : Fin 8 → Word32} {m : Fin 16 → Word32}
     {t_lo t_hi : Word32} {last_block : Bool}
@@ -620,7 +620,7 @@ def IsValidBlake3CompressionWitness
     (block_len = block_len) ∧ (flags = flags)
 
 /-- **End-to-end soundness wrapper for the Blake3 gadget
-(`crates/xark-blake3/src/lib.rs`).** -/
+(`gadgets/xark-blake3/src/lib.rs`).** -/
 theorem lowerBlake3_sound
     {cv : Fin 8 → Word32} {block : Fin 16 → Word32}
     {counter_lo counter_hi block_len flags : Word32}
@@ -845,7 +845,7 @@ def IsValidAES128EncryptWitness
     ciphertext = rounds ⟨10, by decide⟩
 
 /-- **End-to-end soundness wrapper for the AES-128 encryption gadget
-(`crates/xark-aes/src/lib.rs`) (single block).** -/
+(`gadgets/xark-aes/src/lib.rs`) (single block).** -/
 theorem lowerAES128Encrypt_sound
     {plaintext key ciphertext : Fin 16 → Byte8}
     (h : IsValidAES128EncryptWitness plaintext key ciphertext) :
@@ -908,7 +908,7 @@ def IsValidEmbeddedCurveAddWitness {F : Type*} [Field F]
   (is_inf1 = 0 → is_inf2 = 0 → x1 = x2 → y1 = y2 → (2 : F) * y1 ≠ 0)
 
 /-- **End-to-end soundness wrapper for the embedded-curve point-addition gadget
-(`crates/xark-grumpkin/src/lib.rs`).** -/
+(`gadgets/xark-grumpkin/src/lib.rs`).** -/
 theorem lowerEmbeddedCurveAdd_sound {F : Type*} [Field F]
     {x1 y1 is_inf1 x2 y2 is_inf2 lambda
      same_x same_y is_double is_inverse inv_dx inv_dy
@@ -930,7 +930,7 @@ def IsValidMultiScalarMulWitness {G : Type*} [AddCommGroup G]
   output = ∑ i : Fin N, (scalars i) • (points i)
 
 /-- **End-to-end soundness wrapper for the multi-scalar-multiplication gadget
-(`crates/xark-grumpkin/src/lib.rs`).** -/
+(`gadgets/xark-grumpkin/src/lib.rs`).** -/
 theorem lowerMultiScalarMul_sound {G : Type*} [AddCommGroup G]
     {N : ℕ} {points : Fin N → G} {scalars : Fin N → ℕ} {output : G}
     (h : IsValidMultiScalarMulWitness points scalars output) :

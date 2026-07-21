@@ -15,11 +15,7 @@ pub fn aes256_ctr(
 ) {
     // Qualified call: the entry fn shares the gadget's name.
     let out = xark_aes::aes256_ctr::<20>(msg, key, nonce);
-    let mut i = 0usize;
-    while i < 20usize {
-        require_eq(out[i], ct[i]);
-        i += 1;
-    }
+    require_eq(out, ct);
 }
 
 #[cfg(test)]

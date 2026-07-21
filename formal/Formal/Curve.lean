@@ -12,7 +12,7 @@ set_option linter.style.header false
 /-!
 # xark elliptic-curve addition soundness — mechanised in Lean 4 / mathlib
 
-`crates/xark-grumpkin/src/lib.rs` adds points on the embedded short
+`gadgets/xark-grumpkin/src/lib.rs` adds points on the embedded short
 Weierstrass curve `y² = x³ + a·x + b` (Grumpkin, the BN254 embedded curve).
 The generic (distinct-`x`) case supplies a slope witness `λ` constrained by
 
@@ -64,12 +64,12 @@ for the `ec_add_in_circuit` gadget:
   `enforce_on_curve_grumpkin_sound` — the gated curve-membership constraint
   `(1 − is_infinity) · (y² − x³ + 17) = 0` forces curve membership exactly
   when `is_infinity = 0` and is vacuous otherwise. This is the algebraic
-  content of `enforce_on_curve_grumpkin` in `crates/xark-grumpkin/src/lib.rs` and is what discharges
+  content of `enforce_on_curve_grumpkin` in `gadgets/xark-grumpkin/src/lib.rs` and is what discharges
   the "inputs are on the curve" hypothesis used by every preceding theorem.
 * `IsValidECAddWitness` — packaged predicate bundling: both inputs are
   on Grumpkin (or at infinity), all booleans are boolean, the selector
   layer constraints (an `IsSelectorWitness` instance), the two gated slope
-  constraints from `crates/xark-grumpkin/src/lib.rs` (generic and doubling branches), and the
+  constraints from `gadgets/xark-grumpkin/src/lib.rs` (generic and doubling branches), and the
   output-mux equations (an `IsOutputMux` instance).
 * `EcAddSemantics` — Lean-side specification of what the gadget *ought*
   to compute. Stated as a relation `EcAddSemantics in1 in2 out` between
@@ -87,7 +87,7 @@ for the `ec_add_in_circuit` gadget:
   `IsValidECAddWitness`, the output triple stands in the `EcAddSemantics`
   relation to the inputs, by case-split on `is_inf1, is_inf2, is_inverse`.
 
-Scope: the scalar-multiplication ladder in `crates/xark-secp256k1/src/lib.rs` built on top of point
+Scope: the scalar-multiplication ladder in `gadgets/xark-secp256k1/src/lib.rs` built on top of point
 addition is not covered here.
 -/
 
@@ -183,7 +183,7 @@ selectors and the doubling / inverse / generic cases.
 -/
 
 /-- **Selector witness predicate.** Captures exactly the in-circuit
-constraints `crates/xark-grumpkin/src/lib.rs` emits on the routing selectors:
+constraints `gadgets/xark-grumpkin/src/lib.rs` emits on the routing selectors:
 
 * `same_x, same_y, is_double, is_inverse, lhs_inf, rhs_inf` are booleans;
 * `same_x · (x2 − x1) = 0` and `(x2 − x1) · inv_dx = 1 − same_x` form
@@ -346,7 +346,7 @@ is_inf3 = lhs_inf · rhs_inf
 
 (The `take_p1 · lhs_inf` term is omitted from `is_inf3` because
 `take_p1` already carries the `(1 − lhs_inf)` factor, making the
-product identically zero — matching `crates/xark-grumpkin/src/lib.rs` exactly.) -/
+product identically zero — matching `gadgets/xark-grumpkin/src/lib.rs` exactly.) -/
 structure IsOutputMux {F : Type*} [Field F]
     (x1 y1 x2 y2 xg yg lhs_inf rhs_inf is_inverse
      x3 y3 is_inf3 : F) : Prop where
@@ -413,7 +413,7 @@ The gadget enforces input curve membership via the gated constraint
 
     (1 − is_infinity) · (y² − x³ + 17) = 0
 
-emitted by `enforce_on_curve_grumpkin` in `crates/xark-grumpkin/src/lib.rs`. Grumpkin is the
+emitted by `enforce_on_curve_grumpkin` in `gadgets/xark-grumpkin/src/lib.rs`. Grumpkin is the
 short-Weierstrass curve `y² = x³ − 17` (so `a = 0`, `b = −17`) over the
 proving-system base field. The two lemmas below close the two cases:
 
@@ -487,7 +487,7 @@ for `ec_add_in_circuit`. The bundling has three parts:
    `ec_add_in_circuit_sound` (full) — the wrapper theorems.
 
 We model the `(0, 0, 1)` infinity encoding directly in the constructors
-of `EcAddSemantics` so the relation matches `crates/xark-grumpkin/src/lib.rs` exactly. -/
+of `EcAddSemantics` so the relation matches `gadgets/xark-grumpkin/src/lib.rs` exactly. -/
 
 /-- **Packaged witness predicate** for the entire `ec_add_in_circuit`
 gadget. A prover who satisfies all of the gadget's R1CS constraints

@@ -1,13 +1,13 @@
 # Toolchain: the nightly pin
 
-xark's compiler (`crates/xark`) is a `rustc_driver` — it links against rustc's
+xark's compiler (`crates/lang`) is a `rustc_driver` — it links against rustc's
 own internals to run the frontend and read MIR. That requires **nightly Rust**
 and the `rustc-dev` component; there is no stable API for MIR access. This
 document records what is pinned, why, its fragility, and how to bump it.
 
 ## What is pinned
 
-The pin lives in **`crates/xark/rust-toolchain.toml`** (not the repo root — the
+The pin lives in **`crates/lang/rust-toolchain.toml`** (not the repo root — the
 root workspace is plain stable Rust):
 
 ```toml
@@ -27,7 +27,7 @@ nightly is invisible to them (see `docs/architecture.md` → "How MIR is used").
 
 ## Why nightly
 
-`crates/xark` uses `rustc_private` to:
+`crates/lang` uses `rustc_private` to:
 
 - run the frontend (`rustc_driver::Callbacks`, `rustc_interface`),
 - obtain the `TyCtxt` and pull `pub fn circuit`'s MIR `Body` in
@@ -52,37 +52,37 @@ historically broken:
 
 Because the pin is the bare channel `nightly` (not a dated
 `nightly-YYYY-MM-DD`), a fresh `rustup update nightly` can pull a newer compiler
-that fails to build `crates/xark`. This is expected; it is why the compiler is
+that fails to build `crates/lang`. This is expected; it is why the compiler is
 isolated from the stable root workspace and why the snapshot suite is a separate
 CI job (`compiler-snapshots` in `ci.yml`). The locally validated nightly at the
 time of writing resolves to `rustc 1.97.0-nightly (2026-05-02)`.
 
 ## Bump procedure
 
-1. Update the pin in `crates/xark/rust-toolchain.toml` (change `channel`, or pin
+1. Update the pin in `crates/lang/rust-toolchain.toml` (change `channel`, or pin
    a specific `nightly-YYYY-MM-DD` for reproducibility) and run
    `rustup toolchain install nightly --component rustc-dev --component llvm-tools-preview`.
 2. Rebuild the compiler:
    ```bash
-   cd crates/xark-rustc && cargo build
+   cd crates/rustc && cargo build
    ```
    Fix any `rustc_private` API breaks (usually `TyCtxt` queries, MIR variants,
    or the `DiagCtxt`/`Callbacks` shapes — keep the churn behind the small
-   wrappers in `crates/xark-rustc/src`).
+   wrappers in `crates/rustc/src`).
 3. Run the compiler snapshot suite (must be **42 passed**):
    ```bash
-   cd crates/xark && cargo test --test snapshot
+   cd crates/lang && cargo test --test snapshot
    ```
    The `xark-test-harness` builds every gadget crate with `-Zalways-encode-mir`
    into an isolated `target/xark-compile` and the compiler into
-   `crates/xark-rustc/target`, then diffs each example's emitted R1CS/IR against the
-   committed snapshots (`crates/xark/tests/snapshots/`). If a gate count changed
+   `crates/rustc/target`, then diffs each example's emitted R1CS/IR against the
+   committed snapshots (`crates/lang/tests/snapshots/`). If a gate count changed
    intentionally, refresh with `UPDATE_SNAPSHOTS=1` and re-check the Lean-model
    bridges.
 4. Run the heavy known-answer vectors too (they gate real hash/curve
    correctness):
    ```bash
-   cd crates/xark && cargo test --test snapshot -- --include-ignored
+   cd crates/lang && cargo test --test snapshot -- --include-ignored
    cargo test -p xark-ed25519 --release
    ```
    These also run daily in CI via `.github/workflows/nightly-kats.yml`.

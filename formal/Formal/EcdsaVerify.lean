@@ -14,7 +14,7 @@ set_option linter.style.longLine false
 # ECDSA verification end-to-end soundness
 
 Top-level soundness statement for the in-circuit ECDSA verifier in
-the secp256k1 gadget (`crates/xark-secp256k1/src/lib.rs`), packaging the
+the secp256k1 gadget (`gadgets/xark-secp256k1/src/lib.rs`), packaging the
 per-primitive theorems already proved in `formal/`:
 
 * `Formal.NonNative.mul_mod_via_Fr_limbwise_constraints` — the non-native
@@ -91,7 +91,7 @@ def EcdsaVerifyRel {G : Type*} [AddCommGroup G]
 /-! ## Gadget intermediate-state witness -/
 
 /-- **Gadget intermediate-state predicate.** Mirrors the witness allocations
-in the secp256k1 ECDSA-verify gadget (`crates/xark-secp256k1/src/lib.rs`) one-to-one:
+in the secp256k1 ECDSA-verify gadget (`gadgets/xark-secp256k1/src/lib.rs`) one-to-one:
 
 | Field            | Gadget constraint                                                |
 |------------------|------------------------------------------------------------------|

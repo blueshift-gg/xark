@@ -12,7 +12,7 @@ set_option linter.style.header false
 /-!
 # xark secp256k1 lazy-reduction soundness — the Mersenne fold — in Lean 4 / mathlib
 
-The secp256k1 base field is `p = 2²⁵⁶ − 2³² − 977`. `crates/xark-bignum`'s
+The secp256k1 base field is `p = 2²⁵⁶ − 2³² − 977`. `gadgets/xark-bignum`'s
 `mul_lazy_k1` multiplies two 4×64-bit values mod `p` with the same
 quotient-free, deferred-reduction strategy as `mul_lazy_25519`
 (`Formal.Lazy25519`): form the schoolbook column products `cols[0..6]` (positions

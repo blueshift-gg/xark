@@ -1,13 +1,13 @@
 name: Solana E2E
 
 # On-chain verifier tests. The `#[svm_test]` bodies in
-# `crates/tests/tests/sbpf.rs` are each compiled to their own SBF program
+# `gadgets/tests/tests/sbpf.rs` are each compiled to their own SBF program
 # (svm-unit-test shells out to `cargo build-sbf`) and run in Mollusk on the
 # real `alt_bn128` syscalls — positive across every committed circuit, plus
 # negative tests that bad inputs are rejected on chain.
 #
 # Also runs the **`alt_bn128` ↔ Arkworks differential** in
-# `crates/tests/tests/differential_alt_bn128.rs`: the same fixed test
+# `gadgets/tests/tests/differential_alt_bn128.rs`: the same fixed test
 # vectors are evaluated host-side (Arkworks fallback) and on-chain
 # (syscall path) and must produce byte-identical results — the only
 # out-of-Lean trust assumption flagged by name in the formal sources.
@@ -21,15 +21,15 @@ on:
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
-      - "crates/tests/tests/differential_alt_bn128.rs"
-      - "crates/tests/Cargo.toml"
+      - "gadgets/tests/tests/differential_alt_bn128.rs"
+      - "gadgets/tests/Cargo.toml"
       - ".github/workflows/solana-ci.yml"
   pull_request:
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
-      - "crates/tests/tests/differential_alt_bn128.rs"
-      - "crates/tests/Cargo.toml"
+      - "gadgets/tests/tests/differential_alt_bn128.rs"
+      - "gadgets/tests/Cargo.toml"
       - ".github/workflows/solana-ci.yml"
   workflow_dispatch:
 

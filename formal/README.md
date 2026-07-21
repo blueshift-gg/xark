@@ -1,7 +1,7 @@
 # `formal/` — Lean 4 proofs of gadget soundness
 
 Machine-checked soundness proofs for the R1CS gadgets that xark compiles from
-its frontend gadget crates (`crates/xark-*`), written in **Lean 4** against
+its frontend gadget crates (`crates/lang-*`), written in **Lean 4** against
 **mathlib**. Covers the field-arithmetic gadgets where SMT / bit-blasting
 blows up and a proof assistant is the right tool.
 
@@ -118,7 +118,7 @@ point group:
 | `ladder_determinism` | corollary | bit-vectors encoding the same scalar produce the same ladder output — combined with `bits_unique`, this closes the under-constraint story for the scalar-mul ladder |
 
 [`Formal/NonNative.lean`](Formal/NonNative.lean) — the **prover-aided modular
-product** pattern that `crates/xark-secp256k1/src/lib.rs` builds every
+product** pattern that `gadgets/xark-secp256k1/src/lib.rs` builds every
 secp256k1 base- and scalar-field multiplication on top of. The 256-bit moduli
 don't fit in BN254 `Fr`, so each `c = a·b mod m` is lowered to a prover-supplied
 quotient `q` and remainder `c` checked against the *integer* identity
@@ -187,7 +187,7 @@ instances for secp256k1 / secp256r1 live in `Formal.Secp256k1Group` /
 | `ecdsa_verify_compose` | end-to-end | takes the seven per-primitive hypotheses (range, mod-inverse, the two `mul_mod` ℕ-identities, two `ladder_correct` outputs, ec_add, final eq) and concludes `EcdsaVerifyRel` directly |
 
 [`Formal/Sha256.lean`](Formal/Sha256.lean) — **structural** soundness layer
-for `crates/xark-sha256/src/lib.rs`. Full bit-equivalence of SHA-256
+for `gadgets/xark-sha256/src/lib.rs`. Full bit-equivalence of SHA-256
 is left to SAT/SMT bit-blasting (faster, better fit than a proof assistant);
 this file builds the *compositional* story over the
 already-proven per-op gadgets in [`Formal/Bitwise.lean`](Formal/Bitwise.lean)

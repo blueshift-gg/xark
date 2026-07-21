@@ -38,7 +38,7 @@ namespace Xark
 is the byte representative of `t^k mod m(t)` for `m(t) = t^8 + t^4 +
 t^3 + t + 1`. Used to reduce `t^k` for `k ∈ [8, 15)` (the range of
 cross-product exponents `i + j` for `i, j < 8`). Matches
-`gf256_xk_bits` in `crates/xark-aes/src/lib.rs` line-for-line. -/
+`gf256_xk_bits` in `gadgets/xark-aes/src/lib.rs` line-for-line. -/
 def gf256_xk_bits : Fin 15 → ℕ
   | ⟨0, _⟩  => 0x01
   | ⟨1, _⟩  => 0x02
@@ -81,7 +81,7 @@ def gf256_mul (x y : ℕ) : ℕ :=
 
 /-- **AES GF(2^8) multiplicative-inverse table** (the standard table
 used in the AES S-box; matches `gf256_inv` in
-`crates/xark-aes/src/lib.rs`). Entry `i` is the multiplicative inverse
+`gadgets/xark-aes/src/lib.rs`). Entry `i` is the multiplicative inverse
 of byte `i`; entry `0` is `0` by convention. Verified at the byte
 level by `gf256_mul_inv` below. -/
 def gf256_inv_table : List ℕ :=

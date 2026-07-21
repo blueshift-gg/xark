@@ -8,11 +8,11 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/xark", default-features = false }
-xark-bignum = { path = "../../crates/xark-bignum" }
+xark = { path = "../../crates/lang", default-features = false }
+xark-bignum = { path = "../../gadgets/xark-bignum" }
 
 [target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/xark-prover" }
+xark-prover = { path = "../../crates/prover" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

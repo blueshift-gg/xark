@@ -29,7 +29,7 @@ never ship those keys.)
 [Perpetual Powers of Tau]: https://github.com/privacy-scaling-explorations/perpetualpowersoftau
 
 There is also a fully **self-contained, in-process** regression test of this
-whole path — `crates/tests/tests/ceremony_e2e.rs`. It synthesizes a valid
+whole path — `gadgets/tests/tests/ceremony_e2e.rs`. It synthesizes a valid
 phase-1 transcript in memory (no snarkjs, no committed `.ptau`), runs
 `setup_from_ptau` → two `contribute` steps → `verify_chain`, then proves a
 witness with the finalized keys and verifies it — across circuits with **1, 2,
@@ -57,7 +57,7 @@ snarkjs powersoftau prepare phase2 pb.ptau final.ptau
 
 # --- phase 2: multi-party MPC over the circuit (xark) ---
 SEED=00112233... # 32-byte hex
-xark ceremony init --artifact crates/tests/fixtures/arithmetic_square.json \
+xark ceremony init --artifact gadgets/tests/fixtures/arithmetic_square.json \
  --ptau-file final.ptau --phase2-seed $SEED --out ceremony/
 xark ceremony contribute --ceremony-dir ceremony/ --label alice
 xark ceremony contribute --ceremony-dir ceremony/ --label bob
@@ -92,7 +92,7 @@ correspondingly large phase-1; treat them separately.
 Caveats when regenerating committed vectors:
 - A full regen must be **consistent** — regenerate every artifact in a circuit's
  fixture dir from the same keys, not a mix of dev-mode + ceremony bytes.
-- Update the hash pin in `crates/tests/tests/solana_format.rs`
+- Update the hash pin in `gadgets/tests/tests/solana_format.rs`
  (`VK_SOLANA_SHA256` etc.), which intentionally locks the committed VK bytes.
 - Re-run `cargo test -p xark-tests` (host + `--test sbpf`).
 
