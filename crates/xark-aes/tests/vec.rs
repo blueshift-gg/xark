@@ -39,11 +39,11 @@ fn id_of(p: &PrimitiveProgram, name: &str) -> u32 {
 #[test]
 fn gf_mul_matches_known_products() {
     let src = "#![no_std]\n\
-        use xark::{assert_eq, Field, Private, Public};\n\
+        use xark::{require_eq, Field, Private, Public};\n\
         use xark_aes::gf_mul;\n\
         pub fn circuit(a: Private<Field>, b: Private<Field>, expected: Public<Field>) {\n\
             let r = gf_mul(a.to_bits::<8>(), b.to_bits::<8>());\n\
-            assert_eq(Field::from_bits::<8>(r), expected);\n\
+            require_eq(Field::from_bits::<8>(r), expected);\n\
         }\n";
     let p = compile("gf_mul", src);
 
@@ -73,16 +73,181 @@ fn gf_mul_matches_known_products() {
 }
 
 // --------------------------------------------------------------------------
+// GHASH core: GF(2^128) multiplication in the GCM field, against the `ghash` crate.
+// --------------------------------------------------------------------------
+
+#[test]
+fn gf128_mul_matches_ghash() {
+    use ghash::universal_hash::{KeyInit, UniversalHash};
+    use ghash::GHash;
+
+    // Circuit: 16 x-bytes, 16 y-bytes (private), 16 z-bytes (public expected product).
+    let mut src = String::from(
+        "#![no_std]\n\
+         use xark::{require_eq, Field, Private, Public};\n\
+         use xark_aes::{gf128_mul, bytes_to_gf128, gf128_to_bytes};\n\
+         pub fn circuit(\n",
+    );
+    for i in 0..16 {
+        src.push_str(&format!("  x{i}: Private<Field>,\n"));
+    }
+    for i in 0..16 {
+        src.push_str(&format!("  y{i}: Private<Field>,\n"));
+    }
+    for i in 0..16 {
+        src.push_str(&format!("  z{i}: Public<Field>,\n"));
+    }
+    src.push_str(") {\n  let x = [");
+    for i in 0..16 {
+        src.push_str(&format!("x{i},"));
+    }
+    src.push_str("];\n  let y = [");
+    for i in 0..16 {
+        src.push_str(&format!("y{i},"));
+    }
+    src.push_str("];\n  let z = [");
+    for i in 0..16 {
+        src.push_str(&format!("z{i},"));
+    }
+    src.push_str(
+        "];\n  let p = gf128_to_bytes(gf128_mul(bytes_to_gf128(x), bytes_to_gf128(y)));\n\
+         let mut i = 0usize;\n  while i < 16usize { require_eq(p[i], z[i]); i += 1; }\n}\n",
+    );
+    let p = compile("gf128_mul", &src);
+    eprintln!("gf128_mul circuit: {} constraints", p.constraints.len());
+
+    // `GHash::new(H).update(Y)` finalizes to `Y · H` in the GCM field.
+    let gf128 = |x: &[u8; 16], y: &[u8; 16]| -> [u8; 16] {
+        let mut h = GHash::new(x.into());
+        h.update(&[(*y).into()]);
+        h.finalize().into()
+    };
+
+    let cases: [([u8; 16], [u8; 16]); 3] = [
+        // The GCM spec worked example (NIST GCM, H·0 pattern) + arbitrary values.
+        (
+            [
+                0x66, 0xe9, 0x4b, 0xd4, 0xef, 0x8a, 0x2c, 0x3b, 0x88, 0x4c, 0xfa, 0x59, 0xca, 0x34,
+                0x2b, 0x2e,
+            ],
+            [
+                0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92, 0xf3, 0x28, 0xc2, 0xb9, 0x71, 0xb2,
+                0xfe, 0x78,
+            ],
+        ),
+        ([1u8; 16], [2u8; 16]),
+        (
+            [
+                0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+                0xaa, 0xbb,
+            ],
+            [0xff; 16],
+        ),
+    ];
+
+    for (x, y) in cases.iter() {
+        let z = gf128(x, y);
+        let mut inputs = BTreeMap::new();
+        for i in 0..16 {
+            inputs.insert(id_of(&p, &format!("x{i}")), (x[i] as u32).to_string());
+            inputs.insert(id_of(&p, &format!("y{i}")), (y[i] as u32).to_string());
+            inputs.insert(id_of(&p, &format!("z{i}")), (z[i] as u32).to_string());
+        }
+        let assign = solver::solve_and_check(&p, &inputs)
+            .unwrap_or_else(|e| panic!("gf128_mul {x:02x?}·{y:02x?} should = {z:02x?}: {e:?}"));
+        assert!(
+            solver::analyze_underconstrained(&p, &assign).is_empty(),
+            "gf128_mul under-constrained"
+        );
+        // A wrong product byte must be rejected.
+        inputs.insert(id_of(&p, "z0"), ((z[0] ^ 1) as u32).to_string());
+        assert!(
+            solver::solve_and_check(&p, &inputs).is_err(),
+            "wrong gf128 product accepted"
+        );
+    }
+}
+
+/// Full AES-256 block against the FIPS-197 Appendix C.3 known-answer test:
+///   key = 000102…1e1f (32 bytes), pt = 00112233…ff -> ct = 8ea2b7ca…6089
+#[test]
+fn aes256_matches_fips_kat() {
+    let mut src = String::from(
+        "#![no_std]\n\
+         use xark::{Field, Private, Public};\n\
+         use xark_aes::aes256_constrain;\n\
+         pub fn circuit(\n",
+    );
+    for i in 0..16 {
+        src.push_str(&format!("  p{i}: Private<Field>,\n"));
+    }
+    for i in 0..32 {
+        src.push_str(&format!("  k{i}: Private<Field>,\n"));
+    }
+    for i in 0..16 {
+        src.push_str(&format!("  c{i}: Public<Field>,\n"));
+    }
+    src.push_str(") {\n  let pt = [");
+    for i in 0..16 {
+        src.push_str(&format!("p{i},"));
+    }
+    src.push_str("];\n  let key = [");
+    for i in 0..32 {
+        src.push_str(&format!("k{i},"));
+    }
+    src.push_str("];\n  let ct = [");
+    for i in 0..16 {
+        src.push_str(&format!("c{i},"));
+    }
+    src.push_str("];\n  aes256_constrain(pt, key, ct);\n}\n");
+
+    let p = compile("aes256", &src);
+
+    let pt: [u32; 16] = [
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+        0xff,
+    ];
+    let key: [u32; 32] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+    let ct: [u32; 16] = [
+        0x8e, 0xa2, 0xb7, 0xca, 0x51, 0x67, 0x45, 0xbf, 0xea, 0xfc, 0x49, 0x90, 0x4b, 0x49, 0x60,
+        0x89,
+    ];
+
+    let mut inputs = BTreeMap::new();
+    for i in 0..16 {
+        inputs.insert(id_of(&p, &format!("p{i}")), pt[i].to_string());
+        inputs.insert(id_of(&p, &format!("c{i}")), ct[i].to_string());
+    }
+    for i in 0..32 {
+        inputs.insert(id_of(&p, &format!("k{i}")), key[i].to_string());
+    }
+    let assign = solver::solve_and_check(&p, &inputs).expect("AES-256 FIPS KAT must verify");
+    assert!(
+        solver::analyze_underconstrained(&p, &assign).is_empty(),
+        "AES-256 under-constrained"
+    );
+    inputs.insert(id_of(&p, "c0"), "0".to_string());
+    assert!(
+        solver::solve_and_check(&p, &inputs).is_err(),
+        "wrong AES-256 ciphertext accepted"
+    );
+}
+
+// --------------------------------------------------------------------------
 // Layer 2: S-box against the FIPS-197 table.
 // --------------------------------------------------------------------------
 
 #[test]
 fn sbox_matches_fips_table() {
     let src = "#![no_std]\n\
-        use xark::{assert_eq, Field, Private, Public};\n\
+        use xark::{require_eq, Field, Private, Public};\n\
         use xark_aes::sbox;\n\
         pub fn circuit(x: Private<Field>, y: Public<Field>) {\n\
-            assert_eq(Field::from_bits::<8>(sbox(x.to_bits::<8>())), y);\n\
+            require_eq(Field::from_bits::<8>(sbox(x.to_bits::<8>())), y);\n\
         }\n";
     let p = compile("sbox", src);
 
@@ -136,7 +301,7 @@ fn sbox_matches_fips_table() {
 #[test]
 fn key_schedule_matches_fips() {
     let src = "#![no_std]\n\
-        use xark::{assert_eq, Field, Private, Public};\n\
+        use xark::{require_eq, Field, Private, Public};\n\
         use xark_aes::key_schedule_byte;\n\
         pub fn circuit(\n\
           k0: Private<Field>,k1: Private<Field>,k2: Private<Field>,k3: Private<Field>,\n\
@@ -146,12 +311,12 @@ fn key_schedule_matches_fips() {
           e16: Public<Field>, e17: Public<Field>, e18: Public<Field>, e19: Public<Field>,\n\
           e160: Public<Field>, e175: Public<Field>) {\n\
           let key = [k0,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11,k12,k13,k14,k15];\n\
-          assert_eq(key_schedule_byte(key, 16), e16);\n\
-          assert_eq(key_schedule_byte(key, 17), e17);\n\
-          assert_eq(key_schedule_byte(key, 18), e18);\n\
-          assert_eq(key_schedule_byte(key, 19), e19);\n\
-          assert_eq(key_schedule_byte(key, 160), e160);\n\
-          assert_eq(key_schedule_byte(key, 175), e175);\n\
+          require_eq(key_schedule_byte(key, 16), e16);\n\
+          require_eq(key_schedule_byte(key, 17), e17);\n\
+          require_eq(key_schedule_byte(key, 18), e18);\n\
+          require_eq(key_schedule_byte(key, 19), e19);\n\
+          require_eq(key_schedule_byte(key, 160), e160);\n\
+          require_eq(key_schedule_byte(key, 175), e175);\n\
         }\n";
     let p = compile("ks", src);
     let key: [u32; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];

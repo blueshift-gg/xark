@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 // memory_var: a dynamic `arr[idx]` read. xark has no runtime
 // memory, so the variable-index read is modelled as a 4-way select/mux over
@@ -19,15 +19,15 @@ pub fn memory_var(
     y: Public<Field>,
 ) {
     // Each selector bit is boolean: sel_i * sel_i == sel_i.
-    assert_eq(sel0 * sel0, sel0);
-    assert_eq(sel1 * sel1, sel1);
-    assert_eq(sel2 * sel2, sel2);
-    assert_eq(sel3 * sel3, sel3);
+    require_eq(sel0 * sel0, sel0);
+    require_eq(sel1 * sel1, sel1);
+    require_eq(sel2 * sel2, sel2);
+    require_eq(sel3 * sel3, sel3);
     // One-hot: exactly one selector is set.
-    assert_eq(sel0 + sel1 + sel2 + sel3, Field::constant("1"));
+    require_eq(sel0 + sel1 + sel2 + sel3, Field::constant("1"));
     // Selected element = Σ sel_i · arr_i.
     let selected = sel0 * arr0 + sel1 * arr1 + sel2 * arr2 + sel3 * arr3;
-    assert_eq(selected, y);
+    require_eq(selected, y);
 }
 
 #[cfg(test)]
@@ -37,11 +37,33 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // one-hot sel1 → arr[1] = 20
-        memory_var("10".into(), "20".into(), "30".into(), "40".into(), "0".into(), "1".into(), "0".into(), "0".into(), "20".into()).unwrap();
+        memory_var(
+            "10".into(),
+            "20".into(),
+            "30".into(),
+            "40".into(),
+            "0".into(),
+            "1".into(),
+            "0".into(),
+            "0".into(),
+            "20".into(),
+        )
+        .unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(memory_var("10".into(), "20".into(), "30".into(), "40".into(), "0".into(), "1".into(), "0".into(), "0".into(), "21".into()).is_err());
+        assert!(memory_var(
+            "10".into(),
+            "20".into(),
+            "30".into(),
+            "40".into(),
+            "0".into(),
+            "1".into(),
+            "0".into(),
+            "0".into(),
+            "21".into()
+        )
+        .is_err());
     }
 }

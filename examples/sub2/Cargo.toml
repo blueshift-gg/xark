@@ -3,8 +3,18 @@ name = "sub2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+
 [lib]
 path = "src/lib.rs"
+
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-bignum = { path = "../../crates/xark-bignum" }
+
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
+
+[workspace]

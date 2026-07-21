@@ -18,8 +18,8 @@ pub fn grumpkin(
     r: Public<Affine>,
 ) {
     let out = multi_scalar_mul([s0, s1], [[p0.x, p0.y], [p1.x, p1.y]]);
-    assert_eq(out[0], r.x);
-    assert_eq(out[1], r.y);
+    require_eq(out[0], r.x);
+    require_eq(out[1], r.y);
 }
 
 #[cfg(test)]

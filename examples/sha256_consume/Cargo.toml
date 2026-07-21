@@ -10,3 +10,11 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-sha256 = { path = "../../crates/xark-sha256" }
+
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
+
+[workspace]

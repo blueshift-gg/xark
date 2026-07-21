@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 // nested_calls: main asserts square_plus_one(x) == y, where
 // square_plus_one calls square (two-level nested calls).
@@ -16,7 +16,7 @@ fn square_plus_one(x: Field) -> Field {
 
 #[circuit]
 pub fn nested_calls(x: Private<Field>, y: Public<Field>) {
-    assert_eq(square_plus_one(x), y);
+    require_eq(square_plus_one(x), y);
 }
 
 #[cfg(test)]

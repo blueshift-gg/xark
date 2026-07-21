@@ -321,7 +321,7 @@ An auditor should:
 The lowering surface is deliberately small: there is **no opcode
 dispatch and no predication**. The accepted rustc-MIR subset
 lowers to a small primitive IR — `add` / `sub` / `mul` /
-`assert_eq`, plus the `hint_*` / advice primitives — which then
+`require_eq`, plus the `hint_*` / advice primitives — which then
 lowers directly to R1CS. The auditable points are:
 
 * **Each primitive → its expected constraint.** Every primitive has a
@@ -329,9 +329,9 @@ lowers directly to R1CS. The auditable points are:
   gadget's multiplication-gate count, so any drift in a primitive's
   lowering forces the Lean model to be re-checked against the new
   shape.
-* **`mul` → fresh-variable allocation and the `assert_eq` merge.**
+* **`mul` → fresh-variable allocation and the `require_eq` merge.**
   A `mul` allocates one fresh witness and emits a single `A · B = C`
-  row; the `assert_eq` merge folds a trailing equality into that
+  row; the `require_eq` merge folds a trailing equality into that
   row (this is what keeps difference-of-squares at a single
   constraint). These two rules are the whole compaction story and
   should be read together.

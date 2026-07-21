@@ -1,35 +1,38 @@
-//! Demo circuit: prove that a fixed-length 200-byte private message hashes to a
-//! public 256-bit Keccak-256 (Ethereum `keccak256`) digest.
+//! Prove knowledge of a private message whose Keccak-256 (Ethereum `keccak256`)
+//! digest equals a public 256-bit hash — the ergonomic form.
 //!
-//! The 200 message bytes are the private witness `msg[0..200]` (each
-//! range-checked to `0..256` inside `keccak256` via `to_bits::<8>`); the 4
-//! digest words `d[0..4]` are the public inputs (little-endian 64-bit lanes). A
-//! 200-byte message spans 2 rate blocks (padded length 272 = 2 * 136), so the
-//! sponge runs `keccak_f` twice. Lane / byte order is little-endian, matching
-//! the single-block gadget and Ethereum's `keccak256`.
+//! The message is a byte array (`[u8; N]`) and the digest a `Hash` — a 256-bit
+//! digest packed into two field halves (`xark-hash`), so the circuit exposes just
+//! **2 public inputs** instead of four 64-bit lanes. The host still supplies a
+//! plain `[u8; 32]`. `require_eq` packs the gadget's raw little-endian lane output
+//! into that `Hash`.
+#![cfg_attr(xark, no_std)]
 
-#![no_std]
-
-use xark_bits::from_bits64;
 use xark_keccak::prelude::*;
 
-pub fn circuit(msg: Private<[Field; 200]>, d: Public<[Field; 4]>) {
-    // Variable-length sponge: absorb (2 blocks) + squeeze 256 bits (4 lanes).
-    let digest = keccak256::<200>(msg);
+#[circuit]
+pub fn keccak256(msg: Private<[u8; 3]>, digest: Public<Hash>) {
+    // Qualified call: the entry fn shares the gadget's name, so name it by path.
+    require_eq(xark_keccak::keccak256(msg), digest);
+}
 
-    // Constrain each output lane (recomposed to a field element) against the
-    // public digest word. Reading `digest[i]` as a whole lane isn't supported,
-    // so extract each lane bit-by-bit into a flat local first.
-    let zero = [Field::from(0u8); 64];
-    let mut i = 0usize;
-    while i < 4usize {
-        let mut lane = zero;
-        let mut j = 0usize;
-        while j < 64usize {
-            lane[j] = digest[i][j];
-            j += 1;
-        }
-        assert_eq(from_bits64(lane), d[i]);
-        i += 1;
+#[cfg(test)]
+mod tests {
+    use super::keccak256;
+    use sha3::{Digest, Keccak256};
+
+    const MSG: [u8; 3] = *b"abc";
+
+    #[test]
+    fn accepts_valid() {
+        let digest: [u8; 32] = Keccak256::digest(MSG).into();
+        keccak256(MSG, digest).unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong_digest() {
+        let mut digest: [u8; 32] = Keccak256::digest(MSG).into();
+        digest[0] ^= 1;
+        assert!(keccak256(MSG, digest).is_err());
     }
 }

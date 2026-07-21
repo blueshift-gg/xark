@@ -460,7 +460,7 @@ lowering emits) and `crates/xark-prover/` (R1CS synthesis).
 
 **Relation.** Each arithmetic assertion asserts
 `q_c + Σ_k coef_k * w_k + Σ_i q_M_i * a_i * b_i = 0` for the linear
-combinations referenced by the expression. `assert_eq(x, y)` lowers to
+combinations referenced by the expression. `require_eq(x, y)` lowers to
 the `x - y = 0` form of this.
 
 **Constraints emitted.** Three cases based on the number of mul terms:
@@ -515,7 +515,7 @@ hint itself**.
 **Argument.** Soundness relies on a gadget-authoring invariant: every hint
 output witness must also be referenced by at least one surrounding R1CS
 constraint that pins its value relative to other constrained witnesses. The
-canonical example is "supply `w = x⁻¹` as advice, then assert `x * w = 1`".
+canonical example is "supply `w = x⁻¹` as advice, then require `x * w = 1`".
 The check-half is what the R1CS enforces; the hint-half we trust to produce
 *a* value but rely on the check to pin it to the *right* value (see the
 `inverse` example).

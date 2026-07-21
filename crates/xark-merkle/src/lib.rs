@@ -11,11 +11,11 @@
 //! Soundness: every `index_bits[i]` is boolean-constrained (`b·b == b`), so a
 //! prover cannot smuggle a non-`{0,1}` selector to fold a different root; given a
 //! boolean bit the sibling ordering at each level is a sound linear mux
-//! (`if_false + bit·(if_true − if_false)`), and the final `assert_eq` pins the
+//! (`if_false + bit·(if_true − if_false)`), and the final `require_eq` pins the
 //! fold to the claimed root. The path length is the const-generic `DEPTH`.
 #![no_std]
 
-use xark::{assert_eq, Field};
+use xark::{require_eq, Field};
 use xark_poseidon::hash2;
 
 /// Boolean-gated select `bit ? if_true : if_false`, as the linear combination
@@ -41,7 +41,7 @@ pub fn merkle_root<const DEPTH: usize>(
     let mut i = 0usize;
     while i < DEPTH {
         let bit = index_bits[i];
-        bit.assert_bool();
+        bit.require_bool();
         let sib = siblings[i];
         // bit = 0: node is the left child  → (left, right) = (node, sib)
         // bit = 1: node is the right child → (left, right) = (sib, node)
@@ -62,11 +62,11 @@ pub fn merkle_verify<const DEPTH: usize>(
     index_bits: [Field; DEPTH],
     root: Field,
 ) {
-    assert_eq(merkle_root::<DEPTH>(leaf, siblings, index_bits), root);
+    require_eq(merkle_root::<DEPTH>(leaf, siblings, index_bits), root);
 }
 
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_merkle::prelude::*;`.
 pub mod prelude {
     pub use crate::{merkle_root, merkle_verify};

@@ -70,7 +70,7 @@ On a function call with all-`Field` args:
    *plug*). Aliased plugs (the same var in two positions) are copied to distinct
    vars so the var→var replay remap can't collapse them.
 2. **First call — walk & capture.** The body is lowered normally, but inside a
-   function body cross-call caches (bit-decomposition memo, mul→assert_eq merge)
+   function body cross-call caches (bit-decomposition memo, mul→require_eq merge)
    are suppressed so the body is a *pure function of its plugs*. The emitted
    constraints, witness ops, plug vars, and per-var visibilities are captured as
    a `FunctionTemplate`, keyed by `def_id | substs | plug-arity`.
@@ -86,7 +86,7 @@ Recursive functions (a function calling functions) form the DAG.
 `#[inline(never)]` plays two distinct roles that are easy to conflate:
 
 - **On the lang primitives** (the operator impls, `__xark_*`, `constrain_eq`,
-  `assert_eq`, `Field::constant`) it is a *recognition anchor*: it guarantees
+  `require_eq`, `Field::constant`) it is a *recognition anchor*: it guarantees
   rustc emits them as distinct MIR calls that `classify_call` matches by `DefId`,
   rather than inlining the `loop {}` marker bodies away. These are handled as
   `KnownCall`s and lowered *directly* — recognition runs before `is_function`, so

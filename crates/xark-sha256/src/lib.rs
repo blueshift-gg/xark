@@ -35,7 +35,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{assert_eq, Field};
+use xark::{require_eq, Field};
 use xark_bits::{and32, not32, rotr32, shr32, xor32};
 
 // ===========================================================================
@@ -70,7 +70,7 @@ fn reduce<const N: usize>(sum: Field) -> [Field; 32] {
     // Booleanity: every advice bit is 0 or 1.
     let mut i = 0usize;
     while i < N {
-        bits[i].assert_bool();
+        bits[i].require_bool();
         i += 1;
     }
 
@@ -85,7 +85,7 @@ fn reduce<const N: usize>(sum: Field) -> [Field; 32] {
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, sum);
+    require_eq(acc, sum);
 
     // Low 32 bits = the reduced word.
     let mut out = [Field::from(0u8); 32];
@@ -553,9 +553,12 @@ pub fn sha256<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 32]; 8] {
 }
 
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_sha256::prelude::*;`.
 pub mod prelude {
     pub use crate::*;
     pub use xark::prelude::*;
+    // The shared digest types: `Hash` (packed, 2 public inputs) and `Digest`
+    // (unpacked, for a constant hash baked into the circuit).
+    pub use xark_hash::{Digest, Hash};
 }

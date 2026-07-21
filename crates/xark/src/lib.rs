@@ -16,13 +16,13 @@
 //!
 //! /// Prove knowledge of a cube root: `secret^3 == result`.
 //! pub fn circuit(secret: Private<Field>, result: Public<Field>) {
-//!     assert_eq(secret ^ 3, result);
+//!     require_eq(secret ^ 3, result);
 //! }
 //! ```
 //!
 //! [`Private<T>`] marks a private witness input, [`Public<T>`] a public input;
 //! both are transparent aliases the compiler recovers from the signature.
-//! [`assert_eq`] emits an equality constraint (circuit `==`, not native
+//! [`require_eq`] emits an equality constraint (circuit `==`, not native
 //! `bool`). `Field` supports `+ - * ^` (with `^ n` meaning exponentiation).
 //!
 //! ## Building gadgets
@@ -39,7 +39,7 @@
 // same way they resolve in downstream circuit crates. Standard proc-macro pattern.
 extern crate self as xark;
 
-/// The `xark` language markers (`Field`, `Private`, `Public`, `assert_eq`, the
+/// The `xark` language markers (`Field`, `Private`, `Public`, `require_eq`, the
 /// `Field` methods and operator impls, and the recognized intrinsics). Formerly
 /// the standalone `xark-lang` crate, now an in-crate module so that circuit
 /// programs and gadgets depend on a single crate (`xark`).
@@ -51,36 +51,25 @@ pub mod lang;
 /// `Field` impls; circuit authors use the `Field` methods, not these directly.
 pub mod intrinsics;
 
-/// The [`Digest`] wrapper — an ergonomic 256-bit SHA-256 digest that hides the
-/// gadget's word/byte/bit layout so "hash bytes, then assert the digest equals a
-/// known value" is a three-line circuit. See the module docs.
-pub mod digest;
-
-/// The [`Hash`] wrapper — a 256-bit hash packed into 2 field elements, for a
-/// compact `Public<Hash>` input (2 public inputs instead of 256). See the docs.
-pub mod hash;
-
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{
-        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, witness_begin, witness_end,
-        Field, Private, Public,
+        require, require_eq, require_ge, require_gt, require_le, require_lt, witness_begin,
+        witness_end, Field, Private, Public,
     };
     pub use xark_macros::circuit;
 }
 
 // The same surface as `prelude`, re-exported at the crate root so both
-// `use xark::prelude::*;` and `use xark::{assert, Field, ...};` work.
-pub use crate::digest::Digest;
-pub use crate::hash::{Blake256, Hash};
+// `use xark::prelude::*;` and `use xark::{require, Field, ...};` work.
 pub use crate::lang::{
-    assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, witness_begin, witness_end,
-    Field, Private, Public,
+    require, require_eq, require_ge, require_gt, require_le, require_lt, witness_begin,
+    witness_end, Field, Private, Public,
 };
-// `#[circuit]` bodies shadow `assert_eq` with this trait-dispatched version so it
+// `#[circuit]` bodies shadow `require_eq` with this trait-dispatched version so it
 // also compares composite circuit types (e.g. a SHA-256 digest vs a `Digest`).
 #[doc(hidden)]
-pub use crate::lang::{__circuit_assert_eq, AssertEqCircuit};
+pub use crate::lang::{__xark_require_eq, RequireEqCircuit};
 // `#[circuit]`, the `#[derive(CircuitInput)]` that generates a struct's
 // `Into<[Field; N]>` in the compiler's structural-flatten order, and
 // `#[derive(Transparent)]` that generates a transparent type's host `NativeInput`

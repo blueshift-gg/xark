@@ -23,7 +23,7 @@ pub enum ConstraintKind {
     RangeCheck,
     /// A structural part of an ordered comparison (`<`, `<=`, `>`, `>=`).
     Comparison,
-    /// An equality constraint `(a - b) * 1 = 0` (from `assert_eq`).
+    /// An equality constraint `(a - b) * 1 = 0` (from `require_eq`).
     Equality,
     /// A fused boolean XOR gate.
     Xor,

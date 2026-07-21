@@ -1,11 +1,10 @@
-//! Struct support: an elliptic-curve-style `Point` with 3-limb coordinates,
-//! passed **directly as an aggregate circuit input** (it flattens to 6 `Field`
-//! inputs — `p.x[0..2]`, `p.y[0..2]`). Field access `p.x[i]` and passing a
-//! `Point` through a helper both work, and it lowers to the exact same R1CS as
-//! the bare `[[Field; 3]; 2]` array form (zero-cost).
-#![no_std]
+//! Struct support: a `Point { x: [Field; 3], y: [Field; 3] }` built inside the
+//! circuit and passed through a helper that returns a tuple, with field access
+//! `p.x[i]`. Exercises the `AggregateKind::Adt` (struct construction) and tuple
+//! lowering — all zero-cost, lowering to the same R1CS as the bare field form.
+#![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 struct Point {
     x: [Field; 3],
@@ -17,8 +16,43 @@ fn combine(p: Point) -> (Field, Field) {
     (p.x[0] + p.y[0], p.x[0] * p.y[0])
 }
 
-pub fn circuit(p: Private<Point>, sum: Public<Field>, prod: Public<Field>) {
+#[circuit]
+pub fn struct_point(
+    x: Private<[Field; 3]>,
+    y: Private<[Field; 3]>,
+    sum: Public<Field>,
+    prod: Public<Field>,
+) {
+    let p = Point { x, y };
     let (s, m) = combine(p);
-    assert_eq(s, sum);
-    assert_eq(m, prod);
+    require_eq(s, sum);
+    require_eq(m, prod);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::struct_point;
+
+    #[test]
+    fn accepts_valid() {
+        // x0 = 3, y0 = 5 → sum = 8, prod = 15.
+        struct_point(
+            ["3".into(), "0".into(), "0".into()],
+            ["5".into(), "0".into(), "0".into()],
+            "8".into(),
+            "15".into(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong_product() {
+        assert!(struct_point(
+            ["3".into(), "0".into(), "0".into()],
+            ["5".into(), "0".into(), "0".into()],
+            "8".into(),
+            "16".into(),
+        )
+        .is_err());
+    }
 }

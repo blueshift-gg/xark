@@ -1,5 +1,5 @@
 [package]
-name = "xark_sha256_test"
+name = "aes_gcm"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -9,15 +9,13 @@ path = "src/lib.rs"
 
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
-xark-sha256 = { path = "../../crates/xark-sha256" }
+xark-aes = { path = "../../crates/xark-aes" }
 
 [dev-dependencies]
-sha2 = "0.10"
+# Reference AES-GCM (renamed to avoid colliding with this crate's own name).
+aesgcm-ref = { package = "aes-gcm", version = "0.10" }
 
 [target.'cfg(not(xark))'.dependencies]
-# Host-only prover so downstream crates (and this crate's tests) can call
-# the generated native validator; gated on `cfg(not(xark))` so a circuit
-# build stays lean `no_std` with no feature flag.
 xark-prover = { path = "../../crates/xark-prover" }
 
 [lints.rust]

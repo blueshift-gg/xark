@@ -1,11 +1,11 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
-// arithmetic_square: assert(x * x == y).
+// arithmetic_square: require(x * x == y).
 #[circuit]
 pub fn arithmetic_square(x: Private<Field>, y: Public<Field>) {
-    assert_eq(x * x, y);
+    require_eq(x * x, y);
 }
 
 #[cfg(test)]

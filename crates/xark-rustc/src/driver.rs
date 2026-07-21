@@ -242,7 +242,7 @@ impl R1csCallbacks {
 }
 
 /// Build-time faithfulness gate (`XARK_VERIFY`): decode the DAG-compact artifact
-/// and assert it reproduces the flat lowering EXACTLY — same constraints (`a·b=c`),
+/// and require it reproduces the flat lowering EXACTLY — same constraints (`a·b=c`),
 /// same witness program, same variable roles. The decoder is an independent
 /// reimplementation of the encoding, so agreement here means the compact
 /// artifact and the trusted flat form describe the identical circuit. Any

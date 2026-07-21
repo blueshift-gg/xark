@@ -10,3 +10,15 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-blake3 = { path = "../../crates/xark-blake3" }
+
+[dev-dependencies]
+# Reference BLAKE3 (renamed to avoid colliding with this crate's own name).
+blake3-ref = { package = "blake3", version = "1" }
+
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
+
+[workspace]

@@ -18,7 +18,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{assert_eq, Field, Transparent};
+use xark::{require_eq, Field, Transparent};
 
 // The Ed25519 curve: base field p = 2^255 − 19, scalar order L, constant d.
 xark_curve::edwards! {
@@ -52,7 +52,7 @@ pub fn mul_base(k_bits: [Field; 256]) -> Point {
 }
 
 /// Assert `Σ bits[i]·2^i < L` (the ed25519 group order): recompose the bits into
-/// the scalar field's `3 × 86`-bit limbs and assert canonical. `bits` must be
+/// the scalar field's `3 × 86`-bit limbs and require canonical. `bits` must be
 /// caller-constrained boolean.
 fn assert_scalar_below_order(bits: [Field; 256]) {
     let mut limbs = [Field::from(0u8); 3];
@@ -194,7 +194,7 @@ fn on_curve_l(x: L3, y: L3) {
     let rf = fin(rhs);
     let mut i = 0usize;
     while i < 3usize {
-        assert_eq(lf[i], rf[i]);
+        require_eq(lf[i], rf[i]);
         i += 1;
     }
 }
@@ -204,7 +204,7 @@ fn eq_mod_p(u: L3, v: L3) {
     let b = fin(v);
     let mut i = 0usize;
     while i < 3usize {
-        assert_eq(a[i], b[i]);
+        require_eq(a[i], b[i]);
         i += 1;
     }
 }
@@ -270,7 +270,7 @@ pub struct Signature {
 
 /// Everything to write an Ed25519 circuit in one import:
 /// `use xark_ed25519::prelude::*;` re-exports the `xark` essentials (`circuit`,
-/// `Public`, `Field`, `assert_eq`, …) plus the transparent input types [`PointL`],
+/// `Public`, `Field`, `require_eq`, …) plus the transparent input types [`PointL`],
 /// [`Signature`], [`Scalar`]. Verify with `pubkey.verify(sig, digest)`.
 pub mod prelude {
     pub use crate::{PointL, Scalar, Signature};

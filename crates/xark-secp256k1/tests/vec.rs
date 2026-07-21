@@ -35,7 +35,9 @@ fn ecdsa_verify_matches_k256() {
         16,
     )
     .unwrap();
-    let digest = Scalar(Uint256::from(BigUint::from_bytes_be(&Sha256::digest(msg)) % &n));
+    let digest = Scalar(Uint256::from(
+        BigUint::from_bytes_be(&Sha256::digest(msg)) % &n,
+    ));
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/secp256k1_ecdsa/src/lib.rs");

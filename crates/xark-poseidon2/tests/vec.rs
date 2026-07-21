@@ -34,15 +34,15 @@ fn id_of(p: &PrimitiveProgram, name: &str) -> u32 {
 
 /// The full permutation circuit: `poseidon2_perm([in0,in1,in2]) == [out0,out1,out2]`.
 const PERM_SRC: &str = "#![no_std]\n\
-    use xark::{assert_eq, Field, Private, Public};\n\
+    use xark::{require_eq, Field, Private, Public};\n\
     use xark_poseidon2::poseidon2_perm;\n\
     pub fn circuit(\n\
       in0: Private<Field>, in1: Private<Field>, in2: Private<Field>,\n\
       out0: Public<Field>, out1: Public<Field>, out2: Public<Field>) {\n\
       let o = poseidon2_perm([in0, in1, in2]);\n\
-      assert_eq(o[0], out0);\n\
-      assert_eq(o[1], out1);\n\
-      assert_eq(o[2], out2);\n\
+      require_eq(o[0], out0);\n\
+      require_eq(o[1], out1);\n\
+      require_eq(o[2], out2);\n\
     }\n";
 
 /// Reference vector from `poseidon2_ref.py`: `poseidon2_perm([1,2,3])`.

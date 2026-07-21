@@ -5,10 +5,14 @@ use xark_poseidon::prelude::*;
 
 #[circuit]
 pub fn poseidon_sponge(
-    a: Private<Field>, b: Private<Field>, c: Private<Field>,
-    d: Private<Field>, e: Private<Field>, out: Public<Field>,
+    a: Private<Field>,
+    b: Private<Field>,
+    c: Private<Field>,
+    d: Private<Field>,
+    e: Private<Field>,
+    out: Public<Field>,
 ) {
-    assert_eq(hash::<5>([a, b, c, d, e]), out);
+    require_eq(hash::<5>([a, b, c, d, e]), out);
 }
 
 #[cfg(test)]
@@ -19,12 +23,28 @@ mod tests {
     #[ignore = "heavy: original-Poseidon solve (big-coefficient MDS-fold LCs)"]
     fn accepts_valid() {
         // poseidon sponge hash([1..5])
-        poseidon_sponge("1".into(), "2".into(), "3".into(), "4".into(), "5".into(), "11125748760708140916786033670969375031496395171002607896175853736491095949636".into()).unwrap();
+        poseidon_sponge(
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+            "5".into(),
+            "11125748760708140916786033670969375031496395171002607896175853736491095949636".into(),
+        )
+        .unwrap();
     }
 
     #[test]
     #[ignore = "heavy: original-Poseidon solve (big-coefficient MDS-fold LCs)"]
     fn rejects_wrong() {
-        assert!(poseidon_sponge("1".into(), "2".into(), "3".into(), "4".into(), "5".into(), "1".into()).is_err());
+        assert!(poseidon_sponge(
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+            "5".into(),
+            "1".into()
+        )
+        .is_err());
     }
 }

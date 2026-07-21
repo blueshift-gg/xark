@@ -491,7 +491,12 @@ pub trait NativeInput {
 /// the host-side limb split lives, so `#[derive(Transparent)]`-generated impls (and
 /// hand-written ones) all agree with the compiler's structural flatten by
 /// construction, instead of each re-encoding the `"{prefix}.limbs[{i}]"` contract.
-pub fn limb_leaves(be_bytes: &[u8], prefix: &str, n_limbs: usize, bits: u32) -> Vec<(String, String)> {
+pub fn limb_leaves(
+    be_bytes: &[u8],
+    prefix: &str,
+    n_limbs: usize,
+    bits: u32,
+) -> Vec<(String, String)> {
     use num_bigint::BigUint;
     let v = BigUint::from_bytes_be(be_bytes);
     let mask = (BigUint::from(1u8) << bits) - 1u8;
@@ -503,6 +508,28 @@ pub fn limb_leaves(be_bytes: &[u8], prefix: &str, n_limbs: usize, bits: u32) -> 
             )
         })
         .collect()
+}
+
+/// Split a whole-number **decimal or `0x`-hex string** into `n_limbs` little-endian
+/// `bits`-bit limbs, named `<prefix>.limbs[0..n_limbs]`. The string form of
+/// [`limb_leaves`]: lets a width-generic bignum (`Bignum<N, BITS>`, `fp!` field)
+/// take its value as a single decimal — the array analogue of a scalar `Field`
+/// host input, so callers never hand-decompose limbs.
+pub fn limb_leaves_decimal(
+    value: &str,
+    prefix: &str,
+    n_limbs: usize,
+    bits: u32,
+) -> Vec<(String, String)> {
+    use num_bigint::BigUint;
+    let v = value.trim();
+    let v = if let Some(hex) = v.strip_prefix("0x").or_else(|| v.strip_prefix("0X")) {
+        BigUint::parse_bytes(hex.as_bytes(), 16)
+    } else {
+        BigUint::parse_bytes(v.as_bytes(), 10)
+    }
+    .unwrap_or_else(|| panic!("invalid bignum value `{value}` (expected decimal or 0x-hex)"));
+    limb_leaves(&v.to_bytes_be(), prefix, n_limbs, bits)
 }
 
 /// The "circuit not built" failure: an actionable message with the fix command

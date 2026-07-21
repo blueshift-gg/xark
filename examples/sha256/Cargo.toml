@@ -10,3 +10,16 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../../crates/xark", default-features = false }
 xark-sha256 = { path = "../../crates/xark-sha256" }
+
+[dev-dependencies]
+sha2 = "0.10"
+
+[target.'cfg(not(xark))'.dependencies]
+# Host-only prover so the generated native validator (and this crate's tests)
+# can run; gated on `cfg(not(xark))` so a circuit build stays lean `no_std`.
+xark-prover = { path = "../../crates/xark-prover" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
+
+[workspace]

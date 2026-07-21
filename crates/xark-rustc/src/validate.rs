@@ -155,7 +155,7 @@ fn check_terminator<'tcx>(
                         "native `assert!` / `panic!` don't constrain a circuit",
                     )
                     .with_help(
-                        "use `assert_eq(a, b)` to constrain equality (it emits an R1CS \
+                        "use `require_eq(a, b)` to constrain equality (it emits an R1CS \
                          constraint); `assert!(a == b)` instead computes a `bool` wire and then \
                          panics, which a circuit can't do",
                     ));
@@ -164,7 +164,7 @@ fn check_terminator<'tcx>(
                     "unsupported function call inside circuit: `{path}`"
                 ))
                 .with_note(
-                    "only xark field operations, assert_eq, and functions whose MIR is \
+                    "only xark field operations, require_eq, and functions whose MIR is \
                      available can be used",
                 ));
             }

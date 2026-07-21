@@ -10,7 +10,7 @@
 //! For each fixture we build a full, satisfying witness (the solver derives the
 //! internal witness; public *outputs* are recovered from their binding
 //! constraints, and any genuine public/private *inputs* are supplied from a
-//! known-answer test map), then run real Groth16 setup + prove and assert the
+//! known-answer test map), then run real Groth16 setup + prove and require the
 //! proof verifies before writing the four `.bin` files.
 //!
 //! Run explicitly (`#[ignore]`d and env-gated). Use `--release`:
@@ -285,12 +285,14 @@ fn specs() -> Vec<Spec> {
     }); // y = 6*6 + 1 = 37
 
     // ---- Gadget fixtures (real gadgets, from examples/) ----
-    // Hash gadgets: arbitrary private message words; public digest is derived.
+    // Hash gadgets: the private message is the 3 bytes of `"abc"`; the public
+    // digest is a 2-field `Hash` (256-bit packed into two 128-bit halves),
+    // derived by the solver — so `n = 2`, not the 8/4-word raw digest.
     v.push(Spec {
         name: "sha256_basic",
-        n: 8,
+        n: 2,
         crate_dir: example_dir("sha256"),
-        private: map(&[("m[0]", "1"), ("m[1]", "2")]),
+        private: arr("msg", 3, 97), // "abc"
         public_in: BTreeMap::new(),
     });
     v.push(Spec {
@@ -306,24 +308,24 @@ fn specs() -> Vec<Spec> {
     });
     v.push(Spec {
         name: "keccak_basic",
-        n: 4,
-        crate_dir: example_dir("keccak"),
-        private: arr("words", 17, 1),
+        n: 2,
+        crate_dir: example_dir("keccak256"),
+        private: arr("msg", 3, 97), // "abc"
         public_in: BTreeMap::new(),
     });
     v.push(Spec {
         name: "blake2s_basic",
-        n: 9,
+        n: 2,
         crate_dir: example_dir("blake2s"),
-        private: arr("m", 16, 1),
-        public_in: map(&[("len", "64")]),
+        private: arr("msg", 3, 97), // "abc"
+        public_in: BTreeMap::new(),
     });
     v.push(Spec {
         name: "blake3_basic",
-        n: 9,
+        n: 2,
         crate_dir: example_dir("blake3"),
-        private: arr("m", 16, 1),
-        public_in: map(&[("len", "64")]),
+        private: arr("msg", 3, 97), // "abc"
+        public_in: BTreeMap::new(),
     });
     v.push(Spec {
         name: "poseidon_basic",

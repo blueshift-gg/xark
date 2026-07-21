@@ -42,7 +42,7 @@ use xark::{Field, Private, Public};
 use xark_bignum::mul_lazy_25519;
 pub fn circuit(a0:Private<Field>,a1:Private<Field>,a2:Private<Field>,b0:Private<Field>,b1:Private<Field>,b2:Private<Field>,r0:Public<Field>,r1:Public<Field>,r2:Public<Field>){
     let o = mul_lazy_25519([a0,a1,a2],[b0,b1,b2]);
-    xark::assert_eq(o[0],r0); xark::assert_eq(o[1],r1); xark::assert_eq(o[2],r2);
+    xark::require_eq(o[0],r0); xark::require_eq(o[1],r1); xark::require_eq(o[2],r2);
 }"#;
     let c = xark_test_harness::compile_source("mul_lazy_ok", src, "bn254");
     assert!(c.status_success, "{}", c.stderr);
@@ -78,7 +78,7 @@ fn ext_double_is_correct() {
     let src = r#"#![no_std]
 use xark::{Field, Private, Public};
 use xark_bignum::{ext_double_25519, mul_lazy_25519, finalize_25519};
-fn eqp(u:[Field;3], v:[Field;3]){ let a=finalize_25519(u); let b=finalize_25519(v); xark::assert_eq(a[0],b[0]); xark::assert_eq(a[1],b[1]); xark::assert_eq(a[2],b[2]); }
+fn eqp(u:[Field;3], v:[Field;3]){ let a=finalize_25519(u); let b=finalize_25519(v); xark::require_eq(a[0],b[0]); xark::require_eq(a[1],b[1]); xark::require_eq(a[2],b[2]); }
 pub fn circuit(x0:Private<Field>,x1:Private<Field>,x2:Private<Field>,y0:Private<Field>,y1:Private<Field>,y2:Private<Field>,ax0:Public<Field>,ax1:Public<Field>,ax2:Public<Field>,ay0:Public<Field>,ay1:Public<Field>,ay2:Public<Field>){
     let one=[Field::from(1u8),Field::from(0u8),Field::from(0u8)];
     let (x3,y3,z3,_t)=ext_double_25519([x0,x1,x2],[y0,y1,y2],one);
@@ -131,7 +131,7 @@ fn ext_add_is_correct() {
     let src = r#"#![no_std]
 use xark::{Field, Private, Public};
 use xark_bignum::{ext_add_25519, mul_lazy_25519, finalize_25519};
-fn eqp(u:[Field;3], v:[Field;3]){ let a=finalize_25519(u); let b=finalize_25519(v); xark::assert_eq(a[0],b[0]); xark::assert_eq(a[1],b[1]); xark::assert_eq(a[2],b[2]); }
+fn eqp(u:[Field;3], v:[Field;3]){ let a=finalize_25519(u); let b=finalize_25519(v); xark::require_eq(a[0],b[0]); xark::require_eq(a[1],b[1]); xark::require_eq(a[2],b[2]); }
 pub fn circuit(bx0:Private<Field>,bx1:Private<Field>,bx2:Private<Field>,by0:Private<Field>,by1:Private<Field>,by2:Private<Field>,tb0:Private<Field>,tb1:Private<Field>,tb2:Private<Field>,qx0:Private<Field>,qx1:Private<Field>,qx2:Private<Field>,qy0:Private<Field>,qy1:Private<Field>,qy2:Private<Field>,tq0:Private<Field>,tq1:Private<Field>,tq2:Private<Field>,rx0:Public<Field>,rx1:Public<Field>,rx2:Public<Field>,ry0:Public<Field>,ry1:Public<Field>,ry2:Public<Field>){
     let one=[Field::from(1u8),Field::from(0u8),Field::from(0u8)];
     let (x3,y3,z3,_t)=ext_add_25519([bx0,bx1,bx2],[by0,by1,by2],one,[tb0,tb1,tb2],[qx0,qx1,qx2],[qy0,qy1,qy2],one,[tq0,tq1,tq2]);

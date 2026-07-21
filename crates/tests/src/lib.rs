@@ -204,14 +204,14 @@ pub mod fixtures {
         BLAKE2S_BASIC_VK,
         BLAKE2S_BASIC_PROOF,
         BLAKE2S_BASIC_INPUTS,
-        9,
+        2,
         "blake2s_basic"
     );
     typed_fixture!(
         BLAKE3_BASIC_VK,
         BLAKE3_BASIC_PROOF,
         BLAKE3_BASIC_INPUTS,
-        9,
+        2,
         "blake3_basic"
     );
     typed_fixture!(
@@ -239,7 +239,7 @@ pub mod fixtures {
         KECCAK_BASIC_VK,
         KECCAK_BASIC_PROOF,
         KECCAK_BASIC_INPUTS,
-        4,
+        2,
         "keccak_basic"
     );
     typed_fixture!(LARGE_PI_VK, LARGE_PI_PROOF, LARGE_PI_INPUTS, 16, "large_pi");
@@ -304,7 +304,7 @@ pub mod fixtures {
         SHA256_BASIC_VK,
         SHA256_BASIC_PROOF,
         SHA256_BASIC_INPUTS,
-        8,
+        2,
         "sha256_basic"
     );
 }

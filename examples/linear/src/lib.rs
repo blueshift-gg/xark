@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 /// Purely linear relation: `3*x + 2*y == z`.
 ///
@@ -10,7 +10,7 @@ use xark::{assert_eq, circuit, Field, Private, Public};
 pub fn linear(x: Private<Field>, y: Private<Field>, z: Public<Field>) {
     let three = Field::constant("3");
     let two = Field::constant("2");
-    assert_eq(three * x + two * y, z);
+    require_eq(three * x + two * y, z);
 }
 
 #[cfg(test)]

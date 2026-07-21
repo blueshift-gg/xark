@@ -90,14 +90,10 @@ fn eddsa_verify_matches_dalek() {
         + BigUint::parse_bytes(b"27742317777372353535851937790883648493", 10).unwrap();
     let k = Scalar::from(BigUint::from_bytes_le(&h.finalize()) % l);
 
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/ed25519/src/lib.rs");
+    let src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ed25519/src/lib.rs");
     let c = xark_test_harness::compile_file(&src, "ed25519", "bn254");
-    assert!(
-        c.status_success,
-        "compiling ed25519 failed: {}",
-        c.stderr
-    );
+    assert!(c.status_success, "compiling ed25519 failed: {}", c.stderr);
 
     // Constraint-count regression pin (minimized R1CS, what the prover proves).
     // Sound lazy extended-coordinate path (was 4_554_355 affine).

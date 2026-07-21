@@ -1,51 +1,38 @@
-//! Demo circuit: prove knowledge of a 16-word (≤64-byte) message block whose
-//! unkeyed BLAKE2s hash equals a public 8-word (256-bit) digest.
+//! Prove knowledge of a private message whose unkeyed BLAKE2s-256 digest equals
+//! a public 256-bit hash — the ergonomic form.
 //!
-//! The 16 message words `m[0..16]` are the private witness; `len` is the message
-//! length in bytes (0..=64) and `d[0..8]` are the public expected digest words.
-//! Each message/digest word is a 32-bit value carried as a single `Field` and
-//! decomposed to bits inside the circuit (which also range-checks it < 2^32).
-//!
-//! BLAKE2s reads message bytes little-endian, so word `i` is the LE-`u32` value
-//! of message bytes `4i..4i+4`; the digest words are likewise LE-`u32` of the
-//! digest bytes `4i..4i+4`. For inputs of 0..=64 bytes this is spec-compliant
-//! unkeyed BLAKE2s.
-
-#![no_std]
+//! The message is a byte array (`[u8; N]`) and the digest a `Hash` — a 256-bit
+//! digest packed into two field halves (`xark-hash`), so the circuit exposes just
+//! **2 public inputs**. The host still supplies a plain `[u8; 32]`. BLAKE outputs
+//! little-endian words, so the gadget result is wrapped in `Blake256` (a
+//! blake-crate type) to select the LE `Hash` packing.
+#![cfg_attr(xark, no_std)]
 
 use xark_blake2s::prelude::*;
 
-pub fn circuit(m: Private<[Field; 16]>, len: Public<Field>, d: Public<[Field; 8]>) {
-    // Assemble the 16-word message block, decomposing each word to bits (scalar
-    // slot writes — the nested-array store the circuit subset supports).
-    let zero = [Field::constant("0"); 32];
-    let mut w = [zero; 16];
-    let mut i = 0usize;
-    while i < 16usize {
-        let bits = m[i].to_bits::<32>();
-        let mut j = 0usize;
-        while j < 32usize {
-            w[i][j] = bits[j];
-            j += 1;
-        }
-        i += 1;
+#[circuit]
+pub fn blake2s(msg: Private<[u8; 3]>, digest: Public<Hash>) {
+    // Qualified call: the entry fn shares the gadget's name, so name it by path.
+    require_eq(Blake256(xark_blake2s::blake2s(msg)), digest);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::blake2s;
+    use blake2::{Blake2s256, Digest};
+
+    const MSG: [u8; 3] = *b"abc";
+
+    #[test]
+    fn accepts_valid() {
+        let digest: [u8; 32] = Blake2s256::digest(MSG).into();
+        blake2s(MSG, digest).unwrap();
     }
 
-    // Run the single-block unkeyed BLAKE2s hash.
-    let hash = blake2s_hash_one_block(w, len);
-
-    // Constrain each output word (recomposed to a field element) against the
-    // corresponding public digest word. Reading `hash[i]` as a whole word isn't
-    // supported, so extract each word bit-by-bit into a flat local first.
-    let mut i = 0usize;
-    while i < 8usize {
-        let mut word = zero;
-        let mut j = 0usize;
-        while j < 32usize {
-            word[j] = hash[i][j];
-            j += 1;
-        }
-        assert_eq(Field::from_bits::<32>(word), d[i]);
-        i += 1;
+    #[test]
+    fn rejects_wrong_digest() {
+        let mut digest: [u8; 32] = Blake2s256::digest(MSG).into();
+        digest[0] ^= 1;
+        assert!(blake2s(MSG, digest).is_err());
     }
 }

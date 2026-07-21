@@ -46,7 +46,7 @@ pub mod affine {
 #[cfg(not(xark))]
 pub use affine::{order, reduce_scalar};
 
-use xark::{assert_eq, Field, Transparent};
+use xark::{require_eq, Field, Transparent};
 
 /// A P-256 256-bit value (a scalar `r`/`s`/`e`, or a point coordinate) in the
 /// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =
@@ -80,7 +80,7 @@ pub struct Signature {
 
 /// Everything to write a secp256r1-ECDSA circuit in one import:
 /// `use xark_secp256r1::prelude::*;` re-exports the `xark` essentials (`circuit`,
-/// `Public`, `Field`, `assert_eq`, …) plus the transparent input types [`Point`],
+/// `Public`, `Field`, `require_eq`, …) plus the transparent input types [`Point`],
 /// [`Signature`], [`Scalar`]. Verify with `pubkey.verify(sig, digest)`.
 pub mod prelude {
     pub use crate::{Point, Scalar, Signature};
@@ -121,7 +121,7 @@ fn unpack(packed: [Field; 2]) -> [Field; 3] {
     let lo_lo86 = dlo[1];
     xark_bignum::range_check_limbs::<1, 86>([lo_lo86]);
     xark_bignum::range_check_limbs::<1, 42>([lo_hi42]);
-    assert_eq(lo, lo_lo86 + lo_hi42 * two86);
+    require_eq(lo, lo_lo86 + lo_hi42 * two86);
 
     // hi = hi_lo44 + hi_hi84·2⁴⁴ — the range checks force hi < 2¹²⁸.
     let dhi = Field::hint_div_rem(hi, two44); // [hi>>44, hi mod 2^44]
@@ -129,7 +129,7 @@ fn unpack(packed: [Field; 2]) -> [Field; 3] {
     let hi_lo44 = dhi[1];
     xark_bignum::range_check_limbs::<1, 44>([hi_lo44]);
     xark_bignum::range_check_limbs::<1, 84>([hi_hi84]);
-    assert_eq(hi, hi_lo44 + hi_hi84 * two44);
+    require_eq(hi, hi_lo44 + hi_hi84 * two44);
 
     [lo_lo86, lo_hi42 + hi_lo44 * two42, hi_hi84]
 }
@@ -180,7 +180,7 @@ pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {
     let rx_mod_n = affine::Fq::new(rr.x.limbs).reduce();
     let mut i = 0usize;
     while i < 3usize {
-        assert_eq(rx_mod_n.limbs[i], r.limbs[i]);
+        require_eq(rx_mod_n.limbs[i], r.limbs[i]);
         i += 1;
     }
 }

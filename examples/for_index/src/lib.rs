@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 /// Sum an array by indexing it with the `for` loop counter (`arr[i]`). Lowers
 /// byte-for-byte identically to the equivalent `while i < 3` version.
@@ -11,7 +11,7 @@ pub fn for_index(a: Private<Field>, b: Private<Field>, c: Public<Field>) {
     for i in 0..3 {
         acc = acc + arr[i];
     }
-    assert_eq(acc, c);
+    require_eq(acc, c);
 }
 
 #[cfg(test)]

@@ -698,14 +698,19 @@ pub fn resolve_input_ids(
                     "compound input `{k}` ({} fields: {fields:?}) needs a {want}-byte \
                      big-endian value{}, but got {} bytes",
                     fields.len(),
-                    if fields.len() == 2 { " (or 65 with the 0x04 SEC1 tag)" } else { "" },
+                    if fields.len() == 2 {
+                        " (or 65 with the 0x04 SEC1 tag)"
+                    } else {
+                        ""
+                    },
                     bytes.len()
                 );
             }
             for (i, f) in fields.iter().enumerate() {
                 let chunk = &bytes[i * 32..(i + 1) * 32];
                 let n = count_limbs(vars, &format!("{k}.{f}"));
-                for (name, dec) in xark_prover::limb_leaves(chunk, &format!("{k}.{f}"), n, limb_bits(n)?)
+                for (name, dec) in
+                    xark_prover::limb_leaves(chunk, &format!("{k}.{f}"), n, limb_bits(n)?)
                 {
                     if let Some(&id) = by_name.get(name.as_str()) {
                         id_inputs.insert(id, dec);
@@ -825,7 +830,7 @@ fn report_underconstrained(holes: Vec<xark_ir::solver::UnderConstrained>) -> Res
         }
         msg.push_str(
             "\nevery hint/advice value (`hint_inverse`, `hint_bit`, `advice`, the \
-             bignum hints) must be pinned by a constraint (e.g. `assert_eq`).",
+             bignum hints) must be pinned by a constraint (e.g. `require_eq`).",
         );
         anyhow::bail!(msg);
     }

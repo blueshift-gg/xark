@@ -118,11 +118,18 @@ fn mimc_matches_snapshot() {
 
 /// The real `xark-mimc` gadget crate (a port of `noir-lang/mimc`: MiMC-p/p,
 /// exponent 7, 91 rounds) is inlined across the crate boundary and lowers to a
-/// stable R1CS. `examples/mimc_gadget` proves a two-input MiMC-BN254 Feistel
-/// hash preimage `mimc_bn254([x, k]) == h`.
+/// stable R1CS. Compiles a two-input MiMC-BN254 Feistel hash preimage
+/// `mimc_bn254([x, k]) == h` (inline source: the canonical mimc examples are the
+/// hand-written `mimc`/`mimc_loop`; this bridges to the library gadget). The
+/// all-constant-input KAT is covered by `xark-mimc`'s own `vec` test.
 #[test]
 fn mimc_gadget_matches_snapshot() {
-    let c = compile_with_field(&example("mimc_gadget"), "mimc_gadget", "bn254");
+    let src = "#![no_std]\n\
+        use xark_mimc::prelude::*;\n\
+        pub fn circuit(x: Private<Field>, k: Private<Field>, h: Public<Field>) {\n\
+        require_eq(mimc_bn254([x, k]), h);\n\
+        }\n";
+    let c = compile_with_field(&write_case("mimc_gadget", src), "mimc_gadget", "bn254");
     assert!(c.status_success, "mimc_gadget failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let dot = std::fs::read_to_string(c.out_dir.join("graph.dot")).unwrap();
@@ -169,7 +176,7 @@ fn mimc_loop_equals_unrolled() {
     // form inlines it; cache-all emits no debug `note`s on cached-function bodies,
     // so the two differ *only* in cosmetic debug annotations. The R1CS math
     // (variables + every a·b=c row) is still byte-identical — compare with the
-    // debug field stripped to assert that structural equivalence.
+    // debug field stripped to require that structural equivalence.
     let strip = |s: &str| {
         let mut p = xark_ir::json::from_json(s).unwrap();
         for k in &mut p.constraints {
@@ -230,7 +237,7 @@ fn poseidon_gadget() {
 
     // Real HorizenLabs BN256 instance: R_F=8 full (3 S-boxes each) + R_P=56 partial
     // (1 S-box each) = 80 S-boxes × 3 gates (`x^2, x^4, x^5`) = 240 S-box gates,
-    // plus 1 final `assert_eq` equality = 241 constraints. ARK/MDS fold for free.
+    // plus 1 final `require_eq` equality = 241 constraints. ARK/MDS fold for free.
     let r1cs = xark_ir::json::from_json(&json).unwrap();
     assert_eq!(r1cs.constraints.len(), 241);
     // The only equality is the `(out) * 1 = 0` output binding; ARK/MDS are free.
@@ -345,11 +352,11 @@ fn word32_ops() {
 fn nested_arrays() {
     let src = write_case(
         "nested",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          fn get(m: [[Field; 2]; 2], i: usize, j: usize) -> Field { m[i][j] }\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
              let m = [[a, b], [b, a]];\n\
-             assert_eq(get(m, 0, 0) + m[1][1], c);\n\
+             require_eq(get(m, 0, 0) + m[1][1], c);\n\
          }\n",
     );
     let c = compile(&src, "nested");
@@ -358,13 +365,237 @@ fn nested_arrays() {
     assert!(json.contains("\"note\": \"(2*a - c) * 1 = 0\""), "{json}");
 }
 
+// ---------------------------------------------------------------------------
+// Hash FV / vector / stress harnesses.
+//
+// The user-facing `examples/{sha256,keccak256,blake2s,blake3}` are now ergonomic
+// `#[circuit]` bodies with `[u8; N]` message + `[u8; 32]` digest (a 2-field
+// `Hash`). The soundness bridges below need to (a) inject specific per-word
+// witness values and (b) pin exact gate counts against the Lean model, so they
+// compile *inline* sources that reproduce the former limb-shaped circuits. This
+// keeps the FV pins stable and fully decoupled from the demo examples.
+// ---------------------------------------------------------------------------
+
+/// SHA-256 single-block compression: 2-word preimage → 8-word digest via
+/// `sha256_block` (the former `examples/sha256`).
+fn sha256_block_src() -> String {
+    String::from(
+        r#"#![no_std]
+use xark_sha256::prelude::*;
+pub fn circuit(m: Private<[Field; 2]>, d: Public<[Field; 8]>) {
+    let zero = [Field::constant("0"); 32];
+    let mut w = [zero; 16];
+    let b0 = m[0].to_bits::<32>();
+    let mut j = 0usize;
+    while j < 32usize { w[0][j] = b0[j]; j += 1; }
+    let b1 = m[1].to_bits::<32>();
+    let mut j = 0usize;
+    while j < 32usize { w[1][j] = b1[j]; j += 1; }
+    let hash = sha256_block(w);
+    let mut i = 0usize;
+    while i < 8usize {
+        let mut word = zero;
+        let mut j = 0usize;
+        while j < 32usize { word[j] = hash[i][j]; j += 1; }
+        require_eq(Field::from_bits::<32>(word), d[i]);
+        i += 1;
+    }
+}
+"#,
+    )
+}
+
+/// Keccak-256 single (already-padded) rate block: 17-lane block → 4-lane digest
+/// via `keccak256_block` (the former `examples/keccak`).
+fn keccak_block_src() -> String {
+    String::from(
+        r#"#![no_std]
+use xark_bits::{from_bits64, to_bits64};
+use xark_keccak::prelude::*;
+pub fn circuit(words: Private<[Field; 17]>, d: Public<[Field; 4]>) {
+    let zero = [Field::constant("0"); 64];
+    let mut block = [zero; 17];
+    let mut i = 0usize;
+    while i < 17usize {
+        let lane = to_bits64(words[i]);
+        let mut j = 0usize;
+        while j < 64usize { block[i][j] = lane[j]; j += 1; }
+        i += 1;
+    }
+    let digest = keccak256_block(block);
+    let mut i = 0usize;
+    while i < 4usize {
+        let mut lane = zero;
+        let mut j = 0usize;
+        while j < 64usize { lane[j] = digest[i][j]; j += 1; }
+        require_eq(from_bits64(lane), d[i]);
+        i += 1;
+    }
+}
+"#,
+    )
+}
+
+/// Variable-length Keccak-256 sponge over a 200-byte message (2 rate blocks) →
+/// 4-lane digest (the former `examples/keccak256`).
+fn keccak256_varlen_src() -> String {
+    String::from(
+        r#"#![no_std]
+use xark_bits::from_bits64;
+use xark_keccak::prelude::*;
+pub fn circuit(msg: Private<[Field; 200]>, d: Public<[Field; 4]>) {
+    let digest = keccak256::<200>(msg);
+    let zero = [Field::from(0u8); 64];
+    let mut i = 0usize;
+    while i < 4usize {
+        let mut lane = zero;
+        let mut j = 0usize;
+        while j < 64usize { lane[j] = digest[i][j]; j += 1; }
+        require_eq(from_bits64(lane), d[i]);
+        i += 1;
+    }
+}
+"#,
+    )
+}
+
+/// BLAKE3 single-block root over a 16-word message + length → 8-word digest via
+/// `blake3_hash_one_block` (the former `examples/blake3`), for the Lean bridge.
+fn blake3_block_src() -> String {
+    String::from(
+        r#"#![no_std]
+use xark_blake3::prelude::*;
+pub fn circuit(m: Private<[Field; 16]>, len: Public<Field>, d: Public<[Field; 8]>) {
+    let zero = [Field::constant("0"); 32];
+    let mut w = [zero; 16];
+    let mut i = 0usize;
+    while i < 16usize {
+        let bits = m[i].to_bits::<32>();
+        let mut j = 0usize;
+        while j < 32usize { w[i][j] = bits[j]; j += 1; }
+        i += 1;
+    }
+    let hash = blake3_hash_one_block(w, len);
+    let mut i = 0usize;
+    while i < 8usize {
+        let mut word = zero;
+        let mut j = 0usize;
+        while j < 32usize { word[j] = hash[i][j]; j += 1; }
+        require_eq(Field::from_bits::<32>(word), d[i]);
+        i += 1;
+    }
+}
+"#,
+    )
+}
+
+/// Byte-oriented BLAKE3 over an `n`-byte message → 8-word digest via
+/// `blake3::<n>` (the former `examples/blake3_hash`), for the multi-block vector.
+fn blake3_bytes_src(n: usize) -> String {
+    format!(
+        r#"#![no_std]
+use xark_blake3::prelude::*;
+pub fn circuit(msg: Private<[Field; {n}]>, d: Public<[Field; 8]>) {{
+    let hash = blake3::<{n}>(msg);
+    let zero = [Field::from(0u8); 32];
+    let mut i = 0usize;
+    while i < 8usize {{
+        let mut word = zero;
+        let mut j = 0usize;
+        while j < 32usize {{ word[j] = hash[i][j]; j += 1; }}
+        require_eq(Field::from_bits::<32>(word), d[i]);
+        i += 1;
+    }}
+}}
+"#
+    )
+}
+
+/// Unkeyed BLAKE2s single-block over a 16-word message → 8-word digest (the
+/// former `examples/blake2s`).
+fn blake2s_block_src() -> String {
+    String::from(
+        r#"#![no_std]
+use xark_blake2s::prelude::*;
+pub fn circuit(m: Private<[Field; 16]>, len: Public<Field>, d: Public<[Field; 8]>) {
+    let zero = [Field::constant("0"); 32];
+    let mut w = [zero; 16];
+    let mut i = 0usize;
+    while i < 16usize {
+        let bits = m[i].to_bits::<32>();
+        let mut j = 0usize;
+        while j < 32usize { w[i][j] = bits[j]; j += 1; }
+        i += 1;
+    }
+    let hash = blake2s_hash_one_block(w, len);
+    let mut i = 0usize;
+    while i < 8usize {
+        let mut word = zero;
+        let mut j = 0usize;
+        while j < 32usize { word[j] = hash[i][j]; j += 1; }
+        require_eq(Field::from_bits::<32>(word), d[i]);
+        i += 1;
+    }
+}
+"#,
+    )
+}
+
+/// Byte-oriented SHA-256 over an `n`-byte message → 8-word digest (the former
+/// `examples/sha256_hash`), for the multi-block real-vector bridge.
+fn sha256_bytes_src(n: usize) -> String {
+    format!(
+        r#"#![no_std]
+use xark_sha256::prelude::*;
+pub fn circuit(msg: Private<[Field; {n}]>, d: Public<[Field; 8]>) {{
+    let hash = sha256::<{n}>(msg);
+    let zero = [Field::from(0u8); 32];
+    let mut i = 0usize;
+    while i < 8usize {{
+        let mut word = zero;
+        let mut j = 0usize;
+        while j < 32usize {{ word[j] = hash[i][j]; j += 1; }}
+        require_eq(Field::from_bits::<32>(word), d[i]);
+        i += 1;
+    }}
+}}
+"#
+    )
+}
+
+/// Byte-oriented unkeyed BLAKE2s over an `n`-byte message → 8-word digest (the
+/// former `examples/blake2s_hash`), for the multi-block real-vector bridge.
+fn blake2s_bytes_src(n: usize) -> String {
+    format!(
+        r#"#![no_std]
+use xark_blake2s::prelude::*;
+pub fn circuit(msg: Private<[Field; {n}]>, d: Public<[Field; 8]>) {{
+    let hash = blake2s::<{n}>(msg);
+    let zero = [Field::from(0u8); 32];
+    let mut i = 0usize;
+    while i < 8usize {{
+        let mut word = zero;
+        let mut j = 0usize;
+        while j < 32usize {{ word[j] = hash[i][j]; j += 1; }}
+        require_eq(Field::from_bits::<32>(word), d[i]);
+        i += 1;
+    }}
+}}
+"#
+    )
+}
+
 /// Full SHA-256 single-block compression (`xark-sha256`): 64 rounds + message
 /// schedule fully unrolled. This is a large circuit (~37k constraints) and the
 /// main stress test for the compiler's inlining/unrolling performance — it
 /// should compile in seconds, not minutes.
 #[test]
 fn sha256_compiles() {
-    let c = compile_with_field(&example("sha256"), "sha256", "bn254");
+    let c = compile_with_field(
+        &write_case("sha256_stress", &sha256_block_src()),
+        "sha256",
+        "bn254",
+    );
     assert!(c.status_success, "sha256 failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     // Count constraints from the parsed R1CS (note-robust): cache-all emits no
@@ -529,7 +760,7 @@ fn sha256_matches_abc_vector() {
     // Build the 16-block-word + 8-output-word validation circuit.
     let mut src = String::from(
         "#![no_std]\n\
-         use xark::{assert_eq, Field, Private, Public};\n\
+         use xark::{require_eq, Field, Private, Public};\n\
          use xark_sha256::sha256_block;\npub fn circuit(\n",
     );
     for i in 0..16 {
@@ -555,7 +786,7 @@ fn sha256_matches_abc_vector() {
         "];\n  let mut i = 0usize;\n\
         while i < 8usize { let mut word = zero; let mut j = 0usize; \
         while j < 32usize { word[j] = hash[i][j]; j += 1; } \
-        assert_eq(Field::from_bits::<32>(word), o[i]); i += 1; }\n}\n",
+        require_eq(Field::from_bits::<32>(word), o[i]); i += 1; }\n}\n",
     );
 
     let path = write_case("sha256_abc", &src);
@@ -634,7 +865,11 @@ fn keccak_matches_empty_vector() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
 
-    let c = compile_with_field(&example("keccak"), "keccak", "bn254");
+    let c = compile_with_field(
+        &write_case("keccak_empty", &keccak_block_src()),
+        "keccak",
+        "bn254",
+    );
     assert!(c.status_success, "keccak failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
     let program = primitive::from_json(&json).unwrap();
@@ -697,8 +932,12 @@ fn keccak256_varlen_matches_real_vector() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
 
-    let c = compile_with_field(&example("keccak256"), "keccak256", "bn254");
-    assert!(c.status_success, "keccak256 example failed: {}", c.stderr);
+    let c = compile_with_field(
+        &write_case("keccak256_varlen", &keccak256_varlen_src()),
+        "keccak256",
+        "bn254",
+    );
+    assert!(c.status_success, "keccak256 varlen failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
     let program = primitive::from_json(&json).unwrap();
     let id = |name: &str| {
@@ -1131,8 +1370,8 @@ fn rejects_native_u64_param() {
 fn constant_branch_is_resolved() {
     let src = write_case(
         "ctrl",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
-         pub fn circuit(a: Private<Field>, c: Public<Field>) { if true { assert_eq(a, c); } }\n",
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+         pub fn circuit(a: Private<Field>, c: Public<Field>) { if true { require_eq(a, c); } }\n",
     );
     let c = compile(&src, "const_branch");
     assert!(c.status_success, "if true failed: {}", c.stderr);
@@ -1146,11 +1385,11 @@ fn constant_branch_is_resolved() {
 fn while_loop_unrolls() {
     let src = write_case(
         "whileloop",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
              let mut acc = a; let mut i = 0u64;\n\
              while i < 2 { acc = acc * a; i += 1; }\n\
-             assert_eq(acc, c);\n\
+             require_eq(acc, c);\n\
          }\n",
     );
     let c = compile(&src, "while_loop");
@@ -1177,11 +1416,11 @@ fn for_range_equals_while() {
     let cw = compile(
         &write_case(
             "for_cube_while",
-            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
              pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
                  let mut acc = a; let mut i = 0u64;\n\
                  while i < 2u64 { acc = acc * a; i += 1; }\n\
-                 assert_eq(acc, c);\n\
+                 require_eq(acc, c);\n\
              }\n",
         ),
         "for_cube_while",
@@ -1198,12 +1437,12 @@ fn for_range_equals_while() {
     let idxw = compile(
         &write_case(
             "for_index_while",
-            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
              pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
                  let arr = [a, b, a];\n\
                  let mut acc = Field::constant(\"0\"); let mut i = 0usize;\n\
                  while i < 3 { acc = acc + arr[i]; i += 1; }\n\
-                 assert_eq(acc, c);\n\
+                 require_eq(acc, c);\n\
              }\n",
         ),
         "for_index_while",
@@ -1219,11 +1458,11 @@ fn for_range_equals_while() {
     let incf = compile(
         &write_case(
             "for_incl",
-            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
              pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
                  let mut acc = a;\n\
                  for _i in 0..=2u64 { acc = acc * a; }\n\
-                 assert_eq(acc, c);\n\
+                 require_eq(acc, c);\n\
              }\n",
         ),
         "for_incl",
@@ -1232,11 +1471,11 @@ fn for_range_equals_while() {
     let incw = compile(
         &write_case(
             "for_incl_while",
-            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
              pub fn circuit(a: Private<Field>, c: Public<Field>) {\n\
                  let mut acc = a; let mut i = 0u64;\n\
                  while i <= 2u64 { acc = acc * a; i += 1; }\n\
-                 assert_eq(acc, c);\n\
+                 require_eq(acc, c);\n\
              }\n",
         ),
         "for_incl_while",
@@ -1262,12 +1501,12 @@ fn for_array_equals_while() {
     let byref = compile(
         &write_case(
             "for_array_ref",
-            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
              pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
                  let arr = [a, b, a];\n\
                  let mut acc = Field::constant(\"0\");\n\
                  for x in &arr { acc = acc + *x; }\n\
-                 assert_eq(acc, c);\n\
+                 require_eq(acc, c);\n\
              }\n",
         ),
         "for_array_ref",
@@ -1280,12 +1519,12 @@ fn for_array_equals_while() {
     let whilev = compile(
         &write_case(
             "for_array_while",
-            "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
              pub fn circuit(a: Private<Field>, b: Private<Field>, c: Public<Field>) {\n\
                  let arr = [a, b, a];\n\
                  let mut acc = Field::constant(\"0\"); let mut i = 0usize;\n\
                  while i < 3 { acc = acc + arr[i]; i += 1; }\n\
-                 assert_eq(acc, c);\n\
+                 require_eq(acc, c);\n\
              }\n",
         ),
         "for_array_while",
@@ -1310,12 +1549,12 @@ fn for_over_unsupported_iterator_is_rejected() {
         write_case(
             name,
             &format!(
-                "#![no_std]\nuse xark::{{assert_eq, Field, Private, Public}};\n\
+                "#![no_std]\nuse xark::{{require_eq, Field, Private, Public}};\n\
                  pub fn circuit(a: Private<Field>, c: Public<Field>) {{\n\
                      let arr = [a, a];\n\
                      let mut acc = a;\n\
                      {body}\n\
-                     assert_eq(acc, c);\n\
+                     require_eq(acc, c);\n\
                  }}\n"
             ),
         )
@@ -1351,14 +1590,14 @@ fn for_over_unsupported_iterator_is_rejected() {
 }
 
 /// A helper function is inlined, and a multiplication inside it still merges
-/// into the following `assert_eq` — proving the gadget-as-library model.
+/// into the following `require_eq` — proving the gadget-as-library model.
 #[test]
 fn inlines_helper_function() {
     let src = write_case(
         "square",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          fn square(x: Field) -> Field { x * x }\n\
-         pub fn circuit(a: Private<Field>, c: Public<Field>) { assert_eq(square(a), c); }\n",
+         pub fn circuit(a: Private<Field>, c: Public<Field>) { require_eq(square(a), c); }\n",
     );
     let c = compile(&src, "inline_square");
     assert!(c.status_success, "square failed: {}", c.stderr);
@@ -1381,9 +1620,9 @@ fn inlines_helper_function() {
 fn rejects_recursion() {
     let src = write_case(
         "recurse",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          fn rec(x: Field) -> Field { rec(x) }\n\
-         pub fn circuit(a: Private<Field>, c: Public<Field>) { assert_eq(rec(a), c); }\n",
+         pub fn circuit(a: Private<Field>, c: Public<Field>) { require_eq(rec(a), c); }\n",
     );
     let c = compile(&src, "reject_recurse");
     assert!(!c.status_success);
@@ -1444,7 +1683,11 @@ fn poseidon2_matches_lean_t3_model() {
 /// re-checked against the new shape.
 #[test]
 fn sha256_matches_lean_model() {
-    let c = compile_with_field(&example("sha256"), "sha256_lean_bridge", "bn254");
+    let c = compile_with_field(
+        &write_case("sha256_lean", &sha256_block_src()),
+        "sha256_lean_bridge",
+        "bn254",
+    );
     assert!(c.status_success, "sha256 gadget compiles: {}", c.stderr);
     let r1cs = xark_ir::json::from_json(
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
@@ -1478,7 +1721,11 @@ fn sha256_matches_lean_model() {
 /// permutation `[2,6,3,10,7,0,4,13,…]`). Pins the Rust gadget's mult-gate count.
 #[test]
 fn blake3_matches_lean_model() {
-    let c = compile_with_field(&example("blake3"), "blake3_lean_bridge", "bn254");
+    let c = compile_with_field(
+        &write_case("blake3_lean", &blake3_block_src()),
+        "blake3_lean_bridge",
+        "bn254",
+    );
     assert!(c.status_success, "blake3 gadget compiles: {}", c.stderr);
     let r1cs = xark_ir::json::from_json(
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
@@ -1504,7 +1751,11 @@ fn blake3_matches_lean_model() {
 /// (10-round schedule, the 10 SIGMA rows). Pins the Rust gadget's mult-gate count.
 #[test]
 fn blake2s_matches_lean_model() {
-    let c = compile_with_field(&example("blake2s"), "blake2s_lean_bridge", "bn254");
+    let c = compile_with_field(
+        &write_case("blake2s_lean", &blake2s_block_src()),
+        "blake2s_lean_bridge",
+        "bn254",
+    );
     assert!(c.status_success, "blake2s gadget compiles: {}", c.stderr);
     let r1cs = xark_ir::json::from_json(
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
@@ -1531,7 +1782,11 @@ fn blake2s_matches_lean_model() {
 #[test]
 #[ignore]
 fn keccak_matches_lean_model() {
-    let c = compile_with_field(&example("keccak"), "keccak_lean_bridge", "bn254");
+    let c = compile_with_field(
+        &write_case("keccak_lean", &keccak_block_src()),
+        "keccak_lean_bridge",
+        "bn254",
+    );
     assert!(c.status_success, "keccak gadget compiles: {}", c.stderr);
     let r1cs = xark_ir::json::from_json(
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
@@ -1566,6 +1821,99 @@ fn aes_matches_lean_model() {
         .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
         .count();
     assert_eq!(mul, 145816, "AES-128 mult-gate count; got {mul}");
+}
+
+/// **R1CS ↔ Lean bridge (AES-256).** The AES-256 block reuses the exact round-step
+/// (`SubBytes → ShiftRows → MixColumns → AddRoundKey`) proven bit-sound in
+/// `formal/Formal/Aes.lean` (`aesRoundStep_bit_sound`, key-size-independent) — just
+/// 14 rounds instead of 10. The 256-bit key schedule (`Nk = 8`, 60 words, with the
+/// extra `SubWord` at `i % 8 == 4`) is proven sound in `formal/Formal/Aes256.lean`:
+/// `aes256KeyExpansion_from_witness` shows a byte trace satisfying the FIPS-197
+/// recurrence equals the expanded key (via strong-induction `wordBytes_eq`), reusing
+/// the AES-128 S-box/`xor8` primitives. This pins the Rust gadget's mult-gate count.
+/// `#[ignore]` — ~200k.
+#[test]
+#[ignore]
+fn aes256_matches_lean_model() {
+    let src = "#![no_std]\n\
+        use xark::{Field, Private, Public};\n\
+        use xark_aes::aes256_constrain;\n\
+        pub fn circuit(pt: Private<[Field; 16]>, key: Private<[Field; 32]>, ct: Public<[Field; 16]>) {\n\
+        aes256_constrain(pt, key, ct);\n\
+        }\n";
+    let c = compile_with_field(
+        &write_case("aes256_lean", src),
+        "aes256_lean_bridge",
+        "bn254",
+    );
+    assert!(c.status_success, "aes256 gadget compiles: {}", c.stderr);
+    let r1cs = xark_ir::json::from_json(
+        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
+    )
+    .expect("parse r1cs.json");
+    let mul = r1cs
+        .constraints
+        .iter()
+        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
+        .count();
+    assert_eq!(mul, 201484, "AES-256 mult-gate count; got {mul}");
+}
+
+/// **R1CS ↔ Lean bridge (GHASH GF(2¹²⁸) multiply).** `formal/Formal/GF128.lean`
+/// models the GCM binary field `GF(2¹²⁸) = GF(2)[x]/(x¹²⁸+x⁷+x²+x+1)` — the
+/// carryless product + reduction spec, and the bit-serial (NIST SP 800-38D
+/// Algorithm 1) recurrence the gadget implements (`gf128_timesX` / `gf128_xpow`) —
+/// and **proves soundness end-to-end**: `gf128_bitserial_eq_mul` shows the gadget's
+/// bit-serial multiply equals the GF(2¹²⁸) field product (axiom-clean), via the
+/// reduction-step linearity `gf128_timesX_bit`, the running-value invariant
+/// `gf128_V_bit`, and digit extraction `gf128_mul_bit`; the multiply is also
+/// well-defined (`gf128_mul_lt_two128`). Pins the mult-gate count of one `gf128_mul`
+/// (the GHASH core). `#[ignore]` — ~34k.
+#[test]
+#[ignore]
+fn gf128_mul_matches_lean_model() {
+    let src = "#![no_std]\n\
+        use xark::{require_eq, Field, Private, Public};\n\
+        use xark_aes::{gf128_mul, bytes_to_gf128, gf128_to_bytes};\n\
+        pub fn circuit(x: Private<[Field; 16]>, y: Private<[Field; 16]>, z: Public<[Field; 16]>) {\n\
+        let p = gf128_to_bytes(gf128_mul(bytes_to_gf128(x), bytes_to_gf128(y)));\n\
+        let mut i = 0usize;\n  while i < 16usize { require_eq(p[i], z[i]); i += 1; }\n}\n";
+    let c = compile_with_field(&write_case("gf128_lean", src), "gf128_lean_bridge", "bn254");
+    assert!(c.status_success, "gf128_mul gadget compiles: {}", c.stderr);
+    let r1cs = xark_ir::json::from_json(
+        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
+    )
+    .expect("parse r1cs.json");
+    let mul = r1cs
+        .constraints
+        .iter()
+        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
+        .count();
+    assert_eq!(mul, 33280, "GF(2^128) multiply mult-gate count; got {mul}");
+}
+
+/// **R1CS ↔ Lean bridge (AES-128-GCM composition).** The full AEAD composes the
+/// proven pieces: the hash subkey `H = AES_enc(key, 0¹²⁸)` and `E(J0)` reuse the
+/// `Aes.lean` block soundness; confidentiality is CTR (AES rounds + XOR); the tag is
+/// `GHASH_H(A ‖ C ‖ [len]) ⊕ E(J0)` where each GHASH step is a `GF128.lean`
+/// `gf128_mul` (well-defined by `gf128_mul_lt_two128`). This pins the whole-mode
+/// mult-gate count of `examples/aes_gcm` (13-byte AAD + 20-byte message).
+/// `#[ignore]` — ~765k constraints.
+#[test]
+#[ignore]
+fn aes_gcm_matches_lean_model() {
+    let c = compile_with_field(&example("aes_gcm"), "aes_gcm_lean_bridge", "bn254");
+    assert!(c.status_success, "aes_gcm gadget compiles: {}", c.stderr);
+    let r1cs = xark_ir::json::from_json(
+        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
+    )
+    .expect("parse r1cs.json");
+    let mul = r1cs
+        .constraints
+        .iter()
+        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
+        .count();
+    assert_eq!(mul, 715240, "AES-128-GCM mult-gate count; got {mul}");
 }
 
 /// **R1CS ↔ Lean bridge (secp256k1 non-native field multiply).**
@@ -1697,11 +2045,11 @@ fn from_const_lowers() {
 fn from_str_const_lowers() {
     let src = write_case(
         "from_str",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
          let big = Field::from(\"21888242871839275222246405745257275088548364400416034343698204186575808495617\");\n\
          let two: Field = \"2\".into();\n\
-         assert_eq(a * two + big, b);\n}\n",
+         require_eq(a * two + big, b);\n}\n",
     );
     let c = compile(&src, "from_str");
     assert!(c.status_success, "from_str compiles: {}", c.stderr);
@@ -1720,9 +2068,9 @@ fn from_str_const_lowers() {
 fn rejects_non_numeric_field_string() {
     let src = write_case(
         "bad_str",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
-         assert_eq(a + Field::from(\"12a34\"), b);\n}\n",
+         require_eq(a + Field::from(\"12a34\"), b);\n}\n",
     );
     let c = compile(&src, "reject_bad_str");
     assert!(!c.status_success);
@@ -1786,7 +2134,7 @@ fn bignum_ops_lowers() {
 
 /// **`Field::to_bits` / `from_bits`.** Bit decomposition as a first-class `Field`
 /// operation (const-generic bit count, composed from `hint_bit` + arithmetic +
-/// `assert_eq`). 8 merged booleanity checks + 2 recompositions = 10.
+/// `require_eq`). 8 merged booleanity checks + 2 recompositions = 10.
 #[test]
 fn to_bits_lowers() {
     let c = compile(&example("to_bits"), "to_bits");
@@ -1801,16 +2149,16 @@ fn to_bits_lowers() {
 /// **Const-fold `to_bits` — zero constraints.** Decomposing a *constant* has
 /// known bits, so the `N` booleanity + 1 recomposition constraints are
 /// tautologies and are dropped entirely. Here the only value that ever varies is
-/// the public output, and the whole body reduces to a single linear `assert_eq`
+/// the public output, and the whole body reduces to a single linear `require_eq`
 /// with no multiplication (booleanity) gates at all.
 #[test]
 fn const_to_bits_emits_no_booleanity() {
     let src = write_case(
         "const_to_bits",
-        "#![no_std]\nuse xark::{assert_eq, Field, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Public};\n\
          pub fn circuit(out: Public<Field>) {\n\
            let bits = Field::from(5u8).to_bits::<8>();\n\
-           assert_eq(Field::from_bits::<8>(bits), out);\n\
+           require_eq(Field::from_bits::<8>(bits), out);\n\
          }\n",
     );
     let c = compile(&src, "const_to_bits");
@@ -1838,10 +2186,10 @@ fn const_to_bits_emits_no_booleanity() {
 fn const_to_bits_overflow_rejected() {
     let src = write_case(
         "const_to_bits_overflow",
-        "#![no_std]\nuse xark::{assert_eq, Field, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Public};\n\
          pub fn circuit(out: Public<Field>) {\n\
            let bits = Field::from(300u16).to_bits::<8>();\n\
-           assert_eq(Field::from_bits::<8>(bits), out);\n\
+           require_eq(Field::from_bits::<8>(bits), out);\n\
          }\n",
     );
     let c = compile(&src, "const_to_bits_overflow");
@@ -1865,10 +2213,10 @@ fn poseidon2_sponge_matches_permutation() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = "#![no_std]\n\
-        use xark::{assert_eq, Field, Private};\n\
+        use xark::{require_eq, Field, Private};\n\
         use xark_poseidon2::{hash, poseidon2_perm};\n\
         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-          assert_eq(hash::<2>([a, b]), poseidon2_perm([a, b, Field::from(2u8)])[0]);\n\
+          require_eq(hash::<2>([a, b]), poseidon2_perm([a, b, Field::from(2u8)])[0]);\n\
         }\n";
     let path = std::env::temp_dir().join("xark_p2_sponge_id.rs");
     std::fs::write(&path, src).unwrap();
@@ -1913,10 +2261,10 @@ fn poseidon_sponge_matches_permutation() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
     let src = "#![no_std]\n\
-        use xark::{assert_eq, Field, Private};\n\
+        use xark::{require_eq, Field, Private};\n\
         use xark_poseidon::{hash, permute};\n\
         pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-          assert_eq(hash::<2>([a, b]), permute([Field::from(2u8), a, b])[0]);\n\
+          require_eq(hash::<2>([a, b]), permute([Field::from(2u8), a, b])[0]);\n\
         }\n";
     let path = std::env::temp_dir().join("xark_p_sponge_id.rs");
     std::fs::write(&path, src).unwrap();
@@ -1952,8 +2300,11 @@ fn poseidon_sponge_matches_permutation() {
 fn sha256_varlen_matches_real_vector() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
-    let c = compile(&example("sha256_hash"), "sha256_hash");
-    assert!(c.status_success, "sha256_hash failed: {}", c.stderr);
+    let c = compile(
+        &write_case("sha256_varlen", &sha256_bytes_src(8)),
+        "sha256_hash",
+    );
+    assert!(c.status_success, "sha256_varlen failed: {}", c.stderr);
     let program =
         primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
             .unwrap();
@@ -1996,7 +2347,7 @@ fn sha256_varlen_matches_real_vector() {
 }
 
 /// **`Digest` ergonomics POC — KAT-validated.** Compiles the `sha256_consume`
-/// example (the 3-line "hash bytes, then assert the digest equals a known value"
+/// example (the 3-line "hash bytes, then require the digest equals a known value"
 /// form): its body bakes in `sha256("abc")` as a `const [u8; 32]` and pins it to
 /// `Digest::from(sha256(msg))`. Solving with `msg = [97, 98, 99]` (`"abc"`) is
 /// the proof the `From<[u8; 32]>` word/byte/bit ordering matches the gadget: if
@@ -2051,8 +2402,11 @@ fn digest_consume_matches_abc_vector() {
 fn blake2s_varlen_matches_real_vector() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
-    let c = compile(&example("blake2s_hash"), "blake2s_hash");
-    assert!(c.status_success, "blake2s_hash failed: {}", c.stderr);
+    let c = compile(
+        &write_case("blake2s_varlen", &blake2s_bytes_src(100)),
+        "blake2s_hash",
+    );
+    assert!(c.status_success, "blake2s_varlen failed: {}", c.stderr);
     let program =
         primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
             .unwrap();
@@ -2101,8 +2455,11 @@ fn blake2s_varlen_matches_real_vector() {
 fn blake3_varlen_matches_real_vector() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
-    let c = compile(&example("blake3_hash"), "blake3_hash");
-    assert!(c.status_success, "blake3_hash failed: {}", c.stderr);
+    let c = compile(
+        &write_case("blake3_varlen", &blake3_bytes_src(100)),
+        "blake3_hash",
+    );
+    assert!(c.status_success, "blake3_varlen failed: {}", c.stderr);
     let program =
         primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
             .unwrap();
@@ -2144,7 +2501,7 @@ fn blake3_varlen_matches_real_vector() {
     );
 }
 
-/// A multiplication result reused across two `assert_eq`s stays bound to `a*b`
+/// A multiplication result reused across two `require_eq`s stays bound to `a*b`
 /// in both (the product is revived after the merge).
 #[test]
 fn mul_reuse_binds_product_in_both_asserts() {
@@ -2189,9 +2546,9 @@ fn field_div_solves() {
     use xark_ir::{primitive, solver};
     let src = write_case(
         "field_div",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, q: Public<Field>) {\n\
-         \x20   assert_eq(a / b, q);\n\
+         \x20   require_eq(a / b, q);\n\
          }\n",
     );
     let c = compile_with_field(&src, "field_div", "bn254");
@@ -2228,11 +2585,11 @@ fn field_div_solves() {
 fn rejects_compound_assign() {
     let src = write_case(
         "field_assign",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
          \x20   let mut acc = a;\n\
          \x20   acc += b;\n\
-         \x20   assert_eq(acc, b);\n\
+         \x20   require_eq(acc, b);\n\
          }\n",
     );
     let c = compile(&src, "reject_assign");
@@ -2253,9 +2610,9 @@ fn rejects_compound_assign() {
 fn rejects_field_comparison() {
     let src = write_case(
         "field_cmp",
-        "#![no_std]\nuse xark::{assert_eq, Field, Private, Public};\n\
+        "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
          pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
-         \x20   if a == b { assert_eq(a, b); }\n\
+         \x20   if a == b { require_eq(a, b); }\n\
          }\n",
     );
     let c = compile(&src, "reject_cmp");
@@ -2271,7 +2628,7 @@ fn rejects_field_comparison() {
     );
 }
 
-/// `==` on `Field`, `<` via `Field::lt::<N>` + `assert`, and witness mux via
+/// `==` on `Field`, `<` via `Field::lt::<N>` + `require`, and witness mux via
 /// `bool` wire arithmetic.
 #[test]
 fn cmp_operators_solve() {
@@ -2282,11 +2639,11 @@ fn cmp_operators_solve() {
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, eq: Public<Field>, feq: Public<Field>, mux: Public<Field>) {\n\
          \x20   let c = a.lt::<8>(b);\n\
-         \x20   assert(c);\n\
-         \x20   assert_eq(a == b, eq);\n\
-         \x20   assert_eq(a == b, feq);\n\
+         \x20   require(c);\n\
+         \x20   require_eq(a == b, eq);\n\
+         \x20   require_eq(a == b, feq);\n\
          \x20   let r = Field::from(c) * b + Field::from(!c) * a;\n\
-         \x20   assert_eq(r, mux);\n\
+         \x20   require_eq(r, mux);\n\
          }\n",
     );
     let c = compile_with_field(&src, "cmp_ops", "bn254");
@@ -2304,7 +2661,7 @@ fn cmp_operators_solve() {
     };
 
     let mut inputs = BTreeMap::new();
-    // a=3,b=5: assert_lt passes (3<5), mux picks b=5.
+    // a=3,b=5: require_lt passes (3<5), mux picks b=5.
     inputs.insert(id("a"), "3".to_string());
     inputs.insert(id("b"), "5".to_string());
     inputs.insert(id("eq"), "0".to_string());
@@ -2315,15 +2672,15 @@ fn cmp_operators_solve() {
         solver::analyze_underconstrained(&program, &asg).is_empty(),
         "comparison circuit under-constrained"
     );
-    // a=5,b=3: assert_lt fails (5 < 3 is false).
+    // a=5,b=3: require_lt fails (5 < 3 is false).
     inputs.insert(id("a"), "5".to_string());
     inputs.insert(id("b"), "3".to_string());
     inputs.insert(id("mux"), "5".to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
-        "5 < 3 must violate assert_lt"
+        "5 < 3 must violate require_lt"
     );
-    // a=5,b=5: assert_lt fails (5 < 5 is false).
+    // a=5,b=5: require_lt fails (5 < 5 is false).
     inputs.insert(id("a"), "5".to_string());
     inputs.insert(id("b"), "5".to_string());
     inputs.insert(id("eq"), "1".to_string());
@@ -2331,7 +2688,7 @@ fn cmp_operators_solve() {
     inputs.insert(id("mux"), "5".to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
-        "5 < 5 must violate assert_lt"
+        "5 < 5 must violate require_lt"
     );
 }
 
@@ -2351,8 +2708,8 @@ fn if_mux_lowers_and_solves() {
          \x20   } else {\n\
          \x20       (b, a)\n\
          \x20   };\n\
-         \x20   assert_eq(l, left);\n\
-         \x20   assert_eq(r, right);\n\
+         \x20   require_eq(l, left);\n\
+         \x20   require_eq(r, right);\n\
          }\n",
     );
     let c = compile_with_field(&src, "if_mux", "bn254");
@@ -2396,7 +2753,7 @@ fn if_mux_lowers_and_solves() {
     );
 }
 
-/// `is_zero` gadget via `assert`: x=0 passes; x=7 is rejected.
+/// `is_zero` gadget via `require`: x=0 passes; x=7 is rejected.
 #[test]
 fn is_zero_gadget_solves() {
     use std::collections::BTreeMap;
@@ -2405,7 +2762,7 @@ fn is_zero_gadget_solves() {
         "is_zero",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(x: Private<Field>) {\n\
-         \x20   assert(x.is_zero());\n\
+         \x20   require(x.is_zero());\n\
          }\n",
     );
     let c = compile_with_field(&src, "is_zero", "bn254");
@@ -2433,7 +2790,7 @@ fn is_zero_gadget_solves() {
     );
 }
 
-/// `assert(a == b)`: a=b=5 passes; a=5,b=6 is rejected.
+/// `require(a == b)`: a=b=5 passes; a=5,b=6 is rejected.
 #[test]
 fn equality_operator_solves() {
     use std::collections::BTreeMap;
@@ -2442,7 +2799,7 @@ fn equality_operator_solves() {
         "eq_op",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   assert(a == b);\n\
+         \x20   require(a == b);\n\
          }\n",
     );
     let c = compile_with_field(&src, "eq_op", "bn254");
@@ -2512,9 +2869,9 @@ fn ecdsa_scalar_range_checks() {
     );
 }
 
-/// Branchless boolean mux: `assert_bool` pins the condition, then
+/// Branchless boolean mux: `require_bool` pins the condition, then
 /// `if_false + cond·(if_true − if_false)` selects — a non-boolean condition is
-/// rejected by `assert_bool`.
+/// rejected by `require_bool`.
 #[test]
 fn bool_mux_solve() {
     use std::collections::BTreeMap;
@@ -2523,8 +2880,8 @@ fn bool_mux_solve() {
         "bool_mux",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(cond: Private<Field>, a: Private<Field>, b: Private<Field>, out: Public<Field>) {\n\
-         \x20   cond.assert_bool();\n\
-         \x20   assert_eq(b + cond * (a - b), out);\n\
+         \x20   cond.require_bool();\n\
+         \x20   require_eq(b + cond * (a - b), out);\n\
          }\n",
     );
     let c = compile_with_field(&src, "bool_mux", "bn254");
@@ -2561,7 +2918,7 @@ fn bool_mux_solve() {
 }
 
 /// `Field` boolean combinators `and`/`or`/`not` (on wires pinned `{0,1}` by
-/// `assert_bool`) lower and solve.
+/// `require_bool`) lower and solve.
 #[test]
 fn bool_combinators_solve() {
     use std::collections::BTreeMap;
@@ -2570,9 +2927,9 @@ fn bool_combinators_solve() {
         "bool_ops",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>, want: Public<Field>) {\n\
-         \x20   a.assert_bool();\n\
-         \x20   b.assert_bool();\n\
-         \x20   assert_eq(a.and(b).or(a.not()), want);\n\
+         \x20   a.require_bool();\n\
+         \x20   b.require_bool();\n\
+         \x20   require_eq(a.and(b).or(a.not()), want);\n\
          }\n",
     );
     let c = compile_with_field(&src, "bool_ops", "bn254");
@@ -2598,7 +2955,7 @@ fn bool_combinators_solve() {
     // a.and(b).or(a.not()) : a=1,b=0 -> (1&0)|!1 = 0 ; a=0,b=1 -> (0&1)|!0 = 1.
     solver::solve_and_check(&program, &case("1", "0", "0")).expect("(1&0)|!1 == 0");
     solver::solve_and_check(&program, &case("0", "1", "1")).expect("(0&1)|!0 == 1");
-    // Non-boolean input is rejected by assert_bool.
+    // Non-boolean input is rejected by require_bool.
     assert!(
         solver::solve_and_check(&program, &case("2", "0", "0")).is_err(),
         "non-boolean input must reject"
@@ -2613,7 +2970,7 @@ fn rejections_carry_actionable_help() {
         "diag_bare_field",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(x: Field, out: Public<Field>) {\n\
-         \x20   assert_eq(x, out);\n\
+         \x20   require_eq(x, out);\n\
          }\n",
     );
     let c = compile_with_field(&bare, "diag_bare_field", "bn254");
@@ -2721,11 +3078,11 @@ fn ed25519_on_curve_accepts_real_rejects_perturbed() {
     );
 }
 
-// --- assert / assert_lt / assert_ge (author-facing constraint API) ------------
+// --- require / require_lt / require_ge (author-facing constraint API) ------------
 
-/// `assert(cond)` constrains a boolean wire to true. a=b passes; a≠b fails.
+/// `require(cond)` constrains a boolean wire to true. a=b passes; a≠b fails.
 #[test]
-fn assert_bool_demo() {
+fn require_bool_demo() {
     use std::collections::BTreeMap;
     use xark_ir::{primitive, solver};
 
@@ -2733,7 +3090,7 @@ fn assert_bool_demo() {
         "assert_demo",
         "#![no_std]\nuse xark::prelude::*;\n\
          pub fn circuit(a: Private<Field>, b: Private<Field>) {\n\
-         \x20   assert(a == b);\n\
+         \x20   require(a == b);\n\
          }\n",
     );
     let c = compile_with_field(&src, "assert_demo", "bn254");
@@ -2758,7 +3115,7 @@ fn assert_bool_demo() {
     inputs.insert(id("b"), "5".to_string());
     assert!(
         solver::solve_and_check(&program, &inputs).is_err(),
-        "a != b must violate assert"
+        "a != b must violate require"
     );
 }
 
@@ -2805,12 +3162,12 @@ fn field_cmp_uint_const_ops_solve() {
         "cmp_uint_const",
         "pub fn circuit(x: Private<Field>, lt: Public<Field>, le: Public<Field>, \
          gt: Public<Field>, ge: Public<Field>, eq: Public<Field>, ne: Public<Field>) {\n\
-         \x20   assert_eq(x < 100u32, lt);\n\
-         \x20   assert_eq(x <= 100u32, le);\n\
-         \x20   assert_eq(x > 100u32, gt);\n\
-         \x20   assert_eq(x >= 100u32, ge);\n\
-         \x20   assert_eq(x == 100u32, eq);\n\
-         \x20   assert_eq(x != 100u32, ne);\n\
+         \x20   require_eq(x < 100u32, lt);\n\
+         \x20   require_eq(x <= 100u32, le);\n\
+         \x20   require_eq(x > 100u32, gt);\n\
+         \x20   require_eq(x >= 100u32, ge);\n\
+         \x20   require_eq(x == 100u32, eq);\n\
+         \x20   require_eq(x != 100u32, ne);\n\
          }",
     );
     // x = 50: <100 t, <=100 t, >100 f, >=100 f, ==100 f, !=100 t.
@@ -2851,21 +3208,21 @@ fn field_cmp_uint_const_ops_solve() {
     );
 }
 
-/// Boundary behaviour of `<` and `<=` against a constant, via `assert`.
+/// Boundary behaviour of `<` and `<=` against a constant, via `require`.
 #[test]
 fn field_cmp_boundaries() {
-    // assert(x < 100): true at 99, false at 100.
+    // require(x < 100): true at 99, false at 100.
     let lt = cmp_program(
         "cmp_lt_boundary",
-        "pub fn circuit(x: Private<Field>) { assert(x < 100u32); }",
+        "pub fn circuit(x: Private<Field>) { require(x < 100u32); }",
     );
     assert!(solves(&lt, &[("x", "99")]), "99 < 100 holds");
     assert!(!solves(&lt, &[("x", "100")]), "100 < 100 must fail");
 
-    // assert(x <= 100): true at 100, false at 101.
+    // require(x <= 100): true at 100, false at 101.
     let le = cmp_program(
         "cmp_le_boundary",
-        "pub fn circuit(x: Private<Field>) { assert(x <= 100u32); }",
+        "pub fn circuit(x: Private<Field>) { require(x <= 100u32); }",
     );
     assert!(solves(&le, &[("x", "100")]), "100 <= 100 holds");
     assert!(!solves(&le, &[("x", "101")]), "101 <= 100 must fail");
@@ -2879,14 +3236,14 @@ fn field_cmp_edge_constants() {
     // x < 0u32 is always false: unprovable even for x = 0.
     let lt0 = cmp_program(
         "cmp_lt_zero",
-        "pub fn circuit(x: Private<Field>) { assert(x < 0u32); }",
+        "pub fn circuit(x: Private<Field>) { require(x < 0u32); }",
     );
     assert!(!solves(&lt0, &[("x", "0")]), "x < 0 is never true");
 
     // x >= 0u32 is always true.
     let ge0 = cmp_program(
         "cmp_ge_zero",
-        "pub fn circuit(x: Private<Field>) { assert(x >= 0u32); }",
+        "pub fn circuit(x: Private<Field>) { require(x >= 0u32); }",
     );
     assert!(solves(&ge0, &[("x", "0")]), "0 >= 0 holds");
     assert!(solves(&ge0, &[("x", "5")]), "5 >= 0 holds");
@@ -2894,7 +3251,7 @@ fn field_cmp_edge_constants() {
     // c = 2^32 - 2: x <= c true at c, false at c+1 = 2^32 - 1 (both in-domain).
     let hi = cmp_program(
         "cmp_le_near_max",
-        "pub fn circuit(x: Private<Field>) { assert(x <= 4294967294u32); }",
+        "pub fn circuit(x: Private<Field>) { require(x <= 4294967294u32); }",
     );
     assert!(
         solves(&hi, &[("x", "4294967294")]),
@@ -2913,7 +3270,7 @@ fn field_cmp_edge_constants() {
 fn field_cmp_out_of_range_is_unprovable() {
     let program = cmp_program(
         "cmp_soundness",
-        "pub fn circuit(x: Private<Field>) { assert(x < 100u32); }",
+        "pub fn circuit(x: Private<Field>) { require(x < 100u32); }",
     );
     // In-domain small value proves.
     assert!(solves(&program, &[("x", "50")]), "50 < 100 proves");
@@ -2932,7 +3289,7 @@ fn field_cmp_out_of_range_is_unprovable() {
 fn field_field_lt_method() {
     let program = cmp_program(
         "cmp_field_field",
-        "pub fn circuit(a: Private<Field>, b: Private<Field>) { assert(a.lt::<32>(b)); }",
+        "pub fn circuit(a: Private<Field>, b: Private<Field>) { require(a.lt::<32>(b)); }",
     );
     assert!(solves(&program, &[("a", "3"), ("b", "5")]), "3 < 5 proves");
     assert!(
@@ -2952,7 +3309,7 @@ fn field_field_lt_method() {
     // le/ge via `!gt`/`!lt`.
     let le = cmp_program(
         "cmp_field_field_le",
-        "pub fn circuit(a: Private<Field>, b: Private<Field>) { assert(a.le::<32>(b)); }",
+        "pub fn circuit(a: Private<Field>, b: Private<Field>) { require(a.le::<32>(b)); }",
     );
     assert!(solves(&le, &[("a", "5"), ("b", "5")]), "5 <= 5 proves");
     assert!(!solves(&le, &[("a", "6"), ("b", "5")]), "6 <= 5 rejects");
@@ -2969,7 +3326,7 @@ fn field_field_lt_method() {
 fn field_shr_solves() {
     let program = cmp_program(
         "shr_u32",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 3u32, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x >> 3u32, out); }",
     );
     assert!(
         solves(&program, &[("x", "100"), ("out", "12")]),
@@ -2998,8 +3355,8 @@ fn bit_cache_shares_one_decomposition() {
     let shared = cmp_program(
         "bitcache_shared",
         "pub fn circuit(x: Private<Field>, half: Public<Field>) {\n\
-         \x20   assert(x < 100u32);\n\
-         \x20   assert_eq(x >> 1u32, half);\n\
+         \x20   require(x < 100u32);\n\
+         \x20   require_eq(x >> 1u32, half);\n\
          }",
     );
     // Same shape but the shift is on a *distinct* value `y` → two independent
@@ -3007,8 +3364,8 @@ fn bit_cache_shares_one_decomposition() {
     let distinct = cmp_program(
         "bitcache_distinct",
         "pub fn circuit(x: Private<Field>, y: Private<Field>, half: Public<Field>) {\n\
-         \x20   assert(x < 100u32);\n\
-         \x20   assert_eq(y >> 1u32, half);\n\
+         \x20   require(x < 100u32);\n\
+         \x20   require_eq(y >> 1u32, half);\n\
          }",
     );
 
@@ -3050,7 +3407,7 @@ fn bit_cache_shares_one_decomposition() {
 fn field_shr_edges() {
     let id = cmp_program(
         "shr_zero",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 0u32, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x >> 0u32, out); }",
     );
     assert!(
         solves(&id, &[("x", "12345"), ("out", "12345")]),
@@ -3063,7 +3420,7 @@ fn field_shr_edges() {
 
     let big = cmp_program(
         "shr_overshift",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 40u32, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x >> 40u32, out); }",
     );
     assert!(
         solves(&big, &[("x", "4000000000"), ("out", "0")]),
@@ -3080,7 +3437,7 @@ fn field_shr_edges() {
 fn field_shl_solves() {
     let program = cmp_program(
         "shl_u16",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x << 2u16, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x << 2u16, out); }",
     );
     assert!(
         solves(&program, &[("x", "5"), ("out", "20")]),
@@ -3099,7 +3456,7 @@ fn field_shl_solves() {
 fn field_shl_truncates() {
     let program = cmp_program(
         "shl_trunc_u8",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x << 2u8, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x << 2u8, out); }",
     );
     // 200 << 2 = 800; low 8 bits = 800 mod 256 = 32.
     assert!(
@@ -3118,7 +3475,7 @@ fn field_shl_truncates() {
 fn field_rem_pow2_solves() {
     let program = cmp_program(
         "rem_pow2_u32",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 8u32, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x % 8u32, out); }",
     );
     assert!(
         solves(&program, &[("x", "100"), ("out", "4")]),
@@ -3143,7 +3500,7 @@ fn field_rem_pow2_solves() {
 fn field_rem_general_solves() {
     let program = cmp_program(
         "rem_general_u32",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 7u32, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x % 7u32, out); }",
     );
     assert!(
         solves(&program, &[("x", "100"), ("out", "2")]),
@@ -3171,7 +3528,7 @@ fn field_rem_u128_is_not_provided() {
     let bad = write_case(
         "rem_u128",
         "#![no_std]\nuse xark::prelude::*;\n\
-         pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 5u128, out); }\n",
+         pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x % 5u128, out); }\n",
     );
     let c = compile_with_field(&bad, "rem_u128", "bn254");
     assert!(
@@ -3182,7 +3539,7 @@ fn field_rem_u128_is_not_provided() {
     // Shifts remain available at u128 (pure re-wiring, sound).
     let shr = cmp_program(
         "shr_u128",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x >> 3u128, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x >> 3u128, out); }",
     );
     assert!(
         solves(&shr, &[("x", "100"), ("out", "12")]),
@@ -3192,7 +3549,7 @@ fn field_rem_u128_is_not_provided() {
     // Modulus remains available at u64 (2N = 128 <= 253, sound).
     let rem = cmp_program(
         "rem_u64",
-        "pub fn circuit(x: Private<Field>, out: Public<Field>) { assert_eq(x % 5u64, out); }",
+        "pub fn circuit(x: Private<Field>, out: Public<Field>) { require_eq(x % 5u64, out); }",
     );
     assert!(
         solves(&rem, &[("x", "100"), ("out", "0")]),

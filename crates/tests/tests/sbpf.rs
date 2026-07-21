@@ -3,7 +3,7 @@
 //!
 //! `svm-unit-test` compiles each `#[svm_test]` body into its own `no_std`
 //! cdylib, loads it into Mollusk, and runs it on the real `alt_bn128`
-//! syscalls. A failed verification trips the `assert`, which panics on chain
+//! syscalls. A failed verification trips the `require`, which panics on chain
 //! and fails the test — so each of these is a correctness check, and the
 //! logged CU count is the real per-proof cost for that circuit's public-input
 //! count `N` (the `vk_x` linear combination is `N` G1 muls + adds, on top of

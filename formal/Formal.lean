@@ -26,3 +26,5 @@ import Formal.Poseidon2Bn254T3
 import Formal.Merkle
 import Formal.Lazy25519
 import Formal.LazyK1
+import Formal.GF128
+import Formal.Aes256

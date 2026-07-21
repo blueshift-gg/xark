@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 /// Field inverse as an *advice* gadget.
 ///
@@ -9,14 +9,14 @@ use xark::{assert_eq, circuit, Field, Private, Public};
 /// every non-algebraic gadget (is_zero, bit-decomposition, range checks, ...).
 fn inv(x: Field) -> Field {
     let w = Field::hint_inverse(x); // witness-gen records `w = 1/x`
-    assert_eq(x * w, Field::constant("1"));
+    require_eq(x * w, Field::constant("1"));
     w
 }
 
 /// Prove that the public `x_inv` really is the inverse of the private `x`.
 #[circuit]
 pub fn inverse(x: Private<Field>, x_inv: Public<Field>) {
-    assert_eq(inv(x), x_inv);
+    require_eq(inv(x), x_inv);
 }
 
 #[cfg(test)]

@@ -1,10 +1,10 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
 pub fn difference_of_squares(x: Private<Field>, y: Private<Field>, z: Public<Field>) {
-    assert_eq((x + y) * (x - y), z);
+    require_eq((x + y) * (x - y), z);
 }
 
 #[cfg(test)]

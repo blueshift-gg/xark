@@ -2107,9 +2107,10 @@ pub fn keccak256<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 64]; 4
     out
 }
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_keccak::prelude::*;`.
 pub mod prelude {
     pub use crate::*;
     pub use xark::prelude::*;
+    pub use xark_hash::Hash;
 }

@@ -11,7 +11,7 @@ use xark_poseidon::prelude::*;
 /// from an S-box (`x^5`).
 #[circuit]
 pub fn poseidon(a: Private<Field>, b: Private<Field>, out: Public<Field>) {
-    assert_eq(hash2(a, b), out);
+    require_eq(hash2(a, b), out);
 }
 
 #[cfg(test)]
@@ -22,7 +22,12 @@ mod tests {
     #[ignore = "heavy: original-Poseidon solve (big-coefficient MDS-fold LCs)"]
     fn accepts_valid() {
         // poseidon.hash2(3, 5)
-        poseidon("3".into(), "5".into(), "7003178825990875955236852857865616475160076985313430133088248668396799513116".into()).unwrap();
+        poseidon(
+            "3".into(),
+            "5".into(),
+            "7003178825990875955236852857865616475160076985313430133088248668396799513116".into(),
+        )
+        .unwrap();
     }
 
     #[test]

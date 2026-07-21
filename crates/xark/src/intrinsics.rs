@@ -37,7 +37,7 @@
 //! compute the value natively (an inverse, a bit, a division, a non-native
 //! reduction). The emitted advice is **unconstrained on its own**: the *caller*
 //! must add the constraints that pin it (e.g. `hint_inverse(x)` returns `w`, and
-//! the caller must assert `x·w == 1`). The typed `Field::…` wrappers in
+//! the caller must require `x·w == 1`). The typed `Field::…` wrappers in
 //! `lang.rs` (`inv`, `to_bits`, `Bignum::mul`, …) are the safe forms that pair
 //! each hint with its pinning constraints.
 

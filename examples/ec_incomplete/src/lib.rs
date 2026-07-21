@@ -4,18 +4,18 @@
 //! type, so the test passes the raw `G`/`2G`/`3G` coordinate bytes `k256` emits.
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Private, Public};
+use xark::{circuit, require_eq, Private, Public};
 use xark_secp256k1::affine::{ec_add_incomplete, ec_double_incomplete, Point};
 
 fn ceq(got: Point, want: Point) {
     let mut i = 0;
     while i < 3 {
-        assert_eq(got.x.limbs[i], want.x.limbs[i]);
+        require_eq(got.x.limbs[i], want.x.limbs[i]);
         i += 1;
     }
     let mut i = 0;
     while i < 3 {
-        assert_eq(got.y.limbs[i], want.y.limbs[i]);
+        require_eq(got.y.limbs[i], want.y.limbs[i]);
         i += 1;
     }
 }

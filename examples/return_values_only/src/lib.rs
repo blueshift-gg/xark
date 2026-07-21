@@ -1,11 +1,11 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 // return_values_only: main(x: priv) -> pub Field { x*x }.
 #[circuit]
 pub fn return_values_only(x: Private<Field>, ret: Public<Field>) {
-    assert_eq(x * x, ret);
+    require_eq(x * x, ret);
 }
 
 #[cfg(test)]

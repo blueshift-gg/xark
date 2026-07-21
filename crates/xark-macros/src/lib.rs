@@ -6,23 +6,24 @@
 //!
 //! ```ignore
 //! #[circuit]
-//! pub fn xark_sha256_test(input: Private<[u8; 56]>, result: Public<[u8; 32]>) {
-//!     assert_eq(sha256(input), result);
+//! pub fn sha256(msg: Private<[u8; 3]>, digest: Public<Hash>) {
+//!     require_eq(xark_sha256::sha256(msg), digest);
 //! }
 //! ```
 //!
 //! The macro does three things:
 //!
 //! 1. **Rewrites the signature** into the Field-backed types the compiler lowers:
-//!    `Field` stays `Field`, `[u8; N]` becomes `[Field; N]`, and `[u8; 32]`
-//!    becomes a [`Hash`](xark::Hash) — a 256-bit hash packed into 2 field
-//!    elements, so a public expected hash is 2 public inputs, not 256. The body is
-//!    emitted verbatim except for a `use` that shadows `assert_eq` with the
-//!    composite-aware [`__circuit_assert_eq`](xark::__circuit_assert_eq), so
-//!    `assert_eq(sha256(x), hash)` type-checks alongside scalar equalities.
+//!    `Field` stays `Field`, `[u8; N]` becomes `[Field; N]`, `[Field; N]` stays,
+//!    and any type implementing `xark_prover::NativeInput` (e.g. a gadget's
+//!    `Hash`/`Point`) takes its native host form. The body is emitted verbatim
+//!    except for a `use` that shadows `require_eq` with the composite-aware
+//!    [`__xark_require_eq`](xark::__xark_require_eq), so `require_eq(sha256(x),
+//!    hash)` type-checks alongside scalar equalities. Core stays gadget-agnostic:
+//!    the `Hash` packing lives in `xark-hash`, not here.
 //! 2. **Generates `<Fn>Inputs`** — a `#[cfg(test)]` struct whose fields are the
-//!    *native* types (`input: [u8; 56]`, `result: [u8; 32]`), so tests read
-//!    `check(XarkSha256TestInputs { input, result }).unwrap()`, named so
+//!    *native* types (`msg: [u8; 3]`, `digest: <Hash as NativeInput>::Native`), so
+//!    tests read `check(Sha256Inputs { msg, digest }).unwrap()`, named so
 //!    parameters can't be transposed.
 //! 3. **Implements `ProveInputs`** — fanning each parameter out to its witness
 //!    leaves with the compiler's structural-flatten leaf names and decimal values.
@@ -60,9 +61,9 @@ enum Fanout {
     Scalar,
     /// `[u8; N]` (N != 32) → `[Field; N]`: `N` byte leaves `name[0..N]`.
     ByteArray(usize),
-    /// `[u8; 32]` → `Hash`: 2 packed leaves `name.hi` / `name.lo`, the top and low
-    /// 16 bytes of the hash read big-endian. Two field public inputs, not 256 bits.
-    Hash,
+    /// `[Field; N]` → `[Field; N]`: `N` field leaves `name[0..N]`, taken natively
+    /// as `[String; N]` decimals (a field value per element — hashes, limbs, …).
+    FieldArray(usize),
     /// A custom transparent gadget type (e.g. `Fq`, `Point`) that implements
     /// [`xark_prover::NativeInput`]: the fan-out delegates to its `leaves`, and the
     /// native struct field is its `NativeInput::Native` associated type.
@@ -77,14 +78,14 @@ struct CircuitParam {
     wrapper: syn::Ident,
     /// The generated `<Fn>Inputs` field type — the **native** type (`[u8; 32]`, `String`).
     native_ty: TokenStream2,
-    /// The compiler-visible inner type (`::xark::Field`, `::xark::Digest`, `[::xark::Field; N]`).
+    /// The compiler-visible inner type (`::xark::Field`, `[::xark::Field; N]`, a gadget type).
     circuit_ty: TokenStream2,
     fanout: Fanout,
 }
 
 /// Rewrite a `#[circuit]` entry: map its **native** parameter types
 /// (`Private<[u8; 56]>`, `Public<[u8; 32]>`, `Private<Field>`) to the Field-backed
-/// circuit types the compiler accepts, shadow `assert_eq` in the body with the
+/// circuit types the compiler accepts, shadow `require_eq` in the body with the
 /// composite-aware dispatcher, and emit a native-typed `<Fn>Inputs` struct whose
 /// `ProveInputs` fans each parameter out to its witness leaves for `check`.
 fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
@@ -96,8 +97,8 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         .collect::<syn::Result<Vec<_>>>()?;
 
     // The compiler-visible entry: native param types rewritten to circuit types,
-    // body prefixed with a `use` that shadows the scalar `assert_eq` intrinsic
-    // with the trait-dispatched one (so `assert_eq(sha256(x), digest)` compiles).
+    // body prefixed with a `use` that shadows the scalar `require_eq` intrinsic
+    // with the trait-dispatched one (so `require_eq(sha256(x), digest)` compiles).
     // The entry is otherwise emitted verbatim, so the driver extracts it exactly.
     let attrs = &func.attrs;
     let vis = &func.vis;
@@ -120,7 +121,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         #(#attrs)*
         #vis fn #fn_ident(#(#sig_params),*) {
             #[allow(unused_imports)]
-            use ::xark::__circuit_assert_eq as assert_eq;
+            use ::xark::__xark_require_eq as require_eq;
             #(#stmts)*
         }
     };
@@ -137,7 +138,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         #[allow(dead_code, unused_imports)]
         fn #circuit_def_ident(#(#sig_params_def),*) {
             #[allow(unused_imports)]
-            use ::xark::__circuit_assert_eq as assert_eq;
+            use ::xark::__xark_require_eq as require_eq;
             #(#stmts)*
         }
     };
@@ -250,7 +251,8 @@ fn unwrap_visibility(ty: &Type) -> syn::Result<(syn::Ident, Type)> {
 }
 
 /// Map a native inner type to `(native struct-field type, circuit inner type, fanout)`.
-/// Supported: `Field`, `[u8; 32]` (a SHA-256 digest), and `[u8; N]` (byte string).
+/// Supported: `Field`, `[u8; 32]` (a SHA-256 digest), `[u8; N]` (byte string),
+/// `[Field; N]` (field-valued array), or a type implementing `NativeInput`.
 fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> {
     if let Type::Path(tp) = inner {
         if tp.path.segments.last().is_some_and(|s| s.ident == "Field") {
@@ -265,13 +267,27 @@ fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> 
         if let Type::Path(elem) = &*arr.elem {
             if elem.path.segments.last().is_some_and(|s| s.ident == "u8") {
                 let n = eval_usize_lit(&arr.len)?;
-                if n == 32 {
-                    return Ok((quote! { [u8; 32] }, quote! { ::xark::Hash }, Fanout::Hash));
-                }
                 return Ok((
                     quote! { [u8; #n] },
                     quote! { [::xark::Field; #n] },
                     Fanout::ByteArray(n),
+                ));
+            }
+            if elem
+                .path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "Field")
+            {
+                // A field-valued array (hash siblings, bignum limbs, …): each
+                // element is a full field element, so the native form is a
+                // `[String; N]` of decimals — the array analogue of the scalar
+                // `Field` → `String` mapping, not "thinking in limbs".
+                let n = eval_usize_lit(&arr.len)?;
+                return Ok((
+                    quote! { [::std::string::String; #n] },
+                    quote! { [::xark::Field; #n] },
+                    Fanout::FieldArray(n),
                 ));
             }
         }
@@ -291,7 +307,8 @@ fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> 
     Err(syn::Error::new_spanned(
         inner,
         "unsupported #[circuit] parameter type; supported: `Field`, `[u8; N]`, \
-         `[u8; 32]` (a SHA-256 digest), or a gadget type implementing `NativeInput`",
+         `[u8; 32]` (a SHA-256 digest), `[Field; N]`, or a gadget type \
+         implementing `NativeInput`",
     ))
 }
 
@@ -308,7 +325,9 @@ fn fanout_code(p: &CircuitParam) -> TokenStream2 {
                 ::std::string::ToString::to_string(&self.#name),
             ));
         },
-        Fanout::ByteArray(n) => quote! {
+        // Byte arrays (`u8` elements) and field arrays (`String` decimals) fan out
+        // identically: leaf `name[i]` = the element rendered as a decimal string.
+        Fanout::ByteArray(n) | Fanout::FieldArray(n) => quote! {
             {
                 let mut __i = 0usize;
                 while __i < #n {
@@ -318,34 +337,6 @@ fn fanout_code(p: &CircuitParam) -> TokenStream2 {
                     ));
                     __i += 1;
                 }
-            }
-        },
-        // The hash packs into two 128-bit field halves: `hi` = the top 16 bytes,
-        // `lo` = the low 16 bytes, each big-endian (16 bytes = 128 bits fits a
-        // `u128` exactly). These are the `name.hi` / `name.lo` public inputs; the
-        // circuit's `pack` recomposes the same two halves from the digest bits.
-        Fanout::Hash => quote! {
-            {
-                let __b = self.#name;
-                let mut __hi = 0u128;
-                let mut __k = 0usize;
-                while __k < 16usize {
-                    __hi = (__hi << 8) | (__b[__k] as u128);
-                    __k += 1;
-                }
-                let mut __lo = 0u128;
-                while __k < 32usize {
-                    __lo = (__lo << 8) | (__b[__k] as u128);
-                    __k += 1;
-                }
-                out.push((
-                    ::std::format!("{}.hi", #name_lit),
-                    ::std::string::ToString::to_string(&__hi),
-                ));
-                out.push((
-                    ::std::format!("{}.lo", #name_lit),
-                    ::std::string::ToString::to_string(&__lo),
-                ));
             }
         },
         // A transparent gadget type: delegate to its `NativeInput::leaves`, which

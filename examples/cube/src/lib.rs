@@ -1,10 +1,10 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
 pub fn cube(secret: Private<Field>, result: Public<Field>) {
-    assert_eq(secret.pow(3), result);
+    require_eq(secret.pow(3), result);
 }
 
 #[cfg(test)]

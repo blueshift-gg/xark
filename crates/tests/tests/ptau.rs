@@ -2,9 +2,9 @@
 //!
 //! These tests build a *minimal* valid Powers-of-Tau transcript in memory
 //! (just `power = 1`, so the smallest legal one) using the same Montgomery
-//! encoding snarkjs writes, then assert the parser accepts it and reports
+//! encoding snarkjs writes, then require the parser accepts it and reports
 //! the correct structure. The negative-path tests then mutate this fixture
-//! in targeted ways and assert each mutation is caught with a specific
+//! in targeted ways and require each mutation is caught with a specific
 //! [`PtauError`] variant.
 //!
 //! We deliberately do **not** depend on a real snarkjs `.ptau` byte fixture

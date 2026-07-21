@@ -66,7 +66,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{assert_eq, Field};
+use xark::{require_eq, Field};
 
 /// Scalar bit-length (see module docs). Kept in sync with the `128usize` loop
 /// literals below (loop bounds must be integer literals in the subset).
@@ -113,7 +113,7 @@ pub fn ec_add(p: [Field; 2], q: [Field; 2]) -> [Field; 2] {
     let one = Field::from(1u8);
     let dx = q[0] - p[0];
     let inv = Field::hint_inverse(dx); // witness-gen: inv = 1/dx
-    assert_eq(dx * inv, one); // pins dx ≠ 0 (edge ⇒ unsatisfiable)
+    require_eq(dx * inv, one); // pins dx ≠ 0 (edge ⇒ unsatisfiable)
     let lam = (q[1] - p[1]) * inv;
     let x3 = lam * lam - p[0] - q[0];
     let y3 = lam * (p[0] - x3) - p[1];
@@ -130,7 +130,7 @@ pub fn ec_double(p: [Field; 2]) -> [Field; 2] {
     let y = p[1];
     let two_y = two * y;
     let inv = Field::hint_inverse(two_y); // witness-gen: inv = 1/(2y)
-    assert_eq(two_y * inv, one); // pins 2y ≠ 0 (edge ⇒ unsatisfiable)
+    require_eq(two_y * inv, one); // pins 2y ≠ 0 (edge ⇒ unsatisfiable)
     let lam = three * x * x * inv;
     let x3 = lam * lam - two * x;
     let y3 = lam * (x - x3) - y;
@@ -140,7 +140,7 @@ pub fn ec_double(p: [Field; 2]) -> [Field; 2] {
 /// Boolean-gated select between two affine points: `bit ? if_true : if_false`.
 /// Pure arithmetic mux `sel·(a - b) + b` — never a data-dependent branch.
 fn point_select(bit: Field, if_true: [Field; 2], if_false: [Field; 2]) -> [Field; 2] {
-    bit.assert_bool();
+    bit.require_bool();
     [
         if_false[0] + bit * (if_true[0] - if_false[0]),
         if_false[1] + bit * (if_true[1] - if_false[1]),
@@ -164,7 +164,7 @@ pub fn decompose(x: Field) -> [Field; N_BITS] {
     }
     let mut i = 0usize;
     while i < 128usize {
-        bits[i].assert_bool();
+        bits[i].require_bool();
         i += 1;
     }
     let mut acc = Field::from(0u8);
@@ -175,7 +175,7 @@ pub fn decompose(x: Field) -> [Field; N_BITS] {
         pow = pow + pow; // double: stays a compile-time constant (no gate)
         i += 1;
     }
-    assert_eq(acc, x);
+    require_eq(acc, x);
     bits
 }
 
@@ -183,7 +183,7 @@ pub fn decompose(x: Field) -> [Field; N_BITS] {
 pub fn enforce_on_curve(p: [Field; 2]) {
     let x = p[0];
     let y = p[1];
-    assert_eq(y * y, x * x * x - Field::from(17u8));
+    require_eq(y * y, x * x * x - Field::from(17u8));
 }
 
 /// **Variable-base** scalar multiplication `m · p` via the offset
@@ -251,7 +251,7 @@ mod host {
     }
 }
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_grumpkin::prelude::*;`.
 pub mod prelude {
     pub use crate::*;

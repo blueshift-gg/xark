@@ -243,7 +243,7 @@ pub fn hash<const N: usize>(inputs: [Field; N]) -> Field {
     state[0]
 }
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_poseidon::prelude::*;`.
 pub mod prelude {
     pub use crate::*;

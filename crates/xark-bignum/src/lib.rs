@@ -19,10 +19,16 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::assert_eq;
+use xark::require_eq;
 /// Re-exported so the [`fp!`] macro can name `$crate::Field` without the caller
 /// importing `xark`.
 pub use xark::Field;
+
+/// Host-only re-export so the [`fp!`] macro can generate a decimal `NativeInput`
+/// (`$crate::__prover::…`) without the caller depending on `xark_prover` by name.
+#[cfg(not(xark))]
+#[doc(hidden)]
+pub use xark_prover as __prover;
 
 // ===========================================================================
 // Width-generic non-native modular arithmetic (`Bignum<LIMBS, BITS>`).
@@ -46,6 +52,26 @@ const MAX_COLS: usize = 2 * MAX_LIMBS - 1;
 pub struct Bignum<const LIMBS: usize, const BITS: usize> {
     pub limbs: [Field; LIMBS],
 }
+
+// Host-side `NativeInput`: a `Bignum<LIMBS, BITS>` circuit input is a single whole
+// number, taken natively as a decimal (or `0x`-hex) string and split into its
+// `LIMBS` little-endian `BITS`-bit limbs (`<name>.limbs[i]`) — so callers pass the
+// value, never hand-decompose limbs. Distinct from the curve/`fp!` field newtypes
+// (which carry their own byte-host `NativeInput`), so there is no coherence clash.
+// `NativeInput` lives in the `std` `xark_prover` while this crate is `#![no_std]`,
+// so pull `std` in inside an anonymous const (the `#[derive(Transparent)]` pattern).
+#[cfg(not(xark))]
+const _: () = {
+    extern crate std;
+    use std::string::String;
+    use std::vec::Vec;
+    impl<const LIMBS: usize, const BITS: usize> xark_prover::NativeInput for Bignum<LIMBS, BITS> {
+        type Native = String;
+        fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
+            xark_prover::limb_leaves_decimal(native, prefix, LIMBS, BITS as u32)
+        }
+    }
+};
 
 impl<const LIMBS: usize, const BITS: usize> Bignum<LIMBS, BITS> {
     /// The limb count and bit width, exposed so `fp!(Name, "0x…", ThisType)` can
@@ -235,16 +261,41 @@ macro_rules! fp {
     // write only the name and the modulus.
     ($vis:vis $name:ident, $modulus:literal) => {
         $crate::fp!(@build $vis $name, $modulus, 3, 86);
+        $crate::fp!(@host $name, 3, 86);
+    };
+    // Same, but WITHOUT a `NativeInput` host impl: for callers that supply their own
+    // (e.g. curves give a byte host via `curve_host_inputs!`), so the two don't clash.
+    (no_host $vis:vis $name:ident, $modulus:literal) => {
+        $crate::fp!(@build $vis $name, $modulus, 3, 86);
     };
     // Geometry from a `Bignum<LIMBS, BITS>` type — `fp!(Fp, "0x…", Scalar)` — so a
     // single `type Scalar = Bignum<L, B>` can feed both the field and its
     // `[Scalar; 2]` points.
     ($vis:vis $name:ident, $modulus:literal, $geom:ty) => {
         $crate::fp!(@build $vis $name, $modulus, { <$geom>::LIMBS }, { <$geom>::BITS });
+        $crate::fp!(@host $name, { <$geom>::LIMBS }, { <$geom>::BITS });
     };
     // Explicit limb layout: `fp!(Fp, "0x…", 4, 64)`.
     ($vis:vis $name:ident, $modulus:literal, $limbs:literal, $bits:literal) => {
         $crate::fp!(@build $vis $name, $modulus, $limbs, $bits);
+        $crate::fp!(@host $name, $limbs, $bits);
+    };
+    // Host-side `NativeInput`: take the element as a single decimal (or `0x`-hex)
+    // string, split into `$limbs` little-endian `$bits`-bit limbs (`<name>.limbs[i]`)
+    // — callers pass the value, never hand-decompose limbs. Host-only.
+    (@host $name:ident, $limbs:expr, $bits:expr) => {
+        #[cfg(not(xark))]
+        const _: () = {
+            extern crate std;
+            use std::string::String;
+            use std::vec::Vec;
+            impl $crate::__prover::NativeInput for $name {
+                type Native = String;
+                fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
+                    $crate::__prover::limb_leaves_decimal(native, prefix, $limbs, $bits as u32)
+                }
+            }
+        };
     };
     (@build $vis:vis $name:ident, $modulus:literal, $limbs:expr, $bits:expr) => {
         #[derive(Clone, Copy)]
@@ -284,7 +335,7 @@ macro_rules! fp {
             /// Rejects non-canonical encodings (the source of ECDSA malleability).
             pub fn assert_canonical(self) {
                 $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs);
-                $crate::assert_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
+                $crate::require_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
             }
             /// Assert this element is nonzero (assumes range-checked limbs).
             pub fn assert_nonzero(self) {
@@ -337,13 +388,13 @@ fn decompose_top<const BITS: usize, const EXTRA: usize>(v: Field) -> [Field; MAX
     let mut i = 0usize;
     while i < BITS + EXTRA {
         let bit = Field::hint_bit(v, i);
-        bit.assert_bool();
+        bit.require_bool();
         bits[i] = bit;
         acc = acc + bit * pow;
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, v);
+    require_eq(acc, v);
     bits
 }
 
@@ -367,12 +418,12 @@ fn range_bits<const BITS: usize>(v: Field) {
     let mut i = 0usize;
     while i < BITS {
         let bit = Field::hint_bit(v, i);
-        bit.assert_bool();
+        bit.require_bool();
         acc = acc + bit * pow;
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, v);
+    require_eq(acc, v);
 }
 
 /// Range-check a biased column carry `v < 2^(BITS+6)` (the `mulmod_columns`
@@ -384,12 +435,12 @@ fn range_bits_carry<const BITS: usize>(v: Field) {
     let mut i = 0usize;
     while i < BITS + 6 {
         let bit = Field::hint_bit(v, i);
-        bit.assert_bool();
+        bit.require_bool();
         acc = acc + bit * pow;
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, v);
+    require_eq(acc, v);
 }
 
 /// Range-check `v < 2^3` (small biased `sub2` carries, width-independent).
@@ -397,10 +448,10 @@ fn range_lt_8(v: Field) {
     let b0 = Field::hint_bit(v, 0);
     let b1 = Field::hint_bit(v, 1);
     let b2 = Field::hint_bit(v, 2);
-    b0.assert_bool();
-    b1.assert_bool();
-    b2.assert_bool();
-    assert_eq(b0 + b1 + b1 + b2 + b2 + b2 + b2, v);
+    b0.require_bool();
+    b1.require_bool();
+    b2.require_bool();
+    require_eq(b0 + b1 + b1 + b2 + b2 + b2 + b2, v);
 }
 
 /// Range-check each of the `LIMBS` limbs of `x` to `[0, 2^BITS)`.
@@ -428,7 +479,7 @@ pub fn mod_neg<const LIMBS: usize, const BITS: usize>(
         borrow = Field::from(1u8) - bits[BITS];
         i += 1;
     }
-    assert_eq(borrow, Field::from(0u8));
+    require_eq(borrow, Field::from(0u8));
     out
 }
 
@@ -501,7 +552,7 @@ pub fn mod_sub<const LIMBS: usize, const BITS: usize>(
         borrow2 = Field::from(1u8) - bits[BITS];
         i += 1;
     }
-    assert_eq(borrow2, Field::from(0u8));
+    require_eq(borrow2, Field::from(0u8));
     result
 }
 
@@ -523,7 +574,7 @@ pub fn triple_mod<const LIMBS: usize, const BITS: usize>(
         carry = bits[BITS] + Field::from(2u8) * bits[BITS + 1];
         i += 1;
     }
-    assert_eq(carry, Field::from(0u8)); // 3v < 2^(BITS·LIMBS) ⇒ no top overflow
+    require_eq(carry, Field::from(0u8)); // 3v < 2^(BITS·LIMBS) ⇒ no top overflow
     reduce_once::<LIMBS, BITS>(reduce_once::<LIMBS, BITS>(s, m), m)
 }
 
@@ -557,7 +608,7 @@ pub fn reduce_once<const LIMBS: usize, const BITS: usize>(
 
 /// Enforce `x < m` (`(m-1) - x` produces no final borrow). `x`'s limbs must be
 /// range-checked first.
-pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
+pub fn require_lt<const LIMBS: usize, const BITS: usize>(
     x: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
 ) {
@@ -571,18 +622,18 @@ pub fn assert_lt<const LIMBS: usize, const BITS: usize>(
         borrow = Field::from(1u8) - no_borrow;
         i += 1;
     }
-    assert_eq(borrow, Field::from(0u8));
+    require_eq(borrow, Field::from(0u8));
 }
 
 /// Return a pinned boolean `lt ∈ {0,1}` with `lt == 1` **iff** `a < b`, comparing
 /// two canonical `LIMBS × BITS`-bit limb vectors (each limb assumed `< 2^BITS`).
 ///
-/// Same sound subtract-with-borrow as [`assert_lt`] — it computes `a − b` limb by
+/// Same sound subtract-with-borrow as [`require_lt`] — it computes `a − b` limb by
 /// limb, where each `d_i = a[i] − b[i] − borrow + 2^BITS ∈ [0, 2^(BITS+1))` is
 /// bit-decomposed (`decompose_top` pins it) and its top bit is `no_borrow`. Every
 /// term stays `< 2^(BITS+1)`, so nothing wraps the field, and the final borrow is
 /// exactly the `a < b` bit — no full-width value is ever reconstructed. Unlike
-/// `assert_lt` (which asserts the borrow is `0`), this **returns** it, so a caller
+/// `require_lt` (which asserts the borrow is `0`), this **returns** it, so a caller
 /// can branch/mux on the comparison and derive advice (rounding carries, GLV
 /// signs) in-circuit instead of passing it as a witness input.
 pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field; LIMBS]) -> Field {
@@ -606,14 +657,14 @@ pub fn is_ge<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field
 
 /// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
-    // all_zero = AND of isZero(limbᵢ); assert it is 0 to forbid value 0
+    // all_zero = AND of isZero(limbᵢ); require it is 0 to forbid value 0
     let mut all_zero = Field::from(1u8);
     let mut i = 0usize;
     while i < LIMBS {
         all_zero = all_zero.and(Field::from(limbs[i].is_zero()));
         i += 1;
     }
-    assert_eq(all_zero, Field::from(0u8));
+    require_eq(all_zero, Field::from(0u8));
 }
 
 /// Shared column/carry identity `a·b == q·m + r`. `q`, `r` are the caller-supplied
@@ -656,14 +707,14 @@ fn mulmod_columns<const LIMBS: usize, const BITS: usize>(
         let dr = Field::hint_div_rem(num, two_b);
         let cb = dr[0];
         let rem = dr[1];
-        assert_eq(num, two_b * cb + rem);
-        assert_eq(rem, Field::from(0u8));
+        require_eq(num, two_b * cb + rem);
+        require_eq(rem, Field::from(0u8));
         range_bits_carry::<BITS>(cb);
         cb_prev = cb;
         c += 1;
     }
     let num_top = lhs[2 * LIMBS - 2] - rhs[2 * LIMBS - 2] + cb_prev + bias_shift - bias;
-    assert_eq(num_top, bias_shift);
+    require_eq(num_top, bias_shift);
 }
 
 /// Non-native modular multiplication `(a·b) mod m` over `LIMBS` × `BITS`-bit limbs.
@@ -699,28 +750,28 @@ pub fn mul_lazy_25519(a: [Field; 3], b: [Field; 3]) -> [Field; 3] {
     let d0 = Field::hint_div_rem(t0, two85);
     let c0 = d0[0];
     let r0 = d0[1];
-    assert_eq(t0, two85 * c0 + r0);
+    require_eq(t0, two85 * c0 + r0);
     range_bits::<85>(r0);
     range_bits::<101>(c0);
     let x1 = t1 + c0;
     let d1 = Field::hint_div_rem(x1, two85);
     let c1 = d1[0];
     let r1 = d1[1];
-    assert_eq(x1, two85 * c1 + r1);
+    require_eq(x1, two85 * c1 + r1);
     range_bits::<85>(r1);
     range_bits::<101>(c1);
     let x2 = t2 + c1;
     let d2 = Field::hint_div_rem(x2, two85);
     let c2 = d2[0];
     let r2 = d2[1];
-    assert_eq(x2, two85 * c2 + r2);
+    require_eq(x2, two85 * c2 + r2);
     range_bits::<85>(r2);
     range_bits::<96>(c2);
     let u0 = r0 + c19 * c2;
     let e0 = Field::hint_div_rem(u0, two85);
     let k0 = e0[0];
     let s0 = e0[1];
-    assert_eq(u0, two85 * k0 + s0);
+    require_eq(u0, two85 * k0 + s0);
     range_bits::<85>(s0);
     range_bits::<16>(k0);
     let s1 = r1 + k0;
@@ -755,35 +806,35 @@ pub fn mul_lazy_k1(a: [Field; 4], b: [Field; 4]) -> [Field; 4] {
     let d0 = Field::hint_div_rem(t0, two64);
     let c0 = d0[0];
     let r0 = d0[1];
-    assert_eq(t0, two64 * c0 + r0);
+    require_eq(t0, two64 * c0 + r0);
     range_bits::<64>(r0);
     range_bits::<112>(c0);
     let x1 = t1 + c0;
     let d1 = Field::hint_div_rem(x1, two64);
     let c1 = d1[0];
     let r1 = d1[1];
-    assert_eq(x1, two64 * c1 + r1);
+    require_eq(x1, two64 * c1 + r1);
     range_bits::<64>(r1);
     range_bits::<112>(c1);
     let x2 = t2 + c1;
     let d2 = Field::hint_div_rem(x2, two64);
     let c2 = d2[0];
     let r2 = d2[1];
-    assert_eq(x2, two64 * c2 + r2);
+    require_eq(x2, two64 * c2 + r2);
     range_bits::<64>(r2);
     range_bits::<112>(c2);
     let x3 = t3 + c2;
     let d3 = Field::hint_div_rem(x3, two64);
     let c3 = d3[0];
     let r3 = d3[1];
-    assert_eq(x3, two64 * c3 + r3);
+    require_eq(x3, two64 * c3 + r3);
     range_bits::<64>(r3);
     range_bits::<82>(c3);
     let u0 = r0 + c * c3;
     let e0 = Field::hint_div_rem(u0, two64);
     let k0 = e0[0];
     let s0 = e0[1];
-    assert_eq(u0, two64 * k0 + s0);
+    require_eq(u0, two64 * k0 + s0);
     range_bits::<64>(s0);
     range_bits::<52>(k0);
     let s1 = r1 + k0;
@@ -797,35 +848,35 @@ pub fn weak_reduce_k1(v: [Field; 4]) -> [Field; 4] {
     let d0 = Field::hint_div_rem(v[0], two64);
     let c0 = d0[0];
     let r0 = d0[1];
-    assert_eq(v[0], two64 * c0 + r0);
+    require_eq(v[0], two64 * c0 + r0);
     range_bits::<64>(r0);
     range_bits::<10>(c0);
     let x1 = v[1] + c0;
     let d1 = Field::hint_div_rem(x1, two64);
     let c1 = d1[0];
     let r1 = d1[1];
-    assert_eq(x1, two64 * c1 + r1);
+    require_eq(x1, two64 * c1 + r1);
     range_bits::<64>(r1);
     range_bits::<10>(c1);
     let x2 = v[2] + c1;
     let d2 = Field::hint_div_rem(x2, two64);
     let c2 = d2[0];
     let r2 = d2[1];
-    assert_eq(x2, two64 * c2 + r2);
+    require_eq(x2, two64 * c2 + r2);
     range_bits::<64>(r2);
     range_bits::<10>(c2);
     let x3 = v[3] + c2;
     let d3 = Field::hint_div_rem(x3, two64);
     let c3 = d3[0];
     let r3 = d3[1];
-    assert_eq(x3, two64 * c3 + r3);
+    require_eq(x3, two64 * c3 + r3);
     range_bits::<64>(r3);
     range_bits::<10>(c3);
     let u0 = r0 + c * c3;
     let e0 = Field::hint_div_rem(u0, two64);
     let k0 = e0[0];
     let s0 = e0[1];
-    assert_eq(u0, two64 * k0 + s0);
+    require_eq(u0, two64 * k0 + s0);
     range_bits::<64>(s0);
     range_bits::<40>(k0);
     let s1 = r1 + k0;
@@ -838,15 +889,15 @@ pub fn finalize_k1(v: [Field; 4]) -> [Field; 4] {
 }
 
 /// Sound lazy modular inverse mod secp256k1 p: hint w, range-check canonical,
-/// assert a·w ≡ 1 (mod p) via lazy multiply. `a` may be loosely-reduced (≠ 0).
+/// require a·w ≡ 1 (mod p) via lazy multiply. `a` may be loosely-reduced (≠ 0).
 pub fn inv_lazy_k1(a: [Field; 4]) -> [Field; 4] {
     let w = Field::hint_mod_inverse::<4>(a, M_K1, 64);
     range_check_limbs::<4, 64>(w);
     let prod = finalize_k1(mul_lazy_k1(a, w));
-    assert_eq(prod[0], Field::from(1u8));
-    assert_eq(prod[1], Field::from(0u8));
-    assert_eq(prod[2], Field::from(0u8));
-    assert_eq(prod[3], Field::from(0u8));
+    require_eq(prod[0], Field::from(1u8));
+    require_eq(prod[1], Field::from(0u8));
+    require_eq(prod[2], Field::from(0u8));
+    require_eq(prod[3], Field::from(0u8));
     w
 }
 
@@ -950,7 +1001,7 @@ pub fn on_curve_k1(x: [Field; 4], y: [Field; 4]) {
     let rf = finalize_k1(rhs);
     let mut i = 0usize;
     while i < 4usize {
-        assert_eq(lf[i], rf[i]);
+        require_eq(lf[i], rf[i]);
         i += 1;
     }
 }
@@ -965,13 +1016,13 @@ pub fn scalar_to_bits_256(u: [Field; 4]) -> [Field; 256] {
         let mut j = 0usize;
         while j < 64usize {
             let b = Field::hint_bit(u[l], j);
-            b.assert_bool();
+            b.require_bool();
             bits[l * 64 + j] = b;
             acc = acc + b * pow;
             pow = pow + pow;
             j += 1;
         }
-        assert_eq(acc, u[l]);
+        require_eq(acc, u[l]);
         l += 1;
     }
     bits
@@ -983,28 +1034,28 @@ pub fn weak_reduce_25519(v: [Field; 3]) -> [Field; 3] {
     let d0 = Field::hint_div_rem(v[0], two85);
     let c0 = d0[0];
     let r0 = d0[1];
-    assert_eq(v[0], two85 * c0 + r0);
+    require_eq(v[0], two85 * c0 + r0);
     range_bits::<85>(r0);
     range_bits::<8>(c0);
     let x1 = v[1] + c0;
     let d1 = Field::hint_div_rem(x1, two85);
     let c1 = d1[0];
     let r1 = d1[1];
-    assert_eq(x1, two85 * c1 + r1);
+    require_eq(x1, two85 * c1 + r1);
     range_bits::<85>(r1);
     range_bits::<8>(c1);
     let x2 = v[2] + c1;
     let d2 = Field::hint_div_rem(x2, two85);
     let c2 = d2[0];
     let r2 = d2[1];
-    assert_eq(x2, two85 * c2 + r2);
+    require_eq(x2, two85 * c2 + r2);
     range_bits::<85>(r2);
     range_bits::<8>(c2);
     let u0 = r0 + c19 * c2;
     let e0 = Field::hint_div_rem(u0, two85);
     let k0 = e0[0];
     let s0 = e0[1];
-    assert_eq(u0, two85 * k0 + s0);
+    require_eq(u0, two85 * k0 + s0);
     range_bits::<85>(s0);
     range_bits::<8>(k0);
     let s1 = r1 + k0;
@@ -1125,7 +1176,7 @@ pub fn mod_mul<const LIMBS: usize, const BITS: usize>(
 
 /// Non-native `a·b` exposing **both** halves of the division: returns
 /// `(q, r)` with `q = ⌊a·b / m⌋` and `r = a·b mod m`. Both are range-checked to
-/// `LIMBS × BITS` bits, `r` is `assert_lt`'d canonical, and the pair is pinned by
+/// `LIMBS × BITS` bits, `r` is `require_lt`'d canonical, and the pair is pinned by
 /// `mulmod_columns` (`a·b == q·m + r`), so the quotient is as sound as the
 /// remainder. [`mod_mul`] is `.1` of this.
 ///
@@ -1151,7 +1202,7 @@ pub fn mul_divmod<const LIMBS: usize, const BITS: usize>(
         range_bits::<BITS>(r[i]);
         i += 1;
     }
-    assert_lt::<LIMBS, BITS>(r, m_minus_1);
+    require_lt::<LIMBS, BITS>(r, m_minus_1);
     mulmod_columns::<LIMBS, BITS>(a, b, q, r, m);
     (q, r)
 }
@@ -1161,7 +1212,7 @@ pub fn mul_divmod<const LIMBS: usize, const BITS: usize>(
 ///
 /// Specialized: the reduction remainder is *known* to be exactly `1`, so `r` is
 /// pinned to the constant `[1,0,…]` instead of being range-checked and
-/// canonical-checked as advice — saving the per-inverse range/`assert_lt` work.
+/// canonical-checked as advice — saving the per-inverse range/`require_lt` work.
 pub fn mod_inverse<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     m: [Field; LIMBS],
@@ -1178,12 +1229,12 @@ pub fn mod_inverse<const LIMBS: usize, const BITS: usize>(
     let (q, r_hint) = Field::hint_mulmod_divmod::<LIMBS>(a, w, m, BITS);
     range_check_limbs::<LIMBS, BITS>(q);
     // r is exactly 1: pin the hint's remainder outputs to the constant (no range
-    // check / assert_lt needed — 1 is trivially a canonical limb).
+    // check / require_lt needed — 1 is trivially a canonical limb).
     let mut r = [Field::from(0u8); LIMBS];
     r[0] = Field::from(1u8);
     let mut i = 0usize;
     while i < LIMBS {
-        assert_eq(r_hint[i], r[i]);
+        require_eq(r_hint[i], r[i]);
         i += 1;
     }
     mulmod_columns::<LIMBS, BITS>(a, w, q, r, m);
@@ -1195,7 +1246,7 @@ pub fn mod_inverse<const LIMBS: usize, const BITS: usize>(
 /// **linear** identity `a + qabs·m == b + c + r` with biased carries — one
 /// reduction's worth of work instead of two `mod_sub`.
 ///
-/// SOUNDNESS: `r` is range-checked + `assert_lt`'d (canonical, unique). `qabs` is
+/// SOUNDNESS: `r` is range-checked + `require_lt`'d (canonical, unique). `qabs` is
 /// pinned to `{0,1,2}` (2 bits with the `(1,1)` pattern excluded), so each
 /// `lhs[i] = a[i] + qabs·m[i] < 3·2^BITS` and the signed carry stays `|t| ≤ 3`
 /// (`cb = t+4 ∈ [1,7]`, range-checked `< 8`).
@@ -1212,15 +1263,15 @@ pub fn sub2<const LIMBS: usize, const BITS: usize>(
 
     let (qabs, r) = Field::hint_sub2::<LIMBS>(a, b, c, m, BITS);
     range_check_limbs::<LIMBS, BITS>(r);
-    assert_lt::<LIMBS, BITS>(r, m_minus_1);
+    require_lt::<LIMBS, BITS>(r, m_minus_1);
 
     // qabs ∈ {0,1,2}: two bits, exclude the (1,1)=3 pattern.
     let q0 = Field::hint_bit(qabs, 0);
     let q1 = Field::hint_bit(qabs, 1);
-    q0.assert_bool();
-    q1.assert_bool();
-    assert_eq(q0 + q1 + q1, qabs);
-    assert_eq(q0 * q1, Field::from(0u8));
+    q0.require_bool();
+    q1.require_bool();
+    require_eq(q0 + q1 + q1, qabs);
+    require_eq(q0 * q1, Field::from(0u8));
 
     // Column identity a + qabs·m == b + c + r (columns 0..LIMBS-1 hinted; top direct).
     let mut cb_prev = bias;
@@ -1232,8 +1283,8 @@ pub fn sub2<const LIMBS: usize, const BITS: usize>(
         let dr = Field::hint_div_rem(num, two_b);
         let cb = dr[0];
         let rem = dr[1];
-        assert_eq(num, two_b * cb + rem);
-        assert_eq(rem, Field::from(0u8));
+        require_eq(num, two_b * cb + rem);
+        require_eq(rem, Field::from(0u8));
         range_lt_8(cb);
         cb_prev = cb;
         i += 1;
@@ -1241,7 +1292,7 @@ pub fn sub2<const LIMBS: usize, const BITS: usize>(
     let lhs2 = a[LIMBS - 1] + qabs * m[LIMBS - 1];
     let rhs2 = b[LIMBS - 1] + c[LIMBS - 1] + r[LIMBS - 1];
     let num2 = lhs2 - rhs2 + cb_prev + bias_shift - bias;
-    assert_eq(num2, bias_shift);
+    require_eq(num2, bias_shift);
 
     r
 }
@@ -1289,37 +1340,37 @@ pub fn scalar_to_bits(u: [Field; 3]) -> [Field; 256] {
     let mut i = 0usize;
     while i < 86usize {
         let b = Field::hint_bit(u[0], i);
-        b.assert_bool();
+        b.require_bool();
         bits[i] = b;
         acc = acc + b * pow;
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, u[0]);
+    require_eq(acc, u[0]);
     let mut acc = Field::from(0u8);
     let mut pow = Field::from(1u8);
     let mut i = 0usize;
     while i < 86usize {
         let b = Field::hint_bit(u[1], i);
-        b.assert_bool();
+        b.require_bool();
         bits[86 + i] = b;
         acc = acc + b * pow;
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, u[1]);
+    require_eq(acc, u[1]);
     let mut acc = Field::from(0u8);
     let mut pow = Field::from(1u8);
     let mut i = 0usize;
     while i < 84usize {
         let b = Field::hint_bit(u[2], i);
-        b.assert_bool();
+        b.require_bool();
         bits[172 + i] = b;
         acc = acc + b * pow;
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, u[2]);
+    require_eq(acc, u[2]);
     bits
 }
 
@@ -1329,7 +1380,7 @@ pub fn point_select_affine(
     if_true: [[Field; 3]; 2],
     if_false: [[Field; 3]; 2],
 ) -> [[Field; 3]; 2] {
-    bit.assert_bool();
+    bit.require_bool();
     let mut out = [[Field::from(0u8); 3]; 2];
     let mut c = 0usize;
     while c < 2usize {
@@ -1343,14 +1394,14 @@ pub fn point_select_affine(
     out
 }
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_bignum::prelude::*;`. `Field` comes via
 /// `crate::*` (this crate re-exports it for the [`fp!`] macro), so the `xark`
 /// essentials are listed explicitly to avoid a duplicate-`Field` glob.
 pub mod prelude {
     pub use crate::*;
     pub use xark::prelude::{
-        assert, assert_eq, assert_ge, assert_gt, assert_le, assert_lt, circuit, witness_begin,
-        witness_end, Private, Public,
+        circuit, require, require_eq, require_ge, require_gt, require_le, require_lt,
+        witness_begin, witness_end, Private, Public,
     };
 }

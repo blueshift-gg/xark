@@ -8,16 +8,21 @@
 //! [`Digest`] hides that bookkeeping so a circuit reads:
 //!
 //! ```rust,ignore
-//! use xark::Digest;
-//! use xark_sha256::sha256;
+//! use xark_sha256::prelude::*; // re-exports `Digest`
 //!
 //! const EXPECTED: [u8; 32] = [/* known hash */];
 //!
-//! pub fn circuit(msg: Private<[Field; N]>) {
+//! #[circuit]
+//! pub fn circuit(msg: Private<[u8; N]>) {
 //!     let expected: Digest = EXPECTED.into();
-//!     Digest::from(sha256(msg)).assert_eq(expected);
+//!     Digest::from(sha256(msg)).require_eq(expected);
 //! }
 //! ```
+//!
+//! Unlike [`Hash`](crate::Hash), a `Digest` keeps all 256 bits, so a
+//! `Public<Digest>` is 256 public inputs — use it for a **constant** expected
+//! hash baked into the circuit (no public inputs), and use [`Hash`](crate::Hash)
+//! for a runtime public digest.
 //!
 //! ## Layout (must match [`xark_sha256::sha256`])
 //!
@@ -30,16 +35,14 @@
 //! `(3 - idx%4)*8 + j`. This module's [`From<[u8; 32]>`] places the known bytes
 //! at exactly those positions; the KAT test `sha256("abc")` confirms it.
 
-use crate::lang::{assert_eq, AssertEqCircuit, Field};
-// The `#[derive(CircuitInput)]` macro (generates `From<Digest> for [Field; 256]`).
-use crate::CircuitInput;
+use xark::{require_eq, CircuitInput, Field, RequireEqCircuit};
 
 /// A 256-bit SHA-256 digest, stored in [`xark_sha256::sha256`]'s native output
 /// layout: 8 words × 32 little-endian bits (`[[Field; 32]; 8]`).
 ///
 /// Build one from the gadget output (`Digest::from(sha256(msg))`) or from a known
 /// hash constant (`EXPECTED.into()` for `const EXPECTED: [u8; 32]`), then pin the
-/// two together with [`Digest::assert_eq`].
+/// two together with [`Digest::require_eq`].
 ///
 /// `#[derive(CircuitInput)]` generates `Into<[Field; 256]>` in the compiler's
 /// structural-flatten order (word-major, then bit — `bits[w][j]` → index
@@ -56,12 +59,12 @@ impl Digest {
     /// Constrain this digest equal to `other`, bit-for-bit (256 equality
     /// constraints, one per output bit). Both digests are already in the same
     /// word/byte/bit layout, so this is a plain element-wise compare.
-    pub fn assert_eq(self, other: Digest) {
+    pub fn require_eq(self, other: Digest) {
         let mut w = 0usize;
         while w < 8usize {
             let mut j = 0usize;
             while j < 32usize {
-                assert_eq(self.bits[w][j], other.bits[w][j]);
+                require_eq(self.bits[w][j], other.bits[w][j]);
                 j += 1;
             }
             w += 1;
@@ -77,21 +80,21 @@ impl From<[[Field; 32]; 8]> for Digest {
     }
 }
 
-/// Let a `#[circuit]` body write `assert_eq(sha256(msg), expected)` directly: the
+/// Let a `#[circuit]` body write `require_eq(sha256(msg), expected)` directly: the
 /// raw gadget output `[[Field; 32]; 8]` is wrapped and compared bit-for-bit
-/// against the expected [`Digest`]. See [`AssertEqCircuit`] for the dispatch.
-impl AssertEqCircuit<Digest> for [[Field; 32]; 8] {
+/// against the expected [`Digest`]. See [`RequireEqCircuit`] for the dispatch.
+impl RequireEqCircuit<Digest> for [[Field; 32]; 8] {
     #[inline]
-    fn assert_eq_circuit(self, rhs: Digest) {
-        Digest::from(self).assert_eq(rhs);
+    fn require_eq_circuit(self, rhs: Digest) {
+        Digest::from(self).require_eq(rhs);
     }
 }
 
-/// Compare two digests (e.g. `assert_eq(a, b)` where both are already `Digest`).
-impl AssertEqCircuit<Digest> for Digest {
+/// Compare two digests (e.g. `require_eq(a, b)` where both are already `Digest`).
+impl RequireEqCircuit<Digest> for Digest {
     #[inline]
-    fn assert_eq_circuit(self, rhs: Digest) {
-        self.assert_eq(rhs);
+    fn require_eq_circuit(self, rhs: Digest) {
+        self.require_eq(rhs);
     }
 }
 

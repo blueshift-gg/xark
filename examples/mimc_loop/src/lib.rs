@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 /// One MiMC round: `(state + key + round_constant)^3`.
 fn round(state: Field, key: Field, c: Field) -> Field {
@@ -34,7 +34,7 @@ pub fn mimc_loop(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
         i += 1;
     }
 
-    assert_eq(s + k, h);
+    require_eq(s + k, h);
 }
 
 #[cfg(test)]
@@ -44,7 +44,12 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // same 3-round MiMC as `mimc`
-        mimc_loop("3".into(), "5".into(), "20571574433789244246851793328630243816385775205591326058386183977315966726389".into()).unwrap();
+        mimc_loop(
+            "3".into(),
+            "5".into(),
+            "20571574433789244246851793328630243816385775205591326058386183977315966726389".into(),
+        )
+        .unwrap();
     }
 
     #[test]

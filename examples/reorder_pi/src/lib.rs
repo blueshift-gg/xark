@@ -1,11 +1,11 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
-// reorder_pi: main(a: pub, b: priv, c: pub) { assert(b*b == a+c) }.
+// reorder_pi: main(a: pub, b: priv, c: pub) { require(b*b == a+c) }.
 #[circuit]
 pub fn reorder_pi(a: Public<Field>, b: Private<Field>, c: Public<Field>) {
-    assert_eq(b * b, a + c);
+    require_eq(b * b, a + c);
 }
 
 #[cfg(test)]

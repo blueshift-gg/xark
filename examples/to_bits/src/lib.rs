@@ -1,14 +1,14 @@
 //! `Field::to_bits` / `from_bits`: bit decomposition as a first-class `Field`
-//! operation (composed from `hint_bit` + arithmetic + `assert_eq`, no extra
+//! operation (composed from `hint_bit` + arithmetic + `require_eq`, no extra
 //! crate). `to_bits::<N>()` pins each bit boolean and proves `self < 2^N`;
 //! `from_bits` recomposes.
 #![cfg_attr(xark, no_std)]
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
 pub fn to_bits(x: Private<Field>, out: Public<Field>) {
     let bits = x.to_bits::<8>(); // decompose into 8 bits (proves x < 256)
-    assert_eq(Field::from_bits::<8>(bits), out); // recompose == out == x
+    require_eq(Field::from_bits::<8>(bits), out); // recompose == out == x
 }
 
 #[cfg(test)]

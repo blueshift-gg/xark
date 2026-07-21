@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 xark = { path = "../xark", default-features = false }
 xark-bits = { path = "../xark-bits" }
+xark-hash = { path = "../xark-hash" }
 
 [dev-dependencies]
 xark-test-harness = { path = "../xark-test-harness" }

@@ -15,3 +15,6 @@ xark = { path = "../xark", default-features = false }
 [dev-dependencies]
 xark-test-harness = { path = "../xark-test-harness" }
 xark-ir = { path = "../xark-ir" }
+# Independent reference for the GCM GF(2^128) field (GHASH): `GHash::new(H).update(Y)`
+# = Y·H, exactly the `gf128_mul` we validate.
+ghash = "0.5"

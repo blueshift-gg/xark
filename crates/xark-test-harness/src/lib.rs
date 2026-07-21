@@ -166,7 +166,7 @@ fn built() -> &'static (PathBuf, PathBuf) {
         //    nightly pkg with its own pinned `rust-toolchain.toml`). Built *first*
         //    so it can serve as `RUSTC` for the gadget rlibs below.
         let ok = Command::new("cargo")
-            // `--features debug` compiles in the diagnostic markers the tests assert
+            // `--features debug` compiles in the diagnostic markers the tests require
             // on; a `--features` build still lands at `target/release/xark-rustc`.
             .args(["build", "--release", "--features", "debug"])
             .env("RUSTUP_TOOLCHAIN", &channel)

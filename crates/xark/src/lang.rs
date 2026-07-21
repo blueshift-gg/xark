@@ -148,7 +148,7 @@ impl Field {
     }
 
     /// Allocate a fresh *advice* (private witness) field element with no
-    /// witness-generation hint. The circuit must pin it down with `assert_eq`.
+    /// witness-generation hint. The circuit must pin it down with `require_eq`.
     /// Prefer the typed `hint_*` constructors below, which also record how to
     /// compute the value so the emitted IR is self-contained.
     #[inline(never)]
@@ -180,7 +180,7 @@ impl Field {
     /// Decompose `self` into `N` little-endian boolean bits. Each bit is pinned
     /// boolean (`b² == b`) and the bits are pinned to recompose to `self`
     /// (`Σ bitᵢ·2ⁱ == self`) — which also proves `self < 2^N`. Composed entirely
-    /// from `Field` primitives (`hint_bit` + arithmetic + `assert_eq`).
+    /// from `Field` primitives (`hint_bit` + arithmetic + `require_eq`).
     pub fn to_bits<const N: usize>(self) -> [Field; N] {
         // N > 253 wraps mod r, so recomposition wouldn't pin `self`
         const {
@@ -197,7 +197,7 @@ impl Field {
         }
         let mut i = 0usize;
         while i < N {
-            bits[i].assert_bool(); // booleanity: bit ∈ {0, 1}
+            bits[i].require_bool(); // booleanity: bit ∈ {0, 1}
             i += 1;
         }
         let mut acc = Field::from(0u8);
@@ -208,7 +208,7 @@ impl Field {
             pow = pow + pow;
             i += 1;
         }
-        assert_eq(acc, self); // recomposition pins the bits to `self` (⇒ self < 2^N)
+        require_eq(acc, self); // recomposition pins the bits to `self` (⇒ self < 2^N)
         bits
     }
 
@@ -272,8 +272,8 @@ impl Field {
     }
 
     /// Assert `self ∈ {0, 1}` — the booleanity constraint `self² == self`.
-    pub fn assert_bool(self) {
-        assert_eq(self * self, self);
+    pub fn require_bool(self) {
+        require_eq(self * self, self);
     }
 
     // --- Field-vs-Field ordered comparison (explicit width) ------------------
@@ -321,7 +321,7 @@ impl Field {
     /// [`Field::hint_inverse`], which returns an *unconstrained* witness).
     pub fn inv(self) -> Field {
         let w = Field::hint_inverse(self);
-        assert_eq(self * w, Field::from(1u8));
+        require_eq(self * w, Field::from(1u8));
         w
     }
 
@@ -714,8 +714,8 @@ macro_rules! impl_field_int_rem {
                     let qr = Field::hint_div_rem(self, Field::from(m));
                     let q = qr[0];
                     let r = qr[1];
-                    assert_eq(Field::from(m) * q + r, self); // pin the division
-                    assert(r < m); // r < m AND r < 2^N (range check via PartialOrd<T>)
+                    require_eq(Field::from(m) * q + r, self); // pin the division
+                    require(r < m); // r < m AND r < 2^N (range check via PartialOrd<T>)
                     let _ = q.to_bits::<$n>(); // q < 2^N: with 2N <= 253, m*q + r can't wrap
                     r
                 }
@@ -734,15 +734,15 @@ impl_field_int_rem!(u8 => 8, u16 => 16, u32 => 32, u64 => 64);
 /// This is a marker: the compiler lowers it to an R1CS constraint rather than
 /// executing it.
 #[inline(never)]
-pub fn assert_eq<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
+pub fn require_eq<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
     loop {}
 }
 
 /// Constrain a boolean wire to be true.
 ///
-/// `assert(cond)` decomposes into `assert_eq(cond, true)` at lowering time.
-pub fn assert(cond: bool) {
-    assert_eq(cond, true);
+/// `require(cond)` decomposes into `require_eq(cond, true)` at lowering time.
+pub fn require(cond: bool) {
+    require_eq(cond, true);
 }
 
 /// Open a **witness-only** region. Until [`witness_end`], value-producing ops
@@ -769,64 +769,64 @@ pub fn witness_end() {
 
 /// Trait-dispatched equality for `#[circuit]` bodies.
 ///
-/// The plain [`assert_eq`] intrinsic only compares values that collapse to a
+/// The plain [`require_eq`] intrinsic only compares values that collapse to a
 /// single `Field` (its `L: Into<Field>` / `R: Into<Field>` bounds), and the
 /// compiler lowers it with a fixed two-scalar rule. Composite circuit outputs —
 /// a SHA-256 digest (`[[Field; 32]; 8]`) compared against a [`Digest`] — don't
-/// fit that shape. `#[circuit]` shadows `assert_eq` in the body with
-/// [`__circuit_assert_eq`], which dispatches through this trait: the scalar impls
-/// bottom out at the recognized `assert_eq` intrinsic, and composite impls (see
+/// fit that shape. `#[circuit]` shadows `require_eq` in the body with
+/// [`__xark_require_eq`], which dispatches through this trait: the scalar impls
+/// bottom out at the recognized `require_eq` intrinsic, and composite impls (see
 /// [`Digest`](crate::Digest)) loop it element-wise. Existing plain-`fn circuit`
 /// bodies are unaffected — they keep calling the intrinsic directly.
-pub trait AssertEqCircuit<Rhs> {
+pub trait RequireEqCircuit<Rhs> {
     /// Emit the equality constraint(s) for `self == rhs`.
-    fn assert_eq_circuit(self, rhs: Rhs);
+    fn require_eq_circuit(self, rhs: Rhs);
 }
 
-impl<R: Into<Field>> AssertEqCircuit<R> for Field {
+impl<R: Into<Field>> RequireEqCircuit<R> for Field {
     #[inline]
-    fn assert_eq_circuit(self, rhs: R) {
-        assert_eq(self, rhs);
+    fn require_eq_circuit(self, rhs: R) {
+        require_eq(self, rhs);
     }
 }
 
-impl<R: Into<Field>> AssertEqCircuit<R> for bool {
+impl<R: Into<Field>> RequireEqCircuit<R> for bool {
     #[inline]
-    fn assert_eq_circuit(self, rhs: R) {
-        assert_eq(self, rhs);
+    fn require_eq_circuit(self, rhs: R) {
+        require_eq(self, rhs);
     }
 }
 
-/// The dispatcher a `#[circuit]` body sees as `assert_eq` — brought into scope by
-/// a generated `use ::xark::__circuit_assert_eq as assert_eq;` that shadows the
-/// [`assert_eq`] intrinsic. It forwards to [`AssertEqCircuit`], so `assert_eq`
+/// The dispatcher a `#[circuit]` body sees as `require_eq` — brought into scope by
+/// a generated `use ::xark::__xark_require_eq as require_eq;` that shadows the
+/// [`require_eq`] intrinsic. It forwards to [`RequireEqCircuit`], so `require_eq`
 /// inside a `#[circuit]` works for both scalars and composite types like
 /// [`Digest`](crate::Digest). The name is `#[doc(hidden)]` plumbing; authors just
-/// write `assert_eq`.
+/// write `require_eq`.
 #[doc(hidden)]
 #[inline]
-pub fn __circuit_assert_eq<A: AssertEqCircuit<B>, B>(a: A, b: B) {
-    a.assert_eq_circuit(b);
+pub fn __xark_require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
+    a.require_eq_circuit(b);
 }
 
 /// Emit a circuit constraint `a < b` (less than).
-pub fn assert_lt<A: PartialOrd<B>, B>(a: A, b: B) {
-    assert_eq(a < b, true);
+pub fn require_lt<A: PartialOrd<B>, B>(a: A, b: B) {
+    require_eq(a < b, true);
 }
 
 /// Emit a circuit constraint `a <= b` (less than or equal).
-pub fn assert_le<A: PartialOrd<B>, B>(a: A, b: B) {
-    assert_eq(a <= b, true);
+pub fn require_le<A: PartialOrd<B>, B>(a: A, b: B) {
+    require_eq(a <= b, true);
 }
 
 /// Emit a circuit constraint `a > b` (greater than).
-pub fn assert_gt<A: PartialOrd<B>, B>(a: A, b: B) {
-    assert_eq(a > b, true);
+pub fn require_gt<A: PartialOrd<B>, B>(a: A, b: B) {
+    require_eq(a > b, true);
 }
 
 /// Emit a circuit constraint `a >= b` (greater than or equal).
-pub fn assert_ge<A: PartialOrd<B>, B>(a: A, b: B) {
-    assert_eq(a >= b, true);
+pub fn require_ge<A: PartialOrd<B>, B>(a: A, b: B) {
+    require_eq(a >= b, true);
 }
 
 // The `__xark_*` compiler intrinsics referenced above (`__xark_add`,

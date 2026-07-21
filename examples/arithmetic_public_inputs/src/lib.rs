@@ -1,11 +1,11 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
-// arithmetic_public_inputs: assert(x * y + x + y == out).
+// arithmetic_public_inputs: require(x * y + x + y == out).
 #[circuit]
 pub fn arithmetic_public_inputs(x: Private<Field>, y: Private<Field>, out: Public<Field>) {
-    assert_eq(x * y + x + y, out);
+    require_eq(x * y + x + y, out);
 }
 
 #[cfg(test)]

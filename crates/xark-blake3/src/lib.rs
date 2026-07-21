@@ -595,10 +595,42 @@ pub fn blake3<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 32]; 8] {
     // After the final block, `cv` holds the first 8 output words = the digest.
     cv
 }
+/// A BLAKE-family 256-bit digest — 8 words × 32 little-endian bits, whose canonical
+/// bytes serialize each word **little-endian** (BLAKE2s and BLAKE3 both do this).
+///
+/// The raw `[[Field; 32]; 8]` output type is shared with SHA-256, which serializes
+/// its words **big-endian** — and Rust allows only one `RequireEqCircuit<Hash>` impl
+/// per type. So a BLAKE output is wrapped in `Blake256` to select the LE packing:
+/// `require_eq(Blake256(blake3(msg)), expected)`. This wrapper is BLAKE-specific, so
+/// it lives here (not in `xark-hash`), built on the shared [`xark_hash::Hash::pack`].
+pub struct Blake256(pub [[Field; 32]; 8]);
+
+impl xark::RequireEqCircuit<xark_hash::Hash> for Blake256 {
+    #[inline]
+    fn require_eq_circuit(self, rhs: xark_hash::Hash) {
+        // Word `w`, bit `i` → bit `i%8` of hash byte `4w + i/8`, weight
+        // `2^(8·(31 − (4w + i/8)) + i%8)` in the big-endian hash integer.
+        let mut bits = [Field::from(0u8); 256];
+        let mut w = 0usize;
+        while w < 8usize {
+            let mut i = 0usize;
+            while i < 32usize {
+                let byte = 4usize * w + i / 8usize;
+                bits[8usize * (31usize - byte) + i % 8usize] = self.0[w][i];
+                i += 1;
+            }
+            w += 1;
+        }
+        xark_hash::Hash::pack(bits).require_eq_circuit(rhs);
+    }
+}
+
 /// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `assert_eq`, `#[circuit]`), so a
-/// circuit crate needs a single `use xark_blake3::prelude::*;`.
+/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`) and the
+/// shared `Hash` digest type, so a circuit crate needs a single
+/// `use xark_blake3::prelude::*;`.
 pub mod prelude {
-    pub use crate::*;
+    pub use crate::*; // gadget API + the local `Blake256` wrapper
     pub use xark::prelude::*;
+    pub use xark_hash::Hash;
 }

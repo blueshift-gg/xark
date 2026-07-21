@@ -1,8 +1,8 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
-// multi_function: assert(square(x) == y) with a separate helper
+// multi_function: require(square(x) == y) with a separate helper
 // function (xark inlines cross-function MIR).
 #[inline(never)]
 fn square(x: Field) -> Field {
@@ -11,7 +11,7 @@ fn square(x: Field) -> Field {
 
 #[circuit]
 pub fn multi_function(x: Private<Field>, y: Public<Field>) {
-    assert_eq(square(x), y);
+    require_eq(square(x), y);
 }
 
 #[cfg(test)]

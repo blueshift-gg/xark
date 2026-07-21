@@ -698,8 +698,9 @@ fn read_g2_section(
             let x_c0 = fq_from_le_mont(&payload[off..off + BN254_FQ_BYTES]).ok_or_else(nc)?;
             let x_c1 = fq_from_le_mont(&payload[off + BN254_FQ_BYTES..off + 2 * BN254_FQ_BYTES])
                 .ok_or_else(nc)?;
-            let y_c0 = fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES])
-                .ok_or_else(nc)?;
+            let y_c0 =
+                fq_from_le_mont(&payload[off + 2 * BN254_FQ_BYTES..off + 3 * BN254_FQ_BYTES])
+                    .ok_or_else(nc)?;
             let y_c1 = fq_from_le_mont(&payload[off + 3 * BN254_FQ_BYTES..off + point_size])
                 .ok_or_else(nc)?;
             let x = Fq2::new(x_c0, x_c1);

@@ -1,6 +1,6 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 /// A small 3-round MiMC-structured permutation (exponent 3) with key addition,
 /// hand-unrolled. This is a *compiler-feature demo*, not the real hash — for a
@@ -38,7 +38,7 @@ pub fn mimc(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
 
     // finalize with a key addition and constrain to the public digest
     s = s + k;
-    assert_eq(s, h);
+    require_eq(s, h);
 }
 
 #[cfg(test)]
@@ -48,7 +48,12 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // MiMC(x=3, k=5)
-        mimc("3".into(), "5".into(), "20571574433789244246851793328630243816385775205591326058386183977315966726389".into()).unwrap();
+        mimc(
+            "3".into(),
+            "5".into(),
+            "20571574433789244246851793328630243816385775205591326058386183977315966726389".into(),
+        )
+        .unwrap();
     }
 
     #[test]

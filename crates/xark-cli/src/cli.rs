@@ -549,7 +549,7 @@ use xark::prelude::*;
 #[circuit]
 pub fn __FN__(secret: Private<Field>, result: Public<Field>) {
     // prove knowledge of a square root: secret * secret == result
-    assert_eq(secret * secret, result);
+    require_eq(secret * secret, result);
 }
 ";
 

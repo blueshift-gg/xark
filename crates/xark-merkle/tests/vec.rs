@@ -17,9 +17,14 @@ use xark_ir::{primitive, solver};
 const DEPTH: usize = 4;
 
 fn load() -> primitive::PrimitiveProgram {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/merkle/src/lib.rs");
+    let src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/merkle/src/lib.rs");
     let c = xark_test_harness::compile_file(&src, "merkle", "bn254");
-    assert!(c.status_success, "compiling examples/merkle failed: {}", c.stderr);
+    assert!(
+        c.status_success,
+        "compiling examples/merkle failed: {}",
+        c.stderr
+    );
     c.program()
 }
 
@@ -42,7 +47,10 @@ fn path_inputs(
     m.insert(id(p, "leaf"), leaf.to_string());
     for i in 0..DEPTH {
         m.insert(id(p, &format!("siblings[{i}]")), siblings[i].to_string());
-        m.insert(id(p, &format!("index_bits[{i}]")), index_bits[i].to_string());
+        m.insert(
+            id(p, &format!("index_bits[{i}]")),
+            index_bits[i].to_string(),
+        );
     }
     m
 }
@@ -58,7 +66,7 @@ fn fp(dec: &str, p: &BigUint) -> BigUint {
 /// Fold a path to its true root without hardcoding it (`xark::Field` does no real
 /// arithmetic on the host, so we can't run Poseidon here). Run witness generation
 /// once with a placeholder root — the fold is independent of `root`, which only
-/// appears in the final `assert_eq(fold, root)` *constraint* — then solve that
+/// appears in the final `require_eq(fold, root)` *constraint* — then solve that
 /// (linear) constraint for `root` at the witness assignment.
 fn honest_root(
     p: &primitive::PrimitiveProgram,
@@ -72,7 +80,12 @@ fn honest_root(
     let mut probe = path_inputs(p, leaf, siblings, index_bits);
     probe.insert(root_id, "0".to_string());
     let assign = solver::solve(p, &probe).expect("witness generation must succeed");
-    let val = |v: u32| fp(&assign.get(&v).expect("var assigned").to_decimal(), &modulus);
+    let val = |v: u32| {
+        fp(
+            &assign.get(&v).expect("var assigned").to_decimal(),
+            &modulus,
+        )
+    };
 
     // The unique constraint referencing `root` is `Σ cᵢ·vᵢ + const == 0` with a
     // `root` term (the equality against the folded root). Evaluate every other
@@ -85,7 +98,8 @@ fn honest_root(
 
     let mut rest = fp(&e.constant.decimal(), &modulus);
     for mt in &e.mul_terms {
-        let term = fp(&mt.coeff.decimal(), &modulus) * val(mt.left) % &modulus * val(mt.right) % &modulus;
+        let term =
+            fp(&mt.coeff.decimal(), &modulus) * val(mt.left) % &modulus * val(mt.right) % &modulus;
         rest = (rest + term) % &modulus;
     }
     let mut c_root = BigUint::from(0u8);
@@ -121,7 +135,10 @@ fn merkle_membership_accepts_valid_rejects_forgery() {
     let assign = solver::solve_and_check(&p, &ok)
         .unwrap_or_else(|e| panic!("valid membership must accept: {e:?}"));
     let holes = solver::analyze_underconstrained(&p, &assign);
-    assert!(holes.is_empty(), "merkle circuit under-constrained: {holes:?}");
+    assert!(
+        holes.is_empty(),
+        "merkle circuit under-constrained: {holes:?}"
+    );
 
     // (2) A wrong root is rejected.
     let mut bad_root = path_inputs(&p, leaf, siblings, index_bits);

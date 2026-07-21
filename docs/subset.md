@@ -20,7 +20,7 @@ rule of thumb is:
 > Only `Field` *values* may depend on the inputs.**
 
 `Field` is the field element type (BN254 scalar). `Private<Field>` / `Public<Field>`
-mark input visibility. `assert_eq(a, b)` emits an equality **constraint** (it does
+mark input visibility. `require_eq(a, b)` emits an equality **constraint** (it does
 *not* return a native `bool`).
 
 ```rust
@@ -29,7 +29,7 @@ use xark::prelude::*;
 
 /// Prove knowledge of a cube root: `secret^3 == result`.
 pub fn circuit(secret: Private<Field>, result: Public<Field>) {
-    assert_eq(secret ^ 3, result);
+    require_eq(secret ^ 3, result);
 }
 ```
 
@@ -64,7 +64,7 @@ pub fn circuit(secret: Private<Field>, result: Public<Field>) {
 | `&mut x` on a `Field` | a mutable borrow of a `Field` isn't supported | restructure to `x = …` (SSA-style) |
 | `foo(a)` via a trait object / fn pointer | indirect / dynamic calls aren't supported | call the function directly (it gets inlined) |
 | a function that calls itself | recursion isn't supported (no runtime stack) | unroll to a fixed depth, or use a loop with a constant bound |
-| `a == b` expecting a `bool` | `==` would need a native `bool`; a circuit needs a *constraint* | `assert_eq(a, b)` (emits the equality constraint) |
+| `a == b` expecting a `bool` | `==` would need a native `bool`; a circuit needs a *constraint* | `require_eq(a, b)` (emits the equality constraint) |
 | reading a whole inner array out of a nested array (`grid[i]` as a value) | only *scalar* nested access is modeled | rebuild element-by-element: `for j in 0..M { row[j] = grid[i][j]; }` |
 | `x as u8` on a `Field` | only compile-time integer casts are supported | keep field values as `Field`; use bit gadgets for byte views |
 
@@ -74,7 +74,7 @@ construct and source line — that message is the source of truth.
 ## Why `Field` doesn't implement `==` / `Ord`
 
 Native `==`/`<` return a `bool` the host evaluates — but a circuit can't branch on
-a witness. So equality is an **`assert_eq(a, b)` constraint**, and comparisons are
+a witness. So equality is an **`require_eq(a, b)` constraint**, and comparisons are
 explicit width-bounded gadgets (`N ≤ 252` so `2^(N+1)` stays under the field
 order). This keeps every operation's circuit meaning unambiguous.
 

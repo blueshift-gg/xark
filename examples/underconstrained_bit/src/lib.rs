@@ -12,13 +12,13 @@
 //! (`Σ bitᵢ·2ⁱ == x`) — that recomposition pins every bit and proves clean.
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
 pub fn underconstrained_bit(x: Private<Field>, out: Public<Field>) {
     let b = Field::hint_bit(x, 0);
-    b.assert_bool(); // booleanity only: references `b` but leaves it two-valued
-    assert_eq(x, out);
+    b.require_bool(); // booleanity only: references `b` but leaves it two-valued
+    require_eq(x, out);
 }
 
 #[cfg(test)]

@@ -52,7 +52,7 @@ fn canonical_lc_key(lc: &LinearCombination) -> CanonicalLcKey {
 /// noise in a profiling function chain (`s * a` is a `mul` impl, `a + 3` an `add`
 /// impl, `Field::from(n)` a `from` impl), so they are elided so the chain reads
 /// at function granularity. Kept: comparison methods (`lt`/`gt`/…), `to_bits`,
-/// `assert_bool`, `is_zero`, and every user/library function.
+/// `require_bool`, `is_zero`, and every user/library function.
 fn is_operator_impl_name(name: &str) -> bool {
     matches!(
         name,
@@ -61,12 +61,12 @@ fn is_operator_impl_name(name: &str) -> bool {
 }
 
 /// The [`ConstraintKind`] a function *fixes* for every constraint emitted
-/// inside it (pushed onto `kind_stack` while it is inlined). `assert_bool`'s
+/// inside it (pushed onto `kind_stack` while it is inlined). `require_bool`'s
 /// `b*b=b` flows through `emit_mul` but must read as a booleanity check, not a
 /// multiplication; the inverse function `inv`'s `x·w == 1` pins a hint output.
 fn function_kind_hint(name: &str) -> Option<ConstraintKind> {
     Some(match name {
-        "assert_bool" => ConstraintKind::Booleanity,
+        "require_bool" => ConstraintKind::Booleanity,
         "inv" => ConstraintKind::HintPin,
         _ => return None,
     })
@@ -171,7 +171,7 @@ impl CallRegistry {
     /// from `Operand::const_fn_def`, *before* `resolve_call_instance`.
     ///
     /// Two invariants make the pre-resolution id the right key:
-    ///  * The `xark` intrinsics/constants/`assert_eq` are free functions or
+    ///  * The `xark` intrinsics/constants/`require_eq` are free functions or
     ///    inherent methods, so resolution is the identity (pre == post).
     ///  * The `for`-desugaring calls appear in MIR as their trait-method
     ///    (`IntoIterator::into_iter` / `Iterator::next`) `DefId`, which is the
@@ -246,7 +246,7 @@ fn intrinsic_known_call(name: &str) -> Option<KnownCall> {
 ///  * the `__xark_*` stubs in `xark::intrinsics` (enumerated, mapped by name);
 ///  * the `Field` constant constructors `constant` / `constant_u64` /
 ///    `constant_u128` (inherent methods — no `__xark_*` intrinsic) and the free
-///    `assert_eq` function, all in the `xark` crate;
+///    `require_eq` function, all in the `xark` crate;
 ///  * the three `for`-loop lang items `into_iter` / `next` / `RangeInclusive::new`.
 ///
 /// The `xark` crate is a dependency of the circuit being compiled; we find it in
@@ -270,8 +270,8 @@ pub(crate) fn build_call_registry(tcx: TyCtxt<'_>) -> CallRegistry {
         for child in tcx.module_children(root) {
             let name = child.ident.name;
             match child.res {
-                // The free `assert_eq` function (re-exported at the crate root).
-                Res::Def(DefKind::Fn, def_id) if name.as_str() == "assert_eq" => {
+                // The free `require_eq` function (re-exported at the crate root).
+                Res::Def(DefKind::Fn, def_id) if name.as_str() == "require_eq" => {
                     reg.insert(def_id, KnownCall::ConstrainEq);
                 }
                 // Witness-only region markers (re-exported at the crate root).
@@ -353,7 +353,7 @@ fn range_bound<'tcx>(env: &LoweringEnv<'tcx>, operand: &Operand<'tcx>) -> Compil
     env.operand_to_int(operand).map(|v| v as u128).ok_or_else(|| {
         CompileError::new("`for` range bounds must be compile-time constants")
             .with_note("a circuit has no runtime control flow, so the loop length must be fixed")
-            .with_help("use constant bounds, e.g. `for i in 0..N`; for data-dependent work assert a boolean and mux with `b + cond·(a − b)`")
+            .with_help("use constant bounds, e.g. `for i in 0..N`; for data-dependent work require a boolean and mux with `b + cond·(a − b)`")
     })
 }
 
@@ -468,9 +468,9 @@ struct LoweringEnv<'tcx> {
     next_constraint_id: u32,
     /// Maps an allocated multiplication-output var to `(constraint index,
     /// witness-gen index)`, while it is still eligible for merging into a
-    /// following `assert_eq`.
+    /// following `require_eq`.
     pending_mul: BTreeMap<VarId, (usize, usize)>,
-    /// Mul outputs folded into a following `assert_eq`, keyed to
+    /// Mul outputs folded into a following `require_eq`, keyed to
     /// `(a, b, witness_gen_index, original_constraint_index)` so `finish` can
     /// revive `a·b = out` if the var is referenced again after the merge (and
     /// re-attribute the revived constraint from the original's profile record).
@@ -537,7 +537,7 @@ struct LoweringEnv<'tcx> {
     promotions: Option<BTreeMap<String, bool>>,
     /// Per-key function call counts, tallied during the measuring pass (`lower`
     /// pass 1). Keys called `>= 2` times become templated `CALL`s; single-use
-    /// functions inline so their `mul→assert_eq` merges and debug notes survive.
+    /// functions inline so their `mul→require_eq` merges and debug notes survive.
     function_call_counts: BTreeMap<String, u32>,
     /// Exact `DefId → KnownCall` table, resolved once up front (see
     /// [`CallRegistry`]). Replaces def-path string matching in call recognition.
@@ -557,12 +557,12 @@ struct LoweringEnv<'tcx> {
     profile: Vec<ConstraintProfile>,
     /// Kind-override stack: a function (or an emit helper) pushes a kind here so
     /// every constraint emitted while it is on top is attributed to that kind,
-    /// overriding the emit-site's natural kind (e.g. `assert_bool`'s `b*b=b` goes
+    /// overriding the emit-site's natural kind (e.g. `require_bool`'s `b*b=b` goes
     /// through `emit_mul` but should read as `Booleanity`, not `Mul`).
     kind_stack: Vec<ConstraintKind>,
     /// Every var proven boolean by an emitted `v · v = v` constraint (⟺ v ∈
     /// {0,1}). Populated wherever such a constraint is pushed — range-proof bits,
-    /// comparison borrow bits, `assert_bool`, and any replayed function booleanity —
+    /// comparison borrow bits, `require_bool`, and any replayed function booleanity —
     /// so the `to_bits::<N>` bit-sum shortcut can recognize an input `Σ 2ⁱ·bᵢ`
     /// whose bits are ALREADY booleanity-constrained and return them directly
     /// instead of emitting a fresh (redundant) decomposition. Only genuine `v·v=v`
@@ -731,7 +731,7 @@ impl<'tcx> LoweringEnv<'tcx> {
                             .with_note("witness-dependent indexing is not supported")
                             .with_help(
                                 "use a literal index or a loop variable the unroller can fold to a \
-                                 constant; for a data-dependent choice, assert a boolean and mux with \
+                                 constant; for a data-dependent choice, require a boolean and mux with \
                                  `b + cond·(a − b)`",
                             )
                     })?;
@@ -1166,7 +1166,7 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// The function call-chain (outermost → innermost) at the current emit point:
     /// each inlined callee's short name, with low-level arithmetic/conversion
     /// operator impls (`add`/`sub`/`mul`/`neg`/`bitxor`/`from`/`into`) elided so
-    /// the chain reads at function granularity (e.g. `lt → to_bits → assert_bool`).
+    /// the chain reads at function granularity (e.g. `lt → to_bits → require_bool`).
     fn function_chain(&self) -> Vec<String> {
         self.inlining
             .iter()
@@ -1251,7 +1251,7 @@ impl<'tcx> LoweringEnv<'tcx> {
                 })
             }
             // A `bool` constant (`true` / `false`) — e.g. the `true` in
-            // `assert_eq(a < b, true)` inside `assert_lt`'s body.
+            // `require_eq(a < b, true)` inside `require_lt`'s body.
             Operand::Constant(c) if c.const_.ty().is_bool() => match c.const_.try_to_scalar_int() {
                 Some(s) if s.to_uint(s.size()) == 1 => Ok(LinearCombination::one()),
                 _ => Ok(LinearCombination::zero()),
@@ -1865,8 +1865,8 @@ impl<'tcx> LoweringEnv<'tcx> {
             right: rhs,
         }));
         let wg_idx = self.witness_gen.len() - 1;
-        // Always register the mul for the `mul → assert_eq` merge. Intra-function
-        // merges now fold `a*b=t; assert(t==x)` → `a*b=x` *inside* a function body
+        // Always register the mul for the `mul → require_eq` merge. Intra-function
+        // merges now fold `a*b=t; require(t==x)` → `a*b=x` *inside* a function body
         // (the caller's merge state is saved/cleared on entry so cross-boundary
         // folds stay suppressed, and body-local merges are revived at capture if
         // still referenced — keeping the template self-contained).
@@ -1949,7 +1949,7 @@ impl<'tcx> LoweringEnv<'tcx> {
     }
 
     /// Whether `lc` references any witness-only var (a mul must not be merged so as
-    /// to output such a var — see [`Self::emit_assert_eq`]).
+    /// to output such a var — see [`Self::emit_require_eq`]).
     fn is_witness_only_lc(&self, lc: &LinearCombination) -> bool {
         !self.witness_only_vars.is_empty()
             && lc
@@ -1958,8 +1958,8 @@ impl<'tcx> LoweringEnv<'tcx> {
                 .any(|t| self.witness_only_vars.contains(&t.var))
     }
 
-    fn emit_assert_eq(&mut self, lhs: LinearCombination, rhs: LinearCombination) {
-        // Merge `t = a * b; assert_eq(t, target)` into `a * b = target` — but never
+    fn emit_require_eq(&mut self, lhs: LinearCombination, rhs: LinearCombination) {
+        // Merge `t = a * b; require_eq(t, target)` into `a * b = target` — but never
         // when `target` is a witness-only var: it already has a witness-gen op, so
         // rewriting a constraint to output it would doubly-define it (the value
         // from its own witness-gen vs. from `a·b`). Fall through to a clean equality.
@@ -2040,7 +2040,7 @@ impl<'tcx> LoweringEnv<'tcx> {
         let prod = self.emit_mul(input.clone(), LinearCombination::var(inv));
         let out = LinearCombination::one() - prod;
         let input_out = self.emit_mul(input, out.clone());
-        self.emit_assert_eq(input_out, LinearCombination::zero());
+        self.emit_require_eq(input_out, LinearCombination::zero());
         out
     }
 
@@ -2123,7 +2123,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             self.render_side(&target),
         );
         self.constraints[idx].c = target;
-        // `assert_bool(b)` folds `b*b=t; assert(t==b)` → `b*b=b` here (an in-place
+        // `require_bool(b)` folds `b*b=t; require(t==b)` → `b*b=b` here (an in-place
         // rewrite, so `push_constraint` never sees the final form): harvest it.
         if let Some(v) = booleanity_var(&self.constraints[idx]) {
             self.boolean_vars.insert(v);
@@ -2226,7 +2226,7 @@ pub fn lower<'tcx>(
     // reuses those templates and REPLAYS every function called `>= 2` times as a
     // SYMBOLIC `CALL` (substituting the caller's arg LCs into the cached body — no
     // plug materialization, so no `plug = arg` equality rows), while functions called
-    // once inline (fold) so their `mul→assert_eq` merges and debug notes survive.
+    // once inline (fold) so their `mul→require_eq` merges and debug notes survive.
     let (mut measure, _) = run_pass(
         tcx,
         entry,
@@ -2335,7 +2335,7 @@ fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
                     v.name
                 ))
                 .with_note(
-                    "bind every public input/output with an `assert_eq` (or remove it \
+                    "bind every public input/output with an `require_eq` (or remove it \
                      from the signature)",
                 ));
             }
@@ -2347,7 +2347,7 @@ fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult<()> {
                     v.name
                 ))
                 .with_note(
-                    "constrain every hint output, e.g. `assert_eq(x * hint_inverse(x), 1)`",
+                    "constrain every hint output, e.g. `require_eq(x * hint_inverse(x), 1)`",
                 ));
             }
             _ => {}
@@ -2413,7 +2413,7 @@ fn fallback_witness_control_flow_error(term_span: rustc_span::Span) -> CompileEr
     CompileError::new("witness-dependent control flow is not supported")
         .with_note("branch conditions must be compile-time constants (e.g. loop bounds)")
         .with_help(
-            "for a data-dependent choice, assert a boolean and \
+            "for a data-dependent choice, require a boolean and \
              mux with `Field::from(cond) * a + Field::from(!cond) * b`; \
              loops must have constant bounds",
         )
@@ -2737,7 +2737,7 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                     ),
                     TerminatorKind::Assert { .. } => err.with_help(
                         "native `assert!` / `assert_eq!` don't constrain the circuit — call \
-                         `assert_eq(a, b)` (the circuit primitive) to emit an equality constraint",
+                         `require_eq(a, b)` (the circuit primitive) to emit an equality constraint",
                     ),
                     _ => err,
                 };
@@ -3292,7 +3292,7 @@ fn lower_call<'tcx>(
         KnownCall::ConstrainEq => {
             let lhs = env.operand_to_lc(arg(0)?)?;
             let rhs = env.operand_to_lc(arg(1)?)?;
-            env.emit_assert_eq(lhs, rhs);
+            env.emit_require_eq(lhs, rhs);
         }
         // Open/close a witness-only region (both return `()`, so no `dest`).
         KnownCall::WitnessBegin => {
@@ -4593,20 +4593,20 @@ fn inline_call<'tcx>(
         // the author to the circuit primitive instead of the generic MIR-availability
         // note (which is really about calling into un-encoded gadget crates).
         if path.contains("panic") {
-            return Err(CompileError::new(
-                "native `assert!` / `panic!` don't constrain a circuit",
-            )
-            .with_help(
-                "use `assert_eq(a, b)` to constrain equality (it emits an R1CS constraint); \
+            return Err(
+                CompileError::new("native `assert!` / `panic!` don't constrain a circuit")
+                    .with_help(
+                    "use `require_eq(a, b)` to constrain equality (it emits an R1CS constraint); \
                  `assert!(a == b)` instead computes a `bool` wire and then panics, which a \
                  circuit can't do",
-            ));
+                ),
+            );
         }
         return Err(CompileError::new(format!(
             "unsupported function call inside circuit: `{path}`"
         ))
         .with_note(
-            "only xark field operations, assert_eq, and functions whose MIR is available \
+            "only xark field operations, require_eq, and functions whose MIR is available \
              (build function crates with `-Zalways-encode-mir`) can be inlined",
         ));
     }
@@ -4739,7 +4739,7 @@ fn inline_call<'tcx>(
         // times). In the measuring pass (`promotions == None`) template everything
         // so every key is seen. Not promoted → inline (fold) this call: leave args
         // unmaterialized and fall through to the plain walk below (keeps its
-        // `mul→assert_eq` merges + notes).
+        // `mul→require_eq` merges + notes).
         // Never promote inside a witness-only region: a symbolic replay bypasses
         // the normal emit path (its constraints/vars are remapped directly), so the
         // constraint-suppression + var-recording hooks wouldn't fire. Inlining
@@ -4830,7 +4830,7 @@ fn inline_call<'tcx>(
     env.inline_substs.push(call_args);
     env.enter_frame();
     // If this function fixes the kind of the constraints it emits (e.g.
-    // `assert_bool` → Booleanity), push that override for the duration of its
+    // `require_bool` → Booleanity), push that override for the duration of its
     // body. Only relevant when profiling; harmless otherwise.
     let pushed_kind =
         function_kind_hint(env.tcx.item_name(def_id).as_str()).inspect(|&k| env.kind_stack.push(k));
@@ -4843,7 +4843,7 @@ fn inline_call<'tcx>(
     // Inside a function body cross-call caches are suppressed (purity). Nested calls
     // keep the depth raised, so the whole subtree is cache-free.
     let is_function_walk = function_key.is_some();
-    // Scope the `mul → assert_eq` merge state to this function body: save + clear the
+    // Scope the `mul → require_eq` merge state to this function body: save + clear the
     // caller's `pending_mul`/`merged` so a body-local mul can't fold across the
     // boundary (replayed functions never register for the merge, so a walk must match).
     // Restored after capture. `bit_cache` stays untouched (that's Stage 2).
@@ -4864,7 +4864,7 @@ fn inline_call<'tcx>(
     let ret = env.frame_return();
     if is_function_walk {
         env.function_depth -= 1;
-        // Local revival: an intra-body merge folded `a*b=t; assert(t==x)` → `a*b=x`
+        // Local revival: an intra-body merge folded `a*b=t; require(t==x)` → `a*b=x`
         // and dropped `t`. If `t` is still referenced by a captured body constraint
         // or a function output, re-emit `a*b=t` so the captured template stays
         // self-contained (a merged var referenced later must stay defined).
@@ -5024,7 +5024,7 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
             env.function_templates.len()
         );
     }
-    // Revive a merged mul output (its `a·b = out` folded into `assert_eq`) if a
+    // Revive a merged mul output (its `a·b = out` folded into `require_eq`) if a
     // later constraint still references it, so the reuse stays bound to `a·b`.
     // Not-reused outputs are pruned below (fast path unchanged). This MUST run
     // before `build_function_blob` below — else the revived rows land in the flat
@@ -5056,7 +5056,7 @@ fn finish(mut env: LoweringEnv<'_>, field: FieldSpec, n_inputs: usize) -> LowerO
                     a.clone(),
                     b.clone(),
                     out,
-                    "revived a*b = out (product reused after assert_eq merge)",
+                    "revived a*b = out (product reused after require_eq merge)",
                 ));
                 env.witness_gen[wg_idx] = Some(WitnessGen::Product {
                     out,

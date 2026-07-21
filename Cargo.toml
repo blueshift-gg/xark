@@ -11,6 +11,7 @@ members = [
     "crates/xark-ed25519",
     "crates/xark-bignum",
     "crates/xark-grumpkin",
+    "crates/xark-hash",
     "crates/xark-keccak",
     "crates/xark-ir",
     "crates/xark-macros",

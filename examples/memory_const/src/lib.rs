@@ -1,12 +1,12 @@
 #![cfg_attr(xark, no_std)]
 
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
-// memory_const: arr = [x, x*2, x*3]; assert(arr sum == y),
+// memory_const: arr = [x, x*2, x*3]; require(arr sum == y),
 // i.e. x + 2x + 3x == y  (== 6x).
 #[circuit]
 pub fn memory_const(x: Private<Field>, y: Public<Field>) {
-    assert_eq(x + x * Field::constant("2") + x * Field::constant("3"), y);
+    require_eq(x + x * Field::constant("2") + x * Field::constant("3"), y);
 }
 
 #[cfg(test)]

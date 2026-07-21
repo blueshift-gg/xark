@@ -94,7 +94,7 @@ All ops first obtain `bits = to_bits::<N>(x)` — `N` booleanity constraints + 1
 recomposition constraint — **once per `(x, N)`**, then:
 
 * **`x == c` / `x != c`** — a bare equality does not even need bits: it is
-  `assert`/`is_zero` on `x − c`. (Only reach for the decomposition if the same
+  `require`/`is_zero` on `x − c`. (Only reach for the decomposition if the same
   `x` is used in a width-`N` op elsewhere.) ~0–2 constraints.
 * **`x < c` (const RHS)** — compare `bits` against the constant `c`; no second
   decomposition (the RHS is compile-time). Cheaper than a `Field`-vs-`Field`
@@ -203,7 +203,7 @@ below).
 PR #8 shipped an inconsistent state that this spec resolves:
 
 * `impl PartialEq for Field` exists and works (`==` / `!=`) — keep.
-* `assert_lt` / `assert_le` / `assert_gt` / `assert_ge` call `a < b` on `Field`,
+* `require_lt` / `require_le` / `require_gt` / `require_ge` call `a < b` on `Field`,
   which does not compile (`E0369`, no `PartialOrd`) — they are **dead**. Either
   reimplement against this surface (const RHS → operator; two witnesses →
   `.lt::<N>`) or remove until the surface lands.
@@ -212,9 +212,9 @@ PR #8 shipped an inconsistent state that this spec resolves:
 
 ## Related follow-ups (this review pass)
 
-* **`assert_eq` vs `assert`** — keep `assert_eq` as the primitive
-  (`(a−b)·1 = 0`); `assert(cond) = assert_eq(cond, true)`. Do **not** invert
-  (would make `assert_eq` compute an is-zero boolean). *Resolved: no change.*
+* **`require_eq` vs `require`** — keep `require_eq` as the primitive
+  (`(a−b)·1 = 0`); `require(cond) = require_eq(cond, true)`. Do **not** invert
+  (would make `require_eq` compute an is-zero boolean). *Resolved: no change.*
 * **>128-bit constants** — `Field::from(u8..=u128)` caps at `u128` (Rust literal
   limit), *not* a value ceiling; full-width constants use `Field::from("<dec>")`
   (verified sound via the MiMC 254-bit round constants). Ergonomic gap only.

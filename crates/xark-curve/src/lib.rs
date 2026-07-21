@@ -87,7 +87,7 @@ macro_rules! weierstrass {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod n), 3 × 86-bit limbs.
         // Only the modulus is written; limbs, `m − 1`, and the complement derive.
         xark_bignum::fp!(pub Fp, $base);
-        xark_bignum::fp!(pub Fq, $scalar);
+        xark_bignum::fp!(no_host pub Fq, $scalar);
 
         /// An affine curve point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy)]
@@ -134,7 +134,7 @@ macro_rules! weierstrass {
             let rhs = (p.x * p.x * p.x + a_coeff * p.x + b).reduce();
             let mut i = 0usize;
             while i < 3usize {
-                xark::assert_eq(lhs.limbs[i], rhs.limbs[i]);
+                xark::require_eq(lhs.limbs[i], rhs.limbs[i]);
                 i += 1;
             }
         }
@@ -330,7 +330,7 @@ macro_rules! edwards {
     ) => {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod L), 3 × 86-bit limbs.
         xark_bignum::fp!(pub Fp, $base);
-        xark_bignum::fp!(pub Fq, $scalar);
+        xark_bignum::fp!(no_host pub Fq, $scalar);
 
         /// An affine twisted-Edwards point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy)]
@@ -390,7 +390,7 @@ macro_rules! edwards {
             let rhs = (fp(1, 0, 0) + d_const() * (x2 * y2)).reduce();
             let mut i = 0usize;
             while i < 3usize {
-                xark::assert_eq(lhs.limbs[i], rhs.limbs[i]);
+                xark::require_eq(lhs.limbs[i], rhs.limbs[i]);
                 i += 1;
             }
         }

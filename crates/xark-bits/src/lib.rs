@@ -11,7 +11,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{assert_eq, Field};
+use xark::{require_eq, Field};
 
 // ===========================================================================
 // 32-bit word layer (little-endian bit index: bits[i] has weight 2^i).
@@ -103,7 +103,7 @@ pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
     }
     let mut i = 0usize;
     while i < 33 {
-        bits[i].assert_bool();
+        bits[i].require_bool();
         i += 1;
     }
     let mut acc = Field::from(0u8);
@@ -114,7 +114,7 @@ pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, sum);
+    require_eq(acc, sum);
 
     // Return the low 32 bits (the carry, bits[32], is discarded).
     let mut out = [Field::from(0u8); 32];
@@ -147,7 +147,7 @@ pub fn add3(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
     }
     let mut i = 0usize;
     while i < 34 {
-        bits[i].assert_bool();
+        bits[i].require_bool();
         i += 1;
     }
     let mut acc = Field::from(0u8);
@@ -158,7 +158,7 @@ pub fn add3(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, sum);
+    require_eq(acc, sum);
 
     // Return the low 32 bits (the 2 carry bits, bits[32..34], are discarded).
     let mut out = [Field::from(0u8); 32];
@@ -186,7 +186,7 @@ pub fn to_bits64(x: Field) -> [Field; 64] {
     }
     let mut i = 0usize;
     while i < 64 {
-        bits[i].assert_bool();
+        bits[i].require_bool();
         i += 1;
     }
     let mut acc = Field::from(0u8);
@@ -197,7 +197,7 @@ pub fn to_bits64(x: Field) -> [Field; 64] {
         pow = pow + pow;
         i += 1;
     }
-    assert_eq(acc, x);
+    require_eq(acc, x);
     bits
 }
 

@@ -1669,6 +1669,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghash"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
+dependencies = [
+ "opaque-debug",
+ "polyval",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2402,6 +2412,18 @@ checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
  "der",
  "spki",
+]
+
+[[package]]
+name = "polyval"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "opaque-debug",
+ "universal-hash",
 ]
 
 [[package]]
@@ -4297,6 +4319,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
+name = "universal-hash"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
+dependencies = [
+ "crypto-common 0.1.6",
+ "subtle",
+]
+
+[[package]]
 name = "unreachable"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4573,6 +4605,7 @@ dependencies = [
 name = "xark-aes"
 version = "0.0.1"
 dependencies = [
+ "ghash",
  "xark",
  "xark-ir",
  "xark-test-harness",
@@ -4609,6 +4642,7 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-ir",
+ "xark-prover",
  "xark-test-harness",
 ]
 
@@ -4625,6 +4659,7 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
+ "xark-hash",
  "xark-ir",
  "xark-test-harness",
 ]
@@ -4635,6 +4670,7 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
+ "xark-hash",
  "xark-ir",
  "xark-test-harness",
 ]
@@ -4694,6 +4730,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "xark-hash"
+version = "0.0.1"
+dependencies = [
+ "xark",
+ "xark-prover",
+]
+
+[[package]]
 name = "xark-ir"
 version = "0.0.1"
 dependencies = [
@@ -4713,6 +4757,7 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
+ "xark-hash",
 ]
 
 [[package]]
@@ -4820,6 +4865,7 @@ version = "0.0.1"
 dependencies = [
  "xark",
  "xark-bits",
+ "xark-hash",
 ]
 
 [[package]]

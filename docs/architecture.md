@@ -4,7 +4,7 @@ xark is one tool with two faces — a **language** (write a circuit as ordinary
 `#![no_std]` Rust) and a **toolchain** (`xark build` / `xark prove`) — split
 into focused crates with strict layering, so that:
 
-* the circuit-author surface (`xark`'s prelude: `Field`, `assert_eq`,
+* the circuit-author surface (`xark`'s prelude: `Field`, `require_eq`,
   `Private`/`Public`, `bits`) stays small and stable,
 * the MIR → xark-IR → R1CS lowering can be tested without a proving system,
 * the Groth16 layer can be swapped or extended without touching lowering,
@@ -60,7 +60,7 @@ fragility, and the bump procedure are documented in
 
 ### `xark` (the language + CLI)
 
-`crates/xark`. The library defines the marker primitives — `Field`, `assert_eq`,
+`crates/xark`. The library defines the marker primitives — `Field`, `require_eq`,
 `Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics the compiler
 recognises in MIR — in its `lang` module, re-exported via its `prelude`, so a
 circuit author only needs `use xark::prelude::*`. (The marker function bodies

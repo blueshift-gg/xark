@@ -7,7 +7,7 @@
 //!   mimc_bn254([12, 45, 78, 41])
 //!     = 18226366069841799622585958305961373004333097209608110160936134895615261821931
 //!
-//! `examples/mimc_kat` constrains the public output to
+//! An all-constant-input circuit constrains the public output to
 //! `mimc_bn254([12, 45, 78, 41])`. Solving the circuit with the Noir KAT value
 //! must succeed (our MiMC == Noir's, bit-for-bit); solving with any other value
 //! must be rejected. This is the proof that our gadget matches the reference.
@@ -18,14 +18,24 @@ use xark_ir::{primitive, solver};
 /// The `noir-lang/mimc` known-answer for `mimc_bn254([12, 45, 78, 41])`.
 const KAT: &str = "18226366069841799622585958305961373004333097209608110160936134895615261821931";
 
-/// Compile `examples/mimc_kat` to R1CS via the shared test harness (bn254).
+/// Compile an inline all-constant-input MiMC-BN254 circuit to R1CS via the shared
+/// test harness (bn254). Kept inline (not an `examples/` crate) so the KAT lives
+/// next to the gadget it validates.
 fn compile() -> primitive::PrimitiveProgram {
-    let src =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/mimc_kat/src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "mimc_kat", "bn254");
+    let src = "#![no_std]\n\
+        use xark_mimc::prelude::*;\n\
+        pub fn circuit(out: Public<Field>) {\n\
+        require_eq(\n\
+        mimc_bn254([Field::from(12u8), Field::from(45u8), Field::from(78u8), Field::from(41u8)]),\n\
+        out,\n\
+        );\n\
+        }\n";
+    let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("mimc_kat.rs");
+    std::fs::write(&path, src).expect("write inline mimc_kat source");
+    let c = xark_test_harness::compile_file(&path, "mimc_kat", "bn254");
     assert!(
         c.status_success,
-        "compiling examples/mimc_kat failed: {}",
+        "compiling inline mimc_kat failed: {}",
         c.stderr
     );
     c.program()

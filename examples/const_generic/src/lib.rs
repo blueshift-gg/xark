@@ -3,7 +3,7 @@
 //! `[Field; N]` local arrays. This is the enabler for caller-chosen limb
 //! widths (see the `Bignum` gadget).
 #![cfg_attr(xark, no_std)]
-use xark::{assert_eq, circuit, Field, Private, Public};
+use xark::{circuit, require_eq, Field, Private, Public};
 
 /// Elementwise-double `N` limbs, then sum them.
 fn double_and_sum<const N: usize>(a: [Field; N]) -> Field {
@@ -25,7 +25,10 @@ fn double_and_sum<const N: usize>(a: [Field; N]) -> Field {
 #[circuit]
 pub fn const_generic(a: Private<Field>, b: Private<Field>, c: Private<Field>, out: Public<Field>) {
     // double_and_sum::<3> = 2(a+b+c); double_and_sum::<2> = 2(a+b)
-    assert_eq(double_and_sum::<3>([a, b, c]) + double_and_sum::<2>([a, b]), out);
+    require_eq(
+        double_and_sum::<3>([a, b, c]) + double_and_sum::<2>([a, b]),
+        out,
+    );
 }
 
 #[cfg(test)]

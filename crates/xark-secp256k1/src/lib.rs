@@ -46,11 +46,11 @@ pub use affine::{order, reduce_scalar};
 // SOUND LAZY ECDSA verify (4×64 lazy-affine point arithmetic + eager 4×64
 // scalar ops). Alongside the macro's eager 3×86 gadget. ~30% fewer constraints.
 // ===========================================================================
-use xark::{assert_eq as aeq, witness_begin, witness_end, Field, Transparent};
+use xark::{require_eq as aeq, witness_begin, witness_end, Field, Transparent};
 use xark_bignum::{
-    assert_lt, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
+    assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
     modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
-    scalar_to_bits_256, weak_reduce_k1, M_K1,
+    require_lt, scalar_to_bits_256, weak_reduce_k1, M_K1,
 };
 
 type L4 = [Field; 4];
@@ -88,7 +88,7 @@ pub struct Signature {
 
 /// Everything to write a secp256k1-ECDSA circuit in one import:
 /// `use xark_secp256k1::prelude::*;` re-exports the `xark` essentials (`circuit`,
-/// `Public`, `Field`, `assert_eq`, …) plus the transparent input types [`Point`],
+/// `Public`, `Field`, `require_eq`, …) plus the transparent input types [`Point`],
 /// [`Signature`], [`Scalar`]. Verify with `pubkey.verify(sig, digest)`.
 pub mod prelude {
     pub use crate::{Point, Scalar, Signature};
@@ -303,9 +303,9 @@ fn ecdsa_verify_packed(
     let r = unpack(r);
     let s = unpack(s);
     let e = unpack(e);
-    assert_lt::<4, 64>(r, NN1);
-    assert_lt::<4, 64>(s, NN1);
-    assert_lt::<4, 64>(e, NN1);
+    require_lt::<4, 64>(r, NN1);
+    require_lt::<4, 64>(s, NN1);
+    require_lt::<4, 64>(e, NN1);
     assert_nonzero_limbs(r);
     let s_inv = mod_inverse::<4, 64>(s, NN);
     let u1 = mod_mul::<4, 64>(e, s_inv, NN, NN1);
@@ -319,10 +319,10 @@ fn ecdsa_verify_packed(
     let (m11, s11, m12, s12) = glv_split(u1);
     let (m21, s21, m22, s22) = glv_split(u2);
     witness_end();
-    s11.assert_bool();
-    s12.assert_bool();
-    s21.assert_bool();
-    s22.assert_bool();
+    s11.require_bool();
+    s12.require_bool();
+    s21.require_bool();
+    s22.require_bool();
     glv_decomp(u1, m11[0], m11[1], s11, m12[0], m12[1], s12);
     glv_decomp(u2, m21[0], m21[1], s21, m22[0], m22[1], s22);
     on_curve_k1(qx, qy);

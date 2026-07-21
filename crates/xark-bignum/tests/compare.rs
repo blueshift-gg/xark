@@ -1,5 +1,5 @@
 //! Solve-and-check the sound non-native comparison-bit primitive `is_lt` against
-//! `examples/is_lt_check` (`assert_eq(is_lt(a, b), claim)` over 2×64-bit limbs).
+//! `examples/is_lt_check` (`require_eq(is_lt(a, b), claim)` over 2×64-bit limbs).
 //! Confirms: (1) the derived comparison bit matches `a < b` on a spread of vectors
 //! (incl. high-limb-dominant), (2) the circuit is analyzer-clean (the bit and every
 //! borrow are fully pinned — the soundness smoke test), and (3) a wrong claimed bit

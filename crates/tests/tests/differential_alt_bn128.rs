@@ -3126,7 +3126,7 @@ mod host_fuzz {
     /// 256-iteration seeded fuzz: for each iteration, draw two random
     /// scalars, derive their `k·G` points via Arkworks, compute the sum
     /// via `solana_nostd_alt_bn128` (host = Arkworks dispatch), and
-    /// assert it matches the direct Arkworks reference computation.
+    /// require it matches the direct Arkworks reference computation.
     #[test]
     fn g1_add_host_fuzz_matches_arkworks_reference() {
         let mut rng = ChaCha20Rng::from_seed(SEED);
@@ -3196,7 +3196,7 @@ mod host_fuzz {
     /// For each iteration, build a 2-pair input `(k·G, h·H), (k·G, -h·H)`
     /// whose product equals the GT identity (the canonical "verifier
     /// accepts" shape). Run via `solana_nostd_alt_bn128::pairing` and
-    /// assert it returns the LE `1` scalar.
+    /// require it returns the LE `1` scalar.
     #[test]
     fn pairing_host_fuzz_identity_2pair() {
         let mut rng = ChaCha20Rng::from_seed(SEED);

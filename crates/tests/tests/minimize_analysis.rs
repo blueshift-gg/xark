@@ -25,7 +25,7 @@ fn nonzeros(p: &R1csProgram) -> usize {
 }
 
 /// A constraint is "linear" (an eliminable candidate) when one multiplicand has no
-/// variable terms — i.e. `A·const = C`, the shape a plug/copy/assert-eq collapses to.
+/// variable terms — i.e. `A·const = C`, the shape a plug/copy/require-eq collapses to.
 fn linear_identity_count(p: &R1csProgram) -> usize {
     p.constraints
         .iter()
@@ -81,7 +81,7 @@ fn analyze_minimize_removals() {
         "ec_incomplete",
         "blake3",
         "sha256",
-        "keccak",
+        "keccak256",
         "aes",
         "secp256k1_ecdsa",
         "secp256r1_ecdsa",
