@@ -14,6 +14,7 @@ jobs:
   check:
     name: fmt + clippy + test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -56,16 +57,18 @@ jobs:
       - name: cargo test (release)
         # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
         # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
-        # in debug. The full Ed25519 scalar-mul/EdDSA vectors take longer than
-        # the per-step CI limit and run in nightly-kats.yml with a 60-minute
-        # timeout; exclude that package here rather than terminating mid-test.
+        # in debug. The heaviest Groth16 e2e proves — the Ed25519 scalar-mul/EdDSA
+        # and secp256k1/r1 ECDSA vectors — take longer than the per-step CI limit
+        # and run in nightly-kats.yml (60-min timeout); exclude those packages here
+        # rather than terminating mid-test.
         #
         # The `sbpf` and `differential_alt_bn128` integration tests under
         # `gadgets/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
         # they need the Anza toolchain and run in `solana-ci.yml`.
         # Build one xark-tests test list excluding those, then test.
         run: |
-          cargo test --workspace --release --exclude xark-tests --exclude xark-ed25519
+          cargo test --workspace --release --exclude xark-tests --exclude xark-ed25519 \
+            --exclude xark-secp256k1 --exclude xark-secp256r1
           cargo test -p xark-tests --release --lib
           tests_args=()
           for t in $(ls gadgets/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
