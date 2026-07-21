@@ -47,7 +47,7 @@ Because the pin is the bare channel `nightly` (not a dated `nightly-YYYY-MM-DD`)
 `rustup update nightly` can pull a newer compiler that fails to build `crates/lang`. This is
 expected; it's why the compiler is isolated from the stable root workspace and the snapshot suite is
 a separate CI job (`compiler-snapshots` in `ci.yml`). The locally validated nightly at the time of
-writing resolves to `rustc 1.97.0-nightly (2026-05-02)`.
+writing resolves to `rustc 1.97.0-nightly (2026-05-03)`.
 
 ## Bump procedure
 
