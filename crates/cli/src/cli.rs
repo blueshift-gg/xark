@@ -424,7 +424,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
             "rust-analyzer.toml",
             format!(
                 "# Run xark's subset validator on save so unsupported constructs show inline.\n\
-                 # Needs `xark` on PATH (see `xark init` output). Layers on top of rustc checks.\n\
+                 # Needs `xark` on PATH. Layers on top of rustc checks.\n\
                  [check]\n\
                  overrideCommand = {ra_cmd}\n"
             ),
@@ -465,14 +465,8 @@ pub fn cmd_init(args: &[String]) -> i32 {
     } else {
         "."
     };
-    eprintln!("  1. `xark` defaults to the published crate; see Cargo.toml comments for git/local");
-    eprintln!("  2. install the CLI so editors can find it:");
     eprintln!(
-        "       cargo +{} install --path <xark-repo>/crates/lang --features cli",
-        env!("XARK_NIGHTLY")
-    );
-    eprintln!(
-        "\n{}",
+        "{}",
         crate::style::next_steps(&[
             (
                 format!("xark build {where_}"),
