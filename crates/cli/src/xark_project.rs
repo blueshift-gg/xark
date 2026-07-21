@@ -1,18 +1,14 @@
-//! Path inference for the `xark` backend subcommands — the unified analog of
-//! master's Noir `noir_project` inference, keyed on the `target/xark/` layout
-//! that `xark build` writes.
+//! Path inference for the `xark` backend subcommands, keyed on the
+//! `target/xark/` layout `xark build` writes.
 //!
-//! `xark build <crate>` emits `circuit.json` + `r1cs.json` under
-//! `<crate>/target/xark/`; `xark setup`/`prove`/`verify`/`export`/`inspect`
-//! then read and write their artifacts from that same directory. Rather than
-//! make the user retype those paths, each command resolves an [`XarkProject`]
-//! from an optional path argument (defaulting to the current directory) and
-//! derives every file path from it. Explicit `--…` flags always override the
-//! derived defaults.
+//! Each command resolves an [`XarkProject`] from an optional path argument
+//! (defaulting to the current directory) and derives every artifact path from
+//! it, so the user need not retype them. Explicit `--…` flags always override
+//! the derived defaults.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// A resolved xark build output directory (`<crate>/target/xark/`) plus the
 /// canonical artifact paths derived from it.
@@ -23,15 +19,9 @@ pub struct XarkProject {
 }
 
 impl XarkProject {
-    /// Resolve a project from an optional path argument.
-    ///
-    /// `path` may be:
-    /// * a crate directory (containing `Cargo.toml` and/or `target/xark/`) —
-    ///   the output dir is `<path>/target/xark/`;
-    /// * a `target/xark/` directory itself (containing `r1cs.json`) — used
-    ///   directly;
-    /// * omitted — the search starts from the current directory and walks up
-    ///   to the nearest crate root.
+    /// Resolve a project from an optional path argument: a crate directory, a
+    /// `target/xark/` directory itself, or omitted (walk up from the current
+    /// directory to the nearest crate root).
     pub fn resolve(path: Option<PathBuf>) -> Result<Self> {
         let base = match path {
             Some(p) => p,
@@ -79,13 +69,9 @@ impl XarkProject {
     }
 
     /// The circuit's entry function name, from the `entry` marker `xark build`
-    /// writes beside the artifacts. Names the proof bundle and the generated
-    /// `<Fn>Inputs` struct.
-    ///
-    /// Falls back to the directory (crate) name when the marker is absent (older
-    /// builds) or the entry is the *generic* `circuit` — so a `pub fn circuit`
-    /// circuit keeps its meaningful crate name, while a named entry
-    /// (`pub fn my_square`) drives the name itself.
+    /// writes beside the artifacts. Names the proof bundle and generated
+    /// `<Fn>Inputs` struct. Falls back to the crate name when the marker is
+    /// absent or the entry is the generic `circuit`.
     pub fn entry_name(&self) -> String {
         std::fs::read_to_string(self.xark_dir.join("entry"))
             .ok()
@@ -141,11 +127,8 @@ impl XarkProject {
 }
 
 /// Resolve the name-scoped `target/xark/<pkg-name>/` output directory from a
-/// user-supplied base path.
-///
-/// `xark build` now writes each circuit's artifacts to its own subdirectory
-/// (`target/xark/<pkg-name>/`) so a workspace of circuits stays isolated. This
-/// resolver mirrors that layout.
+/// user-supplied base path, mirroring the per-circuit subdir layout `xark build`
+/// writes.
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
     // 1. `base` is already a scoped output dir (a `target/xark/<name>/` holding
     //    circuit.xbc — the artifact every build writes — or the `--emit-json`

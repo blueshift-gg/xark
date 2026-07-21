@@ -1,11 +1,7 @@
 //! An ergonomic 256-bit SHA-256 digest wrapper.
 //!
-//! Consuming a hash in a circuit means "compute `sha256(bytes)`, then constrain
-//! the digest equals a known value". The raw [`xark_sha256::sha256`] output is
-//! `[[Field; 32]; 8]` — 8 words × 32 little-endian bits — and comparing it to a
-//! literal `[u8; 32]` hash requires reproducing SHA-256's word/byte/bit layout
-//! by hand (big-endian bytes within each word, LSB-first bits within each byte).
-//! [`Digest`] hides that bookkeeping so a circuit reads:
+//! [`Digest`] hides SHA-256's word/byte/bit bookkeeping so a circuit can compare
+//! `sha256(bytes)` against a known value directly:
 //!
 //! ```rust,ignore
 //! use xark_sha256::prelude::*; // re-exports `Digest`
@@ -20,35 +16,28 @@
 //! ```
 //!
 //! Unlike [`Hash`](crate::Hash), a `Digest` keeps all 256 bits, so a
-//! `Public<Digest>` is 256 public inputs — use it for a **constant** expected
-//! hash baked into the circuit (no public inputs), and use [`Hash`](crate::Hash)
-//! for a runtime public digest.
+//! `Public<Digest>` is 256 public inputs — use it for a **constant** expected hash
+//! baked into the circuit, and [`Hash`](crate::Hash) for a runtime public digest.
 //!
 //! ## Layout (must match [`xark_sha256::sha256`])
 //!
-//! The gadget returns the 256-bit hash as 8 words. Word `w` covers digest bytes
-//! `4w .. 4w+4` **big-endian**: byte position `k` within the word (`k = 0` is the
-//! most-significant) occupies word bits `(3-k)*8 .. (3-k)*8+8`. Within a byte the
-//! 8 bits are **LSB-first** (matching [`Field::to_bits`]). So the digest byte at
-//! standard hex index `idx` (`idx = 0` is the leading hex pair) lands in word
-//! `idx / 4`, byte slot `idx % 4`, and its bit `j` (`(b >> j) & 1`) at word bit
-//! `(3 - idx%4)*8 + j`. This module's [`From<[u8; 32]>`] places the known bytes
-//! at exactly those positions; the KAT test `sha256("abc")` confirms it.
+//! The gadget returns the hash as 8 words. Word `w` covers digest bytes `4w..4w+4`
+//! **big-endian**: byte slot `k` (`k = 0` most-significant) occupies word bits
+//! `(3-k)*8 .. (3-k)*8+8`, and within a byte the 8 bits are **LSB-first** (matching
+//! [`Field::to_bits`]). So hex byte `idx` lands in word `idx/4`, slot `idx%4`, bit
+//! `j` at word bit `(3 - idx%4)*8 + j`. [`From<[u8; 32]>`] places bytes there; the
+//! KAT test `sha256("abc")` confirms it.
 
-use xark::{require_eq, CircuitInput, Field, RequireEqCircuit};
+use xark::{CircuitInput, Field, RequireEqCircuit, require_eq};
 
-/// A 256-bit SHA-256 digest, stored in [`xark_sha256::sha256`]'s native output
-/// layout: 8 words × 32 little-endian bits (`[[Field; 32]; 8]`).
+/// A 256-bit SHA-256 digest in [`xark_sha256::sha256`]'s native output layout:
+/// 8 words × 32 little-endian bits (`[[Field; 32]; 8]`). Build from the gadget
+/// output (`Digest::from(sha256(msg))`) or a known constant (`EXPECTED.into()`),
+/// then pin them with [`Digest::require_eq`].
 ///
-/// Build one from the gadget output (`Digest::from(sha256(msg))`) or from a known
-/// hash constant (`EXPECTED.into()` for `const EXPECTED: [u8; 32]`), then pin the
-/// two together with [`Digest::require_eq`].
-///
-/// `#[derive(CircuitInput)]` generates `Into<[Field; 256]>` in the compiler's
-/// structural-flatten order (word-major, then bit — `bits[w][j]` → index
-/// `w*32 + j`), so `Digest` works as a `Public<Digest>`/`Private<Digest>` input
-/// *and* a host-side input builder can drive it from a native hash with the
-/// leaf order guaranteed (not merely disciplined) to match the circuit's.
+/// `#[derive(CircuitInput)]` generates `Into<[Field; 256]>` in structural-flatten
+/// order (`bits[w][j]` → index `w*32 + j`), so a host input builder's leaf order is
+/// guaranteed — not merely disciplined — to match the circuit's.
 #[derive(Clone, Copy, CircuitInput)]
 pub struct Digest {
     /// 8 words × 32 little-endian bits, identical to the `sha256` gadget output.
@@ -57,8 +46,7 @@ pub struct Digest {
 
 impl Digest {
     /// Constrain this digest equal to `other`, bit-for-bit (256 equality
-    /// constraints, one per output bit). Both digests are already in the same
-    /// word/byte/bit layout, so this is a plain element-wise compare.
+    /// constraints). Both share the same layout, so it is an element-wise compare.
     pub fn require_eq(self, other: Digest) {
         let mut w = 0usize;
         while w < 8usize {
@@ -80,9 +68,8 @@ impl From<[[Field; 32]; 8]> for Digest {
     }
 }
 
-/// Let a `#[circuit]` body write `require_eq(sha256(msg), expected)` directly: the
-/// raw gadget output `[[Field; 32]; 8]` is wrapped and compared bit-for-bit
-/// against the expected [`Digest`]. See [`RequireEqCircuit`] for the dispatch.
+/// `require_eq(sha256(msg), expected: Digest)`: wrap the raw gadget output and
+/// compare bit-for-bit against `expected`.
 impl RequireEqCircuit<Digest> for [[Field; 32]; 8] {
     #[inline]
     fn require_eq_circuit(self, rhs: Digest) {
@@ -98,15 +85,13 @@ impl RequireEqCircuit<Digest> for Digest {
     }
 }
 
-// `Into<[Field; 256]>` (i.e. `From<Digest> for [Field; 256]`) is generated by
-// `#[derive(CircuitInput)]` above, in the compiler's structural-flatten order.
-// Pin the arity at compile time — a wrong `Into` length would fail to resolve:
+// Pin the derived `Into<[Field; 256]>` arity at compile time — a wrong length
+// would fail to resolve here.
 const _: fn(Digest) -> [Field; 256] = <Digest as core::convert::Into<[Field; 256]>>::into;
 
-/// Build a **constant** digest from a known 32-byte hash (e.g. a test vector or a
-/// value baked into the circuit). Each of the 32 bytes is placed into the same
-/// word/byte/bit slot the `sha256` gadget uses, as `Field` `0`/`1` constants — no
-/// witnesses and no constraints. See the module docs for the layout.
+/// Build a **constant** digest from a known 32-byte hash. Each byte is placed into
+/// the `sha256` gadget's word/byte/bit slot as `Field` `0`/`1` constants — no
+/// witnesses, no constraints. See the module docs for the layout.
 impl From<[u8; 32]> for Digest {
     fn from(bytes: [u8; 32]) -> Digest {
         let zero = [Field::from(0u8); 32];

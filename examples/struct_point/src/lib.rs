@@ -1,7 +1,6 @@
-//! Struct support: a `Point { x: [Field; 3], y: [Field; 3] }` built inside the
-//! circuit and passed through a helper that returns a tuple, with field access
-//! `p.x[i]`. Exercises the `AggregateKind::Adt` (struct construction) and tuple
-//! lowering — all zero-cost, lowering to the same R1CS as the bare field form.
+//! Struct support: a `Point { x: [Field; 3], y: [Field; 3] }` built in-circuit and
+//! passed through a helper returning a tuple, with field access `p.x[i]`. Exercises
+//! `AggregateKind::Adt` and tuple lowering — zero-cost, same R1CS as bare fields.
 #![cfg_attr(xark, no_std)]
 
 use xark::{circuit, require_eq, Field, Private, Public};
@@ -35,7 +34,6 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        // x0 = 3, y0 = 5 → sum = 8, prod = 15.
         struct_point(
             ["3".into(), "0".into(), "0".into()],
             ["5".into(), "0".into(), "0".into()],

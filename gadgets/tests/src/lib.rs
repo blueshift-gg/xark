@@ -101,7 +101,8 @@ pub fn xark_bin() -> std::path::PathBuf {
                 .join("xark-rustc")
         };
         // Every child `xark …` command inherits this and uses it as the driver.
-        std::env::set_var("XARK_RUSTC", &rustc_bin);
+        // SAFETY: single-threaded test setup, before any threads are spawned.
+        unsafe { std::env::set_var("XARK_RUSTC", &rustc_bin) };
 
         // 2. The stable `xark` CLI (a workspace member → workspace target dir).
         // Always (re)build it with `--features debug` — do NOT reuse a pre-built

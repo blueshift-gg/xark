@@ -2,13 +2,11 @@
 //! ed25519, and any future `xark-bignum` circuit).
 //!
 //! A gadget's 256-bit field elements live in-circuit as **`LIMBS` little-endian
-//! `BITS`-bit limbs** (secp/ed25519 use `3 × 86`). A prover has the value in some
-//! *natural* form — the raw crypto bytes a signing library emits, a decimal, a
-//! hex string, a small integer — and should never hand-decompose it into limbs.
-//! [`Uint256`] is that value: it accepts every natural form and owns the one
-//! canonical, unit-tested `→ limbs` decomposition, so the three EC vector tests
-//! (and real proving inputs) share a single conversion instead of re-deriving the
-//! mask/shift each time.
+//! `BITS`-bit limbs** (secp/ed25519 use `3 × 86`). A prover holds the value in
+//! some natural form (raw crypto bytes, a decimal, a hex string, a small integer)
+//! and should never hand-decompose it. [`Uint256`] accepts every natural form and
+//! owns the one canonical, unit-tested `→ limbs` decomposition, so all callers
+//! share a single conversion instead of re-deriving the mask/shift.
 //!
 //! ```ignore
 //! use xark_test_harness::bignum::Uint256;

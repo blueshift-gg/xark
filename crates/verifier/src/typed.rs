@@ -27,8 +27,8 @@
 use solana_nostd_alt_bn128::{G1Point, G2Point};
 
 use crate::verifier::{
-    coords_canonical, groth16_pairing_check, VerifierError, FR_BYTES, G1_BYTES, G2_BYTES,
-    PROOF_BYTES, VK_FIXED_PREFIX_BYTES,
+    FR_BYTES, G1_BYTES, G2_BYTES, PROOF_BYTES, VK_FIXED_PREFIX_BYTES, VerifierError,
+    coords_canonical, groth16_pairing_check,
 };
 
 // `const fn` slice→array readers (no `copy_from_slice` in const context).

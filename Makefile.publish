@@ -1,0 +1,127 @@
+# Auto-generated publish orchestration for xark (v0.0.1).
+# Publishes every crate to crates.io in dependency order (leaves first).
+# `cargo publish` waits for each crate to index before the next, so deps
+# are always available when a dependent is published.
+#
+# Usage:
+#   make -f Makefile.publish publish-dry   # verify everything, upload nothing
+#   make -f Makefile.publish publish       # real publish (needs `cargo login`)
+
+.PHONY: publish publish-dry $(addprefix pub-,$(PKGS))
+
+PKGS := xark-backend xark-curve xark-ir xark-macros xark-prover xark-rustc xark-test-harness xark-verifier xark xark-aes xark-bignum xark-bits xark-cli xark-ed25519 xark-grumpkin xark-hash xark-keccak xark-mimc xark-pedersen xark-poseidon xark-poseidon2 xark-secp256k1 xark-secp256r1 xark-sha256 xark-blake2s xark-blake3 xark-merkle
+
+publish:
+	@echo ">>> publishing xark-backend"
+	cargo publish -p xark-backend
+	@echo ">>> publishing xark-curve"
+	cargo publish -p xark-curve
+	@echo ">>> publishing xark-ir"
+	cargo publish -p xark-ir
+	@echo ">>> publishing xark-macros"
+	cargo publish -p xark-macros
+	@echo ">>> publishing xark-prover"
+	cargo publish -p xark-prover
+	@echo ">>> publishing xark-rustc"
+	cargo publish --manifest-path crates/rustc/Cargo.toml
+	@echo ">>> publishing xark-test-harness"
+	cargo publish -p xark-test-harness
+	@echo ">>> publishing xark-verifier"
+	cargo publish -p xark-verifier
+	@echo ">>> publishing xark"
+	cargo publish --manifest-path crates/lang/Cargo.toml
+	@echo ">>> publishing xark-aes"
+	cargo publish -p xark-aes
+	@echo ">>> publishing xark-bignum"
+	cargo publish -p xark-bignum
+	@echo ">>> publishing xark-bits"
+	cargo publish -p xark-bits
+	@echo ">>> publishing xark-cli"
+	cargo publish -p xark-cli
+	@echo ">>> publishing xark-ed25519"
+	cargo publish -p xark-ed25519
+	@echo ">>> publishing xark-grumpkin"
+	cargo publish -p xark-grumpkin
+	@echo ">>> publishing xark-hash"
+	cargo publish -p xark-hash
+	@echo ">>> publishing xark-keccak"
+	cargo publish -p xark-keccak
+	@echo ">>> publishing xark-mimc"
+	cargo publish -p xark-mimc
+	@echo ">>> publishing xark-pedersen"
+	cargo publish -p xark-pedersen
+	@echo ">>> publishing xark-poseidon"
+	cargo publish -p xark-poseidon
+	@echo ">>> publishing xark-poseidon2"
+	cargo publish -p xark-poseidon2
+	@echo ">>> publishing xark-secp256k1"
+	cargo publish -p xark-secp256k1
+	@echo ">>> publishing xark-secp256r1"
+	cargo publish -p xark-secp256r1
+	@echo ">>> publishing xark-sha256"
+	cargo publish -p xark-sha256
+	@echo ">>> publishing xark-blake2s"
+	cargo publish -p xark-blake2s
+	@echo ">>> publishing xark-blake3"
+	cargo publish -p xark-blake3
+	@echo ">>> publishing xark-merkle"
+	cargo publish -p xark-merkle
+	@echo "All crates published."
+
+publish-dry:
+	@echo ">>> dry-run xark-backend"
+	cargo publish --dry-run -p xark-backend
+	@echo ">>> dry-run xark-curve"
+	cargo publish --dry-run -p xark-curve
+	@echo ">>> dry-run xark-ir"
+	cargo publish --dry-run -p xark-ir
+	@echo ">>> dry-run xark-macros"
+	cargo publish --dry-run -p xark-macros
+	@echo ">>> dry-run xark-prover"
+	cargo publish --dry-run -p xark-prover
+	@echo ">>> dry-run xark-rustc"
+	cargo publish --dry-run --manifest-path crates/rustc/Cargo.toml
+	@echo ">>> dry-run xark-test-harness"
+	cargo publish --dry-run -p xark-test-harness
+	@echo ">>> dry-run xark-verifier"
+	cargo publish --dry-run -p xark-verifier
+	@echo ">>> dry-run xark"
+	cargo publish --dry-run --manifest-path crates/lang/Cargo.toml
+	@echo ">>> dry-run xark-aes"
+	cargo publish --dry-run -p xark-aes
+	@echo ">>> dry-run xark-bignum"
+	cargo publish --dry-run -p xark-bignum
+	@echo ">>> dry-run xark-bits"
+	cargo publish --dry-run -p xark-bits
+	@echo ">>> dry-run xark-cli"
+	cargo publish --dry-run -p xark-cli
+	@echo ">>> dry-run xark-ed25519"
+	cargo publish --dry-run -p xark-ed25519
+	@echo ">>> dry-run xark-grumpkin"
+	cargo publish --dry-run -p xark-grumpkin
+	@echo ">>> dry-run xark-hash"
+	cargo publish --dry-run -p xark-hash
+	@echo ">>> dry-run xark-keccak"
+	cargo publish --dry-run -p xark-keccak
+	@echo ">>> dry-run xark-mimc"
+	cargo publish --dry-run -p xark-mimc
+	@echo ">>> dry-run xark-pedersen"
+	cargo publish --dry-run -p xark-pedersen
+	@echo ">>> dry-run xark-poseidon"
+	cargo publish --dry-run -p xark-poseidon
+	@echo ">>> dry-run xark-poseidon2"
+	cargo publish --dry-run -p xark-poseidon2
+	@echo ">>> dry-run xark-secp256k1"
+	cargo publish --dry-run -p xark-secp256k1
+	@echo ">>> dry-run xark-secp256r1"
+	cargo publish --dry-run -p xark-secp256r1
+	@echo ">>> dry-run xark-sha256"
+	cargo publish --dry-run -p xark-sha256
+	@echo ">>> dry-run xark-blake2s"
+	cargo publish --dry-run -p xark-blake2s
+	@echo ">>> dry-run xark-blake3"
+	cargo publish --dry-run -p xark-blake3
+	@echo ">>> dry-run xark-merkle"
+	cargo publish --dry-run -p xark-merkle
+	@echo "Dry-run complete — all crates package cleanly."
+

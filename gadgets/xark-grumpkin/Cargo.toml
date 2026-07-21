@@ -1,7 +1,11 @@
 [package]
 name = "xark-grumpkin"
+description = "Grumpkin curve gadget for xark zero-knowledge circuits."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 
@@ -10,17 +14,17 @@ name = "xark_grumpkin"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", default-features = false }
+xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
 
 # Host-only dep for the `NativeInput` impl (native field strings → circuit
 # inputs) for `Affine`. Gated on `cfg(not(xark))`: a circuit build drops it and
 # stays lean `no_std`; a host build pulls it in with no feature flag.
 [target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/prover" }
+xark-prover = { path = "../../crates/prover", version = "0.0.1" }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness" }
-xark-ir = { path = "../../crates/ir" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.0.1" }
+xark-ir = { path = "../../crates/ir", version = "0.0.1" }
 
 [lints]
 workspace = true

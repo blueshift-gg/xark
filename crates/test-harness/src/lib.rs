@@ -1,16 +1,16 @@
 //! Shared test harness: compile a circuit source with the `xark` compiler and
-//! read back its emitted artifacts — **no shell script**. Used by the snapshot
-//! suite and by every gadget crate's `vec.rs`.
+//! read back its emitted artifacts (no shell script). Used by the snapshot
+//! suite and every gadget crate's `vec.rs`.
 //!
-//! It handles the repo's awkward build layout for you, once per test process:
-//! `crates/lang` (the compiler) is *excluded* from the root workspace and needs
-//! **nightly** (`rustc_private`) with its own `target/`, while the gadget crates
-//! are root-workspace members. So this builds:
-//!   1. the gadget rlibs (with `-Zalways-encode-mir` so their MIR is inlinable)
-//!      into an isolated `target/xark-compile`, kept apart from the root `target/`
-//!      so a stable `cargo test -p <gadget>` can't collide with them (rustc E0514);
-//!   2. the compiler binary in `crates/lang`'s own target (it's a rustc *driver*,
-//!      so its own deps needn't match the circuit's).
+//! Handles the repo's build layout once per test process. `crates/lang` (the
+//! compiler) is excluded from the root workspace and needs nightly
+//! (`rustc_private`) with its own `target/`; the gadget crates are root-workspace
+//! members. So this builds:
+//!   1. the gadget rlibs (`-Zalways-encode-mir`, so their MIR is inlinable) into
+//!      an isolated `target/xark-compile`, apart from the root `target/` so a
+//!      `cargo test -p <gadget>` can't collide with them (rustc E0514);
+//!   2. the compiler binary in `crates/lang`'s own target (a rustc *driver*, so
+//!      its deps needn't match the circuit's).
 //!
 //! Then it invokes the compiler with an `--extern` per gadget rlib.
 
@@ -38,13 +38,12 @@ impl Compiled {
         primitive::from_json(&json).expect("valid circuit.json")
     }
 
-    /// The **minimized** R1CS constraint count — the invariant the prover actually
-    /// proves. Setup and proving both expand `circuit.xbc` and run
-    /// `minimize_with_fill(.., usize::MAX)`; this reproduces that exact pipeline.
-    /// Use it for constraint-count pins instead of the raw `circuit.json`, whose
-    /// flat expansion carries function plug-materialization that minimization
-    /// removes (so a cached vs. inlined circuit differs in the flat count but not
-    /// in what is proven).
+    /// The **minimized** R1CS constraint count — the invariant the prover
+    /// actually proves. Setup and proving both expand `circuit.xbc` and run
+    /// `minimize_with_fill(.., usize::MAX)`; this reproduces that pipeline. Use
+    /// it for constraint-count pins instead of the raw `circuit.json`, whose flat
+    /// expansion carries function plug-materialization that minimization removes
+    /// (so cached vs. inlined differ in the flat count but not in what is proven).
     pub fn minimized_r1cs_len(&self) -> usize {
         let bytes = std::fs::read(self.out_dir.join("circuit.xbc"))
             .unwrap_or_else(|e| panic!("read {}: {e}", self.out_dir.join("circuit.xbc").display()));
@@ -59,13 +58,13 @@ impl Compiled {
     /// in-memory analogue of [`xark_prover::Circuit::check`], for a circuit
     /// compiled straight from source with [`compile_file`] (no `xark build`).
     ///
-    /// Each `(name, value)` fans out to its witness leaves via
-    /// [`bignum::LeafInput`], the names are resolved against the *actual* compiled
-    /// program (an unknown or missing leaf is a loud `Err`, never a silent skip),
-    /// the witness is solved, and the circuit is confirmed fully constrained
-    /// (analyzer-clean). Returns `Ok(())` when the inputs satisfy every constraint,
-    /// or a descriptive `Err` — so a genuine signature is `check(..).unwrap()` and a
-    /// tampered one is `assert!(check(..).is_err())`.
+    /// Each `(name, value)` fans out to witness leaves via [`bignum::LeafInput`],
+    /// names resolve against the actual compiled program (an unknown/missing leaf
+    /// is a loud `Err`), the witness is solved, and the circuit is confirmed
+    /// fully constrained (analyzer-clean). Returns `Ok(())` when the inputs
+    /// satisfy every constraint, else a descriptive `Err` — so a genuine
+    /// signature is `check(..).unwrap()` and a tampered one
+    /// `assert!(check(..).is_err())`.
     pub fn check(&self, inputs: &[(&str, &dyn bignum::LeafInput)]) -> Result<(), String> {
         use xark_ir::primitive::VarRole;
 
@@ -101,15 +100,14 @@ impl Compiled {
 
         let assign = xark_ir::solver::solve_and_check(&program, &id_inputs)
             .map_err(|e| format!("inputs do not satisfy the circuit: {e:?}"))?;
-        // `analyze_underconstrained` only inspects `Derived` (advice/internal) vars.
+        // `analyze_underconstrained` inspects only `Derived` (advice/internal) vars.
         // A `witness_only` derivation (e.g. the secp256k1 GLV lattice reduction)
-        // computes advice through SCRATCH vars that no constraint references — they
-        // exist only to derive the pinned outputs and are removed by `minimize`
-        // before proving. Such a var is causally disconnected from the circuit: it
-        // appears in no constraint, so changing it alters no constraint's
-        // satisfaction and no public output — it cannot be a forgery vector. Ignore
-        // that (benign) reason; still fail on a var that IS referenced but left free
-        // (a genuine, forgeable under-constraint).
+        // computes advice through SCRATCH vars that no constraint references; they
+        // only derive pinned outputs and are removed by `minimize` before proving.
+        // Such a var is causally disconnected — in no constraint, so changing it
+        // alters no constraint's satisfaction and no public output — hence not a
+        // forgery vector. Ignore that benign reason; still fail on a var that IS
+        // referenced but left free (a genuine, forgeable under-constraint).
         const UNREFERENCED: &str = "no constraint references this variable";
         let real: Vec<_> = xark_ir::solver::analyze_underconstrained(&program, &assign)
             .into_iter()
@@ -180,13 +178,13 @@ fn built() -> &'static (PathBuf, PathBuf) {
         let driver = root.join("crates/rustc/target/release/xark-rustc");
 
         // 2. Gadget rlibs → isolated target (all root-member `xark-*` crates
-        //    except the non-circuit libraries and the excluded packages). Built
-        //    with the driver as `RUSTC` (like the real `xark build`): it reports
-        //    the `xark` cfg on `--print cfg`, so Cargo gates each crate's
-        //    `[target.'cfg(not(xark))'.dependencies]` (the host prover/num-bigint)
-        //    *out* and the sources compile their lean `#[cfg(not(xark))]`-free
-        //    circuit shape — exactly what links into the circuit crate. No
-        //    `RUSTUP_TOOLCHAIN`: the driver resolves its own pinned sysroot.
+        //    except the non-circuit libraries and excluded packages). Built with
+        //    the driver as `RUSTC` (like the real `xark build`): it reports the
+        //    `xark` cfg on `--print cfg`, so Cargo gates each crate's
+        //    `[target.'cfg(not(xark))'.dependencies]` (host prover/num-bigint) out
+        //    and the sources compile their lean circuit shape — exactly what links
+        //    into the circuit crate. No `RUSTUP_TOOLCHAIN`: the driver resolves its
+        //    own pinned sysroot.
         let mut args = vec!["build".to_string(), "--release".to_string()];
         let mut names: Vec<String> = std::fs::read_dir(root.join("crates"))
             .expect("read crates/")
@@ -282,12 +280,12 @@ pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
     let _ = std::fs::remove_dir_all(&out_dir);
 
     let mut cmd = Command::new(bin);
-    // Routine soundness gate: the harness builds the driver with `--features debug`,
-    // so `XARK_VERIFY=1` makes every compiled circuit self-check that its bytecode
+    // Soundness gate: the driver is built with `--features debug`, so
+    // `XARK_VERIFY=1` makes every compiled circuit self-check that its bytecode
     // artifact expands byte-identically to the flat R1CS. The prover proves the
     // artifact, so an artifact≠flat drift (e.g. a revived mul-product missing from
-    // the artifact) is an under-constrained/forgeable circuit — this catches it on
-    // every test build (the drift is invisible to solve tests, which use the flat).
+    // the artifact) is a forgeable under-constraint — caught on every test build
+    // (the drift is invisible to solve tests, which use the flat).
     cmd.env("XARK_VERIFY", "1");
     cmd.args([
         "--crate-type=lib",

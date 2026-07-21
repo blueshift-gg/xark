@@ -7,11 +7,11 @@
 //! soundness gate (`xark prove` / `xark check --inputs`), so both worlds surface
 //! the *same* explanation from one place.
 
+use crate::Visibility;
 use crate::linear_combination::LinearCombination;
 use crate::profile::ProfileProgram;
 use crate::r1cs::R1csProgram;
 use crate::solver::SolveError;
-use crate::Visibility;
 
 /// ANSI palette for the diagnostic, matching the `xark` CLI. Empty strings when
 /// stderr is not a terminal or `NO_COLOR` is set, so piped output / CI logs stay
@@ -44,11 +44,9 @@ fn palette() -> Palette {
     }
 }
 
-/// Render one linear combination compactly: each *input* term (public/private) is
-/// shown by name and **highlighted** (`p.hi`), while the many internal wire terms
-/// collapse to `⟨N wires⟩` so a 128-term packing constraint stays one readable
-/// line. The point is to show the constraint's *shape* and where the input sits in
-/// it, not to dump every wire.
+/// Render one linear combination compactly: *input* terms (public/private) are
+/// shown by name and highlighted; internal wire terms collapse to `⟨N wires⟩` so
+/// a large constraint stays one readable line showing its shape.
 fn render_lc(lc: &LinearCombination, r1cs: &R1csProgram, p: &Palette) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut wires = 0usize;
@@ -89,12 +87,11 @@ fn render_lc(lc: &LinearCombination, r1cs: &R1csProgram, p: &Palette) -> String 
 /// Render a solve/check failure into a colored, multi-line explanation.
 ///
 /// For a constraint violation ([`SolveError::ConstraintFailed`]) this shows the
-/// constraint's `a·b = c` *form* (with the implicated public/private input
-/// underlined in red), the `r1cs.json` debug note, and — if `profile` is `Some` —
-/// the `file:line:col`, function chain, and kind. Constraint ids are index-aligned
-/// across the primitive IR, `r1cs.json`, and `profile.json` (the lowering emits
-/// them 1:1), so the single failing index resolves all three. Any other error is
-/// rendered via its `Display`.
+/// constraint's `a·b = c` form (with the implicated input underlined), the debug
+/// note, and — if `profile` is `Some` — the `file:line:col`, function chain, and
+/// kind. Constraint ids are index-aligned across the primitive IR, `r1cs.json`,
+/// and `profile.json`, so the failing index resolves all three. Any other error
+/// renders via `Display`.
 pub fn describe_unsatisfied(
     err: &SolveError,
     r1cs: &R1csProgram,

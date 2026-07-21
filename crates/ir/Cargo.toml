@@ -1,7 +1,11 @@
 [package]
 name = "xark-ir"
+description = "xark's intermediate representation: R1CS constraints, linear combinations, and the primitive/hint program."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 

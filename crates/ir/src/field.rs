@@ -1,21 +1,15 @@
-//! Field constants.
+//! Field constants: coefficients in a prime field `F_p`, stored as *exact signed
+//! big integers* (not reduced to `[0, p)`).
 //!
-//! Coefficients live in a prime field `F_p`, but we store them as *exact signed
-//! big integers*, not reduced to `[0, p)`. This keeps readable coefficients like
-//! `-1` and `2` while still handling full field-sized round constants (~254-bit)
-//! exactly. Because `(a mod p) + (b mod p) ≡ (a + b) mod p` and likewise for
-//! multiplication, exact integer arithmetic preserves the represented field
-//! element; canonical reduction into `[0, p)` is something a backend does when it
-//! knows the modulus.
+//! Storing exact integers keeps readable coefficients (`-1`, `2`) and full
+//! field-sized round constants (~254-bit). Since `(a mod p) + (b mod p) ≡ (a + b)
+//! mod p` (and likewise for `*`), exact integer arithmetic preserves the field
+//! element; a backend reduces into `[0, p)` once it knows the modulus.
 //!
-//! Representation: coefficients are overwhelmingly tiny (`0`, `1`, `-1`, `2`, …),
-//! so we store an `i64` inline and only fall back to a heap `BigInt` for the rare
-//! field-sized value. This makes cloning a coefficient `Copy`-cheap in the common
-//! case (it was the dominant lower-phase cost when every coefficient was a heap
-//! `String`) and lets linear-combination arithmetic use native `i64` ops instead
-//! of parsing/formatting decimal strings. The `Small`/`Big` split is *canonical*
-//! — a value is `Small` iff it fits in `i64` — so derived `PartialEq`/`Eq` are
-//! correct and the serialized decimal is unchanged (byte-identical output).
+//! Values are overwhelmingly tiny, so we store an `i64` inline and fall back to a
+//! heap `BigInt` only for rare field-sized values. The `Small`/`Big` split is
+//! *canonical* (a value is `Small` iff it fits in `i64`), so derived `Eq` is
+//! correct and the serialized decimal is byte-identical.
 
 use num_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive};
@@ -30,9 +24,8 @@ enum Repr {
     Big(BigInt),
 }
 
-/// A field constant. Serialized transparently as the bare decimal string
-/// (`"123"`), since the wrapper key is pure noise in `circuit.json` / `r1cs.json`
-/// (every coefficient carries one).
+/// A field constant, serialized transparently as the bare decimal string
+/// (`"123"`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FieldConst {
     repr: Repr,
@@ -79,8 +72,7 @@ impl FieldConst {
         FieldConst::from_i64(1)
     }
 
-    /// The canonical decimal string (`BigInt::to_string()` output — unchanged from
-    /// the previous string-backed representation, so serialized bytes match).
+    /// The canonical decimal string.
     pub fn decimal(&self) -> String {
         match &self.repr {
             Repr::Small(i) => i.to_string(),
@@ -157,14 +149,11 @@ impl FieldConst {
         FieldConst::from_bigint(-self.big())
     }
 
-    /// If this constant is a non-negative integer that fits in `n` bits, return
-    /// its little-endian bits (`bits[0]` = LSB, each `false`/`true` = `0`/`1`).
-    /// Returns `None` when the value is negative or `>= 2^n` — i.e. it "does not
-    /// fit in `n` bits". Used to const-fold `Field::to_bits::<N>` of a constant:
-    /// the bits are known, so no booleanity/recomposition constraints are needed.
+    /// If this constant fits in `n` bits (non-negative, `< 2^n`), return its
+    /// little-endian bits; else `None`. Lets `Field::to_bits::<N>` of a constant
+    /// const-fold, avoiding booleanity/recomposition constraints.
     pub fn to_bits_le(&self, n: usize) -> Option<Vec<bool>> {
-        // `to_biguint` is `None` for a negative value (which cannot fit in `n`
-        // unsigned bits); `bits()` is the count of significant bits.
+        // `to_biguint` is `None` for a negative value (cannot fit in `n` unsigned bits).
         let v = self.big().to_biguint()?;
         if v.bits() as usize > n {
             return None;
@@ -185,8 +174,7 @@ impl FieldConst {
     }
 }
 
-// Serialize transparently as the bare decimal string, and parse it back — keeping
-// `circuit.json` / `r1cs.json` byte-identical to the previous representation.
+// Serialize transparently as the bare decimal string, and parse it back.
 impl Serialize for FieldConst {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.decimal())

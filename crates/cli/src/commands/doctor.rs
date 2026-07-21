@@ -39,7 +39,7 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
 
     let mut problems = 0u32;
 
-    // --- Rust toolchain (required) ---------------------------------------
+    // Rust toolchain (required)
     let cargo = cmd_ok("cargo", &["--version"]);
     problems += check(
         cargo.is_some(),
@@ -67,7 +67,7 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
         &install_tc,
     );
 
-    // --- Toolchain components (required; only checked if the toolchain is present)
+    // Toolchain components (required; only checked if the toolchain is present).
     let comps = if tc_ok {
         cmd_ok(
             "rustup",
@@ -92,7 +92,7 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
         );
     }
 
-    // --- Optional (informational — never a hard failure) -----------------
+    // Optional (informational — never a hard failure).
     let onpath = cmd_ok("xark", &["--version"]);
     info(
         onpath.is_some(),

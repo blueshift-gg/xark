@@ -8,7 +8,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
@@ -196,7 +196,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
     let meta_path = out_dir.join("metadata.json");
     let snarkjs_vk_path = out_dir.join("snarkjs-verification_key.json");
 
-    // --- Production phase-2 path -----------------------------------------
+    // Production phase-2 path.
     if let Some(ref ptau_file) = ptau_path {
         let phase2_seed_hex = match &args.phase2_seed {
             Some(s) => s.clone(),
@@ -268,7 +268,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         return Ok(());
     }
 
-    // --- Dev-mode path ---------------------------------------------------
+    // Dev-mode path.
     // `for_setup` runs the boundary-minimize (self-reported `MINIMIZE:` line);
     // structural `validate()` on a multi-million-constraint circuit is itself a
     // non-trivial phase, so time it separately.

@@ -1,18 +1,14 @@
-//! `xark-curve`: the shared short-Weierstrass ECDSA gadget, emitted by one
-//! `macro_rules!` so `secp256k1` (a = 0) and `secp256r1` (a = −3) are a single
-//! source of truth. The two curves differ only in their moduli, the doubling
-//! slope numerator (`3x²` vs `3x² − 3`), and the precomputed constant tables.
+//! `xark-curve`: shared curve gadgets emitted by `macro_rules!` so each curve is
+//! a single source of truth. Curves differ only in moduli, the doubling slope
+//! numerator (`3x²` vs `3x² − 3`), and the precomputed constant tables.
 //!
-//! This crate has **no dependencies**: the macro emits absolute `xark_bignum::…` /
-//! `xark::…` paths that resolve in the *caller* crate (which must depend on
-//! both). Every op the macro emits is token-for-token what the two hand-written,
-//! solver-validated gadgets used to contain, so the emitted R1CS is unchanged.
+//! No dependencies: the macro emits absolute `xark_bignum::…` / `xark::…` paths
+//! that resolve in the caller crate (which must depend on both).
 
 #![no_std]
 
 /// Emit a full short-Weierstrass ECDSA gadget (base/scalar fields, `Point`, the
-/// incomplete affine group law, Strauss–Shamir double-scalar-mul, and
-/// `ecdsa_verify`) for one curve.
+/// incomplete affine group law, Strauss–Shamir double-scalar-mul) for one curve.
 ///
 /// ```ignore
 /// xark_curve::weierstrass! {
@@ -30,7 +26,7 @@
 /// ```
 #[macro_export]
 macro_rules! weierstrass {
-    // ---- public entry: a = 0 (no `a` term in the doubling numerator) ----
+    // public entry: a = 0 (no `a` term in the doubling numerator)
     (
         base = $base:literal,
         scalar = $scalar:literal,
@@ -42,16 +38,15 @@ macro_rules! weierstrass {
         $crate::weierstrass! { @build
             base = $base,
             scalar = $scalar,
-            // a = 0: numerator is exactly `3x²` (NO subtraction).
+            // a = 0: numerator is exactly `3x²` (no subtraction)
             numerator_sub = { },
-            // On-curve RHS is `x³ + a·x + b` with `a = 0`.
             curve_b = [ $b0, $b1, $b2 ],
             curve_a_coeff = { Fp::new([xark::Field::from(0u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
             generators = [ $( [ $gx0, $gx1, $gx2, $gy0, $gy1, $gy2 ] ),* ],
             correction = [ $cx0, $cx1, $cx2, $cy0, $cy1, $cy2 ]
         }
     };
-    // ---- public entry: a = -3 (numerator gains a `- 3`) ----
+    // public entry: a = -3 (numerator gains a `- 3`)
     (
         base = $base:literal,
         scalar = $scalar:literal,
@@ -64,9 +59,9 @@ macro_rules! weierstrass {
             base = $base,
             scalar = $scalar,
             // a = -3: numerator is `3x² - 3` (`Fp` resolves to the type generated
-            // below — items are non-hygienic, so this splices in cleanly).
+            // below — items are non-hygienic, so this splices in cleanly)
             numerator_sub = { - Fp::new([xark::Field::from(3u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
-            // On-curve RHS is `x³ + a·x + b` with `a = −3` (`−3 = p − 3` via Neg).
+            // on-curve RHS is `x³ + a·x + b` with `a = −3` (`−3 = p − 3` via Neg)
             curve_b = [ $b0, $b1, $b2 ],
             curve_a_coeff = { - Fp::new([xark::Field::from(3u8), xark::Field::from(0u8), xark::Field::from(0u8)]) },
             generators = [ $( [ $gx0, $gx1, $gx2, $gy0, $gy1, $gy2 ] ),* ],
@@ -74,7 +69,7 @@ macro_rules! weierstrass {
         }
     };
 
-    // ---- internal builder: one expansion, so `Point` exists before use ----
+    // internal builder: one expansion, so `Point` exists before use
     (@build
         base = $base:literal,
         scalar = $scalar:literal,
@@ -84,8 +79,7 @@ macro_rules! weierstrass {
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal ]
     ) => {
-        // Base field `Fp` (mod p) and scalar field `Fq` (mod n), 3 × 86-bit limbs.
-        // Only the modulus is written; limbs, `m − 1`, and the complement derive.
+        // base field `Fp` (mod p), scalar field `Fq` (mod n), 3 × 86-bit limbs
         xark_bignum::fp!(pub Fp, $base);
         xark_bignum::fp!(no_host pub Fq, $scalar);
 
@@ -224,12 +218,10 @@ macro_rules! weierstrass {
     };
 }
 
-/// Emit the host-side `NativeInput` impls for the macro-generated `Fq`/`Point`
-/// (3 × 86-bit limbs), behind the caller crate's `host` feature. Shared by the
-/// `weierstrass!` and `edwards!` gadgets so every curve gets transparent types:
-/// a scalar is 32 big-endian bytes, a point is the compact uncompressed 64-byte
-/// `x ‖ y` form. Requires the caller to depend (host-gated) on `num-bigint` and
-/// `xark-prover`.
+/// Emit host-side `NativeInput` impls for the macro-generated `Fq`/`Point`
+/// (3 × 86-bit limbs). Shared by `weierstrass!` and `edwards!`: a scalar is 32
+/// big-endian bytes, a point is the compact uncompressed 64-byte `x ‖ y` form.
+/// Requires the caller to depend (host-gated) on `num-bigint` and `xark-prover`.
 #[macro_export]
 macro_rules! curve_host_inputs {
     ($scalar:literal) => {
@@ -247,8 +239,7 @@ macro_rules! curve_host_inputs {
             }
 
             /// Reduce a big-endian integer modulo the scalar order, returned as a
-            /// big-endian 32-byte scalar — e.g. `reduce_scalar(&Sha256::digest(msg))`
-            /// yields an ECDSA message scalar `e`.
+            /// big-endian 32-byte scalar (e.g. an ECDSA message scalar `e`).
             pub fn reduce_scalar(be: &[u8]) -> [u8; 32] {
                 let v = BigUint::from_bytes_be(be) % order();
                 let b = v.to_bytes_be();
@@ -303,11 +294,10 @@ macro_rules! curve_host_inputs {
 ///   −x² + y² = 1 + d·x²·y²          identity = (0, 1)
 /// ```
 ///
-/// Unlike the short-Weierstrass [`weierstrass!`] law, this addition is **complete**
-/// (no exceptional cases): it correctly handles the identity and doubling with the
-/// exact same formula, so no offset accumulator is needed. `d` must be a
-/// non-square (true for Ed25519), which guarantees the denominators `1 ± E` are
-/// never zero.
+/// Soundness: unlike the short-Weierstrass law this addition is **complete** (no
+/// exceptional cases) — it handles the identity and doubling with the same
+/// formula, so no offset accumulator is needed. `d` must be a non-square (true
+/// for Ed25519), which guarantees the denominators `1 ± E` are never zero.
 ///
 /// ```ignore
 /// xark_curve::edwards! {
@@ -316,11 +306,6 @@ macro_rules! curve_host_inputs {
 ///     d      = "…",   // the curve constant d
 /// }
 /// ```
-///
-/// 256-bit field elements use the standard 3 × 86-bit limb layout (same as the
-/// Weierstrass gadgets). Emits: `Fp`, `Fq`, `Point` (with `identity`, `add`,
-/// `double`), `Scalar = Fq`, `ec_add`, `ec_double`, and
-/// `scalar_mul(bits, p)` — a branchless MSB→LSB double-and-add.
 #[macro_export]
 macro_rules! edwards {
     (
@@ -405,7 +390,7 @@ macro_rules! edwards {
         ///   A = x1·y2 ; B = y1·x2 ; C = x1·x2 ; D = y1·y2 ; E = d·C·D
         ///   x3 = (A + B) / (1 + E) ; y3 = (D + C) / (1 − E)
         /// ```
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub fn ec_add(p: Point, q: Point) -> Point {
             let one = fp(1, 0, 0);
             let a = p.x * q.y;
@@ -418,20 +403,17 @@ macro_rules! edwards {
             Point::new(x3, y3)
         }
 
-        /// Dedicated affine doubling `2·P` for twisted Edwards `a = −1`. The
-        /// unified law would compute `ec_add(p, p)` at 8 non-native muls + 2
-        /// inverses; substituting the curve identity `d·x²y² = y² − x² − 1`
-        /// eliminates `d` and the cross products, collapsing doubling to just
-        /// **5 muls + 2 inverses**:
+        /// Dedicated affine doubling `2·P` for twisted Edwards `a = −1`.
+        /// Substituting the curve identity `d·x²y² = y² − x² − 1` into the unified
+        /// law eliminates `d` and the cross products, collapsing doubling from
+        /// 8 muls + 2 inverses to **5 muls + 2 inverses**:
         /// ```text
         ///   x3 = 2·x·y / (y² − x²)
         ///   y3 = (x² + y²) / (2 + x² − y²)
         /// ```
-        /// The doublings dominate a scalar-mul (≈256 per call vs ≈64 adds), so
-        /// dropping 3 muls each is the main constraint saving. Still **complete**:
-        /// for a non-square `d` both denominators (`1 + d·x²y²` and `1 − d·x²y²`)
-        /// are never zero, and it correctly doubles the identity `(0, 1)`.
-        #[no_mangle]
+        /// Still **complete**: for a non-square `d` both denominators
+        /// (`1 ± d·x²y²`) are never zero, and it correctly doubles `(0, 1)`.
+        #[unsafe(no_mangle)]
         pub fn ec_double(p: Point) -> Point {
             let two = fp(2, 0, 0);
             let xy = p.x * p.y;
@@ -446,9 +428,9 @@ macro_rules! edwards {
             Point::new(x3, y3)
         }
 
-        /// Table lookup over 16 affine points by 4 selector bits (`b3` MSB). Thin
-        /// `Point`-native wrapper over `select16_affine` (unwrap/rewrap `Fp` is a
-        /// no-op). Table index reconstructed as `b3·8 + b2·4 + b1·2 + b0`.
+        /// Table lookup over 16 affine points by 4 selector bits (`b3` MSB), index
+        /// `b3·8 + b2·4 + b1·2 + b0`. Thin `Point`-native wrapper over
+        /// `select16_affine` (unwrap/rewrap `Fp` is a no-op).
         fn select16(table: [Point; 16], b3: xark::Field, b2: xark::Field, b1: xark::Field, b0: xark::Field) -> Point {
             let mut raw = [[[xark::Field::from(0u8); 3]; 2]; 16];
             let mut i = 0usize;
@@ -461,10 +443,9 @@ macro_rules! edwards {
         }
 
         /// Windowed `[k]·P` over 256 little-endian scalar `bits` (MSB→LSB, 64 nibbles
-        /// of 4 bits). Precomputes `table[i] = [i]·P` for `i ∈ 0..16` (`table[0]` is
-        /// the identity), then per window does 4 doublings and one 16-way select+add.
-        /// The complete law means the running `acc` (starting at the identity) is
-        /// always valid — no offset accumulator needed.
+        /// of 4 bits). Precomputes `table[i] = [i]·P` for `i ∈ 0..16`, then per window
+        /// does 4 doublings and one 16-way select+add. The complete law keeps `acc`
+        /// (starting at the identity) always valid — no offset accumulator needed.
         pub fn scalar_mul(bits: [xark::Field; 256], p: Point) -> Point {
             // pin coordinates to < 2^BITS before the non-native group law
             // (`mod_mul` assumes in-range operand limbs, else products wrap `Fr`)
@@ -490,9 +471,9 @@ macro_rules! edwards {
 
         /// Windowed Strauss–Shamir `[k1]·P1 + [k2]·P2` over two 256-bit little-endian
         /// scalars (MSB→LSB, 128 windows of 2+2 bits). Precomputes the 16-entry
-        /// combined table `T[i·4 + j] = [i]·P1 + [j]·P2` (`i, j ∈ 0..4`, `T[0]` the
-        /// identity), then per window does 2 doublings and one 16-way select+add.
-        /// Complete law → offset-free (no correction term).
+        /// combined table `T[i·4 + j] = [i]·P1 + [j]·P2` (`i, j ∈ 0..4`), then per
+        /// window does 2 doublings and one 16-way select+add. Complete law → no
+        /// correction term.
         pub fn double_scalar_mul(bits1: [xark::Field; 256], p1: Point, bits2: [xark::Field; 256], p2: Point) -> Point {
             // pin coordinates to < 2^BITS before the non-native group law (see `scalar_mul`)
             p1.x.range_check();

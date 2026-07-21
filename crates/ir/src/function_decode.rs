@@ -1,12 +1,10 @@
 //! Decoder for the DAG-compact `XBC` (version 1) circuit artifact.
 //!
-//! The encoder lives in the compiler (`lower_mir::build_function_blob`, which has
-//! the lowering `env`); this is the decode half, kept in `xark-ir` so both the
-//! `xark` CLI and the compiler can reach it. It parses the container — function
-//! defs (each with its var-kinds and two item streams) + top-level streams — and
-//! expands it to a full [`CircuitProgram`] (constraints + witness program +
-//! variable table), the same shape a flat `circuit.xbc` yields. The wire format
-//! is defined jointly with the encoder; both must move together.
+//! Decode half of `lower_mir::build_function_blob`; lives in `xark-ir` so both the
+//! `xark` CLI and the compiler can reach it. Parses the container (function defs +
+//! top-level streams) and expands it to a full [`CircuitProgram`], the same shape a
+//! flat `circuit.xbc` yields. Wire format is defined jointly with the encoder; both
+//! must move together.
 
 use crate::circuit::{CircuitProgram, R1csRow};
 use crate::field::FieldConst;
@@ -14,7 +12,7 @@ use crate::linear_combination::{LinearCombination, Term, VarId};
 use crate::primitive::{FieldSpec, Var, VarRole, WitnessGen};
 use std::collections::BTreeMap;
 
-// --- low-level readers (mirror the encoder's `put_*`) ------------------------
+// Low-level readers (mirror the encoder's `put_*`).
 fn get_uv(b: &[u8], p: &mut usize) -> u64 {
     let mut v = 0u64;
     let mut s = 0;
@@ -150,8 +148,8 @@ fn get_witness(b: &[u8], p: &mut usize) -> WitnessGen {
     }
 }
 
-/// The primary output var of a witness op (mirrors `lower_mir::witness_gen_out`) —
-/// used to decide whether the op survives the var prune.
+/// Primary output var of a witness op (mirrors `lower_mir::witness_gen_out`);
+/// decides whether the op survives the var prune.
 fn witness_out(op: &WitnessGen) -> VarId {
     match op {
         WitnessGen::Product { out, .. }
@@ -169,11 +167,10 @@ fn witness_out(op: &WitnessGen) -> VarId {
     }
 }
 
-// --- substitution (internals shift base+offset; plug vars → plug LCs) --------
-/// Substitute an LC under `s`: each term `coeff·var` becomes `coeff · s(var)`
-/// (`s` maps an internal var to a shifted single var, and a plug var to the
-/// caller's plug LC). Mirrors `lower_mir::replay_function`'s `subst_lc`, so a
-/// bytecode CALL expands byte-identically to a walked replay.
+// Substitution: internals shift base+offset; plug vars map to plug LCs.
+/// Substitute an LC under `s`: each term `coeff·var` becomes `coeff · s(var)`.
+/// Mirrors `lower_mir::replay_function`'s `subst_lc`, so a bytecode CALL expands
+/// byte-identically to a walked replay.
 fn subst_lc(lc: &LinearCombination, s: &dyn Fn(u32) -> LinearCombination) -> LinearCombination {
     let mut constant = lc.constant.clone();
     let mut terms: Vec<Term> = Vec::new();
@@ -185,7 +182,7 @@ fn subst_lc(lc: &LinearCombination, s: &dyn Fn(u32) -> LinearCombination) -> Lin
     LinearCombination { constant, terms }.simplified()
 }
 /// The single var an out/id witness field maps to. Out/id fields are always fresh
-/// internals, so `s` yields a bare `1·v` LC.
+/// internals, so `s` yields a bare `1·v` LC. (Invariant relied on here.)
 fn subst_out(v: u32, s: &dyn Fn(u32) -> LinearCombination) -> u32 {
     s(v).terms[0].var
 }
@@ -273,7 +270,7 @@ fn subst_witness(w: &mut WitnessGen, s: &dyn Fn(u32) -> LinearCombination) {
     }
 }
 
-/// Build the substitution for a CALL: plug var → the caller's (already
+/// Build the substitution for a CALL: plug var → caller's (already
 /// outer-substituted) plug LC; internal var (`>= def.base_var`) → shifted single
 /// var at `base`; anything else → itself.
 fn call_subst(
@@ -294,20 +291,20 @@ fn call_subst(
     }
 }
 
-// --- parsed items ------------------------------------------------------------
+// Parsed items.
 enum CItem {
     Row(R1csRow),
-    /// A CALL: `(def index, fresh var base, plug LCs)`. The plug LCs are in the
-    /// enclosing scope's coords and are substituted into the def body on expand.
+    /// `(def index, fresh var base, plug LCs)`. Plug LCs are in the enclosing
+    /// scope's coords, substituted into the def body on expand.
     Call(u32, u32, Vec<LinearCombination>),
-    /// A rolled run of ≥2 inline rows, already expanded to flat rows (in the
-    /// def's own coords; remapped at expansion like an inline `Row`).
+    /// A rolled run of ≥2 inline rows, in the def's own coords (remapped at
+    /// expansion like an inline `Row`).
     Rolled(Vec<R1csRow>),
 }
 enum WItem {
     Row(WitnessGen),
     Call(u32, u32, Vec<LinearCombination>),
-    /// A rolled run of ≥2 witness ops, already expanded.
+    /// A rolled run of ≥2 witness ops.
     Rolled(Vec<WitnessGen>),
 }
 struct GDef {
@@ -317,13 +314,11 @@ struct GDef {
     c_items: Vec<CItem>,
     w_items: Vec<WItem>,
 }
-/// Parse a rolled-CALL block (tag `3`, Stage 3 loop fusion) and expand it to the
+/// Parse a rolled-CALL block (tag `3`, loop fusion) and expand it to the
 /// `count · period` individual CALLs it stands for. Iteration `k` of template `j`
 /// gets `base = base0 + k·base_step` and each plug-LC term var `var0 + k·var_step`
-/// (coeffs/constants loop-invariant). Expanding at parse time means the rest of the
-/// decoder (`expand_c`/`expand_w`/`minimize_items`) sees ordinary `Call`s — so the
-/// rolled form is BYTE-IDENTICAL to the unrolled CALL tokens by construction.
-/// Mirrors `lower_mir::put_rolled_call`.
+/// (coeffs/constants loop-invariant). Expanding at parse time keeps the rolled form
+/// BYTE-IDENTICAL to the unrolled CALL tokens. Mirrors `lower_mir::put_rolled_call`.
 fn parse_rolled_calls(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<LinearCombination>)> {
     let count = get_uv(b, p) as i64;
     let period = get_uv(b, p) as usize;
@@ -447,24 +442,19 @@ fn parse_w_items(b: &[u8], p: &mut usize) -> Vec<WItem> {
     out
 }
 
-/// The top-level (identity) substitution: every var maps to itself. Kept as a
-/// named `fn` (not a capturing closure) so it is `Send + Sync + Copy` and can be
-/// handed to rayon workers during parallel expansion.
+/// Top-level (identity) substitution. Kept as a named `fn` (not a closure) so it is
+/// `Send + Sync + Copy` and can be handed to rayon workers during parallel expansion.
 fn identity_lc(v: u32) -> LinearCombination {
     LinearCombination::var(v)
 }
 
-/// Expand the **top-level** constraint stream, optionally in parallel.
+/// Expand the top-level constraint stream, optionally in parallel.
 ///
-/// At the top level the substitution is the identity, and every top-level item's
-/// var ids (a `Row`'s term vars, a `Call`'s fresh `base`, its plug-LC term vars)
-/// are already **absolute** — baked into the bytecode by the encoder's monotonic
-/// walk. So each top-level item expands to a fixed, self-contained slice of rows
-/// that depends only on `defs` and the item itself; there is **no shared running
-/// counter** between items. That makes the items independent: expanding each into
-/// a local buffer and concatenating them *in item order* is byte-for-byte the
-/// same sequence the serial `for it in items` loop produces. We exploit that to
-/// fan the per-item expansion across rayon while keeping the result identical.
+/// The top-level substitution is the identity and every item's var ids are already
+/// absolute (baked in by the encoder's monotonic walk), so items share no running
+/// counter and are independent: expanding each into a local buffer and concatenating
+/// them in item order is byte-for-byte the serial walk's output. That is what makes
+/// the rayon fan-out sound.
 fn expand_c_top(defs: &[GDef], items: &[CItem], parallel: bool) -> Vec<R1csRow> {
     if parallel {
         use rayon::prelude::*;
@@ -489,9 +479,8 @@ fn expand_c_top(defs: &[GDef], items: &[CItem], parallel: bool) -> Vec<R1csRow> 
 }
 
 /// Witness-stream counterpart of [`expand_c_top`] — same independence argument
-/// (top-level witness ops carry absolute out/id vars and identity-substituted
-/// input LCs), so per-item parallel expansion concatenated in order is identical
-/// to the serial walk.
+/// (absolute out/id vars, identity-substituted input LCs), so parallel expansion
+/// concatenated in order equals the serial walk.
 fn expand_w_top(defs: &[GDef], items: &[WItem], parallel: bool) -> Vec<WitnessGen> {
     if parallel {
         use rayon::prelude::*;
@@ -541,8 +530,7 @@ fn expand_c(
             }
             CItem::Call(d, base, plugs) => {
                 let def = &defs[*d as usize];
-                // The call's base var and plug LCs are in the enclosing coords;
-                // pull them into global coords via the outer substitution first.
+                // Pull base var and plug LCs into global coords via the outer subst first.
                 let base = subst_out(*base, subst);
                 let sub_plugs: Vec<LinearCombination> =
                     plugs.iter().map(|lc| subst_lc(lc, subst)).collect();
@@ -584,24 +572,21 @@ fn expand_w(
     }
 }
 
-/// Parse an `XBC` (version 1) container and expand it to the full
-/// `CircuitProgram`. The 6-byte header (`XBC` + `0x0001`) is assumed already
-/// dispatched on.
+/// Parse an `XBC` (version 1) container and expand it to a full `CircuitProgram`.
+/// The 6-byte header (`XBC` + `0x0001`) is assumed already dispatched on.
 ///
-/// **Total.** A `circuit.xbc` may have been produced on another machine or
-/// corrupted on disk, so this must never crash the process: it catches the
-/// bounds/utf8/tag panics of the inner parser and returns them as a clean `Err`.
-/// (Fuzzed by `gadgets/tests/tests/fuzz.rs` — arbitrary/mutated bytes never panic.)
+/// Total: a `circuit.xbc` may be foreign or corrupted, so this must never crash the
+/// process — it catches the inner parser's bounds/utf8/tag panics and returns a clean
+/// `Err`. (Fuzzed by `gadgets/tests/tests/fuzz.rs`.)
 pub fn expand_function_blob(b: &[u8]) -> Result<CircuitProgram, String> {
     expand_function_blob_impl(b)
 }
 
 fn expand_function_blob_impl(b: &[u8]) -> Result<CircuitProgram, String> {
-    // Silence the default panic printer for the expected-on-malformed-input inner
-    // panics, then restore it — so a bad artifact yields one clean error line, not
-    // a spurious backtrace. Decode is sequential in setup/prove, so swapping the
-    // process-global hook here is safe. Panics inside the rayon fan-out propagate
-    // to this thread and are caught here too, so totality still holds.
+    // Silence the panic printer for the expected-on-malformed-input inner panics,
+    // then restore it, so a bad artifact yields one clean error line. Decode is
+    // sequential in setup/prove, so swapping the process-global hook is safe; rayon
+    // fan-out panics propagate to this thread and are caught here too.
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -616,8 +601,7 @@ fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
     let name = get_str(b, &mut p);
     let modulus_decimal = get_str(b, &mut p);
     let num_vars = get_uv(b, &mut p) as usize;
-    // The first `num_inputs` vars are the signature inputs (role + name); every
-    // other var is `Derived` (mul outputs AND hint/advice — all witness-computed).
+    // First `num_inputs` vars are signature inputs (role + name); all others `Derived`.
     let num_inputs = get_uv(b, &mut p) as usize;
     let mut roles = vec![VarRole::Derived; num_vars];
     let mut names: Vec<Option<String>> = vec![None; num_vars];
@@ -646,17 +630,16 @@ fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
     let top_w = parse_w_items(b, &mut p);
     let keep_extra: std::collections::BTreeSet<u32> = get_ids(b, &mut p).into_iter().collect();
 
-    // Constraints and witness are independent of each other; expand them across a
-    // rayon `join` (each internally fanned over its top-level items). The result is
-    // byte-identical to the serial monotonic walk — see `expand_c_top`.
+    // Constraints and witness are independent; expand across a rayon `join`.
+    // Byte-identical to the serial monotonic walk — see `expand_c_top`.
     let (constraints, mut witness_gen) = rayon::join(
         || expand_c_top(&defs, &top_c, true),
         || expand_w_top(&defs, &top_w, true),
     );
 
-    // Prune exactly like `finish`: drop every unreferenced var that isn't an input
-    // or an advice exception (`keep_extra`), then drop witness ops producing a
-    // dropped var. Keeps the reconstructed circuit byte-identical to the flat one.
+    // Prune exactly like `finish`: drop unreferenced vars that aren't inputs or an
+    // advice exception (`keep_extra`), then drop witness ops producing a dropped var.
+    // Keeps the reconstructed circuit byte-identical to the flat one.
     let mut referenced: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
     for c in &constraints {
         for lc in [&c.a, &c.b, &c.c] {
@@ -688,12 +671,11 @@ fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
     }
 }
 
-/// Minimize one item stream's OWN constraints (its `Row`s) in isolation, pinning
-/// the def interface (`base_pins` = plugs + outputs) plus every nested `Call`'s
-/// plug vars — everything else is eliminated. Returns the reduced `Row`s followed
-/// by the (unchanged) `Call`s. This is the per-template R1CS reduction that avoids
-/// materializing and pruning the full flat R1CS: each template's internal
-/// redundancy (identical across all its instances) is removed once, here.
+/// Minimize one item stream's own `Row`s in isolation, pinning the def interface
+/// (`base_pins` = plugs + outputs) plus every nested `Call`'s plug vars; everything
+/// else is eliminated. Returns reduced `Row`s then the unchanged `Call`s. Per-template
+/// reduction: each template's internal redundancy is removed once, here, avoiding
+/// materializing and pruning the full flat R1CS.
 fn minimize_items(
     items: &[CItem],
     base_pins: &BTreeMap<u32, ()>,
@@ -720,8 +702,8 @@ fn minimize_items(
                 debug: None,
             })),
             CItem::Call(d, base, plugs) => {
-                // A CALL's plug LCs reference vars in THIS body; pin every one so
-                // the per-template minimizer keeps the call interface intact.
+                // Plug LCs reference vars in this body; pin them so the minimizer
+                // keeps the call interface intact.
                 for lc in plugs {
                     pins.extend(lc.terms.iter().map(|t| t.var));
                 }
@@ -757,8 +739,7 @@ fn minimize_items(
         variables,
         constraints: rows,
     };
-    // Per-template bodies are small, so the fill-in guard is unnecessary here and
-    // only leaves reductions on the table — minimize each template fully.
+    // Per-template bodies are small; skip the fill-in guard and minimize fully.
     let reduced = crate::minimize::minimize_with_fill(&prog, usize::MAX);
     let mut out: Vec<CItem> = reduced
         .constraints
@@ -776,11 +757,10 @@ fn minimize_items(
     out
 }
 
-/// Like [`expand_function_blob`] but produces the **minimized** R1CS directly:
-/// minimize each template body once (per-template, cheap) and expand the reduced
-/// templates, instead of expanding the full flat R1CS and minimizing that. The
-/// witness program is left empty — this is the Groth16 (R1CS) view; the solver
-/// loads the full circuit separately.
+/// Like [`expand_function_blob`] but produces the minimized R1CS directly: minimize
+/// each template body once and expand the reduced templates, instead of expanding the
+/// full flat R1CS and minimizing that. Witness program left empty — this is the
+/// Groth16 (R1CS) view; the solver loads the full circuit separately.
 pub fn expand_function_blob_reduced(b: &[u8]) -> Result<CircuitProgram, String> {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
@@ -822,8 +802,8 @@ fn expand_reduced_inner(b: &[u8]) -> CircuitProgram {
     let _top_w = parse_w_items(b, &mut p);
     let keep_extra: std::collections::BTreeSet<u32> = get_ids(b, &mut p).into_iter().collect();
 
-    // Reduce each template body once (plugs + outputs pinned), and the top stream
-    // (inputs pinned). `expand_c` on the reduced defs yields the minimized R1CS.
+    // Reduce each template body (plugs + outputs pinned) and the top stream (inputs
+    // pinned); `expand_c` on the reduced defs then yields the minimized R1CS.
     for def in &mut defs {
         let base_pins: BTreeMap<u32, ()> = def
             .plugs
@@ -893,9 +873,8 @@ mod tests {
         }
     }
 
-    /// A def whose body references its two plugs (`10`, `11`) and its own internal
-    /// vars (`>= base_var`), plus a nested `Rolled` run — so expanding a `Call`
-    /// exercises the plug substitution and internal-var shift.
+    /// A def referencing its plugs (`10`, `11`), its own internals (`>= base_var`),
+    /// and a nested `Rolled` run — so a `Call` exercises plug subst and var shift.
     fn make_def() -> GDef {
         GDef {
             base_var: 100,
@@ -930,9 +909,8 @@ mod tests {
         }
     }
 
-    /// Build a top-level stream with many independent items (plain rows, rolled
-    /// runs, and calls to the def at distinct absolute bases with distinct plug
-    /// LCs) — enough items to span several rayon chunks.
+    /// A top-level stream with many independent items (rows, rolled runs, calls at
+    /// distinct bases/plugs) — enough to span several rayon chunks.
     fn top_streams() -> (Vec<CItem>, Vec<WItem>) {
         let mut c = Vec::new();
         let mut w = Vec::new();
@@ -942,8 +920,7 @@ mod tests {
                 row(i, i, i + 5),
                 row(i + 1, i + 1, i + 6),
             ]));
-            // Fresh base per call, disjoint blocks (mirrors the encoder's monotonic
-            // allocation); plug LCs reference distinct caller vars.
+            // Fresh base per call, disjoint blocks (mirrors encoder's monotonic alloc).
             let base = 10_000 + i * 10;
             c.push(CItem::Call(
                 0,

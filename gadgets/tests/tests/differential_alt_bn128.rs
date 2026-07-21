@@ -45,7 +45,7 @@
 //! infrastructure changes).
 
 use svm_unit_test::svm_test;
-use xark_tests::solana_nostd_alt_bn128::{pairing, G1Point, G1Scalar, G2Point};
+use xark_tests::solana_nostd_alt_bn128::{G1Point, G1Scalar, G2Point, pairing};
 
 // 32 additional deterministically-generated vectors per op, computed
 // offline by the small generator at `/tmp/gen_vectors/` (committed
@@ -3086,7 +3086,7 @@ mod host_fuzz {
     use super::{G1Point, G1Scalar, G2Point};
 
     use ark_bn254::{Fr as ArkFr, G1Affine, G1Projective, G2Affine, G2Projective};
-    use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, PrimeGroup};
+    use ark_ec::{AffineRepr, CurveGroup, PrimeGroup, pairing::Pairing};
     use ark_ff::UniformRand;
     use ark_serialize::CanonicalSerialize;
     use rand::SeedableRng;

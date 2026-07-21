@@ -1,37 +1,32 @@
 //! `xark-merkle`: in-circuit Merkle-tree membership verification.
 //!
-//! Given a `leaf`, its authentication path (`siblings` — one sibling hash per
-//! level, leaf level first) and the leaf's position (`index_bits`, LSB-first:
-//! bit `i` is `0` when the running node is the **left** child at level `i` and
-//! `1` when it is the **right** child), [`merkle_root`] folds the path with the
-//! Poseidon 2-to-1 compression ([`xark_poseidon::hash2`]) and returns the
-//! computed root. [`merkle_verify`] additionally asserts it equals an expected
-//! root — the membership proof.
+//! [`merkle_root`] folds an authentication path (`siblings`, leaf level first)
+//! with the leaf position (`index_bits`, LSB-first: `0` = left child, `1` =
+//! right child) through the Poseidon 2-to-1 compression ([`xark_poseidon::hash2`])
+//! and returns the root. [`merkle_verify`] additionally asserts it equals an
+//! expected root.
 //!
 //! Soundness: every `index_bits[i]` is boolean-constrained (`b·b == b`), so a
-//! prover cannot smuggle a non-`{0,1}` selector to fold a different root; given a
-//! boolean bit the sibling ordering at each level is a sound linear mux
-//! (`if_false + bit·(if_true − if_false)`), and the final `require_eq` pins the
-//! fold to the claimed root. The path length is the const-generic `DEPTH`.
+//! prover cannot smuggle a non-`{0,1}` selector; given a boolean bit the sibling
+//! ordering is a sound linear mux, and the final `require_eq` pins the fold to
+//! the claimed root.
 #![no_std]
 
-use xark::{require_eq, Field};
+use xark::{Field, require_eq};
 use xark_poseidon::hash2;
 
-/// Boolean-gated select `bit ? if_true : if_false`, as the linear combination
-/// `if_false + bit·(if_true − if_false)`. `bit` **must** already be constrained
-/// boolean (the callers in this crate do so once per level before selecting).
+/// Boolean-gated select `bit ? if_true : if_false`. `bit` **must** already be
+/// constrained boolean (callers do so once per level before selecting).
 fn select(bit: Field, if_true: Field, if_false: Field) -> Field {
     if_false + bit * (if_true - if_false)
 }
 
 /// Fold an authentication path to its Merkle root.
 ///
-/// `siblings[i]` is the sibling hash at level `i` (leaf level first) and
-/// `index_bits[i]` is the position bit at level `i` (`0` = the running node is
-/// the left child, `1` = the right child). Each bit is boolean-constrained in
-/// place. Returns the computed root (composable — a larger circuit can constrain
-/// it however it likes; use [`merkle_verify`] for the common equality check).
+/// `siblings[i]` is the sibling hash and `index_bits[i]` the position bit at
+/// level `i` (`0` = running node is left child, `1` = right). Each bit is
+/// boolean-constrained in place. Returns the computed root (use
+/// [`merkle_verify`] for the common equality check).
 pub fn merkle_root<const DEPTH: usize>(
     leaf: Field,
     siblings: [Field; DEPTH],
@@ -43,8 +38,7 @@ pub fn merkle_root<const DEPTH: usize>(
         let bit = index_bits[i];
         bit.require_bool();
         let sib = siblings[i];
-        // bit = 0: node is the left child  → (left, right) = (node, sib)
-        // bit = 1: node is the right child → (left, right) = (sib, node)
+        // bit selects child order: 0 → (node, sib), 1 → (sib, node).
         let left = select(bit, sib, node);
         let right = select(bit, node, sib);
         node = hash2(left, right);
@@ -65,9 +59,8 @@ pub fn merkle_verify<const DEPTH: usize>(
     require_eq(merkle_root::<DEPTH>(leaf, siblings, index_bits), root);
 }
 
-/// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
-/// circuit crate needs a single `use xark_merkle::prelude::*;`.
+/// Gadget API plus the xark circuit essentials, for a single
+/// `use xark_merkle::prelude::*;`.
 pub mod prelude {
     pub use crate::{merkle_root, merkle_verify};
     pub use xark::prelude::*;

@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hir::def_id::DefId;
 use rustc_middle::mir::{
-    Body, Const, ConstOperand, ConstValue, Operand, Place, Rvalue, StatementKind, TerminatorKind,
-    START_BLOCK,
+    Body, Const, ConstOperand, ConstValue, Operand, Place, Rvalue, START_BLOCK, StatementKind,
+    TerminatorKind,
 };
 use rustc_middle::ty::TyCtxt;
 
@@ -358,17 +358,10 @@ fn range_bound<'tcx>(env: &LoweringEnv<'tcx>, operand: &Operand<'tcx>) -> Compil
     })
 }
 
-/// One inlining frame's local state. Values are keyed by `Local`, then by
-/// projection path (`[]` for a scalar, `[i]`/`[i, j]` for array elements /
-/// tuple fields), so slot lookups/copies stay local to a single variable
-/// instead of scanning a whole-program map. Frames are pushed on inline and
-/// popped on return, so live memory is bounded by call-stack depth.
 /// A map keyed by MIR `Local`, stored as a dense `Vec` indexed by the local's
-/// index. Within a frame, locals are dense small integers, so this is O(1)
-/// get/set instead of the `BTreeMap` log-n + key comparison — and it was the
-/// single biggest lower-phase cost (frame get/set). Iteration yields locals in
-/// index (== ascending `Local`) order, identical to the old `BTreeMap`, so
-/// lowering stays byte-for-byte deterministic.
+/// index — O(1) get/set (vs `BTreeMap`'s log-n + key comparison), and the
+/// single biggest lower-phase cost. Iteration yields locals in ascending
+/// `Local` order, so lowering stays byte-for-byte deterministic.
 #[derive(Clone, Debug, Default)]
 struct LocalMap<V> {
     slots: Vec<Option<V>>,
@@ -761,7 +754,7 @@ impl<'tcx> LoweringEnv<'tcx> {
                 other => {
                     return Err(CompileError::new(format!(
                         "unsupported place projection: {other:?}"
-                    )))
+                    )));
                 }
             }
         }
@@ -1258,10 +1251,8 @@ impl<'tcx> LoweringEnv<'tcx> {
                 _ => Ok(LinearCombination::zero()),
             },
             // A `Field`-typed constant used directly as an operand — e.g.
-            // `Field::from(3)` behind `a + 3` (the `Add<u64>` etc. operators) —
+            // `Field::from(3)` behind `a + 3`, or an associated `const` —
             // lowers to a constant linear combination.
-            // A `Field`-typed constant used directly as an operand — e.g. an
-            // associated `const` — lowers to a constant linear combination.
             Operand::Constant(c) => self
                 .const_field_slots(c)
                 .and_then(|slots| {
@@ -1566,7 +1557,7 @@ impl<'tcx> LoweringEnv<'tcx> {
         let c = match operand {
             Operand::Constant(c) => c,
             Operand::Copy(place) | Operand::Move(place) => {
-                return self.get_str(place.local).ok_or_else(want_literal)
+                return self.get_str(place.local).ok_or_else(want_literal);
             }
             Operand::RuntimeChecks(_) => return Err(want_literal()),
         };
@@ -1579,7 +1570,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             _ => {
                 return Err(CompileError::new(
                     "`Field::constant` expects a literal string (got an unevaluated constant)",
-                ))
+                ));
             }
         };
         // Only slice-shaped constants carry string bytes; calling the byte
@@ -2404,9 +2395,6 @@ fn truncate_int_cast(v: i128, ty: rustc_middle::ty::Ty<'_>) -> u128 {
 /// while an unbounded/witness-dependent loop trips it with a clear error.
 const MAX_STEPS: u64 = 5_000_000;
 
-/// Walk a body's CFG (from the start block) in the current frame, lowering each
-/// statement and terminator. Loops with compile-time bounds are unrolled by
-/// following back-edges; witness-dependent control flow is rejected.
 /// The fallback error for a `SwitchInt` on a witness discriminant that cannot
 /// be lowered to a branchless mux (e.g. more than 2 targets, or a non-bool
 /// discriminant).
@@ -2421,11 +2409,6 @@ fn fallback_witness_control_flow_error(term_span: rustc_span::Span) -> CompileEr
         .or_span(term_span)
 }
 
-/// Walk one unconditional basic-block arm of an `if cond { a } else { b }` and
-/// collect every `_dest = place` assignment. The arm must be pure: no
-/// constraints, no witness-gen, no calls — only value copies and aggregates.
-/// Returns the join-block (the `Goto` target) and the per-`(dest_local, dest_path)`
-/// lc mapping.
 /// One `if`-arm's join block plus the field values it assigned (keyed by
 /// `(local, projection path)`), used to mux converging arms.
 type ArmAssignments = (
@@ -2433,6 +2416,11 @@ type ArmAssignments = (
     BTreeMap<(rustc_middle::mir::Local, SlotPath), LinearCombination>,
 );
 
+/// Walk one unconditional basic-block arm of an `if cond { a } else { b }` and
+/// collect every `_dest = place` assignment. The arm must be pure: no
+/// constraints, no witness-gen, no calls — only value copies and aggregates.
+/// Returns the join-block (the `Goto` target) and the per-`(dest_local, dest_path)`
+/// lc mapping.
 fn collect_arm_assignments<'tcx>(
     env: &mut LoweringEnv<'tcx>,
     body: &Body<'tcx>,
@@ -2588,6 +2576,9 @@ fn collect_arm_assignments<'tcx>(
     Ok((join_bb, map))
 }
 
+/// Walk a body's CFG (from the start block) in the current frame, lowering each
+/// statement and terminator. Loops with compile-time bounds are unrolled by
+/// following back-edges; witness-dependent control flow is rejected.
 fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileResult<()> {
     let mut bb = START_BLOCK;
     let mut steps = 0u64;
@@ -2721,7 +2712,7 @@ fn walk_body<'tcx>(env: &mut LoweringEnv<'tcx>, body: &Body<'tcx>) -> CompileRes
                         return Err(CompileError::new(
                             "diverging call is not supported inside a circuit",
                         )
-                        .or_span(term_span))
+                        .or_span(term_span));
                     }
                 }
             }
@@ -2989,8 +2980,6 @@ fn lower_statement<'tcx>(
     }
 }
 
-/// Bind `dest[dest_path] = <use of operand>` for a field value, an array, or an
-/// integer/string constant.
 /// Little-endian `[u64; 4]` (a 256-bit value) → its decimal string.
 fn limbs_to_decimal(mut limbs: [u64; 4]) -> String {
     if limbs == [0u64; 4] {
@@ -3010,6 +2999,8 @@ fn limbs_to_decimal(mut limbs: [u64; 4]) -> String {
     String::from_utf8(digits).expect("ascii digits")
 }
 
+/// Bind `dest[dest_path] = <use of operand>` for a field value, an array, or an
+/// integer/string constant.
 fn bind_use<'tcx>(
     env: &mut LoweringEnv<'tcx>,
     dest: rustc_middle::mir::Local,
@@ -3549,11 +3540,6 @@ fn lower_call<'tcx>(
     Ok(())
 }
 
-/// Inline an ordinary function call: evaluate the arguments in the caller frame,
-/// lower the callee's MIR body in a fresh frame, and bind its return value.
-///
-/// This is what makes functions "just library code": a call to `poseidon(..)` or a
-/// local helper expands into the same LC/constraint lowering as inline code.
 /// A user-declared **frontend function**, captured once: the constraints and
 /// witness-gen ops one inline of a monomorphization emits, with vars addressed
 /// relative to the call (`Slot`). A later call to the same function is *replayed* —
@@ -4240,7 +4226,6 @@ fn put_str(buf: &mut Vec<u8>, s: &str) {
     put_uv(buf, s.len() as u64);
     buf.extend_from_slice(s.as_bytes());
 }
-/// Serialize a constraint item stream (`Row` = one flat constraint, `Call` = def ref).
 /// Serialize a constraint item stream. Item tags: `0` = a single inline row,
 /// `1` = a function call, `2` = a **rolled** run of ≥2 consecutive rows (periodic
 /// loops of primitives compress here, so the single container needn't carry them
@@ -4562,11 +4547,10 @@ fn build_function_blob(env: &LoweringEnv, field: &FieldSpec, num_inputs: usize) 
     b
 }
 
-/// Whether to write the DAG-compact `VERSION_FUNCTION` artifact as `circuit.xbc`
-/// The compact DAG-function container is the sole circuit artifact, built for every
-/// circuit (it rolls periodic runs of inline rows, so it needs no flat fallback).
-/// Retained as a function (always `true`) because function capture is gated on it in
-/// a couple of places.
+/// The DAG-compact `VERSION_FUNCTION` container is the sole `circuit.xbc` artifact,
+/// built for every circuit (it rolls periodic runs of inline rows, so needs no flat
+/// fallback). Retained as a function (always `true`) because function capture is
+/// gated on it in a couple of places.
 fn function_artifact_enabled() -> bool {
     true
 }
@@ -4580,6 +4564,10 @@ fn function_replay_enabled() -> bool {
     compact_enabled()
 }
 
+/// Inline an ordinary function call: evaluate the arguments in the caller frame,
+/// lower the callee's MIR body in a fresh frame, and bind its return value. This
+/// is what makes functions "just library code": a call to `poseidon(..)` or a
+/// local helper expands into the same LC/constraint lowering as inline code.
 fn inline_call<'tcx>(
     env: &mut LoweringEnv<'tcx>,
     def_id: DefId,

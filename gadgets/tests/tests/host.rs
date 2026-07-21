@@ -3,7 +3,7 @@
 //! no embedded test data. (Pure-logic unit tests with no fixtures — e.g. the
 //! `scalar_is_canonical` boundary check — stay in the verifier crate.)
 
-use xark_tests::{fixtures, verify_proof_only, VerifierError, FR_BYTES, PROOF_BYTES};
+use xark_tests::{FR_BYTES, PROOF_BYTES, VerifierError, fixtures, verify_proof_only};
 
 /// The committed KAT proof verifies via the host Arkworks path. The on-chain
 /// (syscall) counterpart lives in `tests/sbpf.rs`.

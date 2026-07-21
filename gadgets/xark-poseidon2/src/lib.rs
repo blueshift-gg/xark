@@ -1,38 +1,21 @@
-//! `xark-poseidon2`: the Poseidon2 permutation over BN254 `Fr`, state width
-//! `t = 3`, S-box `x^5` (`alpha = 5`), written entirely in the `Field` subset so
-//! the compiler inlines it into flat R1CS.
+//! `xark-poseidon2`: the Poseidon2 permutation over BN254 `Fr` (state width
+//! `t = 3`, `x^5` S-box, `R_F = 8` full + `R_P = 56` partial rounds), in the
+//! `Field` subset so the compiler inlines it into flat R1CS.
 //!
 //! Poseidon2 (Grassi, Khovratovich, Schofnegger — <https://eprint.iacr.org/2023/323>)
-//! keeps Poseidon's `x^5` S-box but replaces the round structure:
+//! keeps Poseidon's `x^5` S-box but changes the round structure: an extra external
+//! linear layer `M_E` is applied *before* the rounds; full (external) rounds use
+//! `M_E = circ(2,1,1)`; partial (internal) rounds use the sparse `M_I = J +
+//! diag(mu-1)`, which for `t = 3` is `[[2,1,1],[1,2,1],[1,1,3]]`.
 //!
-//!   * an **extra external linear layer** `M_E` is applied *before* the rounds;
-//!   * full (external) rounds use the fixed matrix `M_E = circ(2,1,1)`;
-//!   * partial (internal) rounds use the sparse matrix `M_I = J + diag(mu-1)`,
-//!     which for `t = 3` is `[[2,1,1],[1,2,1],[1,1,3]]`.
+//! Canonical constants (soundness): the round constants (`RC_EXT` 8x3, `RC_INT` 56)
+//! and internal diagonal are transcribed from Horizen Labs
+//! `poseidon2_instance_bn256.rs` (`new(t=3, d=5, R_F=8, R_P=56,
+//! MAT_DIAG3_M_1=[1,1,2], MAT_INTERNAL3, RC3)`), and the permutation ordering
+//! matches that repo's `Poseidon2::permutation` exactly.
 //!
-//! ## Parameters (BN254 / BN256, t = 3, alpha = 5)
-//!
-//!   * `t   = 3`, `alpha = 5`
-//!   * `R_F = 8`  full rounds (4 before + 4 after the partial rounds)
-//!   * `R_P = 56` partial rounds
-//!
-//! ## Constants — CANONICAL
-//!
-//! The round constants (`RC_EXT`: 8x3, `RC_INT`: 56) and the internal diagonal
-//! are transcribed from the reference Horizen Labs implementation
-//! (`HorizenLabs/poseidon2`, `poseidon2_instance_bn256.rs`, params
-//! `new(t=3, d=5, R_F=8, R_P=56, MAT_DIAG3_M_1=[1,1,2], MAT_INTERNAL3, RC3)`).
-//! The permutation ordering here matches that repo's `Poseidon2::permutation`
-//! exactly, so this gadget reproduces the canonical Poseidon2 for BN256/BN254
-//! t=3.
-//!
-//! ## Cost model
-//!
-//! Only `variable * variable` products emit an R1CS gate. Adding round constants
-//! (ARK) and both linear layers (`M_E`, `M_I` are constant-matrix products) fold
-//! into linear combinations for free. Every gate comes from an S-box:
-//! `x^5` = `x2 = x*x`, `x4 = x2*x2`, `x5 = x4*x` = 3 gates. So the permutation
-//! costs `8*3*3 + 56*1*3 = 72 + 168 = 240` multiplication gates.
+//! Only `variable * variable` products emit a gate, so ARK and both linear layers
+//! are free; all 240 gates come from the `x^5` S-boxes (3 gates each).
 
 #![no_std]
 // Circuit-lowered gadget code: the xark compiler rejects compound assignment on

@@ -1,11 +1,7 @@
 //! Prove knowledge of a private message whose Keccak-256 (Ethereum `keccak256`)
-//! digest equals a public 256-bit hash — the ergonomic form.
-//!
-//! The message is a byte array (`[u8; N]`) and the digest a `Hash` — a 256-bit
-//! digest packed into two field halves (`xark-hash`), so the circuit exposes just
-//! **2 public inputs** instead of four 64-bit lanes. The host still supplies a
-//! plain `[u8; 32]`. `require_eq` packs the gadget's raw little-endian lane output
-//! into that `Hash`.
+//! digest equals a public 256-bit hash. The digest is a `Hash` — 256 bits packed
+//! into two field halves (`xark-hash`), so the circuit exposes just 2 public
+//! inputs; the host still supplies a plain `[u8; 32]`.
 #![cfg_attr(xark, no_std)]
 
 use xark_keccak::prelude::*;

@@ -19,7 +19,7 @@ pub mod r1cs;
 pub mod r1cs_cache;
 pub mod solver;
 
-pub use circuit::{expr_from_r1cs, CircuitProgram, R1csRow};
+pub use circuit::{CircuitProgram, R1csRow, expr_from_r1cs};
 pub use field::FieldConst;
 pub use graph::to_dot;
 pub use json::to_json_pretty;

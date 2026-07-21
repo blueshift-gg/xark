@@ -1,14 +1,14 @@
 //! `xark inspect` — print statistics about a built circuit (`circuit.json` +
 //! `r1cs.json`): variable counts by visibility, constraint count, and public
-//! inputs. The unified analog of master's ACIR `inspect`.
+//! inputs.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Args;
 
-use xark_ir::primitive::VarRole;
 use xark_ir::Visibility;
+use xark_ir::primitive::VarRole;
 
 use super::{load_backend_r1cs, load_circuit_auto};
 use crate::xark_project::XarkProject;

@@ -78,8 +78,8 @@ fn gf_mul_matches_known_products() {
 
 #[test]
 fn gf128_mul_matches_ghash() {
-    use ghash::universal_hash::{KeyInit, UniversalHash};
     use ghash::GHash;
+    use ghash::universal_hash::{KeyInit, UniversalHash};
 
     // Circuit: 16 x-bytes, 16 y-bytes (private), 16 z-bytes (public expected product).
     let mut src = String::from(

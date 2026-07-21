@@ -1,9 +1,12 @@
 [package]
 name = "xark-macros"
 version = "0.0.1"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 description = "Proc macros for xark circuits (the `#[circuit]` attribute)."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 
 [lib]
 proc-macro = true

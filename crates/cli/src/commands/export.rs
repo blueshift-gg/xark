@@ -83,10 +83,9 @@ pub fn run(args: ExportArgs) -> Result<()> {
         .unwrap_or_else(|| project.public_inputs());
     let out_dir = args.out.clone().unwrap_or_else(|| project.export_dir());
 
-    // ---- Load inputs ------------------------------------------------------
+    // Load inputs.
     let vk = Groth16Keys::read_verifying_key(&vk_path)
         .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
-    // refuse a non-production key unless `--allow-insecure` is passed
     check_key_safe_for_export(&vk_path, args.allow_insecure)?;
     let proof = ProofBundle::read_proof(&proof_path)
         .with_context(|| format!("reading proof {}", proof_path.display()))?;
@@ -103,7 +102,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
         );
     }
 
-    // ---- Encode (little-endian, the only on-chain wire format) -----------
+    // Encode (little-endian, the only on-chain wire format).
     let vk_bytes = assemble_vk_bytes_le(&vk);
     let proof_bytes = assemble_proof_bytes_le(&proof);
     let public_inputs_bytes = assemble_public_inputs_bytes_le(&public_inputs);
@@ -118,7 +117,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
             .unwrap_or("groth16-verifier")
     }));
 
-    // ---- Write the generated crate ---------------------------------------
+    // Write the generated crate.
     let out = &out_dir;
     fs::create_dir_all(out.join("src"))
         .with_context(|| format!("creating {}", out.join("src").display()))?;
@@ -169,7 +168,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
 /// `vk_path` was produced by an insecure setup (`metadata.json` not marked
 /// `production_safe`).
 fn check_key_safe_for_export(vk_path: &Path, allow_insecure: bool) -> Result<()> {
-    // production_safe only if a metadata.json beside the key says so
+    // production_safe only if a metadata.json beside the key says so.
     let production_safe = vk_path
         .parent()
         .and_then(|dir| fs::read_to_string(dir.join("metadata.json")).ok())
@@ -386,7 +385,7 @@ fn write_str(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
-// -- Off-chain client snippet -------------------------------------------------
+// Off-chain client snippet.
 
 const CLIENT_CALL_EXAMPLE: &str = r#"//! Submit an xark-exported Groth16 proof to your on-chain verifier program.
 //!

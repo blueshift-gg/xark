@@ -1,13 +1,8 @@
-//! AES-128-GCM with AAD: prove that a private plaintext encrypts, under a private
-//! key + 96-bit nonce, to a public `(ciphertext, tag)` that also authenticates a
-//! public 13-byte header (additional authenticated data).
-//!
-//! GCM = AES-CTR for confidentiality + GHASH (a GF(2¹²⁸) multiply-accumulate) for
-//! authentication. This is the AEAD that TLS 1.2/1.3 use — where the AAD is the
-//! record header — so proving it in-circuit is the basis of zkTLS-style "prove a
-//! fact about TLS-encrypted data" statements. The 20-byte message spans two blocks
-//! (16 + a 4-byte tail) and the 13-byte AAD is a partial block, exercising both
-//! GHASH zero-padding paths.
+//! AES-128-GCM with AAD: prove a private plaintext encrypts, under a private key +
+//! 96-bit nonce, to a public `(ciphertext, tag)` that also authenticates a public
+//! 13-byte header. GCM = AES-CTR (confidentiality) + GHASH, a GF(2¹²⁸)
+//! multiply-accumulate (authentication) — the AEAD used by TLS 1.2/1.3. The 20-byte
+//! message and 13-byte partial-block AAD exercise both GHASH zero-padding paths.
 #![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;

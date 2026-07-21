@@ -1,10 +1,7 @@
 //! Grumpkin multi-scalar-multiplication as a `#[circuit]`: constrain
 //! `R = s0·P0 + s1·P1` for two 128-bit scalars and two witness points.
-//!
 //! Grumpkin's base field is BN254's scalar field (the circuit `Field`), so a
-//! point is just two native field coordinates — the transparent `Affine` type
-//! (`x`/`y` as decimal strings on the host, no limbs). A test/prover passes the
-//! scalars and points as native field values.
+//! point is just two native field coordinates (the transparent `Affine` type).
 #![cfg_attr(xark, no_std)]
 
 use xark_grumpkin::prelude::*;

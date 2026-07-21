@@ -1,8 +1,6 @@
-//! Assert a secp256r1 (P-256) point `q = (x, y)` lies on the curve
-//! `y² = x³ − 3x + b`, as a `#[circuit]`. This is the `enforce_on_curve` check
-//! the ECDSA gadget runs on its public-key input (the `a = −3` curve). `Point`
-//! is the transparent compact uncompressed `[u8; 64]` (`x ‖ y`) type, so the test
-//! passes the raw coordinate bytes `p256` emits.
+//! Assert a secp256r1 (P-256) point `q = (x, y)` lies on `y² = x³ − 3x + b`, as a
+//! `#[circuit]` (the `enforce_on_curve` check the ECDSA gadget runs on its public
+//! key). `Point` is the compact `[u8; 64]` `x ‖ y` type.
 #![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Public};

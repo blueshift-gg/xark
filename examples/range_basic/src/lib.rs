@@ -2,9 +2,8 @@
 
 use xark::{circuit, require_eq, Field, Private, Public};
 
-// range_basic: x: u8; require(x as Field == out).
-// `to_bits8` range-checks `x` to 8 bits (booleanity + recomposition); recomposing
-// and constraining against `out` mirrors the `x as Field == out` assertion.
+// `to_bits::<8>` range-checks `x` to 8 bits (booleanity + recomposition);
+// from_bits recomposes and constrains against `out`, mirroring `x as Field == out`.
 #[circuit]
 pub fn range_basic(x: Private<Field>, out: Public<Field>) {
     let bits = x.to_bits::<8>();

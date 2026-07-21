@@ -2,10 +2,8 @@
 
 use xark::{circuit, require_eq, Field, Public};
 
-// large_pi: main(xs: pub [Field; 16]) { require(xs[0] + xs[15] == 30) }.
-// The 16 public inputs are all referenced (the running sum keeps every element
-// allocated as a public input) and the faithful `xs[0] + xs[15] == 30`
-// constraint is enforced.
+// large_pi: 16 public inputs; enforces `xs[0] + xs[15] == 30`. The running sum
+// references every element so all 16 stay allocated as public inputs.
 #[allow(clippy::too_many_arguments)]
 #[circuit]
 pub fn large_pi(
@@ -26,9 +24,8 @@ pub fn large_pi(
     x14: Public<Field>,
     x15: Public<Field>,
 ) {
-    // The circuit's constraint.
     require_eq(x0 + x15, Field::constant("30"));
-    // Reference every element so all 16 stay allocated as public inputs.
+    // reference every element so all 16 stay allocated as public inputs
     let sum = x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 + x12 + x13 + x14 + x15;
     require_eq(sum, Field::constant("44"));
 }

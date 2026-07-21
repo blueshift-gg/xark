@@ -1,18 +1,15 @@
-//! On-disk cache of the **minimized** R1CS that `xark setup` keys the proving
-//! key to, so `xark prove` can reload it instead of re-running the (identical,
-//! deterministic) boundary-minimize + structural `validate()` — the ~25s
-//! "circuit build+validate" phase in the prove profile.
+//! On-disk cache of the **minimized** R1CS that `xark setup` keys the proving key
+//! to, so `xark prove` can reload it instead of re-running the deterministic
+//! boundary-minimize + `validate()` phase.
 //!
-//! Encoded with [`wincode`] (bincode-compatible wire format, placement-init
-//! reads): a lean, matrix-only view — coefficients as signed little-endian bytes
-//! (1–2 bytes for the common `0/±1/small`, up to 32 for a fully-reduced
-//! field element), variables as `(id, visibility)` only. Debug notes and variable
-//! names are dropped: they don't affect the Groth16 matrix (so the reloaded
+//! Encoded with [`wincode`] as a lean, matrix-only view: coefficients as signed
+//! little-endian bytes, variables as `(id, visibility)` only. Debug notes and
+//! names are dropped — they don't affect the Groth16 matrix (so the reloaded
 //! program keys to the same pk) and prove never reads them.
 //!
-//! The cache is tagged with the SHA-256 fingerprint of the `circuit.xbc` it was
-//! built from; a mismatch (stale cache after a rebuild) makes prove ignore it and
-//! recompute, so the cache can never silently desync from the key.
+//! Tagged with the SHA-256 fingerprint of the `circuit.xbc` it was built from; a
+//! mismatch makes prove ignore the stale cache and recompute, so it can never
+//! silently desync from the key.
 
 use num_bigint::BigInt;
 use wincode::config::Configuration;
@@ -22,11 +19,9 @@ use crate::field::FieldConst;
 use crate::linear_combination::{LinearCombination, Term};
 use crate::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 
-/// Magic + version for the raw header that precedes the wincode body. The
-/// `circuit.xbc` fingerprint lives in this header (not the wincode body) so a
-/// stale or foreign cache is rejected by a cheap byte compare, *before* decoding
-/// the large body — a fast staleness gate that also avoids allocating for a body
-/// we're going to throw away.
+/// Magic + version for the raw header preceding the wincode body. The fingerprint
+/// lives here (not in the body) so a stale/foreign cache is rejected by a cheap
+/// byte compare *before* the large body is decoded.
 const MAGIC: &[u8; 4] = b"XR1C";
 const FORMAT_VERSION: u8 = 1;
 
@@ -37,9 +32,8 @@ struct CacheBody {
     modulus: String,
     vars: Vec<CVar>,
     /// Distinct coefficient values (signed little-endian bytes), first-seen order.
-    /// A minimized R1CS reuses the same handful of reduction constants across
-    /// millions of terms, so pooling + indexing shrinks the cache several-fold vs
-    /// storing each full-width coefficient inline.
+    /// A minimized R1CS reuses the same few constants across millions of terms, so
+    /// pooling + indexing shrinks the cache several-fold vs storing them inline.
     pool: Vec<Vec<u8>>,
     cons: Vec<CCon>,
 }
@@ -151,11 +145,9 @@ fn c_to_lc(c: CLc, pool: &[Vec<u8>]) -> LinearCombination {
     }
 }
 
-/// wincode config for the cache: varint encoding (small var ids / pool indices
-/// pack tight) with the preallocation-size guard disabled — a multi-million-
-/// constraint minimized R1CS blows past wincode's 4 MiB default, and the cache is
-/// our own artifact (written by `xark setup`, tagged with the `circuit.xbc`
-/// fingerprint) sitting next to the equally-trusted pk.
+/// wincode config: varint encoding with the preallocation-size guard disabled —
+/// a multi-million-constraint R1CS blows past wincode's 4 MiB default, and the
+/// cache is our own fingerprint-tagged artifact next to the equally-trusted pk.
 fn cache_config() -> impl wincode::config::Config {
     Configuration::default()
         .with_varint_encoding()
@@ -257,12 +249,9 @@ fn body_to_prog(body: CacheBody) -> R1csProgram {
 }
 
 /// Load the cached program **only if** its header fingerprint equals `expected`.
-/// A missing header, mismatched (stale/foreign) fingerprint, or corrupt body all
-/// return `None` — the caller then recomputes. The fingerprint is checked before
-/// the (potentially large) body is decoded, so a stale cache costs a byte compare,
-/// not a full deserialize. The program's variable names and per-constraint debug
-/// notes are reconstructed empty (they don't affect the Groth16 matrix and prove
-/// never reads them).
+/// A missing header, mismatched fingerprint, or corrupt body all return `None`
+/// (caller recomputes). The fingerprint is checked before the body is decoded.
+/// Variable names and debug notes are reconstructed empty.
 pub fn deserialize_if_fingerprint(bytes: &[u8], expected: &str) -> Option<R1csProgram> {
     let (fp, body) = parse_header(bytes)?;
     if fp != expected {
@@ -345,14 +334,11 @@ mod tests {
             assert!(deserialize_if_fingerprint(head, "fp").is_none());
             assert!(deserialize(head).is_err() || cut == bytes.len());
         }
-        // Body bit-flip (header intact): fingerprint still matches, body decode
-        // must fail gracefully rather than mis-decode into a bogus program... or,
-        // if it happens to decode, it simply isn't our concern here — the point is
-        // no panic.
+        // Body bit-flip (header intact): decode must not panic (mis-decode is fine).
         let mut flipped = bytes.clone();
         *flipped.last_mut().unwrap() ^= 0xFF;
         let _ = deserialize_if_fingerprint(&flipped, "fp"); // must not panic
-                                                            // Wrong magic → rejected.
+        // Wrong magic → rejected.
         assert!(deserialize_if_fingerprint(b"NOPEnot-a-cache", "fp").is_none());
         assert!(deserialize_if_fingerprint(&[], "fp").is_none());
     }

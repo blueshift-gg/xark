@@ -35,7 +35,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{require_eq, Field};
+use xark::{Field, require_eq};
 use xark_bits::{and32, not32, rotr32, shr32, xor32};
 
 // ===========================================================================
@@ -323,7 +323,7 @@ fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
     let mut t = 0usize;
     while t < 64usize {
         let wt = read64(sched, t); // W[t] as a flat local
-                                   // T1 = h + Σ1(e) + Ch(e,f,g) + K[t] + W[t]  (raw field sum, < 2^35)
+        // T1 = h + Σ1(e) + Ch(e,f,g) + K[t] + W[t]  (raw field sum, < 2^35)
         let bsig1 = big_sigma1(e);
         let chv = ch(e, f, g);
         let t1 = Field::from_bits::<32>(h)

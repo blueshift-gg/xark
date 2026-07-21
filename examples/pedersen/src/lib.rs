@@ -1,8 +1,6 @@
-//! Grumpkin Pedersen hash example circuit.
-//!
-//! Hashes two private 128-bit message scalars `m0, m1` to a public Grumpkin
-//! point `(hx, hy)` via `H = m0·G0 + m1·G1`, then constrains the computed point
-//! to equal the claimed public output.
+//! Grumpkin Pedersen hash circuit: hashes two private 128-bit scalars `m0, m1`
+//! to a public Grumpkin point `(hx, hy)` via `H = m0·G0 + m1·G1`, then constrains
+//! the result to the claimed public output.
 #![cfg_attr(xark, no_std)]
 
 use xark_pedersen::prelude::*;
@@ -20,7 +18,6 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        // pedersen_hash([m0, m1]) reference vector
         pedersen(
             "1512366075204170929049582354406559215".into(),
             "338770000845734292534325025077361652240".into(),

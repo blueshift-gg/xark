@@ -1,27 +1,17 @@
 //! The **circuit program** — the single lossless artifact the bytecode
 //! (`circuit.xbc`) encodes.
 //!
-//! # Why this and not `PrimitiveProgram`
-//!
-//! The bytecode used to encode a [`PrimitiveProgram`], whose constraints are
-//! flattened `Expression`s (`Σ mul_terms + Σ linear_terms + const == 0`). That
-//! form is **lossy** with respect to the R1CS: `expr_from_r1cs` multiplies out
-//! `a·b` into a flat bag of `mul_terms`, and `(x+y)·(x−y)` collapses to `x²−y²`
-//! — the factorization Groth16 needs is gone. So a `.xbc` built from the
-//! primitive form could not reconstruct the R1CS, which is why `r1cs.json` had
-//! to be kept alongside it.
-//!
-//! A [`CircuitProgram`] instead stores the R1CS `a·b=c` rows verbatim (the
-//! lossless superset) plus the witness-generation program. From it we can derive
-//! **both** consumer views on load:
+//! A [`CircuitProgram`] stores the R1CS `a·b=c` rows verbatim plus the
+//! witness-generation program. Unlike a [`PrimitiveProgram`] (whose flattened
+//! `Expression`s lose the `a·b` factorization Groth16 needs — e.g. `(x+y)·(x−y)`
+//! collapses to `x²−y²`), it is lossless, so both consumer views derive from it:
 //!
 //! * [`CircuitProgram::to_r1cs`] → the [`R1csProgram`] the Groth16 backend needs.
-//! * [`CircuitProgram::to_primitive`] → the [`PrimitiveProgram`] the reference
-//!   solver needs (constraints flattened via [`expr_from_r1cs`], a pure function
-//!   of the R1CS).
+//! * [`CircuitProgram::to_primitive`] → the [`PrimitiveProgram`] the solver needs
+//!   (constraints flattened via [`expr_from_r1cs`]).
 //!
-//! So `circuit.xbc` becomes the sole build artifact: `r1cs.json` and
-//! `circuit.json` are now derivable (and only emitted with `--emit-json`).
+//! So `circuit.xbc` is the sole build artifact; `r1cs.json` / `circuit.json` are
+//! derivable (emitted only with `--emit-json`).
 
 use std::collections::BTreeMap;
 
@@ -40,9 +30,7 @@ pub struct R1csRow {
     pub a: LinearCombination,
     pub b: LinearCombination,
     pub c: LinearCombination,
-    /// Debug annotation (e.g. `secret * secret = t0`), carried so the
-    /// solver-facing `Expression` reproduces the compiler's exactly. Debug-only;
-    /// Phase A drops it from the wire.
+    /// Debug annotation (e.g. `secret * secret = t0`). Debug-only; dropped from the wire.
     pub note: Option<String>,
 }
 
@@ -83,9 +71,8 @@ impl CircuitProgram {
     }
 
     /// The reference-solver view: each R1CS row flattened to an AssertZero
-    /// `Expression` via [`expr_from_r1cs`]. Deterministic and identical to what
-    /// the compiler produced for `circuit.json`, so the solver behaves the same
-    /// whether it loaded the JSON or the bytecode.
+    /// `Expression` via [`expr_from_r1cs`]. Identical to the compiler's
+    /// `circuit.json`, so the solver behaves the same from JSON or bytecode.
     pub fn to_primitive(&self) -> PrimitiveProgram {
         PrimitiveProgram {
             field: self.field.clone(),
@@ -99,13 +86,10 @@ impl CircuitProgram {
         }
     }
 
-    /// The Groth16-backend view: the R1CS rows as an [`R1csProgram`], with the
-    /// `role → visibility` mapping inverted (`PublicInput→Public`,
-    /// `PrivateInput→Private`, `Derived→Internal`) — the exact inverse of the
-    /// bijection the compiler applied, so the reconstructed variable table
-    /// (ids, order, visibilities) matches the original constraint system. The
-    /// debug-only `note`/`source_span` are not reconstructed (the backend
-    /// ignores them).
+    /// The Groth16-backend view: the R1CS rows as an [`R1csProgram`], inverting
+    /// `role → visibility` (`PublicInput→Public`, `PrivateInput→Private`,
+    /// `Derived→Internal`) so the reconstructed variable table matches the
+    /// original. Debug-only `note`/`source_span` are not reconstructed.
     pub fn to_r1cs(&self) -> R1csProgram {
         R1csProgram {
             field: R1csFieldSpec {
@@ -144,10 +128,7 @@ impl CircuitProgram {
     }
 
     /// Like [`to_r1cs`](Self::to_r1cs) but **consumes** `self`, moving each row's
-    /// linear combinations into the `R1csProgram` instead of deep-cloning them.
-    /// The prover uses this once the solver is done with the `CircuitProgram`, so
-    /// handing the R1CS to the Groth16 backend costs O(rows) shallow moves rather
-    /// than re-allocating every constraint's `Vec<Term>`.
+    /// linear combinations instead of cloning them (O(rows) shallow moves).
     pub fn into_r1cs(self) -> R1csProgram {
         R1csProgram {
             field: R1csFieldSpec {
@@ -186,10 +167,8 @@ impl CircuitProgram {
     }
 }
 
-/// Expand an R1CS constraint `a · b = c` (all linear combinations) into an
-/// AssertZero-style expression `a·b − c == 0`. Pure over xark-ir types; moved
-/// here from the compiler so the solver-facing primitive view can be derived
-/// from the bytecode without a `rustc` dependency.
+/// Expand an R1CS constraint `a · b = c` into an AssertZero-style expression
+/// `a·b − c == 0`. Pure over xark-ir types (no `rustc` dependency).
 pub fn expr_from_r1cs(
     a: &LinearCombination,
     b: &LinearCombination,

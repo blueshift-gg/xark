@@ -109,11 +109,17 @@ fn mimc_matches_snapshot() {
     // 3 rounds * 2 gates per `^3` + 1 finalizing equality = 7 constraints.
     assert_eq!(json.matches("\"source_span\"").count(), 7);
     // Big field-sized round constant survived as an exact decimal.
-    assert!(json
-        .contains("7120861356467033611736373842526102177239622603558704633600844922174959859415"));
+    assert!(
+        json.contains(
+            "7120861356467033611736373842526102177239622603558704633600844922174959859415"
+        )
+    );
     // bn254 modulus recorded.
-    assert!(json
-        .contains("21888242871839275222246405745257275088548364400416034343698204186575808495617"));
+    assert!(
+        json.contains(
+            "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+        )
+    );
 }
 
 /// The real `xark-mimc` gadget crate (a port of `noir-lang/mimc`: MiMC-p/p,

@@ -1,17 +1,13 @@
-//! The `xark` language markers used by circuit programs (formerly the
-//! standalone `xark-lang` crate, now merged into `xark`).
-//!
-//! It defines the `Field` circuit type, the `Private`/`Public` visibility
-//! aliases, and a set of `#[inline(never)]` marker/intrinsic functions that the
-//! `xark` compiler recognizes in MIR. None of these functions are ever
-//! actually executed: the compiler stops after MIR extraction, so their bodies
+//! The `xark` language markers used by circuit programs: the `Field` circuit
+//! type, the `Private`/`Public` visibility aliases, and `#[inline(never)]`
+//! marker/intrinsic functions the compiler recognizes in MIR. None of these
+//! functions execute — the compiler stops after MIR extraction, so their bodies
 //! are irrelevant (`loop {}`).
 
-// The intrinsic stubs below are recognized by the compiler by name and never
-// run; their `loop {}` bodies are the intended marker shape.
+// Marker stubs are recognized by name and never run; `loop {}` is the intended shape.
 #![allow(clippy::empty_loop)]
-// `to_bits`/`from_bits` are circuit-lowered: the compiler rejects compound
-// assignment on `Field`, so `acc = acc + …` is required, not `acc += …`.
+// The compiler rejects compound assignment on `Field`, so `acc = acc + …` is
+// required, not `acc += …`.
 #![allow(clippy::assign_op_pattern)]
 
 use core::cmp::{Ordering, PartialOrd};
@@ -20,28 +16,23 @@ use core::ops::{
     Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub, SubAssign,
 };
 
-// The compiler intrinsics (the `__xark_*` marker stubs) live in `crate::intrinsics`;
-// the `Field` impls and `hint_*` methods below call them. Recognition is by name,
-// so their module location does not affect the compiler.
+// The `__xark_*` marker stubs live in `crate::intrinsics`; recognition is by
+// name, so their module location does not affect the compiler.
 use crate::intrinsics::*;
 
 /// The opaque circuit field element.
 ///
-/// It carries a private non-zero-sized payload so that (a) it cannot be
-/// constructed by circuit authors except through the recognized intrinsics, and
-/// (b) MIR optimization cannot collapse `Field` values to a single constant ZST
-/// (which would erase the data-flow the compiler tracks).
+/// Carries a private non-zero-sized payload so that (a) it cannot be constructed
+/// except through the recognized intrinsics, and (b) MIR optimization cannot
+/// collapse `Field` values to a single constant ZST (which would erase the
+/// data-flow the compiler tracks).
 ///
 /// Implements `core::ops` arithmetic (`+ - * /`, unary `-`, `*Assign`, `^`).
-///
-/// Comparisons are circuit operations that return a `bool` — a `{0,1}` field
-/// wire (usable in further boolean logic or muxed via [`Field::from`]`(cond)`):
-/// * `==` / `!=` against another `Field` **or** a native-int constant
-///   (`PartialEq` / `PartialEq<uN>`) — width-independent equality.
-/// * `<` `<=` `>` `>=` against a native-int constant (`PartialOrd<uN>`), whose
-///   type fixes the bit-width `N` for the required range check.
-/// * two-witness ordering via the explicit-width methods
-///   [`Field::lt`]`::<N>` / `gt` / `le` / `ge`.
+/// Comparisons are circuit operations returning a `bool` — a `{0,1}` field wire:
+/// * `==` / `!=` vs a `Field` or native-int constant — width-independent equality.
+/// * `<` `<=` `>` `>=` vs a native-int constant (`PartialOrd<uN>`), whose type
+///   fixes the bit-width `N` for the required range check.
+/// * two-witness ordering via the explicit-width [`Field::lt`]`::<N>` / `gt` / `le` / `ge`.
 ///
 /// A bare `Field` is intentionally **not** `PartialOrd for Field`: ordering the
 /// canonical `[0, r)` representative needs a width, so it must come from the RHS
@@ -49,10 +40,9 @@ use crate::intrinsics::*;
 #[derive(Clone, Copy)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
-    /// Meaningful only for constants (`Field::from`/`Field::constant`, which are
-    /// `const fn`s): the compiler reads this out of a `const Field` value. For
-    /// witnesses, inputs and computed values the compiler tracks the value
-    /// symbolically and never reads these limbs.
+    /// Meaningful only for constants (`Field::from`/`Field::constant` `const fn`s):
+    /// the compiler reads this out of a `const Field`. For witnesses the value is
+    /// tracked symbolically and these limbs are never read.
     _limbs: [u64; 4],
 }
 
@@ -65,8 +55,8 @@ pub type Public<T> = T;
 
 impl Field {
     /// Constant constructor backing `From<u8..u64>` — recognised by the compiler
-    /// through the *call* (so circuit bodies keep working) and evaluated for real
-    /// in `const` contexts, so `const F: Field = 5u64.into()` is a value.
+    /// through the *call* (so circuit bodies work) and evaluated for real in
+    /// `const` contexts (`const F: Field = 5u64.into()`).
     const fn constant_u64(value: u64) -> Field {
         Field {
             _limbs: [value, 0, 0, 0],
@@ -81,9 +71,8 @@ impl Field {
     }
 
     /// The additive identity `0`. `const fn`, so it works in circuit bodies and
-    /// `const` items alike — `let mut acc = Field::zero();`. Prefer this (and
-    /// [`Field::one`]) over `Field::from(0u8)` / `Field::constant("0")` for the
-    /// common small constants.
+    /// `const` items alike. Prefer this (and [`Field::one`]) over
+    /// `Field::from(0u8)` for common small constants.
     pub const fn zero() -> Field {
         Field::constant_u64(0)
     }
@@ -94,21 +83,17 @@ impl Field {
     }
 
     /// The little-endian 4×64-bit limbs of a **compile-time-constant** `Field`.
-    /// Meaningful only for constants (`Field::from` / `Field::constant` values);
-    /// for witnesses the compiler tracks the value symbolically and these limbs
-    /// are unspecified. Exposed for *tooling* — a host-side input builder reads a
-    /// host-built constant's value back to a decimal so a typed input can be
-    /// fanned out into its leaf witness. Circuit authors never need it.
+    /// Meaningful only for constants; for witnesses the value is symbolic and
+    /// these limbs are unspecified. Exposed for *tooling* (a host-side input
+    /// builder reads a constant's value back to decimal); authors never need it.
     #[doc(hidden)]
     pub const fn to_limbs(self) -> [u64; 4] {
         self._limbs
     }
 
-    /// A `const`-context constructor from a `u128` value. Unlike `From<u128>`
-    /// (a non-`const` trait method), this is usable in `const` items — it exists
-    /// so field-parameter derivation (`xark_bignum`'s limb splitting) can build
-    /// `[Field; N]` limb arrays at compile time. Not for circuit bodies; use
-    /// `Field::from(x)` there.
+    /// A `const`-context constructor from a `u128`. Unlike `From<u128>` (non-`const`),
+    /// usable in `const` items — so `xark_bignum`'s limb splitting can build
+    /// `[Field; N]` arrays at compile time. Not for circuit bodies; use `Field::from`.
     #[doc(hidden)]
     pub const fn from_u128(value: u128) -> Field {
         Field {
@@ -117,10 +102,9 @@ impl Field {
     }
 
     /// In-circuit constant from a decimal string, for full field-sized constants
-    /// (e.g. round constants) that don't fit a `u128`:
-    /// `Field::constant("218882428718...")`. A `const fn`, so it works both in
-    /// circuit bodies (recognised by the call) and in `const` items. Parses a
-    /// non-negative decimal `< 2^256`; panics (a compile error in `const`
+    /// that don't fit a `u128`: `Field::constant("218882428718...")`. A `const fn`,
+    /// so it works in circuit bodies (recognised by the call) and `const` items.
+    /// Parses a non-negative decimal `< 2^256`; panics (a compile error in `const`
     /// contexts) on a non-digit or overflow.
     pub const fn constant(decimal: &str) -> Field {
         let bytes = decimal.as_bytes();
@@ -148,9 +132,9 @@ impl Field {
     }
 
     /// Allocate a fresh *advice* (private witness) field element with no
-    /// witness-generation hint. The circuit must pin it down with `require_eq`.
-    /// Prefer the typed `hint_*` constructors below, which also record how to
-    /// compute the value so the emitted IR is self-contained.
+    /// witness-generation hint. The circuit must pin it with `require_eq`. Prefer
+    /// the typed `hint_*` constructors below, which also record how to compute the
+    /// value so the emitted IR is self-contained.
     #[inline(never)]
     pub fn advice() -> Field {
         __xark_advice()
@@ -192,12 +176,12 @@ impl Field {
         let mut bits = [Field::from(0u8); N];
         let mut i = 0usize;
         while i < N {
-            bits[i] = Field::hint_bit(self, i); // witness-gen: bits[i] = bit(self, i)
+            bits[i] = Field::hint_bit(self, i);
             i += 1;
         }
         let mut i = 0usize;
         while i < N {
-            bits[i].require_bool(); // booleanity: bit ∈ {0, 1}
+            bits[i].require_bool();
             i += 1;
         }
         let mut acc = Field::from(0u8);
@@ -235,10 +219,9 @@ impl Field {
     }
 
     /// Exponentiation by a compile-time exponent: `x.pow(3)` is `x³`, lowered to
-    /// repeated multiplication (exponentiation-by-squaring). The exponent is a
-    /// native `u64` constant — a circuit has no runtime integers. This replaces the
-    /// old `x ^ 3` spelling: `^` is Rust's XOR, so overloading it for `pow` silently
-    /// reversed the meaning of valid-looking code. Use [`Field::xor`] for boolean XOR.
+    /// exponentiation-by-squaring. The exponent is a native `u64` constant — a
+    /// circuit has no runtime integers. Not spelled `x ^ 3`: `^` is Rust's XOR
+    /// ([`Field::xor`]), so overloading it for `pow` would silently reverse meaning.
     #[inline(never)]
     pub fn pow(self, exp: u64) -> Field {
         __xark_pow_u64(self, exp)
@@ -276,19 +259,16 @@ impl Field {
         __xark_require_eq_scalar(self * self, self);
     }
 
-    // --- Field-vs-Field ordered comparison (explicit width) ------------------
-    // The one comparison case with no native-int operand to carry a width, so
-    // the width `N` is spelled explicitly: `a.lt::<32>(b)`. Both operands are
-    // *witnesses*, so BOTH are range-checked to `< 2^N` via `to_bits::<N>`
-    // before the width-`N` unsigned comparison — otherwise a prover could place
-    // an out-of-range residue in either wire and defeat the compare. `le`/`ge`
-    // delegate to `gt`/`lt` (boolean `!`), inheriting that single pair of range
-    // checks. These are inherent methods (not `PartialOrd for Field`): a bare
-    // `Field` stays orderless because ordering needs a width (see docs/integer-ops).
+    // Field-vs-Field ordered comparison, explicit width: the one case with no
+    // native-int operand to carry `N`. Both operands are *witnesses*, so BOTH are
+    // range-checked to `< 2^N` via `to_bits::<N>` before the compare — else a
+    // prover could place an out-of-range residue in either wire and defeat it.
+    // `le`/`ge` delegate to `gt`/`lt`, inheriting that pair of checks. Inherent
+    // methods, not `PartialOrd for Field`: a bare `Field` stays orderless because
+    // ordering needs a width (see docs/integer-ops).
 
-    /// `self < rhs` as a `{0,1}` `bool` wire, interpreting both as `N`-bit
-    /// unsigned integers (range-checks both to `< 2^N`).
-    // Named like `PartialOrd::lt` on purpose: the explicit-width Field-vs-Field form.
+    /// `self < rhs` as a `{0,1}` `bool` wire, both as `N`-bit unsigned integers
+    /// (range-checks both to `< 2^N`).
     #[allow(clippy::should_implement_trait)]
     pub fn lt<const N: usize>(self, rhs: Field) -> bool {
         let _ = self.to_bits::<N>();
@@ -557,18 +537,15 @@ macro_rules! impl_field_int_ops {
 }
 impl_field_int_ops!(u8, u16, u32, u64, u128);
 
-/// Integer comparison of a `Field` against a native-integer *constant*, where the
-/// constant's type supplies the domain width `N = bitwidth(T)` (`bool → 1`,
-/// `u8 → 8`, …, `u128 → 128`).
+/// Integer comparison of a `Field` against a native-integer *constant*, whose
+/// type supplies the domain width `N = bitwidth(T)` (`bool → 1`, …, `u128 → 128`).
 ///
-/// * `x == c` / `x != c` — width-independent equality (`__xark_eq`), **no** range
-///   check: equality of residues needs no bounding.
+/// * `x == c` / `x != c` — width-independent equality (`__xark_eq`), **no** range check.
 /// * `x < c` / `x <= c` / `x > c` / `x >= c` — ordered comparison. Each first
 ///   range-checks the *witness* operand `x` to `< 2^N` via `to_bits::<N>` (the
 ///   soundness contract: a prover holding an out-of-range residue cannot satisfy
-///   the decomposition, so the compare can't be defeated), then compares against
-///   the compile-time constant `c` (which needs no check — it is known `< 2^N`).
-///   `le`/`ge` are `!gt`/`!lt` so they inherit `gt`/`lt`'s single range check.
+///   the decomposition), then compares against `c` (known `< 2^N`, no check).
+///   `le`/`ge` are `!gt`/`!lt`, inheriting `gt`/`lt`'s single range check.
 ///
 /// The `c < x` mirror is written `x > c`. Two-witness comparison uses the
 /// explicit-width [`Field::lt`] etc. See `docs/integer-ops.md`.
@@ -579,13 +556,12 @@ macro_rules! impl_field_int_cmp {
             fn eq(&self, rhs: &$t) -> bool {
                 __xark_eq(*self, Field::from(*rhs))
             }
-            // `ne` uses the default (`!eq`).
         }
         impl PartialOrd<$t> for Field {
-            // Never reaches lowering: once `lt`/`le`/`gt`/`ge` are overridden the
-            // `<`/`<=`/`>`/`>=` operators call those directly, so `partial_cmp` is
-            // never invoked. It exists only to satisfy the trait — a circuit
-            // comparison yields a `{0,1}` wire, not a host `Option<Ordering>`.
+            // Never reaches lowering: the overridden `lt`/`le`/`gt`/`ge` handle the
+            // operators directly, so `partial_cmp` is never invoked. Exists only to
+            // satisfy the trait — a circuit compare yields a `{0,1}` wire, not an
+            // `Option<Ordering>`.
             fn partial_cmp(&self, _rhs: &$t) -> Option<Ordering> {
                 loop {}
             }
@@ -608,28 +584,22 @@ macro_rules! impl_field_int_cmp {
 }
 impl_field_int_cmp!(bool => 1, u8 => 8, u16 => 16, u32 => 32, u64 => 64, u128 => 128);
 
-/// Integer shifts of a `Field` against a native-integer *constant*, where the
-/// constant's type supplies the domain width `N = bitwidth(T)` (`u8 → 8`, …,
-/// `u128 → 128`) and its value is the shift amount. So `x >> 3u32` means "treat
-/// `x` as a 32-bit value, shift right by 3". `bool` is excluded (a 1-bit domain
-/// is degenerate for shifting); signed shifts are out of scope.
+/// Integer shifts of a `Field` against a native-integer *constant*, whose type
+/// supplies the domain width `N = bitwidth(T)` and whose value is the shift
+/// amount: `x >> 3u32` = "treat `x` as 32-bit, shift right by 3". `bool` excluded
+/// (degenerate); signed shifts out of scope.
 ///
 /// Provided for `u8`..`u128` — all sound: a shift is pure bit re-wiring, and
-/// `from_bits::<N>` with `N ≤ 128 ≤ 253` cannot wrap the field.
+/// `from_bits::<N>` with `N ≤ 128 ≤ 253` cannot wrap the field. Each op first
+/// `to_bits::<N>(self)`, which range-checks `self < 2^N` (the soundness contract).
+/// The shift amount `n` must be a compile-time constant (const-propagated at the
+/// inline site; a non-const amount fails to lower).
 ///
-/// Each op first calls `to_bits::<N>(self)`, which range-checks `self < 2^N`
-/// (the soundness contract — a prover holding an out-of-domain residue cannot
-/// satisfy the decomposition). The shift amount `n` must be a compile-time
-/// constant; the compiler const-propagates it at the inline site so the loop
-/// bounds, branch conditions, and array indices fold to constants (a non-const
-/// amount naturally fails to lower).
-///
-/// * **`x >> n`** — `⌊x / 2ⁿ⌋` within the `N`-bit domain: place bit `i+n` at
-///   position `i`, zero-fill the top. `n ≥ N` → 0. Free re-wiring (just the
-///   shared `to_bits::<N>`, then `from_bits::<N>`).
-/// * **`x << n`** — place bit `i-n` at position `i`, zero-fill the low bits;
-///   bits shifted past position `N` are **dropped** (integer `<<`, i.e.
-///   truncated to `N` bits — *not* `x·2ⁿ mod p`). `n ≥ N` → 0.
+/// * **`x >> n`** — `⌊x / 2ⁿ⌋` in the `N`-bit domain: bit `i+n` → position `i`,
+///   zero-fill the top. `n ≥ N` → 0.
+/// * **`x << n`** — bit `i-n` → position `i`, zero-fill the low bits; bits past
+///   position `N` are **dropped** (integer `<<`, truncated to `N` bits — *not*
+///   `x·2ⁿ mod p`). `n ≥ N` → 0.
 macro_rules! impl_field_int_shift {
     ($($t:ty => $n:literal),+ $(,)?) => {$(
         impl Shr<$t> for Field {
@@ -659,7 +629,7 @@ macro_rules! impl_field_int_shift {
                     let n = n as usize; // exact: n < N <= 128
                     let mut i = n;
                     while i < $n {
-                        out[i] = bits[i - n]; // bits past position N are dropped (truncate)
+                        out[i] = bits[i - n];
                         i += 1;
                     }
                 }
@@ -670,26 +640,23 @@ macro_rules! impl_field_int_shift {
 }
 impl_field_int_shift!(u8 => 8, u16 => 16, u32 => 32, u64 => 64, u128 => 128);
 
-/// Integer modulus of a `Field` against a native-integer *constant* `m`, where
-/// the constant's type supplies the domain width `N = bitwidth(T)` and its value
-/// is the modulus: `x % 8u16` means "treat `x` as 16-bit, mod 8".
+/// Integer modulus of a `Field` against a native-integer *constant* `m`, whose
+/// type supplies the domain width `N = bitwidth(T)` and whose value is the
+/// modulus: `x % 8u16` = "treat `x` as 16-bit, mod 8".
 ///
 /// **Provided for `u8`..`u64` only** (deliberately **not** `u128`). The general
-/// (non-power-of-two) path pins a `hint_div_rem` witness `[q, r]` with
-/// `m·q + r == x`, `r < m`, `q < 2ᴺ`; that is sound only while `m·q + r` cannot
-/// wrap the field, i.e. `2·N ≤ 253`. For `u8`..`u64` (`2·N ≤ 128 ≤ 253`) this
-/// always holds. For `u128` (`N = 128`, `2·N = 256 > 253`) a modulus `m > 2¹²⁶`
-/// could admit a wrapping `q < 2¹²⁸` and forge the remainder, so we omit
-/// `Rem<u128>` entirely (`x % 5u128` does not compile — use a `u64`-or-narrower
-/// modulus, or `Field::from(m)` division primitives directly).
+/// path pins a `hint_div_rem` witness `[q, r]` with `m·q + r == x`, `r < m`,
+/// `q < 2ᴺ`; sound only while `m·q + r` cannot wrap the field, i.e. `2·N ≤ 253`.
+/// For `u8`..`u64` (`2·N ≤ 128`) this holds. For `u128` (`2·N = 256 > 253`) a
+/// modulus `m > 2¹²⁶` could admit a wrapping `q` and forge the remainder, so
+/// `Rem<u128>` is omitted (`x % 5u128` does not compile).
 ///
-/// `x % m`: for `m = 2ᵏ` (power of two), the low `k` bits — free, no hint. For
-/// general `m`, the pinned `hint_div_rem` above; the two range checks (`r < m`
-/// and `q < 2ᴺ`) are what stop a malicious prover from choosing a wrapping
-/// `q`/`r`. `m` must be a compile-time constant (const-propagated at the inline
-/// site). Mod-by-zero falls into the general path and is **unprovable** (a
-/// `hint_div_rem` by 0), not a clean compile error — because `m` is runtime from
-/// rustc's view, so a `const { assert!(m != 0) }` is not available here.
+/// `x % m`: for `m = 2ᵏ`, the low `k` bits — free, no hint. For general `m`, the
+/// pinned `hint_div_rem` above; the two range checks (`r < m`, `q < 2ᴺ`) stop a
+/// malicious prover choosing a wrapping `q`/`r`. `m` must be a compile-time
+/// constant. Mod-by-zero lands in the general path and is **unprovable** (a
+/// `hint_div_rem` by 0), not a clean compile error — `m` is runtime from rustc's
+/// view, so `const { assert!(m != 0) }` is unavailable here.
 macro_rules! impl_field_int_rem {
     ($($t:ty => $n:literal),+ $(,)?) => {$(
         impl Rem<$t> for Field {
@@ -723,20 +690,16 @@ macro_rules! impl_field_int_rem {
         }
     )+};
 }
-// u128 deliberately excluded: 2N = 256 > 253 would let m*q wrap the field.
 impl_field_int_rem!(u8 => 8, u16 => 16, u32 => 32, u64 => 64);
 
 /// Emit a circuit equality constraint `lhs == rhs`.
 ///
-/// Dispatches through [`RequireEqCircuit`], so a single `require_eq` compares:
-/// scalars (`Field`/`bool` — either side converts to `Field`), fixed arrays
-/// `[T; N]` element-wise, and composite gadget outputs (e.g. a SHA-256 digest
-/// `[[Field; 32]; 8]` against a [`Digest`](crate::Digest)). Every leaf comparison
-/// bottoms out at the recognized scalar intrinsic ([`__xark_require_eq_scalar`]).
-///
-/// A marker: the compiler lowers each leaf to an R1CS constraint rather than
-/// executing it. Works identically in `#[circuit]` bodies and plain gadget code —
-/// no import gymnastics.
+/// Dispatches through [`RequireEqCircuit`], so one `require_eq` compares scalars
+/// (`Field`/`bool`), fixed arrays `[T; N]` element-wise, and composite gadget
+/// outputs (e.g. a SHA-256 digest `[[Field; 32]; 8]` vs a [`Digest`](crate::Digest)).
+/// Every leaf bottoms out at the recognized scalar intrinsic
+/// ([`__xark_require_eq_scalar`]). A marker: the compiler lowers each leaf to an
+/// R1CS constraint rather than executing it.
 #[inline]
 pub fn require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
     a.require_eq_circuit(b);
@@ -750,16 +713,14 @@ pub fn require(cond: bool) {
 }
 
 /// Open a **witness-only** region. Until [`witness_end`], value-producing ops
-/// (multiplications, `hint_*` calls) still fill their witness — so the solver
-/// computes them — but emit **no R1CS constraints**, and the vars they allocate
-/// are pinning-exempt. This lets a gadget *derive* advice (a modular inverse
-/// chain, a GLV lattice reduction, a decompressed coordinate) at **zero
-/// constraint cost**, then pin only the final result with normal constrained code
-/// after `witness_end` (e.g. an existing equality/range check).
+/// (multiplications, `hint_*` calls) still fill their witness but emit **no R1CS
+/// constraints**, and the vars they allocate are pinning-exempt. This lets a
+/// gadget *derive* advice (an inverse chain, a GLV reduction, a decompressed
+/// coordinate) at **zero constraint cost**, then pin only the final result with
+/// normal constrained code after `witness_end`.
 ///
 /// Soundness is the caller's: nothing inside the region is constrained, so every
-/// value that must be trusted has to be pinned afterwards. A marker — the compiler
-/// acts on it; it never executes.
+/// value that must be trusted has to be pinned afterwards. A marker — never executes.
 #[inline(never)]
 pub fn witness_begin() {
     loop {}
@@ -771,12 +732,10 @@ pub fn witness_end() {
     loop {}
 }
 
-/// The dispatch behind [`require_eq`]. Scalar impls (`Field`, `bool`) bottom out at
-/// the recognized scalar intrinsic ([`__xark_require_eq_scalar`]); composite impls —
-/// fixed arrays here, a SHA-256 digest (`[[Field; 32]; 8]`) vs a [`Digest`] in
-/// `xark-hash` — recurse/loop down to those scalar leaves. Downstream crates add
-/// impls for their own gadget-output shapes so `require_eq(gadget(x), expected)`
-/// just works.
+/// The dispatch behind [`require_eq`]. Scalar impls (`Field`, `bool`) bottom out
+/// at the recognized scalar intrinsic ([`__xark_require_eq_scalar`]); composite
+/// impls (fixed arrays here, a digest in `xark-hash`) recurse down to those
+/// scalar leaves. Downstream crates add impls for their own gadget-output shapes.
 pub trait RequireEqCircuit<Rhs> {
     /// Emit the equality constraint(s) for `self == rhs`.
     fn require_eq_circuit(self, rhs: Rhs);
@@ -796,13 +755,11 @@ impl<R: Into<Field>> RequireEqCircuit<R> for bool {
     }
 }
 
-/// Element-wise equality for fixed-size arrays: `require_eq(out, expected)` where
-/// both sides are `[T; N]` emits the per-element constraints, so a `#[circuit]` body
-/// can compare a whole array (e.g. an AES-CTR keystream output against the public
-/// ciphertext) without spelling out an index loop. Unrolls to exactly the same `N`
-/// scalar `require_eq`s the manual loop produced. Recurses through nested arrays
-/// (`[[Field; K]; N]`) via the element impl. Both element types are `Copy` — always
-/// true for the `Field`/`bool`-leaf circuit values this compares.
+/// Element-wise equality for fixed-size arrays: `require_eq(out, expected)` on
+/// `[T; N]` emits the per-element constraints, unrolling to the same `N` scalar
+/// `require_eq`s a manual loop produces. Recurses through nested arrays via the
+/// element impl. Both element types are `Copy` — always true for the `Field`/`bool`
+/// leaves this compares.
 impl<const N: usize, A: Copy + RequireEqCircuit<B>, B: Copy> RequireEqCircuit<[B; N]> for [A; N] {
     #[inline]
     fn require_eq_circuit(self, rhs: [B; N]) {
@@ -814,10 +771,10 @@ impl<const N: usize, A: Copy + RequireEqCircuit<B>, B: Copy> RequireEqCircuit<[B
     }
 }
 
-/// The scalar equality **intrinsic** the compiler recognizes by name and lowers to a
-/// two-`Field` R1CS constraint — the leaf every [`RequireEqCircuit`] impl bottoms out
-/// at. `#[doc(hidden)]` plumbing; authors always write [`require_eq`], which dispatches
-/// here for scalars. Marker body (`loop {}`); it is never executed.
+/// The scalar equality **intrinsic** the compiler recognizes by name and lowers
+/// to a two-`Field` R1CS constraint — the leaf every [`RequireEqCircuit`] impl
+/// bottoms out at. `#[doc(hidden)]` plumbing; authors write [`require_eq`], which
+/// dispatches here. Marker body (`loop {}`); never executed.
 #[doc(hidden)]
 #[inline(never)]
 pub fn __xark_require_eq_scalar<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
@@ -844,13 +801,10 @@ pub fn require_ge<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a >= b, true);
 }
 
-// The `__xark_*` compiler intrinsics referenced above (`__xark_add`,
-// `__xark_eq`, the `hint_*` family, …) now live in `crate::intrinsics`, imported
-// at the top of this module. See that module for the constraint-vs-hint ABI and
-// per-intrinsic lowering docs.
+// The `__xark_*` intrinsics referenced above live in `crate::intrinsics` (imported
+// at the top). See that module for the constraint-vs-hint ABI and lowering docs.
 
-// Keep `PhantomData` referenced so `#![no_std]` users pulling only this crate do
-// not trip an unused-import lint if they re-export internals. It documents that
-// `Field` is intended to be a zero-sized opaque marker.
+// Keeps `PhantomData` referenced so `#![no_std]` users pulling only this crate do
+// not trip an unused-import lint.
 #[doc(hidden)]
 pub type _FieldMarker = PhantomData<Field>;

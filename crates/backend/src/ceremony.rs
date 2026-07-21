@@ -1,13 +1,11 @@
 //! Phase-2 MPC ceremony driver.
 //!
-//! Builds a multi-contributor randomness chain on top of the F.1 phase-2
-//! setup. Each contributor receives the current `(ProvingKey, VerifyingKey)`,
-//! samples a fresh secret `δ_i ∈ Fr*`, applies it to the delta-scaled queries
-//! in place, and attaches a publicly verifiable proof of contribution. The
-//! chain composes multiplicatively: after `n` contributors, the effective
-//! delta is `δ = δ_0 · δ_1 ·... · δ_n`. As long as at least ONE contributor
-//! was honest and discarded their `δ_i`, the trapdoor δ is unknown to any
-//! prover.
+//! Multi-contributor randomness chain on top of the phase-2 setup. Each
+//! contributor samples a fresh secret `δ_i ∈ Fr*`, applies it to the
+//! delta-scaled queries in place, and attaches a publicly verifiable proof of
+//! contribution. The chain composes multiplicatively: after `n` contributors,
+//! `δ = δ_0 · δ_1 ·... · δ_n`. As long as at least ONE contributor was honest
+//! and discarded their `δ_i`, the trapdoor δ is unknown to any prover.
 //!
 //! # Contribution math (per contributor)
 //!

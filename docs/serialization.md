@@ -1,17 +1,13 @@
 # Serialization
 
-xark writes both binary and JSON forms of every artifact. Binary is
-authoritative (it's what verify reads); JSON is for tooling and
-inspection.
+xark writes both binary and JSON forms of every artifact. Binary is authoritative (verify reads
+it); JSON is for tooling and inspection.
 
 ## Binary
 
-Uses Arkworks' `CanonicalSerialize`/`CanonicalDeserialize` with
-`Compress::Yes` and `Validate::Yes` on read. The on-disk layout is
-exactly what `ark-groth16` 0.6 produces for `ProvingKey<Bn254>`,
-`VerifyingKey<Bn254>`, and `Proof<Bn254>`.
-
-Files:
+Uses Arkworks' `CanonicalSerialize`/`CanonicalDeserialize` with `Compress::Yes` and `Validate::Yes`
+on read. The on-disk layout is exactly what `ark-groth16` 0.6 produces for `ProvingKey<Bn254>`,
+`VerifyingKey<Bn254>`, `Proof<Bn254>`.
 
 * `proving_key.bin` — `ark_groth16::ProvingKey<Bn254>`.
 * `verifying_key.bin` — `ark_groth16::VerifyingKey<Bn254>`.
@@ -19,9 +15,8 @@ Files:
 
 ## JSON
 
-Coordinates are always emitted as decimal strings (Fr/Fq big-integer
-representation). The `encoding` field on `public_inputs.json` records the
-choice so future hex support can opt in.
+Coordinates are always decimal strings (Fr/Fq big-integer representation). The `encoding` field on
+`public_inputs.json` records the choice so future hex support can opt in.
 
 ### `proof.json`
 
@@ -35,8 +30,8 @@ choice so future hex support can opt in.
 }
 ```
 
-G2 coordinates use the `Fq2 = c0 + c1*u` convention. The `x` array stores
-`[c0, c1]` for the x coordinate.
+G2 coordinates use the `Fq2 = c0 + c1*u` convention; the `x` array stores `[c0, c1]` for the x
+coordinate.
 
 ### `verifying_key.json`
 
@@ -63,6 +58,5 @@ G2 coordinates use the `Fq2 = c0 + c1*u` convention. The `x` array stores
 }
 ```
 
-The `inputs` array is in exactly the same order as the circuit's
-`Public<Field>` parameters (public-input declaration order). The verifier
-consumes this order verbatim.
+The `inputs` array is in exactly the same order as the circuit's `Public<Field>` parameters
+(public-input declaration order). The verifier consumes this order verbatim.

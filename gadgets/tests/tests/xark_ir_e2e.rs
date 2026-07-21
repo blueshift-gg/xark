@@ -20,10 +20,10 @@ use ark_bn254::{Bn254, Fr};
 use ark_groth16::Groth16;
 use ark_snark::SNARK;
 
-use xark_backend::ptau::{parse_ptau, setup_from_ptau, Phase2Error};
 use xark_backend::Groth16Keys;
-use xark_ir::{primitive, solver, R1csProgram, VarId};
-use xark_prover::{fr_from_decimal, XarkCircuit};
+use xark_backend::ptau::{Phase2Error, parse_ptau, setup_from_ptau};
+use xark_ir::{R1csProgram, VarId, primitive, solver};
+use xark_prover::{XarkCircuit, fr_from_decimal};
 
 use common::build_valid_ptau;
 

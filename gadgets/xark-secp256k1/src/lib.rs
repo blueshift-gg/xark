@@ -46,11 +46,11 @@ pub use affine::{order, reduce_scalar};
 // SOUND LAZY ECDSA verify (4×64 lazy-affine point arithmetic + eager 4×64
 // scalar ops). Alongside the macro's eager 3×86 gadget. ~30% fewer constraints.
 // ===========================================================================
-use xark::{require_eq as aeq, witness_begin, witness_end, Field, Transparent};
+use xark::{Field, Transparent, require_eq as aeq, witness_begin, witness_end};
 use xark_bignum::{
-    assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
+    M_K1, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
     modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
-    require_lt, scalar_to_bits_256, weak_reduce_k1, M_K1,
+    require_lt, scalar_to_bits_256, weak_reduce_k1,
 };
 
 type L4 = [Field; 4];

@@ -8,7 +8,7 @@
 //! resolves them against the compiled program — so the test reads like the sha256
 //! example, with no hand-built limb maps or variable-id plumbing.
 
-use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
 // The circuit takes the transparent compound types `Point` (pubkey), `Signature`

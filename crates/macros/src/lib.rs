@@ -1,9 +1,6 @@
 //! `#[circuit]` — declare a circuit entry with **native** input types and
 //! generate a native-typed input struct for its `xark_prover` tests.
 //!
-//! An entry names its inputs with ordinary Rust types wrapped in
-//! `Private`/`Public`, e.g.
-//!
 //! ```ignore
 //! #[circuit]
 //! pub fn sha256(msg: Private<[u8; 3]>, digest: Public<Hash>) {
@@ -11,37 +8,24 @@
 //! }
 //! ```
 //!
-//! The macro does three things:
-//!
-//! 1. **Rewrites the signature** into the Field-backed types the compiler lowers:
-//!    `Field` stays `Field`, `[u8; N]` becomes `[Field; N]`, `[Field; N]` stays,
-//!    and any type implementing `xark_prover::NativeInput` (e.g. a gadget's
-//!    `Hash`/`Point`) takes its native host form. The body is emitted verbatim:
-//!    `xark::require_eq` itself dispatches through `RequireEqCircuit`, so
-//!    `require_eq(sha256(x), hash)` type-checks alongside scalar equalities with no
-//!    macro rewrite. Core stays gadget-agnostic: the `Hash` packing lives in
-//!    `xark-hash`, not here.
-//! 2. **Generates `<Fn>Inputs`** — a `#[cfg(test)]` struct whose fields are the
-//!    *native* types (`msg: [u8; 3]`, `digest: <Hash as NativeInput>::Native`), so
-//!    tests read `check(Sha256Inputs { msg, digest }).unwrap()`, named so
-//!    parameters can't be transposed.
-//! 3. **Implements `ProveInputs`** — fanning each parameter out to its witness
-//!    leaves with the compiler's structural-flatten leaf names and decimal values.
-//!
-//! The struct and impl are `#[cfg(test)]`-gated (`xark_prover` is a dev-dependency,
-//! proving is a test-time convenience). The entry itself lowers exactly as a plain
-//! `fn circuit` would, so `xark build` is unaffected.
+//! The macro: (1) rewrites the signature into the Field-backed types the compiler
+//! lowers (`[u8; N]` → `[Field; N]`, a `NativeInput` gadget → its native form),
+//! emitting the body verbatim; (2) generates a native-typed `<Fn>Inputs` struct,
+//! named so parameters can't be transposed; (3) implements `ProveInputs`, fanning
+//! each parameter out to its witness leaves using the compiler's structural-flatten
+//! leaf names and decimal values. Core stays gadget-agnostic — `Hash` packing lives
+//! in `xark-hash`, not here.
 //!
 //! `#[derive(CircuitInput)]` — see [`derive_circuit_input`] — generates the
-//! `Into<[Field; N]>` that makes a Field-composed struct a typed circuit input
-//! whose flatten order is *mechanically* the compiler's structural-flatten order.
+//! `Into<[Field; N]>` whose flatten order mechanically matches the compiler's
+//! structural-flatten order.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Expr, ExprLit, FnArg,
-    GenericArgument, ItemFn, Lit, LitInt, LitStr, Pat, PathArguments, Type,
+    Attribute, Data, DataStruct, DeriveInput, Expr, ExprLit, FnArg, GenericArgument, ItemFn, Lit,
+    LitInt, LitStr, Pat, PathArguments, Type, parse_macro_input,
 };
 
 #[proc_macro_attribute]
@@ -53,41 +37,39 @@ pub fn circuit(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-/// How a `#[circuit]` parameter fans out to witness leaves — the compiler names
+/// How a `#[circuit]` parameter fans out to witness leaves. The compiler names
 /// leaves by structurally flattening the *circuit* type (`flatten_field_leaves`),
 /// so this must reproduce those exact names and their values.
 enum Fanout {
     /// A `Field` scalar: one leaf named exactly `name`.
     Scalar,
-    /// `[u8; N]` (N != 32) → `[Field; N]`: `N` byte leaves `name[0..N]`.
+    /// `[u8; N]` → `[Field; N]`: `N` byte leaves `name[0..N]`.
     ByteArray(usize),
-    /// `[Field; N]` → `[Field; N]`: `N` field leaves `name[0..N]`, taken natively
-    /// as `[String; N]` decimals (a field value per element — hashes, limbs, …).
+    /// `[Field; N]` → `[Field; N]`: `N` field leaves `name[0..N]`, native form
+    /// `[String; N]` decimals (a field value per element — hashes, limbs, …).
     FieldArray(usize),
-    /// A custom transparent gadget type (e.g. `Fq`, `Point`) that implements
-    /// [`xark_prover::NativeInput`]: the fan-out delegates to its `leaves`, and the
-    /// native struct field is its `NativeInput::Native` associated type.
+    /// A transparent gadget type (`Fq`, `Point`) implementing
+    /// [`xark_prover::NativeInput`]: fan-out delegates to its `leaves`, native
+    /// struct field is its `NativeInput::Native` associated type.
     Native,
 }
 
 /// One resolved entry parameter.
 struct CircuitParam {
-    /// Identifier — the struct field name *and* the leaf-name root.
+    /// Struct field name *and* leaf-name root.
     name: syn::Ident,
-    /// `Private` / `Public`, kept as the author wrote it.
+    /// `Private` / `Public`, as the author wrote it.
     wrapper: syn::Ident,
-    /// The generated `<Fn>Inputs` field type — the **native** type (`[u8; 32]`, `String`).
+    /// Generated `<Fn>Inputs` field type — the **native** type (`[u8; 32]`, `String`).
     native_ty: TokenStream2,
-    /// The compiler-visible inner type (`::xark::Field`, `[::xark::Field; N]`, a gadget type).
+    /// Compiler-visible inner type (`::xark::Field`, `[::xark::Field; N]`, a gadget type).
     circuit_ty: TokenStream2,
     fanout: Fanout,
 }
 
-/// Rewrite a `#[circuit]` entry: map its **native** parameter types
-/// (`Private<[u8; 56]>`, `Public<[u8; 32]>`, `Private<Field>`) to the Field-backed
-/// circuit types the compiler accepts, shadow `require_eq` in the body with the
-/// composite-aware dispatcher, and emit a native-typed `<Fn>Inputs` struct whose
-/// `ProveInputs` fans each parameter out to its witness leaves for `check`.
+/// Rewrite a `#[circuit]` entry: map native parameter types to the Field-backed
+/// circuit types the compiler accepts, and emit a native-typed `<Fn>Inputs` struct
+/// whose `ProveInputs` fans each parameter out to its witness leaves for `check`.
 fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     let params = func
         .sig
@@ -96,10 +78,6 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         .map(resolve_param)
         .collect::<syn::Result<Vec<_>>>()?;
 
-    // The compiler-visible entry: native param types rewritten to circuit types, the
-    // body otherwise emitted verbatim (the driver extracts it exactly). `require_eq`
-    // is trait-dispatched in `xark` itself, so `require_eq(sha256(x), digest)` needs
-    // no macro rewrite here.
     let attrs = &func.attrs;
     let vis = &func.vis;
     let fn_ident = &func.sig.ident;
@@ -112,10 +90,9 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         })
         .collect();
     // The compiler-visible circuit entry (the real `Field` body the xark compiler
-    // lowers to MIR). It is compiled only when *not* a `test`/`host` build — in
-    // those, the same `fn` name is instead the native-typed validator below, so a
-    // downstream crate calls `mycircuit::<fn>(a, b, c)` to check inputs without a
-    // rename. The two are `cfg`-exclusive, so there is never a name collision.
+    // lowers to MIR), compiled only under `cfg(xark)`. In test/host builds the same
+    // `fn` name is instead the native-typed validator below — the two are
+    // cfg-exclusive, so `mycircuit::<fn>(a, b, c)` needs no rename and never collides.
     let entry = quote! {
         #[cfg(xark)]
         #(#attrs)*
@@ -124,10 +101,9 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         }
     };
 
-    // In a `test`/`host` build the entry above is cfg'd out, which would leave the
-    // circuit's own `use`s (its `Private`/`Public` wrappers and gadget fns) unused.
-    // Emit a hidden, never-called copy of the body there so those imports stay used
-    // (no spurious warnings) — it type-checks but never runs.
+    // In test/host builds the entry above is cfg'd out, leaving the circuit's own
+    // `use`s (its `Private`/`Public` wrappers and gadget fns) unused. Emit a hidden,
+    // never-called copy of the body so those imports stay used (no spurious warnings).
     let circuit_def_ident = format_ident!("__{}_circuit_def", fn_ident);
     let sig_params_def = sig_params.clone();
     let circuit_def = quote! {
@@ -147,10 +123,8 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     let fanouts = params.iter().map(fanout_code);
 
     let fn_name_lit = LitStr::new(&fn_ident.to_string(), fn_ident.span());
-    // The native-typed validator that *replaces* the entry `fn` in `test`/`host`
-    // builds: same name, the entry's **native** parameter types in order, returning
-    // the check result — so `mycircuit::<fn>(a, b, c).unwrap()` checks inputs against
-    // the built circuit (`target/xark/<fn>/`) with no struct literal and no rename.
+    // The native-typed validator replacing the entry `fn` in test/host builds: same
+    // name, the entry's native parameter types in order, returning the check result.
     let host_params = params.iter().map(|p| {
         let (name, nty) = (&p.name, &p.native_ty);
         quote! { #name: #nty }
@@ -161,11 +135,10 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         #entry
         #circuit_def
 
-        /// The native-typed validator for this circuit. In a `test`/`host` build the
-        /// circuit `fn` *is* this function (the `Field` body is compiled only for the
-        /// xark compiler): it takes the entry's native inputs, loads the built
-        /// circuit from `target/xark/<name>/`, and returns `Ok(())` if they satisfy
-        /// it (else an actionable `Err`). So `mycircuit::<fn>(a, b, c).unwrap()`.
+        /// Native-typed validator for this circuit. In test/host builds the circuit
+        /// `fn` *is* this function (the `Field` body compiles only under `cfg(xark)`):
+        /// it takes the entry's native inputs, loads the built circuit from
+        /// `target/xark/<name>/`, and returns `Ok(())` if they satisfy it.
         #[cfg(not(xark))]
         #(#attrs)*
         #vis fn #fn_ident(#(#host_params),*) -> ::core::result::Result<(), ::xark_prover::ProveError> {
@@ -173,8 +146,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         }
 
         /// Typed inputs for this circuit (generated by `#[circuit]`), one field per
-        /// entry parameter with its **native** type. For a custom artifact location
-        /// (e.g. a downstream crate), use it directly:
+        /// entry parameter with its **native** type. For a custom artifact location:
         /// `xark_prover::circuit_at(dir).check(<Fn>Inputs { .. })` — or `.prove(..)`.
         #[cfg(not(xark))]
         #[derive(Clone, Debug)]
@@ -203,7 +175,7 @@ fn resolve_param(arg: &FnArg) -> syn::Result<CircuitParam> {
             return Err(syn::Error::new_spanned(
                 r,
                 "#[circuit] cannot take a `self` parameter",
-            ))
+            ));
         }
     };
     let name = match &*pt.pat {
@@ -212,7 +184,7 @@ fn resolve_param(arg: &FnArg) -> syn::Result<CircuitParam> {
             return Err(syn::Error::new_spanned(
                 other,
                 "#[circuit] parameters must be plain identifiers (no `_`, no patterns)",
-            ))
+            ));
         }
     };
     let (wrapper, inner) = unwrap_visibility(&pt.ty)?;
@@ -227,7 +199,7 @@ fn resolve_param(arg: &FnArg) -> syn::Result<CircuitParam> {
 }
 
 /// Peel `Private<Inner>` / `Public<Inner>`, returning the wrapper ident and inner
-/// type. A circuit input must declare its visibility, so anything else is an error.
+/// type. A circuit input must declare visibility, so anything else is an error.
 fn unwrap_visibility(ty: &Type) -> syn::Result<(syn::Ident, Type)> {
     if let Type::Path(tp) = ty {
         if let Some(seg) = tp.path.segments.last() {
@@ -247,15 +219,13 @@ fn unwrap_visibility(ty: &Type) -> syn::Result<(syn::Ident, Type)> {
 }
 
 /// Map a native inner type to `(native struct-field type, circuit inner type, fanout)`.
-/// Supported: `Field`, `[u8; 32]` (a SHA-256 digest), `[u8; N]` (byte string),
-/// `[Field; N]` (field-valued array), or a type implementing `NativeInput`.
+/// Supported: `Field`, `[u8; N]`, `[Field; N]`, or a type implementing `NativeInput`.
 fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> {
     if let Type::Path(tp) = inner {
         if tp.path.segments.last().is_some_and(|s| s.ident == "Field") {
-            // A `Field` value is a full field element — up to ~254 bits, well past
-            // `i128` — so the struct takes it as a `String` (a decimal or `0x`-hex
-            // value, `"2".into()` for a literal or a runtime-computed reference).
-            // That also matches how the CLI `--inputs` takes scalars.
+            // A `Field` is a full field element (~254 bits, past `i128`), so the
+            // struct takes it as a `String` (decimal or `0x`-hex), matching how the
+            // CLI `--inputs` takes scalars.
             return Ok((quote! { String }, quote! { ::xark::Field }, Fanout::Scalar));
         }
     }
@@ -275,10 +245,8 @@ fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> 
                 .last()
                 .is_some_and(|s| s.ident == "Field")
             {
-                // A field-valued array (hash siblings, bignum limbs, …): each
-                // element is a full field element, so the native form is a
-                // `[String; N]` of decimals — the array analogue of the scalar
-                // `Field` → `String` mapping, not "thinking in limbs".
+                // A field-valued array (hash siblings, bignum limbs, …): native form
+                // is `[String; N]` of decimals, the array analogue of `Field` → `String`.
                 let n = eval_usize_lit(&arr.len)?;
                 return Ok((
                     quote! { [::std::string::String; #n] },
@@ -288,11 +256,10 @@ fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> 
             }
         }
     }
-    // Fallback: any other named type is treated as a **transparent gadget type**
-    // (e.g. a curve `Fq`/`Point`) that implements `xark_prover::NativeInput`. Its
-    // `<Ty as NativeInput>::Native` associated type is the native struct field, and
-    // its `leaves` produce the compiler's flatten names. A type that doesn't impl
-    // the trait is a (reasonably clear) compile error at the delegation site.
+    // Fallback: any other named type is a transparent gadget type (`Fq`/`Point`)
+    // implementing `xark_prover::NativeInput`. Its `Native` associated type is the
+    // struct field, and its `leaves` produce the compiler's flatten names. A type
+    // that doesn't impl the trait is a compile error at the delegation site.
     if let Type::Path(_) = inner {
         return Ok((
             quote! { <#inner as ::xark_prover::NativeInput>::Native },
@@ -321,8 +288,8 @@ fn fanout_code(p: &CircuitParam) -> TokenStream2 {
                 ::std::string::ToString::to_string(&self.#name),
             ));
         },
-        // Byte arrays (`u8` elements) and field arrays (`String` decimals) fan out
-        // identically: leaf `name[i]` = the element rendered as a decimal string.
+        // Byte and field arrays fan out identically: leaf `name[i]` = the element
+        // rendered as a decimal string.
         Fanout::ByteArray(n) | Fanout::FieldArray(n) => quote! {
             {
                 let mut __i = 0usize;
@@ -335,8 +302,8 @@ fn fanout_code(p: &CircuitParam) -> TokenStream2 {
                 }
             }
         },
-        // A transparent gadget type: delegate to its `NativeInput::leaves`, which
-        // produces the compiler's flatten names (`name.x.limbs[i]`, `name[i]`, …).
+        // Transparent gadget type: delegate to `NativeInput::leaves`, which produces
+        // the compiler's flatten names (`name.x.limbs[i]`, `name[i]`, …).
         Fanout::Native => {
             let ty = &p.circuit_ty;
             quote! {
@@ -371,27 +338,20 @@ fn to_pascal(s: &str) -> String {
 }
 
 /// `#[derive(CircuitInput)]` — make a Field-composed struct usable as a typed
-/// circuit input by generating its `Into<[Field; N]>` (i.e. `From<Self> for
-/// [Field; N]`), **in the compiler's structural-flatten order**: fields in
-/// declaration order, arrays in index order, bottoming out at `Field`.
-///
-/// This is the piece that turns host↔circuit layout agreement from *discipline*
-/// into a *mechanical guarantee*. The compiler flattens an input type by walking
-/// its fields (index order) and arrays (index order) down to each `Field` leaf;
-/// this derive emits an `Into` that traverses the exact same way, so leaf `k` of
-/// the produced array is always leaf `k` of the input — a host-side witness
-/// builder can then drive the input from a native value with no hand-written
-/// per-type fan-out and no chance of an order skew.
+/// circuit input by generating its `From<Self> for [Field; N]`, **in the compiler's
+/// structural-flatten order**: fields in declaration order, arrays in index order,
+/// bottoming out at `Field`. The compiler flattens the input type the same way, so
+/// leaf `k` of the produced array is always leaf `k` of the input — making
+/// host↔circuit layout agreement a mechanical guarantee, not discipline.
 ///
 /// ```ignore
 /// #[derive(Clone, Copy, CircuitInput)]
 /// struct Digest { bits: [[Field; 32]; 8] }   // ⇒ impl From<Digest> for [Field; 256]
 /// ```
 ///
-/// Supported field types: `Field`, and (possibly nested) fixed arrays of `Field`
-/// with **integer-literal** lengths. Generic types (const-generic lengths) are
-/// rejected — the flattened `N` must be a compile-time literal; write the `From`
-/// by hand for those.
+/// Supported field types: `Field` and (nested) fixed arrays of `Field` with
+/// **integer-literal** lengths. Generic types (const-generic lengths) are rejected —
+/// the flattened `N` must be a compile-time literal; write the `From` by hand.
 #[proc_macro_derive(CircuitInput)]
 pub fn derive_circuit_input(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
@@ -416,7 +376,7 @@ fn circuit_input_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
             return Err(syn::Error::new_spanned(
                 name,
                 "#[derive(CircuitInput)] only supports structs",
-            ))
+            ));
         }
     };
 
@@ -450,9 +410,9 @@ fn circuit_input_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
-/// Emit the flatten statements for one field/element `access` of type `ty`, and
-/// return `(leaf count, statements)`. Recurses through arrays; a `Field` is one
-/// leaf. `depth` names the per-level loop variable so nested arrays don't collide.
+/// Emit the flatten statements for one field/element `access` of type `ty`, returning
+/// `(leaf count, statements)`. Recurses through arrays; a `Field` is one leaf.
+/// `depth` names the per-level loop variable so nested arrays don't collide.
 fn walk_type(ty: &Type, access: &TokenStream2, depth: usize) -> syn::Result<(usize, TokenStream2)> {
     match ty {
         Type::Path(tp) if tp.path.segments.last().is_some_and(|s| s.ident == "Field") => {
@@ -482,16 +442,14 @@ fn walk_type(ty: &Type, access: &TokenStream2, depth: usize) -> syn::Result<(usi
 }
 
 /// `#[derive(Transparent)]` — generate the host-side [`NativeInput`] fan-out for a
-/// transparent circuit type, so a gadget author declares the type once and the
-/// leaf-name / limb contract (which must match the compiler's structural flatten)
-/// is *generated*, not hand-written and hand-duplicated across gadgets.
+/// transparent circuit type, so the leaf-name / limb contract (which must match the
+/// compiler's structural flatten) is generated once, not hand-duplicated per gadget.
 ///
 /// Two shapes:
 ///  * a **leaf** field element `{ limbs: [Field; N] }` marked `#[transparent(bits = B)]`:
 ///    native form `[u8; N*B/8]` (big-endian), flattening to `<prefix>.limbs[i]`.
 ///  * a **composite** of transparent fields (e.g. `{ x: Fq, y: Fq }`): native form is
-///    the fields' native bytes concatenated, flattening by recursing into each field
-///    under `<prefix>.<field>`.
+///    the fields' native bytes concatenated, recursing under `<prefix>.<field>`.
 ///
 /// The generated impl is `#[cfg(not(xark))]` — `NativeInput` is host-only.
 ///
@@ -556,7 +514,7 @@ fn transparent_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
             return Err(syn::Error::new_spanned(
                 name,
                 "#[derive(Transparent)] only supports structs",
-            ))
+            ));
         }
     };
 
@@ -609,9 +567,8 @@ fn transparent_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         )
     };
 
-    // `NativeInput` lives in `xark_prover` (a `std` crate), but a gadget crate is
-    // `#![no_std]` — so bring `std` in inside an anonymous const (the hygienic-derive
-    // pattern), mirroring what the hand-written host modules did with `extern crate std`.
+    // `NativeInput` lives in `xark_prover` (a `std` crate) but a gadget crate is
+    // `#![no_std]`, so bring `std` in inside an anonymous const (hygienic-derive pattern).
     Ok(quote! {
         #[cfg(not(xark))]
         const _: () = {

@@ -1,18 +1,14 @@
 //! Prove knowledge of a private message whose SHA-256 digest equals a public
-//! 256-bit hash — the ergonomic form.
-//!
-//! The message is a byte array (`[u8; N]`) and the digest a `Hash` — a 256-bit
-//! digest packed into two 128-bit field halves (`xark-hash`), so the whole circuit
-//! exposes just **2 public inputs** instead of eight 32-bit words. The host still
-//! supplies a plain `[u8; 32]` (`Hash`'s native form). `require_eq` compares the
-//! gadget's raw bit output against that packed `Hash` directly.
+//! 256-bit hash. The digest is a `Hash` — packed into two 128-bit field halves
+//! (`xark-hash`), so the circuit exposes just 2 public inputs instead of eight
+//! 32-bit words. The host supplies a plain `[u8; 32]` (`Hash`'s native form).
 #![cfg_attr(xark, no_std)]
 
 use xark_sha256::prelude::*;
 
 #[circuit]
 pub fn sha256(msg: Private<[u8; 3]>, digest: Public<Hash>) {
-    // Qualified call: the entry fn shares the gadget's name, so name it by path.
+    // Qualified: the entry fn shares the gadget's name.
     require_eq(xark_sha256::sha256(msg), digest);
 }
 

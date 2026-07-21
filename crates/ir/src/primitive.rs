@@ -116,12 +116,9 @@ pub enum WitnessGen {
         input: LinearCombination,
         index: u32,
     },
-    /// Batched bit-decomposition: `outs[i] = the i-th least-significant bit of
-    /// eval(input)`. Semantically identical to emitting `Bit { out: outs[i],
-    /// input, index: i }` for each `i`, but the shared `input` linear combination
-    /// is serialized **once** instead of once per bit — the dominant `circuit.json`
-    /// size win for bit-heavy circuits (range proofs, EC scalar multiplication),
-    /// where the same `input` was previously re-serialized for every bit.
+    /// Batched bit-decomposition: `outs[i] = i-th least-significant bit of
+    /// eval(input)`. Like emitting one `Bit` per `i`, but serializes the shared
+    /// `input` once (major size win for bit-heavy circuits).
     Bits {
         outs: Vec<VarId>,
         input: LinearCombination,
@@ -136,10 +133,9 @@ pub enum WitnessGen {
     },
     /// Big-integer non-native multiply-reduce hint. Reconstructs `A`, `B`, `M`
     /// from their little-endian `limb_bits`-bit limbs, computes `P = A·B`, and
-    /// outputs `q = P / M` and `r = P % M` split back into limbs. This is the
-    /// primitive that makes foreign-field (e.g. secp256k1) multiplication
-    /// solvable: `a·b` overflows a single field element, so it can't be done
-    /// with the scalar `product`/`div_rem` hints.
+    /// outputs `q = P / M`, `r = P % M` split back into limbs. Makes foreign-field
+    /// (e.g. secp256k1) multiplication solvable, where `a·b` overflows one field
+    /// element and the scalar `product`/`div_rem` hints don't suffice.
     MulModDivMod {
         /// Quotient output limbs (little-endian).
         q: Vec<VarId>,
@@ -206,10 +202,8 @@ pub struct PrimitiveProgram {
     pub witness_gen: Vec<WitnessGen>,
 }
 
-/// Serialize a primitive program to **compact** JSON (no indentation). This is
-/// the on-disk form for `circuit.json`: a machine-consumed hint/constraint
-/// artifact where pretty-printing more than doubled the file for no benefit.
-/// Round-trips through [`from_json`] identically to [`to_json_pretty`].
+/// Serialize a primitive program to **compact** JSON (the on-disk `circuit.json`
+/// form). Round-trips through [`from_json`] identically to [`to_json_pretty`].
 pub fn to_json(program: &PrimitiveProgram) -> String {
     serde_json::to_string(program).expect("PrimitiveProgram is always serializable")
 }

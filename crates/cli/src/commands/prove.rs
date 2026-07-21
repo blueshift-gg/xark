@@ -22,7 +22,7 @@ use xark_backend::serialization::{
 use xark_backend::solana::{assemble_proof_bytes_le, assemble_public_inputs_bytes_le};
 use xark_backend::{keys::Groth16Keys, prove};
 use xark_ir::VarId;
-use xark_prover::{fr_from_decimal, XarkCircuit};
+use xark_prover::{XarkCircuit, fr_from_decimal};
 
 use super::{
     load_backend_r1cs, load_circuit_auto, parse_inputs_arg, resolve_input_ids, setup,

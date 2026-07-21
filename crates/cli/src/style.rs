@@ -1,7 +1,6 @@
-//! Minimal ANSI styling for the `xark` CLI: truecolor branding in `#99FF00`
-//! plus warning / error colors. Everything is a no-op when stderr is not a TTY
-//! or `NO_COLOR` is set — so piped output (e.g. `xark check --message-format=json`
-//! consumed by rust-analyzer) never gets polluted with escape codes.
+//! Minimal ANSI styling for the `xark` CLI: `#99FF00` branding plus warning /
+//! error colors. A no-op when stderr is not a TTY or `NO_COLOR` is set, so piped
+//! output (e.g. JSON diagnostics) never gets escape codes.
 
 use std::io::IsTerminal;
 use std::sync::OnceLock;
@@ -53,12 +52,12 @@ pub fn dim(s: &str) -> String {
     wrap(DIM, s)
 }
 
-/// Render a "Next steps" block: a branded header followed by one line per
-/// `(command, hint)`, the command in brand color and the hint dimmed. Kept in
-/// one place so every command's guided footer looks identical.
+/// Render a "Next steps" block: a branded header then one line per
+/// `(command, hint)`, command in brand color and hint dimmed. One place so every
+/// command's guided footer looks identical.
 pub fn next_steps(steps: &[(String, &str)]) -> String {
-    // Align the `# hint` comments into a column for a clean, scannable block.
-    // Measure by display columns, not bytes (commands may contain `…`, `‖`).
+    // Align hints into a column, measured by display columns not bytes (commands
+    // may contain `…`, `‖`).
     let width = steps
         .iter()
         .map(|(cmd, _)| cmd.chars().count())
@@ -76,8 +75,7 @@ pub fn next_steps(steps: &[(String, &str)]) -> String {
     out
 }
 
-/// The branded line tag: the `xark` wordmark in the brand color, used as the
-/// prefix for xark's own status lines.
+/// The `xark` wordmark in brand color, prefixed to xark's own status lines.
 pub fn tag() -> String {
     brand("xark")
 }

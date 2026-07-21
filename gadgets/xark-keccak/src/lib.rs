@@ -1,43 +1,24 @@
-//! `xark-keccak`: a Keccak-f[1600] permutation and Keccak-256 (Ethereum-flavour)
-//! gadget written entirely in the `xark` `Field` subset.
+//! `xark-keccak`: Keccak-f[1600] permutation and Keccak-256 (Ethereum-flavour)
+//! gadget written entirely in the `xark` `Field` subset, on top of `xark-bits`.
+//! Everything is `while`-loop unrolled at compile time.
 //!
-//! Circuit authors just `use xark_keccak::keccak256_block;` — the compiler
-//! inlines everything (all 24 rounds and the θ/ρ/π/χ/ι steps are `while`-loop
-//! unrolled at compile time), so it lowers to the same R1CS as if written
-//! inline. It builds on the VERIFIED 64-bit word layer in `xark-bits`.
+//! State: 1600 bits as 25 lanes of 64 LE bits (`[[Field; 64]; 25]`), lanes
+//! indexed `x + 5*y` with `x, y ∈ 0..5`, lane byte-order little-endian.
 //!
-//! ## State & conventions
-//!
-//! - The 1600-bit state is 25 lanes of 64 bits: `[[Field; 64]; 25]`.
-//! - Lanes are indexed `x + 5*y` with `x, y ∈ 0..5` (`x` = column, `y` = row),
-//!   the standard Keccak convention.
-//! - Each lane is a `[Field; 64]` of little-endian bits (bit `i` has weight
-//!   `2^i`), matching `xark-bits`. Lane byte-order is little-endian.
-//!
-//! ## Cost model (only `var * var` products emit an R1CS gate)
-//!
-//! - `xor64`/`and64` = 64 gates each; `not64`/`rotl64` (ρ rotations) = 0 gates.
-//! - θ is all XORs and one rotate: cheap. ρ/π are pure lane re-wiring: FREE.
-//! - χ is the only source of AND gates — it dominates the gate count.
-//! - ι XORs lane 0 with a round constant that is a *compile-time constant* bit
-//!   lane, so each `bit.xor(const)` folds to `bit + const - 2*bit*const`
-//!   where `bit*const` is variable × constant: FREE (0 gates).
-//! - `to_bits64` on each input word (in the demo) costs 64 booleanity gates.
-//!
-//! Per round: θ ≈ 50 `xor64`, χ = 25 `and64` + 25 `xor64` → ~100 word-ops ×
-//! 64 bits ≈ 6400 gates, × 24 rounds ≈ 154k gates for the permutation.
+//! Gate cost (only `var * var` products emit a gate): θ is XORs + one rotate;
+//! ρ/π are pure lane re-wiring (FREE); χ is the only AND source and dominates;
+//! ι XORs lane 0 with a compile-time-constant round-constant lane (FREE).
+//! ~6400 gates/round × 24 ≈ 154k gates for the permutation.
 
 #![no_std]
 
 use xark::Field;
 use xark_bits::{and64, not64, rotl64, xor64};
 
-// ===========================================================================
-// Lane readers. Reading a whole inner `[Field; 64]` *out of* a nested array
-// (`s[i]` as a value) is NOT supported by the circuit subset — rustc lowers it
-// to a whole-inner-array copy that the compiler drops. Only *scalar* nested
-// access (`s[i][j]`) works, so we rebuild the lane element-by-element (0 gates).
-// ===========================================================================
+// Lane readers. Reading a whole inner `[Field; 64]` out of a nested array
+// (`s[i]` as a value) is NOT supported by the circuit subset (it lowers to a
+// whole-inner-array copy the compiler drops); only scalar access `s[i][j]`
+// works, so we rebuild the lane element-by-element (0 gates).
 
 /// Read lane `i` out of a 25-lane state into a fresh flat `[Field; 64]`.
 fn read25(s: [[Field; 64]; 25], i: usize) -> [Field; 64] {
@@ -72,20 +53,16 @@ fn read24(s: [[Field; 64]; 24], r: usize) -> [Field; 64] {
     out
 }
 
-// ===========================================================================
 // The five Keccak-f step mappings. Each takes the 25-lane state and returns the
-// updated 25-lane state (whole nested-array params/returns are supported, as in
-// the SHA-256 gadget).
-// ===========================================================================
+// updated state (whole nested-array params/returns are supported).
 
 /// θ (theta): `C[x] = ⊕_y A[x,y]`, `D[x] = C[x-1] ⊕ rotl(C[x+1], 1)`, then
-/// `A[x,y] ⊕= D[x]`. All XOR + one rotate. Cost: 20 (C) + 5 (D) + 25 (apply) =
-/// 50 `xor64` per call.
+/// `A[x,y] ⊕= D[x]`. All XOR + one rotate; 50 `xor64` per call.
 fn theta(a: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     let zero = [Field::from(0u8); 64];
 
     // Column parities C[x] = A[x,0] ⊕ A[x,1] ⊕ A[x,2] ⊕ A[x,3] ⊕ A[x,4].
-    let mut c = [zero; 5];
+    let mut c = [zero; 5]; // C[x]
     let mut x = 0usize;
     while x < 5usize {
         let mut lane = read25(a, x);

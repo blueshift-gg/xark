@@ -9,7 +9,7 @@
 //! example, with no hand-built limb maps or variable-id plumbing.
 
 use num_bigint::BigUint;
-use p256::ecdsa::{signature::Signer, Signature as P256Sig, SigningKey};
+use p256::ecdsa::{Signature as P256Sig, SigningKey, signature::Signer};
 use sha2::{Digest, Sha256};
 // The circuit takes the transparent compound types `Point` (pubkey), `Signature`
 // (r‖s), `Scalar` (digest), all in the 2×128-bit leaf layout — mirror them with the

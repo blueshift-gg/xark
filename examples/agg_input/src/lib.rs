@@ -5,7 +5,6 @@ use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
 pub fn agg_input(a: Private<[u8; 3]>, b: Public<Field>) {
-    // b == a[0] + a[1] + a[2]
     require_eq(a[0] + a[1] + a[2], b);
 }
 

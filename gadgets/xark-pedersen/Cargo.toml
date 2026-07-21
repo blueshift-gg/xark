@@ -1,7 +1,11 @@
 [package]
 name = "xark-pedersen"
+description = "Pedersen hash and commitment gadget for xark zero-knowledge circuits."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 
@@ -10,8 +14,8 @@ name = "xark_pedersen"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", default-features = false }
+xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness" }
-xark-ir = { path = "../../crates/ir" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.0.1" }
+xark-ir = { path = "../../crates/ir", version = "0.0.1" }

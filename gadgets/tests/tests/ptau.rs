@@ -19,7 +19,7 @@ use ark_ff::UniformRand;
 use ark_std::rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
-use xark_backend::ptau::{parse_ptau, PtauError};
+use xark_backend::ptau::{PtauError, parse_ptau};
 
 mod common;
 use common::build_valid_ptau;
@@ -50,10 +50,12 @@ fn parses_valid_minimal_ptau() {
     assert!(parsed.beta_tau_g1.iter().all(|p| p.is_on_curve()));
     assert!(parsed.beta_g2.is_on_curve());
     // G2 subgroup membership.
-    assert!(parsed
-        .tau_g2
-        .iter()
-        .all(|p| p.is_in_correct_subgroup_assuming_on_curve()));
+    assert!(
+        parsed
+            .tau_g2
+            .iter()
+            .all(|p| p.is_in_correct_subgroup_assuming_on_curve())
+    );
     assert!(parsed.beta_g2.is_in_correct_subgroup_assuming_on_curve());
 }
 

@@ -2,8 +2,7 @@
 
 use xark::{circuit, require_eq, Field, Private, Public};
 
-// nested_calls: main asserts square_plus_one(x) == y, where
-// square_plus_one calls square (two-level nested calls).
+// require(square_plus_one(x) == y); square_plus_one calls square (two-level nesting).
 #[inline(never)]
 fn square(x: Field) -> Field {
     x * x
@@ -25,7 +24,6 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        // 6² + 1 = 37
         nested_calls("6".into(), "37".into()).unwrap();
     }
 

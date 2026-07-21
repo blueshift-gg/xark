@@ -1,65 +1,57 @@
 //! `xark-bignum`: non-native ("foreign field") arithmetic over a 256-bit prime
 //! modulus, shared by the secp256k1 / secp256r1 curve gadgets.
 //!
-//! A field element is a **width-generic `Bignum`**: `LIMBS` little-endian
-//! `BITS`-bit limbs (`[Field; LIMBS]`, value `Σ limb[i]·2^(BITS·i)`). Callers pick
-//! the width explicitly (e.g. secp256k1 uses `<3, 86>`). Every operation takes the
-//! modulus as an explicit parameter (`m` as `LIMBS` limbs, `m_minus_1` for the
-//! canonical range check), so the exact same, individually solver-validated
-//! routines serve any prime field — base field or scalar field, k1 or r1.
+//! A field element is a width-generic `Bignum`: `LIMBS` little-endian `BITS`-bit
+//! limbs (value `Σ limb[i]·2^(BITS·i)`); callers pick the width (e.g. `<3, 86>`).
+//! Every op takes the modulus explicitly (`m` limbs, `m_minus_1` for the range
+//! check), so one set of routines serves any prime field.
 //!
-//! All arithmetic is limb-wise with explicit carry/borrow propagation; carries
-//! are range-checked so no intermediate term ever wraps the BN254 modulus the
-//! circuit is proven over (which would silently break the integer identity). A
-//! per-instantiation `const` budget assertion (see [`mod_mul`]) rejects any
-//! `(LIMBS, BITS)` whose schoolbook column products could overflow BN254 `Fr`.
+//! Arithmetic is limb-wise with explicit carry/borrow propagation; carries are
+//! range-checked so no intermediate term wraps the BN254 modulus the circuit is
+//! proven over (which would silently break the integer identity). A per-instance
+//! `const` budget assertion (see [`mod_mul`]) rejects any `(LIMBS, BITS)` whose
+//! schoolbook column products could overflow BN254 `Fr`.
 
 #![no_std]
 // Circuit-lowered gadget code: the xark compiler rejects compound assignment on
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::require_eq;
-/// Re-exported so the [`fp!`] macro can name `$crate::Field` without the caller
-/// importing `xark`.
+/// Re-exported so the [`fp!`] macro can name `$crate::Field`.
 pub use xark::Field;
+use xark::require_eq;
 
 /// Host-only re-export so the [`fp!`] macro can generate a decimal `NativeInput`
-/// (`$crate::__prover::…`) without the caller depending on `xark_prover` by name.
+/// without the caller depending on `xark_prover` by name.
 #[cfg(not(xark))]
 #[doc(hidden)]
 pub use xark_prover as __prover;
 
-// ===========================================================================
 // Width-generic non-native modular arithmetic (`Bignum<LIMBS, BITS>`).
-// ===========================================================================
 
-/// Maximum limb count / bit width the fixed decomposition buffers accommodate.
-/// Buffers are sized to these maxima and only the first `BITS`/`LIMBS` slots are
-/// ever filled or referenced — the unused (constant-zero) slots are pruned from
-/// the R1CS, so oversizing the buffers costs nothing. (Avoids `[Field; BITS + 1]`,
-/// which would need unstable `generic_const_exprs`.)
+/// Max limb count / bit width the fixed decomposition buffers accommodate. Only
+/// the first `BITS`/`LIMBS` slots are used; unused constant-zero slots are pruned
+/// from the R1CS, so oversizing is free. (Avoids `[Field; BITS + 1]`, which needs
+/// unstable `generic_const_exprs`.)
 const MAX_BITS: usize = 128;
 const MAX_LIMBS: usize = 16;
 const MAX_COLS: usize = 2 * MAX_LIMBS - 1;
 
-/// A width-generic non-native field element: `LIMBS` little-endian `BITS`-bit
-/// limbs (value `Σ limb[i]·2^(BITS·i)`). A **zero-cost** newtype over
-/// `[Field; LIMBS]` — every method forwards to the free function of the same
-/// name, so the emitted R1CS is byte-identical. Callers alias a concrete width,
-/// e.g. `type Fp = Bignum<3, 86>` for a 256-bit prime field.
+/// Width-generic non-native field element: `LIMBS` little-endian `BITS`-bit limbs
+/// (value `Σ limb[i]·2^(BITS·i)`). A zero-cost newtype over `[Field; LIMBS]` whose
+/// methods forward to the free functions, so the emitted R1CS is byte-identical.
+/// Callers alias a concrete width, e.g. `type Fp = Bignum<3, 86>`.
 #[derive(Clone, Copy)]
 pub struct Bignum<const LIMBS: usize, const BITS: usize> {
     pub limbs: [Field; LIMBS],
 }
 
-// Host-side `NativeInput`: a `Bignum<LIMBS, BITS>` circuit input is a single whole
-// number, taken natively as a decimal (or `0x`-hex) string and split into its
-// `LIMBS` little-endian `BITS`-bit limbs (`<name>.limbs[i]`) — so callers pass the
-// value, never hand-decompose limbs. Distinct from the curve/`fp!` field newtypes
-// (which carry their own byte-host `NativeInput`), so there is no coherence clash.
-// `NativeInput` lives in the `std` `xark_prover` while this crate is `#![no_std]`,
-// so pull `std` in inside an anonymous const (the `#[derive(Transparent)]` pattern).
+// Host-side `NativeInput`: a `Bignum` circuit input is one whole number, taken as
+// a decimal (or `0x`-hex) string and split into its `LIMBS` little-endian `BITS`-bit
+// limbs — callers pass the value, never hand-decompose. Distinct from the
+// curve/`fp!` newtypes (own byte-host), so no coherence clash. `NativeInput` lives
+// in `std` `xark_prover` while this crate is `#![no_std]`, so pull `std` in inside
+// an anonymous const.
 #[cfg(not(xark))]
 const _: () = {
     extern crate std;
@@ -74,10 +66,8 @@ const _: () = {
 };
 
 impl<const LIMBS: usize, const BITS: usize> Bignum<LIMBS, BITS> {
-    /// The limb count and bit width, exposed so `fp!(Name, "0x…", ThisType)` can
-    /// read the geometry off a `Bignum<LIMBS, BITS>` type alias (e.g. a shared
-    /// `type Scalar = Bignum<3, 86>` used for both the field and `[Scalar; 2]`
-    /// points).
+    /// Limb count and bit width, exposed so `fp!(Name, "0x…", ThisType)` can read
+    /// the geometry off a `Bignum<LIMBS, BITS>` alias.
     pub const LIMBS: usize = LIMBS;
     pub const BITS: usize = BITS;
 
@@ -247,18 +237,16 @@ pub const fn complement<const N: usize, const BITS: usize>(s: &str) -> [Field; N
 /// xark_bignum::fp!(Fp, "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
 /// let c = a * b + a - b;   // `Fp` has +  -  *  unary-  and .inverse()/.sub2()/.triple()/.reduce()
 /// ```
-/// You give it the name and the modulus (a decimal or `0x`-hex string); a
-/// `~256`-bit field defaults to the `3 × 86`-bit limb layout. An optional trailing
-/// `LIMBS, BITS` picks a different geometry: `fp!(Fp, "0x…", 4, 64)`. The limb
-/// split, `m − 1`, and the `2^(BITS·LIMBS) − m` subtraction complement are all
-/// derived at compile time; the generated type is a zero-cost `[Field; LIMBS]`
-/// newtype whose operators forward to the width-generic free functions, so the
-/// emitted R1CS is byte-identical to calling them by hand.
+/// Give it the name and the modulus (decimal or `0x`-hex); a `~256`-bit field
+/// defaults to the `3 × 86`-bit layout. An optional trailing `LIMBS, BITS` picks a
+/// different geometry: `fp!(Fp, "0x…", 4, 64)`. The limb split, `m − 1`, and the
+/// `2^(BITS·LIMBS) − m` subtraction complement are derived at compile time; the
+/// generated type is a zero-cost `[Field; LIMBS]` newtype forwarding to the
+/// width-generic free functions.
 #[macro_export]
 macro_rules! fp {
-    // Two-arg form: a ~256-bit prime field. Defaults to the standard 3 × 86-bit
-    // limb layout (86 bits is the multiply-optimal limb size over BN254), so you
-    // write only the name and the modulus.
+    // Two-arg form: ~256-bit prime field, default 3 × 86-bit layout (86 bits is
+    // multiply-optimal over BN254).
     ($vis:vis $name:ident, $modulus:literal) => {
         $crate::fp!(@build $vis $name, $modulus, 3, 86);
         $crate::fp!(@host $name, 3, 86);
@@ -268,9 +256,7 @@ macro_rules! fp {
     (no_host $vis:vis $name:ident, $modulus:literal) => {
         $crate::fp!(@build $vis $name, $modulus, 3, 86);
     };
-    // Geometry from a `Bignum<LIMBS, BITS>` type — `fp!(Fp, "0x…", Scalar)` — so a
-    // single `type Scalar = Bignum<L, B>` can feed both the field and its
-    // `[Scalar; 2]` points.
+    // Geometry from a `Bignum<LIMBS, BITS>` type — `fp!(Fp, "0x…", Scalar)`.
     ($vis:vis $name:ident, $modulus:literal, $geom:ty) => {
         $crate::fp!(@build $vis $name, $modulus, { <$geom>::LIMBS }, { <$geom>::BITS });
         $crate::fp!(@host $name, { <$geom>::LIMBS }, { <$geom>::BITS });
@@ -280,9 +266,8 @@ macro_rules! fp {
         $crate::fp!(@build $vis $name, $modulus, $limbs, $bits);
         $crate::fp!(@host $name, $limbs, $bits);
     };
-    // Host-side `NativeInput`: take the element as a single decimal (or `0x`-hex)
-    // string, split into `$limbs` little-endian `$bits`-bit limbs (`<name>.limbs[i]`)
-    // — callers pass the value, never hand-decompose limbs. Host-only.
+    // Host-side `NativeInput`: take the element as one decimal (or `0x`-hex) string,
+    // split into `$limbs` little-endian `$bits`-bit limbs. Host-only.
     (@host $name:ident, $limbs:expr, $bits:expr) => {
         #[cfg(not(xark))]
         const _: () = {
@@ -375,12 +360,9 @@ fn two_pow<const BITS: usize>() -> Field {
     Field::from(1u128 << BITS)
 }
 
-/// Decompose `v < 2^(BITS+1)` into `BITS+1` pinned boolean bits (low `BITS` + top
-/// borrow/carry bit at index `BITS`). Only the first `BITS+1` buffer slots are
-/// filled; the rest stay constant-zero.
 /// Decompose `v` into `BITS + EXTRA` little-endian bits (boolean-constrained and
-/// recomposition-pinned). `EXTRA` is the headroom above `BITS` for the top
-/// carry/borrow: `1` for a single carry bit, `2` for a doubled term.
+/// recomposition-pinned; top borrow/carry bit at index `BITS`). `EXTRA` is the
+/// headroom above `BITS`: `1` for a single carry bit, `2` for a doubled term.
 fn decompose_top<const BITS: usize, const EXTRA: usize>(v: Field) -> [Field; MAX_BITS] {
     let mut bits = [Field::from(0u8); MAX_BITS];
     let mut acc = Field::from(0u8);
@@ -523,9 +505,9 @@ pub fn mod_add<const LIMBS: usize, const BITS: usize>(
     result
 }
 
-/// Modular subtraction `(a - b) mod m`. Direct two-pass: `diff = a - b`
-/// (borrow = `[a<b]`), then `result = diff - borrow·comp` where `comp = 2^(BITS·LIMBS·... )`
-/// is the caller-supplied top-representation complement of `m`.
+/// Modular subtraction `(a - b) mod m`. Two-pass: `diff = a - b` (borrow = `[a<b]`),
+/// then `result = diff - borrow·comp`, where `comp = 2^(BITS·LIMBS) − m` is the
+/// caller-supplied complement of `m`.
 pub fn mod_sub<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     b: [Field; LIMBS],
@@ -625,17 +607,15 @@ pub fn require_lt<const LIMBS: usize, const BITS: usize>(
     require_eq(borrow, Field::from(0u8));
 }
 
-/// Return a pinned boolean `lt ∈ {0,1}` with `lt == 1` **iff** `a < b`, comparing
-/// two canonical `LIMBS × BITS`-bit limb vectors (each limb assumed `< 2^BITS`).
+/// Pinned boolean `lt ∈ {0,1}`, `1` iff `a < b`, over two canonical limb vectors
+/// (each limb `< 2^BITS`).
 ///
-/// Same sound subtract-with-borrow as [`require_lt`] — it computes `a − b` limb by
-/// limb, where each `d_i = a[i] − b[i] − borrow + 2^BITS ∈ [0, 2^(BITS+1))` is
-/// bit-decomposed (`decompose_top` pins it) and its top bit is `no_borrow`. Every
-/// term stays `< 2^(BITS+1)`, so nothing wraps the field, and the final borrow is
-/// exactly the `a < b` bit — no full-width value is ever reconstructed. Unlike
-/// `require_lt` (which asserts the borrow is `0`), this **returns** it, so a caller
-/// can branch/mux on the comparison and derive advice (rounding carries, GLV
-/// signs) in-circuit instead of passing it as a witness input.
+/// Same sound subtract-with-borrow as [`require_lt`]: each
+/// `d_i = a[i] − b[i] − borrow + 2^BITS ∈ [0, 2^(BITS+1))` is bit-decomposed, so
+/// every term stays `< 2^(BITS+1)` (nothing wraps the field) and the final borrow
+/// is exactly the `a < b` bit. Unlike `require_lt` (which asserts borrow `== 0`),
+/// this returns it, so a caller can mux/derive advice (rounding carries, GLV signs)
+/// in-circuit rather than take it as a witness input.
 pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field; LIMBS]) -> Field {
     let two_b = two_pow::<BITS>();
     let mut borrow = Field::from(0u8);
@@ -657,7 +637,7 @@ pub fn is_ge<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field
 
 /// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
-    // all_zero = AND of isZero(limbᵢ); require it is 0 to forbid value 0
+    // all_zero = AND of isZero(limbᵢ); require == 0 to forbid value 0.
     let mut all_zero = Field::from(1u8);
     let mut i = 0usize;
     while i < LIMBS {
@@ -1084,7 +1064,7 @@ pub fn ext_double_25519(
     let xy = mul_lazy_25519(x, y); // XY
     let e = [two * xy[0], two * xy[1], two * xy[2]]; // E = 2XY
     let c = [two * zz[0], two * zz[1], two * zz[2]]; // C = 2Z^2
-                                                     // G = B - A
+    // G = B - A
     let g = [
         b8[0] + bb[0] - aa[0],
         b8[1] + bb[1] - aa[1],
@@ -1140,7 +1120,7 @@ pub fn ext_add_25519(
     let x1y1 = [x1[0] + y1[0], x1[1] + y1[1], x1[2] + y1[2]];
     let x2y2 = [x2[0] + y2[0], x2[1] + y2[1], x2[2] + y2[2]];
     let xy = mul_lazy_25519(x1y1, x2y2); // (X1+Y1)(X2+Y2)
-                                         // E = xy - A - B
+    // E = xy - A - B
     let e = [
         b8[0] + xy[0] - a[0] - b[0],
         b8[1] + xy[1] - a[1] - b[1],
@@ -1293,10 +1273,8 @@ pub fn sub2<const LIMBS: usize, const BITS: usize>(
     r
 }
 
-// ===========================================================================
 // 3-limb-specific helpers (256-bit scalar layout / affine-point muxes). Not
 // width-generalized (tied to the 86+86+84 bit split and affine point shape).
-// ===========================================================================
 
 /// 4-bit (16-entry) affine-point mux tree, 3-limb. `b3` is the MSB.
 pub fn select16_affine(
@@ -1389,15 +1367,13 @@ pub fn point_select_affine(
     }
     out
 }
-/// Bring the gadget's public API into scope alongside the xark circuit
-/// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
-/// circuit crate needs a single `use xark_bignum::prelude::*;`. `Field` comes via
-/// `crate::*` (this crate re-exports it for the [`fp!`] macro), so the `xark`
-/// essentials are listed explicitly to avoid a duplicate-`Field` glob.
+/// The gadget's public API plus the xark circuit essentials, so a circuit crate
+/// needs a single `use xark_bignum::prelude::*;`. `Field` comes via `crate::*`, so
+/// the `xark` essentials are listed explicitly to avoid a duplicate-`Field` glob.
 pub mod prelude {
     pub use crate::*;
     pub use xark::prelude::{
-        circuit, require, require_eq, require_ge, require_gt, require_le, require_lt,
-        witness_begin, witness_end, Private, Public,
+        Private, Public, circuit, require, require_eq, require_ge, require_gt, require_le,
+        require_lt, witness_begin, witness_end,
     };
 }

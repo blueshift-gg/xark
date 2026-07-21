@@ -9,12 +9,9 @@ fn round(state: Field, key: Field, c: Field) -> Field {
 }
 
 /// MiMC written idiomatically with a `while` loop over an array of round
-/// constants. It lowers to *exactly the same* R1CS as the hand-unrolled
-/// `examples/mimc` — arrays, bounded loops, and function inlining all compose.
-///
-/// The loop is unrolled at compile time (`while i < 3`), the round constants are
-/// a fixed `[Field; 3]` array indexed by the loop counter, and `round` inlines
-/// per iteration.
+/// constants. Lowers to *exactly the same* R1CS as the hand-unrolled
+/// `examples/mimc`: the loop is unrolled at compile time, the `[Field; 3]`
+/// constants are indexed by the counter, and `round` inlines per iteration.
 #[circuit]
 pub fn mimc_loop(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     let cs = [

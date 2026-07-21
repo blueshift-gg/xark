@@ -3,9 +3,8 @@
 use xark::{circuit, require_eq, Field, Private, Public};
 use xark_bits::{and32, xor32};
 
-// bitwise_basic: a,b: u32; require(a & b == and_out); require(a ^ b == xor_out).
-// Each u32 is carried as a Field, decomposed to 32 bits (which range-checks it),
-// combined bitwise, and recomposed to compare against the public outputs.
+// require(a & b == and_out) and require(a ^ b == xor_out). Each u32 is a Field
+// decomposed to 32 bits (which range-checks it), combined bitwise, and recomposed.
 #[circuit]
 pub fn bitwise_basic(
     a: Private<Field>,

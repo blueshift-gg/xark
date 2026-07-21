@@ -1,7 +1,11 @@
 [package]
 name = "xark-prover"
+description = "xark's Groth16 (BN254) prover: witness solving, trusted setup, prove, and verify."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 
@@ -13,7 +17,7 @@ path = "src/lib.rs"
 debug = ["xark-ir/debug"]
 
 [dependencies]
-xark-ir = { path = "../ir" }
+xark-ir = { path = "../ir", version = "0.0.1" }
 # Use the workspace arkworks deps (which enable `parallel`) so the prover fans
 # MSM/FFT across cores even when this crate is built in isolation — not only when
 # Cargo feature-unification happens to pull `parallel` in via `xark-backend`.

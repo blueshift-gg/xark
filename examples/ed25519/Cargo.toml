@@ -1,26 +1,26 @@
 [package]
 name = "ed25519"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", default-features = false }
-xark-bignum = { path = "../../gadgets/xark-bignum" }
-xark-ed25519 = { path = "../../gadgets/xark-ed25519" }
+xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
+xark-bignum = { path = "../../gadgets/xark-bignum", version = "0.0.1" }
+xark-ed25519 = { path = "../../gadgets/xark-ed25519", version = "0.0.1" }
 
 [dev-dependencies]
-xark-ed25519 = { path = "../../gadgets/xark-ed25519" }
+xark-ed25519 = { path = "../../gadgets/xark-ed25519", version = "0.0.1" }
 ed25519-dalek = "2"
 
 [target.'cfg(not(xark))'.dependencies]
 # Host-only prover so downstream crates (and this crate's tests) can call
 # the generated native validator; gated on `cfg(not(xark))` so a circuit
 # build stays lean `no_std` with no feature flag.
-xark-prover = { path = "../../crates/prover" }
+xark-prover = { path = "../../crates/prover", version = "0.0.1" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

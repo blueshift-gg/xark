@@ -1,11 +1,14 @@
 [package]
 name = "xark-backend"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Arkworks Groth16 (BN254) prover/verifier, frontend-agnostic (proves any gr1cs ConstraintSynthesizer)."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 exclude = ["tests", "benches", "examples"]
 
 [dependencies]

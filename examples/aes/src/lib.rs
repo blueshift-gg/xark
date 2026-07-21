@@ -1,12 +1,6 @@
-//! AES-128 single-block encryption circuit.
-//!
-//! Proves knowledge of a 16-byte plaintext and 16-byte key whose AES-128
-//! encryption equals the public 16-byte ciphertext. Inputs are native `[u8; 16]`
-//! byte arrays (each byte range-checked to `[0, 256)` by `to_bits8` inside the
-//! gadget).
-//!
-//! S-box approach: GF(2^8) multiplicative inverse via `b^254` (Itoh–Tsujii
-//! addition chain), then the fixed GF(2)-affine map + `0x63`. See `xark_aes`.
+//! AES-128 single-block encryption: prove a private 16-byte plaintext and key
+//! encrypt to the public ciphertext. Bytes are range-checked by `to_bits8`; the
+//! S-box uses the GF(2^8) inverse `b^254` (Itoh–Tsujii) + affine map. See `xark_aes`.
 #![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;

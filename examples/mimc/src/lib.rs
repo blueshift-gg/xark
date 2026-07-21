@@ -3,18 +3,15 @@
 use xark::{circuit, require_eq, Field, Private, Public};
 
 /// A small 3-round MiMC-structured permutation (exponent 3) with key addition,
-/// hand-unrolled. This is a *compiler-feature demo*, not the real hash — for a
-/// cryptographic MiMC-p/p (exponent 7, 91 rounds, matching `noir-lang/mimc`) use
-/// the `xark-mimc` gadget crate (see `examples/mimc_gadget`).
+/// hand-unrolled. Compiler-feature demo, not the real hash — for cryptographic
+/// MiMC-p/p use the `xark-mimc` gadget crate (see `examples/mimc_gadget`).
 ///
-/// `state ← (state + k + c_i)^3` per round (with `c_0 = 0`), finalized with a
-/// key addition, then constrained to equal the public digest `h`. Round
-/// constants are full BN254-field-sized values, exercising big-integer field
-/// constants. (Compile with `--field bn254`.)
+/// `state ← (state + k + c_i)^3` per round (`c_0 = 0`), finalized with a key
+/// addition, then constrained to equal the public digest `h`. Round constants are
+/// full BN254-field-sized (compile with `--field bn254`).
 ///
-/// It is deliberately hand-unrolled so the snapshot suite can check that the
-/// loop form (`examples/mimc_loop`) and cross-crate gadget inlining lower to the
-/// exact same R1CS.
+/// Hand-unrolled so the snapshot suite can check that the loop form
+/// (`examples/mimc_loop`) and cross-crate gadget inlining lower to the same R1CS.
 #[circuit]
 pub fn mimc(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     let c1 = Field::constant(
@@ -36,7 +33,7 @@ pub fn mimc(x: Private<Field>, k: Public<Field>, h: Public<Field>) {
     s = s + k + c2;
     s = s.pow(3);
 
-    // finalize with a key addition and constrain to the public digest
+    // finalize with a key addition
     s = s + k;
     require_eq(s, h);
 }

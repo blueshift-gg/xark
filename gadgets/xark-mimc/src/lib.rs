@@ -1,12 +1,11 @@
-//! `xark-mimc`: a real MiMC-p/p hash over the BN254 scalar field, written
-//! entirely in the `Field` subset so the compiler inlines it into circuits.
+//! `xark-mimc`: MiMC-p/p hash over the BN254 scalar field, written in the
+//! `Field` subset so the compiler inlines it into circuits.
 //!
-//! This is a faithful port of [`noir-lang/mimc`](https://github.com/noir-lang/mimc)
-//! and is **circomlib-compatible**: MiMC-p/p with S-box exponent 7, 91 rounds,
-//! first round constant `C[0] = 0`, and the remaining 90 constants derived from
-//! the seed `"mimc"` via iterated keccak256 (the standard circomlib schedule).
-//! [`mimc_bn254`] is the Feistel / Miyaguchi–Preneel multi-input sponge used by
-//! circomlib's `MiMCSponge`/`multiMiMC7`.
+//! Faithful port of [`noir-lang/mimc`](https://github.com/noir-lang/mimc),
+//! **circomlib-compatible**: S-box exponent 7, 91 rounds, `C[0] = 0`, remaining
+//! 90 constants derived from the seed `"mimc"` via iterated keccak256.
+//! [`mimc_bn254`] is the Feistel / Miyaguchi–Preneel multi-input sponge.
+//! Compile with `--field bn254`.
 //!
 //! Verified bit-for-bit against Noir's known-answer test:
 //!
@@ -14,21 +13,15 @@
 //! mimc_bn254([12, 45, 78, 41])
 //!   = 18226366069841799622585958305961373004333097209608110160936134895615261821931
 //! ```
-//!
-//! Circuit authors just `use xark_mimc::{mimc, mimc_bn254};` — there is no
-//! backend "gadget" handling; it is ordinary library code that lowers to the
-//! same constraints as if it were written inline. Compile with `--field bn254`.
-//!
-//! Build with `-Zalways-encode-mir` so the compiler can read this crate's MIR
-//! across the crate boundary (the workspace `.cargo/config.toml` sets this).
 
 #![no_std]
+// The xark compiler rejects compound assignment on `Field`, so `x = x + y` is
+// required in place of `x += y`.
 #![allow(clippy::assign_op_pattern)]
 
 use xark::Field;
 
 /// The 91 MiMC-p/p round constants (circomlib schedule, seed `"mimc"`).
-///
 /// `C[0] = 0`; the rest are the keccak256-derived nothing-up-my-sleeve values
 /// shared with circomlib and `noir-lang/mimc`.
 fn round_constants() -> [Field; 91] {
@@ -243,7 +236,7 @@ pub fn mimc(x: Field, k: Field) -> Field {
 
 /// The MiMC-BN254 multi-input hash: a Feistel / Miyaguchi–Preneel feed-forward
 /// sponge absorbing `inputs` one at a time. Matches `noir-lang/mimc`'s
-/// `mimc_bn254`. This is the collision-resistant hash circuit authors want.
+/// `mimc_bn254`.
 pub fn mimc_bn254<const N: usize>(inputs: [Field; N]) -> Field {
     let mut r = Field::from(0u8);
     let mut i = 0usize;

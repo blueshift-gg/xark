@@ -1,17 +1,13 @@
 //! `xark`: the user-facing toolchain CLI (`xark build|setup|prove|verify|…`).
 //!
-//! `xark build` shells out to `cargo`, using the sibling `xark-rustc` binary as
-//! `RUSTC` under one pinned nightly, so cargo builds every dependency (the `xark`
-//! lib and any gadget crates) with matching MIR-encoded rlibs and the driver
-//! extracts the circuit's R1CS. The driver lives in a separate binary because a
-//! `rustc_driver` process can't host a custom global allocator; this CLI can, and
-//! uses jemalloc/mimalloc to parallelize circuit loading without allocator
-//! contention.
+//! `xark build` shells out to `cargo` with the sibling `xark-rustc` driver as
+//! `RUSTC`. The driver is a separate binary because a `rustc_driver` process
+//! can't host a custom global allocator; this CLI can, and uses mimalloc to
+//! parallelize circuit loading without allocator contention.
 
-// Per-thread-arena allocator. Circuit loading materializes millions of small
-// `Vec<Term>` allocations, which the system allocator serializes across rayon's
-// expansion threads — the dominant load cost. This binary never hosts
-// `rustc_driver` (that's `xark-rustc`), so a custom global allocator is safe here.
+// mimalloc: circuit loading makes millions of small `Vec<Term>` allocations that
+// the system allocator serializes across rayon threads. Safe here since this
+// binary never hosts `rustc_driver`.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

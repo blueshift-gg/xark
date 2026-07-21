@@ -1,12 +1,8 @@
-//! Poseidon2 permutation circuit (BN254, t = 3, alpha = 5, R_F = 8, R_P = 56).
-//!
-//! Proves knowledge of a private 3-element preimage `[in0, in1, in2]` whose
-//! Poseidon2 permutation equals the public output `[out0, out1, out2]`.
-//!
-//! The whole permutation is imported from the `xark-poseidon2` gadget crate and
-//! inlined by the compiler. ARK (constant adds) and both linear layers (`M_E`,
-//! `M_I`, constant-matrix products) fold into linear combinations for free;
-//! every R1CS multiplication gate comes from an S-box (`x^5`).
+//! Poseidon2 permutation circuit (BN254, t = 3, alpha = 5, R_F = 8, R_P = 56):
+//! proves a private preimage `[in0, in1, in2]` permutes to the public
+//! `[out0, out1, out2]`. Imported from `xark-poseidon2` and inlined; ARK and both
+//! linear layers (`M_E`, `M_I`) fold into linear combinations, so every R1CS mul
+//! gate comes from an S-box (`x^5`).
 #![cfg_attr(xark, no_std)]
 
 use xark_poseidon2::prelude::*;

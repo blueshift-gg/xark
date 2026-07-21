@@ -9,10 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The kind of an emitted R1CS constraint — what circuit operation produced it.
-/// Set at each lowering emit-site so the profiler can bucket constraints by
-/// their purpose (a range-check bit vs. a genuine multiplication vs. an
-/// equality, …).
+/// The kind of an emitted R1CS constraint, set at each lowering emit-site so the
+/// profiler can bucket constraints by purpose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ConstraintKind {
     /// A genuine multiplication gate `a * b = c` (both `a`, `b` non-constant).
@@ -52,9 +50,9 @@ impl ConstraintKind {
     }
 }
 
-/// One constraint's profile record: which constraint (`id`, matching the
-/// `R1csConstraint::id`), the top-level user source location that triggered it,
-/// the function call-chain it expanded through, and its [`ConstraintKind`].
+/// One constraint's profile record: its `id` (matching `R1csConstraint::id`),
+/// the user source location that triggered it, the call-chain it expanded
+/// through, and its [`ConstraintKind`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConstraintProfile {
     /// The R1CS constraint id (identical to its index in `r1cs.json`).

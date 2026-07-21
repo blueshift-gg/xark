@@ -1,27 +1,17 @@
-//! `xark-blake3`: the BLAKE3 compression function + single-block hash, written
-//! entirely in the `xark` `Field` subset.
+//! `xark-blake3`: BLAKE3 compression + hash in the `xark` `Field` subset, so the
+//! compiler inlines the whole compression (rounds and `G` mixes unrolled) to the
+//! same R1CS as inline code. Built on the verified 32-bit word layer in
+//! `xark-bits`.
 //!
-//! Circuit authors just `use xark_blake3::blake3_hash_one_block;` — the compiler
-//! inlines the whole compression (all 7 rounds, 8 `G` mixes per round, fully
-//! `while`-loop unrolled at compile time), so it lowers to the same R1CS as if
-//! written inline. It builds on the VERIFIED 32-bit word layer in `xark-bits`.
+//! Soundness conventions: a 32-bit word is a `[Field; 32]` of little-endian bits
+//! (bit `i` has weight `2^i`), matching `xark-bits`. BLAKE3 reads message bytes
+//! little-endian, so each of the 16 message words is the LE-`u32` of 4 consecutive
+//! bytes.
 //!
-//! ## Conventions
-//!
-//! - A 32-bit word is a `[Field; 32]` of little-endian bits (bit `i` has weight
-//!   `2^i`), matching `xark-bits`. BLAKE3 reads message bytes little-endian, so
-//!   each of the 16 message *words* is the LE-`u32` value of 4 consecutive bytes.
-//! - `xor32` is bit-by-bit (32 gates); `rotr32` is pure re-wiring (0 gates);
-//!   `add32` is modular add mod 2^32 (33 gates).
-//!
-//! ## What's here
-//!
-//! - [`blake3_hash_one_block`]: hash a single (≤64-byte) block as the *root* of a
-//!   one-chunk message — flags `CHUNK_START | CHUNK_END | ROOT = 11`, counter 0.
-//!   Returns the 256-bit digest as 8 words. This is spec-compliant BLAKE3 for
-//!   inputs of 0..=64 bytes (a single chunk that is also the root node).
-//! - [`blake3`]: variable-length single-chunk hash of a `[Field; N_BYTES]` byte
-//!   array (`N_BYTES <= 1024`), chaining [`compress`] across up to 16 blocks.
+//! [`blake3_hash_one_block`] hashes a single (≤64-byte) block as the root of a
+//! one-chunk message (flags `CHUNK_START | CHUNK_END | ROOT = 11`, counter 0);
+//! [`blake3`] chains [`compress`] over a `[Field; N_BYTES]` array (`N_BYTES <=
+//! 1024`, a single chunk).
 
 #![no_std]
 // Circuit-lowered gadget code: the block count is const-folded from a native
@@ -32,34 +22,10 @@
 use xark::Field;
 use xark_bits::{add3, add32, read_n, rotr32, sha256_iv, xor32};
 
-// ===========================================================================
-// Small array-extraction helpers.
-//
-// The circuit storage model does NOT support reading a whole inner `[Field; 32]`
-// word *out* of a nested array as a value (`arr[t]` copies a whole inner array,
-// which the compiler drops). Only *scalar* nested access (`arr[t][j]`) works, so
-// we rebuild each word element-by-element (zero gates).
-// ===========================================================================
-
-// Extract word `t` from a nested `[[Field; 32]; 16]` into a fresh flat local.
-// Extract word `t` from a nested `[[Field; 32]; 8]` into a fresh flat local.
-// Extract word `t` from a nested `[[Field; 32]; 4]` into a fresh flat local.
-// Used to unpack the 4 updated words returned by `g`.
-
-// ===========================================================================
-// The BLAKE3 `G` mixing function.
-//
-//   a = (a + b + mx) mod 2^32
-//   d = (d ^ a) >>> 16
-//   c = (c + d) mod 2^32
-//   b = (b ^ c) >>> 12
-//   a = (a + b + my) mod 2^32
-//   d = (d ^ a) >>> 8
-//   c = (c + d) mod 2^32
-//   b = (b ^ c) >>> 7
-//
-// Returns the 4 updated words `[a, b, c, d]`.
-// ===========================================================================
+// The circuit storage model can't read a whole inner `[Field; 32]` word out of a
+// nested array as a value (`arr[t]` copies a whole inner array, which the compiler
+// drops); only scalar nested access (`arr[t][j]`) works, so words are rebuilt
+// element-by-element (zero gates).
 
 /// BLAKE3 quarter-round mix. All four inputs are 32-bit words; `mx`/`my` are the
 /// two message words for this mix. Returns `[a, b, c, d]` after mixing.
@@ -93,14 +59,9 @@ fn g(
     out
 }
 
-// ===========================================================================
-// One BLAKE3 round: mix the 4 columns then the 4 diagonals of the 16-word state.
-// ===========================================================================
-
-/// Apply one BLAKE3 round to `state` using message words `block`, returning the
-/// updated 16-word state.
+/// Apply one BLAKE3 round to `state` (mix 4 columns then 4 diagonals) using
+/// message words `block`, returning the updated 16-word state.
 fn round(state: [[Field; 32]; 16], block: [[Field; 32]; 16]) -> [[Field; 32]; 16] {
-    // Pull all 16 state words into flat locals.
     let s0 = read_n(state, 0);
     let s1 = read_n(state, 1);
     let s2 = read_n(state, 2);
@@ -118,7 +79,6 @@ fn round(state: [[Field; 32]; 16], block: [[Field; 32]; 16]) -> [[Field; 32]; 16
     let s14 = read_n(state, 14);
     let s15 = read_n(state, 15);
 
-    // Pull all 16 message words into flat locals.
     let m0 = read_n(block, 0);
     let m1 = read_n(block, 1);
     let m2 = read_n(block, 2);
@@ -136,7 +96,7 @@ fn round(state: [[Field; 32]; 16], block: [[Field; 32]; 16]) -> [[Field; 32]; 16
     let m14 = read_n(block, 14);
     let m15 = read_n(block, 15);
 
-    // --- Mix the columns. ---
+    // Mix the columns.
     let r = g(s0, s4, s8, s12, m0, m1);
     let s0 = read_n(r, 0);
     let s4 = read_n(r, 1);
@@ -161,7 +121,7 @@ fn round(state: [[Field; 32]; 16], block: [[Field; 32]; 16]) -> [[Field; 32]; 16
     let s11 = read_n(r, 2);
     let s15 = read_n(r, 3);
 
-    // --- Mix the diagonals. ---
+    // Mix the diagonals.
     let r = g(s0, s5, s10, s15, m8, m9);
     let s0 = read_n(r, 0);
     let s5 = read_n(r, 1);
@@ -186,7 +146,7 @@ fn round(state: [[Field; 32]; 16], block: [[Field; 32]; 16]) -> [[Field; 32]; 16
     let s9 = read_n(r, 2);
     let s14 = read_n(r, 3);
 
-    // Write the updated words back into a fresh state array (scalar slot writes).
+    // Write words back via scalar slot writes.
     let zero = [Field::from(0u8); 32];
     let mut out = [zero; 16];
     let mut j = 0usize;
@@ -211,12 +171,6 @@ fn round(state: [[Field; 32]; 16], block: [[Field; 32]; 16]) -> [[Field; 32]; 16
     }
     out
 }
-
-// ===========================================================================
-// Message permutation between rounds.
-//   MSG_PERMUTATION = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
-//   permuted[i] = m[MSG_PERMUTATION[i]]
-// ===========================================================================
 
 /// Permute the 16 message words per BLAKE3's fixed schedule (zero gates).
 /// `permuted[i] = block[MSG_PERMUTATION[i]]`; the permutation is unrolled with
@@ -266,22 +220,6 @@ fn permute(block: [[Field; 32]; 16]) -> [[Field; 32]; 16] {
     out
 }
 
-// ===========================================================================
-// The IV (first 4 words feed the compression state; all 8 form the initial
-// chaining value for unkeyed hashing). These are the SHA-256 initial hash words.
-// ===========================================================================
-
-// BLAKE3 / SHA-256 IV words H0..H7, as field constants.
-
-// ===========================================================================
-// The BLAKE3 compression function.
-//
-//   state = [ cv[0..8], IV[0..4], counter_low, counter_high, block_len, flags ]
-//   7 rounds (permuting the message block after each of the first 6)
-//   out[i]   = state[i]   ^ state[i+8]   (i in 0..8)
-//   out[i+8] = state[i+8] ^ cv[i]        (i in 0..8)
-// ===========================================================================
-
 /// BLAKE3 compression: mix `cv` and `block` with the given counter halves,
 /// `block_len` and `flags` words, returning the 16-word feed-forward output.
 ///
@@ -295,14 +233,14 @@ pub fn compress(
     block_len: [Field; 32],
     flags: [Field; 32],
 ) -> [[Field; 32]; 16] {
-    // Decompose the 4 IV words needed at state positions 8..12 into bit arrays.
+    // The 4 IV words at state positions 8..12.
     let ivc = sha256_iv();
     let iv0 = ivc[0].to_bits::<32>();
     let iv1 = ivc[1].to_bits::<32>();
     let iv2 = ivc[2].to_bits::<32>();
     let iv3 = ivc[3].to_bits::<32>();
 
-    // Extract the 8 chaining-value words as flat locals (reused in feed-forward).
+    // Chaining-value words as flat locals (reused in feed-forward).
     let cv0 = read_n(cv, 0);
     let cv1 = read_n(cv, 1);
     let cv2 = read_n(cv, 2);
@@ -312,7 +250,6 @@ pub fn compress(
     let cv6 = read_n(cv, 6);
     let cv7 = read_n(cv, 7);
 
-    // Assemble the initial 16-word state.
     let zero = [Field::from(0u8); 32];
     let mut state = [zero; 16];
     let mut j = 0usize;
@@ -410,10 +347,6 @@ pub fn compress(
     out
 }
 
-// ===========================================================================
-// Single-block root hash.
-// ===========================================================================
-
 /// Hash a single (≤64-byte) block as a one-chunk root node.
 ///
 /// `input_words` holds the 16 message words (each a `[Field; 32]` LE bit word);
@@ -462,34 +395,25 @@ pub fn blake3_hash_one_block(
     out
 }
 
-// ===========================================================================
-// Variable-length single-chunk hash (message ≤ 1024 bytes = ≤ 16 blocks).
-// ===========================================================================
-
 /// Variable-length BLAKE3 for a single chunk (message ≤ 1024 bytes). `N_BYTES`
 /// is a compile-time constant; the message is a byte array (each `Field` a byte,
 /// range-checked `< 256` when decomposed). (Multi-chunk tree mode — messages
 /// over 1024 bytes — is a future extension.)
 ///
-/// ## Chunk chaining
-///
-/// The message is split into 64-byte blocks (the final block zero-padded to 64
-/// bytes, but with `block_len` = its real byte count). Blocks are compressed in
-/// sequence, threading the chaining value:
-///
+/// Chunk chaining (soundness): the message is split into 64-byte blocks (final
+/// block zero-padded to 64, but with `block_len` = its real byte count), each
+/// compressed in sequence threading the chaining value:
 /// - `cv` starts as the full 8-word IV (unkeyed hashing);
-/// - every block uses `counter = 0` (single chunk) and `block_len` = the number
-///   of real message bytes in that block (64 for every block but the last);
-/// - `flags` = `CHUNK_START (1)` on the FIRST block, `CHUNK_END (2) | ROOT (8) =
-///   10` on the LAST block, `0` on interior blocks — so a one-block message gets
-///   `1 | 10 = 11`, exactly matching [`blake3_hash_one_block`];
-/// - after each block `cv` becomes the first 8 output words of [`compress`].
+/// - every block uses `counter = 0` (single chunk) and `block_len` = its real
+///   byte count (64 for every block but the last);
+/// - `flags` = `CHUNK_START (1)` on the first block, `CHUNK_END (2) | ROOT (8) =
+///   10` on the last, `0` on interior blocks — so a one-block message gets `1 | 10
+///   = 11`, matching [`blake3_hash_one_block`];
+/// - after each block `cv` becomes the first 8 output words of [`compress`], which
+///   after the final block is the 256-bit digest.
 ///
-/// Returns the first 8 words of the final compression = the 256-bit digest.
-///
-/// Each 32-bit message word is the little-endian `u32` of 4 consecutive bytes:
-/// byte `k` of the word occupies bits `8k..8k+8`, built with [`Field::to_bits`]
-/// `::<8>()` (matching the byte layout used by [`blake3_hash_one_block`]).
+/// Each 32-bit message word is the LE-`u32` of 4 consecutive bytes: byte `k`
+/// occupies bits `8k..8k+8` (`Field::to_bits::<8>()`).
 pub fn blake3<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 32]; 8] {
     // Single-chunk MVP: a chunk is at most 1024 bytes (16 × 64-byte blocks).
     const {

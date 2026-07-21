@@ -1,6 +1,6 @@
 //! Isolated validation of the fused non-native subtract `(a − b − c) mod p` over
-//! secp256k1's base field (3×86-bit limbs). Low-level bignum primitive demo: the
-//! inputs are field-valued limb arrays passed natively as decimal strings.
+//! secp256k1's base field (3×86-bit limbs). Inputs are field-valued limb arrays
+//! passed as decimal strings.
 #![cfg_attr(xark, no_std)]
 
 use xark::{circuit, require_eq, Field, Private, Public};

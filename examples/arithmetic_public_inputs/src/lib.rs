@@ -2,7 +2,6 @@
 
 use xark::{circuit, require_eq, Field, Private, Public};
 
-// arithmetic_public_inputs: require(x * y + x + y == out).
 #[circuit]
 pub fn arithmetic_public_inputs(x: Private<Field>, y: Private<Field>, out: Public<Field>) {
     require_eq(x * y + x + y, out);

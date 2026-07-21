@@ -2,8 +2,7 @@
 
 use xark::{circuit, require_eq, Field, Private, Public};
 
-// multi_function: require(square(x) == y) with a separate helper
-// function (xark inlines cross-function MIR).
+// require(square(x) == y) via a helper (xark inlines cross-function MIR).
 #[inline(never)]
 fn square(x: Field) -> Field {
     x * x
@@ -20,7 +19,6 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        // square(6) = 36
         multi_function("6".into(), "36".into()).unwrap();
     }
 

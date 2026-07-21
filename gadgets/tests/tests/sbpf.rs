@@ -43,11 +43,13 @@ fn flag_bit_mutation_onchain() {
     data[63] ^= 0x80; // flip the unused top flag bit of -A.y
 
     // Unmodified data still verifies under strict (sanity).
-    assert!(verify_proof_only_strict(
-        fixtures::ARITHMETIC_SQUARE_VK_LE,
-        fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA,
-    )
-    .unwrap());
+    assert!(
+        verify_proof_only_strict(
+            fixtures::ARITHMETIC_SQUARE_VK_LE,
+            fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA,
+        )
+        .unwrap()
+    );
 
     // Non-strict: the syscall masks the flag bit, so the mutated bytes verify.
     assert!(verify_proof_only(fixtures::ARITHMETIC_SQUARE_VK_LE, &data).unwrap());
@@ -109,8 +111,10 @@ fn blake3_basic() {
 
 #[svm_test]
 fn curve_basic() {
-    assert!(fixtures::CURVE_BASIC_VK
-        .verify(&fixtures::CURVE_BASIC_PROOF, &fixtures::CURVE_BASIC_INPUTS));
+    assert!(
+        fixtures::CURVE_BASIC_VK
+            .verify(&fixtures::CURVE_BASIC_PROOF, &fixtures::CURVE_BASIC_INPUTS)
+    );
 }
 
 #[svm_test]
@@ -188,8 +192,10 @@ fn poseidon_basic() {
 
 #[svm_test]
 fn range_basic() {
-    assert!(fixtures::RANGE_BASIC_VK
-        .verify(&fixtures::RANGE_BASIC_PROOF, &fixtures::RANGE_BASIC_INPUTS));
+    assert!(
+        fixtures::RANGE_BASIC_VK
+            .verify(&fixtures::RANGE_BASIC_PROOF, &fixtures::RANGE_BASIC_INPUTS)
+    );
 }
 
 #[svm_test]

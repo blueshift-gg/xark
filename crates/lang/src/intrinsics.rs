@@ -1,60 +1,31 @@
 //! Compiler intrinsics: the ABI between circuit library code and the `xark`
 //! compiler.
 //!
-//! # What an intrinsic *is*
-//!
 //! An intrinsic is a plain `#[inline(never)]` function whose body is `loop {}`
-//! and is **never executed**. It exists only as a marker the compiler
-//! recognizes: [`build_call_registry`] (in `lower_mir.rs`) enumerates this
-//! module's functions and maps each `__xark_*` stub — by its exact name, against
-//! this known module — to a [`KnownCall`] variant, producing a `DefId → KnownCall`
-//! table. [`classify_call`] is then an exact `DefId` lookup, and `lower_call` has
-//! one arm per variant that emits the real R1CS / witness-generation effect.
-//! Compilation stops after MIR extraction, so the `loop {}` never runs — it is
-//! just the intended shape of an unreachable marker.
+//! and is **never executed** — it is only a marker the compiler recognizes by
+//! *exact name* (`build_call_registry` maps each `__xark_*` stub to a
+//! `KnownCall`, and `lower_call` emits the real R1CS / witness-gen effect).
+//! Compilation stops after MIR extraction, so `loop {}` never runs. `#[inline(never)]`
+//! keeps the marker call intact for the driver to see. A stub must keep its name
+//! but may move modules freely; `lang.rs` wrappers reach it via inlining.
 //!
-//! Recognition is by `DefId`, resolved once from this module, so a `__xark_*`
-//! stub must keep its exact name (the registry keys on it) but may move modules
-//! freely. These functions live here (rather than inline in `lang.rs`) purely to
-//! gather the compiler ABI in one documented place; `lang.rs`'s `Field` operator
-//! impls and `hint_*` methods call them via `use crate::intrinsics::*`, and the
-//! compiler reaches the intrinsic by *inlining* those thin wrappers.
-//!
-//! [`build_call_registry`]: crate::lower_mir::build_call_registry
-//! [`classify_call`]: crate::lower_mir::CallRegistry::classify
-//! [`KnownCall`]: crate::lower_mir::KnownCall
-//!
-//! # Two families
-//!
-//! **Constraint intrinsics** lower *directly* to R1CS: they emit constraints
-//! (and/or fold into a linear combination) that fully define their result. On
-//! their own they are sound — the returned wire is pinned by the emitted
-//! constraints (or is a pure linear combination of already-pinned wires).
-//!
-//! **Hint intrinsics** are the "compute out-of-circuit, verify in-circuit"
-//! pattern. They allocate a fresh private witness (advice) and record a
-//! `WitnessGen` step (see `crates/ir/src/solver.rs`) so the *solver* can
-//! compute the value natively (an inverse, a bit, a division, a non-native
-//! reduction). The emitted advice is **unconstrained on its own**: the *caller*
-//! must add the constraints that pin it (e.g. `hint_inverse(x)` returns `w`, and
-//! the caller must require `x·w == 1`). The typed `Field::…` wrappers in
-//! `lang.rs` (`inv`, `to_bits`, `Bignum::mul`, …) are the safe forms that pair
-//! each hint with its pinning constraints.
+//! Two families:
+//! - **Constraint intrinsics** lower *directly* to R1CS: they emit constraints
+//!   that fully define their result, so they are sound on their own.
+//! - **Hint intrinsics** ("compute out-of-circuit, verify in-circuit") allocate
+//!   fresh advice and record a `WitnessGen` step so the solver can compute the
+//!   value. The advice is **unconstrained on its own** — the *caller* must add
+//!   the pinning constraints (e.g. `hint_inverse(x)` returns `w`; caller requires
+//!   `x·w == 1`). The typed `Field::…` wrappers in `lang.rs` are the safe forms.
 
-// The intrinsic stubs below are recognized by the compiler by name and never
-// run; their `loop {}` bodies are the intended marker shape.
+// Marker bodies are `loop {}` (never executed); this allow justifies that shape.
 #![allow(clippy::empty_loop)]
 
 use crate::lang::Field;
 
-// ---------------------------------------------------------------------------
 // Constraint intrinsics — lower directly to R1CS.
-// ---------------------------------------------------------------------------
 
-/// Field addition `a + b`. Maps to [`KnownCall::Add`]; lowers to the linear
-/// combination `a + b` with **no constraint**.
-///
-/// [`KnownCall::Add`]: crate::lower_mir::KnownCall::Add
+/// Field addition `a + b`; lowers to the linear combination `a + b`, no constraint.
 #[inline(never)]
 pub fn __xark_add(_lhs: Field, _rhs: Field) -> Field {
     loop {}

@@ -18,7 +18,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{require_eq, Field, Transparent};
+use xark::{Field, Transparent, require_eq};
 
 // The Ed25519 curve: base field p = 2^255 − 19, scalar order L, constant d.
 xark_curve::edwards! {
@@ -80,8 +80,9 @@ fn assert_scalar_below_order(bits: [Field; 256]) {
 // reduction). Alongside the affine macro gadget above. Point = [X,Y,Z,T].
 // ===========================================================================
 use xark_bignum::{
-    ext_add_25519 as eadd, ext_double_25519 as edbl, finalize_25519 as fin, modulus_limbs,
-    mul_lazy_25519 as mul, range_check_limbs, weak_reduce_25519 as wr, D_25519, P_25519_L as PL,
+    D_25519, P_25519_L as PL, ext_add_25519 as eadd, ext_double_25519 as edbl,
+    finalize_25519 as fin, modulus_limbs, mul_lazy_25519 as mul, range_check_limbs,
+    weak_reduce_25519 as wr,
 };
 
 type L3 = [Field; 3];
@@ -213,11 +214,7 @@ fn dsm_l(bits1: [Field; 256], p1: Ext, bits2: [Field; 256], p2: Ext) -> Ext {
         let mut j = 0usize;
         while j < 4usize {
             table[i * 4 + j] = if i == 0 {
-                if j == 0 {
-                    id_e()
-                } else {
-                    jp2[j - 1]
-                }
+                if j == 0 { id_e() } else { jp2[j - 1] }
             } else if j == 0 {
                 jp1[i - 1]
             } else {
@@ -367,7 +364,7 @@ mod host {
         let y2 = (&y * &y) % &p;
         let u = (&y2 + &p - 1u32) % &p; // y² − 1
         let v = (&d() * &y2 + 1u32) % &p; // d·y² + 1
-                                          // x = (u/v)^((p+3)/8) via x = u·v³·(u·v⁷)^((p−5)/8)
+        // x = (u/v)^((p+3)/8) via x = u·v³·(u·v⁷)^((p−5)/8)
         let v3 = v.modpow(&BigUint::from(3u32), &p);
         let v7 = v.modpow(&BigUint::from(7u32), &p);
         let pw = ((&u * &v7) % &p).modpow(&((&p - 5u32) / 8u32), &p);

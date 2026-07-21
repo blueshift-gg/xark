@@ -2,7 +2,6 @@
 
 use xark::{circuit, require_eq, Field, Private, Public};
 
-// arithmetic_square: require(x * x == y).
 #[circuit]
 pub fn arithmetic_square(x: Private<Field>, y: Public<Field>) {
     require_eq(x * x, y);

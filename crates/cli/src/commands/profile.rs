@@ -1,18 +1,14 @@
-//! `xark profile <dir>` — attribute every R1CS constraint back to the user's
-//! source line, the function call-chain that produced it, and its kind, then print
-//! a sorted drill-down so the author sees which lines cost the most constraints.
+//! `xark profile <dir>` — attribute every R1CS constraint back to its source
+//! line, call-chain, and kind, then print a drill-down sorted by cost.
 //!
-//! This builds the circuit with the extractor's `--profile` flag (which writes a
-//! **separate** `profile.json`, leaving `r1cs.json` / `circuit.json`
-//! byte-identical), then aggregates that attribution: group by user `(file,
-//! line)` → within each, by function `chain` → by [`ConstraintKind`], summing
-//! counts. Lines are sorted by total cost descending; chains within a line
-//! likewise.
+//! Builds with the extractor's `--profile` flag (writes a separate `profile.json`,
+//! leaving `r1cs.json` / `circuit.json` byte-identical), then groups by `(file,
+//! line)` → `chain` → [`ConstraintKind`], summing counts.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use serde_json::json;
 
@@ -73,8 +69,6 @@ pub fn run(args: ProfileArgs) -> Result<()> {
     }
     Ok(())
 }
-
-// --- aggregation -------------------------------------------------------------
 
 /// The aggregated drill-down: per user line, per function chain, per kind.
 struct Aggregate {
@@ -234,8 +228,6 @@ fn read_source_line(
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
 }
-
-// --- rendering ---------------------------------------------------------------
 
 /// Truncate `s` to `max` display chars, appending `…` when cut.
 fn truncate(s: &str, max: usize) -> String {

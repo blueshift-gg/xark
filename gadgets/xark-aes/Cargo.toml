@@ -1,7 +1,11 @@
 [package]
 name = "xark-aes"
+description = "AES-128/256 block cipher, CTR, and GCM gadgets for xark zero-knowledge circuits."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 
@@ -10,11 +14,11 @@ name = "xark_aes"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", default-features = false }
+xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness" }
-xark-ir = { path = "../../crates/ir" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.0.1" }
+xark-ir = { path = "../../crates/ir", version = "0.0.1" }
 # Independent reference for the GCM GF(2^128) field (GHASH): `GHash::new(H).update(Y)`
 # = Y·H, exactly the `gf128_mul` we validate.
 ghash = "0.5"

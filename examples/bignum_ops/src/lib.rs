@@ -1,12 +1,8 @@
 //! Operator syntax for non-native fields. `xark_bignum::fp!` defines a field-element
-//! type from just its modulus (limbs / `m − 1` / complement derived), with
-//! `core::ops` (`+`, `-`, `*`, unary `-`) on it and `.inverse()`/`.sub2()`/… on it.
-//! Zero-cost: the operators forward to the width-generic free functions.
-//!
-//! Each `Private<El>` is a first-class **typed circuit input**: on the host it is a
-//! single whole number (a decimal or `0x`-hex string), split into its 3 limbs
-//! (`a.limbs[0..2]`) automatically by the `fp!`-generated `NativeInput` — the
-//! caller never thinks in limbs.
+//! type from just its modulus, with zero-cost `core::ops` (`+`, `-`, `*`, unary `-`)
+//! and `.inverse()`/`.sub2()`/… forwarding to the width-generic free functions. Each
+//! `Private<El>` is a typed circuit input — a single whole number on the host, split
+//! into its 3 limbs automatically by the `fp!`-generated `NativeInput`.
 #![cfg_attr(xark, no_std)]
 
 use xark::{circuit, require_eq, Field, Private, Public};
@@ -16,7 +12,6 @@ xark_bignum::fp!(El, "41904174945551648470736051755806485464313947085173149");
 
 #[circuit]
 pub fn bignum_ops(a: Private<El>, b: Private<El>, out: Public<Field>) {
-    // Natural operator syntax on non-native field elements.
     let r = a * b + a - b;
     require_eq(r.limbs[0], out);
 }

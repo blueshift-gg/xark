@@ -1,7 +1,6 @@
-//! AES-256-CTR over an arbitrary-length message — the 256-bit-key counter mode.
-//! Same structure as `examples/aes_ctr` (AES-128-CTR); the block cipher is AES-256
-//! (14 rounds, 32-byte key). The 20-byte message spans two blocks (16 + a 4-byte
-//! tail) to exercise the partial-final-block path.
+//! AES-256-CTR over an arbitrary-length message. Same structure as
+//! `examples/aes_ctr`, but AES-256 (14 rounds, 32-byte key). The 20-byte message
+//! spans two blocks (16 + a 4-byte tail) to exercise the partial-final-block path.
 #![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;

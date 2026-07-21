@@ -1,17 +1,9 @@
-//! Ed25519 signature verification as a `#[circuit]`: a succinct proof that a
-//! signature satisfies the EdDSA equation `[S]·B == R + [k]·A` (sound lazy
-//! extended-coordinate path, ~2.36M constraints vs the affine gadget's 4.55M).
-//! Inputs are transparent compound types you pass straight through — no limbs:
-//!
-//! ```ignore
-//! pubkey.verify(sig, digest);
-//! ```
-//!
-//! `PointL` = the **compressed** 32-byte public key `A` (decompressed to `x`/`y`
-//! 3×85-bit limbs on the host), `Signature` = `(R, S)` (`[u8; 64]` = compressed
-//! `R ‖ big-endian S`), `Scalar` = the challenge `k = SHA-512(R ‖ A ‖ M) mod L`
-//! (a prover-supplied witness derived from the signature, so a prover still
-//! provides only the signature).
+//! Ed25519 signature verification as a `#[circuit]`: a succinct proof that the
+//! EdDSA equation `[S]·B == R + [k]·A` holds, via a sound lazy extended-coordinate
+//! path (~2.36M constraints vs the affine gadget's 4.55M). Inputs pass straight
+//! through: `PointL` = compressed 32-byte pubkey `A`, `Signature` = `(R, S)` as
+//! `[u8; 64]` (compressed `R ‖ big-endian S`), `Scalar` = the challenge
+//! `k = SHA-512(R ‖ A ‖ M) mod L` (a prover-supplied witness).
 #![cfg_attr(xark, no_std)]
 
 use xark_ed25519::prelude::*;
@@ -29,9 +21,8 @@ mod tests {
 
     const MSG: &[u8] = b"xark ed25519 eddsa vector";
 
-    /// `(pubkey, sig)` from a real signature: `pubkey` = compressed public key `A`,
-    /// `sig` = `[u8; 64]` = compressed `R ‖ big-endian S` (the transparent
-    /// `Signature`'s native form).
+    /// `(pubkey, sig)` from a real signature: compressed `A` and `[u8; 64]`
+    /// (compressed `R ‖ big-endian S`).
     fn parts() -> ([u8; 32], [u8; 64]) {
         let sk = SigningKey::from_bytes(&[0x42u8; 32]);
         let pubkey = sk.verifying_key().to_bytes();

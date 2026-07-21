@@ -1,8 +1,6 @@
 //! Assert an Ed25519 point `q = (x, y)` lies on the twisted-Edwards curve
-//! `−x² + y² = 1 + d·x²·y²`, as a `#[circuit]`. This is the `enforce_on_curve`
-//! check `eddsa_verify` runs on its `A`/`R` point inputs. `Point` is the
-//! transparent compact uncompressed `[u8; 64]` (`x ‖ y`) type; the test uses the
-//! Ed25519 basepoint as a known on-curve point.
+//! `−x² + y² = 1 + d·x²·y²`, as a `#[circuit]` (the `enforce_on_curve` check
+//! `eddsa_verify` runs on `A`/`R`). `Point` is the compact `[u8; 64]` `x ‖ y` type.
 #![cfg_attr(xark, no_std)]
 
 use xark::{circuit, Public};

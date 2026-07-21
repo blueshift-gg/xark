@@ -14,14 +14,14 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::G1Affine;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
 use clap::{Args, Subcommand};
 use rand::rngs::OsRng;
 
 use xark_backend::ceremony::{
-    contribute, verify_chain, verify_keys_consistent_with_chain, Contribution,
+    Contribution, contribute, verify_chain, verify_keys_consistent_with_chain,
 };
 use xark_backend::keys::{Groth16Keys, KeyMetadata};
 use xark_backend::ptau::parse_ptau;

@@ -11,15 +11,12 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{require_eq, Field};
+use xark::{Field, require_eq};
 
-// ===========================================================================
-// 32-bit word layer (little-endian bit index: bits[i] has weight 2^i).
-//
-// This is the building block for word-oriented hashes like SHA-256. Bitwise
-// ops work bit-by-bit on `[Field; 32]`; rotations/shifts are pure re-wiring
-// (zero gates/constraints); `add32` is modular addition via carry decomposition.
-// ===========================================================================
+// 32-bit word layer (little-endian bit index: bits[i] has weight 2^i), the
+// building block for SHA-256-style hashes. Bitwise ops are bit-by-bit on
+// `[Field; 32]`; rotations/shifts are pure re-wiring (zero gates); `add32` is
+// modular addition via carry decomposition.
 
 pub fn and32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
     let mut out = [Field::from(0u8); 32];
@@ -98,7 +95,7 @@ pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
     let mut bits = [Field::from(0u8); 33];
     let mut i = 0usize;
     while i < 33 {
-        bits[i] = Field::hint_bit(sum, i); // witness-gen: bits[i] = bit(sum, i)
+        bits[i] = Field::hint_bit(sum, i);
         i += 1;
     }
     let mut i = 0usize;
@@ -142,7 +139,7 @@ pub fn add3(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
     let mut bits = [Field::from(0u8); 34];
     let mut i = 0usize;
     while i < 34 {
-        bits[i] = Field::hint_bit(sum, i); // witness-gen: bits[i] = bit(sum, i)
+        bits[i] = Field::hint_bit(sum, i);
         i += 1;
     }
     let mut i = 0usize;
@@ -170,11 +167,8 @@ pub fn add3(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
     out
 }
 
-// ===========================================================================
-// 64-bit word layer (for Keccak-f[1600] and other 64-bit-lane primitives).
-// Same conventions as the 32-bit layer: little-endian bit index (bits[i] has
-// weight 2^i). Keccak uses only XOR / AND / NOT / rotations (no additions).
-// ===========================================================================
+// 64-bit word layer (Keccak-f[1600] and other 64-bit lanes). Same little-endian
+// conventions as the 32-bit layer. Keccak uses only XOR/AND/NOT/rotations.
 
 /// Decompose `x` into its 64 little-endian bits (boolean-constrained + pinned).
 pub fn to_bits64(x: Field) -> [Field; 64] {
@@ -268,9 +262,7 @@ pub fn rotr64(a: [Field; 64], n: usize) -> [Field; 64] {
     out
 }
 
-// ===========================================================================
 // Word-array helpers shared by the SHA-256-family hashes (SHA-256/BLAKE2s/BLAKE3).
-// ===========================================================================
 
 /// Read the `t`-th 32-bit word out of an `N`-word array (a constant-indexed
 /// copy of `arr[t]`).

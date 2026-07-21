@@ -2,11 +2,10 @@
 //!
 //! # Wire format
 //!
-//! The Solana `alt_bn128` group-op syscall has explicit little-endian
-//! variants (selected with the `0x80` flag). This crate's wire format is LE
-//! end-to-end: every `Fq` and `Fr` element is encoded as a 32-byte
-//! little-endian limb, so the bytes go straight to the syscall without
-//! conversion. All curve arithmetic is delegated to [`solana_nostd_alt_bn128`].
+//! LE end-to-end: every `Fq`/`Fr` element is a 32-byte little-endian limb, so
+//! bytes go straight to the Solana `alt_bn128` group-op syscall (LE variant,
+//! `0x80` flag) without conversion. Curve arithmetic is delegated to
+//! [`solana_nostd_alt_bn128`].
 //!
 //! ```text
 //! vk_bytes : alpha (G1, 64 B)
@@ -20,30 +19,28 @@
 //!
 //! * G1 = `x || y` where each coord is 32 B LE Fq.
 //! * G2 = `x.c0 || x.c1 || y.c0 || y.c1` where each Fq is 32 B LE.
-//! * `proof.A` is pre-negated by the exporter so the program doesn't have
-//!   to do a modular subtraction inside the syscall path.
+//! * `proof.A` is pre-negated by the exporter to avoid a modular subtraction
+//!   inside the syscall path.
 //!
 //! # Public-input linear combination
 //!
-//! `vk_x = ic[0] + Σ inputs[i] · ic[i+1]`, computed via the G1 mul + add
-//! syscalls. Final pairing check:
+//! `vk_x = ic[0] + Σ inputs[i] · ic[i+1]`, via the G1 mul + add syscalls.
+//! Final pairing check:
 //!
 //! ```text
 //! e(-A, B) · e(α, β) · e(vk_x, γ) · e(C, δ) == 1
 //! ```
 //!
-//! evaluated as a single multi-pair call with 4 × 192 = 768 input bytes.
+//! evaluated as a single multi-pair call (4 × 192 = 768 input bytes).
 //!
 //! # BN254 backend
 //!
-//! All curve arithmetic goes through [`solana_nostd_alt_bn128`], whose
-//! `G1Point` / `G2Point` operators and [`pairing`] resolve to the
-//! `alt_bn128` syscalls on `target_os = "solana"` and to an Arkworks
-//! reference implementation off-chain. The same [`verify_groth16`] code
-//! therefore runs unchanged in host tests and on-chain — no backend
-//! abstraction, and nothing but `core` is linked into the SBF build.
+//! [`solana_nostd_alt_bn128`]'s `G1Point`/`G2Point` operators and [`pairing`]
+//! resolve to the `alt_bn128` syscalls on `target_os = "solana"` and to an
+//! Arkworks reference off-chain, so the same [`verify_groth16`] runs unchanged
+//! in host tests and on-chain; only `core` is linked into the SBF build.
 
-use solana_nostd_alt_bn128::{pairing, AltBn128Error, G1Point, G2Point};
+use solana_nostd_alt_bn128::{AltBn128Error, G1Point, G2Point, pairing};
 use solana_program_error::ProgramError;
 
 // -- byte-layout constants ----------------------------------------------------
@@ -61,16 +58,15 @@ pub const PROOF_BYTES: usize = G1_BYTES + G2_BYTES + G1_BYTES;
 /// Fixed-size prefix of the VK: `alpha || beta || gamma || delta`.
 pub const VK_FIXED_PREFIX_BYTES: usize = G1_BYTES + 3 * G2_BYTES;
 
-/// BN254 scalar field order `r`, little-endian
-/// (`0x30644e72…f0000001`). Public-input scalars must be *canonical* —
-/// strictly less than `r`.
+/// BN254 scalar field order `r`, little-endian (`0x30644e72…f0000001`).
+/// Public-input scalars must be *canonical* — strictly less than `r`.
 ///
-/// Without this check the encodings `v`, `v + r`, `v + 2r`, … all reduce to
-/// the same field element and so verify against the same proof. A caller could
-/// then present one proof under several distinct 32-byte public-input values;
-/// a program that reads a public input as an integer (nullifier, amount, root,
-/// …) would see a different value than the proof actually attests to. So we
-/// reject any non-canonical public input up front.
+/// Without this check `v`, `v + r`, `v + 2r`, … all reduce to the same field
+/// element and verify against the same proof, so a caller could present one
+/// proof under several distinct 32-byte public-input values. A program reading
+/// a public input as an integer (nullifier, amount, root, …) would then see a
+/// different value than the proof attests to. Reject non-canonical inputs up
+/// front.
 const FR_MODULUS_LE: [u8; FR_BYTES] = [
     0x01, 0x00, 0x00, 0xf0, 0x93, 0xf5, 0xe1, 0x43, 0x91, 0x70, 0xb9, 0x79, 0x48, 0xe8, 0x33, 0x28,
     0x5d, 0x58, 0x81, 0x81, 0xb6, 0x45, 0x50, 0xb8, 0x29, 0xa0, 0x31, 0xe1, 0x72, 0x4e, 0x64, 0x30,
@@ -81,11 +77,11 @@ const FR_MODULUS_LE: [u8; FR_BYTES] = [
 /// also forces the two unused top bits of the 32-byte limb to zero.
 ///
 /// The `alt_bn128` syscall (and its Arkworks host reference) **mask** those top
-/// bits when decoding a point — so without an explicit check, the encodings
-/// `c`, `c + q`, … and any value with the unused top bits flipped all decode to
-/// the *same* point and verify against the same proof. That is proof/VK
-/// encoding malleability: a third party can mangle a valid proof's bytes and it
-/// still verifies. The `*_strict` entry points reject it.
+/// bits when decoding, so without an explicit check `c`, `c + q`, … and any
+/// value with the unused top bits flipped all decode to the *same* point and
+/// verify against the same proof — proof/VK encoding malleability, where a
+/// third party mangles a valid proof's bytes and it still verifies. The
+/// `*_strict` entry points reject it.
 const FQ_MODULUS_LE: [u8; FR_BYTES] = [
     0x47, 0xfd, 0x7c, 0xd8, 0x16, 0x8c, 0x20, 0x3c, 0x8d, 0xca, 0x71, 0x68, 0x91, 0x6a, 0x81, 0x97,
     0x5d, 0x58, 0x81, 0x81, 0xb6, 0x45, 0x50, 0xb8, 0x29, 0xa0, 0x31, 0xe1, 0x72, 0x4e, 0x64, 0x30,
@@ -119,10 +115,9 @@ pub(crate) fn fq_is_canonical(c: &[u8; FR_BYTES]) -> bool {
 
 /// `true` iff every 32-byte little-endian field element in `bytes` is a
 /// canonical `Fq` coordinate (`< q`). `bytes` is a concatenation of 32-byte
-/// coordinates — a single G1/G2 point, or a whole VK/proof blob, every byte of
-/// which is part of some coordinate. A trailing partial chunk (a malformed,
-/// non-multiple-of-32 length) is ignored here and caught by the structural
-/// checks in [`verify_groth16`].
+/// coordinates (a G1/G2 point or a whole VK/proof blob). A trailing partial
+/// chunk (a malformed non-multiple-of-32 length) is ignored here and caught by
+/// the structural checks in [`verify_groth16`].
 pub(crate) fn coords_canonical(bytes: &[u8]) -> bool {
     let mut c = [0u8; FR_BYTES];
     for chunk in bytes.chunks_exact(FR_BYTES) {
@@ -253,11 +248,10 @@ fn g2_at(buf: &[u8], off: usize) -> G2Point {
 
 // -- curve-op wrappers (Kani stub seam) ---------------------------------------
 //
-// Thin `#[inline(always)]` wrappers around the BN254 backend's `Mul` / `Add`
-// / `pairing` calls. Production code is identical post-inlining (LLVM erases
-// the wrappers), but they give Kani a stable, nominal function path to swap
-// via `#[kani::stub(super::g1_scalar_mul, …)]`. Without them, stubbing the
-// trait-method / const-generic callsites is awkward.
+// Thin `#[inline(always)]` wrappers around the BN254 backend's `Mul`/`Add`/
+// `pairing`. LLVM erases them post-inlining (production codegen is identical),
+// but they give Kani a stable nominal path to swap via `#[kani::stub(...)]`;
+// stubbing the trait-method / const-generic callsites directly is awkward.
 
 #[inline(always)]
 fn g1_scalar_mul(p: G1Point, s: &[u8; FR_BYTES]) -> Result<G1Point, AltBn128Error> {
@@ -590,22 +584,13 @@ mod proofs {
     // -------------------------------------------------------------------------
     // Fail-closed, strict non-malleability, arity.
     //
-    // These harnesses exercise the parse path of `verify_groth16` /
-    // `verify_groth16_strict` and rely on the fact that every structural error
-    // path early-exits *before* any `alt_bn128` curve operation runs. That lets
-    // us prove them without stubbing the BN254 backend: the curve ops are
-    // unreachable on the error paths these harnesses cover.
-    //
-    // Totality over the *full* `verify_groth16` body (i.e. proving
-    // no panic for an *accepted* input — where the curve ops *do* run) is
-    // discharged separately by the `verify_groth16_totality_n{0,1,2}` and
-    // `totality_verify_groth16` / `totality_verify_proof_only` harnesses
-    // below, which stub `g1_scalar_mul` / `g1_add` / `g16_pairing` so Kani
-    // doesn't have to symbolically execute the BN254 pairing/scalar-mul.
-    //
-    // All harnesses bound `N` (= public-input count) to a small concrete value
-    // so Kani's enumeration stays tractable. The verifier code is uniform in
-    // `N`, so each bounded harness witnesses the general property.
+    // These exercise the parse path of `verify_groth16` / `verify_groth16_strict`;
+    // every structural error path early-exits *before* any `alt_bn128` curve op,
+    // so they prove without stubbing the backend (the curve ops are unreachable
+    // here). Totality over the full body (no panic for an *accepted* input, where
+    // the curve ops do run) is discharged separately by the stubbed totality
+    // harnesses below. `N` is bounded to small concrete values; the code is
+    // uniform in `N`, so each bounded harness witnesses the general property.
     // -------------------------------------------------------------------------
 
     /// **Fail-closed: a `proof_bytes` length other than 256 always returns
@@ -780,27 +765,21 @@ mod proofs {
     }
 
     // -------------------------------------------------------------------------
-    // Totality (no panic) over the FULL verify_groth16 body,
-    // including the curve ops, with kani::stub replacing the BN254 operators.
+    // Totality (no panic) over the FULL verify_groth16 body including the curve
+    // ops, with kani::stub replacing the BN254 operators.
     //
-    // The curve ops (G1Point::Mul, G1Point::Add, pairing) resolve to the
-    // alt_bn128 syscall on-chain and the Arkworks fallback off-chain — neither
-    // is symbolically executable inside Kani's budget. The harnesses route
-    // every call site through three #[inline(always)] wrappers
-    // (g1_scalar_mul, g1_add, g16_pairing, defined above) and swap them out
-    // with kani::stub replacements that return unconstrained
-    // Result<_, AltBn128Error>. Production codegen is byte-identical.
+    // The curve ops (G1Point::Mul/Add, pairing) resolve to the alt_bn128 syscall
+    // on-chain / Arkworks off-chain — neither is symbolically executable in
+    // Kani's budget. Every call site routes through the three #[inline(always)]
+    // wrappers above, swapped for kani::stub replacements returning unconstrained
+    // Result<_, AltBn128Error>; production codegen is byte-identical.
     //
-    // What this proves: panic freedom of the Rust around the curve ops on any
-    // backend behaviour. What it does NOT prove: anything about the *value* of
-    // the boolean return (Layer C — Groth16 soundness — out of scope), nor
-    // that successful curve ops produce on-curve points (orthogonal to panic
-    // freedom).
+    // Proves: panic freedom of the Rust around the curve ops on any backend
+    // behaviour. Does NOT prove: the *value* of the boolean return (Groth16
+    // soundness — out of scope), nor that curve ops yield on-curve points.
     //
-    // N (= public-input count) is bounded to {0, 1, 2}. The body is uniform
-    // in N (the only N-dependent path is the IC accumulator loop, whose body
-    // is identical per iteration), so the three values witness {empty,
-    // single-iter, multi-iter} loop patterns.
+    // N is bounded to {0, 1, 2} — empty / single-iter / multi-iter of the only
+    // N-dependent path (the IC accumulator loop), whose body is per-iter uniform.
     // -------------------------------------------------------------------------
 
     /// Stub replacement for `g1_scalar_mul`. Returns an unconstrained Result:
@@ -934,31 +913,24 @@ mod proofs {
 
         let pairs = g16_assemble_pairs(a, b, alpha, beta, vk_x, gamma, c, delta);
 
-        assert!(pairs[0].0 .0 == a_bytes && pairs[0].1 .0 == b_bytes);
-        assert!(pairs[1].0 .0 == alpha_bytes && pairs[1].1 .0 == beta_bytes);
-        assert!(pairs[2].0 .0 == vk_x_bytes && pairs[2].1 .0 == gamma_bytes);
-        assert!(pairs[3].0 .0 == c_bytes && pairs[3].1 .0 == delta_bytes);
+        assert!(pairs[0].0.0 == a_bytes && pairs[0].1.0 == b_bytes);
+        assert!(pairs[1].0.0 == alpha_bytes && pairs[1].1.0 == beta_bytes);
+        assert!(pairs[2].0.0 == vk_x_bytes && pairs[2].1.0 == gamma_bytes);
+        assert!(pairs[3].0.0 == c_bytes && pairs[3].1.0 == delta_bytes);
     }
 
     // -------------------------------------------------------------------------
-    // Named aliases for totality and operand assembly.
+    // Named aliases for totality and operand assembly. The N-parameterised
+    // harnesses above discharge totality; these give the single-entry-point names:
     //
-    // The N-parameterised totality harnesses above (verify_groth16_totality_n0/
-    // n1/n2 and the strict variants) discharge totality for verify_groth16
-    // and verify_groth16_strict. The three harnesses below provide the
-    // single-entry-point names:
-    //
-    //   * totality_verify_groth16     — totality of the public verify_groth16
-    //                                   entry point on accepted-input shape.
-    //   * totality_verify_proof_only  — totality of verify_proof_only's split
-    //                                   wrapper plus its downstream verify_groth16.
-    //   * pairing_operand_assembly    — byte-level concatenation check that the
-    //                                   buffer presented to the alt_bn128_pairing
-    //                                   syscall equals
+    //   * totality_verify_groth16     — verify_groth16 on accepted-input shape.
+    //   * totality_verify_proof_only  — verify_proof_only's split wrapper plus
+    //                                   its downstream verify_groth16.
+    //   * pairing_operand_assembly    — byte-level check that the buffer handed
+    //                                   to alt_bn128_pairing equals
     //                                   neg(A) || B || α || β || vk_x || γ || C || δ.
     //
-    // All three use the same g1_scalar_mul / g1_add / g16_pairing stubs as the
-    // N-parameterised totality block above.
+    // Same g1_scalar_mul / g1_add / g16_pairing stubs as the block above.
     // -------------------------------------------------------------------------
 
     /// **Totality of `verify_groth16` over an accepted-input

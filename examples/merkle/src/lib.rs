@@ -1,10 +1,8 @@
-//! Merkle-tree membership as a circuit: prove a `leaf` sits at the position
+//! Merkle-tree membership as a circuit: prove a `leaf` sits at position
 //! `index_bits` in a depth-4 Poseidon Merkle tree with the public `root`, given
-//! its authentication path `siblings`. The gadget folds the path and asserts the
-//! computed root equals the public one — the whole plumbing (per-level sibling
-//! mux, boolean-constrained direction bits, Poseidon compression) is hidden
-//! behind [`merkle_verify`]. The path values are field elements, passed natively
-//! as decimal strings (`[Field; 4]`).
+//! its authentication path `siblings`. [`merkle_verify`] folds the path (sibling
+//! mux, boolean-constrained direction bits, Poseidon compression) and asserts the
+//! computed root equals the public one.
 #![cfg_attr(xark, no_std)]
 
 use xark_merkle::prelude::*;
@@ -23,9 +21,8 @@ pub fn merkle(
 mod tests {
     use super::merkle;
 
-    // A concrete leaf, authentication path, and LSB-first position (0b0101 = left,
-    // right, left, right up the tree). The Poseidon root of this path was derived
-    // once by solving the circuit (see `xark-merkle`'s `vec` test), then pinned here.
+    // Concrete leaf, path, and LSB-first position (0b0101). The Poseidon root was
+    // derived once by solving the circuit (`xark-merkle`'s `vec` test), then pinned.
     const LEAF: &str = "7";
     const SIBLINGS: [&str; 4] = ["11", "22", "33", "44"];
     const INDEX_BITS: [&str; 4] = ["1", "0", "1", "0"];

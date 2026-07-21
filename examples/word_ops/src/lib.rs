@@ -5,7 +5,6 @@ use xark_bits::{add32, and32, rotr32, xor32};
 
 /// Exercises the 32-bit word gadget layer:
 /// `out == (rotr(a XOR b, 7) + (a AND b)) mod 2^32`.
-///
 /// Bitwise ops cost 1 gate/bit; rotations are free re-wiring; `add32` is modular
 /// addition via carry decomposition.
 #[circuit]
@@ -22,7 +21,6 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        // all-zero inputs → zero word
         word_ops("0".into(), "0".into(), "0".into()).unwrap();
     }
 

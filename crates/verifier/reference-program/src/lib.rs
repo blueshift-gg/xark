@@ -18,7 +18,7 @@
 
 use solana_program_entrypoint::entrypoint;
 use solana_program_error::ProgramError;
-use xark_verifier::{verify_groth16, FR_BYTES, PROOF_BYTES};
+use xark_verifier::{FR_BYTES, PROOF_BYTES, verify_groth16};
 
 entrypoint!(process_instruction);
 

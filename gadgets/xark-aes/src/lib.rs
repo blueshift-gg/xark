@@ -1,45 +1,23 @@
-//! `xark-aes`: an AES-128 (10 rounds) encryption gadget written entirely in the
-//! `xark` `Field` subset, building on the VERIFIED bit layer in `xark-bits`.
+//! `xark-aes`: AES-128/256 (block, CTR, and authenticated GCM) written in the
+//! `xark` `Field` subset. All modes are forward-only (stream encrypt == decrypt),
+//! so no inverse cipher is needed; GCM adds a GF(2¹²⁸) multiply-accumulate
+//! ([`gf128_mul`] → GHASH) for the authentication tag.
 //!
-//! Provides the single-block cipher ([`aes128_encrypt`] / [`aes128_encrypt_bytes`]),
-//! an arbitrary-length **counter mode** ([`aes128_ctr`]), and full authenticated
-//! **GCM** ([`aes128_gcm`]) — the AEAD used by TLS. All are forward-only (encrypt ==
-//! decrypt for the stream), so no inverse cipher is needed; GCM adds a GF(2¹²⁸)
-//! multiply-accumulate ([`gf128_mul`] → GHASH) for the authentication tag.
+//! A byte is a `[Field; 8]` of little-endian bits (bit `i` = coefficient of `x^i`
+//! in the GF(2^8) polynomial basis). State/round keys are flat `[[Field; 8]; N]`
+//! byte arrays: state uses FIPS-197 column-major index `row + 4*col`; the expanded
+//! key uses index `4*word + byte_in_word`, so round `k`'s byte `i` is `ek[16*k + i]`.
 //!
-//! ## Byte / state representation
+//! S-box: `affine(inv(b))` with the GF(2^8) inverse computed as `b^254`. The
+//! multiplicative group has order 255, so `b^254 = b^-1` for `b != 0` and
+//! `0^254 = 0`, meaning `b^254` IS the S-box inverse for all 256 bytes — no zero
+//! special-case, no advice/hint. `b^254` uses an Itoh–Tsujii addition chain; GF
+//! squaring is a linear (Frobenius) map so it is XOR-only, and the 4 general muls
+//! (64 AND gates each) dominate.
 //!
-//! A byte is a `[Field; 8]` of little-endian bits (bit `i` has weight `2^i`,
-//! i.e. bit `i` is the coefficient of `x^i` in the GF(2^8) polynomial basis).
-//! The AES state and round keys are flat `[[Field; 8]; N]` arrays of bytes:
-//!   * state  = `[[Field; 8]; 16]`, byte index `= row + 4*col` (FIPS-197 column
-//!     major; the input block loads directly, no permutation).
-//!   * key    = `[[Field; 8]; 16]`.
-//!   * expanded key = `[[Field; 8]; 176]`, byte index `= 4*word + byte_in_word`,
-//!     so round `k`'s round-key byte at state position `i` is `ek[16*k + i]`.
-//!
-//! ## S-box approach: GF(2^8) inverse via x^254 (approach A)
-//!
-//! The AES S-box is `affine(inv(b))` where `inv` is the GF(2^8) multiplicative
-//! inverse with `inv(0) = 0`. Since the multiplicative group has order 255,
-//! `b^254 = b^-1` for `b != 0`, and `0^254 = 0`, so **`b^254` IS the S-box
-//! inverse for all 256 bytes** — no zero special-case, no advice/hint needed.
-//! We compute `b^254` with an Itoh–Tsujii addition chain (4 general GF muls + 7
-//! GF squares). GF squaring is a *linear* (Frobenius) map over GF(2), so it uses
-//! only XOR gates (no AND / R1CS mult gates) and is cheap; the 4 general muls
-//! (64 AND gates each) dominate. The fixed GF(2)-affine map is XOR-only.
-//!
-//! Everything is straight-line: no data-dependent control flow; every `while`
-//! loop has a literal bound and is fully unrolled; selection is pure index
-//! arithmetic. All additions here are GF(2) XORs — never modular field adds.
-//!
-//! ## Cost model (only `var * var` products emit an R1CS mult gate)
-//!
-//! * `gf_mul` = 64 AND (mult) + 64 XOR + 28 reduction XOR.
-//! * `gf_square` = 13 XOR (closed-form linear map), 0 AND.
-//! * `gf_inv`   = 4 `gf_mul` + 7 `gf_square`.
-//! * `sbox`     = `gf_inv` + 32 XOR affine.
-//! * `xtime` = 3 XOR; MixColumns / AddRoundKey / ShiftRows are XOR-only / rewiring.
+//! Everything is straight-line: no data-dependent control flow, every `while` has
+//! a literal bound and is fully unrolled, selection is pure index arithmetic. All
+//! additions here are GF(2) XORs — never modular field adds.
 
 #![no_std]
 // Circuit-lowered gadget code: native `usize` index math is const-folded, but the
@@ -48,17 +26,15 @@
 #![allow(clippy::manual_div_ceil)]
 #![allow(clippy::manual_is_multiple_of)]
 
-use xark::{require_eq, Field};
+use xark::{Field, require_eq};
 
-// ===========================================================================
 // GF(2^8) arithmetic on `[Field; 8]` little-endian bit vectors.
 // Irreducible polynomial m(x) = x^8 + x^4 + x^3 + x + 1  (AES, 0x11B).
-// ===========================================================================
 
-/// Reduce a 15-coefficient GF(2) polynomial (product of two bytes) modulo the
-/// AES irreducible `m(x)`, returning the 8 low bits. Uses `x^8 ≡ x^4+x^3+x+1`:
-/// a coefficient at position `pos >= 8` folds (XORs) into positions
-/// `pos-8, pos-7, pos-5, pos-4`. Folding high→low so cascaded carries settle.
+/// Reduce a 15-coefficient GF(2) polynomial modulo the AES irreducible `m(x)`,
+/// returning the 8 low bits. Uses `x^8 ≡ x^4+x^3+x+1`: a coefficient at position
+/// `pos >= 8` folds (XORs) into positions `pos-8, pos-7, pos-5, pos-4`. Folds
+/// high→low so cascaded carries settle.
 fn gf_reduce(p_in: [Field; 15]) -> [Field; 8] {
     let mut p = [Field::from(0u8); 15];
     let mut i = 0usize;
@@ -68,7 +44,7 @@ fn gf_reduce(p_in: [Field; 15]) -> [Field; 8] {
     }
     let mut step = 0usize;
     while step < 7usize {
-        let pos = 14usize - step; // 14,13,...,8
+        let pos = 14usize - step;
         let t = p[pos];
         p[pos - 8] = p[pos - 8].xor(t);
         p[pos - 7] = p[pos - 7].xor(t);
@@ -94,7 +70,7 @@ pub fn gf_mul(a: [Field; 8], b: [Field; 8]) -> [Field; 8] {
         let mut j = 0usize;
         while j < 8usize {
             let prod = a[i] * b[j]; // boolean AND (1 R1CS mult gate)
-            p[i + j] = p[i + j].xor(prod); // XOR into the (i+j) coefficient
+            p[i + j] = p[i + j].xor(prod);
             j += 1;
         }
         i += 1;
@@ -103,9 +79,8 @@ pub fn gf_mul(a: [Field; 8], b: [Field; 8]) -> [Field; 8] {
 }
 
 /// GF(2^8) squaring: in characteristic 2 this is the linear Frobenius map
-/// `(Σ a_i x^i)^2 = Σ a_i x^{2i}` (cross terms vanish), so it is XOR-only (no AND
-/// gates). Closed form after reduction mod `m(x)` (derived once, validated
-/// against `gf_mul(a,a)` via the S-box table test):
+/// `(Σ a_i x^i)^2 = Σ a_i x^{2i}` (cross terms vanish), so it is XOR-only. Closed
+/// form after reduction mod `m(x)`, validated against `gf_mul(a,a)`.
 pub fn gf_square(a: [Field; 8]) -> [Field; 8] {
     let mut o = [Field::from(0u8); 8];
     o[0] = a[0].xor(a[4]).xor(a[6]);
@@ -187,10 +162,8 @@ fn bxor(a: [Field; 8], b: [Field; 8]) -> [Field; 8] {
     o
 }
 
-// ===========================================================================
-// Whole-byte reads from flat nested arrays (rebuilt bit-by-bit — reading a whole
-// inner `[Field; 8]` out of a nested array is not supported by the subset).
-// ===========================================================================
+// Whole-byte reads from nested arrays (rebuilt bit-by-bit — reading a whole inner
+// `[Field; 8]` out of a nested array is not supported by the subset).
 
 fn rd16(s: [[Field; 8]; 16], k: usize) -> [Field; 8] {
     let mut o = [Field::from(0u8); 8];
@@ -224,10 +197,8 @@ fn rdn<const M: usize>(s: [[Field; 8]; M], k: usize) -> [Field; 8] {
     o
 }
 
-// ===========================================================================
-// AES round operations. Each returns a fresh state (no in-place mutation of a
-// borrowed array; arrays are Copy and passed by value).
-// ===========================================================================
+// AES round operations. Each returns a fresh state (arrays are Copy, passed by
+// value — no in-place mutation of a borrowed array).
 
 /// SubBytes: apply the S-box to every state byte (16 S-boxes).
 fn sub_bytes(s: [[Field; 8]; 16]) -> [[Field; 8]; 16] {
@@ -319,9 +290,7 @@ fn add_round_key<const EK: usize>(
     o
 }
 
-// ===========================================================================
 // Key expansion: 44 words (176 bytes) from the 16-byte key.
-// ===========================================================================
 
 /// Round-constant byte for round `round` (1..=10) as an LE bit array.
 /// Rcon = [01,02,04,08,10,20,40,80,1b,36] for rounds 1..10 (only byte 0 of each
@@ -406,7 +375,7 @@ fn key_expansion(key: [[Field; 8]; 16]) -> [[Field; 8]; 176] {
     let mut round = 1usize;
     while round < 11usize {
         let base = 16usize * round; // byte index of word (4*round)
-                                    // temp = previous word W[4*round - 1] = ek[base-4 .. base]
+        // temp = previous word W[4*round - 1] = ek[base-4 .. base]
         let t0 = rd176(ek, base - 4usize);
         let t1 = rd176(ek, base - 3usize);
         let t2 = rd176(ek, base - 2usize);
@@ -508,7 +477,7 @@ fn key_expansion_256(key: [[Field; 8]; 32]) -> [[Field; 8]; 240] {
     let mut w = 8usize;
     while w < 60usize {
         let base = 4usize * w; // byte index of word w
-                               // temp = W[w-1] = bytes (base-4 .. base).
+        // temp = W[w-1] = bytes (base-4 .. base).
         let t0 = rdn(ek, base - 4usize);
         let t1 = rdn(ek, base - 3usize);
         let t2 = rdn(ek, base - 2usize);

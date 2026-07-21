@@ -48,14 +48,14 @@ use ark_ff::{Field, One, Zero};
 use ark_groth16::{ProvingKey, VerifyingKey};
 use ark_poly::{EvaluationDomain, GeneralEvaluationDomain};
 use ark_relations::gr1cs::{
-    ConstraintSynthesizer, ConstraintSystem, OptimizationGoal, SynthesisMode, R1CS_PREDICATE_LABEL,
+    ConstraintSynthesizer, ConstraintSystem, OptimizationGoal, R1CS_PREDICATE_LABEL, SynthesisMode,
 };
 use rand::RngCore;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
 use crate::keys::Groth16Keys;
-use crate::ptau::{check_ptau_covers_circuit, Phase2Error, PtauFile};
+use crate::ptau::{Phase2Error, PtauFile, check_ptau_covers_circuit};
 
 /// Run the phase-2 deterministic setup from `ptau` and `randomness_seed`.
 ///
@@ -143,13 +143,11 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
         beta_a_g1[i] += lambda_beta_g1[row];
     }
 
-    // For each constraint row, the row's sparse contributions to A, B, C affect
-    // the corresponding column's Lagrange-weighted sum. The row-major scatter
-    // writes to shared columns, so it can't be parallelized over rows without
-    // races; transpose each matrix to column-major once (cheap — one entry per
-    // nonzero), then compute every column's group sum independently across the
-    // rayon pool. This is the dominant cost of setup (millions of curve
-    // scalar-muls), so parallelizing it is what makes setup use all cores.
+    // The row-major scatter writes to shared columns, so it can't parallelize
+    // over rows without races. Transpose each matrix to column-major once
+    // (cheap), then sum every column's group contribution independently across
+    // the rayon pool — this is the dominant cost of setup (millions of curve
+    // scalar-muls).
     use rayon::prelude::*;
     let transpose = |mat: &[Vec<(Fr, usize)>]| -> Vec<Vec<(usize, Fr)>> {
         let mut cols: Vec<Vec<(usize, Fr)>> = vec![Vec::new(); total_vars];
@@ -162,11 +160,9 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
     };
     let (cols_a, cols_b, cols_c) = (transpose(mat_a), transpose(mat_b), transpose(mat_c));
 
-    // The overwhelming majority of R1CS coefficients are ±1 (booleanity, copy,
-    // selection rows), and `Projective * Fr::ONE` still runs a full 254-bit
-    // double-and-add. Special-case ±1 to a plain group add/sub — skipping that
-    // scalar-mul for ~90%+ of nonzeros is the dominant speedup here. `weight`
-    // applies the same rule to a single (base, coeff) contribution.
+    // Most R1CS coefficients are ±1, and `Projective * Fr::ONE` still runs a
+    // full 254-bit double-and-add. Special-case ±1 to a plain group add/sub to
+    // skip the scalar-mul for the ~90%+ of nonzeros that are ±1.
     let neg_one = -Fr::one();
     let weight = |base: G1Projective, coeff: &Fr| -> G1Projective {
         if coeff.is_one() {
@@ -236,9 +232,8 @@ pub fn setup_from_ptau<C: ConstraintSynthesizer<Fr>>(
         .map(|i| beta_a_g1[i] + alpha_b_g1[i] + w_g1[i])
         .collect();
 
-    // Scale (γ⁻¹ / δ⁻¹) in parallel, then convert to affine with ONE batched field
-    // inversion (Montgomery's trick) per vector instead of one per point — the
-    // per-point `into_affine` inversions dominated the single-threaded setup.
+    // Scale (γ⁻¹ / δ⁻¹) in parallel, then batch-normalize to affine (one field
+    // inversion per vector via Montgomery's trick, not one per point).
     let gamma_abc_proj: Vec<G1Projective> = combined[..num_instance]
         .par_iter()
         .map(|c| *c * gamma_inv)

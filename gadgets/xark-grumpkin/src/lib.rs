@@ -66,7 +66,7 @@
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{require_eq, Field};
+use xark::{Field, require_eq};
 
 /// Scalar bit-length (see module docs). Kept in sync with the `128usize` loop
 /// literals below (loop bounds must be integer literals in the subset).

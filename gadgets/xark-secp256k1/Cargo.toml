@@ -1,7 +1,11 @@
 [package]
 name = "xark-secp256k1"
+description = "secp256k1 ECDSA-verification gadget for xark zero-knowledge circuits."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 
@@ -10,9 +14,9 @@ name = "xark_secp256k1"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", default-features = false }
-xark-bignum = { path = "../xark-bignum" }
-xark-curve = { path = "../xark-curve" }
+xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
+xark-bignum = { path = "../xark-bignum", version = "0.0.1" }
+xark-curve = { path = "../xark-curve", version = "0.0.1" }
 
 # Host-only deps for the `NativeInput` impls (native bytes → circuit inputs).
 # Gated on `cfg(not(xark))`: the `xark-rustc` driver reports the `xark` cfg, so a
@@ -20,14 +24,14 @@ xark-curve = { path = "../xark-curve" }
 # build (tests, downstream provers) pulls them in with no feature flag.
 [target.'cfg(not(xark))'.dependencies]
 num-bigint = "0.4"
-xark-prover = { path = "../../crates/prover" }
+xark-prover = { path = "../../crates/prover", version = "0.0.1" }
 
 [dev-dependencies]
 k256 = "0.13"
 num-bigint = "0.4"
 sha2 = "0.10"
-xark-ir = { path = "../../crates/ir" }
-xark-test-harness = { path = "../../crates/test-harness" }
+xark-ir = { path = "../../crates/ir", version = "0.0.1" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.0.1" }
 
 [lints]
 workspace = true

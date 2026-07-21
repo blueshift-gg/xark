@@ -45,37 +45,37 @@ pub fn find_circuit<'tcx>(tcx: TyCtxt<'tcx>) -> CompileResult<EntryInfo> {
     // A `fn circuit` is the explicit entry (back-compatible). Failing that,
     // auto-detect the single circuit-shaped fn so the entry can be named freely.
     let named: Vec<&(ItemId, String)> = fns.iter().filter(|(_, n)| n == "circuit").collect();
-    let (item_id, name) = match named.len() {
-        1 => (named[0].0, named[0].1.clone()),
-        n if n > 1 => {
-            return Err(CompileError::new(format!(
-                "found {n} functions named `circuit`, expected exactly one"
-            )))
-        }
-        _ => {
-            let candidates: Vec<&(ItemId, String)> = fns
-                .iter()
-                .filter(|(id, _)| is_circuit_shaped(tcx, *id))
-                .collect();
-            match candidates.len() {
-                1 => (candidates[0].0, candidates[0].1.clone()),
-                0 => return Err(
-                    CompileError::new("no circuit entry function found").with_help(
-                        "define a `pub fn` whose parameters are all `Public<_>` / `Private<_>` \
+    let (item_id, name) =
+        match named.len() {
+            1 => (named[0].0, named[0].1.clone()),
+            n if n > 1 => {
+                return Err(CompileError::new(format!(
+                    "found {n} functions named `circuit`, expected exactly one"
+                )));
+            }
+            _ => {
+                let candidates: Vec<&(ItemId, String)> = fns
+                    .iter()
+                    .filter(|(id, _)| is_circuit_shaped(tcx, *id))
+                    .collect();
+                match candidates.len() {
+                    1 => (candidates[0].0, candidates[0].1.clone()),
+                    0 => return Err(CompileError::new("no circuit entry function found")
+                        .with_help(
+                            "define a `pub fn` whose parameters are all `Public<_>` / `Private<_>` \
                          (or name it `circuit`)",
-                    ),
-                ),
-                _ => {
-                    let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
-                    return Err(CompileError::new(format!(
-                        "multiple candidate circuit functions ({}); name the entry `circuit` \
+                        )),
+                    _ => {
+                        let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
+                        return Err(CompileError::new(format!(
+                            "multiple candidate circuit functions ({}); name the entry `circuit` \
                          to disambiguate",
-                        names.join(", ")
-                    )));
+                            names.join(", ")
+                        )));
+                    }
                 }
             }
-        }
-    };
+        };
 
     let item = tcx.hir_item(item_id);
     let ItemKind::Fn { sig, body, .. } = item.kind else {

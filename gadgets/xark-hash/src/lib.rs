@@ -1,29 +1,22 @@
-//! `xark-hash` — the shared 256-bit digest types for the hash gadgets.
+//! `xark-hash` — shared 256-bit digest types for the hash gadgets.
 //!
-//! [`Hash`] packs a 256-bit digest into **two field elements** (a compact 2-input
+//! [`Hash`] packs a 256-bit digest into two field elements (a compact 2-input
 //! public form); [`Digest`] keeps all 256 bits (bit-exact). Both, and the
-//! `RequireEqCircuit<…>` impls that let a `#[circuit]` compare a raw gadget output
-//! against them, live here rather than in the `xark` language core — so gadget
-//! concerns stay out of core.
-//!
-//! The `RequireEqCircuit<Hash>` impls for the raw gadget-output shapes
-//! (`[[Field; 32]; 8]` for SHA-256, `[[Field; 64]; 4]` for Keccak) live here
-//! because coherence requires them where `Hash` is defined. BLAKE's little-endian
-//! wrapper is a *local* type, so it lives in the blake crates (`xark-blake2s` /
-//! `xark-blake3`), built on the public [`Hash::pack`] primitive.
+//! `RequireEqCircuit<…>` impls comparing a raw gadget output against them, live
+//! here (not in the `xark` core) because coherence requires them where `Hash` is
+//! defined. BLAKE's little-endian wrapper is a local type, so it lives in the
+//! blake crates, built on the public [`Hash::pack`] primitive.
 #![no_std]
 
-use xark::{require_eq, Field, RequireEqCircuit};
+use xark::{Field, RequireEqCircuit, require_eq};
 
 pub mod digest;
 pub use digest::Digest;
 
 /// A 256-bit hash as two field elements: `hi` = the top 16 bytes, `lo` = the low
 /// 16 bytes, each read big-endian (so the hash is `hi · 2¹²⁸ + lo`). Used as a
-/// **public input** (`Public<Hash>`) so a digest costs 2 public inputs, not 256.
-///
-/// The two fields flatten to `<param>.hi` and `<param>.lo`; the host side supplies
-/// the 32-byte hash (split into the two halves by the [`NativeInput`] impl below).
+/// `Public<Hash>` so a digest costs 2 public inputs, not 256. The two fields
+/// flatten to `<param>.hi` / `<param>.lo`.
 #[derive(Clone, Copy)]
 pub struct Hash {
     hi: Field,
@@ -32,12 +25,9 @@ pub struct Hash {
 
 impl Hash {
     /// Recompose 256 weighted bits into the packed pair `hi · 2¹²⁸ + lo`: `bits[i]`
-    /// is bit `i` of the hash read as a big-endian integer (weight `2ⁱ`), so bits
-    /// `0..128` form `lo` and `128..256` form `hi`. Pure linear recomposition
-    /// (`Field::from_bits`) — the bits are already boolean.
-    ///
-    /// Each gadget permutes its raw output into this weight order (which encodes
-    /// its byte serialization) and calls `pack`.
+    /// is bit `i` of the hash as a big-endian integer (weight `2ⁱ`), so bits
+    /// `0..128` form `lo` and `128..256` form `hi`. Pure linear recomposition; each
+    /// gadget permutes its raw output into this weight order before calling `pack`.
     pub fn pack(bits: [Field; 256]) -> Hash {
         let zero = Field::from(0u8);
         let mut lo_bits = [zero; 128];
@@ -64,11 +54,10 @@ impl RequireEqCircuit<Hash> for Hash {
     }
 }
 
-/// Let a `#[circuit]` body write `require_eq(sha256(msg), expected)` where
-/// `expected: Public<Hash>`: SHA-256 serializes each 32-bit word **big-endian**, so
-/// word `w`, bit `j` (`bits[w][j]`, LSB-first within the word) has weight
-/// `2^(224 − 32w + j)` in the big-endian hash integer. Permute to that order and
-/// pack into the two 128-bit halves.
+/// `require_eq(sha256(msg), expected: Public<Hash>)`. SHA-256 serializes each
+/// 32-bit word **big-endian**, so word `w` bit `j` (`bits[w][j]`, LSB-first) has
+/// weight `2^(224 − 32w + j)` in the big-endian hash integer. Permute to that
+/// order and pack into the two 128-bit halves.
 impl RequireEqCircuit<Hash> for [[Field; 32]; 8] {
     #[inline]
     fn require_eq_circuit(self, rhs: Hash) {
@@ -86,10 +75,9 @@ impl RequireEqCircuit<Hash> for [[Field; 32]; 8] {
     }
 }
 
-/// Let a `#[circuit]` body write `require_eq(keccak256(msg), expected)` where
-/// `expected: Public<Hash>`: Keccak serializes each 64-bit lane **little-endian**, so
-/// lane `w`, bit `i` is bit `i % 8` of hash byte `8w + i/8`, weight
-/// `2^(8·(31 − (8w + i/8)) + i%8)` in the big-endian hash integer.
+/// `require_eq(keccak256(msg), expected: Public<Hash>)`. Keccak serializes each
+/// 64-bit lane **little-endian**, so lane `w` bit `i` is bit `i % 8` of hash byte
+/// `8w + i/8`, weight `2^(8·(31 − (8w + i/8)) + i%8)` in the big-endian hash integer.
 impl RequireEqCircuit<Hash> for [[Field; 64]; 4] {
     #[inline]
     fn require_eq_circuit(self, rhs: Hash) {
@@ -108,11 +96,9 @@ impl RequireEqCircuit<Hash> for [[Field; 64]; 4] {
     }
 }
 
-// Host-side `NativeInput`: a `Hash` circuit input is a 32-byte hash, split into
-// its two 128-bit halves `hi` (top 16 bytes, big-endian) and `lo` (low 16 bytes),
-// as the `<name>.hi` / `<name>.lo` field leaves. `NativeInput` lives in the `std`
-// prover while this crate is `#![no_std]`, so pull `std` in inside an anonymous
-// const (the pattern `#[derive(Transparent)]` generates).
+// Host-side `NativeInput`: a `Hash` input is a 32-byte hash split into its two
+// 128-bit halves `hi`/`lo` (big-endian) as `<name>.hi` / `<name>.lo` leaves.
+// `std` is pulled in inside an anonymous const because this crate is `#![no_std]`.
 #[cfg(not(xark))]
 const _: () = {
     extern crate std;

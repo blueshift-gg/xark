@@ -1,30 +1,20 @@
-//! `xark-pedersen`: a **native-field Pedersen hash** on the Grumpkin curve,
-//! written entirely in the `xark` `Field` subset.
+//! `xark-pedersen`: a native-field Pedersen hash on the Grumpkin curve, in the
+//! `xark` `Field` subset.
 //!
-//! ## Why Grumpkin is native (the key insight)
+//! Grumpkin and BN254 form a 2-cycle: Grumpkin's base field is exactly BN254's
+//! scalar field `r`, which is `xark`'s native `Field`. So Grumpkin point
+//! coordinates are ordinary `Field` values and all EC arithmetic is native
+//! `Field` `+ - *` — no non-native limbs. Grumpkin form: `y² = x³ - 17` (`a = 0`).
 //!
-//! Grumpkin and BN254 form a 2-cycle: Grumpkin's **base field** is exactly
-//! BN254's **scalar field**
-//! `r = 21888242871839275222246405745257275088548364400416034343698204186575808495617`,
-//! which is precisely `xark`'s native `Field`. So a Grumpkin point's
-//! coordinates are ordinary `Field` values and **all elliptic-curve arithmetic
-//! is native `Field` `+ - *`** — no non-native limbs, no `mod_mul`, no
-//! `xark-bignum`. This makes the whole gadget dramatically simpler (and cheaper)
-//! than the secp256k1 gadget, which lives over a foreign 256-bit field.
-//!
-//! Grumpkin short-Weierstrass form: `y² = x³ - 17`  (`a = 0`, `b = -17`).
-//!
-//! ## Construction
-//!
-//! Pedersen hash of `K` scalars `mᵢ` against `K` fixed generators `Gᵢ`:
+//! Pedersen hash of `K` scalars `mᵢ` against fixed generators `Gᵢ`:
 //!
 //! ```text
 //!   H = Σ_i  mᵢ · Gᵢ
 //! ```
 //!
-//! Each `mᵢ · Gᵢ` is a fixed-base scalar multiplication. We use an **offset
-//! (double-and-add) accumulator** so that every intermediate point stays off the
-//! point at infinity (which incomplete affine addition cannot represent):
+//! Each `mᵢ · Gᵢ` is a fixed-base scalar mul via an offset (double-and-add)
+//! accumulator, so every intermediate stays off the point at infinity (which
+//! incomplete affine addition cannot represent):
 //!
 //! ```text
 //!   acc = O                              // O: fixed non-identity offset point
@@ -35,51 +25,40 @@
 //! ```
 //!
 //! After the loop `acc = 2^N·O + m·G`, so subtracting the compile-time constant
-//! `2^N·O` yields `m·G`. Because `O` and `G` are **constants**, `2^N·O` (and its
-//! negation, the correction point [`corr`]) are compile-time constants too.
+//! `2^N·O` (the correction point [`corr`]) yields `m·G`.
 //!
 //! ## Soundness / completeness
 //!
 //! Every division uses `Field::hint_inverse`, PINNED by `denom · inv == 1`. At an
 //! exceptional case (`acc.x == G.x`, `acc.y == 0`, or `x1 == x2` in a subtract)
-//! the denominator is `0`, so `0 · inv == 1` is **unsatisfiable** — a malicious
-//! prover can never forge a result at an edge (soundness holds). An honest prover
-//! only fails on the negligible fraction of inputs that land exactly on an edge
-//! (the standard incomplete-addition completeness gap). Concretely this gadget
-//! requires each scalar `mᵢ` to be **nonzero** (`0·G` is the identity, which the
-//! affine representation cannot express).
+//! the denominator is `0`, so `0 · inv == 1` is unsatisfiable — a malicious prover
+//! can never forge a result at an edge (soundness). An honest prover only fails on
+//! the negligible fraction of inputs landing on an edge (the standard incomplete-
+//! addition completeness gap). Each scalar `mᵢ` must be nonzero (`0·G` is the
+//! identity, which the affine representation cannot express).
 //!
-//! ## Scalar range / bit-length
+//! ## Scalar range
 //!
-//! `N_BITS = 128`: each message scalar is decomposed into 128 pinned little-
-//! endian bits, so this gadget hashes 128-bit messages. Because
-//! `2^128 < r`, the bit decomposition is *injective* — the bits are uniquely
-//! determined by the scalar (analyzer-clean, no non-canonical-decomposition
-//! malleability). Raising `N_BITS` toward 252 (full-field messages) is a
-//! one-line change plus regenerating the single `corr` constant (`corr` depends
-//! on `N_BITS`); the generators are unchanged. It costs ~`12·N_BITS` gates per
-//! scalar.
+//! `N_BITS = 128`: each scalar is 128 pinned little-endian bits. Because
+//! `2^128 < r` the decomposition is injective (no non-canonical-decomposition
+//! malleability). Raising `N_BITS` toward 252 is a one-line change plus
+//! regenerating the single `corr` constant; costs ~`12·N_BITS` gates per scalar.
 //!
 //! ## Generators (nothing-up-my-sleeve)
 //!
-//! The generators `Gᵢ` are derived by hash-to-curve — `Gᵢ = try-and-increment from
-//! x = SHA256("xark-pedersen:generator:i")` on Grumpkin (`y² = x³ - 17`), taking
-//! the smaller `y`. This fixed, reproducible, domain-separated derivation gives
-//! generators with no known discrete-log relation, which is the security
-//! requirement a Pedersen hash needs. `examples/pedersen` reproduces the exact
-//! derivation with `ark-grumpkin` and checks the circuit output equals
-//! `m0·G0 + m1·G1` (see also `tests/vec.rs`).
-//!
-//! The offset seed `O` is an internal device (it makes the incomplete-addition
-//! accumulator non-degenerate and is corrected out of the result), so it does not
-//! affect the hash value or its security and can be any fixed non-identity point.
+//! `Gᵢ = try-and-increment from x = SHA256("xark-pedersen:generator:i")` on
+//! Grumpkin, taking the smaller `y`. This fixed, domain-separated derivation gives
+//! generators with no known discrete-log relation (the Pedersen security
+//! requirement); `examples/pedersen` reproduces it with `ark-grumpkin`. The offset
+//! seed `O` is an internal device (corrected out of the result), so it can be any
+//! fixed non-identity point.
 
 #![no_std]
 // Circuit-lowered gadget code: the xark compiler rejects compound assignment on
 // `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{require_eq, Field};
+use xark::{Field, require_eq};
 
 /// Scalar bit-length (see module docs). Kept in sync with the `128usize` loop
 /// literals below (loop bounds must be integer literals in the subset).
@@ -221,13 +200,13 @@ fn decompose(x: Field) -> [Field; N_BITS] {
 /// Fixed-base scalar multiplication `m · gen` via the offset (double-and-add)
 /// accumulator. `bits` is the little-endian decomposition of `m`; processed
 /// MSB-first. Returns the affine point `m · gen`. Requires `m ≠ 0`.
-pub fn scalar_mul(bits: [Field; N_BITS], gen: [Field; 2]) -> [Field; 2] {
+pub fn scalar_mul(bits: [Field; N_BITS], base: [Field; 2]) -> [Field; 2] {
     let mut acc = offset();
     let mut i = 0usize;
     while i < 128usize {
         acc = ec_double(acc);
         let bit = bits[127 - i]; // MSB first
-        let cand = ec_add(acc, gen);
+        let cand = ec_add(acc, base);
         acc = point_select(bit, cand, acc);
         i += 1;
     }

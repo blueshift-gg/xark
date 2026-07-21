@@ -8,12 +8,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Locate the `xark-rustc` binary — the `rustc_driver` shim — without failing.
-/// Honors the `XARK_RUSTC` env var (an explicit path override, used by the test
-/// harness which builds the driver separately); otherwise it's a sibling of the
-/// `xark` CLI (same dir). `None` if neither is present. The driver lives in a
-/// separate binary so the CLI can host a fast global allocator and stay on stable
-/// Rust; `xark build`/`check` invoke it as `RUSTC`.
+/// Locate the `xark-rustc` driver without failing: the `XARK_RUSTC` env override
+/// (used by the test harness), else a sibling of the `xark` CLI. `None` if
+/// neither exists. `xark build`/`check` invoke it as `RUSTC`.
 pub(crate) fn find_rustc_shim() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("XARK_RUSTC") {
         return Some(PathBuf::from(path));
@@ -55,9 +52,9 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     let mut crate_dir: Option<String> = None;
     let mut out: Option<String> = None;
     let mut field = "bn254".to_string();
-    // `--emit-json`: also write the human-readable `circuit.json`. Off by default
-    // — the prover/checker load `circuit.xbc` instead, so a normal build skips the
-    // (multi-GB on large circuits) primitive-program JSON serialization.
+    // `--emit-json`: also write the human-readable `circuit.json`. Off by default;
+    // the prover/checker load `circuit.xbc`, so a normal build skips the (multi-GB
+    // on large circuits) JSON serialization.
     let mut emit_json = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -85,17 +82,12 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
         .to_string();
     let cwd = std::env::current_dir().expect("cwd");
     let crate_abs = cwd.join(&crate_dir);
-    // Everything xark produces lives under the crate's `target/xark/`: the emitted
-    // artifacts (circuit.json, r1cs.json) AND an isolated cargo target for the
-    // nightly xark-as-rustc build. Isolating the cargo target keeps the nightly /
-    // MIR-encoded rlibs from thrashing the crate's normal `target/` — the one your
-    // own `cargo` and rust-analyzer use.
-    //
-    // The cargo build cache stays at the shared `target/xark/` (so all circuits in
-    // a workspace share compiled deps), but each circuit's *artifacts* land in a
-    // name-scoped subdir `target/xark/<pkg-name>/` for per-circuit isolation. The
-    // package name comes from the crate's `Cargo.toml` (`[package] name`), falling
-    // back to the directory name.
+    // Everything xark produces lives under the crate's `target/xark/`, isolated
+    // from the crate's normal `target/` so the nightly / MIR-encoded rlibs don't
+    // thrash the one `cargo` and rust-analyzer use. The build cache stays at the
+    // shared `target/xark/` (workspace circuits share deps); each circuit's
+    // artifacts land in a name-scoped `target/xark/<pkg-name>/`, the package name
+    // from `Cargo.toml` (`[package] name`) falling back to the directory name.
     let xark_dir = crate_abs.join("target/xark");
     let pkg_name = crate::xark_project::read_pkg_name(&crate_abs).unwrap_or_else(|| name.clone());
     let out_abs = out
@@ -104,12 +96,10 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
 
     let self_exe = rustc_shim();
 
-    // The emitted artifacts are a side-effect of compilation. If they were
-    // deleted but the source is unchanged, cargo cache-hits and never re-runs the
-    // extractor, so they never come back. Bump the source mtime to force the
-    // primary crate to recompile when the output looks incomplete — but only
-    // then. `circuit.xbc` is the artifact every build writes, so its absence is
-    // the primary "needs (re)build" signal.
+    // Artifacts are a side-effect of compilation: if deleted while the source is
+    // unchanged, cargo cache-hits and never re-runs the extractor, so they never
+    // come back. Bump the source mtime to force a recompile when the output looks
+    // incomplete. `circuit.xbc` (every build writes it) is the primary signal.
     let regen_needed = !out_abs.join("circuit.xbc").exists()
         // `--emit-json` needs circuit.json / r1cs.json; force a recompile if they
         // are absent so a circuit already built without them gets the JSON when
@@ -138,10 +128,9 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     if emit_json {
         rustflags.push_str(" --emit-json");
     }
-    // Heartbeat: large circuits lower for a long time with no output (ed25519 is
-    // ~2min), which reads as a hang. A watcher thread prints an "still building"
-    // line every 15s; it exits promptly when the build finishes (tx drop). Builds
-    // under 15s never print anything.
+    // Heartbeat: large circuits lower for minutes with no output (ed25519 ~2min),
+    // which reads as a hang. A watcher thread prints every 15s and exits when the
+    // build finishes (tx drop); builds under 15s print nothing.
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let heartbeat = std::thread::spawn(move || {
         let start = std::time::Instant::now();
@@ -293,11 +282,10 @@ pub fn cmd_test(args: &[String]) -> i32 {
         .cloned()
         .unwrap_or_else(|| ".".to_string());
 
-    // Build first so the artifacts the tests load are present + up to date.
-    // Build *with* `--profile` (it also writes `profile.json`, leaving
-    // `circuit.json` / `r1cs.json` byte-identical): the `xark_prover` test
-    // harness reads it to explain *which* source line / function a failing
-    // constraint came from when `c.check(..)` fails.
+    // Build first so the tests' artifacts are present + current. Build with
+    // `--profile` (also writes `profile.json`, leaving the other artifacts
+    // byte-identical): the test harness reads it to explain which source line /
+    // function a failing constraint came from.
     let code = cmd_build_profile(std::slice::from_ref(&crate_dir));
     if code != 0 {
         eprintln!("xark: build failed; skipping tests");
@@ -305,10 +293,8 @@ pub fn cmd_test(args: &[String]) -> i32 {
     }
 
     // Run in `--release`: circuit tests drive a full Groth16 setup+prove+verify,
-    // which is 10–50× slower in debug — a large hash/EC circuit takes *minutes*
-    // unoptimized versus seconds optimized. Proving is the whole point of a
-    // circuit test, so release is the sensible default (the same reason CI runs
-    // these `--release`). Anything after `--` still forwards to the test harness.
+    // 10–50× slower in debug (minutes vs seconds on a large hash/EC circuit), so
+    // release is the sensible default. Anything after `--` forwards to the harness.
     eprintln!("xark: running `cargo test --release` in {crate_dir}");
     let status = Command::new("cargo")
         .arg("test")
@@ -328,11 +314,10 @@ pub fn cmd_test(args: &[String]) -> i32 {
 /// `xark check <crate-dir>`
 ///
 /// Fast, artifact-free validation of a circuit crate for editor diagnostics.
-/// Drives `cargo check` with `xark` as `RUSTC` (so gadget deps build with
-/// MIR-encoded metadata) and injects `--check` via `RUSTFLAGS`; the driver then
-/// validates + lowers the primary crate and routes any rejection through rustc's
-/// diagnostic context. `--message-format=json` makes cargo wrap those
-/// diagnostics as JSON on stdout — exactly the shape `rust-analyzer`'s
+/// Drives `cargo check` with `xark` as `RUSTC` and injects `--check` via
+/// `RUSTFLAGS`; the driver validates + lowers the primary crate and routes any
+/// rejection through rustc's diagnostic context. `--message-format=json` makes
+/// cargo emit JSON diagnostics on stdout, the shape `rust-analyzer`'s
 /// `check.overrideCommand` consumes. Exit status mirrors `cargo check`.
 pub fn cmd_check(args: &[String]) -> i32 {
     let mut crate_dir: Option<String> = None;
@@ -361,8 +346,7 @@ pub fn cmd_check(args: &[String]) -> i32 {
         // `run_build`), so cargo runs under the ambient toolchain.
         .env("RUSTC", &self_exe)
         // Isolated cargo target (nightly / MIR-encoded rlibs) so on-save checks
-        // never invalidate the crate's normal `target/` — the one rust-analyzer's
-        // own analysis and your `cargo build` use. This is what makes editor
+        // never invalidate the crate's normal `target/`, which keeps editor
         // integration fast (no rebuild-on-save thrash).
         .env("CARGO_TARGET_DIR", crate_abs.join("target/xark"))
         // `--check` is injected globally, but only the primary package extracts

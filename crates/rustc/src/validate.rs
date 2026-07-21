@@ -78,7 +78,7 @@ fn check_place(place: &Place<'_>) -> CompileResult<()> {
             | ProjectionElem::Deref => {}
             _ => {
                 return Err(CompileError::new("unsupported place projection (subslice)")
-                    .with_note("only fixed-size array indexing is supported"))
+                    .with_note("only fixed-size array indexing is supported"));
             }
         }
     }

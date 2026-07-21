@@ -14,8 +14,7 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        // 6² = 36
-        return_values_only("6".into(), "36".into()).unwrap();
+        return_values_only("6".into(), "36".into()).unwrap(); // 6² = 36
     }
 
     #[test]

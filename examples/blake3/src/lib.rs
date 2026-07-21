@@ -1,18 +1,14 @@
 //! Prove knowledge of a private message whose BLAKE3 root hash equals a public
-//! 256-bit hash — the ergonomic form.
-//!
-//! The message is a byte array (`[u8; N]`) and the digest a `Hash` — a 256-bit
-//! digest packed into two field halves (`xark-hash`), so the circuit exposes just
-//! **2 public inputs**. The host still supplies a plain `[u8; 32]`. BLAKE outputs
-//! little-endian words, so the gadget result is wrapped in `Blake256` (a
-//! blake-crate type) to select the LE `Hash` packing.
+//! 256-bit `Hash` (packed into two field halves → 2 public inputs). The gadget
+//! result is wrapped in `Blake256` to select the little-endian `Hash` packing
+//! that BLAKE's LE word output requires.
 #![cfg_attr(xark, no_std)]
 
 use xark_blake3::prelude::*;
 
 #[circuit]
 pub fn blake3(msg: Private<[u8; 3]>, digest: Public<Hash>) {
-    // Qualified call: the entry fn shares the gadget's name, so name it by path.
+    // Entry fn shares the gadget's name, so call it by path.
     require_eq(Blake256(xark_blake3::blake3(msg)), digest);
 }
 

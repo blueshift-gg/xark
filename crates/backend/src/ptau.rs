@@ -1,15 +1,12 @@
-//! Parser for the snarkjs / Hermez Powers-of-Tau (`.ptau`) binary format.
-//!
-//! This module is **read-only**: it deserializes a `.ptau` transcript into an
-//! in-memory [`PtauFile`] of arkworks BN254 points so that downstream code
-//! (e.g. a phase-2 contribution) can consume the powers `[τ^i]G1`,
-//! `[τ^i]G2`, `[α·τ^i]G1`, `[β·τ^i]G1`, and `[β]G2` produced by a public
-//! phase-1 ceremony.
+//! Read-only parser for the snarkjs / Hermez Powers-of-Tau (`.ptau`) binary
+//! format. Deserializes a `.ptau` transcript into an in-memory [`PtauFile`] of
+//! arkworks BN254 points (`[τ^i]G1`, `[τ^i]G2`, `[α·τ^i]G1`, `[β·τ^i]G1`,
+//! `[β]G2`) for downstream phase-2 consumption.
 //!
 //! # Binary layout
 //!
-//! The format is the one produced by snarkjs' `powersoftau new` /
-//! `powersoftau contribute` commands. Multi-byte integers are little-endian.
+//! Format produced by snarkjs `powersoftau new` / `contribute`. Multi-byte
+//! integers are little-endian.
 //!
 //! ```text
 //! +---------+--------+---------+---------------------+
@@ -48,17 +45,14 @@
 //! implied for G1 (BN254 has cofactor 1 on G1) and is checked for G2.
 //! The point at infinity is encoded as `(0, 0)` per the snarkjs convention.
 //!
-//! # Where this is consumed
-//!
-//! The phase-2 circuit-specific setup that turns a [`PtauFile`] into Groth16
-//! keys lives in [`crate::setup_phase2::setup_from_ptau`] (re-exported here as
-//! [`setup_from_ptau`]); `xark setup --ptau-file` and the `xark ceremony`
-//! commands drive it. See `docs/trusted-setup.md`.
+//! Phase-2 setup that turns a [`PtauFile`] into Groth16 keys lives in
+//! [`crate::setup_phase2::setup_from_ptau`] (re-exported here). See
+//! `docs/trusted-setup.md`.
 
 use std::convert::TryFrom;
 
 use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, VariableBaseMSM};
+use ark_ec::{AffineRepr, CurveGroup, VariableBaseMSM, pairing::Pairing};
 use ark_ff::{BigInt, BigInteger, Fp, One, PrimeField, Zero};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
@@ -174,16 +168,13 @@ pub fn check_ptau_covers_circuit(
     })
 }
 
-/// Re-export the implementation from [`crate::setup_phase2::setup_from_ptau`].
+/// Re-export of [`crate::setup_phase2::setup_from_ptau`].
 ///
-/// The function consumes the circuit synthesizer in Setup mode, evaluates
-/// the QAP polynomials at τ using the ptau powers in the group (no scalar
-/// τ is ever materialized), derives `γ, δ` deterministically from the
-/// user-supplied `randomness_seed` via ChaCha20, and assembles a
-/// `Groth16Keys` bundle ready for [`crate::prove::prove`] / [`crate::verify::verify`].
-///
-/// See `docs/security.md` for the production-readiness checklist and the
-/// audit boundary around the phase-2 logic.
+/// Consumes the circuit in Setup mode, evaluates the QAP polynomials at τ using
+/// the ptau powers in the group (no scalar τ is ever materialized), derives
+/// `γ, δ` deterministically from `randomness_seed` via ChaCha20, and assembles
+/// a `Groth16Keys` bundle. See `docs/security.md` for the production-readiness
+/// checklist and audit boundary.
 pub fn setup_from_ptau<C: ark_relations::gr1cs::ConstraintSynthesizer<ark_bn254::Fr>>(
     circuit: C,
     ptau: &PtauFile,
@@ -523,11 +514,9 @@ pub fn parse_ptau(bytes: &[u8]) -> Result<PtauFile, PtauError> {
     )?;
     let beta_g2 = beta_g2_vec[0];
 
-    // Sanity-check that contributions, if present, is at least non-empty
-    // semantics-wise. We don't actually verify the transcript — that's a
-    // separate (and significantly harder) job that belongs in `xark
-    // ceremony verify`. We just look at the section to know it's there.
-    let _ = find(SECTION_CONTRIBUTIONS, "contributions"); // ignore error
+    // Note presence of the contributions section; transcript verification
+    // itself belongs in `xark ceremony verify`, not here.
+    let _ = find(SECTION_CONTRIBUTIONS, "contributions");
 
     Ok(PtauFile {
         power,
@@ -728,16 +717,10 @@ fn read_g2_section(
         .collect()
 }
 
-/// Re-encode an [`Fq`] element back into the snarkjs ptau
-/// little-endian-Montgomery byte layout. This is the exact inverse of
-/// [`fq_from_le_mont`] and is the helper [`tests/ptau.rs`] uses to build
-/// fixture bytes; it lives here so that the fixture-generator and the
-/// parser cannot drift apart silently.
-///
-/// Visible at `pub(crate)` because there's no production use for it (real
-/// `.ptau` files come from snarkjs, not from us) — but the integration
-/// test in `tests/ptau.rs` needs it, so we re-export it from `lib.rs`
-/// behind `#[doc(hidden)]`.
+/// Re-encode an [`Fq`] into the snarkjs ptau little-endian-Montgomery byte
+/// layout — the exact inverse of [`fq_from_le_mont`]. Test-only fixture helper
+/// (kept beside the parser so the two cannot drift apart), re-exported from
+/// `lib.rs` behind `#[doc(hidden)]` for `tests/ptau.rs`.
 #[doc(hidden)]
 pub fn __fq_to_le_mont_bytes_for_tests(f: Fq) -> [u8; BN254_FQ_BYTES] {
     // arkworks stores `Fq` internally in Montgomery form, and the field is

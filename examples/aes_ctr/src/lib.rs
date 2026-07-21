@@ -1,17 +1,13 @@
-//! AES-128-CTR over an arbitrary-length message: prove that a private plaintext
-//! encrypts (under a private key + 96-bit nonce) to a public ciphertext.
-//!
-//! CTR turns the block cipher into a stream cipher — the keystream is
-//! `AES_enc(key, nonce ‖ be_u32(block))` and the ciphertext is `msg XOR keystream`,
-//! so encryption and decryption are the same operation (forward cipher only). The
-//! message here is 20 bytes, spanning two blocks (16 + a 4-byte tail), to exercise
-//! the partial-final-block path.
+//! AES-128-CTR over an arbitrary-length message: prove a private plaintext
+//! encrypts (under a private key + 96-bit nonce) to a public ciphertext. CTR is a
+//! stream cipher: keystream = `AES_enc(key, nonce ‖ be_u32(block))`, ciphertext =
+//! `msg XOR keystream`. The 20-byte message spans two blocks (16 + a 4-byte tail)
+//! to exercise the partial-final-block path.
 #![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;
 
-// The `#[circuit]` macro requires integer-literal array lengths, so the 20-byte
-// message length is spelled out (a `const` path isn't accepted in the signature).
+// `#[circuit]` requires integer-literal array lengths (no `const` paths in the signature).
 #[circuit]
 pub fn aes_ctr(
     msg: Private<[u8; 20]>,

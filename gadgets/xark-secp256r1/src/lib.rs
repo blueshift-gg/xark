@@ -46,7 +46,7 @@ pub mod affine {
 #[cfg(not(xark))]
 pub use affine::{order, reduce_scalar};
 
-use xark::{require_eq, Field, Transparent};
+use xark::{Field, Transparent, require_eq};
 
 /// A P-256 256-bit value (a scalar `r`/`s`/`e`, or a point coordinate) in the
 /// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =

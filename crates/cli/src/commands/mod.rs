@@ -1,16 +1,9 @@
 //! The clap-driven `xark` CLI.
 //!
-//! `xark` is a dual-role binary: when cargo invokes it as `RUSTC` during
-//! `xark build` it drives `rustc_driver` (see `crate::run_as_rustc`); when a
-//! user runs one of the known subcommands it behaves as this toolchain CLI.
-//! `crate::main` dispatches between the two before clap ever sees the args, so
-//! clap never tries to parse a rustc invocation.
-//!
-//! The frontend subcommands (`init`/`build`/`check`) drive `cargo` with `xark`
-//! as `RUSTC`; their implementations live in [`crate::cli`]. The backend
-//! subcommands (`setup`/`prove`/`verify`/`export`/`ceremony`/`inspect`) read
-//! the xark-IR (`circuit.json` + `r1cs.json`) produced by `xark build` and run
-//! the shared Arkworks Groth16 backend (`xark_backend`).
+//! Frontend subcommands (`init`/`build`/`check`) drive `cargo` with `xark` as
+//! `RUSTC`; their implementations live in [`crate::cli`]. Backend subcommands
+//! (`setup`/`prove`/`verify`/`export`/`ceremony`/`inspect`) read the xark-IR
+//! produced by `xark build` and run the shared Arkworks Groth16 backend.
 
 use std::collections::BTreeMap;
 
@@ -25,8 +18,8 @@ use xark_ir::solver::Fp;
 use xark_ir::{R1csProgram, VarId, Visibility};
 
 /// Developer-diagnostics env-flag probe. Only reads the environment under the
-/// `debug` feature; a normal release build compiles this to `false` so the
-/// diagnostic branches (and their `XARK_*` knobs) vanish entirely.
+/// `debug` feature; a normal build compiles it to `false`, so the diagnostic
+/// branches and their `XARK_*` knobs vanish.
 #[inline]
 pub(crate) fn dbg_flag(name: &str) -> bool {
     #[cfg(feature = "debug")]
@@ -172,7 +165,7 @@ fn exit_code(_name: &str, code: i32) -> Result<()> {
     }
 }
 
-// -- Frontend argument structs (delegate to `crate::cli`) ---------------------
+// Frontend argument structs (delegate to `crate::cli`).
 
 #[derive(clap::Args, Debug)]
 pub struct InitArgs {
@@ -284,11 +277,10 @@ impl TestArgs {
     }
 }
 
-// -- Shared helpers for the backend commands ----------------------------------
+// Shared helpers for the backend commands.
 
-/// Render the path argument the user passed (for the guided "Next:" hints), so
-/// suggested commands are copy-pasteable verbatim. Falls back to `.` (the
-/// current directory) when no path was given, matching the commands' defaults.
+/// Render the path argument the user passed (for the guided "Next:" hints) so
+/// suggested commands are copy-pasteable. Falls back to `.` when none was given.
 pub fn path_arg(path: &Option<std::path::PathBuf>) -> String {
     match path {
         Some(p) => p.display().to_string(),
@@ -296,12 +288,9 @@ pub fn path_arg(path: &Option<std::path::PathBuf>) -> String {
     }
 }
 
-/// Parse the `--inputs` argument: either an inline JSON object
-/// `{ "name": value, … }` or a path to a file (a JSON object, or `name = value`
-/// lines with `#` comments and blank lines ignored). Array elements use the flat
-/// names `xark inspect` prints, e.g. `path[0]`. A leading `{` (after trimming)
-/// selects inline JSON; anything else is treated as a file path — so the one
-/// argument is agnostic to how you pass the witness.
+/// Parse the `--inputs` argument: a leading `{` selects inline JSON, anything
+/// else is a file path (JSON object, or `name = value` lines). Array elements
+/// use the flat names `xark inspect` prints, e.g. `path[0]`.
 pub fn parse_inputs_arg(arg: &str) -> Result<BTreeMap<String, String>> {
     if arg.trim_start().starts_with('{') {
         parse_input_text(arg, std::path::Path::new("<--inputs>"))
@@ -381,11 +370,6 @@ pub fn load_circuit(path: &std::path::Path) -> Result<PrimitiveProgram> {
     xark_ir::primitive::from_json(&s).with_context(|| format!("parsing {}", path.display()))
 }
 
-/// Read and expand a `circuit.xbc` into the full [`CircuitProgram`] it encodes
-/// (R1CS rows + witness-gen), across rayon's thread pool. The `.xbc` is the
-/// compact binary artifact `xark build` always emits; expanding it in parallel
-/// avoids the `serde_json` parse of a (potentially multi-GB) JSON blob and is
-/// the sole circuit description a build produces.
 /// True if `bytes` is a current `XBC` version-1 circuit container. The magic +
 /// u16 version guard rejects stale/foreign files so every loader can dispatch on
 /// it (version 1 is the only format).
@@ -432,11 +416,9 @@ pub fn load_backend_r1cs(
                 xbc_path.display()
             );
         }
-        // Groth16 view. By DEFAULT expand the *reduced* R1CS (each template
-        // minimized once) directly — avoiding the full flat expansion + flat
-        // minimize. `XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE` fall back to the full
-        // expand (then flat-minimized / not, in the prover). The solver always
-        // loads the full circuit separately.
+        // Groth16 view. By default expand the reduced R1CS (each template
+        // minimized once), avoiding the full flat expansion + flat minimize.
+        // `XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE` fall back to the full expand.
         let use_reduced = !dbg_flag("XARK_FLAT_MINIMIZE") && !dbg_flag("XARK_NO_MINIMIZE");
         let cp = if use_reduced {
             xark_ir::function_decode::expand_function_blob_reduced(&bytes)
@@ -740,13 +722,11 @@ pub fn resolve_input_ids(
 /// [`xark_ir::solver::analyze_underconstrained`]: if any derived variable is not
 /// uniquely pinned by the constraints (a value a malicious prover could forge
 /// without violating any constraint — a genuine soundness hole), it `bail!`s
-/// with a clear message listing each hole. On success it returns the solved
-/// assignment.
+/// listing each hole. On success it returns the solved assignment.
 ///
-/// This is the *witness-based* check: it needs the solved assignment (hence it
-/// runs after solving, before any key-loading / synthesis). It rejects circuits
-/// with a derived variable the constraints fail to pin uniquely. A structural,
-/// witness-free version at `xark build`/`check` is planned.
+/// Witness-based: it needs the solved assignment, so it runs after solving and
+/// before key-loading / synthesis. A structural, witness-free version at
+/// `xark build`/`check` is planned.
 pub fn soundness_check(
     cp: &xark_ir::CircuitProgram,
     profile: Option<&ProfileProgram>,
@@ -921,9 +901,10 @@ mod tests {
     fn rejects_non_scalar_json_values() {
         let err = parse_input_text(r#"{"path": [1, 2]}"#, Path::new("witness.json")).unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("input `path` must be a decimal string or number"));
+        assert!(
+            err.to_string()
+                .contains("input `path` must be a decimal string or number")
+        );
     }
 
     #[test]

@@ -10,13 +10,13 @@
 //! variable the constraints fail to pin (a value a malicious prover could
 //! forge) — no proving keys or proof are produced.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use xark_ir::primitive::VarRole;
 
 use super::{
-    load_circuit_program, load_profile, parse_inputs_arg, resolve_input_ids, soundness_check,
-    CheckArgs,
+    CheckArgs, load_circuit_program, load_profile, parse_inputs_arg, resolve_input_ids,
+    soundness_check,
 };
 use crate::xark_project::XarkProject;
 
@@ -44,7 +44,6 @@ pub fn run(args: CheckArgs) -> Result<()> {
     // Resolve inputs → var ids and run the shared soundness gate (no setup/prove).
     // A best-effort profile lets a bad witness name the failing constraint (and
     // its source line), matching `xark prove` / `xark test`.
-    // `check::run` is dispatched only when `--inputs` is present (see `mod::run`).
     let arg = args
         .inputs
         .as_deref()

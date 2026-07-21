@@ -30,13 +30,13 @@ use std::collections::BTreeMap;
 use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Groth16, Proof};
 use ark_snark::SNARK;
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
 use xark_backend::setup::setup;
-use xark_backend::{test_rng, verify, Groth16Keys};
+use xark_backend::{Groth16Keys, test_rng, verify};
 use xark_ir::solver;
-use xark_ir::{primitive, R1csProgram, VarId};
-use xark_prover::{fr_from_decimal, XarkCircuit};
+use xark_ir::{R1csProgram, VarId, primitive};
+use xark_prover::{XarkCircuit, fr_from_decimal};
 
 /// Read `gadgets/tests/tests/fixtures/xark_ir/<name>` (mirrors the e2e test).
 fn fixture(name: &str) -> String {

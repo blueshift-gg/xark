@@ -1,11 +1,8 @@
 //! The width-generic `Bignum<LIMBS, BITS>` wrapper: a zero-cost newtype over
-//! `[Field; LIMBS]` whose methods forward to the non-native modular-arithmetic
-//! free functions. Callers alias a concrete width — here a 256-bit prime field
-//! as `Bignum<3, 86>` (3 limbs × 86 bits, the secp256k1 shape).
-//!
-//! Each `Private<Fp>`/`Public<Fp>` is a first-class **typed circuit input**: on
-//! the host it is a single whole number (a decimal or `0x`-hex string), split into
-//! its 3 limbs (`a.limbs[0..2]`) automatically — the caller never thinks in limbs.
+//! `[Field; LIMBS]` forwarding to the non-native modular-arithmetic free functions.
+//! Here a 256-bit prime field as `Bignum<3, 86>` (the secp256k1 shape). Each
+//! `Private<Fp>`/`Public<Fp>` is a typed circuit input — a single whole number on
+//! the host, split into its 3 limbs automatically; the caller never thinks in limbs.
 #![cfg_attr(xark, no_std)]
 
 use xark_bignum::prelude::*;
@@ -20,8 +17,7 @@ pub fn bignum(
     m1: Public<Fp>, // modulus − 1
     o: Public<Fp>,  // expected (a · b) mod m
 ) {
-    // (a · b) mod m, wrapper-style.
-    let r = a.mul(b, m, m1);
+    let r = a.mul(b, m, m1); // (a · b) mod m, wrapper-style
     require_eq(r.limbs[0], o.limbs[0]);
     require_eq(r.limbs[1], o.limbs[1]);
     require_eq(r.limbs[2], o.limbs[2]);

@@ -1,11 +1,9 @@
 //! Reference witness solver + constraint checker for the [primitive IR].
 //!
-//! This is a *reference implementation* of what the backend's lowering must do:
-//! given values for the input variables, run the witness-generation program to
-//! fill every derived/hint variable, then check that all AssertZero constraints
-//! evaluate to zero. It exists so functions can be validated end-to-end (e.g.
-//! against a known SHA-256 test vector) purely from the emitted IR — no proving
-//! system required.
+//! Given values for the input variables, runs the witness-generation program to
+//! fill every derived/hint variable, then checks that all AssertZero constraints
+//! evaluate to zero — validating functions end-to-end from the emitted IR alone,
+//! no proving system required.
 //!
 //! [primitive IR]: crate::primitive
 
@@ -19,12 +17,10 @@ use num_traits::{One, Zero};
 use crate::linear_combination::{LinearCombination, VarId};
 use crate::primitive::{Expression, PrimitiveProgram, WitnessGen};
 
-/// A field element — a fixed-width **BN254 scalar** (Montgomery `Fr`, no
-/// allocation, no division) on the common path, or an arbitrary-modulus big
-/// integer for programs over a different field. The reference solver runs
-/// millions of field ops, so the BN254 fast path (native `Fr` arithmetic
-/// instead of `num-bigint` modmul / `modpow` inversion) is the dominant
-/// witness-gen and soundness-check speedup.
+/// A field element: a BN254 scalar (Montgomery `Fr`) on the common path, or an
+/// arbitrary-modulus big integer for other fields. The BN254 fast path uses
+/// native `Fr` arithmetic instead of `num-bigint` modmul/`modpow` inversion,
+/// which dominates witness-gen and soundness-check cost.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Fp {
     Bn254(Fr),
@@ -63,10 +59,9 @@ impl Fp {
     /// Reduce a signed decimal string into the field.
     pub(crate) fn from_decimal(s: &str, modulus: &BigUint) -> Self {
         let trimmed = s.trim();
-        // Fast path: the overwhelming majority of circuit coefficients are small
-        // integers (`0`, `±1`, `±2`, small constants). Parsing as `i64` skips the
-        // `BigUint` allocation + byte-reduction on the field's hottest inner loop
-        // (`eval_lc` re-parses every coefficient on every evaluation).
+        // Fast path: most coefficients are small integers; parsing as `i64` skips
+        // the `BigUint` alloc + byte-reduction on `eval_lc`'s hot loop, which
+        // re-parses every coefficient on every evaluation.
         if let Ok(n) = trimmed.parse::<i64>() {
             return Fp::from_i64(n, modulus);
         }
@@ -76,15 +71,10 @@ impl Fp {
         };
         let m = BigUint::parse_bytes(mag.as_bytes(), 10).unwrap_or_else(BigUint::zero);
         let v = Fp::new(m, modulus);
-        if neg {
-            v.neg()
-        } else {
-            v
-        }
+        if neg { v.neg() } else { v }
     }
 
-    /// Reduce a signed `BigInt` into the field without a decimal round-trip
-    /// (`to_bytes_le` avoids the `to_string`/parse the string path would do).
+    /// Reduce a signed `BigInt` into the field without a decimal round-trip.
     pub(crate) fn from_bigint(v: &num_bigint::BigInt, modulus: &BigUint) -> Self {
         let (sign, mag) = v.to_bytes_le();
         let f = Fp::new(BigUint::from_bytes_le(&mag), modulus);
@@ -102,11 +92,7 @@ impl Fp {
             Fp::Bn254(if n < 0 { -mag } else { mag })
         } else {
             let mag = Fp::new(BigUint::from(n.unsigned_abs()), modulus);
-            if n < 0 {
-                mag.neg()
-            } else {
-                mag
-            }
+            if n < 0 { mag.neg() } else { mag }
         }
     }
 
@@ -197,10 +183,8 @@ impl Fp {
         self.to_biguint().to_str_radix(10)
     }
 
-    /// The raw BN254 scalar, when this element lives in that field. Lets the
-    /// Groth16 backend consume the solved witness directly — `Fp::Bn254` already
-    /// holds the `Fr`, so this avoids a per-variable `Fr → decimal string → Fr`
-    /// round-trip over the whole witness (millions of format+parse calls).
+    /// The raw BN254 scalar, when this element lives in that field, so the Groth16
+    /// backend consumes the witness directly without a `Fr → decimal → Fr` round-trip.
     pub fn as_bn254_fr(&self) -> Option<Fr> {
         match self {
             Fp::Bn254(a) => Some(*a),
@@ -263,10 +247,9 @@ fn modulus_of_field(field: &crate::primitive::FieldSpec) -> Result<BigUint, Solv
     Ok(m)
 }
 
-/// Read access to a variable assignment. The witness solve uses the dense
-/// [`DenseAssign`] (O(1) indexed lookups for its millions of `eval_lc` term
-/// reads); the constraint check/analysis keeps the sparse `BTreeMap` it is
-/// handed. Both flow through the same generic `eval_*` code.
+/// Read access to a variable assignment. The witness solve uses dense
+/// [`DenseAssign`] (O(1) lookups); check/analysis keep the sparse `BTreeMap`.
+/// Both flow through the same generic `eval_*` code.
 trait Assignment {
     fn get_fp(&self, var: VarId) -> Option<&Fp>;
 }
@@ -278,10 +261,8 @@ impl Assignment for BTreeMap<VarId, Fp> {
     }
 }
 
-/// A witness assignment stored densely by `VarId`. Var ids are allocated
-/// contiguously during lowering, so this is a flat `Vec` — turning each of the
-/// solve loop's per-term lookups from a `BTreeMap` tree descent (O(log n)) into
-/// a single index.
+/// A witness assignment stored densely by `VarId`. Var ids are contiguous, so a
+/// flat `Vec` turns each per-term lookup from a `BTreeMap` descent into an index.
 struct DenseAssign {
     slots: Vec<Option<Fp>>,
 }
@@ -302,8 +283,7 @@ impl DenseAssign {
         self.slots[i] = Some(val);
     }
 
-    /// The public solve API hands back a `BTreeMap` (what check/analyze and the
-    /// backend consume); convert once at the boundary.
+    /// Convert once at the boundary to the `BTreeMap` the public API returns.
     fn into_btreemap(self) -> BTreeMap<VarId, Fp> {
         self.slots
             .into_iter()
@@ -379,8 +359,8 @@ fn solve_witness(
     modulus: BigUint,
     inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>, SolveError> {
-    // Dense assignment sized to the highest var id (ids are contiguous, so this
-    // is tight); `Option` handles any gap and the not-yet-produced slots.
+    // Dense assignment sized to the highest var id; `Option` handles any gap and
+    // not-yet-produced slots.
     let n = vars
         .iter()
         .map(|v| v.id as usize)
@@ -402,14 +382,14 @@ fn solve_witness(
     }
 
     // Run the hint program. Large programs exploit the witness DAG (independent
-    // ops at the same dependency level run in parallel); small ones stay
-    // sequential to avoid the level-analysis overhead.
+    // same-level ops run in parallel); small ones stay sequential to avoid the
+    // level-analysis overhead.
     const PAR_THRESHOLD: usize = 4096;
     if witness_gen.len() >= PAR_THRESHOLD {
         solve_witness_parallel(witness_gen, &modulus, &mut assign)?;
     } else {
-        // Collect each op's outputs into a scratch buffer (so the op reads the
-        // shared assignment while `emit` doesn't alias it), then apply them.
+        // Scratch buffer so the op reads the shared assignment without `emit`
+        // aliasing it, then apply the outputs.
         let mut outs: Vec<(VarId, Fp)> = Vec::new();
         for op in witness_gen {
             outs.clear();
@@ -423,9 +403,8 @@ fn solve_witness(
     Ok(assign.into_btreemap())
 }
 
-/// Execute one witness-gen op against the current (immutable) assignment,
-/// reporting each output via `emit`. Pure over its inputs, so the parallel
-/// solver can run independent ops concurrently.
+/// Execute one witness-gen op against the immutable assignment, reporting each
+/// output via `emit`. Pure over its inputs, so independent ops run concurrently.
 fn exec_witness_op(
     op: &WitnessGen,
     assign: &impl Assignment,
@@ -621,12 +600,11 @@ fn exec_witness_op(
     Ok(())
 }
 
-/// Solve the witness in parallel by exploiting the op DAG: ops at the same
-/// dependency level (none reading another's output) are independent, so each
-/// level runs across rayon. Ops are emitted in a valid topological order, so a
-/// single forward pass assigns levels. Produces the identical assignment to the
-/// sequential path (all outputs of a variable come from one op; a level never
-/// reads a same-level output).
+/// Solve the witness in parallel via the op DAG: same-level ops (none reading
+/// another's output) are independent, so each level runs across rayon. Ops are
+/// emitted in topological order, so one forward pass assigns levels. Produces the
+/// identical assignment to the sequential path — every var is written by exactly
+/// one op, and a level never reads a same-level output.
 fn solve_witness_parallel(
     witness_gen: &[WitnessGen],
     modulus: &BigUint,
@@ -702,8 +680,7 @@ fn op_output_vars(op: &WitnessGen, mut f: impl FnMut(VarId)) {
     }
 }
 
-/// Visit each input `VarId` a witness-gen op reads (the vars referenced by its
-/// input linear combinations).
+/// Visit each input `VarId` a witness-gen op reads.
 fn op_read_vars(op: &WitnessGen, mut f: impl FnMut(VarId)) {
     fn add(lc: &LinearCombination, f: &mut impl FnMut(VarId)) {
         lc.terms.iter().for_each(|t| f(t.var));
@@ -751,8 +728,7 @@ fn op_read_vars(op: &WitnessGen, mut f: impl FnMut(VarId)) {
     }
 }
 
-/// Construct a field element from a decimal string against a program's field
-/// (for tests / tooling that need to inject specific witness values).
+/// Construct a field element from a decimal string against a program's field.
 pub fn fp_from_decimal(s: &str, program: &PrimitiveProgram) -> Fp {
     Fp::from_decimal(s, &modulus_of(program).expect("valid field modulus"))
 }
@@ -778,14 +754,11 @@ pub fn solve_and_check(
     Ok(assign)
 }
 
-// ===========================================================================
 // Under-constraint (soundness smoke-test) analyzer.
-// ===========================================================================
 
 /// A derived variable the analyzer could not prove is uniquely pinned by the
-/// constraints (holding every other variable at the honest witness). This is a
-/// potential under-constraint — a value a malicious prover might be able to
-/// change without violating any constraint.
+/// constraints (holding every other variable at the honest witness) — a potential
+/// under-constraint a malicious prover might change without violating a constraint.
 #[derive(Debug, Clone)]
 pub struct UnderConstrained {
     pub var: VarId,
@@ -828,12 +801,12 @@ fn univariate(
 /// Check every `Derived` variable is uniquely determined by the constraints,
 /// given the honest witness `assign` (which must satisfy the program).
 ///
-/// This is a *necessary* soundness check, not a full proof: it catches free /
-/// two-valued variables (the dominant under-constraint bug class) by testing,
-/// for each variable, whether any value other than the honest one also
-/// satisfies every constraint that references it (all other variables fixed). A
-/// variable pinned by a linear constraint is uniquely determined; one pinned
-/// only by quadratics is checked against the quadratics' second roots (Vieta).
+/// A *necessary* soundness check, not a full proof: it catches free/two-valued
+/// variables (the dominant under-constraint bug class) by testing, per variable,
+/// whether any value other than the honest one also satisfies every referencing
+/// constraint (all others fixed). A variable pinned by a linear constraint is
+/// unique; one pinned only by quadratics is checked against their second roots
+/// (Vieta).
 pub fn analyze_underconstrained(
     program: &PrimitiveProgram,
     assign: &BTreeMap<VarId, Fp>,
@@ -857,9 +830,8 @@ pub fn analyze_underconstrained(
         }
     }
 
-    // Each Derived var's analysis is independent (read-only shared state) —
-    // parallelize with rayon. `filter_map().collect()` preserves order, so the
-    // result is deterministic (each var yields at most one finding).
+    // Each Derived var's analysis is independent (read-only shared state).
+    // `filter_map().collect()` preserves order, keeping the result deterministic.
     use rayon::prelude::*;
     program
         .vars
@@ -929,12 +901,10 @@ pub fn analyze_underconstrained(
         .collect()
 }
 
-// ===========================================================================
 // CircuitProgram entry points — operate on R1CS rows (`a·b = c`) directly,
-// avoiding the `to_primitive` flattening. `xark prove`/`check` use these so a
-// loaded `circuit.xbc` is never materialized into `Expression`s. Equivalence
-// with the `Expression`-based path is asserted in the tests below.
-// ===========================================================================
+// avoiding the `to_primitive` flattening, so a loaded `circuit.xbc` is never
+// materialized into `Expression`s. Equivalence with the `Expression`-based path
+// is asserted in the tests below.
 
 /// Run the witness-generation program of a [`CircuitProgram`].
 pub fn solve_cp(
@@ -1035,10 +1005,8 @@ pub fn analyze_underconstrained_cp(
         }
     }
 
-    // Each derived variable's verdict is independent (reads only the shared
-    // immutable index/constraints/assignment), so check them across rayon's
-    // thread pool. `collect` preserves the source order, keeping the output
-    // deterministic.
+    // Each derived variable's verdict is independent (reads only shared immutable
+    // state); `collect` preserves source order, keeping the output deterministic.
     program
         .vars
         .par_iter()
@@ -1048,8 +1016,7 @@ pub fn analyze_underconstrained_cp(
 }
 
 /// The per-variable under-constraint verdict (`None` = uniquely pinned). Pure
-/// over shared immutable inputs, so [`analyze_underconstrained_cp`] runs it in
-/// parallel.
+/// over shared immutable inputs, so it runs in parallel.
 fn check_one_var_cp(
     var: &crate::primitive::Var,
     refs: &BTreeMap<VarId, Vec<usize>>,
@@ -1117,12 +1084,10 @@ mod tests {
     use super::*;
     use crate::primitive::{FieldSpec, PrimitiveProgram};
 
-    /// The `CircuitProgram` (R1CS-row) solver path must agree exactly with the
-    /// `PrimitiveProgram` (Expression) path — same witness, same constraint
-    /// pass/fail, same under-constraint verdicts (`_cp` derives its `Expression`
-    /// view via `to_primitive`, so this pins `solve_cp`/`check_cp`/`analyze…_cp`
-    /// against the reference). Covers a sound mul-gate, a dangling advice var
-    /// (free path), and a booleanity-only bit (two-valued quadratic path).
+    /// The `CircuitProgram` (R1CS-row) path must agree exactly with the
+    /// `PrimitiveProgram` (Expression) path — same witness, constraint verdict,
+    /// and under-constraint verdicts. Covers a sound mul-gate, a dangling advice
+    /// var (free path), and a booleanity-only bit (two-valued quadratic path).
     #[test]
     fn cp_solver_matches_primitive_path() {
         use crate::circuit::{CircuitProgram, R1csRow};
@@ -1215,9 +1180,7 @@ mod tests {
 
     /// Exercise the parallel witness solver (>`PAR_THRESHOLD` ops) over a
     /// two-level DAG — `t_i = x_i²`, then `u_i = t_i²` — verifying every output.
-    /// A level-ordering bug (reading a same-level output) or a lost write would
-    /// give the wrong `u_i`, and a var only lands via one op so parallel writes
-    /// never race.
+    /// A level-ordering bug or lost write would give the wrong `u_i`.
     #[test]
     fn parallel_solve_large_dag_is_correct() {
         use crate::primitive::{FieldSpec, PrimitiveProgram, Var, VarRole, WitnessGen};

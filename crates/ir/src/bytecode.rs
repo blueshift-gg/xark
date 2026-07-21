@@ -1,25 +1,8 @@
-//! Binary "bytecode" form of a [`PrimitiveProgram`] — a compact,
-//! offset-addressed instruction stream that round-trips to the exact same
-//! program.
-//!
-//! # Why
-//!
-//! `circuit.json` is the human-/tool-readable circuit artifact. This bytecode is
-//! its compact sibling (`circuit.xbc`): every constraint and every
-//! witness-generation (hint) op becomes a single *opcode* whose operands are
-//! **witness offsets** (`VarId`s — indices into the witness vector) plus
-//! immediates (field constants, small widths). It is the foundation for a
-//! parallel-expandable circuit format.
-//!
-//! # The parallelism affordance
-//!
-//! The container carries an **opcode index**: one entry per opcode giving its
-//! byte offset in the opcode stream plus the witness/constraint offsets it
-//! produces. Because each opcode fully embeds the `VarId`s it writes and (for a
-//! constraint) the constraint slot it fills, opcode `K` can be decoded and
-//! expanded *in isolation* — seek to `index[K].byte_offset`, decode, done — with
-//! no need to process opcodes `0..K` first. That is the property that later lets
-//! expansion run in parallel; the layout is designed for it now.
+//! Compact binary form (`circuit.xbc`) of a [`PrimitiveProgram`] that round-trips
+//! exactly. Each constraint and each witness-gen op becomes one *opcode* whose
+//! operands are witness offsets (`VarId`s) plus immediates. Each opcode fully
+//! embeds the `VarId`s it writes / constraint slot it fills, so an opcode can be
+//! decoded and expanded in isolation (the affordance for parallel expansion).
 //!
 //! # Binary layout (little-endian throughout)
 //!
@@ -38,23 +21,17 @@
 //! opcode stream:       n_opcodes × { tag: u8, payload… }
 //! ```
 //!
-//! Each index entry is **64 bits**: `offset` is the opcode's byte position in
-//! the stream (relative to its start; ≤ 4 GiB), and `base` is the single output
-//! coordinate the opcode produces — a constraint opcode's constraint index, or a
-//! witness op's first output `VarId`. Which one it is follows from the opcode's
-//! tag byte at `offset` (read in O(1), no predecessor scan), so the two were
-//! collapsed from the earlier 128-bit `{u64, witness_base, constraint_base}`
-//! entry (they are mutually exclusive: one was always the `NO_BASE` sentinel).
-//! `base == NO_BASE` marks an opcode with no output (e.g. an empty `Bits`).
+//! Each index entry is 64 bits: `offset` is the opcode's byte position in the
+//! stream, and `base` is the single output coordinate — a constraint index or a
+//! witness op's first output `VarId` (which one follows from the tag byte at
+//! `offset`). `base == NO_BASE` marks an opcode with no output (e.g. empty `Bits`).
 //!
 //! The opcode stream is emitted constraints-first (one [`OP_CONSTRAINT`] per
 //! constraint, in order) then witness-gen ops (one opcode per [`WitnessGen`]
 //! kind, in order), so [`expand`] rebuilds the two ordered vectors exactly.
 //!
-//! Field constants are stored as a sign byte + little-endian magnitude bytes
-//! (via `BigInt`), which is both compact (32 bytes for a 254-bit constant vs.
-//! ~78 decimal digits) and exactly round-trips the canonical decimal we always
-//! store.
+//! Field constants are stored as a sign byte + little-endian magnitude (via
+//! `BigInt`): compact and exactly round-trips the canonical decimal.
 
 use std::collections::BTreeMap;
 
@@ -65,8 +42,8 @@ use crate::field::FieldConst;
 use crate::linear_combination::{LinearCombination, Term, VarId};
 use crate::primitive::WitnessGen;
 
-/// Container magic: `XBC` ("Xark ByteCode") + a reserved `\0` byte. Version-neutral
-/// — the format version lives in the following `u16`, not the magic.
+/// Container magic: `XBC` + a reserved `\0`. Version-neutral — the format version
+/// lives in the following `u16`, not the magic.
 pub const MAGIC: [u8; 4] = *b"XBC\0";
 
 // Item tags in a looped stream.
@@ -77,8 +54,7 @@ const ITEM_REPEAT: u8 = 1;
 const NOTE_NOCHANGE: u8 = 0;
 const NOTE_TEMPLATE: u8 = 1;
 
-/// Sentinel in the opcode index `base` field meaning "this opcode produces no
-/// output witness var / no constraint".
+/// Sentinel in the opcode index `base` field: opcode produces no output.
 pub const NO_BASE: u32 = u32::MAX;
 
 // Opcode tags. One per constraint plus one per `WitnessGen` kind.
@@ -96,12 +72,8 @@ pub const OP_MULMOD_DIVMOD: u8 = 10;
 pub const OP_MODINVERSE: u8 = 11;
 pub const OP_SUB2: u8 = 12;
 
-/// A single decoded instruction: either a constraint or a witness-gen op.
-///
-/// This is the in-memory opcode model. At the byte level each `Witness` variant
-/// is encoded under its own opcode tag (`OP_PRODUCT`, `OP_BIT`, …), so the wire
-/// format is genuinely "one opcode per `WitnessGen` kind, plus a
-/// constraint-carrying opcode".
+/// A single decoded instruction: a constraint or a witness-gen op. At the byte
+/// level each `Witness` variant is encoded under its own opcode tag.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opcode {
     /// An R1CS `a · b = c` constraint (fills one constraint slot).
@@ -137,9 +109,7 @@ impl core::fmt::Display for BytecodeError {
 
 impl std::error::Error for BytecodeError {}
 
-// ===========================================================================
-// Encoding
-// ===========================================================================
+// --- Encoding ---
 
 fn put_u32(buf: &mut Vec<u8>, v: u32) {
     buf.extend_from_slice(&v.to_le_bytes());
@@ -147,8 +117,7 @@ fn put_u32(buf: &mut Vec<u8>, v: u32) {
 fn put_i64(buf: &mut Vec<u8>, v: i64) {
     buf.extend_from_slice(&v.to_le_bytes());
 }
-/// LEB128 unsigned varint — 1 byte for values < 128 (the common case for var
-/// ids, term counts, and small immediates), growing 7 bits at a time.
+/// LEB128 unsigned varint — 1 byte for values < 128, growing 7 bits at a time.
 fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
     loop {
         let byte = (v & 0x7f) as u8;
@@ -160,7 +129,7 @@ fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
         buf.push(byte | 0x80);
     }
 }
-/// A `u32` value (var id / length / small immediate) as a varint.
+/// A `u32` (var id / length / small immediate) as a varint.
 fn put_vu32(buf: &mut Vec<u8>, v: u32) {
     put_varint(buf, u64::from(v));
 }
@@ -178,9 +147,8 @@ fn put_opt_str(buf: &mut Vec<u8>, s: &Option<String>) {
     }
 }
 
-// Field-constant tag bytes. The overwhelmingly common coefficients (`1`, `-1`,
-// `0`) and small integers cost one tag byte (+ a short varint), instead of the
-// old `sign + 4-byte length + magnitude` (6 bytes for `1`).
+// Field-constant tag bytes. Common coefficients (`0`/`1`/`-1`) and small
+// integers cost one tag byte (+ a short varint).
 const FC_ZERO: u8 = 0;
 const FC_ONE: u8 = 1;
 const FC_NEG_ONE: u8 = 2;
@@ -249,8 +217,7 @@ fn put_lcs(buf: &mut Vec<u8>, lcs: &[LinearCombination]) {
     }
 }
 
-/// Encode an R1CS row `a · b = c` — three linear combinations plus the debug
-/// note.
+/// Encode an R1CS row `a · b = c`: three LCs plus the debug note.
 fn put_r1csrow(buf: &mut Vec<u8>, r: &R1csRow) {
     put_lc(buf, &r.a);
     put_lc(buf, &r.b);
@@ -258,9 +225,8 @@ fn put_r1csrow(buf: &mut Vec<u8>, r: &R1csRow) {
     put_opt_str(buf, &r.note);
 }
 
-/// Encode one witness-gen op into `stream`, returning its `witness_base` (the
-/// first output `VarId` it writes). Public so the DAG-compact function encoder
-/// (`lower_mir`) can reuse the exact same witness wire format.
+/// Encode one witness-gen op into `stream`, returning its first output `VarId`.
+/// Public so `lower_mir` can reuse the exact same witness wire format.
 pub fn put_witness(stream: &mut Vec<u8>, w: &WitnessGen) -> u32 {
     match w {
         WitnessGen::Product { out, left, right } => {
@@ -375,8 +341,7 @@ pub fn put_witness(stream: &mut Vec<u8>, w: &WitnessGen) -> u32 {
     }
 }
 
-/// Encode one in-memory [`Opcode`] (its tag byte + payload) into `stream`. This
-/// is the single encoder shared by the flat v2 stream and the v3 item stream.
+/// Encode one in-memory [`Opcode`] (tag byte + payload) into `stream`.
 fn put_opcode(stream: &mut Vec<u8>, op: &Opcode) {
     match op {
         Opcode::Constraint(r) => {
@@ -389,9 +354,7 @@ fn put_opcode(stream: &mut Vec<u8>, op: &Opcode) {
     }
 }
 
-// ===========================================================================
-// Decoding
-// ===========================================================================
+// --- Decoding ---
 
 /// A minimal forward cursor over the byte buffer.
 struct Cursor<'a> {
@@ -622,47 +585,33 @@ impl<'a> Cursor<'a> {
     }
 }
 
-// ===========================================================================
-// Loop rolling (v5): REPEAT opcodes
-// ===========================================================================
+// --- Loop rolling: REPEAT opcodes ---
 //
-// The unrolled opcode stream is highly periodic: a 254-bit scalar ladder, a
-// bit-decomposition, or a hash round repeats the *same* opcode sub-sequence with
-// every witness offset (`VarId`) and every affine immediate shifted by a fixed
-// per-iteration stride. `roll_loops` collapses each such run into a single
-// [`Repeat`] item — the body stored **once**, plus a `count` and a per-operand
-// affine rule — so N near-identical iterations shrink to one body. It is pure
-// lossless compression: [`expand`] replays the body `count` times to reproduce
-// the exact same [`PrimitiveProgram`], byte for byte.
+// The unrolled opcode stream is highly periodic (scalar ladders, bit
+// decompositions, hash rounds repeat the same sub-sequence with each operand
+// shifted by a fixed per-iteration stride). Rolling collapses each such run into
+// a single [`Repeat`] — body stored once, plus `count` and a per-operand affine
+// rule. Lossless: [`expand`] replays the body `count` times to reproduce the
+// exact same [`PrimitiveProgram`], byte for byte.
 //
-// ## The affine rule (`imm_rule`)
+// The affine rule: every varying quantity is either constant across iterations
+// or linear (`base + i·step`). Operands (output `VarId`s, LC term vars, the
+// `Bit` index) carry a per-slot `step` (0 = fixed input; nonzero = stride); the
+// body stores iteration 0 and iteration `i` adds `i·step`. Constraint `note`
+// strings carry a per-note rule: unchanged, or a template whose embedded decimal
+// integers advance by fixed steps.
 //
-// Every varying quantity in an opcode is either **constant** across iterations
-// or **linear** (`base + i·step`):
+// Soundness: a run is collapsed only after verifying every iteration reproduces
+// exactly under the rule (structure, operands, notes); anything that doesn't fit
+// is left flat. Partial collapse is fine.
 //
-// * Every operand — output `VarId`s, linear-combination term vars, and the
-//   `Bit`/index immediate — carries a per-slot `step` (0 = constant, i.e. a fixed
-//   input referenced every iteration; nonzero = the witness/immediate stride).
-//   The body stores iteration 0's values; iteration `i` adds `i·step`.
-// * Debug `note` strings (constraints only) carry a per-note rule: unchanged, or
-//   a template whose embedded decimal integers advance by fixed steps (e.g. the
-//   var index in `b12 = xor`).
-//
-// A run is collapsed only after **verifying** every iteration reproduces exactly
-// under the rule (structure, operands, and notes); anything that doesn't fit —
-// a per-iteration round-constant table, a coefficient that scales rather than
-// shifts — is left flat. Partial collapse is fine: we loop what we safely can.
-//
-// ## Nesting
-//
-// Rolling runs as repeated **passes**: pass 1 collapses the innermost (smallest-
-// period) runs into [`Repeat`] items; a later pass sees the outer pattern
-// (`[Repeat, ops…]` repeated) and collapses *that*, nesting the inner `Repeat`
-// inside the outer body. Because an item's operands recurse through nested
-// bodies, the outer affine stride shifts the inner loop's bases while the inner
-// loop keeps its own steps — the two compose exactly.
+// Nesting: rolling runs as repeated passes — pass 1 collapses the innermost
+// (smallest-period) runs; a later pass sees the outer `[Repeat, ops…]` pattern
+// and collapses that, nesting the inner `Repeat`. Operand traversal recurses
+// through nested bodies, so the outer stride shifts the inner loop's bases while
+// the inner loop keeps its own steps — the two compose exactly.
 
-/// One item in a rolled (v3) stream: a single opcode, or a loop.
+/// One item in a rolled stream: a single opcode, or a loop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
     /// A single flat opcode (constraint or witness op).
@@ -681,9 +630,8 @@ pub struct Repeat {
     /// contain nested [`Repeat`]s.
     pub body: Vec<Item>,
     /// Per-operand affine step, in `body`'s operand-traversal order (see
-    /// [`item_operands`]). `witness_stride`/`constraint_stride` are just the
-    /// dominant nonzero values here; storing per-slot steps lets a loop reference
-    /// both iteration-local vars (nonzero step) and fixed inputs (step 0).
+    /// [`item_operands`]). Per-slot steps let a loop reference both
+    /// iteration-local vars (nonzero step) and fixed inputs (step 0).
     pub steps: Vec<i64>,
     /// Per-note affine rule, in `body`'s note-traversal order (see [`item_notes`]).
     pub notes: Vec<NoteRule>,
@@ -702,14 +650,14 @@ pub enum NoteRule {
     Template(Vec<(u32, i64)>),
 }
 
-// --- operand / note / structure traversal ---------------------------------
+// --- operand / note / structure traversal ---
 //
-// Three traversals drive rolling and expansion; they MUST visit operands and
+// These traversals drive rolling and expansion; they MUST visit operands and
 // notes in one canonical order so `steps`/`notes` line up between rolling (which
 // builds them) and expansion (which applies them).
 
-/// Visit every operand `u32` of an opcode — output vars, linear-combination term
-/// vars, and the `Bit` index — in canonical order, allowing mutation.
+/// Visit every operand `u32` of an opcode — output vars, LC term vars, and the
+/// `Bit` index — in canonical order, allowing mutation.
 fn visit_opcode_operands(op: &mut Opcode, f: &mut impl FnMut(&mut u32)) {
     fn lc(lc: &mut LinearCombination, f: &mut impl FnMut(&mut u32)) {
         for t in &mut lc.terms {
@@ -826,8 +774,6 @@ fn opcode_note_mut(op: &mut Opcode) -> Option<&mut Option<String>> {
 fn item_operands(item: &Item, out: &mut Vec<u32>) {
     match item {
         Item::Op(op) => {
-            // Read via the mutable visitor on a throwaway clone-free path: we only
-            // read, so use a local copy of each slot.
             let mut op2 = op.clone();
             visit_opcode_operands(&mut op2, &mut |x| out.push(*x));
         }
@@ -894,17 +840,9 @@ fn shift_item_notes(item: &mut Item, k: i64, notes: &[NoteRule], idx: &mut usize
     }
 }
 
-/// Canonical **structural** bytes of an item: its shape with all operand values
-/// zeroed and all note digit-runs blanked, so two items are structurally equal
-/// iff they differ only in operand bases and note integers (exactly what a
-/// [`Repeat`] can express). Recurses through nested bodies (including a nested
-/// `Repeat`'s `count`/`steps`/note-rule kinds, which must match for the outer
-/// loop to be valid).
-/// Serialize an LC into *structural* bytes: its constant and per-term coefficients
-/// but with every var written as `0` (operands are what a `Repeat` steps, so they
-/// must not distinguish structurally-equal blocks). Clone-free — the previous
-/// impl cloned the whole opcode just to zero these, which was the dominant encode
-/// cost on large circuits.
+/// Serialize an LC into *structural* bytes: constant and per-term coefficients,
+/// but every var written as `0`. Operands are what a `Repeat` steps, so they must
+/// not distinguish structurally-equal blocks.
 fn put_lc_struct(buf: &mut Vec<u8>, lc: &LinearCombination) {
     put_fieldconst(buf, &lc.constant);
     put_varint(buf, lc.terms.len() as u64);
@@ -927,10 +865,9 @@ fn put_var_ids_struct(buf: &mut Vec<u8>, ids: &[VarId]) {
     }
 }
 /// Structural bytes of an opcode: same tags/shape as [`put_opcode`], but every
-/// operand var is `0` and notes have their digit-runs blanked. Mirrors
-/// [`put_witness`] and [`visit_opcode_operands`] — the set of zeroed fields must
-/// match `visit_opcode_operands` exactly (only `limb_bits` is structural). Any
-/// drift changes which blocks roll together and is caught by the snapshot suite.
+/// operand var is `0` and notes have digit-runs blanked. The set of zeroed fields
+/// MUST match [`visit_opcode_operands`] exactly (only `limb_bits` is structural);
+/// any drift changes which blocks roll together.
 fn put_opcode_struct(buf: &mut Vec<u8>, op: &Opcode) {
     match op {
         Opcode::Constraint(r) => {
@@ -1229,10 +1166,8 @@ impl SparseMin {
 /// outer ones.
 fn roll_stream(ops: Vec<Opcode>) -> Vec<Item> {
     let mut items: Vec<Item> = ops.into_iter().map(Item::Op).collect();
-    // Carry each item's hash across passes: un-rolled items (the bulk, on every
-    // pass) keep their hash, so only newly-built `Repeat`s are hashed. Re-hashing
-    // every item every pass was the dominant cost of encoding large circuits
-    // (ed25519's ~33s bytecode encode walks ~100k item LCs up to 64×).
+    // Carry hashes across passes so only newly-built `Repeat`s are re-hashed;
+    // re-hashing every item every pass dominated encode time on large circuits.
     let mut hashes: Vec<u64> = items.iter().map(item_hash).collect();
     for _ in 0..MAX_ROLL_PASSES {
         let (next, next_hashes, changed) = roll_pass(items, hashes);
@@ -1392,9 +1327,8 @@ fn try_build_repeat(
     }
 
     // Extend the count while each further block reproduces exactly under the
-    // rule. Scratch buffers are reused across iterations (filled then cleared) to
-    // avoid millions of short-lived allocations — the dominant encode cost on
-    // large circuits (ed25519: ~3.7M items verified here).
+    // rule. Scratch buffers are reused across iterations to avoid millions of
+    // short-lived allocations (the dominant encode cost on large circuits).
     let mut count = 2usize;
     let mut sbuf: Vec<u8> = Vec::with_capacity(s0.len());
     let mut obuf: Vec<u32> = Vec::with_capacity(o0.len());
@@ -1457,12 +1391,9 @@ fn try_build_repeat(
     })
 }
 
-/// Compress a homogeneous opcode run (all `Constraint`, or all `Witness`) with the
-/// same periodic-run rolling as [`roll_loops`], serialized standalone as
-/// `u32(item_count)` followed by the items. This lets the v8 function container
-/// embed loop compression for runs of inline (non-function) rows, so a single
-/// container format need not carry unrolled primitive loops. Round-trips exactly
-/// via [`decode_and_expand_ops`].
+/// Compress a homogeneous opcode run (all `Constraint`, or all `Witness`) with
+/// periodic-run rolling, serialized standalone as `u32(item_count)` + the items.
+/// Round-trips exactly via [`decode_and_expand_ops`].
 pub fn roll_and_encode_ops(ops: Vec<Opcode>) -> Vec<u8> {
     let items = roll_stream(ops);
     let mut buf = Vec::new();
@@ -1473,9 +1404,8 @@ pub fn roll_and_encode_ops(ops: Vec<Opcode>) -> Vec<u8> {
     buf
 }
 
-/// Inverse of [`roll_and_encode_ops`]: decode a standalone rolled-op blob back to
-/// flat constraints and/or witness ops. A homogeneous blob yields only one of the
-/// two vectors (the other stays empty).
+/// Inverse of [`roll_and_encode_ops`]: decode a rolled-op blob back to flat
+/// constraints and/or witness ops. A homogeneous blob fills only one vector.
 pub fn decode_and_expand_ops(
     bytes: &[u8],
 ) -> Result<(Vec<R1csRow>, Vec<WitnessGen>), BytecodeError> {
@@ -1593,11 +1523,8 @@ fn emit_repeat_iter(r: &Repeat, k: u32, cons: &mut Vec<R1csRow>, wit: &mut Vec<W
     let mut note_idx = 0usize;
     for it in &r.body {
         match it {
-            // Flat opcode (the common case — an innermost loop body): clone it
-            // ONCE, apply the operand + note shifts directly to that clone, and
-            // move it into the output. The old code cloned the whole body, shifted
-            // it, then `emit_item` cloned every opcode a second time — doubling the
-            // allocation traffic that dominates load.
+            // Flat opcode (the common case): clone once, apply operand + note
+            // shifts directly, move into output.
             Item::Op(op) => {
                 let mut op2 = op.clone();
                 visit_opcode_operands(&mut op2, &mut |x| {
@@ -1619,10 +1546,8 @@ fn emit_repeat_iter(r: &Repeat, k: u32, cons: &mut Vec<R1csRow>, wit: &mut Vec<W
                     Opcode::Witness(w) => wit.push(w),
                 }
             }
-            // Nested loop: clone it, shift all its (recursive) bases/notes under
-            // the outer rule, then emit — the nested loop then applies its own
-            // per-iteration steps. Nested loops are the rare minority, so the
-            // extra clone here is not on the hot path.
+            // Nested loop: clone it, shift its (recursive) bases/notes under the
+            // outer rule, then emit — the nested loop applies its own steps.
             Item::Repeat(_) => {
                 let mut nested = it.clone();
                 shift_item_operands(&mut nested, ki, &r.steps, &mut op_idx);
@@ -1652,8 +1577,6 @@ mod tests {
             note,
         }
     }
-
-    // --- loop rolling (v5) --------------------------------------------------
 
     /// A bit-decomposition-shaped periodic program: `n` `Bit` witness ops (output
     /// var + bit index both advance by 1, the decomposed input is a fixed var) and
@@ -1685,9 +1608,8 @@ mod tests {
         }
     }
 
-    /// The standalone rolled-op blob (embedded in the v8 function container)
-    /// round-trips exactly for both a constraint run and a witness run, and a
-    /// large periodic run compresses to a handful of bytes.
+    /// The rolled-op blob round-trips exactly for both a constraint run and a
+    /// witness run, and a large periodic run compresses to a handful of bytes.
     #[test]
     fn roll_and_encode_ops_round_trips_and_compresses() {
         for n in [1u32, 2, 8, 64, 254] {

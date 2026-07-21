@@ -1,48 +1,20 @@
-//! `xark-poseidon`: a Poseidon permutation gadget over state width `t = 3`
-//! with the `alpha = 5` S-box, written entirely in the `Field` subset.
+//! `xark-poseidon`: a Poseidon permutation gadget (state width `t = 3`, `alpha =
+//! 5` S-box `x^5`, `R_F = 8` full + `R_P = 56` partial rounds) in the `Field`
+//! subset, inlined by the compiler to flat R1CS.
 //!
-//! Circuit authors just `use xark_poseidon::hash2;` — the compiler inlines the
-//! whole permutation, so it lowers to the same R1CS as if it were written
-//! inline. Bounded `while` loops are unrolled at compile time and `[Field; 3]`
-//! arrays / helper `fn`s all compose.
+//! Canonical parameters (soundness): the MDS matrix and round constants are
+//! transcribed from the reference Horizen Labs `poseidon_instance_bn256.rs` — the
+//! secure instance `zkhash` exposes as `POSEIDON_BN_PARAMS` (BN254 and BN256 share
+//! the scalar field). The in-circuit permutation is the plain `permutation_not_opt`
+//! form, mathematically equal to zkhash's optimized `permutation`, so `hash2`
+//! matches it element-for-element.
 //!
-//! ## Parameters (BN254 / BN256, t = 3, alpha = 5)
+//! Only `variable * variable` products emit a gate, so ARK and MDS (constant folds)
+//! are free; the 240 gates come entirely from the 80 `x^5` S-boxes (3 gates each).
 //!
-//! The MDS matrix and round constants are transcribed from the reference Horizen
-//! Labs implementation (`HorizenLabs/poseidon2`, `poseidon_instance_bn256.rs`) —
-//! the same real, secure instance the `zkhash` crate exposes as
-//! `POSEIDON_BN_PARAMS`. (BN254 and BN256 are the same curve — the scalar field
-//! modulus is identical.) The in-circuit permutation is the plain
-//! (`permutation_not_opt`) form, which is mathematically equal to zkhash's
-//! optimized `permutation`, so `hash2` matches it element-for-element.
-//!
-//! - `t   = 3`   (state width)
-//! - `R_F = 8`   (full rounds: 4 before + 4 after the partial rounds)
-//! - `R_P = 56`  (partial rounds)
-//! - total rounds = 64
-//! - S-box: `x^5` (`alpha = 5`)
-//!
-//! ## Cost model
-//!
-//! Only `variable * variable` products emit an R1CS gate. `constant * variable`,
-//! `+`, and `-` fold into linear combinations for free. Therefore:
-//! - ARK (adding constant round keys) is FREE.
-//! - MDS (a constant-matrix * state product) is FREE.
-//! - The ONLY gates come from the S-boxes. `x^5` lowers by repeated squaring:
-//!   `x^2` (1 gate), `x^4 = x^2 * x^2` (1 gate), `x^5 = x^4 * x` (1 gate) = 3
-//!   gates.
-//!
-//! With `t = 3`, a full round has 3 S-boxes; a partial round has 1. So
-//! `8` full + `56` partial rounds cost `(8*3 + 56*1) = 80` S-boxes = `240`
-//! multiplication gates.
-//!
-//! ## Subset gotcha
-//!
-//! Loop bounds must be integer *literals* (`while i < 3usize`), not named
-//! `const`s: the unroller resolves the branch by tracking integer *locals*, and
-//! a comparison against a named const reads as witness-dependent control flow
-//! and is rejected. `T` is therefore used only as an array length, never as a
-//! loop bound.
+//! Subset gotcha: loop bounds must be integer *literals* (`while i < 3usize`), not
+//! named `const`s — a comparison against a named const reads as witness-dependent
+//! control flow and is rejected. `T` is used only as an array length.
 
 #![no_std]
 // Circuit-lowered gadget code: the xark compiler rejects compound assignment on

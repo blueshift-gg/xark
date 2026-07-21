@@ -1,11 +1,14 @@
 [package]
 name = "xark-verifier"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Solana on-chain Groth16 BN254 verifier consuming xark-exported VK + proof bytes."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
 
 # Lean publishable verifier: source + README only. Fixtures + the
 # on-chain/host/fuzz test harness live in the (unpublished) `xark-tests` crate.

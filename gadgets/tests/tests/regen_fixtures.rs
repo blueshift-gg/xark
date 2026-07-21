@@ -31,13 +31,13 @@ use ark_ff::{Field as _, Zero};
 use ark_groth16::Groth16;
 use ark_snark::SNARK;
 
+use xark_backend::Groth16Keys;
 use xark_backend::solana::{
     assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le,
 };
-use xark_backend::Groth16Keys;
 use xark_ir::linear_combination::LinearCombination as IrLc;
-use xark_ir::{primitive, solver, R1csProgram, VarId, Visibility};
-use xark_prover::{fr_from_decimal, XarkCircuit};
+use xark_ir::{R1csProgram, VarId, Visibility, primitive, solver};
+use xark_prover::{XarkCircuit, fr_from_decimal};
 
 /// secp256k1 ECDSA known-answer vector, generated with `k256`. The GLV
 /// `ecdsa_verify` takes each 256-bit value as two 128-bit halves `[lo, hi]`

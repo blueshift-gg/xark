@@ -1,11 +1,8 @@
 //! End-to-end Groth16 prover for the xark-lang IR.
 //!
-//! Consumes an [`R1csProgram`] (our `a·b = c` constraint form) plus a
-//! [`PrimitiveProgram`] (the witness-generation hint program), runs the
-//! reference [`solver`] to produce the full witness, lowers the constraints into
-//! Arkworks `gr1cs`, and runs the exact Groth16/BN254 stack the `xark` backend
-//! uses (ark 0.6). This closes the loop: a Rust circuit → MIR → xark-IR → R1CS →
-//! a *verified* Groth16 proof, entirely within xark's own pipeline.
+//! Consumes an [`R1csProgram`] plus a [`PrimitiveProgram`] (witness-gen hints),
+//! runs the [`solver`] to produce the witness, lowers the constraints into
+//! Arkworks `gr1cs`, and runs the Groth16/BN254 stack (ark 0.6).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -80,14 +77,11 @@ pub fn fr_from_decimal(s: &str) -> Fr {
     try_fr_from_decimal(s).expect("valid decimal")
 }
 
-/// Convert a [`FieldConst`] straight to `Fr`, skipping the decimal string that the
-/// `fr_from_decimal(&fc.decimal())` path formats and reparses. The small-integer
-/// fast path (the vast majority of coefficients) matches [`try_fr_from_decimal`];
-/// the big path reduces the stored `BigInt`'s little-endian bytes directly
-/// (`from_le_bytes_mod_order` handles the mod-p reduction). The Groth16 synthesizer
-/// parses *every* coefficient of a dense minimized R1CS at both setup and prove, so
-/// eliminating the `BigInt→String→BigInt` round-trip is the dominant synthesis
-/// speedup. Infallible — a `FieldConst` is already a validated field value.
+/// Convert a [`FieldConst`] straight to `Fr`, skipping the `decimal()` round-trip:
+/// the small-integer fast path goes direct, the big path reduces the stored
+/// `BigInt`'s little-endian bytes (`from_le_bytes_mod_order`). Since the Groth16
+/// synthesizer parses every coefficient at both setup and prove, avoiding the
+/// `BigInt→String→BigInt` round-trip is the dominant synthesis speedup. Infallible.
 pub fn fr_from_fieldconst(fc: &FieldConst) -> Fr {
     if let Some(n) = fc.as_i64() {
         let mag = Fr::from(n.unsigned_abs());
@@ -95,11 +89,7 @@ pub fn fr_from_fieldconst(fc: &FieldConst) -> Fr {
     }
     let (sign, bytes) = fc.big().to_bytes_le();
     let mag = Fr::from_le_bytes_mod_order(&bytes);
-    if sign == Sign::Minus {
-        -mag
-    } else {
-        mag
-    }
+    if sign == Sign::Minus { -mag } else { mag }
 }
 
 /// Parse a `0x`-prefixed hex value as a field element (big-endian, reduced mod p)
@@ -137,29 +127,22 @@ pub struct XarkCircuit {
 
 /// Minimize the R1CS (linear-variable elimination to a fixpoint). **Default ON**;
 /// `XARK_NO_MINIMIZE` (the `--no-minimize` flag) disables it. Both setup and
-/// proving route through here, so both see the *identical* deterministic minimized
-/// circuit — keys and proof stay consistent. Elimination is Gaussian, so
-/// satisfiability is preserved exactly: the witness `assign` (keyed by original
-/// ids, which surviving vars retain) remains a valid superset, and public-input
-/// ids/order are untouched.
+/// proving route through here so they see the *identical* deterministic circuit.
+/// Elimination is Gaussian, so satisfiability is preserved exactly: the witness
+/// `assign` (keyed by original ids, retained by surviving vars) stays valid, and
+/// public-input ids/order are untouched.
 fn maybe_minimize(prog: R1csProgram) -> R1csProgram {
-    // The guarded minimizer (fill cap `MAX_FILL_DEFAULT`, overridable via
-    // `XARK_MAX_FILL`) is the default for both setup and proving, so both see the
-    // identical circuit. The cap is deliberately low: it does the cheap,
-    // strictly-shrinking eliminations (plug/copy collapse, dead-var pruning) that
-    // reduce the circuit, and stops before the dense substitutions that inflate the
-    // nonzero count — which is what Groth16 prove/setup actually cost within a
-    // power-of-two FFT domain. An unguarded pass (`XARK_MAX_FILL` huge) reduces a few
-    // more constraints but explodes nonzeros on non-native circuits (secp256k1:
-    // 6.6M→47M) and can OOM on large flat ones, so it is opt-in, not the default.
-    //  * `XARK_NO_MINIMIZE` — skip entirely.
+    // The fill cap (`MAX_FILL_DEFAULT`, overridable via `XARK_MAX_FILL`) is
+    // deliberately low: it does the cheap, strictly-shrinking eliminations and
+    // stops before the dense substitutions that inflate the nonzero count (which is
+    // what Groth16 setup/prove actually cost). An unguarded pass reduces a few more
+    // constraints but explodes nonzeros on non-native circuits (secp256k1:
+    // 6.6M→47M) and can OOM, so it is opt-in.
     if dbg_flag("XARK_NO_MINIMIZE") {
         return prog;
     }
     let t = std::time::Instant::now();
     let out = xark_ir::minimize::minimize(&prog);
-    // Reduction stats are diagnostic noise on a normal run; show them only under
-    // the setup/prove timing flags.
     if dbg_flag("XARK_BUILD_TIME") || dbg_flag("PROVE_TIME") {
         eprintln!(
             "MINIMIZE: {} -> {} constraints, {} -> {} vars ({:.2}s)",
@@ -268,11 +251,9 @@ fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
 
 impl ConstraintSynthesizer<Fr> for XarkCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        // Allocate one arkworks variable per IR var, in id order. Public →
-        // input variable, everything else → witness variable. Var ids are dense,
-        // so the id→arkworks-var map is a `Vec` (O(1) per-term lookups in `build`,
-        // vs a `BTreeMap`'s O(log n)); we sort a slice of *references*, avoiding a
-        // clone of the whole `variables` vec on every synthesis.
+        // Allocate one arkworks variable per IR var, in id order (Public → input,
+        // else witness). Ids are dense, so the id→var map is a `Vec` (O(1) lookups);
+        // we sort a slice of *references* to avoid cloning `variables`.
         let mut order: Vec<_> = self.prog.variables.iter().collect();
         order.sort_by_key(|v| v.id);
         let max_id = order.last().map_or(0, |v| v.id) as usize;
@@ -286,14 +267,11 @@ impl ConstraintSynthesizer<Fr> for XarkCircuit {
             map[v.id as usize] = Some(av);
         }
 
-        // Cache large-coefficient → `Fr` conversions. A non-native circuit (ECDSA,
-        // hashes) carries thousands of ~254-bit constants (limb weights, field
-        // moduli, reduction factors) that recur across millions of constraints;
-        // converting each occurrence via `big().to_bytes_le()` (num_bigint) was the
-        // dominant synthesis cost, and arkworks runs `generate_constraints` *twice*
-        // (setup `to_matrices` + prove). Interning by value collapses that to one
-        // conversion per *distinct* big coeff. Small coeffs (the `Repr::Small` fast
-        // path, incl. the ubiquitous ±1) skip the cache entirely — no allocation.
+        // Cache large-coefficient → `Fr` conversions. Non-native circuits carry
+        // thousands of ~254-bit constants recurring across millions of constraints,
+        // and arkworks runs `generate_constraints` twice (setup + prove), so
+        // interning by value collapses that to one conversion per distinct big
+        // coeff. Small coeffs (`Repr::Small`, incl. ±1) skip the cache entirely.
         let mut big_cache: BTreeMap<FieldConst, Fr> = BTreeMap::new();
         let mut fr_of = |fc: &FieldConst| -> Fr {
             if let Some(n) = fc.as_i64() {
@@ -402,13 +380,9 @@ pub fn prove_and_verify(
     Groth16::<Bn254>::verify(&vk, &public, &proof).map_err(|e| format!("verify: {e:?}"))
 }
 
-// ===========================================================================
-// In-crate testing API.
-//
-// Lets a circuit author unit-test their circuit with plain `cargo test` (via
-// the `xark init` scaffold): load the built artifacts, feed positional inputs,
-// and get back whether a dev-mode Groth16 proof verifies.
-// ===========================================================================
+// In-crate testing API: lets a circuit author unit-test with plain `cargo test`
+// (via the `xark init` scaffold) — load the built artifacts, feed positional
+// inputs, and get back whether a dev-mode Groth16 proof verifies.
 
 /// A built circuit loaded from `target/xark/<name>/`, ready to prove against.
 ///
@@ -486,11 +460,8 @@ pub trait NativeInput {
 }
 
 /// Split a big-endian byte string into `n_limbs` little-endian `bits`-bit limbs,
-/// named `<prefix>.limbs[0..n_limbs]` — the leaf form a "leaf" transparent field
-/// element (`{ limbs: [Field; n_limbs] }`) flattens to. This is the single place
-/// the host-side limb split lives, so `#[derive(Transparent)]`-generated impls (and
-/// hand-written ones) all agree with the compiler's structural flatten by
-/// construction, instead of each re-encoding the `"{prefix}.limbs[{i}]"` contract.
+/// named `<prefix>.limbs[0..n_limbs]`. The single place the host-side limb split
+/// lives, so all `NativeInput` impls agree with the compiler's structural flatten.
 pub fn limb_leaves(
     be_bytes: &[u8],
     prefix: &str,
@@ -564,13 +535,9 @@ fn not_built_message(name: &str, xbc_path: &std::path::Path) -> String {
 }
 
 /// Best-effort auto-build: when a `#[circuit]` test finds its circuit missing,
-/// build it in place so `cargo test` works without a separate `xark build` step.
-/// Runs the `xark` CLI (`$XARK`, else `xark` on `PATH`) on the crate directory
-/// (`target/xark/<name>` → up three to the crate root; empty ⇒ the current dir).
-/// Silently no-ops if `xark` isn't reachable or the build fails — the caller then
-/// re-checks the artifact and prints the "run `xark build`" guidance. Only fires
-/// when the artifact is *absent*, so it never masks a stale one (rebuild after
-/// editing the circuit, exactly as with a manual `xark build`).
+/// run the `xark` CLI (`$XARK`, else `xark` on `PATH`) to build it in place.
+/// Silently no-ops if `xark` isn't reachable or the build fails. Only fires when
+/// the artifact is *absent*, so it never masks a stale one.
 fn try_autobuild(dir: &std::path::Path) {
     // Serialize across the test binary's threads: parallel `#[circuit]` tests
     // would otherwise each launch a build and race on the output files. After
@@ -712,24 +679,15 @@ impl Circuit {
         id_inputs
     }
 
-    /// Check that `inputs` **satisfy the circuit**: solve the witness and verify
-    /// it meets every constraint. Returns `Ok(())` when it does, or an actionable
-    /// `Err` naming the first failing constraint — and, when the circuit was built
-    /// with `--profile` (as `xark test` does), its source line and function chain.
+    /// Check that `inputs` **satisfy the circuit**: solve the witness and verify it
+    /// meets every constraint. Returns `Ok(())`, or an actionable `Err` naming the
+    /// first failing constraint (with source line / function chain when profiled).
     ///
-    /// This is the fast, everyday circuit test. A satisfying witness *is* the
-    /// proof the stated relation holds for these inputs, so the **positive** test
-    /// is `c.check(good).unwrap()` (its panic message points at the offending line
-    /// on failure) and the **negative** test is `assert!(c.check(bad).is_err())`.
-    ///
-    /// It deliberately does **not** run Groth16: producing a real proof over a
-    /// large circuit is orders of magnitude slower and exercises the *backend*,
-    /// not the circuit. If a witness satisfies the R1CS, a correct Groth16 backend
-    /// proves and verifies it — a property the backend's own tests cover, not one
-    /// re-checked per circuit. Use [`Self::prove`] when you specifically want the
-    /// full proving pipeline.
-    ///
-    /// Panics only on malformed `inputs` (see [`Self::resolve_inputs`]).
+    /// The fast, everyday circuit test — a satisfying witness *is* the proof the
+    /// relation holds, so the positive test is `c.check(good).unwrap()` and the
+    /// negative test is `assert!(c.check(bad).is_err())`. It deliberately does
+    /// **not** run Groth16 (that exercises the backend, not the circuit); use
+    /// [`Self::prove`] for the full pipeline. Panics only on malformed `inputs`.
     pub fn check<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
         let id_inputs = self.resolve_inputs(inputs);
         // An unsatisfiable witness means the stated relation is false; explain

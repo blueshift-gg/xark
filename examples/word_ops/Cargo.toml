@@ -1,20 +1,20 @@
 [package]
 name = "word_ops"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", default-features = false }
-xark-bits = { path = "../../gadgets/xark-bits" }
+xark = { path = "../../crates/lang", version = "0.0.1", default-features = false }
+xark-bits = { path = "../../gadgets/xark-bits", version = "0.0.1" }
 
 # Host-only prover so this crate's tests can call the generated native validator;
 # gated on `cfg(not(xark))` so a circuit build stays lean `no_std`.
 [target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/prover" }
+xark-prover = { path = "../../crates/prover", version = "0.0.1" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
