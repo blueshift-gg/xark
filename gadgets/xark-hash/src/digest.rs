@@ -28,7 +28,7 @@
 //! `j` at word bit `(3 - idx%4)*8 + j`. [`From<[u8; 32]>`] places bytes there; the
 //! KAT test `sha256("abc")` confirms it.
 
-use xark::{CircuitInput, Field, RequireEqCircuit, require_eq};
+use xark::{CircuitInput, Field, RequireEqCircuit};
 
 /// A 256-bit SHA-256 digest in [`xark_sha256::sha256`]'s native output layout:
 /// 8 words × 32 little-endian bits (`[[Field; 32]; 8]`). Build from the gadget
@@ -52,7 +52,7 @@ impl Digest {
         while w < 8usize {
             let mut j = 0usize;
             while j < 32usize {
-                require_eq(self.bits[w][j], other.bits[w][j]);
+                self.bits[w][j].require_eq_circuit(other.bits[w][j]);
                 j += 1;
             }
             w += 1;

@@ -8,7 +8,7 @@
 //! blake crates, built on the public [`Hash::pack`] primitive.
 #![no_std]
 
-use xark::{Field, RequireEqCircuit, require_eq};
+use xark::{Field, RequireEqCircuit};
 
 pub mod digest;
 pub use digest::Digest;
@@ -49,8 +49,11 @@ impl Hash {
 impl RequireEqCircuit<Hash> for Hash {
     #[inline]
     fn require_eq_circuit(self, rhs: Hash) {
-        require_eq(self.hi, rhs.hi);
-        require_eq(self.lo, rhs.lo);
+        // Bottom out at the scalar leaf via the trait method, not the free
+        // `require_eq` (which would re-dispatch through `require_eq` and read to
+        // the driver as `require_eq` calling itself → "recursion not supported").
+        self.hi.require_eq_circuit(rhs.hi);
+        self.lo.require_eq_circuit(rhs.lo);
     }
 }
 
