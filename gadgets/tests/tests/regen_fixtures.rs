@@ -367,23 +367,9 @@ fn specs() -> Vec<Spec> {
 
 /// The xark toolchain binary (rustc-driver `xark build`). Build it if absent.
 fn xark_toolchain_bin() -> PathBuf {
-    let xark_crate = manifest_dir().join("..").join("xark");
-    for profile in ["release", "debug"] {
-        let p = xark_crate.join("target").join(profile).join("xark");
-        if p.exists() {
-            return p;
-        }
-    }
-    let status = Command::new("cargo")
-        .args(["build", "--release", "--features", "cli", "--bin", "xark"])
-        .current_dir(&xark_crate)
-        .status()
-        .expect("build xark toolchain");
-    assert!(
-        status.success(),
-        "failed to build the xark toolchain binary"
-    );
-    xark_crate.join("target").join("release").join("xark")
+    // Build the `xark` CLI + the nightly `xark-rustc` driver and point the CLI at
+    // it (sets `XARK_RUSTC`). Same setup the rest of the suite uses.
+    xark_tests::xark_bin()
 }
 
 /// Compile a circuit crate to `<out>/{r1cs,circuit}.json` via `xark build`.

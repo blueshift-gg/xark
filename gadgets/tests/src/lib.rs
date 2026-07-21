@@ -53,10 +53,10 @@ pub fn xark_bin() -> std::path::PathBuf {
     use std::sync::OnceLock;
     static BIN: OnceLock<std::path::PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        // CARGO_MANIFEST_DIR is gadgets/tests; the two toolchain crates are siblings.
-        let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let workspace_root = crates_dir.join("..");
-        let rustc_crate = crates_dir.join("xark-rustc");
+        // CARGO_MANIFEST_DIR is gadgets/tests; the toolchain crates live in
+        // <repo>/crates (the nightly driver is `crates/rustc`, package `xark-rustc`).
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let rustc_crate = workspace_root.join("crates/rustc");
 
         // 1. The nightly `rustc_driver` shim. It's excluded from the workspace and
         //    pins its own nightly (its `rust-toolchain.toml`), so build it in place.
