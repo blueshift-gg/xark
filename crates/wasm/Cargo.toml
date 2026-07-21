@@ -1,6 +1,6 @@
 [package]
 name = "xark-wasm"
-version = "0.0.1"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 description = "WebAssembly bindings for generating xark Groth16 (BN254) proofs in the browser / Node."
@@ -42,8 +42,3 @@ js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 rand = "0.8"
 console_error_panic_hook = "0.1"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1

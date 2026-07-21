@@ -1044,6 +1044,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1641,8 +1651,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2865,6 +2877,17 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4932,6 +4955,25 @@ version = "0.2.1"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",
+]
+
+[[package]]
+name = "xark-wasm"
+version = "0.2.0"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-groth16",
+ "ark-serialize 0.6.0",
+ "ark-snark",
+ "console_error_panic_hook",
+ "getrandom 0.2.17",
+ "js-sys",
+ "rand 0.8.6",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "xark-ir",
+ "xark-prover",
+ "xark-snarkjs",
 ]
 
 [[package]]

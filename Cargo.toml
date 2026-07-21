@@ -27,20 +27,16 @@ members = [
     "gadgets/xark-sha256",
     "crates/snarkjs",
     "crates/test-harness",
+    "crates/wasm",
     "gadgets/xark-curve",
 ]
 # The reference Solana program lives under `crates/verifier/reference-program/`
 # but is *intentionally* kept out of the workspace: it's only built via
 # `cargo-build-sbf` (with its own pinned `Cargo.lock`) as the
 # reproducible-build target. See `docs/reproducible-build.md`.
-#
-# `crates/wasm` is excluded too: it ships its own `[profile.release]` and a
-# pinned `Cargo.lock` for `wasm32-unknown-unknown` / wasm-pack builds, so it
-# must compile as a standalone package rather than a workspace member.
 exclude = [
     "crates/lang",
     "crates/rustc",
-    "crates/wasm",
     "examples",
     "crates/verifier/reference-program",
 ]
