@@ -238,7 +238,9 @@ pub fn preload(circuit_xbc: &Bytes, pk_bytes: &Bytes) -> Result<(), js_sys::Erro
 pub fn prove_preloaded(inputs: JsValue) -> Result<ProofBundle, js_sys::Error> {
     ARTIFACTS.with(|cell| -> Result<ProofBundle, js_sys::Error> {
         let state = cell.borrow();
-        let s = state.as_ref().ok_or_else(|| js_error("call preload() first"))?;
+        let s = state
+            .as_ref()
+            .ok_or_else(|| js_error("call preload() first"))?;
         let id_inputs = resolve_inputs(&s.by_name, inputs).map_err(|e| js_error(&e))?;
         prove_with(&s.circuit, &s.r1cs, &s.pk, &id_inputs)
     })
