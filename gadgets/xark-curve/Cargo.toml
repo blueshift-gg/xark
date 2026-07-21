@@ -12,3 +12,6 @@ repository.workspace = true
 [lib]
 name = "xark_curve"
 path = "src/lib.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
