@@ -27,7 +27,8 @@ fn rustc_shim() -> PathBuf {
     find_rustc_shim().unwrap_or_else(|| {
         panic!(
             "xark-rustc not found next to the `xark` binary (or set XARK_RUSTC) — install \
-             it: `cargo +nightly-2026-05-03 install --git https://github.com/blueshift-gg/xark xark-rustc`"
+             it: `cargo +{} install --git https://github.com/blueshift-gg/xark xark-rustc`",
+            env!("XARK_NIGHTLY")
         )
     })
 }
@@ -384,6 +385,11 @@ pub fn cmd_init(args: &[String]) -> i32 {
         ),
     };
 
+    // Pin the published `xark`/`xark-prover` deps to this CLI's own major.minor
+    // (the whole workspace releases together), so the scaffold never suggests a
+    // version older than the CLI you ran it with.
+    let full = env!("CARGO_PKG_VERSION");
+    let ver = full.rsplit_once('.').map_or(full, |(mm, _)| mm);
     let cargo_toml = format!(
         "[package]\n\
          name = \"{name}\"\n\
@@ -392,18 +398,18 @@ pub fn cmd_init(args: &[String]) -> i32 {
          [lib]\n\
          crate-type = [\"lib\"]\n\n\
          [dependencies]\n\
-         # Once xark is published:  xark = \"0.1\"\n\
-         # From git:                
+         # Once xark is published:  xark = \"{ver}\"\n\
+         # From git:
          xark = {{ git = \"https://github.com/blueshift-gg/xark\", default-features = false }}\n\
          # From a local checkout:   xark = {{ path = \"../xark/crates/lang\", default-features = false }}\n\
-         # xark = \"0.1\"\n\n\
+         # xark = \"{ver}\"\n\n\
          # `xark-prover` powers the in-crate `cargo test` circuit tests below.\n\
          [dev-dependencies]\n\
-         # Once xark is published:  xark-prover = \"0.1\"\n\
-         # From git:                
+         # Once xark is published:  xark-prover = \"{ver}\"\n\
+         # From git:
          xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\" }}\n\
          # From a local checkout:   xark-prover = {{ path = \"../xark/crates/prover\" }}\n\
-         # xark-prover = \"0.1\"\n"
+         # xark-prover = \"{ver}\"\n"
     );
     let fn_ident = ident_of(&name);
     let inputs_struct = format!("{}Inputs", pascal_of(&fn_ident));
@@ -466,7 +472,8 @@ pub fn cmd_init(args: &[String]) -> i32 {
     eprintln!("  1. set the `xark` dependency in Cargo.toml (see its comments)");
     eprintln!("  2. install the CLI so editors can find it:");
     eprintln!(
-        "       cargo +nightly-2026-05-03 install --path <xark-repo>/crates/lang --features cli"
+        "       cargo +{} install --path <xark-repo>/crates/lang --features cli",
+        env!("XARK_NIGHTLY")
     );
     eprintln!(
         "\n{}",
