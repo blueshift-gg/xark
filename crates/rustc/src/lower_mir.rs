@@ -307,9 +307,10 @@ pub(crate) fn build_call_registry(tcx: TyCtxt<'_>) -> CallRegistry {
                 Res::Def(DefKind::Mod, mod_did) if name.as_str() == "intrinsics" => {
                     for item in tcx.module_children(mod_did) {
                         if let Res::Def(DefKind::Fn, def_id) = item.res
-                            && let Some(kc) = intrinsic_known_call(item.ident.name.as_str()) {
-                                reg.insert(def_id, kc);
-                            }
+                            && let Some(kc) = intrinsic_known_call(item.ident.name.as_str())
+                        {
+                            reg.insert(def_id, kc);
+                        }
                     }
                 }
                 _ => {}
@@ -561,6 +562,57 @@ struct LoweringEnv<'tcx> {
     /// instead of emitting a fresh (redundant) decomposition. Only genuine `v·v=v`
     /// rows enter this set — never a value assumed boolean (see `bit_sum_shortcut`).
     boolean_vars: BTreeSet<VarId>,
+    /// Per top-level MIR local, its native-unsigned bit-width (`u8..u128` → 8..128),
+    /// else `None`. Populated once from `body.local_decls` in `run_pass`, so the
+    /// `BinaryOp` arm can read a witness `uN`'s width and lower `< <= > >= == !=` to
+    /// the field-comparison gadgets. Indexed by `Local::as_usize`; only meaningful at
+    /// the top frame (not while inlining, where locals are renumbered).
+    local_uint_width: Vec<Option<u32>>,
+}
+
+/// The native-unsigned bit-width of `ty` (`u8→8 … u128→128`), else `None`. `usize` is
+/// deliberately excluded so loop-counter locals stay unmarked (they const-fold).
+fn uint_width(ty: rustc_middle::ty::Ty<'_>) -> Option<u32> {
+    use rustc_middle::ty::{TyKind, UintTy};
+    match ty.kind() {
+        TyKind::Uint(UintTy::U8) => Some(8),
+        TyKind::Uint(UintTy::U16) => Some(16),
+        TyKind::Uint(UintTy::U32) => Some(32),
+        TyKind::Uint(UintTy::U64) => Some(64),
+        TyKind::Uint(UintTy::U128) => Some(128),
+        _ => None,
+    }
+}
+
+/// Which wrapping op a recognized `uN::wrapping_*` inherent method is.
+#[derive(Clone, Copy)]
+enum WrapOp {
+    Add,
+    Sub,
+    Mul,
+}
+
+/// If `def_id` is an inherent `uN::wrapping_add` / `wrapping_sub`, return `(width, op)`.
+/// The call is then lowered to the wrapping gadget *directly* (width from the receiver
+/// `uN`), instead of inlining the std body — inside which the operand width isn't
+/// visible (locals are renumbered per frame).
+fn wrapping_uint_call(tcx: TyCtxt<'_>, def_id: DefId) -> Option<(u32, WrapOp)> {
+    let op = match tcx.item_name(def_id).as_str() {
+        "wrapping_add" => WrapOp::Add,
+        "wrapping_sub" => WrapOp::Sub,
+        "wrapping_mul" => WrapOp::Mul,
+        _ => return None,
+    };
+    let impl_did = tcx.parent(def_id);
+    if !matches!(
+        tcx.def_kind(impl_did),
+        rustc_hir::def::DefKind::Impl { of_trait: false }
+    ) {
+        return None;
+    }
+    // The impl self type of an inherent `impl uN` has no generic params.
+    let width = uint_width(tcx.type_of(impl_did).skip_binder())?;
+    Some((width, op))
 }
 
 /// If `c` is exactly `v · v = v` (single term `1·v` on all three sides, zero
@@ -664,7 +716,35 @@ impl<'tcx> LoweringEnv<'tcx> {
             promotions: None,
             function_call_counts: BTreeMap::new(),
             boolean_vars: BTreeSet::new(),
+            local_uint_width: Vec::new(),
         }
+    }
+
+    /// Width of a scalar `uN` operand (a bare local, no projection) at the top frame,
+    /// else `None`. Used to lower native-`uN` witness comparisons.
+    fn operand_uint_width(&self, op: &Operand<'tcx>) -> Option<u32> {
+        if !self.inlining.is_empty() {
+            return None; // `local_uint_width` indexes the top body only
+        }
+        let place = match op {
+            Operand::Copy(p) | Operand::Move(p) => p,
+            _ => return None, // constants / runtime-check operands carry no `uN` local
+        };
+        if !place.projection.is_empty() {
+            return None;
+        }
+        self.local_uint_width
+            .get(place.local.as_usize())
+            .copied()
+            .flatten()
+    }
+
+    /// The common `uN` width of a binary op's operands (at least one a `uN` local),
+    /// else `None` — the signal to lower it as a native-integer op rather than a
+    /// bool-wire op.
+    fn binop_uint_width(&self, a: &Operand<'tcx>, b: &Operand<'tcx>) -> Option<u32> {
+        self.operand_uint_width(a)
+            .or_else(|| self.operand_uint_width(b))
     }
 
     // --- frame-scoped local access -----------------------------------------
@@ -1681,26 +1761,28 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Handles whole `Field` arrays, not just scalars.
     fn eval_arg(&mut self, operand: &Operand<'tcx>) -> ArgValue {
         if let Operand::Copy(place) | Operand::Move(place) = operand
-            && let Ok((local, base)) = self.resolve_place(place) {
-                let slots = self.collect_field_slots(local, &base);
-                if !slots.is_empty() {
-                    return ArgValue::Fields(slots);
-                }
-                if let Some(v) = self.get_int_at(local, &base) {
-                    return ArgValue::Int(v);
-                }
-                // A whole integer array/tuple (slots at `base + [i]`) — e.g. a
-                // `const [u8; 32]` passed by value into a helper that indexes it.
-                let int_slots = self.collect_int_slots(local, &base);
-                if !int_slots.is_empty() {
-                    return ArgValue::Ints(int_slots);
-                }
-                if base.is_empty()
-                    && let Some(s) = self.get_str(local) {
-                        return ArgValue::Str(s);
-                    }
-                return ArgValue::Unit;
+            && let Ok((local, base)) = self.resolve_place(place)
+        {
+            let slots = self.collect_field_slots(local, &base);
+            if !slots.is_empty() {
+                return ArgValue::Fields(slots);
             }
+            if let Some(v) = self.get_int_at(local, &base) {
+                return ArgValue::Int(v);
+            }
+            // A whole integer array/tuple (slots at `base + [i]`) — e.g. a
+            // `const [u8; 32]` passed by value into a helper that indexes it.
+            let int_slots = self.collect_int_slots(local, &base);
+            if !int_slots.is_empty() {
+                return ArgValue::Ints(int_slots);
+            }
+            if base.is_empty()
+                && let Some(s) = self.get_str(local)
+            {
+                return ArgValue::Str(s);
+            }
+            return ArgValue::Unit;
+        }
         if let Operand::Constant(c) = operand {
             // A `const Field` / `[Field; N]` passed directly as an argument
             // (e.g. `mod_mul(.., P::MODULUS)` with an associated-const modulus).
@@ -1953,15 +2035,17 @@ impl<'tcx> LoweringEnv<'tcx> {
         // rewriting a constraint to output it would doubly-define it (the value
         // from its own witness-gen vs. from `a·b`). Fall through to a clean equality.
         if let Some(v) = self.as_pending_var(&lhs)
-            && !self.is_witness_only_lc(&rhs) {
-                self.merge_mul(v, rhs);
-                return;
-            }
+            && !self.is_witness_only_lc(&rhs)
+        {
+            self.merge_mul(v, rhs);
+            return;
+        }
         if let Some(v) = self.as_pending_var(&rhs)
-            && !self.is_witness_only_lc(&lhs) {
-                self.merge_mul(v, lhs);
-                return;
-            }
+            && !self.is_witness_only_lc(&lhs)
+        {
+            self.merge_mul(v, lhs);
+            return;
+        }
 
         let diff = lhs - rhs;
         let id = self.fresh_constraint_id();
@@ -1975,7 +2059,11 @@ impl<'tcx> LoweringEnv<'tcx> {
     /// Emit an `n`-bit range proof over a (possibly compound) linear combination:
     /// decompose `value` into `n` boolean bits and pin their recomposition to
     /// `value` (⇒ `value < 2^n`).
-    fn emit_range_proof_lc(&mut self, value: LinearCombination, n: usize) {
+    /// Decompose `value` into `n` little-endian boolean bit vars: hint them (batched
+    /// `Bits`), pin each `∈ {0,1}`, and pin `Σ bitᵢ·2ⁱ == value` (which also proves
+    /// `value < 2^n`). Returns the bit vars — the shared core of the range proof and
+    /// the native bitwise ops.
+    fn decompose_bits(&mut self, value: LinearCombination, n: usize) -> Vec<VarId> {
         let two = xark_ir::FieldConst::from_i64(2);
         let mut pow = xark_ir::FieldConst::from_i64(1);
         let mut recomp = LinearCombination::zero();
@@ -2013,6 +2101,68 @@ impl<'tcx> LoweringEnv<'tcx> {
             ConstraintKind::Equality,
             R1csConstraint::equal(id, recomp, value, &note),
         );
+        bit_vars
+    }
+
+    fn emit_range_proof_lc(&mut self, value: LinearCombination, n: usize) {
+        let _ = self.decompose_bits(value, n);
+    }
+
+    /// Native `uN` bitwise op (`& | ^`): decompose both operands to `n` bits, apply the
+    /// per-bit gate, and recompose. `a`, `b` need not be pre-ranged — the decomposition
+    /// ranges them. Result is `< 2^n` by construction.
+    fn emit_uint_bitop(
+        &mut self,
+        op: rustc_middle::mir::BinOp,
+        n: usize,
+        a: LinearCombination,
+        b: LinearCombination,
+    ) -> LinearCombination {
+        use rustc_middle::mir::BinOp::*;
+        let abits = self.decompose_bits(a, n);
+        let bbits = self.decompose_bits(b, n);
+        let mut acc = LinearCombination::zero();
+        let mut pow = xark_ir::FieldConst::from_i64(1);
+        let two = xark_ir::FieldConst::from_i64(2);
+        for i in 0..n {
+            let ai = LinearCombination::var(abits[i]);
+            let bi = LinearCombination::var(bbits[i]);
+            let obit = match op {
+                BitAnd => self.emit_mul(ai, bi), // a_i · b_i
+                BitOr => self.emit_or(ai, bi),
+                BitXor => self.emit_xor(ai, bi),
+                _ => unreachable!("emit_uint_bitop called with a non-bitwise op"),
+            };
+            acc = acc + obit.scale(&pow);
+            pow = pow.mul(&two);
+        }
+        acc
+    }
+
+    /// Native `uN` shift by a compile-time constant `k` (`<<`/`>>`, mod `2^n`): reindex
+    /// the `n` bits of `a` (bits shifted past the ends are dropped). Zero gates beyond
+    /// the decomposition — a pure re-wiring.
+    fn emit_uint_shift(
+        &mut self,
+        left: bool,
+        n: usize,
+        a: LinearCombination,
+        k: usize,
+    ) -> LinearCombination {
+        let bits = self.decompose_bits(a, n);
+        let mut acc = LinearCombination::zero();
+        for (j, &bit) in bits.iter().enumerate() {
+            // `<<`: bit j → position j+k; `>>`: bit j → position j−k. Out of range drops.
+            let target = if left {
+                j as isize + k as isize
+            } else {
+                j as isize - k as isize
+            };
+            if target >= 0 && (target as usize) < n {
+                acc = acc + LinearCombination::var(bit).scale(&pow2_fc(target as usize));
+            }
+        }
+        acc
     }
 
     /// Equality-to-zero function: a `{0,1}` lc that is `1` iff `input == 0`.
@@ -2084,6 +2234,109 @@ impl<'tcx> LoweringEnv<'tcx> {
         Ok(lt)
     }
 
+    /// Booleanity for a fresh advice `v`: emit `v · v = v` (⟺ `v ∈ {0,1}`) and record
+    /// `v` as boolean. Used by the wrapping-arithmetic carry/borrow bits.
+    fn emit_booleanity(&mut self, v: VarId, note: &str) {
+        let id = self.fresh_constraint_id();
+        let lc = LinearCombination::var(v);
+        self.push_constraint(
+            ConstraintKind::RangeCheck,
+            R1csConstraint::general(id, lc.clone(), lc.clone(), lc, note),
+        );
+        self.boolean_vars.insert(v);
+    }
+
+    /// Wrapping `uN` addition (`a + b mod 2^N`). `sum = a + b ∈ [0, 2^{N+1})`; the
+    /// carry is bit `N` of `sum` (boolean), and `result = sum − carry·2^N` is
+    /// range-checked `< 2^N` — which pins the unique carry. One booleanity + one
+    /// N-bit range check.
+    fn emit_wrapping_add(
+        &mut self,
+        n: usize,
+        a: LinearCombination,
+        b: LinearCombination,
+    ) -> LinearCombination {
+        let sum = a + b;
+        let carry = self.alloc_advice();
+        self.witness_gen.push(Some(WitnessGen::Bit {
+            out: carry,
+            input: sum.clone(),
+            index: n as u32,
+        }));
+        self.emit_booleanity(carry, "wrap-add carry ∈ {0,1}");
+        let result = sum - LinearCombination::var(carry).scale(&pow2_fc(n));
+        self.kind_stack.push(ConstraintKind::RangeCheck);
+        self.emit_range_proof_lc(result.clone(), n);
+        self.kind_stack.pop();
+        result
+    }
+
+    /// Wrapping `uN` subtraction (`a − b mod 2^N`). Bit `N` of `a − b + 2^N` is `1` iff
+    /// `a ≥ b`, so `borrow = 1 − that`; `result = a − b + borrow·2^N` is range-checked
+    /// `< 2^N`, pinning the unique borrow. One booleanity + one N-bit range check.
+    fn emit_wrapping_sub(
+        &mut self,
+        n: usize,
+        a: LinearCombination,
+        b: LinearCombination,
+    ) -> LinearCombination {
+        let shifted = a.clone() - b.clone() + pow2_lc(n);
+        let ge = self.alloc_advice();
+        self.witness_gen.push(Some(WitnessGen::Bit {
+            out: ge,
+            input: shifted,
+            index: n as u32,
+        }));
+        self.emit_booleanity(ge, "wrap-sub !borrow ∈ {0,1}");
+        let borrow = LinearCombination::one() - LinearCombination::var(ge);
+        let result = a - b + borrow.scale(&pow2_fc(n));
+        self.kind_stack.push(ConstraintKind::RangeCheck);
+        self.emit_range_proof_lc(result.clone(), n);
+        self.kind_stack.pop();
+        result
+    }
+
+    /// Wrapping `uN` multiplication (`a · b mod 2^N`). The full field product
+    /// `a·b ∈ [0, 2^{2N})` (needs `2N ≤ 252` — so `u128` is out), decomposed as
+    /// `product = low + high·2^N` with `low, high` range-checked `< 2^N`; `low` is the
+    /// wrapped result. One mul + a linking equality + two N-bit range checks.
+    fn emit_wrapping_mul(
+        &mut self,
+        n: usize,
+        a: LinearCombination,
+        b: LinearCombination,
+    ) -> CompileResult<LinearCombination> {
+        if 2 * n > 252 {
+            return Err(CompileError::new(
+                "wrapping multiplication of this width overflows the BN254 field",
+            )
+            .with_help("`wrapping_mul` needs 2·N ≤ 252 bits; `u128` is unsupported"));
+        }
+        let product = self.emit_mul(a, b);
+        // Finalize `a·b = product` as its own constraint: `product` is referenced twice
+        // below (the `DivRem` hint and the linking equality), so it must not be merged
+        // into the equality (which would drop the mul row and break the hint's input).
+        self.consume_pending(&product);
+        let high = self.alloc_advice();
+        let low = self.alloc_advice();
+        self.witness_gen.push(Some(WitnessGen::DivRem {
+            q: high,
+            r: low,
+            num: product.clone(),
+            den: pow2_lc(n),
+        }));
+        // Pin `product == low + high·2^N`, then bound both parts to `[0, 2^N)` — which
+        // makes the split unique, so `low` is the true `product mod 2^N`.
+        let recomposed =
+            LinearCombination::var(low) + LinearCombination::var(high).scale(&pow2_fc(n));
+        self.emit_require_eq(product, recomposed);
+        self.kind_stack.push(ConstraintKind::RangeCheck);
+        self.emit_range_proof_lc(LinearCombination::var(low), n);
+        self.emit_range_proof_lc(LinearCombination::var(high), n);
+        self.kind_stack.pop();
+        Ok(LinearCombination::var(low))
+    }
+
     fn merge_mul(&mut self, var: VarId, target: LinearCombination) {
         let (idx, wg_idx) = self
             .pending_mul
@@ -2151,14 +2404,21 @@ fn flatten_field_leaves<'tcx>(
     ty: rustc_middle::ty::Ty<'tcx>,
     path: &mut Vec<u64>,
     name: &str,
-    out: &mut Vec<(Vec<u64>, String)>,
+    out: &mut Vec<(Vec<u64>, String, Option<u32>)>,
 ) -> CompileResult<()> {
     // `Field` is the opaque leaf — never recurse into its private limbs.
     if let Some(d) = ty.ty_adt_def()
-        && tcx.item_name(d.did()).as_str() == "Field" {
-            out.push((path.clone(), name.to_string()));
-            return Ok(());
-        }
+        && tcx.item_name(d.did()).as_str() == "Field"
+    {
+        out.push((path.clone(), name.to_string(), None));
+        return Ok(());
+    }
+    // A native `uN` is also a one-`Field` leaf, tagged with its width so the input
+    // binding can range-check the witness to `< 2^N` on entry.
+    if let Some(w) = uint_width(ty) {
+        out.push((path.clone(), name.to_string(), Some(w)));
+        return Ok(());
+    }
     match ty.kind() {
         rustc_middle::ty::TyKind::Array(elem, len) => {
             let n = len
@@ -2262,6 +2522,9 @@ fn run_pass<'tcx>(
 ) -> CompileResult<(LoweringEnv<'tcx>, usize)> {
     let mut env = LoweringEnv::new(tcx, registry, profile_enabled);
     env.promotions = promotions;
+    // Record each top-level local's native-`uN` width so the body walk can lower
+    // witness integer comparisons (`< <= > >= == !=`) to the field gadgets.
+    env.local_uint_width = body.local_decls.iter().map(|d| uint_width(d.ty)).collect();
     // Pre-load templates captured by an earlier pass so every cached call replays
     // from its first occurrence (no first-call special-case): pass 2 gets pass 1's
     // templates, so a promoted function is a symbolic `CALL` even the first time.
@@ -2272,17 +2535,29 @@ fn run_pass<'tcx>(
     // scalar `Field` is one input var; an array/tuple/struct of `Field` collapses
     // to `n` vars, each bound to the leaf's projection path so body reads resolve.
     let mut num_inputs = 0usize;
+    let mut uint_inputs: Vec<(VarId, u32)> = Vec::new();
     for (i, input) in entry.inputs.iter().enumerate() {
         let local = rustc_middle::mir::Local::from_usize(i + 1);
         let ty = body.local_decls[local].ty;
         let mut leaves = Vec::new();
         let mut path = Vec::new();
         flatten_field_leaves(tcx, ty, &mut path, &input.name, &mut leaves)?;
-        for (leaf_path, leaf_name) in leaves {
+        for (leaf_path, leaf_name, width) in leaves {
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
+            if let Some(n) = width {
+                uint_inputs.push((id, n));
+            }
             num_inputs += 1;
         }
+    }
+    // Every input is now a var in `0..num_inputs` (contiguous — a load-bearing
+    // invariant for prove-time input binding). Only *now* emit each native-`uN`
+    // input's entry range check (`< 2^N`), whose bit advice lands *after* the inputs.
+    for (id, n) in uint_inputs {
+        env.kind_stack.push(ConstraintKind::RangeCheck);
+        env.emit_range_proof_lc(LinearCombination::var(id), n as usize);
+        env.kind_stack.pop();
     }
 
     walk_body(&mut env, body)?;
@@ -2846,6 +3121,95 @@ fn lower_statement<'tcx>(
                         }
                         return Ok(());
                     }
+                    // Native `uN` witness comparison: `< <= > >= == !=` between integer
+                    // wires, lowered to the field-comparison gadgets at the operands'
+                    // type width (both are `< 2^N` by their entry range check). `<=`/`>=`
+                    // are `!(>)`/`!(<)`; `!=` is `!(==)`. Arithmetic (`+ - * …`) is not yet
+                    // a circuit op and falls through to the reject below.
+                    if let Some(n) = env.binop_uint_width(&operands.0, &operands.1) {
+                        use rustc_middle::mir::BinOp::*;
+                        // Comparisons yield a `{0,1}` wire; wrapping `+`/`-` (from
+                        // `wrapping_add`/`wrapping_sub`, which lower to plain `Add`/`Sub`)
+                        // yield a `uN` wire. Checked `+`/`*` (`AddWithOverflow`, …) are a
+                        // separate MIR shape handled elsewhere.
+                        if matches!(op, Lt | Le | Gt | Ge | Eq | Ne | Add | Sub) {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let n = n as usize;
+                            let one = LinearCombination::one();
+                            let out = match op {
+                                Lt => env.emit_less_than(n, a, b)?,
+                                Gt => env.emit_less_than(n, b, a)?,
+                                Ge => one - env.emit_less_than(n, a, b)?,
+                                Le => one - env.emit_less_than(n, b, a)?,
+                                Eq => env.emit_is_zero(a - b),
+                                Ne => one - env.emit_is_zero(a - b),
+                                Add => env.emit_wrapping_add(n, a, b),
+                                Sub => env.emit_wrapping_sub(n, a, b),
+                                _ => unreachable!(),
+                            };
+                            env.set_field(dest, out);
+                            return Ok(());
+                        }
+                        // Checked arithmetic (`a + b`, `a - b`, `a * b` — the default,
+                        // overflow-checked forms → `*WithOverflow`, a `(result, overflow)`
+                        // tuple). Range-checking the field result to N bits enforces
+                        // no-overflow directly: the op is unsatisfiable on overflow
+                        // (matching debug Rust's panic), and the overflow flag is then a
+                        // constant `0`, so the following `assert(!overflow)` is a no-op
+                        // goto. (`overflowing_*`, which *reads* the flag, is inlined and
+                        // thus width-invisible here → rejected, never silently wrong.)
+                        if matches!(op, AddWithOverflow | SubWithOverflow | MulWithOverflow) {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let n = n as usize;
+                            let result = match op {
+                                AddWithOverflow => a + b,
+                                SubWithOverflow => a - b,
+                                MulWithOverflow => {
+                                    let p = env.emit_mul(a, b);
+                                    env.consume_pending(&p);
+                                    p
+                                }
+                                _ => unreachable!(),
+                            };
+                            env.kind_stack.push(ConstraintKind::RangeCheck);
+                            env.emit_range_proof_lc(result.clone(), n);
+                            env.kind_stack.pop();
+                            let mut p0 = dest_path.clone();
+                            p0.push(0);
+                            env.set_field_at(dest, &p0, result);
+                            let mut p1 = dest_path.clone();
+                            p1.push(1);
+                            env.set_field_at(dest, &p1, LinearCombination::zero());
+                            return Ok(());
+                        }
+                        // Native `uN` bitwise ops (`& | ^`): decompose both operands to
+                        // N bits, apply the per-bit gate, recompose.
+                        if matches!(op, BitAnd | BitOr | BitXor) {
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let b = env.operand_to_lc(&operands.1)?;
+                            let out = env.emit_uint_bitop(*op, n as usize, a, b);
+                            env.set_field(dest, out);
+                            return Ok(());
+                        }
+                        // Native `uN` shifts by a compile-time constant (`<< >>`): a
+                        // pure bit re-index (mod 2^N). A witness shift amount can't be
+                        // lowered — it would need a data-dependent barrel shifter.
+                        if matches!(op, Shl | Shr | ShlUnchecked | ShrUnchecked) {
+                            let k = env.operand_to_int(&operands.1).ok_or_else(|| {
+                                CompileError::new(
+                                    "the shift amount must be a compile-time constant in a circuit",
+                                )
+                                .with_help("shift by a literal / `const`, not a witness value")
+                            })? as usize;
+                            let a = env.operand_to_lc(&operands.0)?;
+                            let left = matches!(op, Shl | ShlUnchecked);
+                            let out = env.emit_uint_shift(left, n as usize, a, k);
+                            env.set_field(dest, out);
+                            return Ok(());
+                        }
+                    }
                     // Otherwise these are boolean ops on `{0,1}` wires (the
                     // results of circuit comparisons).
                     use rustc_middle::mir::BinOp::*;
@@ -2904,6 +3268,16 @@ fn lower_statement<'tcx>(
                             _ => a,
                         };
                         env.set_int_at(dest, &dest_path, r as u128);
+                        return Ok(());
+                    }
+                    // Native `uN` bitwise NOT: `!a = (2^n − 1) − a` (a is `< 2^n` by its
+                    // width invariant, so no bit decomposition is needed).
+                    if matches!(op, rustc_middle::mir::UnOp::Not)
+                        && let Some(n) = env.operand_uint_width(operand)
+                    {
+                        let a = env.operand_to_lc(operand)?;
+                        let mask = pow2_lc(n as usize) - LinearCombination::one();
+                        env.set_field(dest, mask - a);
                         return Ok(());
                     }
                     // Boolean NOT on a `{0,1}` wire: `1 − x`.
@@ -3030,10 +3404,12 @@ fn bind_use<'tcx>(
                         path.extend(rel);
                         env.set_field_at(dest, &path, lc);
                     }
-                } else if src_path.is_empty() && dest_path.is_empty()
-                    && let Some(s) = env.get_str(src) {
-                        env.set_str(dest, s);
-                    }
+                } else if src_path.is_empty()
+                    && dest_path.is_empty()
+                    && let Some(s) = env.get_str(src)
+                {
+                    env.set_str(dest, s);
+                }
                 // Otherwise a non-circuit temporary (e.g. unit) — ignore.
             }
             Ok(())
@@ -3115,7 +3491,7 @@ fn lower_ref<'tcx>(
 }
 
 /// `2^n` as a `Field` constant linear combination (zero constraints).
-fn pow2_lc(n: usize) -> LinearCombination {
+fn pow2_fc(n: usize) -> xark_ir::FieldConst {
     let mut p = xark_ir::FieldConst::from_i64(1);
     let two = xark_ir::FieldConst::from_i64(2);
     let mut i = 0;
@@ -3123,7 +3499,11 @@ fn pow2_lc(n: usize) -> LinearCombination {
         p = p.mul(&two);
         i += 1;
     }
-    LinearCombination::constant(p.decimal().clone())
+    p
+}
+
+fn pow2_lc(n: usize) -> LinearCombination {
+    LinearCombination::constant(pow2_fc(n).decimal().clone())
 }
 
 fn is_with_overflow(op: rustc_middle::mir::BinOp) -> bool {
@@ -3184,6 +3564,22 @@ fn lower_call<'tcx>(
     };
 
     let dest = LoweringEnv::place_local(destination)?;
+
+    // Native wrapping arithmetic (`uN::wrapping_add`/`wrapping_sub`): lower the call
+    // directly to the wrapping gadget (width from the receiver `uN`) rather than
+    // inlining the std body — inside the inlined body the operand width isn't visible.
+    if let Some((n, wop)) = wrapping_uint_call(env.tcx, def_id) {
+        let a = env.operand_to_lc(&args[0].node)?;
+        let b = env.operand_to_lc(&args[1].node)?;
+        let n = n as usize;
+        let out = match wop {
+            WrapOp::Add => env.emit_wrapping_add(n, a, b),
+            WrapOp::Sub => env.emit_wrapping_sub(n, a, b),
+            WrapOp::Mul => env.emit_wrapping_mul(n, a, b)?,
+        };
+        env.set_field(dest, out);
+        return Ok(());
+    }
 
     // A recognized intrinsic is lowered directly; any other ordinary function
     // with available MIR is inlined; anything else is rejected. Recognition keys
@@ -4667,12 +5063,13 @@ fn inline_call<'tcx>(
             // reference vars outside its own args/internals, which replay can't
             // reproduce per call). One of several such cross-call memoizations.
             if env.function_depth == 0
-                && let Some(bits) = env.bit_cache.get(&key).cloned() {
-                    for (i, &v) in bits.iter().enumerate() {
-                        env.set_field_at(dest, &[i as u64], LinearCombination::var(v));
-                    }
-                    return Ok(());
+                && let Some(bits) = env.bit_cache.get(&key).cloned()
+            {
+                for (i, &v) in bits.iter().enumerate() {
+                    env.set_field_at(dest, &[i as u64], LinearCombination::var(v));
                 }
+                return Ok(());
+            }
             Some(key)
         }
     } else {
@@ -4774,27 +5171,29 @@ fn inline_call<'tcx>(
     // REPLAY: cached function + replay enabled → substitute the caller's arg LCs into
     // the template and append it, skipping the walk.
     if let Some(key) = &function_key
-        && function_replay_enabled() && env.function_templates.contains_key(key) {
-            let c_start = env.constraints.len();
-            let w_start = env.witness_gen.len();
-            let base = env.next_var_id;
-            let outs = env.replay_function(key, &plug_lcs);
-            if function_artifact_enabled() {
-                env.function_calls.push((
-                    key.clone(),
-                    c_start,
-                    env.constraints.len(),
-                    base,
-                    plug_lcs.clone(),
-                    w_start,
-                    env.witness_gen.len(),
-                ));
-            }
-            env.call_memo_total += 1;
-            env.call_memo_ok += 1;
-            env.bind_value(dest, &[], ArgValue::Fields(outs));
-            return Ok(());
+        && function_replay_enabled()
+        && env.function_templates.contains_key(key)
+    {
+        let c_start = env.constraints.len();
+        let w_start = env.witness_gen.len();
+        let base = env.next_var_id;
+        let outs = env.replay_function(key, &plug_lcs);
+        if function_artifact_enabled() {
+            env.function_calls.push((
+                key.clone(),
+                c_start,
+                env.constraints.len(),
+                base,
+                plug_lcs.clone(),
+                w_start,
+                env.witness_gen.len(),
+            ));
         }
+        env.call_memo_total += 1;
+        env.call_memo_ok += 1;
+        env.bind_value(dest, &[], ArgValue::Fields(outs));
+        return Ok(());
+    }
 
     // Snapshot resources so a function's body constraints/witness can be captured.
     let cap_base_var = env.next_var_id;

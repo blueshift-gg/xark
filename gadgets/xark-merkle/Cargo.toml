@@ -14,12 +14,12 @@ name = "xark_merkle"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.0", default-features = false }
-xark-poseidon = { path = "../xark-poseidon", version = "0.2.0" }
+xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
+xark-poseidon = { path = "../xark-poseidon", version = "0.2.1" }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.2.0" }
-xark-ir = { path = "../../crates/ir", version = "0.2.0" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+xark-ir = { path = "../../crates/ir", version = "0.2.1" }
 num-bigint = "0.4"
 
 [lints]

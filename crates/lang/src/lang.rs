@@ -37,7 +37,7 @@ use crate::intrinsics::*;
 /// A bare `Field` is intentionally **not** `PartialOrd for Field`: ordering the
 /// canonical `[0, r)` representative needs a width, so it must come from the RHS
 /// type or the `::<N>`. See `docs/integer-ops.md`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
     /// Meaningful only for constants (`Field::from`/`Field::constant` `const fn`s):
@@ -55,8 +55,9 @@ pub type Public<T> = T;
 
 impl Field {
     /// Constant constructor backing `From<u8..u64>` — recognised by the compiler
-    /// through the *call* (so circuit bodies work) and evaluated for real in
-    /// `const` contexts (`const F: Field = 5u64.into()`).
+    /// through the *call* (so circuit bodies work) and const-evaluated for real
+    /// literals. For a `const` **item**, call [`Field::from_u128`] directly (`.into()`
+    /// can't appear in `const` — `From`/`Into` aren't `const` on stable).
     const fn constant_u64(value: u64) -> Field {
         Field {
             _limbs: [value, 0, 0, 0],
@@ -91,14 +92,71 @@ impl Field {
         self._limbs
     }
 
-    /// A `const`-context constructor from a `u128`. Unlike `From<u128>` (non-`const`),
-    /// usable in `const` items — so `xark_bignum`'s limb splitting can build
-    /// `[Field; N]` arrays at compile time. Not for circuit bodies; use `Field::from`.
+    /// The decimal value of a **compile-time-constant** `Field` (built via
+    /// `Field::from`/`Field::constant`) — the host reads a constructed input back out
+    /// to feed the prover. Meaningful only for constants (a witness's limbs are
+    /// symbolic). `#[doc(hidden)]` tooling; authors never call it.
     #[doc(hidden)]
+    pub fn to_decimal(self) -> alloc::string::String {
+        use alloc::string::String;
+        use alloc::vec::Vec;
+        let mut limbs = self._limbs; // little-endian 4×u64
+        if limbs == [0u64; 4] {
+            return String::from("0");
+        }
+        // Long division of the 256-bit value by 10, collecting digits.
+        let mut digits: Vec<u8> = Vec::new();
+        while limbs != [0u64; 4] {
+            let mut rem = 0u128;
+            let mut i = 4;
+            while i > 0 {
+                i -= 1;
+                let cur = (rem << 64) | limbs[i] as u128;
+                limbs[i] = (cur / 10) as u64;
+                rem = cur % 10;
+            }
+            digits.push(b'0' + rem as u8);
+        }
+        digits.reverse();
+        String::from_utf8(digits).expect("ascii digits")
+    }
+
+    /// A field element from an integer, in `const` position: `const DOB: Field =
+    /// Field::from_u128(19900101)`. Use these `from_*` constructors (not `x.into()`) in a
+    /// `const` item — `From`/`Into` are trait methods, and trait methods aren't `const` on
+    /// stable Rust, so a conversion can't appear in a `const`. At runtime, `Field::from(x)`
+    /// is equivalent. Per-type constructors ([`from_u8`](Self::from_u8) …
+    /// [`from_u64`](Self::from_u64), [`from_bool`](Self::from_bool)) avoid an `as u128` cast.
     pub const fn from_u128(value: u128) -> Field {
         Field {
             _limbs: [value as u64, (value >> 64) as u64, 0, 0],
         }
+    }
+
+    /// A field element from a `u8`, in `const` position. See [`Field::from_u128`].
+    pub const fn from_u8(value: u8) -> Field {
+        Field::constant_u64(value as u64)
+    }
+
+    /// A field element from a `u16`, in `const` position. See [`Field::from_u128`].
+    pub const fn from_u16(value: u16) -> Field {
+        Field::constant_u64(value as u64)
+    }
+
+    /// A field element from a `u32`, in `const` position. See [`Field::from_u128`].
+    pub const fn from_u32(value: u32) -> Field {
+        Field::constant_u64(value as u64)
+    }
+
+    /// A field element from a `u64`, in `const` position. See [`Field::from_u128`].
+    pub const fn from_u64(value: u64) -> Field {
+        Field::constant_u64(value)
+    }
+
+    /// A field element from a `bool` (`false → 0`, `true → 1`), in `const` position.
+    /// See [`Field::from_u128`].
+    pub const fn from_bool(value: bool) -> Field {
+        Field::constant_u64(value as u64)
     }
 
     /// In-circuit constant from a decimal string, for full field-sized constants
@@ -126,6 +184,36 @@ impl Field {
                 j += 1;
             }
             assert!(carry == 0, "Field::constant literal overflows 256 bits");
+            i += 1;
+        }
+        Field { _limbs: limbs }
+    }
+
+    /// A field element from **little-endian** bytes (`bytes[0]` is least significant) —
+    /// the direct "raw bytes → `Field`" input constructor, no `Fr`/decimal round-trip.
+    /// A `const fn`, so byte-encoded inputs (an id, a random nonce) can be `const`.
+    /// At most 32 bytes; the value is reduced mod the field order at prove time.
+    pub const fn from_le_bytes(bytes: &[u8]) -> Field {
+        assert!(bytes.len() <= 32, "Field::from_le_bytes: at most 32 bytes");
+        let mut limbs = [0u64; 4];
+        let mut i = 0;
+        while i < bytes.len() {
+            limbs[i / 8] |= (bytes[i] as u64) << ((i % 8) * 8);
+            i += 1;
+        }
+        Field { _limbs: limbs }
+    }
+
+    /// A field element from **big-endian** bytes (`bytes[0]` is most significant) — the
+    /// byte order of most hashes / SEC1 scalars. See [`Field::from_le_bytes`].
+    pub const fn from_be_bytes(bytes: &[u8]) -> Field {
+        assert!(bytes.len() <= 32, "Field::from_be_bytes: at most 32 bytes");
+        let mut limbs = [0u64; 4];
+        let n = bytes.len();
+        let mut i = 0;
+        while i < n {
+            // `bytes[n-1-i]` is the i-th least-significant byte.
+            limbs[i / 8] |= (bytes[n - 1 - i] as u64) << ((i % 8) * 8);
             i += 1;
         }
         Field { _limbs: limbs }
@@ -415,6 +503,26 @@ impl PartialEq for Field {
 impl From<bool> for Field {
     fn from(b: bool) -> Field {
         __xark_bool_to_field(b)
+    }
+}
+
+/// A constructed **constant** `Field` to the prover's scalar (`ark_bn254::Fr`), reduced
+/// mod the field order — the same value the solver feeds the circuit. Host-only tooling
+/// (`cfg(not(xark))`); lets a `Field` input flow straight into off-circuit reference
+/// code (`poseidon2::hash([field, …])`) without a hand-written conversion. Meaningful
+/// only for constants; a witness's limbs are symbolic.
+#[cfg(not(xark))]
+impl From<Field> for ark_bn254::Fr {
+    fn from(f: Field) -> ark_bn254::Fr {
+        use ark_ff::PrimeField;
+        let mut bytes = [0u8; 32];
+        let mut i = 0;
+        while i < 4 {
+            let limb = f._limbs[i].to_le_bytes();
+            bytes[i * 8..i * 8 + 8].copy_from_slice(&limb);
+            i += 1;
+        }
+        ark_bn254::Fr::from_le_bytes_mod_order(&bytes)
     }
 }
 
@@ -710,6 +818,21 @@ pub fn require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
 /// `require(cond)` decomposes into `require_eq(cond, true)` at lowering time.
 pub fn require(cond: bool) {
     __xark_require_eq_scalar(cond, true);
+}
+
+/// Emit a circuit inequality constraint `a != b`.
+///
+/// `a != b` holds exactly when `a - b` is nonzero, i.e. invertible. This reuses
+/// [`Field::inv`], which allocates `w = (a-b)⁻¹` as advice and pins `(a-b)·w == 1`
+/// — a single multiplication constraint. In a field `0·w = 1` is unsatisfiable for
+/// every `w`, so the circuit has no solution precisely when `a == b`, with no way
+/// for a prover to cheat. Cost: one R1CS constraint plus one witness value.
+///
+/// Scalars only (`Field`/`bool`, via [`Into<Field>`]); there is no element-wise
+/// array form because `[a] != [b]` is ambiguous (all-differ vs not-all-equal).
+#[inline]
+pub fn require_ne(a: impl Into<Field>, b: impl Into<Field>) {
+    let _ = (a.into() - b.into()).inv();
 }
 
 /// Open a **witness-only** region. Until [`witness_end`], value-producing ops

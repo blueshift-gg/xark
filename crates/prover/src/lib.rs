@@ -679,6 +679,44 @@ impl Circuit {
         id_inputs
     }
 
+    /// Bind flattened input field values (decimals, in the circuit's structural-flatten
+    /// order) **positionally** to the input variables — the `Into<[Field; N]>` path,
+    /// which needs no leaf names: value `k` binds to the `k`-th input var. The
+    /// `#[derive(CircuitInput)]` flatten order is a mechanical match for the compiler's
+    /// input-var order, so this is exact.
+    fn resolve_positional(&self, decimals: Vec<String>) -> BTreeMap<VarId, String> {
+        let mut input_vars: Vec<&Var> = self
+            .prim
+            .vars
+            .iter()
+            .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
+            .collect();
+        input_vars.sort_by_key(|v| v.id); // id order == structural-flatten order
+        assert_eq!(
+            decimals.len(),
+            input_vars.len(),
+            "positional input count mismatch: circuit has {} input leaves, got {} values",
+            input_vars.len(),
+            decimals.len(),
+        );
+        input_vars.iter().map(|v| v.id).zip(decimals).collect()
+    }
+
+    /// [`check`](Self::check) via flat, positional field values — the `Into<[Field; N]>`
+    /// input path. The caller flattens their host value to `[Field; N]` (via
+    /// `#[derive(CircuitInput)]`) and renders each with `Field::to_decimal`.
+    pub fn check_fields(&self, decimals: Vec<String>) -> Result<(), ProveError> {
+        let id_inputs = self.resolve_positional(decimals);
+        solver::solve_and_check(&self.prim, &id_inputs).map_err(|e| {
+            ProveError(xark_ir::diagnose::describe_unsatisfied(
+                &e,
+                &self.r1cs,
+                self.profile.as_ref(),
+            ))
+        })?;
+        Ok(())
+    }
+
     /// Check that `inputs` **satisfy the circuit**: solve the witness and verify it
     /// meets every constraint. Returns `Ok(())`, or an actionable `Err` naming the
     /// first failing constraint (with source line / function chain when profiled).

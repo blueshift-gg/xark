@@ -58,6 +58,7 @@ pub fn circuit(secret: Private<Field>, result: Public<Field>) {
 | `foo(a)` via a trait object / fn pointer | indirect / dynamic calls aren't supported | call the function directly (it gets inlined) |
 | a function that calls itself | recursion isn't supported (no runtime stack) | unroll to a fixed depth, or use a loop with a constant bound |
 | `a == b` expecting a `bool` | `==` would need a native `bool`; a circuit needs a *constraint* | `require_eq(a, b)` |
+| `a != b` expecting a `bool` | same reason; inequality is a *constraint*, not a native `bool` | `require_ne(a, b)` (unsatisfiable iff `a == b`) |
 | reading a whole inner array out of a nested array (`grid[i]` as a value) | only *scalar* nested access is modeled | rebuild element-by-element: `for j in 0..M { row[j] = grid[i][j]; }` |
 | `x as u8` on a `Field` | only compile-time integer casts are supported | keep field values as `Field`; use bit gadgets for byte views |
 

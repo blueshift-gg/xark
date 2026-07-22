@@ -1,0 +1,4 @@
+# Run xark's subset validator on save so unsupported constructs show inline.
+# Needs `xark` on PATH. Layers on top of rustc checks.
+[check]
+overrideCommand = ["xark", "check", ".", "--message-format=json"]

@@ -226,6 +226,20 @@ fn map_inner(inner: &Type) -> syn::Result<(TokenStream2, TokenStream2, Fanout)> 
         // CLI `--inputs` takes scalars.
         return Ok((quote! { String }, quote! { ::xark::Field }, Fanout::Scalar));
     }
+    // Native unsigned integers are first-class circuit witnesses: the `<Fn>Inputs`
+    // field takes the native `uN` (fits `u128`, so no `String` needed), the circuit
+    // body sees the same `uN` (the compiler range-checks it `< 2^N` on entry and
+    // lowers its comparisons), and it fans out to one decimal leaf. Must precede the
+    // gadget-type fallback, else `u64` would be treated as a `NativeInput` type.
+    if let Type::Path(tp) = inner
+        && let Some(seg) = tp.path.segments.last()
+        && matches!(
+            seg.ident.to_string().as_str(),
+            "u8" | "u16" | "u32" | "u64" | "u128"
+        )
+    {
+        return Ok((quote! { #inner }, quote! { #inner }, Fanout::Scalar));
+    }
     if let Type::Array(arr) = inner
         && let Type::Path(elem) = &*arr.elem
     {
@@ -393,6 +407,23 @@ fn circuit_input_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     }
     let n = total;
 
+    // Host-side `NativeInput`: the native form IS this `Field`-composed struct itself
+    // (built host-side with `Field` values — no `String` mirror), and `leaves` renders
+    // each field to its decimal under the compiler's structural-flatten names, so a
+    // `#[circuit]` param of this type binds by name exactly as a gadget input does.
+    let mut leaf_stmts = Vec::new();
+    for (i, field) in data.fields.iter().enumerate() {
+        let (fname, access) = match &field.ident {
+            Some(id) => (id.to_string(), quote! { native.#id }),
+            None => {
+                let idx = syn::Index::from(i);
+                (i.to_string(), quote! { native.#idx })
+            }
+        };
+        let field_prefix = quote! { std::format!("{}.{}", prefix, #fname) };
+        leaf_stmts.push(circuit_leaves(&field.ty, &access, &field_prefix, 0)?);
+    }
+
     Ok(quote! {
         #[automatically_derived]
         impl ::core::convert::From<#name> for [::xark::Field; #n] {
@@ -404,6 +435,24 @@ fn circuit_input_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 out
             }
         }
+
+        // `NativeInput` lives in `xark_prover` (a `std` crate); bring `std` in inside an
+        // anonymous const so this also works from a `no_std`-under-`xark` crate's host build.
+        #[cfg(not(xark))]
+        const _: () = {
+            extern crate std;
+            use std::string::String;
+            use std::vec::Vec;
+            #[automatically_derived]
+            impl ::xark_prover::NativeInput for #name {
+                type Native = #name;
+                fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
+                    let mut __out = Vec::new();
+                    #( #leaf_stmts )*
+                    __out
+                }
+            }
+        };
     })
 }
 
@@ -581,6 +630,53 @@ fn transparent_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
             }
         };
     })
+}
+
+/// Emit `NativeInput::leaves` push statements for a `Field`-composed value `access` of
+/// circuit type `ty`, whose flatten prefix is the `String` expression `prefix`. A `Field`
+/// renders to its decimal via [`Field::to_decimal`]; arrays recurse under `prefix[i]`; a
+/// nested `NativeInput` type delegates under its own `prefix`. `depth` names loop vars.
+/// Used by `#[derive(CircuitInput)]` to build the host-side leaf fan-out.
+fn circuit_leaves(
+    ty: &Type,
+    access: &TokenStream2,
+    prefix: &TokenStream2,
+    depth: usize,
+) -> syn::Result<TokenStream2> {
+    match ty {
+        Type::Path(tp) if tp.path.segments.last().is_some_and(|s| s.ident == "Field") => {
+            Ok(quote! { __out.push((#prefix, #access.to_decimal())); })
+        }
+        Type::Array(arr) => {
+            let len = eval_usize_lit(&arr.len)?;
+            let kv = format_ident!("__k{depth}");
+            let pv = format_ident!("__p{depth}");
+            let inner = circuit_leaves(
+                &arr.elem,
+                &quote! { #access[#kv] },
+                &quote! { std::format!("{}[{}]", #pv, #kv) },
+                depth + 1,
+            )?;
+            Ok(quote! {
+                {
+                    let #pv = #prefix;
+                    let mut #kv = 0usize;
+                    while #kv < #len {
+                        #inner
+                        #kv += 1;
+                    }
+                }
+            })
+        }
+        Type::Path(_) => Ok(quote! {
+            __out.extend(<#ty as ::xark_prover::NativeInput>::leaves(&#access, &#prefix));
+        }),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "#[derive(CircuitInput)] fields must be `Field`, fixed arrays of them, \
+             or a type implementing `NativeInput`",
+        )),
+    }
 }
 
 /// A `usize` from an integer-literal length expression (`[Field; 32]` → `32`).

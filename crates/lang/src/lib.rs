@@ -22,6 +22,10 @@
 
 #![no_std]
 
+// `Field::to_decimal` (host-side input tooling) allocates a `String`. `alloc` links
+// in both builds; the allocation only ever runs host-side, never in a circuit.
+extern crate alloc;
+
 // Self-alias so the `#[derive(CircuitInput)]` macro's generated `::xark::Field`
 // paths resolve *inside* this crate (where the derive is used on `Digest`), the
 // same way they resolve in downstream circuit crates. Standard proc-macro pattern.
@@ -41,16 +45,18 @@ pub mod intrinsics;
 pub mod prelude {
     pub use crate::lang::{
         Field, Private, Public, require, require_eq, require_ge, require_gt, require_le,
-        require_lt, witness_begin, witness_end,
+        require_lt, require_ne, witness_begin, witness_end,
     };
-    pub use xark_macros::circuit;
+    // `CircuitInput` makes a `Field`-composed struct a circuit input (the everyday way to
+    // group inputs); `circuit` is the entry attribute.
+    pub use xark_macros::{CircuitInput, circuit};
 }
 
 // Same surface as `prelude`, re-exported at the crate root so both
 // `use xark::prelude::*;` and `use xark::{require, Field, ...};` work.
 pub use crate::lang::{
     Field, Private, Public, require, require_eq, require_ge, require_gt, require_le, require_lt,
-    witness_begin, witness_end,
+    require_ne, witness_begin, witness_end,
 };
 // `require_eq` dispatches through `RequireEqCircuit`, comparing scalars, fixed
 // arrays, and composite types; downstream crates impl it for their own shapes.
@@ -60,7 +66,9 @@ pub use crate::lang::RequireEqCircuit;
 // name. Authors never touch it; they write `require_eq`.
 #[doc(hidden)]
 pub use crate::lang::__xark_require_eq_scalar;
-// `#[derive(CircuitInput)]` generates a struct's `Into<[Field; N]>` in the
-// compiler's structural-flatten order; `#[derive(Transparent)]` generates a
-// transparent type's host `NativeInput` leaf fan-out in that same order.
+// `#[derive(CircuitInput)]` makes a `Field`-composed struct a circuit input: it
+// generates the `Into<[Field; N]>` flatten AND the host-side `NativeInput` fan-out
+// (`Native = Self`, each field rendered via `Field::to_decimal`) — so the host builds
+// the same struct with `Field` values, no `String` mirror. `#[derive(Transparent)]`
+// does the same for a byte-backed gadget type (`limbs`/native-bytes form).
 pub use xark_macros::{CircuitInput, Transparent, circuit};

@@ -14,9 +14,9 @@ name = "xark_poseidon2"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.0", default-features = false }
+xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.2.0" }
-xark-ir = { path = "../../crates/ir", version = "0.2.0" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+xark-ir = { path = "../../crates/ir", version = "0.2.1" }
 

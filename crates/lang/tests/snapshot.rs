@@ -166,6 +166,311 @@ fn inverse_advice_gadget() {
     assert_eq!(json.matches("\"source_span\"").count(), 2);
 }
 
+/// `require_ne(a, b)` is the nonzero gadget over `a - b`: it reuses `inv()` to
+/// pin `(a-b)·w == 1`, which solves iff `a != b` and is unsatisfiable when they
+/// are equal — with the inverse advice `w` fully pinned (analyzer-clean). This is
+/// the soundness-meaningful test: an honest distinct pair proves, and no witness
+/// can satisfy an equal pair (`0·w = 1` has no solution in the field).
+#[test]
+fn require_ne_solves_iff_distinct() {
+    use xark_ir::solver;
+    let src = "#![no_std]\n\
+        use xark::prelude::*;\n\
+        pub fn circuit(a: Private<Field>, b: Public<Field>) {\n\
+        require_ne(a, b);\n\
+        }\n";
+    let c = compile_with_field(&write_case("require_ne", src), "require_ne", "bn254");
+    assert!(c.status_success, "require_ne failed: {}", c.stderr);
+    let p = c.program();
+
+    let id = |n: &str| {
+        p.vars
+            .iter()
+            .find(|v| v.name == n)
+            .unwrap_or_else(|| panic!("missing circuit var `{n}`"))
+            .id
+    };
+    let inputs = |a: &str, b: &str| {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m
+    };
+
+    // Distinct inputs solve, and the inverse advice is fully pinned.
+    let assign =
+        solver::solve_and_check(&p, &inputs("3", "7")).expect("require_ne(3, 7) must solve");
+    assert!(
+        solver::analyze_underconstrained(&p, &assign).is_empty(),
+        "require_ne must be fully constrained (inverse advice pinned)"
+    );
+    // A difference that is nonzero only mod p still solves.
+    solver::solve_and_check(&p, &inputs("0", "1")).expect("require_ne(0, 1) must solve");
+
+    // Equal inputs are unsatisfiable: a - b == 0 has no inverse, so 0·w == 1 fails.
+    assert!(
+        solver::solve_and_check(&p, &inputs("5", "5")).is_err(),
+        "require_ne(5, 5) must be rejected (equal ⇒ no solution)"
+    );
+}
+
+/// Native `u64` as a first-class circuit witness: a `Private<u64>` input is range-checked
+/// to 64 bits on entry, and the *native* `<` operator lowers to the field comparison
+/// gadget — no wrapper type, no `::<64>`. A true ordering solves (analyzer-clean), a false
+/// one is rejected, and an input `>= 2^64` fails the entry range check.
+#[test]
+fn native_u64_comparison() {
+    use xark_ir::solver;
+    let src = "#![no_std]\n\
+        use xark::prelude::*;\n\
+        pub fn circuit(a: Private<u64>, b: Private<u64>) {\n\
+        require(a < b);\n\
+        }\n";
+    let c = compile_with_field(
+        &write_case("native_u64_cmp", src),
+        "native_u64_cmp",
+        "bn254",
+    );
+    assert!(c.status_success, "native u64 compare failed: {}", c.stderr);
+    let p = c.program();
+
+    let id = |n: &str| {
+        p.vars
+            .iter()
+            .find(|v| v.name == n)
+            .unwrap_or_else(|| panic!("missing circuit var `{n}`"))
+            .id
+    };
+    let inputs = |a: &str, b: &str| {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m
+    };
+
+    // 3 < 7 holds → require(true) solves, fully constrained.
+    let assign =
+        solver::solve_and_check(&p, &inputs("3", "7")).expect("native u64 3 < 7 must solve");
+    assert!(
+        solver::analyze_underconstrained(&p, &assign).is_empty(),
+        "native u64 compare must be fully constrained"
+    );
+    // 7 < 3 is false → require rejects it.
+    assert!(
+        solver::solve_and_check(&p, &inputs("7", "3")).is_err(),
+        "native u64 7 < 3 must be rejected"
+    );
+    // 2^64 is not a valid u64: the entry range check on `a` is unsatisfiable.
+    assert!(
+        solver::solve_and_check(&p, &inputs("18446744073709551616", "0")).is_err(),
+        "a native u64 input >= 2^64 must fail the entry range check"
+    );
+}
+
+/// Native `u64` through the `#[circuit]` macro (not just bare source): the macro maps
+/// a `Private<u64>` param to a native-`u64` circuit input + a `u64` host-input field,
+/// and the driver lowers the comparison. Confirms macro + driver compose end-to-end.
+#[test]
+fn native_u64_via_circuit_macro() {
+    use xark_ir::solver;
+    let src = "#![no_std]\n\
+        use xark::prelude::*;\n\
+        #[circuit]\n\
+        pub fn cmp(a: Private<u64>, b: Private<u64>) {\n\
+        require(a < b);\n\
+        }\n";
+    let c = compile_with_field(&write_case("u64_macro", src), "u64_macro", "bn254");
+    assert!(
+        c.status_success,
+        "native u64 via #[circuit] failed: {}",
+        c.stderr
+    );
+    let p = c.program();
+    let id = |n: &str| p.vars.iter().find(|v| v.name == n).unwrap().id;
+    let mut ok = std::collections::BTreeMap::new();
+    ok.insert(id("a"), "3".to_string());
+    ok.insert(id("b"), "7".to_string());
+    solver::solve_and_check(&p, &ok).expect("#[circuit] native u64 3 < 7 must solve");
+    let mut bad = std::collections::BTreeMap::new();
+    bad.insert(id("a"), "7".to_string());
+    bad.insert(id("b"), "3".to_string());
+    assert!(
+        solver::solve_and_check(&p, &bad).is_err(),
+        "#[circuit] native u64 7 < 3 must be rejected"
+    );
+}
+
+/// Native `u64` **wrapping arithmetic**: `wrapping_add`/`wrapping_sub` lower to the
+/// mod-2⁶⁴ gadget (carry/borrow + range check). The defining property is wraparound —
+/// `(2⁶⁴−1) + 1 == 0` and `5 − 7 == 2⁶⁴−2` — which must solve, while a wrong result is
+/// rejected. Compiles via `wrapping_*` being recognized as a call (not inlined).
+#[test]
+fn native_u64_wrapping_arithmetic() {
+    use xark_ir::solver;
+    const MAX: &str = "18446744073709551615"; // 2^64 - 1
+    let check = |op: &str, a: &str, b: &str, c: &str| -> Result<(), ()> {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(a: Private<u64>, b: Private<u64>, c: Public<u64>) {{\n\
+             require(a.{op}(b) == c);\n\
+             }}\n"
+        );
+        let comp = compile_with_field(&write_case("u64_wrap", &src), "u64_wrap", "bn254");
+        assert!(
+            comp.status_success,
+            "{op} failed to compile: {}",
+            comp.stderr
+        );
+        let p = comp.program();
+        let id = |n: &str| p.vars.iter().find(|v| v.name == n).unwrap().id;
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("c"), c.to_string());
+        solver::solve_and_check(&p, &m).map(|_| ()).map_err(|_| ())
+    };
+
+    // wrapping_add: normal, and the wraparound (2^64-1) + 1 == 0.
+    assert!(check("wrapping_add", "5", "7", "12").is_ok(), "5 + 7 == 12");
+    assert!(
+        check("wrapping_add", MAX, "1", "0").is_ok(),
+        "(2^64-1) + 1 wraps to 0"
+    );
+    assert!(
+        check("wrapping_add", "5", "7", "13").is_err(),
+        "5 + 7 != 13 rejected"
+    );
+
+    // wrapping_sub: normal, and the borrow wraparound 5 - 7 == 2^64 - 2.
+    assert!(check("wrapping_sub", "7", "5", "2").is_ok(), "7 - 5 == 2");
+    assert!(
+        check("wrapping_sub", "5", "7", "18446744073709551614").is_ok(),
+        "5 - 7 wraps to 2^64 - 2"
+    );
+    assert!(
+        check("wrapping_sub", "7", "5", "3").is_err(),
+        "7 - 5 != 3 rejected"
+    );
+
+    // wrapping_mul: normal, and the wraparound 2^32 · 2^32 == 2^64 ≡ 0 (mod 2^64).
+    assert!(check("wrapping_mul", "5", "7", "35").is_ok(), "5 * 7 == 35");
+    assert!(
+        check("wrapping_mul", "4294967296", "4294967296", "0").is_ok(),
+        "2^32 * 2^32 wraps to 0"
+    );
+    assert!(
+        check("wrapping_mul", "5", "7", "36").is_err(),
+        "5 * 7 != 36 rejected"
+    );
+}
+
+/// Native `u64` **checked arithmetic**: the default `+ - *` (overflow-checked, like debug
+/// Rust) lower to `*WithOverflow` + a range check that makes the op **unsatisfiable on
+/// overflow** — the opposite of wrapping. A valid result solves; an overflowing/underflowing
+/// operation is rejected for *every* claimed result.
+#[test]
+fn native_u64_checked_arithmetic() {
+    use xark_ir::solver;
+    const MAX: &str = "18446744073709551615"; // 2^64 - 1
+    let check = |expr: &str, name: &str, a: &str, b: &str, c: &str| -> Result<(), ()> {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(a: Private<u64>, b: Private<u64>, c: Public<u64>) {{\n\
+             require({expr} == c);\n\
+             }}\n"
+        );
+        let comp = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(
+            comp.status_success,
+            "{expr} failed to compile: {}",
+            comp.stderr
+        );
+        let p = comp.program();
+        let id = |n: &str| p.vars.iter().find(|v| v.name == n).unwrap().id;
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(id("a"), a.to_string());
+        m.insert(id("b"), b.to_string());
+        m.insert(id("c"), c.to_string());
+        solver::solve_and_check(&p, &m).map(|_| ()).map_err(|_| ())
+    };
+
+    // + : valid solves; overflow is rejected even for the wrapped value (unlike wrapping).
+    assert!(
+        check("a + b", "chk_add", "5", "7", "12").is_ok(),
+        "5 + 7 == 12"
+    );
+    assert!(
+        check("a + b", "chk_add", MAX, "1", "0").is_err(),
+        "(2^64-1) + 1 overflows → rejected"
+    );
+    assert!(
+        check("a + b", "chk_add", "5", "7", "13").is_err(),
+        "5 + 7 != 13"
+    );
+
+    // - : valid solves; underflow (a < b) is rejected.
+    assert!(
+        check("a - b", "chk_sub", "7", "5", "2").is_ok(),
+        "7 - 5 == 2"
+    );
+    assert!(
+        check("a - b", "chk_sub", "5", "7", "0").is_err(),
+        "5 - 7 underflows → rejected"
+    );
+
+    // * : valid solves; overflow is rejected.
+    assert!(
+        check("a * b", "chk_mul", "5", "7", "35").is_ok(),
+        "5 * 7 == 35"
+    );
+    assert!(
+        check("a * b", "chk_mul", "4294967296", "4294967296", "0").is_err(),
+        "2^32 * 2^32 = 2^64 overflows → rejected"
+    );
+}
+
+/// Native `u8` **bitwise ops + shifts + not**: `& | ^` decompose both operands and apply
+/// the per-bit gate; `<< >>` by a constant re-index the bits (mod 2⁸); `!a = 255 − a`.
+/// Checked against the real integer results, with a wrong result rejected.
+#[test]
+fn native_u8_bitwise_ops() {
+    use xark_ir::solver;
+    // `expr` uses `a` (and `b` for binary ops); `c` is the expected result.
+    let ok = |expr: &str, name: &str, a: u8, b: u8, c: u8| {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(a: Private<u8>, b: Private<u8>, c: Public<u8>) {{\n\
+             require(({expr}) == c);\n\
+             }}\n"
+        );
+        let comp = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(
+            comp.status_success,
+            "{expr} failed to compile: {}",
+            comp.stderr
+        );
+        let p = comp.program();
+        let id = |n: &str| p.vars.iter().find(|v| v.name == n).unwrap().id;
+        let solve = |cv: u8| {
+            let mut m = std::collections::BTreeMap::new();
+            m.insert(id("a"), a.to_string());
+            m.insert(id("b"), b.to_string());
+            m.insert(id("c"), cv.to_string());
+            solver::solve_and_check(&p, &m).is_ok()
+        };
+        assert!(solve(c), "{expr} with a={a} b={b} must give {c}");
+        assert!(!solve(c ^ 0xFF), "{expr} must reject a wrong result");
+    };
+
+    ok("a & b", "u8_and", 0b1100, 0b1010, 0b1000);
+    ok("a | b", "u8_or", 0b1100, 0b1010, 0b1110);
+    ok("a ^ b", "u8_xor", 0b1100, 0b1010, 0b0110);
+    ok("!a", "u8_not", 12, 0, 243); // 255 - 12
+    ok("a << 2", "u8_shl", 0b1100, 0, 0b110000); // 12 << 2 = 48
+    ok("a >> 2", "u8_shr", 0b1100, 0, 0b11); // 12 >> 2 = 3
+    ok("a << 2", "u8_shl_ovf", 200, 0, 32); // (200 << 2) mod 256 = 32 (top bits dropped)
+}
+
 /// MiMC written with a `while` loop over an array of round constants lowers to
 /// exactly the same R1CS as the hand-unrolled version — arrays + bounded loops +
 /// inlining compose.

@@ -163,9 +163,8 @@ fn ensure_sysroot(args: &mut Vec<String>) {
     let has = args
         .iter()
         .any(|a| a == "--sysroot" || a.starts_with("--sysroot="));
-    if !has
-        && let Some(sysroot) = option_env!("XARK_SYSROOT") {
-            args.push("--sysroot".to_string());
-            args.push(sysroot.to_string());
-        }
+    if !has && let Some(sysroot) = option_env!("XARK_SYSROOT") {
+        args.push("--sysroot".to_string());
+        args.push(sysroot.to_string());
+    }
 }
