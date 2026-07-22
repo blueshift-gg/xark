@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "xark-ir"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "xark-rustc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde_json",
  "smallvec",
