@@ -18,6 +18,7 @@ xark-prover = { path = "../../crates/prover", version = "0.2.1" }
 # Test-only: an off-circuit Poseidon2 reference (pure arkworks field arithmetic)
 # used to compute the expected commitment the circuit is checked against.
 [dev-dependencies]
+poseidon2 = "0.0.1"
 ark-bn254 = "0.6"
 ark-ff = "0.6.0"
 hex = "0.4.3"
