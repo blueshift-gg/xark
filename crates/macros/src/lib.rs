@@ -19,6 +19,11 @@
 //! `#[derive(CircuitInput)]` — see [`derive_circuit_input`] — generates the
 //! `Into<[Field; N]>` whose flatten order mechanically matches the compiler's
 //! structural-flatten order.
+//!
+//! The attribute must sit on a **module-scope** function: the expansion wraps
+//! the entry in a sibling module that resolves the surrounding scope via
+//! `use super::*;`, which has no meaning inside a function body or an `impl`
+//! block.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -111,7 +116,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     let circuit_def = quote! {
         #[cfg(not(xark))]
         #[doc(hidden)]
-        #[allow(dead_code, unused_imports)]
+        #[allow(dead_code, unused_imports, clippy::assign_op_pattern)]
         fn #circuit_def_ident(#(#sig_params_def),*) {
             #(#stmts)*
         }
@@ -137,9 +142,13 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         // Keep the custom cfg entirely inside an always-present, lint-scoped module.
         // A proc macro cannot register `cfg(xark)` in the downstream manifest, but
         // it can own the lint locally so circuit authors need no `[lints]` ceremony.
+        // Only `unexpected_cfgs` is module-wide (the cfgs sit on items that contain
+        // the author's body, so no tighter scope exists); other allows are pinned
+        // to the exact generated construct that needs them.
         #[doc(hidden)]
-        #[allow(unexpected_cfgs, unused_imports, clippy::assign_op_pattern)]
+        #[allow(unexpected_cfgs)]
         mod #module_ident {
+            #[allow(unused_imports)]
             use super::*;
 
             #entry
@@ -475,8 +484,9 @@ fn circuit_input_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         // Scope the host-only cfg under an always-present module so downstream
         // crates do not need to register Xark's private cfg with check-cfg.
         #[doc(hidden)]
-        #[allow(unexpected_cfgs, unused_imports, non_snake_case)]
+        #[allow(unexpected_cfgs, non_snake_case)]
         mod #host_module {
+            #[allow(unused_imports)]
             use super::*;
 
             #[cfg(not(xark))]
@@ -664,8 +674,9 @@ fn transparent_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     // an always-present module so downstream crates need no lint configuration.
     Ok(quote! {
         #[doc(hidden)]
-        #[allow(unexpected_cfgs, unused_imports, non_snake_case)]
+        #[allow(unexpected_cfgs, non_snake_case)]
         mod #host_module {
+            #[allow(unused_imports)]
             use super::*;
 
             #[cfg(not(xark))]
