@@ -23,7 +23,7 @@ use rand::rngs::OsRng;
 use xark_backend::ceremony::{
     Contribution, contribute, verify_chain, verify_keys_consistent_with_chain,
 };
-use xark_backend::keys::{Groth16Keys, KeyMetadata};
+use xark_backend::keys::{Groth16Keys, KeyMetadata, SetupMode};
 use xark_backend::ptau::parse_ptau;
 use xark_prover::XarkCircuit;
 
@@ -234,12 +234,14 @@ fn run_finalize(args: FinalizeArgs) -> Result<()> {
         .as_str()
         .ok_or_else(|| anyhow!("circuit_meta.json missing circuit_hash"))?;
 
-    let mut metadata = KeyMetadata::new_dev(circuit_hash.to_string(), num_pi, 0);
-    metadata.setup_mode = format!(
-        "phase2-from-ptau+mpc[{} contributors]",
-        read_contribution_count(dir)?
+    let metadata = KeyMetadata::new(
+        SetupMode::Mpc {
+            contributors: read_contribution_count(dir)?,
+        },
+        circuit_hash.to_string(),
+        num_pi,
+        0,
     );
-    metadata.production_safe = true;
     fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
     println!("Finalized; metadata.json written.");
     Ok(())

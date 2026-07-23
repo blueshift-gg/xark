@@ -855,9 +855,31 @@ pub fn current_circuit_fingerprint(
     Ok(sha256_hex(&bytes))
 }
 
+/// SHA-256 of both artifact forms of the current build — (`circuit.xbc`,
+/// `r1cs.json`), either `None` when absent — for stamping into key metadata.
+/// `circuit_hash` records only the artifact setup consumed; recording both
+/// forms lets a later prove/verify/export match the same circuit through
+/// either one (e.g. setup on the compact artifact, prove with an explicit
+/// `--r1cs` written by the same build).
+pub fn artifact_hashes(
+    project: &crate::xark_project::XarkProject,
+    r1cs_override: Option<&std::path::Path>,
+) -> (Option<String>, Option<String>) {
+    let hash_file =
+        |path: &std::path::Path| std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes));
+    let xbc = hash_file(&project.circuit_xbc());
+    let json = r1cs_override
+        .map(&hash_file)
+        .unwrap_or_else(|| hash_file(&project.r1cs_json()));
+    (xbc, json)
+}
+
 /// Require the key metadata beside `key_path` to name the current built
 /// circuit. Default project artifacts must never silently cross a circuit
 /// rebuild boundary: setup is the operation that deliberately creates new keys.
+/// The metadata records every artifact form of the circuit it was generated
+/// for, so the in-use artifact only has to match one of them — a `--r1cs`
+/// override from the same build as the XBC that setup consumed is not stale.
 pub fn ensure_key_matches_current_circuit(
     project: &crate::xark_project::XarkProject,
     key_path: &std::path::Path,
@@ -876,7 +898,7 @@ pub fn ensure_key_matches_current_circuit(
     let metadata: xark_backend::KeyMetadata = serde_json::from_str(&raw)
         .with_context(|| format!("parsing {}", metadata_path.display()))?;
     let current = current_circuit_fingerprint(project, r1cs_override)?;
-    if metadata.circuit_hash != current {
+    if !metadata.covers_artifact(&current) {
         anyhow::bail!(
             "stale proving/verifying key: {} was generated for circuit {}, but the current circuit is {}. Run `xark setup {}` again before proving, verifying, or exporting",
             key_path.display(),
@@ -928,6 +950,7 @@ mod tests {
         sha256_hex,
     };
     use std::path::Path;
+    use xark_backend::{KeyMetadata, SetupMode};
 
     fn temp_project(name: &str) -> (std::path::PathBuf, crate::xark_project::XarkProject) {
         let nonce = std::time::SystemTime::now()
@@ -1019,7 +1042,7 @@ mod tests {
         let (dir, project) = temp_project("current-key");
         let circuit = b"XBC\0\x01\0current";
         std::fs::write(project.circuit_xbc(), circuit).unwrap();
-        let metadata = xark_backend::KeyMetadata::new_dev(sha256_hex(circuit), 1, 1);
+        let metadata = KeyMetadata::new(SetupMode::InsecureDev, sha256_hex(circuit), 1, 1);
         std::fs::write(
             dir.join("metadata.json"),
             serde_json::to_string(&metadata).unwrap(),
@@ -1034,7 +1057,7 @@ mod tests {
     fn stale_key_metadata_is_rejected() {
         let (dir, project) = temp_project("stale-key");
         std::fs::write(project.circuit_xbc(), b"XBC\0\x01\0new").unwrap();
-        let metadata = xark_backend::KeyMetadata::new_dev("old-circuit".into(), 1, 1);
+        let metadata = KeyMetadata::new(SetupMode::InsecureDev, "old-circuit".into(), 1, 1);
         std::fs::write(
             dir.join("metadata.json"),
             serde_json::to_string(&metadata).unwrap(),
@@ -1042,6 +1065,38 @@ mod tests {
         .unwrap();
 
         let err = ensure_key_matches_current_circuit(&project, &dir.join("vk.bin"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("stale proving/verifying key"), "got: {err}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Setup consumed the XBC; prove passes `--r1cs` pointing at the JSON the
+    /// same build wrote. The recorded sibling hash makes that current, while a
+    /// JSON from a different circuit stays stale.
+    #[test]
+    fn r1cs_override_from_the_same_build_is_accepted() {
+        let (dir, project) = temp_project("override-key");
+        let circuit = b"XBC\0\x01\0current";
+        let json = b"{\"same\": \"build\"}";
+        std::fs::write(project.circuit_xbc(), circuit).unwrap();
+        let json_path = dir.join("r1cs.json");
+        std::fs::write(&json_path, json).unwrap();
+        let mut metadata = KeyMetadata::new(SetupMode::InsecureDev, sha256_hex(circuit), 1, 1);
+        (metadata.circuit_hash_xbc, metadata.circuit_hash_json) =
+            super::artifact_hashes(&project, Some(&json_path));
+        std::fs::write(
+            dir.join("metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        ensure_key_matches_current_circuit(&project, &dir.join("pk.bin"), Some(&json_path))
+            .unwrap();
+
+        let foreign = dir.join("foreign-r1cs.json");
+        std::fs::write(&foreign, b"{\"different\": \"circuit\"}").unwrap();
+        let err = ensure_key_matches_current_circuit(&project, &dir.join("pk.bin"), Some(&foreign))
             .unwrap_err()
             .to_string();
         assert!(err.contains("stale proving/verifying key"), "got: {err}");

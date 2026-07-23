@@ -15,7 +15,10 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use xark_backend::serialization::vk_to_snarkjs;
-use xark_backend::{keys::KeyMetadata, setup};
+use xark_backend::{
+    keys::{KeyMetadata, SetupMode},
+    setup,
+};
 use xark_ir::Visibility;
 use xark_prover::XarkCircuit;
 
@@ -151,6 +154,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     let prof = super::dbg_flag("XARK_BUILD_TIME");
     let t_load = std::time::Instant::now();
     let (prog, hash) = load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
+    // Record both artifact forms of this build so the stale-key check accepts
+    // the same circuit whether a later command consumes the XBC or the JSON.
+    let artifact_hashes = super::artifact_hashes(&project, args.r1cs.as_deref());
     if prof {
         eprintln!(
             "SETUP_TIME: load+expand         = {:.2}s",
@@ -233,9 +239,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         keys.write_proving_key(&pk_path)?;
         keys.write_verifying_key(&vk_path)?;
 
-        let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
-        metadata.setup_mode = "phase2-from-ptau".into();
-        metadata.production_safe = true;
+        let mut metadata =
+            KeyMetadata::new(SetupMode::Phase2FromPtau, hash, num_pi, num_constraints);
+        (metadata.circuit_hash_xbc, metadata.circuit_hash_json) = artifact_hashes;
         // commit to the (to-be-discarded) phase-2 seed for audit; never keep the seed
         metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
         metadata.ptau_source = ptau_file
@@ -323,7 +329,8 @@ pub fn run(args: SetupArgs) -> Result<()> {
         );
     }
 
-    let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
+    let mut metadata = KeyMetadata::new(SetupMode::InsecureDev, hash, num_pi, num_constraints);
+    (metadata.circuit_hash_xbc, metadata.circuit_hash_json) = artifact_hashes;
     metadata.deterministic_rng_seed = effective_seed;
     fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("writing {}", meta_path.display()))?;

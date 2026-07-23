@@ -132,15 +132,59 @@ pub struct KeyMetadata {
     /// setup (Groth16 soundness). `None` for dev-mode keys.
     #[serde(default)]
     pub phase2_seed_hash: Option<String>,
+    /// SHA-256 (hex) of the `circuit.xbc` from the build this setup ran
+    /// against, when that artifact existed. Lets the stale-key check accept the
+    /// same circuit through either artifact form (`circuit_hash` records only
+    /// the artifact setup actually consumed).
+    #[serde(default)]
+    pub circuit_hash_xbc: Option<String>,
+    /// SHA-256 (hex) of the sibling `r1cs.json` from the same build, when it
+    /// existed at setup time.
+    #[serde(default)]
+    pub circuit_hash_json: Option<String>,
+}
+
+/// How the proving/verifying keys were generated. Fixes the `setup_mode` label
+/// and the `production_safe` bit together so a caller can never claim one
+/// without the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupMode {
+    /// Single-machine RNG setup: fine for development, never for production.
+    InsecureDev,
+    /// Single-party phase-2 contribution on a Powers-of-Tau transcript.
+    Phase2FromPtau,
+    /// Multi-party phase-2 ceremony, finalized with `contributors` contributions.
+    Mpc { contributors: usize },
+}
+
+impl SetupMode {
+    fn label(&self) -> String {
+        match self {
+            SetupMode::InsecureDev => "insecure-dev-mode".into(),
+            SetupMode::Phase2FromPtau => "phase2-from-ptau".into(),
+            SetupMode::Mpc { contributors } => {
+                format!("phase2-from-ptau+mpc[{contributors} contributors]")
+            }
+        }
+    }
+
+    fn production_safe(&self) -> bool {
+        !matches!(self, SetupMode::InsecureDev)
+    }
 }
 
 impl KeyMetadata {
-    pub fn new_dev(circuit_hash: String, num_public_inputs: usize, num_constraints: usize) -> Self {
+    pub fn new(
+        mode: SetupMode,
+        circuit_hash: String,
+        num_public_inputs: usize,
+        num_constraints: usize,
+    ) -> Self {
         Self {
             protocol: "groth16".into(),
             curve: "bn254".into(),
-            setup_mode: "insecure-dev-mode".into(),
-            production_safe: false,
+            setup_mode: mode.label(),
+            production_safe: mode.production_safe(),
             circuit_hash,
             backend_version: env!("CARGO_PKG_VERSION").into(),
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -149,6 +193,16 @@ impl KeyMetadata {
             deterministic_rng_seed: None,
             ptau_source: None,
             phase2_seed_hash: None,
+            circuit_hash_xbc: None,
+            circuit_hash_json: None,
         }
+    }
+
+    /// Does `sha256_hex` name the circuit these keys were generated for, in any
+    /// of the artifact forms recorded at setup time?
+    pub fn covers_artifact(&self, sha256_hex: &str) -> bool {
+        self.circuit_hash == sha256_hex
+            || self.circuit_hash_xbc.as_deref() == Some(sha256_hex)
+            || self.circuit_hash_json.as_deref() == Some(sha256_hex)
     }
 }

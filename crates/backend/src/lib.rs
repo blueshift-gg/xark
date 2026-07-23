@@ -12,7 +12,7 @@ pub mod setup_phase2;
 pub mod solana;
 pub mod verify;
 
-pub use keys::{Groth16Keys, KeyMetadata};
+pub use keys::{Groth16Keys, KeyMetadata, SetupMode};
 pub use proof::ProofBundle;
 pub use prove::prove;
 pub use ptau::{PtauError, PtauFile, parse_ptau};
