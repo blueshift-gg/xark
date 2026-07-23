@@ -1,0 +1,11 @@
+[package]
+name = "xark-build-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Build-script helper stamping the exact Xark source identity (git revision + dirty-worktree fingerprint) into the xark binaries."
+
+[lib]
+path = "src/lib.rs"

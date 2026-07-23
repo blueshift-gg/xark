@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/backend",
+    "crates/build-identity",
     "crates/verifier",
     "gadgets/tests",
     "gadgets/xark-aes",

@@ -1006,6 +1006,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "xark-build-identity"
+version = "0.2.2"
+
+[[package]]
 name = "xark-ir"
 version = "0.2.2"
 dependencies = [
@@ -1025,6 +1029,7 @@ version = "0.2.2"
 dependencies = [
  "serde_json",
  "smallvec",
+ "xark-build-identity",
  "xark-ir",
 ]
 

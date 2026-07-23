@@ -40,3 +40,6 @@ mimalloc = "0.1"
 rayon = "1"
 # Inline storage for MIR-lowering projection paths — hot slot-map keys.
 smallvec = "1"
+
+[build-dependencies]
+xark-build-identity = { path = "../build-identity", version = "0.2.2" }

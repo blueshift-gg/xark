@@ -4754,6 +4754,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "xark-build-identity"
+version = "0.2.2"
+
+[[package]]
 name = "xark-cli"
 version = "0.2.2"
 dependencies = [
@@ -4774,6 +4778,7 @@ dependencies = [
  "tracing-subscriber",
  "xark",
  "xark-backend",
+ "xark-build-identity",
  "xark-ir",
  "xark-prover",
 ]
