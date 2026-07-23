@@ -25,7 +25,7 @@ program crate and pin *its* hash.
 
 | Component | Pinned version | Install |
 |---|---|---|
-| `cargo-build-sbf` (Anza / Solana CLI) | `stable` channel via `release.anza.xyz/stable/install` (currently `solana-cli 3.x`, `platform-tools v1.52`, `rustc 1.89.0`) | `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"` |
+| `cargo-build-sbf` (Anza / Solana CLI) | `4.0.0` (`platform-tools v1.53`, `rustc 1.89.0`) | `sh -c "$(curl -sSfL https://release.anza.xyz/v4.0.0/install)"` |
 | Host `cargo` (only drives `cargo-build-sbf`) | Workspace `rust-version = "1.85"` | Any 1.85+ stable is fine. |
 
 `cargo-build-sbf` is the *only* thing that touches the SBF target's codegen. Its bundled
@@ -58,10 +58,10 @@ its own `Cargo.lock`, the source of truth for the dependency graph compiled into
 * All other deps (`solana-program-entrypoint`, `solana-program-error`, `solana-nostd-alt-bn128`, …)
   are pinned to crates.io versions whose checksums are committed in `Cargo.lock`.
 
-We do **not** vendor sources — `cargo` verifies each dep's registry checksum against `Cargo.lock` on
-build, so a committed `Cargo.lock` is byte-for-byte equivalent to a `vendor/` tree for
-reproducibility. CI passes `--locked` (`--frozen --locked` semantics), failing if the lockfile would
-need to change.
+We do **not** vendor sources — `cargo` verifies each registry dependency against the checksum in
+`Cargo.lock`. CI passes `--locked`, so the build fails if dependency resolution would change the
+lockfile. It may still download missing, checksum-verified crates; fully offline builds additionally
+need a populated Cargo cache or a separately audited vendor directory.
 
 ## The build command line
 
@@ -69,6 +69,7 @@ From the repo root:
 
 ```bash
 cargo build-sbf \
+  --arch v0 \
   --manifest-path crates/verifier/reference-program/Cargo.toml \
   --sbf-out-dir build-out/ \
   -- \
@@ -76,7 +77,8 @@ cargo build-sbf \
 ```
 
 This (1) resolves against `crates/verifier/reference-program/Cargo.lock` (`--locked` forwarded to the
-inner `cargo`), (2) compiles for `sbpf-solana-solana` with the pinned `platform-tools` rustc, (3)
+inner `cargo`), (2) explicitly targets SBPFv0, whose dynamic syscall ABI the target selects,
+(3) compiles with the pinned `platform-tools` rustc, and (4)
 links a single `.so` into `build-out/`. Verify:
 
 ```bash

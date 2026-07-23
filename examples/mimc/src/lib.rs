@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 /// A small 3-round MiMC-structured permutation (exponent 3) with key addition,
 /// hand-unrolled. Compiler-feature demo, not the real hash — for cryptographic

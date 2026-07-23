@@ -40,7 +40,7 @@ fn ecdsa_verify_matches_p256() {
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/secp256r1_ecdsa/src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "ecdsa_p256_vec", "bn254");
+    let c = xark_test_harness::compile_file_xbc(&src, "ecdsa_p256_vec", "bn254");
     assert!(
         c.status_success,
         "compiling secp256r1_ecdsa failed: {}",

@@ -1,6 +1,5 @@
 //! Variable-length hashing with the Poseidon **sponge** (`hash::<N>`). `N` is a
 //! compile-time constant; here we hash 5 private inputs and expose the digest.
-#![cfg_attr(xark, no_std)]
 use xark_poseidon::prelude::*;
 
 #[circuit]

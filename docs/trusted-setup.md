@@ -48,16 +48,19 @@ snarkjs powersoftau prepare phase2 pb.ptau final.ptau
 
 # --- phase 2: multi-party MPC over the circuit (xark) ---
 SEED=00112233... # 32-byte hex
-xark ceremony init --artifact gadgets/tests/fixtures/arithmetic_square.json \
- --ptau-file final.ptau --phase2-seed $SEED --out ceremony/
+xark build path/to/circuit
+xark ceremony init path/to/circuit \
+  --ptau-file final.ptau --phase2-seed $SEED --out ceremony/
 xark ceremony contribute --ceremony-dir ceremony/ --label alice
 xark ceremony contribute --ceremony-dir ceremony/ --label bob
 xark ceremony verify --ceremony-dir ceremony/ # checks the chain
 xark ceremony finalize --ceremony-dir ceremony/
 
 # --- prove + verify with the finalized keys ---
-xark prove --artifact … --witness … --proving-key ceremony/proving_key.bin --out proof.bin
-xark verify --verifying-key ceremony/verifying_key.bin --proof proof.bin --public-inputs public_inputs.json
+xark prove path/to/circuit --inputs inputs.json \
+  --proving-key ceremony/proving_key.bin --out proof.bin
+xark verify path/to/circuit --verifying-key ceremony/verifying_key.bin \
+  --proof proof.bin --public-inputs public_inputs.bin
 # => Proof verified: true
 ```
 

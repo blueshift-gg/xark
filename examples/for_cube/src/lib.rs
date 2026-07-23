@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 /// `a^3` via a compile-time-unrolled `for` loop. Lowers byte-for-byte identically
 /// to the equivalent `let mut i = 0; while i < 2 { acc = acc * a; i += 1; }`.

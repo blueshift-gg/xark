@@ -1,10 +1,9 @@
-#![cfg_attr(xark, no_std)]
 
 //! A scalar `s` must be canonical (`< n`, not merely limb-bounded `< 2^258`) and
 //! nonzero, i.e. `s ∈ [1, n-1]` — this is what makes ECDSA signatures
 //! non-malleable. A non-canonical or zero `s` makes the circuit unsatisfiable.
 
-use xark::{circuit, Field, Private};
+use xark::prelude::*;
 use xark_secp256k1::affine::Fq;
 
 #[circuit]

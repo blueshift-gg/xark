@@ -3,7 +3,6 @@
 //! 13-byte header. GCM = AES-CTR (confidentiality) + GHASH, a GF(2¹²⁸)
 //! multiply-accumulate (authentication) — the AEAD used by TLS 1.2/1.3. The 20-byte
 //! message and 13-byte partial-block AAD exercise both GHASH zero-padding paths.
-#![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;
 

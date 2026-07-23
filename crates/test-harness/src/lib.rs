@@ -38,20 +38,32 @@ impl Compiled {
         primitive::from_json(&json).expect("valid circuit.json")
     }
 
-    /// The **minimized** R1CS constraint count — the invariant the prover
-    /// actually proves. Setup and proving both expand `circuit.xbc` and run
-    /// `minimize_with_fill(.., usize::MAX)`; this reproduces that pipeline. Use
-    /// it for constraint-count pins instead of the raw `circuit.json`, whose flat
-    /// expansion carries function plug-materialization that minimization removes
-    /// (so cached vs. inlined differ in the flat count but not in what is proven).
-    pub fn minimized_r1cs_len(&self) -> usize {
+    /// Expand the compact compiler artifact directly into the primitive program.
+    /// Large gadget tests should use this with [`compile_file_xbc`] so they do not
+    /// serialize and parse a multi-gigabyte debug JSON file just to test semantics.
+    pub fn program_xbc(&self) -> PrimitiveProgram {
+        let path = self.out_dir.join("circuit.xbc");
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        xark_ir::function_decode::expand_function_blob(&bytes)
+            .unwrap_or_else(|error| panic!("expand {}: {error}", path.display()))
+            .to_primitive()
+    }
+
+    /// The **minimized** R1CS relation — the invariant setup and proving actually
+    /// consume. Raw expanded JSON can carry function-boundary materialization
+    /// constraints that this production pipeline removes.
+    pub fn minimized_r1cs(&self) -> xark_ir::R1csProgram {
         let bytes = std::fs::read(self.out_dir.join("circuit.xbc"))
             .unwrap_or_else(|e| panic!("read {}: {e}", self.out_dir.join("circuit.xbc").display()));
         let cp = xark_ir::function_decode::expand_function_blob(&bytes)
             .unwrap_or_else(|e| panic!("expand circuit.xbc: {e}"));
         xark_ir::minimize::minimize_with_fill(&cp.to_r1cs(), usize::MAX)
-            .constraints
-            .len()
+    }
+
+    /// Constraint count of [`Self::minimized_r1cs`].
+    pub fn minimized_r1cs_len(&self) -> usize {
+        self.minimized_r1cs().constraints.len()
     }
 
     /// Check that native `inputs` **satisfy** this compiled circuit — the
@@ -68,7 +80,11 @@ impl Compiled {
     pub fn check(&self, inputs: &[(&str, &dyn bignum::LeafInput)]) -> Result<(), String> {
         use xark_ir::primitive::VarRole;
 
-        let program = self.program();
+        let program = if self.out_dir.join("circuit.json").is_file() {
+            self.program()
+        } else {
+            self.program_xbc()
+        };
         let input_vars: Vec<&primitive::Var> = program
             .vars
             .iter()
@@ -273,6 +289,17 @@ static LOCK: Mutex<()> = Mutex::new(());
 
 /// Compile a circuit source **file** to R1CS + IR under `target/test-out/<out_name>`.
 pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
+    compile_file_impl(src, out_name, field, true)
+}
+
+/// Compile a circuit source file to the compact `circuit.xbc` only. Prefer this
+/// for semantic tests; use [`compile_file`] when the JSON artifact itself is what
+/// the test inspects.
+pub fn compile_file_xbc(src: &Path, out_name: &str, field: &str) -> Compiled {
+    compile_file_impl(src, out_name, field, false)
+}
+
+fn compile_file_impl(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let (bin, deps) = built();
     let root = workspace_root();
@@ -296,14 +323,16 @@ pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
     for e in externs(deps) {
         cmd.arg("--extern").arg(e);
     }
-    let output = cmd
-        .arg("-L")
+    cmd.arg("-L")
         .arg(format!("dependency={}", deps.display()))
         .arg("--field")
-        .arg(field)
-        // The snapshot suite and gadget `vec.rs` tests read `circuit.json`, so the
-        // harness opts into it (a normal `xark build` writes only `circuit.xbc`).
-        .arg("--emit-json")
+        .arg(field);
+    if emit_json {
+        // Snapshot and serialization tests inspect the readable artifacts; normal
+        // semantic tests can stay on the compact artifact.
+        cmd.arg("--emit-json");
+    }
+    let output = cmd
         .arg(src)
         .arg("--r1cs-out")
         .arg(&out_dir)

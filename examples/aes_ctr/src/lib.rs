@@ -3,7 +3,6 @@
 //! stream cipher: keystream = `AES_enc(key, nonce ‖ be_u32(block))`, ciphertext =
 //! `msg XOR keystream`. The 20-byte message spans two blocks (16 + a 4-byte tail)
 //! to exercise the partial-final-block path.
-#![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;
 

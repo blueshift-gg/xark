@@ -22,10 +22,10 @@ pub use xark::Field;
 use xark::require_eq;
 
 /// Host-only re-export so the [`fp!`] macro can generate a decimal `NativeInput`
-/// without the caller depending on `xark_prover` by name.
+/// without exposing Xark's host plumbing by name.
 #[cfg(not(xark))]
 #[doc(hidden)]
-pub use xark_prover as __prover;
+pub use xark::__private as __prover;
 
 // Width-generic non-native modular arithmetic (`Bignum<LIMBS, BITS>`).
 
@@ -50,17 +50,17 @@ pub struct Bignum<const LIMBS: usize, const BITS: usize> {
 // a decimal (or `0x`-hex) string and split into its `LIMBS` little-endian `BITS`-bit
 // limbs — callers pass the value, never hand-decompose. Distinct from the
 // curve/`fp!` newtypes (own byte-host), so no coherence clash. `NativeInput` lives
-// in `std` `xark_prover` while this crate is `#![no_std]`, so pull `std` in inside
+// in Xark's host-only plumbing while this crate is `#![no_std]`, so pull `std` in inside
 // an anonymous const.
 #[cfg(not(xark))]
 const _: () = {
     extern crate std;
     use std::string::String;
     use std::vec::Vec;
-    impl<const LIMBS: usize, const BITS: usize> xark_prover::NativeInput for Bignum<LIMBS, BITS> {
+    impl<const LIMBS: usize, const BITS: usize> xark::__private::NativeInput for Bignum<LIMBS, BITS> {
         type Native = String;
         fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
-            xark_prover::limb_leaves_decimal(native, prefix, LIMBS, BITS as u32)
+            xark::__private::limb_leaves_decimal(native, prefix, LIMBS, BITS as u32)
         }
     }
 };
@@ -269,17 +269,23 @@ macro_rules! fp {
     // Host-side `NativeInput`: take the element as one decimal (or `0x`-hex) string,
     // split into `$limbs` little-endian `$bits`-bit limbs. Host-only.
     (@host $name:ident, $limbs:expr, $bits:expr) => {
-        #[cfg(not(xark))]
+        // The private cfg stays under a lint-scoped parent so downstream crates
+        // invoking `fp!` never need a check-cfg manifest entry.
+        #[doc(hidden)]
+        #[allow(unexpected_cfgs)]
         const _: () = {
-            extern crate std;
-            use std::string::String;
-            use std::vec::Vec;
-            impl $crate::__prover::NativeInput for $name {
-                type Native = String;
-                fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
-                    $crate::__prover::limb_leaves_decimal(native, prefix, $limbs, $bits as u32)
+            #[cfg(not(xark))]
+            const _: () = {
+                extern crate std;
+                use std::string::String;
+                use std::vec::Vec;
+                impl $crate::__prover::NativeInput for $name {
+                    type Native = String;
+                    fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
+                        $crate::__prover::limb_leaves_decimal(native, prefix, $limbs, $bits as u32)
+                    }
                 }
-            }
+            };
         };
     };
     (@build $vis:vis $name:ident, $modulus:literal, $limbs:expr, $bits:expr) => {

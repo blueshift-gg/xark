@@ -24,7 +24,14 @@ description = "Reproducible-build reference Solana program wrapping xark-verifie
 [workspace]
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib"]
+
+[features]
+# Recognized by Solana's `entrypoint!` macro when a program supplies its own
+# allocator or panic handler. Declaring them keeps check-cfg clean even though
+# this reference program uses the defaults.
+custom-heap = []
+custom-panic = []
 
 [dependencies]
 xark-verifier = { path = ".." }

@@ -27,7 +27,8 @@ use xark_backend::keys::{Groth16Keys, KeyMetadata};
 use xark_backend::ptau::parse_ptau;
 use xark_prover::XarkCircuit;
 
-use super::{circuit_hash, load_r1cs, num_public_inputs};
+use super::{load_backend_r1cs, num_public_inputs};
+use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
 pub struct CeremonyArgs {
@@ -49,17 +50,22 @@ pub enum CeremonyCommand {
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
-    /// Path to `r1cs.json` (produced by `xark build`).
+    /// Circuit crate directory (or its `target/xark/` output dir). Defaults to
+    /// the current directory; the built `circuit.xbc` is used automatically.
+    #[arg(value_hint = clap::ValueHint::DirPath)]
+    pub path: Option<PathBuf>,
+    /// Explicit `r1cs.json` override for legacy or `--emit-json` builds.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
-    pub r1cs: PathBuf,
+    pub r1cs: Option<PathBuf>,
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub ptau_file: PathBuf,
     /// Optional — auto-generated via OS RNG when not supplied. Pass this to
     /// reproduce byte-identical initial keys from the same circuit + `.ptau`.
     #[arg(long, value_name = "HEX")]
     pub phase2_seed: Option<String>,
+    /// Ceremony directory. Defaults to `target/xark/ceremony/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
-    pub out: PathBuf,
+    pub out: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -93,10 +99,13 @@ pub fn run(args: CeremonyArgs) -> Result<()> {
 }
 
 fn run_init(args: InitArgs) -> Result<()> {
-    let r1cs_str = fs::read_to_string(&args.r1cs)
-        .with_context(|| format!("reading {}", args.r1cs.display()))?;
-    let prog = load_r1cs(&args.r1cs)?;
-    let hash = circuit_hash(&r1cs_str);
+    let project = XarkProject::resolve(args.path.clone())?;
+    let r1cs_path = args.r1cs.clone().unwrap_or_else(|| project.r1cs_json());
+    let (prog, hash) = load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
+    let out = args
+        .out
+        .clone()
+        .unwrap_or_else(|| project.xark_dir.join("ceremony"));
     let num_pi = num_public_inputs(&prog);
     let circuit = XarkCircuit::for_setup(prog);
 
@@ -123,7 +132,7 @@ fn run_init(args: InitArgs) -> Result<()> {
     let keys = xark_backend::ptau::setup_from_ptau(circuit, &ptau, &seed_arr)
         .map_err(|e| anyhow!("phase-2 setup failed: {e}"))?;
 
-    fs::create_dir_all(&args.out).with_context(|| format!("creating {}", args.out.display()))?;
+    fs::create_dir_all(&out).with_context(|| format!("creating {}", out.display()))?;
 
     // Record the initial delta_g1 baseline for verifier re-anchoring.
     let mut baseline_bytes = Vec::new();
@@ -131,22 +140,22 @@ fn run_init(args: InitArgs) -> Result<()> {
         .delta_g1
         .serialize_with_mode(&mut baseline_bytes, Compress::Yes)
         .map_err(|e| anyhow!("serializing baseline delta_g1: {e}"))?;
-    fs::write(args.out.join("baseline_delta_g1.bin"), &baseline_bytes)?;
+    fs::write(out.join("baseline_delta_g1.bin"), &baseline_bytes)?;
 
-    keys.write_proving_key(&args.out.join("proving_key.bin"))?;
-    keys.write_verifying_key(&args.out.join("verifying_key.bin"))?;
-    write_contribution_count(&args.out, 0)?;
+    keys.write_proving_key(&out.join("proving_key.bin"))?;
+    keys.write_verifying_key(&out.join("verifying_key.bin"))?;
+    write_contribution_count(&out, 0)?;
 
     // Stash the circuit metadata for finalize().
     fs::write(
-        args.out.join("circuit_meta.json"),
+        out.join("circuit_meta.json"),
         serde_json::to_string_pretty(&serde_json::json!({
             "circuit_hash": hash,
             "num_public_inputs": num_pi,
         }))?,
     )?;
 
-    println!("Initialized ceremony at {}", args.out.display());
+    println!("Initialized ceremony at {}", out.display());
     println!("baseline_delta_g1 recorded; 0 contributions so far.");
     Ok(())
 }

@@ -1,5 +1,4 @@
-#![cfg_attr(xark, no_std)]
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 // all-Field, called many times → gadget by default, UNLESS the user opts out.
 #[inline(never)]

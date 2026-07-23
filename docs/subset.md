@@ -12,31 +12,36 @@ compile time. It has no runtime: no value-dependent control flow, no data-depend
 no I/O. Rule of thumb:
 
 > **Everything that decides the *shape* of the circuit — loop lengths, array indices, branch
-> conditions, array sizes — must be a compile-time constant. Only `Field` *values* may depend on the
-> inputs.**
+> conditions, array sizes — must be a compile-time constant. Only circuit witness values may depend
+> on the inputs.**
 
 `Field` is the field element type (BN254 scalar). `Private<Field>`/`Public<Field>` mark input
 visibility. `require_eq(a, b)` emits an equality **constraint** (it does *not* return a native `bool`).
 
 ```rust
-#![no_std]
 use xark::prelude::*;
 
 /// Prove knowledge of a cube root: `secret^3 == result`.
-pub fn circuit(secret: Private<Field>, result: Public<Field>) {
+#[circuit]
+pub fn cube(secret: Private<Field>, result: Public<Field>) {
     require_eq(secret ^ 3, result);
 }
 ```
 
+That is the complete crate-level authoring surface: one `xark` dependency, no
+`no_std` attribute, private cfg, or direct `xark-prover` dependency.
+
 ## Supported
 
-- **Types:** `Field`; fixed-size arrays `[Field; N]` (nested too); tuples and plain structs of
-  `Field`. Circuit inputs must be `Field` or arrays/tuples/structs of `Field`, with **constant**
-  array lengths.
+- **Types:** `Field`; native unsigned witnesses (`u8` through `u128`); fixed-size arrays
+  `[Field; N]` (nested too); and `#[derive(CircuitInput)]` structs composed of `Field` values.
+  Array lengths must be **constant**.
 - **`Field` arithmetic:** `+`, `-`, `*`, unary `-`, `^ n` (exponentiation by a **constant** `n`).
   Multiplication by a constant is free (folds into a linear combination); only `var * var` emits a gate.
-- **Constants & host integers:** integer literals and `usize`/`u*` values for loop bounds, indices,
-  widths — as long as compile-time constant.
+- **Constants & native integers:** integer literals and `usize`/`u*` values for loop bounds,
+  indices, and widths when compile-time constant; unsigned circuit inputs also support bounded
+  arithmetic, bitwise operations, shifts by constants, and direct comparisons such as
+  `power_level > 9_000u64`.
 - **Control flow, compile-time only:** `if cond { … } else { … }` where `cond` is constant; `while i < N`
   / `for i in 0..N` where `N` is constant (loops are fully **unrolled**).
 - **Functions:** ordinary function calls, including across crates — **gadgets are just Rust libraries**
@@ -48,7 +53,7 @@ pub fn circuit(secret: Private<Field>, result: Public<Field>) {
 
 | You wrote | Why it's rejected | Do this instead |
 |---|---|---|
-| `a += b`, `a -= b`, `a *= b` | compound assignment on `Field` isn't modeled | `a = a + b` |
+| `a += b`, `a -= b`, `a *= b` | compound assignment on `Field` isn't modeled | `a = a + b` (the `#[circuit]` macro owns the matching Clippy suppression) |
 | `for x in slice` / iterators | iterator desugaring isn't a circuit operation | `for i in 0..N { let x = arr[i]; }` |
 | `while cond` on a `Field`-derived `cond` | witness-dependent control flow — loop length would depend on inputs | make the bound a constant |
 | `if secret_field == 0 { … }` | branches can't depend on a witness value | compute both sides and **mux**: `b + cond·(a − b)` with a boolean `cond` |
@@ -75,10 +80,17 @@ unambiguous.
 ## Testing a circuit
 
 Circuit crates are tested with **`xark test`** (not bare `cargo test`): it builds the `target/xark/`
-artifacts first, then runs the crate's tests, which load the built circuit and check the witness
-solves. A `#[circuit]`-style test expecting failure asserts the solve is `Err`. Run `xark build` then
-`xark prove <dir> --input name=value …` to prove end-to-end; `--input` takes a decimal string per
-declared input (`--input x=42`, repeated per array element).
+artifact first, then runs tests against that exact circuit. The canonical loop is:
+
+```bash
+xark build .
+xark setup .
+xark test .
+xark prove . --inputs '{"secret": 3, "result": 27}'
+```
+
+For large witnesses, pass a JSON file or `name = value` file to `--inputs`. Use `xark inspect`
+to see the flattened input names and `xark inspect --json` for the uncapped machine-readable list.
 
 See also: [architecture.md](architecture.md) (compile pipeline),
 [integer-ops.md](integer-ops.md) (bit/integer gadget layer).

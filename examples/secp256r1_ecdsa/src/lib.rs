@@ -2,7 +2,6 @@
 //! 3×86-bit Weierstrass gadget. Inputs are transparent compound types: `Point` =
 //! `[u8; 64]` `x ‖ y`, `Signature` = `[u8; 64]` `r ‖ s`, `Scalar` = digest
 //! `int(hash(msg)) mod n` (`[u8; 32]`) — the exact bytes `p256` emits.
-#![cfg_attr(xark, no_std)]
 
 use xark_secp256r1::prelude::*;
 
@@ -14,7 +13,7 @@ pub fn secp256r1_ecdsa(pubkey: Public<Point>, sig: Public<Signature>, digest: Pu
 #[cfg(test)]
 mod tests {
     use super::secp256r1_ecdsa;
-    use p256::ecdsa::{signature::Signer, Signature as P256Sig, SigningKey};
+    use p256::ecdsa::{Signature as P256Sig, SigningKey, signature::Signer};
     use sha2::{Digest, Sha256};
     use xark_secp256r1::reduce_scalar;
 
@@ -26,7 +25,7 @@ mod tests {
         let sig: P256Sig = sk.sign(msg);
         let enc = vk.to_encoded_point(false);
         let pubkey: [u8; 64] = enc.as_bytes()[1..].try_into().unwrap(); // drop 0x04 tag
-        let sig_bytes: [u8; 64] = sig.to_bytes().as_slice().try_into().unwrap();
+        let sig_bytes: [u8; 64] = sig.to_bytes().into();
         let digest = reduce_scalar(&Sha256::digest(msg));
         (pubkey, sig_bytes, digest)
     }

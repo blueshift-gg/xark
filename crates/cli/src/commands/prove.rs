@@ -1,6 +1,6 @@
 //! `xark prove` — produce a Groth16 proof for a built circuit.
 //!
-//! Self-contained: loads `r1cs.json` + `circuit.json`, *solves* the witness from
+//! Self-contained: loads `circuit.xbc`, *solves* the witness from
 //! the `--inputs` values (via the reference solver), loads the proving key
 //! written by `xark setup`, and runs the shared `xark_backend` prover. The proof
 //! and its public inputs are written next to the build output.
@@ -84,6 +84,12 @@ pub struct ProveArgs {
     /// flag only controls *writing* it. Ideal for producing many proofs.
     #[arg(long, default_value_t = false)]
     pub cache: bool,
+
+    /// Print the complete proof and packed verifier calldata as terminal hex.
+    /// By default these bytes are written to files and only a compact summary
+    /// is shown, which keeps large-circuit output readable.
+    #[arg(long, default_value_t = false)]
+    pub verbose: bool,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -145,6 +151,9 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // artifacts are *absent* — it never overwrites an existing build or key, so
     // it just replaces a "run build first" error with actually doing it.
     autobuild_and_setup(&args, &project, &r1cs_path, &pk_path)?;
+    if args.proving_key.is_none() {
+        super::ensure_key_matches_current_circuit(&project, &pk_path, args.r1cs.as_deref())?;
+    }
 
     // Load the circuit + solve the witness under the soundness gate. The default
     // path — no `--r1cs`/`--circuit` overrides — expands the self-contained
@@ -342,11 +351,14 @@ pub fn run(args: ProveArgs) -> Result<()> {
 
     fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating output dir {}", out_dir.display()))?;
-    bundle.write_proof(&proof_out)?;
+    bundle
+        .write_proof(&proof_out)
+        .with_context(|| format!("writing proof {}", proof_out.display()))?;
 
     // Public inputs as canonical binary (primary format for verify/export).
     let public_path = out_dir.join("public_inputs.bin");
-    write_public_inputs(&public, &public_path)?;
+    write_public_inputs(&public, &public_path)
+        .with_context(|| format!("writing public inputs {}", public_path.display()))?;
 
     // snarkjs-compatible proof + public inputs (reused for the standalone files
     // and embedded into the self-contained bundle below).
@@ -356,12 +368,14 @@ pub fn run(args: ProveArgs) -> Result<()> {
     fs::write(
         &snarkjs_proof_path,
         serde_json::to_string_pretty(&snarkjs_proof)?,
-    )?;
+    )
+    .with_context(|| format!("writing {}", snarkjs_proof_path.display()))?;
     let snarkjs_public_path = out_dir.join("snarkjs-public.json");
     fs::write(
         &snarkjs_public_path,
         serde_json::to_string_pretty(&snarkjs_public)?,
-    )?;
+    )
+    .with_context(|| format!("writing {}", snarkjs_public_path.display()))?;
 
     // Verifier calldata: the packed `proof (256 B) || public_inputs (N * 32 B)`
     // bytes, little-endian, that the xark on-chain verifier consumes (`A` is
@@ -371,6 +385,15 @@ pub fn run(args: ProveArgs) -> Result<()> {
     let mut calldata = Vec::with_capacity(proof_bytes.len() + public_bytes.len());
     calldata.extend_from_slice(&proof_bytes);
     calldata.extend_from_slice(&public_bytes);
+    let solana_proof_path = out_dir.join("proof.solana.bin");
+    let solana_public_path = out_dir.join("public_inputs.solana.bin");
+    let instruction_path = out_dir.join("instruction_data.bin");
+    fs::write(&solana_proof_path, &proof_bytes)
+        .with_context(|| format!("writing {}", solana_proof_path.display()))?;
+    fs::write(&solana_public_path, &public_bytes)
+        .with_context(|| format!("writing {}", solana_public_path.display()))?;
+    fs::write(&instruction_path, &calldata)
+        .with_context(|| format!("writing {}", instruction_path.display()))?;
     let proof_hex = format!("0x{}", hex::encode(&proof_bytes));
     let calldata_hex = format!("0x{}", hex::encode(&calldata));
 
@@ -407,6 +430,9 @@ pub fn run(args: ProveArgs) -> Result<()> {
     println!("Wrote {}", public_path.display());
     println!("Wrote {}", snarkjs_proof_path.display());
     println!("Wrote {}", snarkjs_public_path.display());
+    println!("Wrote {}", solana_proof_path.display());
+    println!("Wrote {}", solana_public_path.display());
+    println!("Wrote {}", instruction_path.display());
     println!(
         "Wrote {}  {}",
         bundle_path.display(),
@@ -420,33 +446,36 @@ pub fn run(args: ProveArgs) -> Result<()> {
         ))
     );
 
-    // Show the proof and its fingerprint, both copy-pasteable from the terminal.
-    println!(
-        "\n{}",
-        crate::style::brand(&format!(
-            "── proof ── {} bytes, little-endian ──",
-            proof_bytes.len()
-        ))
-    );
-    println!("{proof_hex}");
     println!(
         "\nproof sha256:  0x{proof_sha}  {}",
         crate::style::dim("# fingerprint — copy to reference this exact proof")
     );
 
-    // The packed verifier calldata (proof ‖ public), ready to hand to a verifier.
-    println!(
-        "\n{}",
-        crate::style::brand(&format!(
-            "── verifier calldata ── proof ‖ public inputs, little-endian, {} bytes ──",
-            calldata.len()
-        ))
-    );
-    println!("{calldata_hex}");
-    println!(
-        "{}",
-        crate::style::dim("   ↑ the packed bytes your on-chain verifier consumes")
-    );
+    if args.verbose {
+        println!(
+            "\n{}",
+            crate::style::brand(&format!(
+                "── proof ── {} bytes, little-endian ──",
+                proof_bytes.len()
+            ))
+        );
+        println!("{proof_hex}");
+        println!(
+            "\n{}",
+            crate::style::brand(&format!(
+                "── verifier calldata ── proof ‖ public inputs, little-endian, {} bytes ──",
+                calldata.len()
+            ))
+        );
+        println!("{calldata_hex}");
+    } else {
+        println!(
+            "On-chain calldata: {} bytes in {}  {}",
+            calldata.len(),
+            instruction_path.display(),
+            crate::style::dim("# pass --verbose to print hex")
+        );
+    }
 
     let p = super::path_arg(&args.path);
     println!(
@@ -477,7 +506,7 @@ fn autobuild_and_setup(
 ) -> Result<()> {
     // "Built" is signalled by `circuit.xbc` (always emitted), not `r1cs.json`
     // (now `--emit-json`-only): a normal build no longer writes the JSON.
-    let is_built = project.circuit_xbc().exists() || r1cs_path.exists();
+    let mut is_built = project.circuit_xbc().exists() || r1cs_path.exists();
     if args.r1cs.is_none()
         && !is_built
         && let Some(dir) = find_crate_dir(args, project)
@@ -490,6 +519,7 @@ fn autobuild_and_setup(
         if crate::cli::cmd_build(&[dir.display().to_string()]) != 0 {
             anyhow::bail!("auto-build failed (build the circuit with `xark build` first)");
         }
+        is_built = project.circuit_xbc().exists() || r1cs_path.exists();
     }
     // If no crate dir is found, fall through: `load_r1cs` emits the usual
     // clear "run `xark build` first" error.

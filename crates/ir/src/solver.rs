@@ -77,12 +77,35 @@ impl Fp {
     /// Reduce a signed `BigInt` into the field without a decimal round-trip.
     pub(crate) fn from_bigint(v: &num_bigint::BigInt, modulus: &BigUint) -> Self {
         let (sign, mag) = v.to_bytes_le();
+        if is_bn254(modulus) {
+            let value = Fr::from_le_bytes_mod_order(&mag);
+            return Fp::Bn254(if sign == num_bigint::Sign::Minus {
+                -value
+            } else {
+                value
+            });
+        }
         let f = Fp::new(BigUint::from_bytes_le(&mag), modulus);
         if sign == num_bigint::Sign::Minus {
             f.neg()
         } else {
             f
         }
+    }
+
+    /// Convert an already-validated IR constant without formatting it to decimal
+    /// and parsing it back on every constraint evaluation.
+    #[inline]
+    pub(crate) fn from_field_const(value: &crate::FieldConst, modulus: &BigUint) -> Self {
+        value.as_i64().map_or_else(
+            || {
+                Fp::from_bigint(
+                    value.as_bigint().expect("non-small FieldConst is Big"),
+                    modulus,
+                )
+            },
+            |small| Fp::from_i64(small, modulus),
+        )
     }
 
     /// Allocation-free small-integer constructor (the `from_decimal` fast path).
@@ -301,9 +324,9 @@ impl Assignment for DenseAssign {
 }
 
 fn eval_lc(lc: &LinearCombination, assign: &impl Assignment, modulus: &BigUint) -> Fp {
-    let mut acc = Fp::from_decimal(&lc.constant.decimal(), modulus);
+    let mut acc = Fp::from_field_const(&lc.constant, modulus);
     for term in &lc.terms {
-        let coeff = Fp::from_decimal(&term.coeff.decimal(), modulus);
+        let coeff = Fp::from_field_const(&term.coeff, modulus);
         let var = assign
             .get_fp(term.var)
             .cloned()
@@ -313,27 +336,51 @@ fn eval_lc(lc: &LinearCombination, assign: &impl Assignment, modulus: &BigUint) 
     acc
 }
 
-fn eval_expression(expr: &Expression, assign: &impl Assignment, modulus: &BigUint) -> Fp {
-    let mut acc = Fp::from_decimal(&expr.constant.decimal(), modulus);
+/// Convert a coefficient once per evaluation pass. Large gadget programs reuse
+/// the same round constants across function instances; reparsing their `BigInt`
+/// representation for every occurrence dominates debug checks.
+fn cached_field_const(
+    value: &crate::FieldConst,
+    modulus: &BigUint,
+    cache: &mut BTreeMap<crate::FieldConst, Fp>,
+) -> Fp {
+    if let Some(small) = value.as_i64() {
+        return Fp::from_i64(small, modulus);
+    }
+    if let Some(cached) = cache.get(value) {
+        return cached.clone();
+    }
+    let converted = Fp::from_field_const(value, modulus);
+    cache.insert(value.clone(), converted.clone());
+    converted
+}
+
+fn eval_expression_cached(
+    expr: &Expression,
+    assign: &impl Assignment,
+    modulus: &BigUint,
+    cache: &mut BTreeMap<crate::FieldConst, Fp>,
+) -> Fp {
+    let mut acc = cached_field_const(&expr.constant, modulus, cache);
     for lt in &expr.linear_terms {
-        let coeff = Fp::from_decimal(&lt.coeff.decimal(), modulus);
-        let v = assign
+        let coeff = cached_field_const(&lt.coeff, modulus, cache);
+        let value = assign
             .get_fp(lt.var)
             .cloned()
             .unwrap_or_else(|| Fp::zero(modulus));
-        acc = acc.add(&coeff.mul(&v));
+        acc = acc.add(&coeff.mul(&value));
     }
     for mt in &expr.mul_terms {
-        let coeff = Fp::from_decimal(&mt.coeff.decimal(), modulus);
-        let l = assign
+        let coeff = cached_field_const(&mt.coeff, modulus, cache);
+        let left = assign
             .get_fp(mt.left)
             .cloned()
             .unwrap_or_else(|| Fp::zero(modulus));
-        let r = assign
+        let right = assign
             .get_fp(mt.right)
             .cloned()
             .unwrap_or_else(|| Fp::zero(modulus));
-        acc = acc.add(&coeff.mul(&l).mul(&r));
+        acc = acc.add(&coeff.mul(&left).mul(&right));
     }
     acc
 }
@@ -736,8 +783,9 @@ pub fn fp_from_decimal(s: &str, program: &PrimitiveProgram) -> Fp {
 /// Check that every constraint evaluates to zero under `assign`.
 pub fn check(program: &PrimitiveProgram, assign: &BTreeMap<VarId, Fp>) -> Result<(), SolveError> {
     let modulus = modulus_of(program)?;
+    let mut constants = BTreeMap::new();
     for (i, c) in program.constraints.iter().enumerate() {
-        if !eval_expression(c, assign, &modulus).is_zero() {
+        if !eval_expression_cached(c, assign, &modulus, &mut constants).is_zero() {
             return Err(SolveError::ConstraintFailed(i));
         }
     }
@@ -773,12 +821,13 @@ fn univariate(
     v: VarId,
     assign: &BTreeMap<VarId, Fp>,
     modulus: &BigUint,
+    constants: &mut BTreeMap<crate::FieldConst, Fp>,
 ) -> (Fp, Fp, Fp) {
     let zero = || Fp::zero(modulus);
     let get = |id: VarId| assign.get(&id).cloned().unwrap_or_else(zero);
     let (mut a, mut b, mut c) = (zero(), zero(), zero());
     for mt in &expr.mul_terms {
-        let coeff = Fp::from_decimal(&mt.coeff.decimal(), modulus);
+        let coeff = cached_field_const(&mt.coeff, modulus, constants);
         match (mt.left == v, mt.right == v) {
             (true, true) => a = a.add(&coeff),
             (true, false) => b = b.add(&coeff.mul(&get(mt.right))),
@@ -787,14 +836,14 @@ fn univariate(
         }
     }
     for lt in &expr.linear_terms {
-        let coeff = Fp::from_decimal(&lt.coeff.decimal(), modulus);
+        let coeff = cached_field_const(&lt.coeff, modulus, constants);
         if lt.var == v {
             b = b.add(&coeff);
         } else {
             c = c.add(&coeff.mul(&get(lt.var)));
         }
     }
-    c = c.add(&Fp::from_decimal(&expr.constant.decimal(), modulus));
+    c = c.add(&cached_field_const(&expr.constant, modulus, constants));
     (a, b, c)
 }
 
@@ -836,7 +885,7 @@ pub fn analyze_underconstrained(
     program
         .vars
         .par_iter()
-        .filter_map(|var| {
+        .map_init(BTreeMap::new, |constants, var| {
             if !matches!(var.role, VarRole::Derived) {
                 return None;
             }
@@ -856,7 +905,8 @@ pub fn analyze_underconstrained(
             let mut restricted = false;
             let mut candidates: Vec<Fp> = Vec::new();
             for &ci in cons {
-                let (a, b, _c) = univariate(&program.constraints[ci], v, assign, &modulus);
+                let (a, b, _c) =
+                    univariate(&program.constraints[ci], v, assign, &modulus, constants);
                 if a.is_zero() && b.is_zero() {
                     continue;
                 }
@@ -884,7 +934,8 @@ pub fn analyze_underconstrained(
                     continue;
                 }
                 let satisfies_all = cons.iter().all(|&ci| {
-                    let (a, b, c) = univariate(&program.constraints[ci], v, assign, &modulus);
+                    let (a, b, c) =
+                        univariate(&program.constraints[ci], v, assign, &modulus, constants);
                     a.mul(beta).mul(beta).add(&b.mul(beta)).add(&c).is_zero()
                 });
                 if satisfies_all {
@@ -898,6 +949,7 @@ pub fn analyze_underconstrained(
             }
             None
         })
+        .filter_map(|result| result)
         .collect()
 }
 
@@ -958,9 +1010,9 @@ fn univariate_r1cs(
 ) -> (Fp, Fp, Fp) {
     let split = |lc: &LinearCombination| -> (Fp, Fp) {
         let mut coeff_v = Fp::zero(modulus);
-        let mut rest = Fp::from_decimal(&lc.constant.decimal(), modulus);
+        let mut rest = Fp::from_field_const(&lc.constant, modulus);
         for t in &lc.terms {
-            let coeff = Fp::from_decimal(&t.coeff.decimal(), modulus);
+            let coeff = Fp::from_field_const(&t.coeff, modulus);
             if t.var == v {
                 coeff_v = coeff_v.add(&coeff);
             } else {

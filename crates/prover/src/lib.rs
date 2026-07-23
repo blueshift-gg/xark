@@ -4,26 +4,38 @@
 //! runs the [`solver`] to produce the witness, lowers the constraints into
 //! Arkworks `gr1cs`, and runs the Groth16/BN254 stack (ark 0.6).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(feature = "groth16")]
+use std::collections::BTreeSet;
 
-use ark_bn254::{Bn254, Fr};
-use ark_ff::{PrimeField, Zero};
+#[cfg(feature = "groth16")]
+use ark_bn254::Bn254;
+use ark_bn254::Fr;
+use ark_ff::PrimeField;
+#[cfg(feature = "groth16")]
+use ark_ff::Zero;
+#[cfg(feature = "groth16")]
 use ark_groth16::{Groth16, Proof, VerifyingKey};
+#[cfg(feature = "groth16")]
 use ark_relations::gr1cs::{
     ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError, Variable,
 };
+#[cfg(feature = "groth16")]
 use ark_snark::SNARK;
 use num_bigint::{BigInt, Sign};
 
 use xark_ir::primitive::{PrimitiveProgram, Var, VarRole};
 use xark_ir::profile::ProfileProgram;
 use xark_ir::solver;
-use xark_ir::{FieldConst, LinearCombination as IrLc, R1csProgram, VarId, Visibility};
+use xark_ir::{FieldConst, R1csProgram, VarId};
+#[cfg(feature = "groth16")]
+use xark_ir::{LinearCombination as IrLc, Visibility};
 
 /// Developer-diagnostics env-flag probe. Only reads the environment under the
 /// `debug` feature; a normal release build compiles this to `false` so the
 /// diagnostic branches (and their `XARK_*` knobs) vanish entirely.
 #[inline]
+#[cfg(feature = "groth16")]
 fn dbg_flag(name: &str) -> bool {
     #[cfg(feature = "debug")]
     {
@@ -87,7 +99,10 @@ pub fn fr_from_fieldconst(fc: &FieldConst) -> Fr {
         let mag = Fr::from(n.unsigned_abs());
         return if n < 0 { -mag } else { mag };
     }
-    let (sign, bytes) = fc.big().to_bytes_le();
+    let (sign, bytes) = fc
+        .as_bigint()
+        .expect("non-small FieldConst is Big")
+        .to_bytes_le();
     let mag = Fr::from_le_bytes_mod_order(&bytes);
     if sign == Sign::Minus { -mag } else { mag }
 }
@@ -120,6 +135,7 @@ pub fn hex_to_field_decimal(s: &str) -> Result<String, String> {
 /// Supports both setup mode
 /// (constraint shape only) and proving mode (with the witness assignment).
 #[derive(Clone)]
+#[cfg(feature = "groth16")]
 pub struct XarkCircuit {
     prog: R1csProgram,
     assign: BTreeMap<VarId, Fr>,
@@ -131,6 +147,7 @@ pub struct XarkCircuit {
 /// Elimination is Gaussian, so satisfiability is preserved exactly: the witness
 /// `assign` (keyed by original ids, retained by surviving vars) stays valid, and
 /// public-input ids/order are untouched.
+#[cfg(feature = "groth16")]
 fn maybe_minimize(prog: R1csProgram) -> R1csProgram {
     // The fill cap (`MAX_FILL_DEFAULT`, overridable via `XARK_MAX_FILL`) is
     // deliberately low: it does the cheap, strictly-shrinking eliminations and
@@ -156,6 +173,7 @@ fn maybe_minimize(prog: R1csProgram) -> R1csProgram {
     out
 }
 
+#[cfg(feature = "groth16")]
 impl XarkCircuit {
     /// For Groth16 setup: only the constraint *shape* is needed (Arkworks calls
     /// the value closures only in proving mode), so the assignment is empty.
@@ -223,6 +241,7 @@ impl XarkCircuit {
 /// Reject an R1CS program that would crash the synthesizer, returning a
 /// descriptive error. Used to fail gracefully on an untrusted program before the
 /// panicking synthesis path runs.
+#[cfg(feature = "groth16")]
 fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
     // Every term must reference a declared variable: `generate_constraints`
     // indexes `map[&t.var]`, which panics on a dangling id. Reject it here so a
@@ -249,6 +268,7 @@ fn validate_program_constants(prog: &R1csProgram) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "groth16")]
 impl ConstraintSynthesizer<Fr> for XarkCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         // Allocate one arkworks variable per IR var, in id order (Public → input,
@@ -312,6 +332,7 @@ impl ConstraintSynthesizer<Fr> for XarkCircuit {
 
 /// Public inputs in variable-id order (the order they are allocated), which is
 /// exactly the order Groth16 verification expects.
+#[cfg(feature = "groth16")]
 fn public_inputs(prog: &R1csProgram, assign: &BTreeMap<VarId, Fr>) -> Vec<Fr> {
     let mut order: Vec<_> = prog.variables.iter().collect();
     order.sort_by_key(|v| v.id);
@@ -334,6 +355,7 @@ fn public_inputs(prog: &R1csProgram, assign: &BTreeMap<VarId, Fr>) -> Vec<Fr> {
 // The tuple return (verifying key, proof, public inputs) is the natural result
 // shape for a test/dev prove helper; a named struct would not add clarity.
 #[allow(clippy::type_complexity)]
+#[cfg(feature = "groth16")]
 pub fn prove_only(
     r1cs: &R1csProgram,
     circuit: &PrimitiveProgram,
@@ -371,6 +393,7 @@ pub fn prove_only(
 
 /// Run the full pipeline: solve the witness from `inputs`, lower to Groth16, and
 /// return whether the resulting proof verifies against the public inputs.
+#[cfg(feature = "groth16")]
 pub fn prove_and_verify(
     r1cs: &R1csProgram,
     circuit: &PrimitiveProgram,
@@ -389,6 +412,7 @@ pub fn prove_and_verify(
 /// Obtain one with [`circuit`]; drive it with [`Circuit::prove`].
 pub struct Circuit {
     /// The circuit name (for diagnostics), e.g. `<name>` in `target/xark/<name>/`.
+    #[cfg(feature = "groth16")]
     name: String,
     r1cs: R1csProgram,
     prim: PrimitiveProgram,
@@ -631,6 +655,7 @@ pub fn circuit_at(dir: impl AsRef<std::path::Path>) -> Circuit {
         .ok()
         .and_then(|s| xark_ir::profile::from_json(&s).ok());
     Circuit {
+        #[cfg(feature = "groth16")]
         name,
         r1cs,
         prim,
@@ -751,6 +776,7 @@ impl Circuit {
     /// backend, not the circuit). Reach for `prove` to confirm the whole proving
     /// pipeline for one circuit. Runs in seconds only in `--release`; a large
     /// circuit takes minutes in debug.
+    #[cfg(feature = "groth16")]
     pub fn prove<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
         let id_inputs = self.resolve_inputs(inputs);
         let assign_fp = solver::solve_and_check(&self.prim, &id_inputs).map_err(|e| {
@@ -805,7 +831,7 @@ impl Circuit {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "groth16"))]
 mod tests {
     use super::*;
     use xark_ir::primitive::{Expression, MulTerm, Var, VarRole, WitnessGen};

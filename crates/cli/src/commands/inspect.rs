@@ -1,6 +1,5 @@
-//! `xark inspect` — print statistics about a built circuit (`circuit.json` +
-//! `r1cs.json`): variable counts by visibility, constraint count, and public
-//! inputs.
+//! `xark inspect` — print statistics about a built `circuit.xbc`: variable counts
+//! by visibility, constraint count, and public inputs.
 
 use std::path::PathBuf;
 
@@ -119,8 +118,14 @@ pub fn run(args: InspectArgs) -> Result<()> {
     } else {
         println!("Field:                {}", prog.field.name);
         println!("Variables:            {}", prog.variables.len());
-        println!("  public inputs:      {num_public} {public_names:?}");
-        println!("  private inputs:     {num_private} {private_names:?}");
+        println!(
+            "  public inputs:      {num_public} {}",
+            format_input_preview(&public_names)
+        );
+        println!(
+            "  private inputs:     {num_private} {}",
+            format_input_preview(&private_names)
+        );
         println!("  internal:           {num_internal}");
         if let Some(names) = &derived_names {
             println!(
@@ -156,9 +161,24 @@ fn format_witness_preview(names: &[&str]) -> String {
     }
 }
 
+fn format_input_preview(names: &[&str]) -> String {
+    const MAX: usize = 16;
+    let shown = names
+        .iter()
+        .take(MAX)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if names.len() > MAX {
+        format!("[{shown}, … (+{} more; use --json)]", names.len() - MAX)
+    } else {
+        format!("[{shown}]")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_witness_preview;
+    use super::{format_input_preview, format_witness_preview};
 
     #[test]
     fn witnesses_render_as_indexed_private_slots() {
@@ -175,5 +195,14 @@ mod tests {
         let out = format_witness_preview(&refs);
         assert!(out.starts_with("[private[w0], private[w1],"));
         assert!(out.ends_with("… (+6 more)]")); // 30 - 24 cap
+    }
+
+    #[test]
+    fn long_input_lists_are_capped() {
+        let names: Vec<String> = (0..20).map(|i| format!("input[{i}]")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let out = format_input_preview(&refs);
+        assert!(out.starts_with("[input[0], input[1],"));
+        assert!(out.ends_with("… (+4 more; use --json)]"));
     }
 }

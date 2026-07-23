@@ -4,9 +4,8 @@
 //! `check_pinning` exemption). `d` is then pinned to a constrained `x·x·x·x`, a
 //! mergeable `require_eq` that must not fold into the witness-only `d`. So the
 //! witness-only muls cost zero constraints yet a wrong `claim` is rejected.
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, witness_begin, witness_end, Field, Public};
+use xark::prelude::*;
 
 #[circuit]
 pub fn witness_only_check(x: Public<Field>, claim: Public<Field>) {

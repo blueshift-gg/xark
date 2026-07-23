@@ -2,7 +2,6 @@
 //! digest equals a public 256-bit hash. The digest is a `Hash` — 256 bits packed
 //! into two field halves (`xark-hash`), so the circuit exposes just 2 public
 //! inputs; the host still supplies a plain `[u8; 32]`.
-#![cfg_attr(xark, no_std)]
 
 use xark_keccak::prelude::*;
 

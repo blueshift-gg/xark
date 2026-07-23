@@ -56,14 +56,14 @@ pub fn synth_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
 #[derive(Parser, Debug)]
 #[command(
     name = "xark",
-    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("XARK_GIT_HASH"), ")"),
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("XARK_GIT_HASH_SHORT"), ")"),
     styles = crate::style::clap_styles(),
     about = "Write, compile, prove and verify zero-knowledge circuits in Rust",
     long_about = "xark compiles a restricted Rust circuit (via rustc MIR) into \
 xark-IR + R1CS, then proves and verifies it with an Arkworks Groth16 backend \
-over BN254. `xark build` emits `circuit.json` + `r1cs.json` under \
-`<crate>/target/xark/`; the backend commands read them from there \
-automatically."
+over BN254. `xark build` emits a compact `circuit.xbc` under \
+`<crate>/target/xark/<package>/`; backend commands resolve it automatically. \
+Pass `--emit-json` only when human-readable IR is needed."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -184,8 +184,8 @@ pub struct BuildArgs {
     /// Circuit crate directory to build.
     #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
     pub crate_dir: String,
-    /// Output directory for `circuit.json` / `r1cs.json`
-    /// (default: `<crate>/target/xark/`).
+    /// Output directory for circuit artifacts
+    /// (default: `<crate>/target/xark/<package>/`).
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<String>,
     /// Field the circuit is defined over.
@@ -194,7 +194,7 @@ pub struct BuildArgs {
     /// Also emit the human-readable `circuit.json` (the primitive program as
     /// JSON). Off by default: `xark prove`/`check` load the compact binary
     /// `circuit.xbc` instead, so a normal build skips the (multi-GB on large
-    /// circuits) JSON serialization. `r1cs.json` is always written.
+    /// circuits) JSON serialization. This also emits `r1cs.json`.
     #[arg(long = "emit-json", default_value_t = false)]
     pub emit_json: bool,
 }
@@ -240,8 +240,8 @@ pub struct CheckArgs {
     /// `check` stays the fast validator.
     #[arg(long = "inputs", value_name = "JSON|FILE")]
     pub inputs: Option<String>,
-    /// Output directory for the intermediate `circuit.json` / `r1cs.json` built
-    /// by `--inputs` (default: `<crate>/target/xark/`). Only used with `--inputs`.
+    /// Output directory for the intermediate circuit artifact built by
+    /// `--inputs` (default: `<crate>/target/xark/<package>/`). Only used with `--inputs`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<String>,
 }
@@ -348,19 +348,15 @@ pub fn parse_input_text(text: &str, source: &std::path::Path) -> Result<BTreeMap
 /// Render a copy-pasteable `--inputs` JSON template naming every declared input,
 /// e.g. `--inputs '{"secret": <value>, "result": <value>}'`.
 pub fn inputs_hint(names: &[&str]) -> String {
+    if names.len() > 8 {
+        return "--inputs inputs.json".to_string();
+    }
     let body = names
         .iter()
         .map(|n| format!("\"{n}\": <value>"))
         .collect::<Vec<_>>()
         .join(", ");
     format!("--inputs '{{{body}}}'")
-}
-
-/// Load and parse an `r1cs.json` file.
-pub fn load_r1cs(path: &std::path::Path) -> Result<R1csProgram> {
-    let s = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {} (run `xark build` first?)", path.display()))?;
-    xark_ir::json::from_json(&s).with_context(|| format!("parsing {}", path.display()))
 }
 
 /// Load and parse a `circuit.json` (primitive / witness-gen) file.
@@ -832,6 +828,66 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+/// Fingerprint the built circuit artifact without expanding it. This is the
+/// identity stamped into `metadata.json` by setup and checked before default
+/// project keys are used by prove, verify, or export.
+pub fn current_circuit_fingerprint(
+    project: &crate::xark_project::XarkProject,
+    r1cs_override: Option<&std::path::Path>,
+) -> Result<String> {
+    if let Some(path) = r1cs_override {
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("reading circuit artifact {}", path.display()))?;
+        return Ok(sha256_hex(&bytes));
+    }
+    let xbc = project.circuit_xbc();
+    let artifact = if xbc.exists() {
+        xbc
+    } else {
+        project.r1cs_json()
+    };
+    let bytes = std::fs::read(&artifact).with_context(|| {
+        format!(
+            "reading current circuit {} (run `xark build` first)",
+            artifact.display()
+        )
+    })?;
+    Ok(sha256_hex(&bytes))
+}
+
+/// Require the key metadata beside `key_path` to name the current built
+/// circuit. Default project artifacts must never silently cross a circuit
+/// rebuild boundary: setup is the operation that deliberately creates new keys.
+pub fn ensure_key_matches_current_circuit(
+    project: &crate::xark_project::XarkProject,
+    key_path: &std::path::Path,
+    r1cs_override: Option<&std::path::Path>,
+) -> Result<xark_backend::KeyMetadata> {
+    let metadata_path = key_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("metadata.json");
+    let raw = std::fs::read_to_string(&metadata_path).with_context(|| {
+        format!(
+            "reading key metadata {} (run `xark setup` for the current circuit)",
+            metadata_path.display()
+        )
+    })?;
+    let metadata: xark_backend::KeyMetadata = serde_json::from_str(&raw)
+        .with_context(|| format!("parsing {}", metadata_path.display()))?;
+    let current = current_circuit_fingerprint(project, r1cs_override)?;
+    if metadata.circuit_hash != current {
+        anyhow::bail!(
+            "stale proving/verifying key: {} was generated for circuit {}, but the current circuit is {}. Run `xark setup {}` again before proving, verifying, or exporting",
+            key_path.display(),
+            metadata.circuit_hash,
+            current,
+            project.xark_dir.display(),
+        );
+    }
+    Ok(metadata)
+}
+
 /// A stable circuit identifier: the SHA-256 (hex) of the `r1cs.json` text.
 pub fn circuit_hash(r1cs_json: &str) -> String {
     sha256_hex(r1cs_json.as_bytes())
@@ -867,8 +923,24 @@ pub fn public_inputs_from_inputs(
 
 #[cfg(test)]
 mod tests {
-    use super::{inputs_hint, parse_input_text, parse_inputs_arg};
+    use super::{
+        ensure_key_matches_current_circuit, inputs_hint, parse_input_text, parse_inputs_arg,
+        sha256_hex,
+    };
     use std::path::Path;
+
+    fn temp_project(name: &str) -> (std::path::PathBuf, crate::xark_project::XarkProject) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("xark-{name}-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        (
+            dir.clone(),
+            crate::xark_project::XarkProject { xark_dir: dir },
+        )
+    }
 
     #[test]
     fn parses_line_input_file() {
@@ -933,5 +1005,46 @@ mod tests {
             inputs_hint(&["secret", "result"]),
             r#"--inputs '{"secret": <value>, "result": <value>}'"#
         );
+    }
+
+    #[test]
+    fn hint_uses_a_file_for_large_witnesses() {
+        let names: Vec<String> = (0..9).map(|i| format!("leaf[{i}]")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        assert_eq!(inputs_hint(&refs), "--inputs inputs.json");
+    }
+
+    #[test]
+    fn current_key_metadata_is_accepted() {
+        let (dir, project) = temp_project("current-key");
+        let circuit = b"XBC\0\x01\0current";
+        std::fs::write(project.circuit_xbc(), circuit).unwrap();
+        let metadata = xark_backend::KeyMetadata::new_dev(sha256_hex(circuit), 1, 1);
+        std::fs::write(
+            dir.join("metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        ensure_key_matches_current_circuit(&project, &dir.join("pk.bin"), None).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stale_key_metadata_is_rejected() {
+        let (dir, project) = temp_project("stale-key");
+        std::fs::write(project.circuit_xbc(), b"XBC\0\x01\0new").unwrap();
+        let metadata = xark_backend::KeyMetadata::new_dev("old-circuit".into(), 1, 1);
+        std::fs::write(
+            dir.join("metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let err = ensure_key_matches_current_circuit(&project, &dir.join("vk.bin"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("stale proving/verifying key"), "got: {err}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -1,7 +1,6 @@
 //! Grumpkin Pedersen hash circuit: hashes two private 128-bit scalars `m0, m1`
 //! to a public Grumpkin point `(hx, hy)` via `H = m0·G0 + m1·G1`, then constrains
 //! the result to the claimed public output.
-#![cfg_attr(xark, no_std)]
 
 use xark_pedersen::prelude::*;
 

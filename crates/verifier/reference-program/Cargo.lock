@@ -476,7 +476,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "xark-verifier"
-version = "0.0.1"
+version = "0.2.2"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",

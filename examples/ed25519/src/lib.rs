@@ -4,7 +4,6 @@
 //! through: `PointL` = compressed 32-byte pubkey `A`, `Signature` = `(R, S)` as
 //! `[u8; 64]` (compressed `R ‖ big-endian S`), `Scalar` = the challenge
 //! `k = SHA-512(R ‖ A ‖ M) mod L` (a prover-supplied witness).
-#![cfg_attr(xark, no_std)]
 
 use xark_ed25519::prelude::*;
 

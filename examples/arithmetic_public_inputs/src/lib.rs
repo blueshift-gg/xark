@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 #[circuit]
 pub fn arithmetic_public_inputs(x: Private<Field>, y: Private<Field>, out: Public<Field>) {

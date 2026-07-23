@@ -8,13 +8,7 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
-xark-secp256k1 = { path = "../../gadgets/xark-secp256k1", version = "0.2.1" }
+xark = { path = "../../crates/lang", version = "0.2.2" }
+xark-secp256k1 = { path = "../../gadgets/xark-secp256k1", version = "0.2.2" }
 
 [workspace]
-
-[target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/prover", version = "0.2.1" }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

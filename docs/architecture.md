@@ -1,7 +1,7 @@
 # Architecture
 
 xark is one tool with two faces — a **language** (write a circuit as ordinary
-`#![no_std]` Rust) and a **toolchain** (`xark build` / `xark prove`) — split into
+stable Rust) and a **toolchain** (`xark build` / `xark prove`) — split into
 focused crates with strict layering so that:
 
 * the circuit-author surface (`xark`'s prelude: `Field`, `require_eq`,
@@ -32,16 +32,17 @@ are plain Rust crates that lower to the *same* small primitive constraint set.
 
 ## How MIR is used
 
-The `xark` binary is both the friendly CLI and, when `cargo` invokes it as
-`RUSTC` during `xark build`, a `rustc_driver` (nightly, `#![feature(rustc_private)]`).
-`xark build` runs `cargo build` on the circuit crate with itself as the compiler
-under one pinned nightly, so every dependency (the `xark` lib and gadget crates)
-is built with matching MIR-encoded rlibs. Only the primary crate
+The stable `xark` CLI drives Cargo with the separate nightly `xark-rustc` binary
+as `RUSTC`. Keeping them separate lets the CLI use its normal host runtime while
+the driver links rustc internals. `xark build` runs Cargo with a stable,
+tool-owned rebuild nonce, so deleted artifacts can be regenerated without
+touching source mtimes. Every dependency is built with
+matching MIR-encoded rlibs. Only the primary crate
 (`CARGO_PRIMARY_PACKAGE`) is extracted; the rest compile normally so their MIR is
 available for cross-crate inlining.
 
 For the primary crate the driver, in `after_analysis`, obtains the `TyCtxt`, finds
-`pub fn circuit(..)`, reads its signature to recover `Private`/`Public` visibility,
+the `#[circuit]` entry, reads its signature to recover `Private`/`Public` visibility,
 pulls its MIR body (gadget calls inlined via `-Zalways-encode-mir`), validates that
 only the accepted MIR subset is present (rejecting arbitrary control flow,
 references, aggregates, unknown calls, …), lowers it to xark-IR and then R1CS, and
@@ -50,20 +51,26 @@ writes the output. Signalling intrinsics recognised in MIR are named `__xark_*`
 
 Nightly is required only because there is no stable API for MIR access, and it is
 hidden inside the tool: **circuit authors write stable Rust**; only the tool touches
-nightly (pinned in `crates/lang/rust-toolchain.toml`). See
+nightly (pinned in `crates/rustc/rust-toolchain.toml`). See
 [`docs/toolchain.md`](toolchain.md) for the pin and bump procedure.
 
 ## Crates
 
-### `xark` (the language + CLI) — `crates/lang`
+### `xark` (the language) — `crates/lang`
 
 The library defines the marker primitives — `Field`, `require_eq`,
 `Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics the compiler
 recognises in MIR — in its `lang` module, re-exported via its `prelude` (so an
-author needs only `use xark::prelude::*`; the marker bodies never run, as the tool
-stops after MIR extraction). The binary (feature-gated behind `cli`) is the `xark`
-command — `build`, `prove`/`verify` — and doubles as the `rustc_driver`. Compiler
-internals live in `crates/rustc/src/{driver,find_entry,validate,lower_mir,diagnostics}.rs`.
+author needs only `use xark::prelude::*`; the marker bodies never run in a circuit
+build). The `#[circuit]` macro also generates the host validator and typed input
+struct behind the same function name. Circuit manifests depend on `xark` alone;
+the language crate privately owns its host-side prover dependency.
+
+### `xark-cli` and `xark-rustc` — `crates/cli`, `crates/rustc`
+
+`xark-cli` is the stable user-facing command. `xark-rustc` is the pinned-nightly
+MIR driver in `crates/rustc/src/{driver,find_entry,validate,lower_mir,diagnostics}.rs`.
+`xark doctor` requires both binaries to report the same release and source revision.
 
 ### `xark-ir`
 

@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 // memory_var: a dynamic `arr[idx]` read. xark has no runtime
 // memory, so the variable-index read is modelled as a 4-way select/mux over

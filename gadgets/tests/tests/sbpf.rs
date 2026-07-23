@@ -17,6 +17,7 @@ use xark_tests::{fixtures, verify_proof_only, verify_proof_only_strict};
 
 /// Dynamic byte path: `verify_proof_only(vk_bytes, instruction_data)`.
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn arithmetic_square_bytes() {
     let ok = verify_proof_only(
         fixtures::ARITHMETIC_SQUARE_VK_LE,
@@ -36,6 +37,7 @@ fn arithmetic_square_bytes() {
 ///     chain, not just on the host reference path), while
 ///   * `verify_proof_only_strict` rejects it (the canonical-encoding check).
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn flag_bit_mutation_onchain() {
     // arithmetic_square instruction data = 256-byte proof + 1 × 32-byte input.
     let mut data = [0u8; 256 + 32];
@@ -62,6 +64,7 @@ fn flag_bit_mutation_onchain() {
 // one per circuit. `N` spans 0 (ecdsa) to 16 (aes128, large_pi).
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn arithmetic_square() {
     assert!(fixtures::ARITHMETIC_SQUARE_VK.verify(
         &fixtures::ARITHMETIC_SQUARE_PROOF,
@@ -70,6 +73,7 @@ fn arithmetic_square() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn aes128_basic() {
     assert!(fixtures::AES128_BASIC_VK.verify(
         &fixtures::AES128_BASIC_PROOF,
@@ -78,6 +82,7 @@ fn aes128_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn arithmetic_public_inputs() {
     assert!(fixtures::ARITHMETIC_PUBLIC_INPUTS_VK.verify(
         &fixtures::ARITHMETIC_PUBLIC_INPUTS_PROOF,
@@ -86,6 +91,7 @@ fn arithmetic_public_inputs() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn bitwise_basic() {
     assert!(fixtures::BITWISE_BASIC_VK.verify(
         &fixtures::BITWISE_BASIC_PROOF,
@@ -94,6 +100,7 @@ fn bitwise_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn blake2s_basic() {
     assert!(fixtures::BLAKE2S_BASIC_VK.verify(
         &fixtures::BLAKE2S_BASIC_PROOF,
@@ -102,6 +109,7 @@ fn blake2s_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn blake3_basic() {
     assert!(fixtures::BLAKE3_BASIC_VK.verify(
         &fixtures::BLAKE3_BASIC_PROOF,
@@ -110,6 +118,7 @@ fn blake3_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn curve_basic() {
     assert!(
         fixtures::CURVE_BASIC_VK
@@ -118,6 +127,7 @@ fn curve_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn secp256k1_ecdsa() {
     assert!(fixtures::SECP256K1_ECDSA_VK.verify(
         &fixtures::SECP256K1_ECDSA_PROOF,
@@ -126,6 +136,7 @@ fn secp256k1_ecdsa() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn secp256r1_ecdsa() {
     assert!(fixtures::SECP256R1_ECDSA_VK.verify(
         &fixtures::SECP256R1_ECDSA_PROOF,
@@ -134,6 +145,7 @@ fn secp256r1_ecdsa() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn keccak_basic() {
     assert!(fixtures::KECCAK_BASIC_VK.verify(
         &fixtures::KECCAK_BASIC_PROOF,
@@ -142,11 +154,13 @@ fn keccak_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn large_pi() {
     assert!(fixtures::LARGE_PI_VK.verify(&fixtures::LARGE_PI_PROOF, &fixtures::LARGE_PI_INPUTS));
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn memory_const() {
     assert!(fixtures::MEMORY_CONST_VK.verify(
         &fixtures::MEMORY_CONST_PROOF,
@@ -155,6 +169,7 @@ fn memory_const() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn memory_var() {
     assert!(
         fixtures::MEMORY_VAR_VK.verify(&fixtures::MEMORY_VAR_PROOF, &fixtures::MEMORY_VAR_INPUTS)
@@ -162,11 +177,13 @@ fn memory_var() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn mixed_pi() {
     assert!(fixtures::MIXED_PI_VK.verify(&fixtures::MIXED_PI_PROOF, &fixtures::MIXED_PI_INPUTS));
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn multi_function() {
     assert!(fixtures::MULTI_FUNCTION_VK.verify(
         &fixtures::MULTI_FUNCTION_PROOF,
@@ -175,6 +192,7 @@ fn multi_function() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn nested_calls() {
     assert!(fixtures::NESTED_CALLS_VK.verify(
         &fixtures::NESTED_CALLS_PROOF,
@@ -183,6 +201,7 @@ fn nested_calls() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn poseidon_basic() {
     assert!(fixtures::POSEIDON_BASIC_VK.verify(
         &fixtures::POSEIDON_BASIC_PROOF,
@@ -191,6 +210,7 @@ fn poseidon_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn range_basic() {
     assert!(
         fixtures::RANGE_BASIC_VK
@@ -199,6 +219,7 @@ fn range_basic() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn reorder_pi() {
     assert!(
         fixtures::REORDER_PI_VK.verify(&fixtures::REORDER_PI_PROOF, &fixtures::REORDER_PI_INPUTS)
@@ -206,6 +227,7 @@ fn reorder_pi() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn return_values_only() {
     assert!(fixtures::RETURN_VALUES_ONLY_VK.verify(
         &fixtures::RETURN_VALUES_ONLY_PROOF,
@@ -214,6 +236,7 @@ fn return_values_only() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn sha256_basic() {
     assert!(fixtures::SHA256_BASIC_VK.verify(
         &fixtures::SHA256_BASIC_PROOF,
@@ -238,6 +261,7 @@ const ARITHMETIC_SQUARE_PI_PLUS_R: [u8; 32] = [
 ];
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn reject_noncanonical_public_input() {
     let ix = fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA;
     let mut data = [0u8; 288];
@@ -247,6 +271,7 @@ fn reject_noncanonical_public_input() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn reject_tampered_proof() {
     let ix = fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA;
     let mut data = [0u8; 288];
@@ -256,6 +281,7 @@ fn reject_tampered_proof() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn reject_offcurve_proof_a() {
     let ix = fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA;
     let mut data = [0u8; 288];
@@ -266,6 +292,7 @@ fn reject_offcurve_proof_a() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn reject_truncated_instruction_data() {
     let ix = fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA;
     assert!(!verify_proof_only(fixtures::ARITHMETIC_SQUARE_VK_LE, &ix[..200]).unwrap_or(false));

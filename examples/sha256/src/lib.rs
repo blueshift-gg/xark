@@ -2,7 +2,6 @@
 //! 256-bit hash. The digest is a `Hash` — packed into two 128-bit field halves
 //! (`xark-hash`), so the circuit exposes just 2 public inputs instead of eight
 //! 32-bit words. The host supplies a plain `[u8; 32]` (`Hash`'s native form).
-#![cfg_attr(xark, no_std)]
 
 use xark_sha256::prelude::*;
 

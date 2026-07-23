@@ -1107,6 +1107,8 @@ dependencies = [
  "num-traits",
  "once_cell",
  "oorandom",
+ "plotters",
+ "rayon",
  "regex",
  "serde",
  "serde_derive",
@@ -1593,6 +1595,17 @@ name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-task"
@@ -2415,6 +2428,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "plotters"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
+dependencies = [
+ "num-traits",
+ "plotters-backend",
+ "plotters-svg",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "plotters-backend"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a"
+
+[[package]]
+name = "plotters-svg"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
+dependencies = [
+ "plotters-backend",
+]
+
+[[package]]
 name = "polyval"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2927,6 +2968,31 @@ dependencies = [
  "serde_core",
  "serde_json",
  "time",
+]
+
+[[package]]
+name = "serial_test"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "699f4197115b8a7e7ff19c9a315a4bd6fffec26cc4626ef45ecaea389e081c6d"
+dependencies = [
+ "futures-executor",
+ "futures-util",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94e153fc76e1c6a068703d6d29c508a0b15c061c4b7e43da59cc097bc342673c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -4447,6 +4513,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "web-sys"
+version = "0.3.103"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4596,16 +4672,17 @@ dependencies = [
 
 [[package]]
 name = "xark"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
  "xark-macros",
+ "xark-prover",
 ]
 
 [[package]]
 name = "xark-aes"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ghash",
  "xark",
@@ -4615,7 +4692,7 @@ dependencies = [
 
 [[package]]
 name = "xark-backend"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4640,24 +4717,23 @@ dependencies = [
 
 [[package]]
 name = "xark-bignum"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-bits"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-blake2s"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4668,7 +4744,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake3"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4679,7 +4755,7 @@ dependencies = [
 
 [[package]]
 name = "xark-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
@@ -4704,11 +4780,11 @@ dependencies = [
 
 [[package]]
 name = "xark-curve"
-version = "0.2.1"
+version = "0.2.2"
 
 [[package]]
 name = "xark-ed25519"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ed25519-dalek",
  "num-bigint 0.4.8",
@@ -4717,31 +4793,28 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-grumpkin"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-hash"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
- "xark-prover",
 ]
 
 [[package]]
 name = "xark-ir"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4755,7 +4828,7 @@ dependencies = [
 
 [[package]]
 name = "xark-keccak"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4764,7 +4837,7 @@ dependencies = [
 
 [[package]]
 name = "xark-macros"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4773,7 +4846,7 @@ dependencies = [
 
 [[package]]
 name = "xark-merkle"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
@@ -4784,7 +4857,7 @@ dependencies = [
 
 [[package]]
 name = "xark-mimc"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4793,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "xark-pedersen"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4802,14 +4875,14 @@ dependencies = [
 
 [[package]]
 name = "xark-poseidon"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-poseidon2"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4818,7 +4891,7 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4833,7 +4906,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256k1"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "k256",
  "num-bigint 0.4.8",
@@ -4842,13 +4915,12 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-secp256r1"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "num-bigint 0.4.8",
  "p256",
@@ -4857,13 +4929,12 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-sha256"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4872,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "xark-test-harness"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "num-bigint 0.4.8",
  "xark-ir",
@@ -4880,7 +4951,7 @@ dependencies = [
 
 [[package]]
 name = "xark-tests"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "ark-bn254 0.6.0",
@@ -4901,6 +4972,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rayon",
  "serde_json",
+ "serial_test",
  "sha2 0.11.0",
  "sha3 0.11.0",
  "solana-nostd-alt-bn128",
@@ -4913,7 +4985,7 @@ dependencies = [
 
 [[package]]
 name = "xark-verifier"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",

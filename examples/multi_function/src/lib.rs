@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 // require(square(x) == y) via a helper (xark inlines cross-function MIR).
 #[inline(never)]

@@ -1,7 +1,6 @@
 //! Variable-length hashing with the Poseidon2 **sponge** (`hash::<N>`). A circuit
 //! is fixed-size, so the element count `N` is a compile-time constant and the
 //! absorb loop unrolls. Here we hash 5 private inputs and expose the digest.
-#![cfg_attr(xark, no_std)]
 use xark_poseidon2::prelude::*;
 
 #[circuit]

@@ -59,6 +59,7 @@ jobs:
         run: |
           mkdir -p build-out
           cargo build-sbf \
+            --arch v0 \
             --manifest-path crates/verifier/reference-program/Cargo.toml \
             --sbf-out-dir build-out \
             -- \

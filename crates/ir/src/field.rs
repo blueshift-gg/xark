@@ -48,6 +48,16 @@ impl FieldConst {
         }
     }
 
+    /// Borrow the out-of-`i64` representation without cloning it. Returns
+    /// `None` for inline small values; pair with [`Self::as_i64`] when converting
+    /// constants on a hot path.
+    pub fn as_bigint(&self) -> Option<&BigInt> {
+        match &self.repr {
+            Repr::Small(_) => None,
+            Repr::Big(value) => Some(value),
+        }
+    }
+
     pub fn from_bigint(value: BigInt) -> Self {
         FieldConst { repr: norm(value) }
     }

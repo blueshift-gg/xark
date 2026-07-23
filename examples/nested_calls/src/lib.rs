@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 // require(square_plus_one(x) == y); square_plus_one calls square (two-level nesting).
 #[inline(never)]

@@ -1,4 +1,3 @@
-#![cfg_attr(xark, no_std)]
 #[cfg(test)]
 mod poseidon2;
 use xark::prelude::*;
@@ -32,7 +31,7 @@ pub fn zk_kyc(user: Private<ZKID>, max_dob: Public<Field>, commitment: Public<Fi
 
 #[cfg(test)]
 mod tests {
-    use super::{poseidon2, zk_kyc, ZKID};
+    use super::{ZKID, poseidon2, zk_kyc};
     use xark::Field;
 
     // The fixed identity fields as circuit `Field`s, packed at compile time.
@@ -59,23 +58,23 @@ mod tests {
 
     // The issuer's off-circuit Poseidon2 commitment over that identity — `Field`s pass
     // straight in (the reference reduces each mod p, as the solver does).
-    fn commitment(dob: Field) -> String {
-        poseidon2::hash([ID, dob, COUNTRY, NONCE])
+    fn commitment(dob: Field) -> Field {
+        Field::constant(&poseidon2::hash([ID, dob, COUNTRY, NONCE]))
     }
 
     #[test]
     fn accepts_valid() {
-        zk_kyc(user(DOB), MAX_DOB.to_decimal(), commitment(DOB)).unwrap();
+        zk_kyc(user(DOB), MAX_DOB, commitment(DOB)).unwrap();
     }
 
     #[test]
     fn rejects_too_young() {
         // dob == MAX_DOB violates the strict `dob < MAX_DOB` (commitment is valid).
-        assert!(zk_kyc(user(MAX_DOB), MAX_DOB.to_decimal(), commitment(MAX_DOB)).is_err());
+        assert!(zk_kyc(user(MAX_DOB), MAX_DOB, commitment(MAX_DOB)).is_err());
     }
 
     #[test]
     fn rejects_wrong_hash() {
-        assert!(zk_kyc(user(DOB), MAX_DOB.to_decimal(), "1".to_string()).is_err());
+        assert!(zk_kyc(user(DOB), MAX_DOB, Field::one()).is_err());
     }
 }

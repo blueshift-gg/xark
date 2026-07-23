@@ -221,68 +221,74 @@ macro_rules! weierstrass {
 /// Emit host-side `NativeInput` impls for the macro-generated `Fq`/`Point`
 /// (3 × 86-bit limbs). Shared by `weierstrass!` and `edwards!`: a scalar is 32
 /// big-endian bytes, a point is the compact uncompressed 64-byte `x ‖ y` form.
-/// Requires the caller to depend (host-gated) on `num-bigint` and `xark-prover`.
+/// Requires the caller to depend on host-gated `num-bigint`; Xark owns the
+/// native-input plumbing transitively.
 #[macro_export]
 macro_rules! curve_host_inputs {
     ($scalar:literal) => {
-        #[cfg(not(xark))]
+        #[doc(hidden)]
+        #[allow(unexpected_cfgs, unused_imports)]
         mod __curve_host {
-            extern crate std;
-            use super::{Fq, Point};
-            use ::num_bigint::BigUint;
-            use std::{format, string::String, string::ToString, vec::Vec};
+            #[cfg(not(xark))]
+            mod enabled {
+                extern crate std;
+                use super::super::{Fq, Point};
+                use ::num_bigint::BigUint;
+                use std::{format, string::String, string::ToString, vec::Vec};
 
-            /// The scalar field order (group order `n` / `L`) as a big integer.
-            pub fn order() -> BigUint {
-                let hex = $scalar.strip_prefix("0x").unwrap_or($scalar);
-                BigUint::parse_bytes(hex.as_bytes(), 16).unwrap()
-            }
-
-            /// Reduce a big-endian integer modulo the scalar order, returned as a
-            /// big-endian 32-byte scalar (e.g. an ECDSA message scalar `e`).
-            pub fn reduce_scalar(be: &[u8]) -> [u8; 32] {
-                let v = BigUint::from_bytes_be(be) % order();
-                let b = v.to_bytes_be();
-                let mut out = [0u8; 32];
-                out[32 - b.len()..].copy_from_slice(&b);
-                out
-            }
-
-            /// Little-endian 3 × 86-bit limbs of a big-endian integer, named
-            /// `<prefix>.limbs[i]` (matching the compiler's aggregate flattening).
-            fn limbs86(be: &[u8], prefix: &str) -> Vec<(String, String)> {
-                let v = BigUint::from_bytes_be(be);
-                let mask = (BigUint::from(1u8) << 86u32) - 1u8;
-                (0..3)
-                    .map(|i| {
-                        (
-                            format!("{prefix}.limbs[{i}]"),
-                            ((&v >> (i as u32 * 86)) & &mask).to_string(),
-                        )
-                    })
-                    .collect()
-            }
-
-            impl ::xark_prover::NativeInput for Fq {
-                type Native = [u8; 32];
-                fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
-                    limbs86(native, prefix)
+                /// The scalar field order (group order `n` / `L`) as a big integer.
+                pub fn order() -> BigUint {
+                    let hex = $scalar.strip_prefix("0x").unwrap_or($scalar);
+                    BigUint::parse_bytes(hex.as_bytes(), 16).unwrap()
                 }
-            }
 
-            impl ::xark_prover::NativeInput for Point {
-                /// Compact uncompressed point: `x(32) ‖ y(32)` big-endian.
-                type Native = [u8; 64];
-                fn leaves(native: &[u8; 64], prefix: &str) -> Vec<(String, String)> {
-                    let mut out = limbs86(&native[0..32], &format!("{prefix}.x"));
-                    out.extend(limbs86(&native[32..64], &format!("{prefix}.y")));
+                /// Reduce a big-endian integer modulo the scalar order, returned as a
+                /// big-endian 32-byte scalar (e.g. an ECDSA message scalar `e`).
+                pub fn reduce_scalar(be: &[u8]) -> [u8; 32] {
+                    let v = BigUint::from_bytes_be(be) % order();
+                    let b = v.to_bytes_be();
+                    let mut out = [0u8; 32];
+                    out[32 - b.len()..].copy_from_slice(&b);
                     out
                 }
-            }
-        }
 
-        #[cfg(not(xark))]
-        pub use __curve_host::{order, reduce_scalar};
+                /// Little-endian 3 × 86-bit limbs of a big-endian integer, named
+                /// `<prefix>.limbs[i]` (matching the compiler's aggregate flattening).
+                fn limbs86(be: &[u8], prefix: &str) -> Vec<(String, String)> {
+                    let v = BigUint::from_bytes_be(be);
+                    let mask = (BigUint::from(1u8) << 86u32) - 1u8;
+                    (0..3)
+                        .map(|i| {
+                            (
+                                format!("{prefix}.limbs[{i}]"),
+                                ((&v >> (i as u32 * 86)) & &mask).to_string(),
+                            )
+                        })
+                        .collect()
+                }
+
+                impl ::xark::__private::NativeInput for Fq {
+                    type Native = [u8; 32];
+                    fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
+                        limbs86(native, prefix)
+                    }
+                }
+
+                impl ::xark::__private::NativeInput for Point {
+                    /// Compact uncompressed point: `x(32) ‖ y(32)` big-endian.
+                    type Native = [u8; 64];
+                    fn leaves(native: &[u8; 64], prefix: &str) -> Vec<(String, String)> {
+                        let mut out = limbs86(&native[0..32], &format!("{prefix}.x"));
+                        out.extend(limbs86(&native[32..64], &format!("{prefix}.y")));
+                        out
+                    }
+                }
+            }
+
+            #[cfg(not(xark))]
+            pub use enabled::{order, reduce_scalar};
+        }
+        pub use __curve_host::*;
     };
 }
 

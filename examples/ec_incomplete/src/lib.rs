@@ -2,9 +2,8 @@
 //! and `G + 2G == 3G` (exercises the whole 3×86-bit field stack: add, sub, mul,
 //! inverse). `Point` is the transparent compact uncompressed `[u8; 64]` (`x ‖ y`)
 //! type, so the test passes the raw `G`/`2G`/`3G` coordinate bytes `k256` emits.
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Private, Public};
+use xark::prelude::*;
 use xark_secp256k1::affine::{ec_add_incomplete, ec_double_incomplete, Point};
 
 fn ceq(got: Point, want: Point) {

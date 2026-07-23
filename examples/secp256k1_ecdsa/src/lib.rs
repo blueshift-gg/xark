@@ -5,7 +5,6 @@
 //! endomorphism decomposition is derived inside the circuit (a `witness_only`
 //! region at zero constraint cost, pinned by `glv_decomp`), so the caller supplies
 //! only the signature.
-#![cfg_attr(xark, no_std)]
 
 use xark_secp256k1::prelude::*;
 
@@ -17,7 +16,7 @@ pub fn secp256k1_ecdsa(pubkey: Public<Point>, sig: Public<Signature>, digest: Pu
 #[cfg(test)]
 mod tests {
     use super::secp256k1_ecdsa;
-    use k256::ecdsa::{signature::Signer, Signature as K256Sig, SigningKey};
+    use k256::ecdsa::{Signature as K256Sig, SigningKey, signature::Signer};
     use sha2::{Digest, Sha256};
     use xark_secp256k1::reduce_scalar;
 
@@ -29,7 +28,7 @@ mod tests {
         let sig: K256Sig = sk.sign(msg);
         let enc = vk.to_encoded_point(false);
         let pubkey: [u8; 64] = enc.as_bytes()[1..].try_into().unwrap(); // drop 0x04 tag
-        let sig_bytes: [u8; 64] = sig.to_bytes().as_slice().try_into().unwrap();
+        let sig_bytes: [u8; 64] = sig.to_bytes().into();
         let digest = reduce_scalar(&Sha256::digest(msg));
         (pubkey, sig_bytes, digest)
     }

@@ -14,11 +14,11 @@ name = "xark_aes"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
+xark = { path = "../../crates/lang", version = "0.2.2" }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
-xark-ir = { path = "../../crates/ir", version = "0.2.1" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.2" }
+xark-ir = { path = "../../crates/ir", version = "0.2.2" }
 # Independent reference for the GCM GF(2^128) field (GHASH): `GHash::new(H).update(Y)`
 # = Y·H, exactly the `gf128_mul` we validate.
 ghash = "0.5"

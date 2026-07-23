@@ -4,15 +4,17 @@
 //! names — no parallel `String` mirror. These tests pin the generated leaf names, order,
 //! and decimal values, which must match the compiler's input-var order exactly.
 
+use xark::__private::NativeInput;
 use xark::{CircuitInput, Field};
-use xark_prover::NativeInput;
+
+const TAGS: usize = 3;
 
 /// Scalars + a fixed array — `Field`s (host-built) rendered to decimals, `<prefix>.f[i]`
 /// for array elements.
 #[derive(CircuitInput)]
 struct Account {
     id: Field,
-    tags: [Field; 3],
+    tags: [Field; TAGS],
     balance: Field,
 }
 
@@ -42,13 +44,13 @@ fn circuit_input_leaf_count_matches_flatten_arity() {
     // flatten agree on the count leaf-for-leaf.
     let flat: [Field; 5] = Account {
         id: Field::from(0u8),
-        tags: [Field::from(0u8); 3],
+        tags: [Field::from(0u8); TAGS],
         balance: Field::from(0u8),
     }
     .into();
     let acct = Account {
         id: Field::from(1u64),
-        tags: [Field::from(2u64); 3],
+        tags: [Field::from(2u64); TAGS],
         balance: Field::from(3u64),
     };
     assert_eq!(

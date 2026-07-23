@@ -2,7 +2,6 @@
 //! encrypts, under a private 32-byte key + 96-bit nonce, to a public
 //! `(ciphertext, tag)` that also authenticates a public 13-byte header. Identical
 //! structure to `examples/aes_gcm`, but AES-256 (14 rounds, 32-byte key).
-#![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;
 

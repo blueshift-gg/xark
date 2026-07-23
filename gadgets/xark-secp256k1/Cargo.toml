@@ -14,24 +14,20 @@ name = "xark_secp256k1"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
-xark-bignum = { path = "../xark-bignum", version = "0.2.1" }
-xark-curve = { path = "../xark-curve", version = "0.2.1" }
+xark = { path = "../../crates/lang", version = "0.2.2" }
+xark-bignum = { path = "../xark-bignum", version = "0.2.2" }
+xark-curve = { path = "../xark-curve", version = "0.2.2" }
 
-# Host-only deps for the `NativeInput` impls (native bytes → circuit inputs).
-# Gated on `cfg(not(xark))`: the `xark-rustc` driver reports the `xark` cfg, so a
-# circuit build drops these and the crate stays lean `no_std`; an ordinary host
-# build (tests, downstream provers) pulls them in with no feature flag.
+# Host-only arithmetic used by native input helpers.
 [target.'cfg(not(xark))'.dependencies]
 num-bigint = "0.4"
-xark-prover = { path = "../../crates/prover", version = "0.2.1" }
 
 [dev-dependencies]
 k256 = "0.13"
 num-bigint = "0.4"
 sha2 = "0.10"
-xark-ir = { path = "../../crates/ir", version = "0.2.1" }
-xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+xark-ir = { path = "../../crates/ir", version = "0.2.2" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.2" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

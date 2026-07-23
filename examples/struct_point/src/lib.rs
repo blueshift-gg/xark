@@ -1,9 +1,8 @@
 //! Struct support: a `Point { x: [Field; 3], y: [Field; 3] }` built in-circuit and
 //! passed through a helper returning a tuple, with field access `p.x[i]`. Exercises
 //! `AggregateKind::Adt` and tuple lowering — zero-cost, same R1CS as bare fields.
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 struct Point {
     x: [Field; 3],
@@ -31,14 +30,19 @@ pub fn struct_point(
 #[cfg(test)]
 mod tests {
     use super::struct_point;
+    use xark::Field;
+
+    fn point_coord(value: u64) -> [Field; 3] {
+        [value.into(), 0u64.into(), 0u64.into()]
+    }
 
     #[test]
     fn accepts_valid() {
         struct_point(
-            ["3".into(), "0".into(), "0".into()],
-            ["5".into(), "0".into(), "0".into()],
-            "8".into(),
-            "15".into(),
+            point_coord(3),
+            point_coord(5),
+            8u64.into(),
+            15u64.into(),
         )
         .unwrap();
     }
@@ -46,10 +50,10 @@ mod tests {
     #[test]
     fn rejects_wrong_product() {
         assert!(struct_point(
-            ["3".into(), "0".into(), "0".into()],
-            ["5".into(), "0".into(), "0".into()],
-            "8".into(),
-            "16".into(),
+            point_coord(3),
+            point_coord(5),
+            8u64.into(),
+            16u64.into(),
         )
         .is_err());
     }

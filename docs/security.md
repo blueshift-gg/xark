@@ -382,7 +382,7 @@ Walk through before tagging a production release of a circuit deployed via xark:
 * [ ] **`deterministic_rng_seed` is `null` in production metadata.** Non-null means the
   operator chose reproducibility — dev/test only.
 * [ ] **Public input order matches the verifier's.** Run end-to-end verify against the
-  deployed verifier with the canonical `public_inputs.json`.
+  deployed verifier with the `instruction_data.bin` emitted by `xark prove`.
 * [ ] **Constraint count benchmarked vs a recorded baseline.** Sudden change without a
   source change indicates a backend or artifact regression.
 * [ ] **Tampered-input tests cover every public input.** For each `p_i`, a test flips it

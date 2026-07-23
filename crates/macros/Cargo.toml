@@ -1,8 +1,9 @@
 [package]
 name = "xark-macros"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/blueshift-gg/xark"
 description = "Proc macros for xark circuits (the `#[circuit]` attribute)."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
@@ -15,6 +16,3 @@ proc-macro = true
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

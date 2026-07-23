@@ -2,7 +2,6 @@
 //! a public 256-bit `Hash` (packed into two field halves → 2 public inputs).
 //! The gadget result is wrapped in `Blake256` to select the little-endian `Hash`
 //! packing that BLAKE's LE word output requires.
-#![cfg_attr(xark, no_std)]
 
 use xark_blake2s::prelude::*;
 

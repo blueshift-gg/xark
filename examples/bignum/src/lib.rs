@@ -3,7 +3,6 @@
 //! Here a 256-bit prime field as `Bignum<3, 86>` (the secp256k1 shape). Each
 //! `Private<Fp>`/`Public<Fp>` is a typed circuit input — a single whole number on
 //! the host, split into its 3 limbs automatically; the caller never thinks in limbs.
-#![cfg_attr(xark, no_std)]
 
 use xark_bignum::prelude::*;
 

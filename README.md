@@ -21,29 +21,30 @@ Install the pinned nightly the driver needs, then both binaries from crates.io:
 
 ```bash
 rustup toolchain install nightly-2026-05-03 --profile minimal --component rust-src --component rustc-dev --component llvm-tools
-# the rustc-driver shim (pinned nightly)
-cargo +nightly-2026-05-03 install xark-rustc
-# the CLI (stable Rust)
-cargo install xark-cli
+XARK_VERSION=0.2.2
+cargo +nightly-2026-05-03 install xark-rustc --version "$XARK_VERSION" --locked
+cargo install xark-cli --version "$XARK_VERSION" --locked
+xark doctor
 ```
 
 Only `xark-rustc` touches nightly — you write **stable Rust** in your circuits. To
-build from source instead, append `--git https://github.com/blueshift-gg/xark` to
-each `cargo install`.
+build from source, install both crates from the same checkout; `xark doctor`
+rejects a CLI/driver version or revision mismatch.
 
 ## As a language (library)
 
-Write a circuit as a `#![no_std]` function over `Field` values, using the `xark`
-prelude. `require_eq` emits a circuit equality constraint (not a native `bool`);
+Write a normal Rust function over `Field` values and mark it with `#[circuit]`.
+`require_eq` emits a circuit equality constraint (not a native `bool`);
 `Private<T>` / `Public<T>` mark input visibility; `Field` supports `+ - * ^`
-(with `^ n` meaning exponentiation).
+(with `^ n` meaning exponentiation). Xark owns its internal `no_std` build mode;
+circuit crates do not need cfg attributes or extra host dependencies.
 
 ```rust
-#![no_std]
 use xark::prelude::*;
 
 /// Prove knowledge of a cube root: `secret^3 == result`.
-pub fn circuit(secret: Private<Field>, result: Public<Field>) {
+#[circuit]
+pub fn cube(secret: Private<Field>, result: Public<Field>) {
     require_eq(secret ^ 3, result);
 }
 ```
@@ -53,24 +54,33 @@ pub fn circuit(secret: Private<Field>, result: Public<Field>) {
 ```bash
 # Scaffold a new circuit crate, pre-wired for rust-analyzer diagnostics.
 xark init my-circuit
+cd my-circuit
 
-# Compile: Rust → MIR → xark-IR → R1CS. All output (artifacts + an isolated
-# cargo target) lives under the crate's target/xark/.
-xark build examples/cube
-# → writes examples/cube/target/xark/cube/ (circuit.json + r1cs.json)
+# The canonical local loop. Each command accepts `.` by default, but spelling it
+# out makes the sequence unambiguous.
+xark build .
+# → target/xark/my-circuit/circuit.xbc
 
 # Generate Groth16 keys. With no .ptau this produces an INSECURE dev key
 # (single-party OsRng); pass --ptau-file (or run `xark ceremony`) for production.
-xark setup examples/cube
+xark setup .
+
+# Build first, then run the circuit's native host tests.
+xark test .
 
 # Solve the witness from your inputs, then produce AND verify a Groth16 proof.
-xark prove examples/cube --input secret=3 --input result=27
+xark prove . --inputs '{"secret": 3, "result": 27}'
 # → ✅ Proof produced and self-checked (1 public input).
 
 # Validate a circuit WITHOUT emitting artifacts — subset violations as rustc
 # diagnostics with source spans (great for editors / CI).
-xark check examples/cube
+xark check .
 ```
+
+`xark init` pins the language crate to the same exact release or clean Git
+revision as the CLI. A dirty source build deliberately writes a path to that
+local checkout for `init` and `export`, making unreleased dogfooding work while
+keeping the generated manifest visibly non-publishable.
 
 ## Editor diagnostics (rust-analyzer)
 
@@ -113,7 +123,7 @@ Rust source  →  rustc MIR  →  xark-IR  →  R1CS  →  Groth16 (BN254)  → 
 `rustc_driver` shim, pinned nightly) as the compiler, so every dependency (the
 `xark` lib and any gadget crates) is compiled with matching MIR-encoded rlibs.
 rustc does the hard work — parse, type-check, borrow-check, monomorphize — and
-`xark-rustc` then finds `pub fn circuit(..)`, reads its signature for `Private` /
+`xark-rustc` then finds the `#[circuit]` entry, reads its signature for `Private` /
 `Public` visibility, extracts its MIR (cross-crate gadget calls inlined via
 `-Zalways-encode-mir`), validates the accepted subset (rejecting arbitrary
 control flow, references, aggregates, unknown calls, …), and lowers it to
@@ -141,7 +151,7 @@ snarkjs groth16 verify \
 
 ## Crates and gadgets
 
-* **`xark`** (`crates/lang`, `#![no_std]`, stable) — the language library; its
+* **`xark`** (`crates/lang`, internally `#![no_std]`, stable) — the language library; its
   `prelude` provides the marker primitives (`Field`, `require_eq`,
   `Private`/`Public`). The CLI is the **`xark`** binary (stable; published as the
   `xark-cli` crate) and the MIR-extraction driver is **`xark-rustc`** (pinned
@@ -169,10 +179,9 @@ xark-poseidon = { path = "../../gadgets/xark-poseidon" }
 ```
 
 ```rust
-#![no_std]
 use xark::prelude::*;
 use xark_poseidon::hash;
-// ... call `hash(..)` inside `circuit` and `require_eq` the result.
+// ... call `hash(..)` inside a `#[circuit]` function and constrain the result.
 ```
 
 ## Examples

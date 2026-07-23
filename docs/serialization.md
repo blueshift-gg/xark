@@ -1,7 +1,8 @@
 # Serialization
 
-xark writes both binary and JSON forms of every artifact. Binary is authoritative (verify reads
-it); JSON is for tooling and inspection.
+Xark writes authoritative native binaries plus interoperable JSON where it is useful. The default
+build artifact is the compact `circuit.xbc`; pass `xark build --emit-json` only when inspecting the
+expanded circuit/R1CS as text.
 
 ## Binary
 
@@ -9,54 +10,57 @@ Uses Arkworks' `CanonicalSerialize`/`CanonicalDeserialize` with `Compress::Yes` 
 on read. The on-disk layout is exactly what `ark-groth16` 0.6 produces for `ProvingKey<Bn254>`,
 `VerifyingKey<Bn254>`, `Proof<Bn254>`.
 
-* `proving_key.bin` — `ark_groth16::ProvingKey<Bn254>`.
-* `verifying_key.bin` — `ark_groth16::VerifyingKey<Bn254>`.
+* `pk.bin` — `ark_groth16::ProvingKey<Bn254>`.
+* `vk.bin` — `ark_groth16::VerifyingKey<Bn254>`.
 * `proof.bin` — `ark_groth16::Proof<Bn254>`.
+* `public_inputs.bin` — canonical `Vec<Fr>` used by `xark verify`.
+* `proof.solana.bin` — the 256-byte little-endian proof wire format.
+* `public_inputs.solana.bin` — public `Fr` values as consecutive 32-byte little-endian scalars.
+* `instruction_data.bin` — `proof.solana.bin || public_inputs.solana.bin`, ready for the generated
+  on-chain verifier.
+
+`xark export` copies those wire files into the generated verifier crate as its
+self-test vector and pins `xark-verifier` to the CLI's exact release or clean
+Git revision. A dirty source build uses a path to the same local checkout, so
+unreleased verifier changes can be tested without naming a stale remote revision.
 
 ## JSON
 
-Coordinates are always decimal strings (Fr/Fq big-integer representation). The `encoding` field on
-`public_inputs.json` records the choice so future hex support can opt in.
+`xark setup` writes `snarkjs-verification_key.json`. `xark prove` writes
+`snarkjs-proof.json` and `snarkjs-public.json`; the latter is an array of decimal-string public
+signals in declaration/flatten order. These files can be passed directly to `snarkjs groth16 verify`.
 
-### `proof.json`
+### `snarkjs-proof.json`
 
 ```json
 {
- "curve": "bn254",
+ "pi_a": ["<x>", "<y>", "1"],
+ "pi_b": [["<x0>", "<x1>"], ["<y0>", "<y1>"], ["1", "0"]],
+ "pi_c": ["<x>", "<y>", "1"],
  "protocol": "groth16",
- "a": { "x": "<dec>", "y": "<dec>" },
- "b": { "x": ["<c0>", "<c1>"], "y": ["<c0>", "<c1>"] },
- "c": { "x": "<dec>", "y": "<dec>" }
+ "curve": "bn128"
 }
 ```
 
-G2 coordinates use the `Fq2 = c0 + c1*u` convention; the `x` array stores `[c0, c1]` for the x
-coordinate.
+G2 coordinates use the `Fq2 = c0 + c1*u` convention.
 
-### `verifying_key.json`
+### `snarkjs-verification_key.json`
 
 ```json
 {
- "curve": "bn254",
  "protocol": "groth16",
- "alpha_g1": { "x": "...", "y": "..." },
- "beta_g2": { "x": ["...","..."], "y": ["...","..."] },
- "gamma_g2": { "x": ["...","..."], "y": ["...","..."] },
- "delta_g2": { "x": ["...","..."], "y": ["...","..."] },
- "gamma_abc_g1": [ { "x": "...", "y": "..." },... ]
+ "curve": "bn128",
+ "nPublic": 1,
+ "vk_alpha_1": ["...", "...", "1"],
+ "vk_beta_2": [["...", "..."], ["...", "..."], ["1", "0"]],
+ "vk_gamma_2": [["...", "..."], ["...", "..."], ["1", "0"]],
+ "vk_delta_2": [["...", "..."], ["...", "..."], ["1", "0"]],
+ "IC": [["...", "...", "1"], ["...", "...", "1"]]
 }
 ```
 
-### `public_inputs.json`
+### Proof bundle
 
-```json
-{
- "curve": "bn254",
- "field": "fr",
- "encoding": "decimal-string",
- "inputs": ["..."]
-}
-```
-
-The `inputs` array is in exactly the same order as the circuit's `Public<Field>` parameters
-(public-input declaration order). The verifier consumes this order verbatim.
+`xark prove` also writes `<entry>-<proof-hash>.proof.json`, a self-contained bundle containing the
+snarkjs proof/public signals, circuit hash, proof fingerprint, and on-chain calldata hex. Full hex
+is retained in files while terminal output stays compact unless `--verbose` is requested.

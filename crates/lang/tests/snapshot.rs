@@ -267,6 +267,43 @@ fn native_u64_comparison() {
     );
 }
 
+/// Native integers compare directly with literals and named constants. Constants
+/// remain constants in the circuit rather than requiring a redundant public input.
+#[test]
+fn native_u64_literal_comparison() {
+    use xark_ir::solver;
+    let src = "#![no_std]\n\
+        use xark::prelude::*;\n\
+        const MINIMUM: u64 = 9_000;\n\
+        pub fn circuit(power: Private<u64>) {\n\
+        require(power > MINIMUM);\n\
+        require(9_000u64 < power);\n\
+        }\n";
+    let c = compile_with_field(
+        &write_case("native_u64_literal_cmp", src),
+        "native_u64_literal_cmp",
+        "bn254",
+    );
+    assert!(
+        c.status_success,
+        "native u64 literal compare failed: {}",
+        c.stderr
+    );
+    let p = c.program();
+    let power = p.vars.iter().find(|v| v.name == "power").unwrap().id;
+    let inputs = |value: &str| {
+        let mut values = std::collections::BTreeMap::new();
+        values.insert(power, value.to_string());
+        values
+    };
+
+    solver::solve_and_check(&p, &inputs("9001")).expect("9001 > 9000 must solve");
+    assert!(
+        solver::solve_and_check(&p, &inputs("9000")).is_err(),
+        "the strict literal boundary must be rejected"
+    );
+}
+
 /// Native `u64` through the `#[circuit]` macro (not just bare source): the macro maps
 /// a `Private<u64>` param to a native-`u64` circuit input + a `u64` host-input field,
 /// and the driver lowers the comparison. Confirms macro + driver compose end-to-end.
@@ -541,35 +578,34 @@ fn bit_decompose_gadget() {
 fn poseidon_gadget() {
     let c = compile_with_field(&example("poseidon"), "poseidon", "bn254");
     assert!(c.status_success, "poseidon failed: {}", c.stderr);
-    let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
-    let dot = std::fs::read_to_string(c.out_dir.join("graph.dot")).unwrap();
-    check_snapshot("poseidon.r1cs.json", &json);
-    check_snapshot("poseidon.graph.dot", &dot);
 
     // Real HorizenLabs BN256 instance: R_F=8 full (3 S-boxes each) + R_P=56 partial
-    // (1 S-box each) = 80 S-boxes × 3 gates (`x^2, x^4, x^5`) = 240 S-box gates,
-    // plus 1 final `require_eq` equality = 241 constraints. ARK/MDS fold for free.
-    let r1cs = xark_ir::json::from_json(&json).unwrap();
-    assert_eq!(r1cs.constraints.len(), 241);
+    // (1 S-box each) = 80 S-boxes × 3 multiplications (`x^2, x^4, x^5`). The
+    // capacity lane starts constant, so minimization folds its first three
+    // multiplications; it also substitutes the final output binding. The relation
+    // setup/proving consume therefore has 240 - 3 = 237 multiplication constraints.
+    // Assert that relation, not expanded debug JSON with removable function plugs.
+    let r1cs = c.minimized_r1cs();
     // The only equality is the `(out) * 1 = 0` output binding; ARK/MDS are free.
     let equalities = r1cs
         .constraints
         .iter()
         .filter(|k| k.b.terms.is_empty() && k.c.terms.is_empty() && k.c.constant.is_zero())
         .count();
+    assert_eq!(r1cs.constraints.len(), 237);
     assert_eq!(
-        equalities, 1,
-        "only the output binding should be an equality; ARK/MDS are free"
+        equalities, 0,
+        "the output binding should be substituted; ARK/MDS are free"
     );
     assert_eq!(
         r1cs.constraints.len() - equalities,
-        240,
-        "expected exactly 240 S-box multiplication gates"
+        237,
+        "expected exactly 237 non-constant S-box multiplication gates"
     );
 }
 
 /// Merkle membership (`xark-merkle`): a depth-4 Poseidon path fold. Each level is
-/// one `hash2` (240 S-box gates) plus one booleanity gate for the direction bit
+/// one minimized `hash2` (237 S-box gates) plus one booleanity gate for the direction bit
 /// and two sibling muxes (each a single mul); the direction bits let the sibling
 /// ordering fold as free linear combinations. The whole path is proven against
 /// the public root with a single final equality.
@@ -577,22 +613,23 @@ fn poseidon_gadget() {
 fn merkle_membership_gadget() {
     let c = compile_with_field(&example("merkle"), "merkle", "bn254");
     assert!(c.status_success, "merkle failed: {}", c.stderr);
-    let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
-    let r1cs = xark_ir::json::from_json(&json).unwrap();
+    let r1cs = c.minimized_r1cs();
 
-    // 4 levels × (241 Poseidon `hash2` gates [240 S-box + 1 output binding] + 1
-    // booleanity + 2 sibling muxes) + 1 final root equality = 4×244 + 1 = 977.
-    // (No `r1cs.json` snapshot: Poseidon's full-field round-constant coefficients
-    // make it ~40 MB — the count + nonzero pins below catch a lowering change, and
+    // 4 levels × (237 minimized Poseidon S-box gates + 1 booleanity + 2 sibling
+    // muxes) = 4×240 = 960. Minimization substitutes each hash output and the final
+    // public-root binding rather than retaining standalone equality constraints.
+    // (No raw `r1cs.json` snapshot: Poseidon's full-field round constants make
+    // expanded JSON huge and function-boundary materialization is not proof shape.
+    // The minimized count + nonzero pins below catch a lowering change, and
     // `xark-merkle`'s `vec` KAT covers the values. The gadget's cost is linear in
     // depth: exactly 4× the single-`hash2` `poseidon` circuit, no LC blow-up.)
-    assert_eq!(r1cs.constraints.len(), 977);
     let nonzeros: usize = r1cs
         .constraints
         .iter()
         .map(|k| k.a.terms.len() + k.b.terms.len() + k.c.terms.len())
         .sum();
-    assert_eq!(nonzeros, 25_330, "depth-4 Poseidon Merkle nonzero count");
+    assert_eq!(r1cs.constraints.len(), 960);
+    assert_eq!(nonzeros, 42_936, "depth-4 Poseidon Merkle nonzero count");
 }
 
 /// **R1CS ↔ Lean bridge (Merkle membership).**
@@ -606,9 +643,9 @@ fn merkle_membership_gadget() {
 /// (`Formal/Poseidon.lean`); the full root is their composition.
 ///
 /// This is the bridge to the actual `xark-merkle` gadget: it pins the per-level
-/// multiplication shape the Lean model is stated over — one Poseidon `hash2`
-/// (240 S-box muls) + one booleanity gate (`b·b`) + two select muxes (`b·(t−f)`)
-/// — across the depth-4 path: 4 × (240 + 1 + 2) = 972. Any drift in the fold's
+/// minimized multiplication shape the Lean model is stated over — one Poseidon
+/// `hash2` (237 non-constant S-box muls) + one booleanity gate (`b·b`) + two select
+/// muxes (`b·(t−f)`) — across the depth-4 path: 4 × (237 + 1 + 2) = 960. Any drift in the fold's
 /// mux/booleanity shape or the compression changes this and fails here.
 #[test]
 fn merkle_matches_lean_model() {

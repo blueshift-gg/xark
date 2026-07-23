@@ -2,9 +2,10 @@
 //! (a 2×128 leaf) and `Point`/`Signature` (composites), against the exact leaf-name
 //! / limb contract the compiler's structural flatten produces. This is what the
 //! deleted hand-written `host_inputs` module used to guarantee by hand.
+#![allow(unexpected_cfgs)]
 #![cfg(not(xark))]
 
-use xark_prover::NativeInput;
+use xark::__private::NativeInput;
 use xark_secp256k1::{Point, Scalar, Signature};
 
 #[test]

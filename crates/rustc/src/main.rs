@@ -58,6 +58,14 @@ fn main() {
         println!("{}", option_env!("XARK_TOOLCHAIN").unwrap_or("nightly"));
         return;
     }
+    if args.get(1).map(String::as_str) == Some("--print-xark-version") {
+        println!(
+            "{} ({})",
+            env!("CARGO_PKG_VERSION"),
+            env!("XARK_GIT_HASH_SHORT")
+        );
+        return;
+    }
     run_as_rustc(args);
 }
 
@@ -71,12 +79,10 @@ fn run_as_rustc(mut args: Vec<String>) {
     // `--emit-json`) — stripped before rustc.
     let (direct_out, direct_field, check, profile, emit_json) = strip_xark_flags(&mut args);
     ensure_sysroot(&mut args);
-    // Report a distinguishing `xark` cfg on *every* invocation — including the
-    // `--print cfg` target query cargo runs before building. That lets a circuit
-    // crate key `#[cfg(xark)]` on "compiled by the xark toolchain" (e.g.
-    // `#![cfg_attr(xark, no_std)]`, host-only code behind `#[cfg(not(xark))]`) AND
-    // lets Cargo gate host-only deps via `[target.'cfg(not(xark))'.dependencies]` —
-    // together replacing the per-crate `host` feature + the `no_std` ceremony.
+    // Report the private `xark` cfg on every invocation, including Cargo's
+    // `--print cfg` target query. The language crate and `#[circuit]` expansion
+    // use it internally to select circuit vs host code; downstream manifests do
+    // not need to mention this cfg.
     args.push("--cfg".to_string());
     args.push("xark".to_string());
 

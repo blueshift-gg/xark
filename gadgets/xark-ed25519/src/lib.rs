@@ -391,7 +391,7 @@ mod host {
             .collect()
     }
 
-    impl xark_prover::NativeInput for PointL {
+    impl xark::__private::NativeInput for PointL {
         /// Ed25519 compressed point (`y` little-endian + `x`-sign bit).
         type Native = [u8; 32];
         fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
@@ -482,6 +482,5 @@ mod host {
         base_mul_be(&one)
     }
 }
-
 #[cfg(not(xark))]
 pub use host::{base_be, base_mul_be, challenge, point_be, scalar_le_to_be};

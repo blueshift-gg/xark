@@ -36,6 +36,36 @@ type SlotPath = smallvec::SmallVec<[u64; 4]>;
 /// values compare equal). Used to memoize bit decompositions (see `bit_cache`).
 type CanonicalLcKey = (String, Vec<(String, VarId)>);
 
+/// Evaluate a type-level array length, including a named `const` imported from
+/// another crate. `Const::try_to_target_usize` handles literals and already
+/// normalized const generics, but cross-crate const items can still arrive as
+/// `ConstKind::Unevaluated` in an otherwise fully monomorphized type.
+fn eval_type_const_usize<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    c: rustc_middle::ty::Const<'tcx>,
+) -> Option<u64> {
+    use rustc_middle::ty;
+
+    if let Some(value) = c.try_to_target_usize(tcx) {
+        return Some(value);
+    }
+
+    match c.kind() {
+        ty::ConstKind::Value(value) => value.try_to_target_usize(tcx),
+        ty::ConstKind::Unevaluated(unevaluated) => tcx
+            .const_eval_resolve_for_typeck(
+                ty::TypingEnv::fully_monomorphized(),
+                ty::UnevaluatedConst::new(unevaluated.def, unevaluated.args),
+                rustc_span::DUMMY_SP,
+            )
+            .ok()
+            .and_then(|result| result.ok())
+            .and_then(|value| value.try_to_leaf())
+            .map(|value| value.to_target_usize(tcx)),
+        _ => None,
+    }
+}
+
 /// Build the [`CanonicalLcKey`] for `lc` (simplified → merged + sorted terms).
 fn canonical_lc_key(lc: &LinearCombination) -> CanonicalLcKey {
     let lc = lc.clone().simplified();
@@ -1347,6 +1377,19 @@ impl<'tcx> LoweringEnv<'tcx> {
         }
     }
 
+    /// Render a native unsigned-integer witness or constant as a field linear
+    /// combination. Integer literals are MIR scalar constants rather than `Field`
+    /// constants, so the general field helper intentionally does not accept them.
+    fn operand_to_uint_lc(&self, operand: &Operand<'tcx>) -> CompileResult<LinearCombination> {
+        match operand {
+            Operand::Constant(c) => self
+                .const_to_u128(c)
+                .map(|value| LinearCombination::constant(value.to_string()))
+                .ok_or_else(|| CompileError::new("expected an unsigned integer constant")),
+            _ => self.operand_to_lc(operand),
+        }
+    }
+
     /// Read an integer constant, evaluating named/associated `const`s (e.g. a
     /// `const N: usize = 3` used as a loop bound), not just literals.
     fn const_to_u128(&self, c: &ConstOperand<'tcx>) -> Option<u128> {
@@ -1566,7 +1609,7 @@ impl<'tcx> LoweringEnv<'tcx> {
             rustc_middle::ty::TypingEnv::fully_monomorphized(),
             rustc_middle::ty::EarlyBinder::bind(c),
         );
-        c.try_to_target_usize(self.tcx)
+        eval_type_const_usize(self.tcx, c)
     }
 
     /// Read a compile-time integer operand (constant or tracked int local,
@@ -2421,8 +2464,7 @@ fn flatten_field_leaves<'tcx>(
     }
     match ty.kind() {
         rustc_middle::ty::TyKind::Array(elem, len) => {
-            let n = len
-                .try_to_target_usize(tcx)
+            let n = eval_type_const_usize(tcx, *len)
                 .ok_or_else(|| CompileError::new("circuit input array length must be constant"))?;
             for i in 0..n {
                 path.push(i);
@@ -3133,8 +3175,8 @@ fn lower_statement<'tcx>(
                         // yield a `uN` wire. Checked `+`/`*` (`AddWithOverflow`, …) are a
                         // separate MIR shape handled elsewhere.
                         if matches!(op, Lt | Le | Gt | Ge | Eq | Ne | Add | Sub) {
-                            let a = env.operand_to_lc(&operands.0)?;
-                            let b = env.operand_to_lc(&operands.1)?;
+                            let a = env.operand_to_uint_lc(&operands.0)?;
+                            let b = env.operand_to_uint_lc(&operands.1)?;
                             let n = n as usize;
                             let one = LinearCombination::one();
                             let out = match op {
@@ -3160,8 +3202,8 @@ fn lower_statement<'tcx>(
                         // goto. (`overflowing_*`, which *reads* the flag, is inlined and
                         // thus width-invisible here → rejected, never silently wrong.)
                         if matches!(op, AddWithOverflow | SubWithOverflow | MulWithOverflow) {
-                            let a = env.operand_to_lc(&operands.0)?;
-                            let b = env.operand_to_lc(&operands.1)?;
+                            let a = env.operand_to_uint_lc(&operands.0)?;
+                            let b = env.operand_to_uint_lc(&operands.1)?;
                             let n = n as usize;
                             let result = match op {
                                 AddWithOverflow => a + b,
@@ -3187,8 +3229,8 @@ fn lower_statement<'tcx>(
                         // Native `uN` bitwise ops (`& | ^`): decompose both operands to
                         // N bits, apply the per-bit gate, recompose.
                         if matches!(op, BitAnd | BitOr | BitXor) {
-                            let a = env.operand_to_lc(&operands.0)?;
-                            let b = env.operand_to_lc(&operands.1)?;
+                            let a = env.operand_to_uint_lc(&operands.0)?;
+                            let b = env.operand_to_uint_lc(&operands.1)?;
                             let out = env.emit_uint_bitop(*op, n as usize, a, b);
                             env.set_field(dest, out);
                             return Ok(());
@@ -3203,7 +3245,7 @@ fn lower_statement<'tcx>(
                                 )
                                 .with_help("shift by a literal / `const`, not a witness value")
                             })? as usize;
-                            let a = env.operand_to_lc(&operands.0)?;
+                            let a = env.operand_to_uint_lc(&operands.0)?;
                             let left = matches!(op, Shl | ShlUnchecked);
                             let out = env.emit_uint_shift(left, n as usize, a, k);
                             env.set_field(dest, out);

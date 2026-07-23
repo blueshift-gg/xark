@@ -35,7 +35,7 @@ fn rustc_shim() -> PathBuf {
 
 /// `xark build <crate-dir> [--out DIR] [--field F]`
 ///
-/// Drives `cargo build` on the circuit crate with `xark` itself as `RUSTC`, under
+/// Drives `cargo build` on the circuit crate with `xark-rustc` as `RUSTC`, under
 /// one pinned nightly, so every dependency (the `xark` lib + gadget crates) is
 /// built with matching MIR-encoded rlibs and only the primary crate is extracted.
 pub fn cmd_build(args: &[String]) -> i32 {
@@ -98,9 +98,9 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     let self_exe = rustc_shim();
 
     // Artifacts are a side-effect of compilation: if deleted while the source is
-    // unchanged, cargo cache-hits and never re-runs the extractor, so they never
-    // come back. Bump the source mtime to force a recompile when the output looks
-    // incomplete. `circuit.xbc` (every build writes it) is the primary signal.
+    // unchanged, cargo cache-hits and never re-runs the extractor. Clean only the
+    // primary package from Xark's isolated target dir when regeneration is needed;
+    // dependencies remain cached and the user's source tree is untouched.
     let regen_needed = !out_abs.join("circuit.xbc").exists()
         // `--emit-json` needs circuit.json / r1cs.json; force a recompile if they
         // are absent so a circuit already built without them gets the JSON when
@@ -110,19 +110,18 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
         // `xark profile` needs profile.json; force a recompile if it's absent so
         // an already-built (cache-hit) circuit still produces the attribution.
         || (profile && !out_abs.join("profile.json").exists());
-    if regen_needed {
-        touch_sources(&crate_abs);
-    }
-
     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| xark_dir.clone());
-    eprintln!("{} building circuit `{name}`", crate::style::tag());
+    if regen_needed && let Err(error) = clean_primary_package(&crate_abs, &target_dir, &pkg_name) {
+        eprintln!("xark: could not prepare `{pkg_name}` for artifact regeneration: {error}");
+        return 1;
+    }
+    eprintln!("{} building circuit `{pkg_name}`", crate::style::tag());
     // `--profile` / `--emit-json` (when requested) are injected globally, but
     // only the primary package extracts (see `run_as_rustc`), so dependency
     // crates ignore them.
-    let mut rustflags =
-        String::from("--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0");
+    let mut rustflags = String::from("-Zalways-encode-mir -Zmir-opt-level=0");
     if profile {
         rustflags.push_str(" --profile");
     }
@@ -161,7 +160,7 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     let _ = heartbeat.join();
 
     match status {
-        Ok(_) if out_abs.join("circuit.xbc").exists() => {
+        Ok(status) if build_completed(status.success(), out_abs.join("circuit.xbc").exists()) => {
             eprintln!(
                 "{} wrote {}",
                 crate::style::tag(),
@@ -176,9 +175,17 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
             );
             0
         }
+        Ok(status) if !status.success() => {
+            invalidate_build_artifacts(&out_abs);
+            eprintln!(
+                "xark: circuit build failed (cargo exit {:?}); invalidated stale build artifacts",
+                status.code()
+            );
+            1
+        }
         Ok(s) => {
             eprintln!(
-                "xark: no circuit.xbc produced (does the crate expose `pub fn circuit(..)`?); \
+                "xark: no circuit.xbc produced (does the crate expose a `#[circuit]` function?); \
                  cargo exit {:?}",
                 s.code()
             );
@@ -191,26 +198,50 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
     }
 }
 
-/// Bump the mtime of the crate's `src/*.rs` files so cargo recompiles the primary
-/// crate on the next build (forcing the extractor to re-emit artifacts).
-/// Best-effort: per-file failures are ignored. Content is never modified.
-fn touch_sources(crate_dir: &std::path::Path) {
-    fn walk(dir: &std::path::Path, now: std::time::SystemTime) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, now);
-            } else if path.extension().is_some_and(|e| e == "rs")
-                && let Ok(f) = std::fs::File::options().write(true).open(&path)
-            {
-                let _ = f.set_modified(now);
-            }
+/// A cached artifact is usable only when the Cargo invocation that selected it
+/// also succeeded. Otherwise a source error could silently reuse an older
+/// `circuit.xbc` and let setup/prove operate on the wrong circuit.
+fn build_completed(cargo_succeeded: bool, artifact_exists: bool) -> bool {
+    cargo_succeeded && artifact_exists
+}
+
+fn invalidate_build_artifacts(out_dir: &std::path::Path) {
+    for name in ["circuit.xbc", "circuit.json", "r1cs.json", "profile.json"] {
+        let path = out_dir.join(name);
+        if let Err(error) = std::fs::remove_file(&path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("xark: could not invalidate {}: {error}", path.display());
         }
     }
-    walk(&crate_dir.join("src"), std::time::SystemTime::now());
+}
+
+/// Remove only the primary circuit package's cached compiler outputs. This
+/// forces the extractor to run again without changing global `RUSTFLAGS`,
+/// recompiling dependencies, or touching user source mtimes.
+fn clean_primary_package(
+    crate_dir: &std::path::Path,
+    target_dir: &std::path::Path,
+    package: &str,
+) -> Result<(), String> {
+    let status = Command::new("cargo")
+        .arg("clean")
+        .arg("--manifest-path")
+        .arg(crate_dir.join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(target_dir)
+        .arg("-p")
+        .arg(package)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "`cargo clean -p {package}` exited {:?}",
+            status.code()
+        ))
+    }
 }
 
 /// `xark clean` — remove **every** xark output tree under the current directory:
@@ -352,10 +383,7 @@ pub fn cmd_check(args: &[String]) -> i32 {
         .env("CARGO_TARGET_DIR", crate_abs.join("target/xark"))
         // `--check` is injected globally, but only the primary package extracts
         // (see `run_as_rustc`); dependency crates compile normally.
-        .env(
-            "RUSTFLAGS",
-            "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0 --check",
-        );
+        .env("RUSTFLAGS", "-Zalways-encode-mir -Zmir-opt-level=0 --check");
     if json {
         cmd.arg("--message-format=json");
     }
@@ -385,35 +413,16 @@ pub fn cmd_init(args: &[String]) -> i32 {
         ),
     };
 
-    // Pin the published `xark`/`xark-prover` deps to this CLI's own major.minor
-    // (the whole workspace releases together), so the scaffold never suggests a
-    // version older than the CLI you ran it with.
-    let full = env!("CARGO_PKG_VERSION");
-    let ver = full.rsplit_once('.').map_or(full, |(mm, _)| mm);
-    let cargo_toml = format!(
-        "[package]\n\
-         name = \"{name}\"\n\
-         version = \"0.1.0\"\n\
-         edition = \"2021\"\n\n\
-         [lib]\n\
-         crate-type = [\"lib\"]\n\n\
-         [dependencies]\n\
-         xark = {{ version = \"{ver}\", default-features = false }}\n\
-         # From git:               xark = {{ git = \"https://github.com/blueshift-gg/xark\", default-features = false }}\n\
-         # From a local checkout:  xark = {{ path = \"../xark/crates/lang\", default-features = false }}\n\n\
-         # `xark-prover` powers the in-crate `cargo test` circuit tests below.\n\
-         [dev-dependencies]\n\
-         xark-prover = \"{ver}\"\n\
-         # From git:               xark-prover = {{ git = \"https://github.com/blueshift-gg/xark\" }}\n\
-         # From a local checkout:  xark-prover = {{ path = \"../xark/crates/prover\" }}\n"
-    );
+    let xark_dep = match scaffold_xark_dep() {
+        Ok(dep) => dep,
+        Err(error) => {
+            eprintln!("xark: {error}");
+            return 1;
+        }
+    };
+    let cargo_toml = scaffold_manifest(&name, &xark_dep);
     let fn_ident = ident_of(&name);
-    let inputs_struct = format!("{}Inputs", pascal_of(&fn_ident));
-    let lib_rs = format!(
-        "{}{}",
-        LIB_TEMPLATE.replace("__FN__", &fn_ident),
-        tests_template(&name, &inputs_struct)
-    );
+    let lib_rs = scaffold_source(&fn_ident);
     // Both files set the same rust-analyzer override: `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code specifically.
     let ra_cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\"]";
@@ -485,6 +494,57 @@ pub fn cmd_init(args: &[String]) -> i32 {
     0
 }
 
+/// The complete author-facing manifest emitted by `xark init`: one exact Xark
+/// dependency, with host validation owned transitively by the language crate.
+fn scaffold_manifest(name: &str, xark_dep: &str) -> String {
+    format!(
+        "[package]\n\
+         name = \"{name}\"\n\
+         version = \"0.1.0\"\n\
+         edition = \"2024\"\n\n\
+         [lib]\n\
+         crate-type = [\"lib\"]\n\n\
+         [dependencies]\n\
+         xark = {xark_dep}\n"
+    )
+}
+
+/// Match the scaffold's language crate to the CLI that created it. Published
+/// binaries use the exact matching crate release; source builds use their exact
+/// clean commit. A dirty source build deliberately writes a local path to that
+/// checkout: ideal for dogfooding, and visibly non-publishable until replaced by
+/// a clean revision or release.
+fn scaffold_xark_dep() -> Result<String, String> {
+    scaffold_xark_dep_for(
+        env!("XARK_GIT_HASH"),
+        env!("CARGO_PKG_VERSION"),
+        env!("XARK_SOURCE_ROOT"),
+    )
+}
+
+fn scaffold_xark_dep_for(
+    git_hash: &str,
+    version: &str,
+    source_root: &str,
+) -> Result<String, String> {
+    const REPO: &str = "https://github.com/blueshift-gg/xark";
+    if git_hash.ends_with("-dirty") {
+        if source_root.is_empty() {
+            return Err(format!(
+                "cannot locate the dirty Xark checkout behind this CLI ({git_hash}); rebuild from a Git checkout or use a released build"
+            ));
+        }
+        let path = std::path::Path::new(source_root).join("crates/lang");
+        let path = serde_json::to_string(&path.display().to_string())
+            .map_err(|error| format!("encoding local Xark path: {error}"))?;
+        return Ok(format!(r#"{{ path = {path} }}"#));
+    }
+    Ok(match git_hash {
+        "unknown" => format!(r#""={version}""#),
+        rev => format!(r#"{{ git = "{REPO}", rev = "{rev}" }}"#),
+    })
+}
+
 /// Turn a crate name into a valid Rust identifier for the scaffolded entry fn
 /// (`my-circuit` → `my_circuit`); falls back to `circuit`.
 fn ident_of(name: &str) -> String {
@@ -501,30 +561,8 @@ fn ident_of(name: &str) -> String {
     s
 }
 
-/// `my_square` → `MySquare` — must match `xark-macros`' struct naming so the
-/// scaffolded test references the generated `<Fn>Inputs` struct correctly.
-fn pascal_of(ident: &str) -> String {
-    ident
-        .split('_')
-        .filter(|seg| !seg.is_empty())
-        .map(|seg| {
-            let mut chars = seg.chars();
-            match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
-}
-
-/// The starter circuit written by `xark init`. The `#[cfg(test)] mod tests`
-/// block ([`tests_template`]) is appended with the crate's own name filled in.
-///
-/// `no_std` applies to the real circuit build (via `xark build`) but is dropped
-/// under `cargo test` so the `xark-prover` test harness (which uses `std`) can
-/// link.
+/// The starter circuit written by `xark init`.
 const LIB_TEMPLATE: &str = "\
-#![cfg_attr(not(test), no_std)]
 use xark::prelude::*;
 
 #[circuit]
@@ -534,12 +572,20 @@ pub fn __FN__(secret: Private<Field>, result: Public<Field>) {
 }
 ";
 
+fn scaffold_source(fn_ident: &str) -> String {
+    format!(
+        "{}{}",
+        LIB_TEMPLATE.replace("__FN__", fn_ident),
+        tests_template(fn_ident)
+    )
+}
+
 /// The `#[cfg(test)] mod tests` appended to the scaffolded `src/lib.rs`.
 ///
-/// Inputs are the typed struct `#[circuit]` generates from the entry signature
-/// (`inputs` = `<Fn>Inputs`), so they're named, not positional. These tests load
-/// the built artifacts, so they need `xark build .` to have run first.
-fn tests_template(name: &str, inputs: &str) -> String {
+/// On the host, `#[circuit]` turns the circuit function into its native validator,
+/// so the test calls the same function authors wrote. `xark test` builds the
+/// artifacts before running these tests.
+fn tests_template(fn_ident: &str) -> String {
     format!(
         "\n\
          #[cfg(test)]\n\
@@ -548,15 +594,84 @@ fn tests_template(name: &str, inputs: &str) -> String {
          \n\
          \x20   #[test]\n\
          \x20   fn accepts_valid() {{\n\
-         \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       c.check({inputs} {{ secret: \"2\".into(), result: \"4\".into() }}).unwrap(); // 2 * 2 == 4\n\
+         \x20       {fn_ident}(2u64.into(), 4u64.into()).unwrap(); // 2 * 2 == 4\n\
          \x20   }}\n\
          \n\
          \x20   #[test]\n\
          \x20   fn rejects_invalid() {{\n\
-         \x20       let c = xark_prover::circuit(\"{name}\");\n\
-         \x20       assert!(c.check({inputs} {{ secret: \"3\".into(), result: \"4\".into() }}).is_err()); // 3 * 3 != 4\n\
+         \x20       assert!({fn_ident}(3u64.into(), 4u64.into()).is_err()); // 3 * 3 != 4\n\
          \x20   }}\n\
          }}\n"
     )
+}
+
+#[cfg(test)]
+mod scaffold_tests {
+    use super::{
+        build_completed, invalidate_build_artifacts, scaffold_manifest, scaffold_source,
+        scaffold_xark_dep_for,
+    };
+
+    #[test]
+    fn scaffold_has_one_dependency_and_no_cfg_ceremony() {
+        let manifest = scaffold_manifest("square", r#""=0.2.2""#);
+        assert!(manifest.contains("xark = \"=0.2.2\""));
+        assert!(!manifest.contains("xark-prover"));
+        assert!(!manifest.contains("cfg("));
+        assert!(!manifest.contains("[dev-dependencies]"));
+    }
+
+    #[test]
+    fn scaffold_dependency_matches_the_cli_source() {
+        assert_eq!(
+            scaffold_xark_dep_for("unknown", "0.2.2", "").unwrap(),
+            r#""=0.2.2""#
+        );
+        assert_eq!(
+            scaffold_xark_dep_for("abc123", "0.2.2", "").unwrap(),
+            r#"{ git = "https://github.com/blueshift-gg/xark", rev = "abc123" }"#
+        );
+        assert_eq!(
+            scaffold_xark_dep_for("abc123-dirty", "0.2.2", "/src/xark").unwrap(),
+            r#"{ path = "/src/xark/crates/lang" }"#
+        );
+    }
+
+    #[test]
+    fn scaffold_source_is_plain_rust_and_tests_the_circuit_directly() {
+        let source = scaffold_source("square");
+        assert!(!source.contains("no_std"));
+        assert!(!source.contains("xark_prover"));
+        assert!(source.contains("square(2u64.into(), 4u64.into()).unwrap()"));
+    }
+
+    #[test]
+    fn failed_build_never_accepts_a_stale_artifact() {
+        assert!(build_completed(true, true));
+        assert!(!build_completed(true, false));
+        assert!(!build_completed(false, true));
+        assert!(!build_completed(false, false));
+    }
+
+    #[test]
+    fn failed_build_invalidates_every_compiler_artifact() {
+        let unique = format!(
+            "xark-stale-artifacts-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir(&dir).unwrap();
+        for name in ["circuit.xbc", "circuit.json", "r1cs.json", "profile.json"] {
+            std::fs::write(dir.join(name), b"stale").unwrap();
+        }
+
+        invalidate_build_artifacts(&dir);
+
+        assert!(std::fs::read_dir(&dir).unwrap().next().is_none());
+        std::fs::remove_dir(dir).unwrap();
+    }
 }

@@ -17,7 +17,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-xark-verifier = { path = "../../crates/verifier", version = "0.2.1" }
+xark-verifier = { path = "../../crates/verifier", version = "0.2.2" }
 # Direct dep so the `#[svm_test]` cdylibs in `tests/differential_alt_bn128.rs`
 # can reach the BN254 group-op API. Already pulled in transitively via
 # `xark-verifier`; promoting to a top-level dep keeps the import path stable
@@ -25,9 +25,9 @@ xark-verifier = { path = "../../crates/verifier", version = "0.2.1" }
 solana-nostd-alt-bn128 = "0.1.1"
 
 [dev-dependencies]
-xark-backend = { path = "../../crates/backend", version = "0.2.1", features = ["test-deterministic"] }
-xark-prover = { path = "../../crates/prover", version = "0.2.1" }
-xark-ir = { path = "../../crates/ir", version = "0.2.1" }
+xark-backend = { path = "../../crates/backend", version = "0.2.2", features = ["test-deterministic"] }
+xark-prover = { path = "../../crates/prover", version = "0.2.2" }
+xark-ir = { path = "../../crates/ir", version = "0.2.2" }
 ark-bn254.workspace = true
 ark-ec.workspace = true
 ark-ff.workspace = true
@@ -43,8 +43,9 @@ sha2.workspace = true
 hex.workspace = true
 num-bigint.workspace = true
 serde_json.workspace = true
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.5", features = ["cargo_bench_support"] }
 svm-unit-test = "0.1.8"
+serial_test = "3"
 proptest = "1"
 # Reference implementations used as the "expected output" oracle for the
 # NIST / RFC test-vector coverage in `tests/nist_rfc_vectors.rs`.

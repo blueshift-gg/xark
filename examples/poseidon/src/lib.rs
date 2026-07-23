@@ -1,4 +1,3 @@
-#![cfg_attr(xark, no_std)]
 
 use xark_poseidon::prelude::*;
 

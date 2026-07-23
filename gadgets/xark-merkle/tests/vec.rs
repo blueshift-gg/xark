@@ -12,20 +12,24 @@
 
 use num_bigint::BigUint;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use xark_ir::{primitive, solver};
 
 const DEPTH: usize = 4;
 
-fn load() -> primitive::PrimitiveProgram {
-    let src =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/merkle/src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "merkle", "bn254");
-    assert!(
-        c.status_success,
-        "compiling examples/merkle failed: {}",
-        c.stderr
-    );
-    c.program()
+fn load() -> &'static primitive::PrimitiveProgram {
+    static PROGRAM: OnceLock<primitive::PrimitiveProgram> = OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/merkle/src/lib.rs");
+        let c = xark_test_harness::compile_file_xbc(&src, "merkle", "bn254");
+        assert!(
+            c.status_success,
+            "compiling examples/merkle failed: {}",
+            c.stderr
+        );
+        c.program_xbc()
+    })
 }
 
 fn id(p: &primitive::PrimitiveProgram, name: &str) -> u32 {
@@ -126,34 +130,34 @@ fn merkle_membership_accepts_valid_rejects_forgery() {
     let siblings = ["11", "22", "33", "44"];
     let index_bits = ["1", "0", "1", "0"];
 
-    let root = honest_root(&p, leaf, siblings, index_bits);
+    let root = honest_root(p, leaf, siblings, index_bits);
     assert_ne!(root, "0", "sanity: a real Poseidon root is not zero");
 
     // (1) The honest membership proof is accepted and fully constrained.
-    let mut ok = path_inputs(&p, leaf, siblings, index_bits);
-    ok.insert(id(&p, "root"), root.clone());
-    let assign = solver::solve_and_check(&p, &ok)
+    let mut ok = path_inputs(p, leaf, siblings, index_bits);
+    ok.insert(id(p, "root"), root.clone());
+    let assign = solver::solve_and_check(p, &ok)
         .unwrap_or_else(|e| panic!("valid membership must accept: {e:?}"));
-    let holes = solver::analyze_underconstrained(&p, &assign);
+    let holes = solver::analyze_underconstrained(p, &assign);
     assert!(
         holes.is_empty(),
         "merkle circuit under-constrained: {holes:?}"
     );
 
     // (2) A wrong root is rejected.
-    let mut bad_root = path_inputs(&p, leaf, siblings, index_bits);
-    bad_root.insert(id(&p, "root"), "12345".to_string());
+    let mut bad_root = path_inputs(p, leaf, siblings, index_bits);
+    bad_root.insert(id(p, "root"), "12345".to_string());
     assert!(
-        solver::solve_and_check(&p, &bad_root).is_err(),
+        solver::solve_and_check(p, &bad_root).is_err(),
         "a wrong root must be rejected"
     );
 
     // (3) A tampered sibling (with the honest root) is rejected — the fold no
     // longer reaches `root`.
-    let mut bad_path = path_inputs(&p, leaf, ["99", "22", "33", "44"], index_bits);
-    bad_path.insert(id(&p, "root"), root.clone());
+    let mut bad_path = path_inputs(p, leaf, ["99", "22", "33", "44"], index_bits);
+    bad_path.insert(id(p, "root"), root.clone());
     assert!(
-        solver::solve_and_check(&p, &bad_path).is_err(),
+        solver::solve_and_check(p, &bad_path).is_err(),
         "a tampered authentication path must be rejected"
     );
 }
@@ -167,12 +171,12 @@ fn merkle_position_bit_is_boolean_constrained() {
     let p = load();
     let leaf = "7";
     let siblings = ["11", "22", "33", "44"];
-    let honest = honest_root(&p, leaf, siblings, ["1", "0", "1", "0"]);
+    let honest = honest_root(p, leaf, siblings, ["1", "0", "1", "0"]);
 
-    let mut m = path_inputs(&p, leaf, siblings, ["2", "0", "1", "0"]);
-    m.insert(id(&p, "root"), honest);
+    let mut m = path_inputs(p, leaf, siblings, ["2", "0", "1", "0"]);
+    m.insert(id(p, "root"), honest);
     assert!(
-        solver::solve_and_check(&p, &m).is_err(),
+        solver::solve_and_check(p, &m).is_err(),
         "a non-boolean index bit must be rejected"
     );
 }

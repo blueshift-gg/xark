@@ -9,9 +9,8 @@
 //!
 //! Contrast `examples/to_bits`, which recomposes the bits (`Σ bitᵢ·2ⁱ == x`) —
 //! that recomposition pins every bit and proves clean.
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 #[circuit]
 pub fn underconstrained_bit(x: Private<Field>, out: Public<Field>) {

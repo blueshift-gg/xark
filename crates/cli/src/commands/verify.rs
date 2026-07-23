@@ -52,6 +52,10 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         .unwrap_or_else(|| project.verifying_key());
     let proof_path = args.proof.clone().unwrap_or_else(|| project.proof());
 
+    if args.verifying_key.is_none() {
+        super::ensure_key_matches_current_circuit(&project, &vk_path, args.r1cs.as_deref())?;
+    }
+
     let vk = Groth16Keys::read_verifying_key(&vk_path).with_context(|| {
         format!(
             "reading verifying key {} (run `xark setup` first?)",

@@ -92,7 +92,7 @@ fn eddsa_verify_matches_dalek() {
 
     let src =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ed25519/src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "ed25519", "bn254");
+    let c = xark_test_harness::compile_file_xbc(&src, "ed25519", "bn254");
     assert!(c.status_success, "compiling ed25519 failed: {}", c.stderr);
 
     // Constraint-count regression pin (minimized R1CS, what the prover proves).

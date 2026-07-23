@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 use xark_bits::{and32, xor32};
 
 // require(a & b == and_out) and require(a ^ b == xor_out). Each u32 is a Field

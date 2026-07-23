@@ -1,7 +1,6 @@
 //! AES-128 single-block encryption: prove a private 16-byte plaintext and key
 //! encrypt to the public ciphertext. Bytes are range-checked by `to_bits8`; the
 //! S-box uses the GF(2^8) inverse `b^254` (Itoh–Tsujii) + affine map. See `xark_aes`.
-#![cfg_attr(xark, no_std)]
 
 use xark_aes::prelude::*;
 

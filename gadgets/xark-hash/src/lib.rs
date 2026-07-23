@@ -107,7 +107,7 @@ const _: () = {
     extern crate std;
     use std::string::{String, ToString};
     use std::vec::Vec;
-    impl xark_prover::NativeInput for Hash {
+    impl xark::__private::NativeInput for Hash {
         type Native = [u8; 32];
         fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
             let mut hi = 0u128;

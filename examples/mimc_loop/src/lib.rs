@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 /// One MiMC round: `(state + key + round_constant)^3`.
 fn round(state: Field, key: Field, c: Field) -> Field {

@@ -2,8 +2,7 @@
 //! monomorphized per instantiation, with `N` const-folded in loop bounds and
 //! `[Field; N]` local arrays. This is the enabler for caller-chosen limb
 //! widths (see the `Bignum` gadget).
-#![cfg_attr(xark, no_std)]
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 /// Elementwise-double `N` limbs, then sum them.
 fn double_and_sum<const N: usize>(a: [Field; N]) -> Field {

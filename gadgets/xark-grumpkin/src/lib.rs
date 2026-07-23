@@ -239,7 +239,7 @@ mod host {
     use std::string::String;
     use std::vec::Vec;
 
-    impl xark_prover::NativeInput for Affine {
+    impl xark::__private::NativeInput for Affine {
         type Native = [String; 2];
         fn leaves(native: &[String; 2], prefix: &str) -> Vec<(String, String)> {
             use std::format;

@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 /// Sum an array by indexing it with the `for` loop counter (`arr[i]`). Lowers
 /// byte-for-byte identically to the equivalent `while i < 3` version.

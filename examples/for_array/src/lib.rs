@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 /// Iterate a fixed-size array by value (`for x in arr`). Lowers byte-for-byte
 /// identically to the equivalent `while i < N { let x = arr[i]; .. }`.

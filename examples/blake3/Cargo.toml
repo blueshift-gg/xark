@@ -8,17 +8,11 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
-xark-blake3 = { path = "../../gadgets/xark-blake3", version = "0.2.1" }
+xark = { path = "../../crates/lang", version = "0.2.2" }
+xark-blake3 = { path = "../../gadgets/xark-blake3", version = "0.2.2" }
 
 [dev-dependencies]
 # Reference BLAKE3 (renamed to avoid colliding with this crate's own name).
 blake3-ref = { package = "blake3", version = "1" }
-
-[target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/prover", version = "0.2.1" }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
 
 [workspace]

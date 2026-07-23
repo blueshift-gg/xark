@@ -1,6 +1,6 @@
 //! `xark setup` — generate Groth16 proving/verifying keys for a circuit.
 //!
-//! Reads the `r1cs.json` produced by `xark build` and runs either the insecure
+//! Reads the circuit artifact produced by `xark build` and runs either the insecure
 //! dev-mode setup (`--insecure-dev-mode`) or the production phase-2 setup from a
 //! Powers-of-Tau transcript (`--ptau-file`, or one auto-detected under
 //! `target/xark/`). Keys land next to the build output as `pk.bin` / `vk.bin`.
@@ -35,10 +35,10 @@ pub struct SetupArgs {
     /// Output directory for keys and metadata. Inferred as `target/xark/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
-    /// Required to run Groth16 setup with locally generated randomness.
-    /// By default, the OS RNG drives the trapdoor sampling — still unsuitable
-    /// for production (no ceremony, no transcript). **Do not use the resulting
-    /// parameters in production.**
+    /// Explicitly use local development setup. If no `.ptau` is found and no
+    /// mode is selected, setup falls back to this mode with a warning. The OS
+    /// RNG drives trapdoor sampling, but without a ceremony/transcript the
+    /// resulting parameters are not suitable for production.
     #[arg(long, default_value_t = false)]
     pub insecure_dev_mode: bool,
     /// Reproducible-randomness escape hatch for test fixtures **only**.
@@ -183,10 +183,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         bail!("--deterministic-rng requires --insecure-dev-mode");
     }
     // No `.ptau` and no explicit `--insecure-dev-mode`: rather than block, fall
-    // back to insecure dev-mode with a hardcoded deterministic seed (1) so the
-    // common `xark build && xark setup && xark prove` loop just works. A real
-    // `--ptau-file` still runs production phase-2; a user-supplied
-    // `--deterministic-rng <n>` still overrides the seed.
+    // back to an OS-random insecure dev key so the common build → setup → test
+    // loop works. A real `--ptau-file` still runs production phase-2;
+    // deterministic randomness remains an explicit test-fixture-only choice.
     let dev_fallback = ptau_path.is_none() && !args.insecure_dev_mode;
 
     fs::create_dir_all(&out_dir)
@@ -247,7 +246,8 @@ pub fn run(args: SetupArgs) -> Result<()> {
             .with_context(|| format!("writing {}", meta_path.display()))?;
 
         let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, num_pi);
-        fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
+        fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)
+            .with_context(|| format!("writing {}", snarkjs_vk_path.display()))?;
 
         println!("Wrote {}", pk_path.display());
         println!("Wrote {}", vk_path.display());
@@ -264,7 +264,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
                  trustless phase-2, use the multi-party `xark ceremony` flow instead."
             )
         );
-        print_next_steps(&project, &args.path, &prog);
+        print_next_steps(&project, &args.path, &prog)?;
         return Ok(());
     }
 
@@ -314,7 +314,8 @@ pub fn run(args: SetupArgs) -> Result<()> {
     keys.write_verifying_key(&vk_path)?;
 
     let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, num_pi);
-    fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)?;
+    fs::write(&snarkjs_vk_path, serde_json::to_string_pretty(&snarkjs_vk)?)
+        .with_context(|| format!("writing {}", snarkjs_vk_path.display()))?;
     if prof {
         eprintln!(
             "SETUP_TIME: write pk+vk          = {:.2}s",
@@ -346,13 +347,17 @@ pub fn run(args: SetupArgs) -> Result<()> {
             )
         );
     }
-    print_next_steps(&project, &args.path, &prog);
+    print_next_steps(&project, &args.path, &prog)?;
     Ok(())
 }
 
 /// Guided post-setup footer: show the exact `xark prove` command with a
 /// placeholder for every declared input, so the next step is unambiguous.
-fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_ir::R1csProgram) {
+fn print_next_steps(
+    project: &XarkProject,
+    path: &Option<PathBuf>,
+    prog: &xark_ir::R1csProgram,
+) -> Result<()> {
     // Only the *declared* inputs — never the witnesses the solver derives
     // (e.g. `to_bits` range-check bits). The primitive program carries the
     // roles that tell them apart; the R1CS marks both `Private`, so falling
@@ -379,8 +384,23 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_i
             vars.iter().map(|v| v.name.clone()).collect()
         }
     };
-    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    let hint = super::inputs_hint(&name_refs);
+    let hint = if names.len() > 8 {
+        let template_path = project.xark_dir.join("inputs.example.json");
+        let values: serde_json::Map<String, serde_json::Value> = names
+            .iter()
+            .map(|name| (name.clone(), serde_json::Value::String("0".into())))
+            .collect();
+        fs::write(
+            &template_path,
+            format!("{}\n", serde_json::to_string_pretty(&values)?),
+        )
+        .with_context(|| format!("writing input template {}", template_path.display()))?;
+        println!("Wrote {}", template_path.display());
+        format!("--inputs {}", template_path.display())
+    } else {
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        super::inputs_hint(&name_refs)
+    };
     let p = super::path_arg(path);
     println!(
         "\n{}",
@@ -389,4 +409,5 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, prog: &xark_i
             "solve the witness and produce a proof",
         )])
     );
+    Ok(())
 }

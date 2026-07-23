@@ -15,16 +15,23 @@ use clap::Args;
 pub struct DoctorArgs {}
 
 pub fn run(_args: DoctorArgs) -> Result<()> {
-    // The pinned toolchain, queried from the `xark-rustc` driver — which bakes it
-    // at build time (`--print-toolchain`), the single source of truth. Falls back
-    // to a bare `nightly` if the driver isn't installed (doctor flags that missing
-    // driver separately below).
-    let toolchain_owned = crate::cli::find_rustc_shim()
+    let driver = crate::cli::find_rustc_shim();
+    let driver_identity = driver
+        .as_ref()
+        .and_then(|d| Command::new(d).arg("--print-xark-version").output().ok())
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // The driver bakes the exact pinned toolchain. Keep checking the rest of the
+    // machine even when it is absent, using the CLI's release-time pin.
+    let toolchain_owned = driver
+        .as_ref()
         .and_then(|d| Command::new(d).arg("--print-toolchain").output().ok())
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "nightly".to_string());
+        .unwrap_or_else(|| env!("XARK_NIGHTLY").to_string());
     let toolchain = toolchain_owned.as_str();
     let channel = channel_of(toolchain);
     let install_tc = format!(
@@ -38,6 +45,56 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
     );
 
     let mut problems = 0u32;
+
+    let dirty_source = env!("XARK_GIT_HASH").ends_with("-dirty");
+    let source_root = env!("XARK_SOURCE_ROOT");
+    let install_cli = if dirty_source && !source_root.is_empty() {
+        format!("cargo install --path {source_root}/crates/cli --locked")
+    } else {
+        format!(
+            "cargo install xark-cli --version {} --locked",
+            env!("CARGO_PKG_VERSION")
+        )
+    };
+    let install_driver = if dirty_source && !source_root.is_empty() {
+        format!(
+            "cargo +{} install --path {source_root}/crates/rustc --locked",
+            env!("XARK_NIGHTLY")
+        )
+    } else {
+        format!(
+            "cargo +{} install xark-rustc --version {} --locked",
+            env!("XARK_NIGHTLY"),
+            env!("CARGO_PKG_VERSION")
+        )
+    };
+    problems += check(
+        driver_identity.is_some(),
+        "xark-rustc driver",
+        driver.as_ref().and_then(|path| path.to_str()),
+        &install_driver,
+    );
+    let expected_identity = current_identity();
+    if let Some(actual) = driver_identity.as_deref() {
+        problems += check(
+            identities_match(&expected_identity, actual),
+            "xark CLI / driver parity",
+            Some(actual),
+            &format!(
+                "reinstall both from the same source: `{install_cli}` then `{install_driver}`",
+            ),
+        );
+    }
+    info(
+        !dirty_source,
+        "reproducible source",
+        if dirty_source {
+            "init/export will pin local checkout paths"
+        } else {
+            "CLI identity can be reproduced"
+        },
+        "commit the Xark source changes before publishing generated manifests",
+    );
 
     // Rust toolchain (required)
     let cargo = cmd_ok("cargo", &["--version"]);
@@ -94,11 +151,15 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
 
     // Optional (informational — never a hard failure).
     let onpath = cmd_ok("xark", &["--version"]);
+    let onpath_matches = onpath
+        .as_deref()
+        .and_then(|value| value.strip_prefix("xark "))
+        .is_some_and(|actual| identities_match(&expected_identity, actual));
     info(
-        onpath.is_some(),
+        onpath_matches,
         "xark on PATH",
-        "needed for `xark init` and rust-analyzer diagnostics",
-        "cargo +nightly-… install --path crates/lang --features cli",
+        "resolves to this CLI build",
+        &install_cli,
     );
     let node = cmd_ok("node", &["--version"]);
     info(
@@ -110,10 +171,12 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
 
     println!();
     if problems == 0 {
-        println!(
-            "{}",
-            crate::style::brand("✅ All required checks passed — you're ready to `xark init`.")
-        );
+        let message = if dirty_source {
+            "✅ All required checks passed — local build, init, test, and export are ready."
+        } else {
+            "✅ All required checks passed — you're ready to `xark init`."
+        };
+        println!("{}", crate::style::brand(message));
     } else {
         println!(
             "{}",
@@ -181,5 +244,37 @@ fn channel_of(tc: &str) -> String {
         format!("nightly-{}-{}-{}", parts[1], parts[2], parts[3])
     } else {
         tc.to_string()
+    }
+}
+
+fn current_identity() -> String {
+    format!(
+        "{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        env!("XARK_GIT_HASH_SHORT")
+    )
+}
+
+fn identities_match(expected: &str, actual: &str) -> bool {
+    expected == actual
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{channel_of, identities_match};
+
+    #[test]
+    fn extracts_a_pinned_nightly_channel() {
+        assert_eq!(
+            channel_of("nightly-2026-05-03-aarch64-apple-darwin"),
+            "nightly-2026-05-03"
+        );
+    }
+
+    #[test]
+    fn parity_requires_the_same_release_and_revision() {
+        assert!(identities_match("0.2.2 (abc123)", "0.2.2 (abc123)"));
+        assert!(!identities_match("0.2.2 (abc123)", "0.2.1 (abc123)"));
+        assert!(!identities_match("0.2.2 (abc123)", "0.2.2 (def456)"));
     }
 }

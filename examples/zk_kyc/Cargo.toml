@@ -7,13 +7,8 @@ edition = "2021"
 crate-type = ["lib"]
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
-xark-poseidon2 = { path = "../../gadgets/xark-poseidon2", version = "0.2.1" }
-
-# Host-only prover so this crate's tests can call the generated native validator;
-# gated on `cfg(not(xark))` so a circuit build stays lean `no_std`.
-[target.'cfg(not(xark))'.dependencies]
-xark-prover = { path = "../../crates/prover", version = "0.2.1" }
+xark = { path = "../../crates/lang", version = "0.2.2" }
+xark-poseidon2 = { path = "../../gadgets/xark-poseidon2", version = "0.2.2" }
 
 # Test-only: an off-circuit Poseidon2 reference (pure arkworks field arithmetic)
 # used to compute the expected commitment the circuit is checked against.
@@ -21,6 +16,3 @@ xark-prover = { path = "../../crates/prover", version = "0.2.1" }
 ark-bn254 = "0.6"
 ark-ff = "0.6.0"
 hex = "0.4.3"
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

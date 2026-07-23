@@ -1,7 +1,6 @@
 //! Ergonomics demo for `xark_hash::Digest`: prove knowledge of a 3-byte private
 //! preimage whose SHA-256 equals the baked-in constant `sha256("abc")`. Since the
 //! expected digest is a compile-time constant, the circuit has no public inputs.
-#![cfg_attr(xark, no_std)]
 
 use xark_sha256::prelude::*; // re-exports `Digest`
 

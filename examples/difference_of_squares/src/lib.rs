@@ -1,6 +1,5 @@
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 #[circuit]
 pub fn difference_of_squares(x: Private<Field>, y: Private<Field>, z: Public<Field>) {

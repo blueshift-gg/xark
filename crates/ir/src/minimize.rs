@@ -75,7 +75,7 @@ struct Lc {
 fn fc_to_fp(fc: &FieldConst, m: &BigUint) -> Fp {
     match fc.as_i64() {
         Some(n) => Fp::from_i64(n, m),
-        None => Fp::from_bigint(&fc.big(), m),
+        None => Fp::from_bigint(fc.as_bigint().expect("non-small FieldConst is Big"), m),
     }
 }
 

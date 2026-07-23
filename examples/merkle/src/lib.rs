@@ -3,7 +3,6 @@
 //! its authentication path `siblings`. [`merkle_verify`] folds the path (sibling
 //! mux, boolean-constrained direction bits, Poseidon compression) and asserts the
 //! computed root equals the public one.
-#![cfg_attr(xark, no_std)]
 
 use xark_merkle::prelude::*;
 
@@ -20,17 +19,18 @@ pub fn merkle(
 #[cfg(test)]
 mod tests {
     use super::merkle;
+    use xark::Field;
 
     // Concrete leaf, path, and LSB-first position (0b0101). The Poseidon root was
     // derived once by solving the circuit (`xark-merkle`'s `vec` test), then pinned.
-    const LEAF: &str = "7";
-    const SIBLINGS: [&str; 4] = ["11", "22", "33", "44"];
-    const INDEX_BITS: [&str; 4] = ["1", "0", "1", "0"];
+    const LEAF: u64 = 7;
+    const SIBLINGS: [u64; 4] = [11, 22, 33, 44];
+    const INDEX_BITS: [u64; 4] = [1, 0, 1, 0];
     const ROOT: &str =
         "19217897426496189115890594488318047711322540293288184119629031241572428947159";
 
-    fn path() -> ([String; 4], [String; 4]) {
-        (SIBLINGS.map(String::from), INDEX_BITS.map(String::from))
+    fn path() -> ([Field; 4], [Field; 4]) {
+        (SIBLINGS.map(Field::from), INDEX_BITS.map(Field::from))
     }
 
     #[test]

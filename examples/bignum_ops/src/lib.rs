@@ -3,9 +3,8 @@
 //! and `.inverse()`/`.sub2()`/… forwarding to the width-generic free functions. Each
 //! `Private<El>` is a typed circuit input — a single whole number on the host, split
 //! into its 3 limbs automatically by the `fp!`-generated `NativeInput`.
-#![cfg_attr(xark, no_std)]
 
-use xark::{circuit, require_eq, Field, Private, Public};
+use xark::prelude::*;
 
 // A concrete 256-bit prime field (3 × 86-bit limbs), defined by its modulus alone.
 xark_bignum::fp!(El, "41904174945551648470736051755806485464313947085173149");

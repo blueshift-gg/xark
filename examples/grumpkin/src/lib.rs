@@ -2,7 +2,6 @@
 //! `R = s0·P0 + s1·P1` for two 128-bit scalars and two witness points.
 //! Grumpkin's base field is BN254's scalar field (the circuit `Field`), so a
 //! point is just two native field coordinates (the transparent `Affine` type).
-#![cfg_attr(xark, no_std)]
 
 use xark_grumpkin::prelude::*;
 

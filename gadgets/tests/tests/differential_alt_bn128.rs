@@ -2970,6 +2970,7 @@ fn pairing_host_matches_golden() {
 // =============================================================================
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn g1_add_onchain_matches_golden() {
     // Each `(a, b, expected)` triple must round-trip through the syscall.
     let (a0, b0, e0) = G1_ADD_VECTORS[0];
@@ -2981,18 +2982,21 @@ fn g1_add_onchain_matches_golden() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn g1_mul_onchain_matches_golden() {
     let (p0, s0, e0) = G1_MUL_VECTORS[0];
     assert!((p0 * s0).unwrap() == e0);
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn g2_add_onchain_matches_golden() {
     let (a0, b0, e0) = G2_ADD_VECTORS[0];
     assert!((a0 + b0).unwrap() == e0);
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn pairing_onchain_matches_golden() {
     let (pairs0, e0) = PAIRING_2_VECTORS[0];
     assert!(pairing(&pairs0).unwrap() == e0);
@@ -3005,6 +3009,7 @@ fn pairing_onchain_matches_golden() {
 // with Arkworks on all 32 inputs of that op.
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn g1_add_onchain_extra_matches_golden() {
     let mut i = 0;
     while i < G1_ADD_VECTORS_EXTRA.len() {
@@ -3015,6 +3020,7 @@ fn g1_add_onchain_extra_matches_golden() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn g1_mul_onchain_extra_matches_golden() {
     let mut i = 0;
     while i < G1_MUL_VECTORS_EXTRA.len() {
@@ -3025,6 +3031,7 @@ fn g1_mul_onchain_extra_matches_golden() {
 }
 
 #[svm_test]
+#[cfg_attr(test, serial_test::serial(sbf_build))]
 fn g2_add_onchain_extra_matches_golden() {
     let mut i = 0;
     while i < G2_ADD_VECTORS_EXTRA.len() {

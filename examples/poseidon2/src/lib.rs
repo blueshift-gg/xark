@@ -3,7 +3,6 @@
 //! `[out0, out1, out2]`. Imported from `xark-poseidon2` and inlined; ARK and both
 //! linear layers (`M_E`, `M_I`) fold into linear combinations, so every R1CS mul
 //! gate comes from an S-box (`x^5`).
-#![cfg_attr(xark, no_std)]
 
 use xark_poseidon2::prelude::*;
 
