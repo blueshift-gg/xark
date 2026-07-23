@@ -36,14 +36,31 @@ type SlotPath = smallvec::SmallVec<[u64; 4]>;
 /// values compare equal). Used to memoize bit decompositions (see `bit_cache`).
 type CanonicalLcKey = (String, Vec<(String, VarId)>);
 
+/// How array lengths are resolved when flattening a type into `Field` leaves.
+///
+/// The auto-DAG signature probe ([`LoweringEnv::all_field_sig`]) must stay
+/// [`LenResolve::Shallow`]: whether a callee gets templated as a cached CALL
+/// (materialized single-var plugs + output bindings) or folded inline is proof
+/// shape. Resolving named consts there flips gadget-internal helpers from the
+/// free inline fold to plug boundaries — same minimized constraint count, but
+/// the substituted bindings densify the A/B/C matrices (~74% more nonzeros on
+/// Poseidon `hash2`). Entry-input binding and `[x; N]` repeats use
+/// [`LenResolve::Deep`], where imported named constants are part of the
+/// supported authoring surface and no lowering strategy hangs off the answer.
+#[derive(Clone, Copy, PartialEq)]
+enum LenResolve {
+    /// Literals and already-evaluated consts only (`Const::try_to_target_usize`).
+    Shallow,
+    /// Also evaluate named/cross-crate `const` items via
+    /// `const_eval_resolve_for_typeck`.
+    Deep,
+}
+
 /// Evaluate a type-level array length, including a named `const` imported from
 /// another crate. `Const::try_to_target_usize` handles literals and already
 /// normalized const generics, but cross-crate const items can still arrive as
 /// `ConstKind::Unevaluated` in an otherwise fully monomorphized type.
-fn eval_type_const_usize<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    c: rustc_middle::ty::Const<'tcx>,
-) -> Option<u64> {
+fn eval_type_const_usize<'tcx>(tcx: TyCtxt<'tcx>, c: rustc_middle::ty::Const<'tcx>) -> Option<u64> {
     use rustc_middle::ty;
 
     if let Some(value) = c.try_to_target_usize(tcx) {
@@ -1023,7 +1040,12 @@ impl<'tcx> LoweringEnv<'tcx> {
         for (i, ty) in tys.iter().enumerate() {
             let mut out = Vec::new();
             let mut path = Vec::new();
-            if flatten_field_leaves(self.tcx, ty, &mut path, "", &mut out).is_err() {
+            // Shallow on purpose: promoting a callee to a cached CALL is proof
+            // shape, and must not flip when a named const becomes resolvable
+            // (see [`LenResolve`]).
+            if flatten_field_leaves(self.tcx, ty, &mut path, "", &mut out, LenResolve::Shallow)
+                .is_err()
+            {
                 return false;
             }
             if i == n - 1 && out.is_empty() {
@@ -2448,6 +2470,7 @@ fn flatten_field_leaves<'tcx>(
     path: &mut Vec<u64>,
     name: &str,
     out: &mut Vec<(Vec<u64>, String, Option<u32>)>,
+    resolve: LenResolve,
 ) -> CompileResult<()> {
     // `Field` is the opaque leaf — never recurse into its private limbs.
     if let Some(d) = ty.ty_adt_def()
@@ -2464,11 +2487,14 @@ fn flatten_field_leaves<'tcx>(
     }
     match ty.kind() {
         rustc_middle::ty::TyKind::Array(elem, len) => {
-            let n = eval_type_const_usize(tcx, *len)
-                .ok_or_else(|| CompileError::new("circuit input array length must be constant"))?;
+            let n = match resolve {
+                LenResolve::Shallow => len.try_to_target_usize(tcx),
+                LenResolve::Deep => eval_type_const_usize(tcx, *len),
+            }
+            .ok_or_else(|| CompileError::new("circuit input array length must be constant"))?;
             for i in 0..n {
                 path.push(i);
-                flatten_field_leaves(tcx, *elem, path, &format!("{name}[{i}]"), out)?;
+                flatten_field_leaves(tcx, *elem, path, &format!("{name}[{i}]"), out, resolve)?;
                 path.pop();
             }
             Ok(())
@@ -2476,7 +2502,7 @@ fn flatten_field_leaves<'tcx>(
         rustc_middle::ty::TyKind::Tuple(elems) => {
             for (i, elem) in elems.iter().enumerate() {
                 path.push(i as u64);
-                flatten_field_leaves(tcx, elem, path, &format!("{name}.{i}"), out)?;
+                flatten_field_leaves(tcx, elem, path, &format!("{name}.{i}"), out, resolve)?;
                 path.pop();
             }
             Ok(())
@@ -2485,7 +2511,14 @@ fn flatten_field_leaves<'tcx>(
             for (i, fdef) in def.non_enum_variant().fields.iter().enumerate() {
                 let fty = fdef.ty(tcx, args);
                 path.push(i as u64);
-                flatten_field_leaves(tcx, fty, path, &format!("{name}.{}", fdef.name), out)?;
+                flatten_field_leaves(
+                    tcx,
+                    fty,
+                    path,
+                    &format!("{name}.{}", fdef.name),
+                    out,
+                    resolve,
+                )?;
                 path.pop();
             }
             Ok(())
@@ -2583,7 +2616,14 @@ fn run_pass<'tcx>(
         let ty = body.local_decls[local].ty;
         let mut leaves = Vec::new();
         let mut path = Vec::new();
-        flatten_field_leaves(tcx, ty, &mut path, &input.name, &mut leaves)?;
+        flatten_field_leaves(
+            tcx,
+            ty,
+            &mut path,
+            &input.name,
+            &mut leaves,
+            LenResolve::Deep,
+        )?;
         for (leaf_path, leaf_name, width) in leaves {
             let id = env.alloc_var(leaf_name, input.visibility.clone());
             env.set_field_at(local, &leaf_path, LinearCombination::var(id));
