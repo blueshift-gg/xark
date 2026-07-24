@@ -16,3 +16,7 @@ crates/wasm/dist/
 # Python bytecode (reference scripts)
 __pycache__/
 *.pyc
+
+# Editor configs (local per-crate rust-analyzer overrides)
+.vscode/
+!clients/vscode
