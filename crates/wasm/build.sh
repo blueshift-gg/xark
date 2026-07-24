@@ -69,10 +69,10 @@ wasm-bindgen "target/wasm32-unknown-unknown/$profile/xark_wasm.wasm" \
   --target module \
   --out-name xark_wasm
 
-# wasm-bindgen's `--target module` emits `import source X from "./x.wasm"`; the
-# `source` keyword isn't understood by some bundlers like esbuild yet, and a
-# plain `import X` gives the `WebAssembly.Module` we want.
-# applies. (Harmless if a future wasm-bindgen drops the keyword.)
+# wasm-bindgen's `--target module` emits `import source X from "./x.wasm"`. The
+# `source` keyword isn't understood by some bundlers/engines (e.g. esbuild), and
+# a plain `import X` is what hands back the `WebAssembly.Module` workerd expects.
+# A no-op if a future wasm-bindgen drops the keyword.
 sed -i 's|^import source |import |' "$out_dir/xark_wasm.js"
 
 if [[ "$mode" == "release" ]]; then
