@@ -174,6 +174,6 @@ rustup target add wasm32-unknown-unknown
 
 The `module` target (Cloudflare Workers / `workerd`) is built with
 `wasm-bindgen` directly, since wasm-pack can't emit `--target module`. A
-`release` build of the `module` target will **also rebuilds `dist/bundler/`**
+`release` build of the `module` target will **also rebuild `dist/bundler/`**
 and copies its optimized wasm (the raw wasm is byte-identical across targets —
 only the JS glue differs).
