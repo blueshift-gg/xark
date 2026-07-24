@@ -88,16 +88,39 @@ export function xarkVersion(): string | null {
   return null;
 }
 
-/** Does the workspace's rust-analyzer config already point at xark? */
+/** Does the workspace's rust-analyzer config already point at xark?
+ *
+ *  Checks both `.vscode/settings.json` (VS Code) and `rust-analyzer.toml`
+ *  (editor-agnostic). Parses the JSON settings properly so any reformatting
+ *  (multi-line arrays, reordered keys) still matches — a raw `/xark.*check/`
+ *  regex would miss pretty-printed arrays where `xark` and `check` land on
+ *  separate lines, causing the enable-prompt to re-fire forever. */
 export function hasXarkOverride(folder: string): boolean {
-  const settings = path.join(folder, ".vscode", "settings.json");
-  let text: string;
+  // 1. VS Code settings.json — parse and inspect the actual override value.
   try {
-    text = fs.readFileSync(settings, "utf-8");
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(folder, ".vscode", "settings.json"), "utf-8")
+    );
+    const cmd = settings["rust-analyzer.check.overrideCommand"];
+    if (Array.isArray(cmd) && cmd.some((s) => s === "xark")) {
+      return true;
+    }
   } catch {
-    return false;
+    /* missing or malformed — fall through to the toml check */
   }
-  return /xark.*check/.test(text);
+
+  // 2. rust-analyzer.toml — the editor-agnostic form `xark init` also writes.
+  //    It's TOML, not JSON, so a newline-tolerant regex is the pragmatic check.
+  try {
+    const toml = fs.readFileSync(path.join(folder, "rust-analyzer.toml"), "utf-8");
+    if (/xark[\s\S]*check/.test(toml)) {
+      return true;
+    }
+  } catch {
+    /* no toml */
+  }
+
+  return false;
 }
 
 /** Write the rust-analyzer override into `.vscode/settings.json`, merging
