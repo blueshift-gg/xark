@@ -19,4 +19,3 @@ __pycache__/
 
 # Editor configs (local per-crate rust-analyzer overrides)
 .vscode/
-!clients/vscode
