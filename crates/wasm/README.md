@@ -155,10 +155,6 @@ const snarkjsProof  = proof_to_snarkjs(proof);
 const snarkjsPublic = public_inputs_to_snarkjs(publicInputs);
 ```
 
-### `version()` → `string`
-
-Package version.
-
 ## Security
 
 Prover randomness comes from the platform CSPRNG (`crypto.getRandomValues`).

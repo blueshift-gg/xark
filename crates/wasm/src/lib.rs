@@ -314,12 +314,6 @@ pub fn public_inputs_to_snarkjs(public_inputs_bytes: &Bytes) -> Result<JsValue, 
         .map_err(|e| js_error(&format!("encoding snarkjs public inputs: {e}")))
 }
 
-/// xark-wasm package version.
-#[wasm_bindgen]
-pub fn version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------

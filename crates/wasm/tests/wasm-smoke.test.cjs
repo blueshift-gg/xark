@@ -17,7 +17,7 @@ const { join } = require("node:path");
 const { readFileSync } = require("node:fs");
 
 const {
-  prove, verify, version, preload, prove_preloaded,
+  prove, verify, preload, prove_preloaded,
   proof_to_snarkjs, public_inputs_to_snarkjs,
 } = require("../dist/node/xark_wasm.js");
 
@@ -32,10 +32,6 @@ const hostSnarkPublic = readFileSync(join(D, "snarkjs-public.json"), "utf8").tri
 // Prove two satisfiable instances once and reuse them across cases.
 const p27 = prove(xbc, pk, { secret: "3", result: "27" });
 const p8 = prove(xbc, pk, { secret: "2", result: "8" });
-
-test("version() returns a non-empty string", () => {
-  assert.ok(version().length > 0, "version string should be non-empty");
-});
 
 test("prove(3->27) yields a non-empty proof with exactly 1 public input", () => {
   assert.ok(p27.proof.length > 0, "proof must be non-empty");
