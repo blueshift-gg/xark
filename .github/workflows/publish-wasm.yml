@@ -1,0 +1,97 @@
+name: Publish xark-wasm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry-run (build + validate, no upload)"
+        type: boolean
+        required: true
+        default: true
+      use-token:
+        description: "Auth with NPM_TOKEN instead of OIDC trusted publishing (first publish / fallback)"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-xark-wasm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: build & publish${{ inputs.dry-run && ' (dry-run)' || '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install stable Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build every target (release)
+        working-directory: crates/wasm
+        run: ./build.sh all release
+
+      - name: Verify shipped files exist
+        working-directory: crates/wasm
+        run: |
+          for f in \
+            dist/node/xark_wasm.js    dist/node/xark_wasm_bg.wasm    dist/node/xark_wasm.d.ts \
+            dist/web/xark_wasm.js     dist/web/xark_wasm_bg.wasm     dist/web/xark_wasm.d.ts \
+            dist/module/xark_wasm.js  dist/module/xark_wasm_bg.wasm  dist/module/xark_wasm.d.ts
+          do
+            [[ -f "$f" ]] || { echo "::error::missing shipped file: $f"; exit 1; }
+          done
+          echo "all shipped files present"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Refuse to re-publish an existing version
+        working-directory: crates/wasm
+        run: |
+          current=$(node -p "require('./package.json').version")
+          existing=$(npm view "@blueshift-gg/xark-wasm" version 2>/dev/null || true)
+          if [[ -n "$existing" && "$existing" == "$current" ]]; then
+            echo "::error::version $current is already published. Bump version in crates/wasm/package.json before publishing."
+            exit 1
+          fi
+          echo "version $current ok (latest published: ${existing:-none})"
+
+      - name: Show tarball contents (what would be published)
+        working-directory: crates/wasm
+        run: npm pack --dry-run
+
+      - name: Publish (dry-run — build + validate, no upload)
+        if: ${{ inputs.dry-run }}
+        working-directory: crates/wasm
+        run: npm publish --dry-run --access public
+
+      - name: Publish via OIDC trusted publishing
+        if: ${{ !inputs.dry-run && !inputs.use-token }}
+        working-directory: crates/wasm
+        run: npm publish --access public
+
+      - name: Publish via NPM_TOKEN (bootstrap / fallback)
+        if: ${{ !inputs.dry-run && inputs.use-token }}
+        working-directory: crates/wasm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

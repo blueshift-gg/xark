@@ -1,0 +1,40 @@
+{
+  "name": "@blueshift-gg/xark-wasm",
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/blueshift-gg/xark.git",
+    "directory": "crates/wasm"
+  },
+  "main": "./dist/node/xark_wasm.js",
+  "types": "./dist/node/xark_wasm.d.ts",
+  "scripts": {
+    "test": "node --test tests/wasm-smoke.test.cjs"
+  },
+  "files": [
+    "dist/node/*",
+    "dist/web/*",
+    "dist/module/*"
+  ],
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./dist/node/xark_wasm.d.ts",
+        "default": "./dist/node/xark_wasm.js"
+      },
+      "workerd": {
+        "types": "./dist/module/xark_wasm.d.ts",
+        "default": "./dist/module/xark_wasm.js"
+      },
+      "browser": {
+        "types": "./dist/web/xark_wasm.d.ts",
+        "default": "./dist/web/xark_wasm.js"
+      },
+      "default": {
+        "types": "./dist/web/xark_wasm.d.ts",
+        "default": "./dist/web/xark_wasm.js"
+      }
+    }
+  }
+}

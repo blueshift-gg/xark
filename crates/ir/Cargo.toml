@@ -19,6 +19,11 @@ path = "src/lib.rs"
 # env reads out entirely.
 debug = []
 
+# Parallel field arithmetic (ark-ff). Must be disabled in environments that
+# lacks threads
+parallel = ["ark-ff/parallel"]
+default = ["parallel"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -31,4 +36,5 @@ wincode = { version = "0.5", features = ["derive"] }
 # Fast fixed-width BN254 scalar field (Montgomery) for the reference solver's
 # hot path; the `num-bigint` fallback stays for arbitrary-modulus programs.
 ark-bn254 = { workspace = true }
-ark-ff = { workspace = true }
+# parallel feature is enabled by default
+ark-ff = { version = "0.6", default-features = false, features = ["std"] }

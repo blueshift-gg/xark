@@ -16,13 +16,12 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::{
-    proof_to_snarkjs, public_inputs_to_snarkjs, write_public_inputs,
-};
+use xark_backend::serialization::write_public_inputs;
 use xark_backend::solana::{assemble_proof_bytes_le, assemble_public_inputs_bytes_le};
 use xark_backend::{keys::Groth16Keys, prove};
 use xark_ir::VarId;
 use xark_prover::{XarkCircuit, fr_from_decimal};
+use xark_snarkjs::{proof_to_snarkjs, public_inputs_to_snarkjs};
 
 use super::{
     load_backend_r1cs, load_circuit_auto, parse_inputs_arg, resolve_input_ids, setup,
@@ -383,6 +382,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // Self-contained, shareable proof bundle: the snarkjs proof (verify
     // off-chain) plus the verifier calldata, in one file. Named by the entry
     // name so it lines up with the generated client.
+    let snarkjs_proof_value = serde_json::to_value(&snarkjs_proof)?;
     let name = project.entry_name();
     let bundle_json = serde_json::json!({
         "circuit": name,
@@ -391,7 +391,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         "protocol": "groth16",
         "curve": "bn128",
         "public_signals": snarkjs_public,
-        "proof": snarkjs_proof,
+        "proof": snarkjs_proof_value,
         "calldata": {
             "endianness": "little",
             "hex": calldata_hex,

@@ -1,0 +1,44 @@
+[package]
+name = "xark-wasm"
+version.workspace = true
+edition = "2021"
+license = "MIT"
+description = "WebAssembly bindings for generating xark Groth16 (BN254) proofs in the browser / Node."
+repository = "https://github.com/blueshift-gg/xark"
+publish = false
+
+[lib]
+name = "xark_wasm"
+crate-type = ["cdylib", "rlib"]
+
+# Single-threaded by design: this crate compiles and runs on any WebAssembly
+# host (browsers, Node 20+, Cloudflare Workers, edge runtimes). Rayon (pulled
+# in transitively via `xark-ir`) falls back to serial execution on
+# `wasm32-unknown-unknown` without threads, and the arkworks `parallel` feature
+# stays off so MSM/FFT run single-threaded too.
+
+[dependencies]
+# All xark deps with `default-features = false` so the arkworks `parallel`
+# (rayon) feature stays OFF — rayon's thread pool (and `std::time`) are
+# unsupported on `wasm32-unknown-unknown`, and enabling `parallel` here would
+# panic the prover.
+xark-ir = { path = "../ir", default-features = false }
+xark-prover = { path = "../prover", default-features = false }
+xark-snarkjs = { path = "../snarkjs" }
+
+# Only the arkworks crates actually named in `lib.rs`. `ark-ff` / `ark-ec` /
+# `ark-relations` / `ark-std` are pulled transitively (via `ark-groth16` etc.)
+# with the right features — the `parallel`-OFF guarantee comes from the `xark-*`
+# deps above being built `default-features = false`, not from pinning them here.
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-groth16 = { version = "0.6", default-features = false, features = ["std"] }
+ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
+ark-snark = { version = "0.6", default-features = false }
+
+serde-wasm-bindgen = "0.6"
+
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+getrandom = { version = "0.2", features = ["js"] }
+rand = "0.8"
+console_error_panic_hook = "0.1"

@@ -1,0 +1,15 @@
+[package]
+name = "xark-snarkjs"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+description = "snarkjs-compatible JSON encodings of Groth16 (BN254) proofs, verifying keys, and public inputs."
+publish = false
+
+[dependencies]
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.6", default-features = false, features = ["std"] }
+ark-groth16 = { version = "0.6", default-features = false, features = ["std"] }
+num-bigint = "0.4"
+serde = { version = "1", features = ["derive"] }

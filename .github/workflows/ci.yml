@@ -127,3 +127,42 @@ jobs:
         # committed snapshots. The heavy `#[ignore]`d known-answer-vector tests
         # run separately in `nightly-kats.yml`.
         run: cd crates/lang && cargo test --test snapshot
+
+      # ---- xark-wasm smoke test ----
+      # Reuse the nightly toolchain and xark-rustc binary already built above, then
+      # produce the cube artifacts the wasm smoke test cross-checks (build + setup +
+      # prove). Cube is rebuilt with a real field (bn254): the snapshot test compiled
+      # it field-independent (`unknown`), which the prover can't solve.
+
+      - name: Rebuild cube with bn254 field
+        # Drop the field-independent `unknown` output the snapshot test wrote, then
+        # rebuild with the default bn254 field.
+        run: |
+          # The driver crate is `xark-rustc` but it lives under `crates/rustc`
+          # (renamed from `crates/xark-rustc` in the `1a19385 reorg`); the path
+          # below must match the dir the snapshot test built it into.
+          export XARK_RUSTC="$PWD/crates/rustc/target/release/xark-rustc"
+          rm -rf target/test-out/cube
+          cargo run --release -p xark-cli -- build examples/cube --out target/test-out/cube
+
+      - name: Generate proving + verifying keys for cube
+        run: cargo run --release -p xark-cli -- setup target/test-out/cube
+
+      - name: Generate host proof + public inputs for cube
+        # The smoke test cross-checks the wasm-generated public inputs against
+        # the host's (same circuit, same witness — must be byte-identical).
+        run: cargo run --release -p xark-cli -- prove target/test-out/cube --inputs '{"secret":"3","result":"27"}'
+
+      - name: Activate stable Rust for wasm steps
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build xark-wasm node package
+        run: cd crates/wasm && wasm-pack build --target nodejs --dev --out-dir dist/node
+
+      - name: Run xark-wasm smoke test
+        run: CIRCUIT_ARTIFACTS_DIR=target/test-out/cube node --test crates/wasm/tests/wasm-smoke.test.cjs

@@ -16,9 +16,8 @@ use ark_groth16::VerifyingKey;
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
-use xark_backend::serialization::{
-    proof_to_snarkjs, public_inputs_to_snarkjs, read_public_inputs, vk_to_snarkjs,
-};
+use xark_backend::serialization::read_public_inputs;
+use xark_snarkjs::{proof_to_snarkjs, public_inputs_to_snarkjs, vk_to_snarkjs};
 
 fn main() {
     let mut args = std::env::args().skip(1);

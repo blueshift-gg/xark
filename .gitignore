@@ -10,6 +10,9 @@ Cargo.lock.bak
 /target/test-out/
 examples/*/Cargo.lock
 
+# xark-wasm packages
+crates/wasm/dist/
+
 # Python bytecode (reference scripts)
 __pycache__/
 *.pyc
