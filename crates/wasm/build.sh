@@ -45,7 +45,7 @@ build() {
   local cargo_flag=""; [[ "$profile" == "release" ]] && cargo_flag="--release"
 
   cargo build $cargo_flag --target wasm32-unknown-unknown
-  wasm-bindgen "target/wasm32-unknown-unknown/$profile/xark_wasm.wasm" \
+  wasm-bindgen "../../target/wasm32-unknown-unknown/$profile/xark_wasm.wasm" \
     --out-dir "$out_dir" --target module --out-name xark_wasm
 
   # workerd/esbuild reject the `import source` keyword; rewrite to a plain import.
