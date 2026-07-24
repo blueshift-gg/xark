@@ -1,0 +1,103 @@
+{
+  "name": "xark-vscode",
+  "displayName": "xark — ZK Circuit Diagnostics",
+  "version": "0.1.0",
+  "description": "Inline constraint-cost hints, gutter annotations, and one-click xark commands for ZK circuit development.",
+  "license": "MIT",
+  "repository": "https://github.com/blueshift-gg/xark",
+  "publisher": "blueshift-gg",
+  "categories": ["Other", "Linters"],
+  "keywords": ["xark", "zero-knowledge", "groth16", "r1cs", "circuit"],
+  "engines": { "vscode": "^1.85.0" },
+  "activationEvents": [
+    "workspaceContains:**/Cargo.toml",
+    "workspaceContains:**/rust-analyzer.toml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "xark.check",
+        "title": "xark: Validate Circuit",
+        "category": "xark"
+      },
+      {
+        "command": "xark.build",
+        "title": "xark: Build Circuit",
+        "category": "xark"
+      },
+      {
+        "command": "xark.profile",
+        "title": "xark: Profile Circuit (Constraint Drill-Down)",
+        "category": "xark"
+      },
+      {
+        "command": "xark.prove",
+        "title": "xark: Generate Proof",
+        "category": "xark"
+      },
+      {
+        "command": "xark.setup",
+        "title": "xark: Generate Keys (Setup)",
+        "category": "xark"
+      },
+      {
+        "command": "xark.inspect",
+        "title": "xark: Inspect Circuit Stats",
+        "category": "xark"
+      },
+      {
+        "command": "xark.injectConfig",
+        "title": "xark: Configure rust-analyzer for this crate",
+        "category": "xark"
+      },
+      {
+        "command": "xark.toggleProfileAnnotations",
+        "title": "xark: Toggle Constraint-Cost Annotations",
+        "category": "xark"
+      }
+    ],
+    "configuration": {
+      "title": "xark",
+      "properties": {
+        "xark.binary": {
+          "type": "string",
+          "default": "xark",
+          "description": "Path to the `xark` CLI binary (on PATH, or absolute path)."
+        },
+        "xark.profileOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `xark check --profile` on file save to refresh constraint-cost annotations."
+        },
+        "xark.showGutterAnnotations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show per-line constraint counts as gutter decorations."
+        },
+        "xark.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show total constraint count in the status bar."
+        },
+        "xark.annotationMaxLines": {
+          "type": "number",
+          "default": 100,
+          "description": "Maximum number of source lines to annotate with constraint counts."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.6.0"
+  }
+}
