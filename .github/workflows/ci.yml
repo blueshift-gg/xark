@@ -104,7 +104,7 @@ jobs:
             target
             crates/lang/target
             crates/rustc/target
-          key: snapshots-${{ hashFiles('Cargo.lock', 'crates/wasm/Cargo.lock') }}
+          key: snapshots-${{ hashFiles('Cargo.lock') }}
 
       - name: cargo clippy (xark-rustc driver)
         # The workspace `check` job runs on stable and excludes this nightly
