@@ -323,10 +323,12 @@ pub fn cmd_test(args: &[String]) -> i32 {
 pub fn cmd_check(args: &[String]) -> i32 {
     let mut crate_dir: Option<String> = None;
     let mut json = false;
+    let mut profile = false;
     for a in args.iter() {
         match a.as_str() {
             // Emit machine-readable JSON diagnostics (for editors / rust-analyzer).
             "--message-format=json" | "--json" => json = true,
+            "--profile" => profile = true,
             _ if crate_dir.is_none() => crate_dir = Some(a.clone()),
             _ => {}
         }
@@ -340,6 +342,25 @@ pub fn cmd_check(args: &[String]) -> i32 {
 
     let self_exe = rustc_shim();
 
+    // When `--profile` is set, resolve the output dir the same way
+    // `cmd_build_impl` does so `profile.json` lands in `target/xark/<pkg>/`.
+    let xark_out = if profile {
+        let pkg_name = crate::xark_project::read_pkg_name(&crate_abs)
+            .unwrap_or_else(|| crate_abs.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("circuit")
+                .to_string());
+        let out_dir = crate_abs.join("target/xark").join(&pkg_name);
+        // Force recompilation when profile.json is missing — cargo would
+        // otherwise cache-hit and the driver never writes the file.
+        if !out_dir.join("profile.json").exists() {
+            touch_sources(&crate_abs);
+        }
+        Some(out_dir)
+    } else {
+        None
+    };
+
     let mut cmd = Command::new("cargo");
     cmd.arg("check")
         .current_dir(&crate_dir)
@@ -349,12 +370,18 @@ pub fn cmd_check(args: &[String]) -> i32 {
         // Isolated cargo target (nightly / MIR-encoded rlibs) so on-save checks
         // never invalidate the crate's normal `target/`, which keeps editor
         // integration fast (no rebuild-on-save thrash).
-        .env("CARGO_TARGET_DIR", crate_abs.join("target/xark"))
-        // `--check` is injected globally, but only the primary package extracts
+        .env("CARGO_TARGET_DIR", crate_abs.join("target/xark"));
+    if let Some(out) = &xark_out {
+        cmd.env("XARK_OUT", out);
+    }
+    cmd // `--check` is injected globally, but only the primary package extracts
         // (see `run_as_rustc`); dependency crates compile normally.
         .env(
             "RUSTFLAGS",
-            "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0 --check",
+            format!(
+                "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0 --check{}",
+                if profile { " --profile" } else { "" }
+            ),
         );
     if json {
         cmd.arg("--message-format=json");
@@ -416,7 +443,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
     );
     // Both files set the same rust-analyzer override: `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code specifically.
-    let ra_cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\"]";
+    let ra_cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\", \"--profile\"]";
     let files: [(&str, String); 5] = [
         ("Cargo.toml", cargo_toml),
         ("src/lib.rs", lib_rs),

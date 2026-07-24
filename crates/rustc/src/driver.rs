@@ -122,6 +122,14 @@ impl R1csCallbacks {
         }
         let output = output?;
 
+        // When `--check --profile` both present: also write `profile.json` so
+        // downstream tooling (editor extensions, CI) can consume per-line
+        // constraint attribution. A plain `--check` (no `--profile`) still
+        // writes nothing. Writes go to `target/xark/<pkg>/profile.json`.
+        if self.check_only && self.profile {
+            self.write_profile_only(&output);
+        }
+
         if !self.check_only {
             self.emit_outputs(&output);
             // Record the entry fn name beside the artifacts so downstream (proof
@@ -237,6 +245,58 @@ impl R1csCallbacks {
             let profile_path = self.output_dir.join("profile.json");
             std::fs::write(&profile_path, format!("{profile_json}\n"))
                 .unwrap_or_else(|e| panic!("failed to write {profile_path:?}: {e}"));
+        }
+    }
+
+    /// Write only `profile.json` — used by `--check --profile` so editors can
+    /// consume per-line constraint attribution without running a full build.
+    /// The output directory comes from `XARK_OUT` (set by `xark check --profile`).
+    fn write_profile_only(&self, output: &crate::lower_mir::LowerOutput) {
+        if self.output_dir.as_os_str().is_empty() {
+            return;
+        }
+        let _ = std::fs::create_dir_all(&self.output_dir);
+        let source_root = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let prof = xark_ir::ProfileProgram {
+            source_root,
+            constraints: output.profile.clone(),
+        };
+        let profile_json = xark_ir::profile::to_json_pretty(&prof);
+        let profile_path = self.output_dir.join("profile.json");
+        if let Err(e) = std::fs::write(&profile_path, format!("{profile_json}\n")) {
+            eprintln!(
+                "xark: warning: could not write {}: {e}",
+                profile_path.display()
+            );
+        }
+
+        // Also write a small metadata.json with variable table + circuit stats
+        // so editor extensions can show stats (vars, witness ops, field).
+        let meta = serde_json::json!({
+            "field": self.field.name,
+            "num_vars": output.primitive.vars.len(),
+            "num_constraints": output.primitive.constraints.len(),
+            "num_witness_ops": output.primitive.witness_gen.len(),
+            "inputs": output.primitive.vars.iter()
+                .filter(|v| matches!(v.role, xark_ir::primitive::VarRole::PublicInput | xark_ir::primitive::VarRole::PrivateInput))
+                .map(|v| serde_json::json!({
+                    "name": v.name,
+                    "role": match v.role {
+                        xark_ir::primitive::VarRole::PublicInput => "public",
+                        xark_ir::primitive::VarRole::PrivateInput => "private",
+                        _ => "derived",
+                    }
+                }))
+                .collect::<Vec<_>>(),
+        });
+        let meta_path = self.output_dir.join("metadata.json");
+        if let Err(e) = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap() + "\n") {
+            eprintln!(
+                "xark: warning: could not write {}: {e}",
+                meta_path.display()
+            );
         }
     }
 }

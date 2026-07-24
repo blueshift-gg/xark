@@ -70,6 +70,11 @@ xark prove examples/cube --input secret=3 --input result=27
 # Validate a circuit WITHOUT emitting artifacts — subset violations as rustc
 # diagnostics with source spans (great for editors / CI).
 xark check examples/cube
+
+# `--profile` also writes per-line constraint-cost attribution to
+# `target/xark/<pkg>/profile.json` (+ a `metadata.json` with circuit stats),
+# consumed by the `xark-vscode` extension and `xark profile`.
+xark check examples/cube --profile
 ```
 
 ## Editor diagnostics (rust-analyzer)
@@ -81,10 +86,17 @@ check`, so an editor shows live rejections on save. `xark init` writes this
 wiring; to add it to an existing crate, point `rust-analyzer`'s check command at
 `xark` (which must be on `PATH`):
 
+With `--profile`, `xark check` also writes per-line constraint-cost data to
+`target/xark/<pkg>/profile.json` and a `metadata.json` (variable table + circuit
+stats). The `xark-vscode` extension reads these to render gutter annotations,
+status-bar stats, and dead-code detection — no extension install needed for
+basic diagnostics.
+
 ```toml
-# rust-analyzer.toml
+# rust-analyzer.toml — subset validation on save
 [check]
 overrideCommand = ["xark", "check", ".", "--message-format=json"]
+# With the xark-vscode extension: add "--profile" for inline constraint-cost hints
 ```
 
 ```jsonc
@@ -92,6 +104,7 @@ overrideCommand = ["xark", "check", ".", "--message-format=json"]
 {
   "rust-analyzer.check.overrideCommand": ["xark", "check", ".", "--message-format=json"]
 }
+// With the xark-vscode extension: add "--profile" to the array above.
 ```
 
 Replace `.` with the crate directory (e.g. `examples/cube`) when the editor is

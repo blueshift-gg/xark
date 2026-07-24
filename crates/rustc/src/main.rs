@@ -104,9 +104,10 @@ fn run_as_rustc(mut args: Vec<String>) {
             output_dir: out.map(PathBuf::from).unwrap_or_default(),
             field,
             check_only: check_here,
-            // Emit `profile.json` only in a real build (not `--check`, which
-            // writes no artifacts) and only for the extracted primary crate.
-            profile: profile && !check_here,
+            // `--check --profile` both present: collect profile data during
+            // lowering and write `profile.json` (check mode skips normal
+            // artifact I/O, so `write_profile_only` handles it explicitly).
+            profile,
             emit_json,
         };
         rustc_driver::catch_fatal_errors(|| rustc_driver::run_compiler(&args, &mut cb))

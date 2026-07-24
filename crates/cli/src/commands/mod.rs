@@ -232,6 +232,11 @@ pub struct CheckArgs {
     /// Emit machine-readable JSON diagnostics (for editors / rust-analyzer).
     #[arg(long = "message-format", value_parser = ["json", "human"])]
     pub message_format: Option<String>,
+    /// Also write per-line constraint-cost attribution to
+    /// `target/xark/<pkg>/profile.json` (and a `metadata.json` with circuit
+    /// stats). Consumed by editor extensions and `xark profile`.
+    #[arg(long, default_value_t = false)]
+    pub profile: bool,
     /// Circuit inputs as inline JSON `{"name": value, …}` or a path to an input
     /// file. Passing `--inputs` opts into the witness-based under-constrained
     /// soundness check: xark builds the circuit, solves the witness from these
@@ -251,6 +256,9 @@ impl CheckArgs {
         let mut v = vec![self.crate_dir.clone()];
         if self.message_format.as_deref() == Some("json") {
             v.push("--message-format=json".into());
+        }
+        if self.profile {
+            v.push("--profile".into());
         }
         v
     }
