@@ -17,6 +17,7 @@ import {
   cmdInspect,
 } from "./commands";
 import { injectConfig } from "./config";
+import { runFirstRunExperience } from "./setup";
 
 // ---- State ------------------------------------------------------------------
 
@@ -88,7 +89,9 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Initial load
-  loadAndUpdate();
+  // Zero-config first-run: detect xark crate, check binary, wire rust-analyzer,
+  // and bootstrap a profile.json so annotations appear immediately.
+  runFirstRunExperience(context).then(() => loadAndUpdate());
 }
 
 export function deactivate() {

@@ -70,6 +70,11 @@
           "default": true,
           "description": "Run `xark check --profile` on file save to refresh constraint-cost annotations."
         },
+        "xark.autoConfigure": {
+          "type": "boolean",
+          "default": true,
+          "description": "On first open of an xark crate, offer to wire rust-analyzer and bootstrap a profile automatically."
+        },
         "xark.showGutterAnnotations": {
           "type": "boolean",
           "default": true,
