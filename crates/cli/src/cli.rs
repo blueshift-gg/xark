@@ -443,8 +443,10 @@ pub fn cmd_init(args: &[String]) -> i32 {
     );
     // Both files set the same rust-analyzer override: `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code specifically.
+    // `.vscode/extensions.json` recommends the xark-vscode extension so VS Code
+    // auto-prompts to install it on first open — zero manual wiring.
     let ra_cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\", \"--profile\"]";
-    let files: [(&str, String); 5] = [
+    let files: [(&str, String); 6] = [
         ("Cargo.toml", cargo_toml),
         ("src/lib.rs", lib_rs),
         (
@@ -459,6 +461,15 @@ pub fn cmd_init(args: &[String]) -> i32 {
         (
             ".vscode/settings.json",
             format!("{{\n  \"rust-analyzer.check.overrideCommand\": {ra_cmd}\n}}\n"),
+        ),
+        (
+            ".vscode/extensions.json",
+            "{\n\
+               // Recommend the xark-vscode extension for inline constraint-cost\n\
+               // diagnostics, gutter annotations, and one-click build/prove commands.\n\
+               \"recommendations\": [\"blueshift-gg.xark-vscode\"]\n\
+             }\n"
+                .to_string(),
         ),
         (".gitignore", "/target\n".to_string()),
     ];
@@ -495,6 +506,10 @@ pub fn cmd_init(args: &[String]) -> i32 {
     eprintln!(
         "{}",
         crate::style::next_steps(&[
+            (
+                format!("code {where_}"),
+                "open in VS Code — it will offer the xark extension and wire diagnostics",
+            ),
             (
                 format!("xark build {where_}"),
                 "compile the circuit to R1CS"
