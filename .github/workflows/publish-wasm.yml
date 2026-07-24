@@ -8,11 +8,6 @@ on:
         type: boolean
         required: true
         default: true
-      use-token:
-        description: "Auth with NPM_TOKEN instead of OIDC trusted publishing (first publish / fallback)"
-        type: boolean
-        required: true
-        default: false
 
 permissions:
   contents: read
@@ -85,13 +80,6 @@ jobs:
         run: npm publish --dry-run --access public
 
       - name: Publish via OIDC trusted publishing
-        if: ${{ !inputs.dry-run && !inputs.use-token }}
+        if: ${{ !inputs.dry-run }}
         working-directory: crates/wasm
         run: npm publish --access public
-
-      - name: Publish via NPM_TOKEN (bootstrap / fallback)
-        if: ${{ !inputs.dry-run && inputs.use-token }}
-        working-directory: crates/wasm
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
