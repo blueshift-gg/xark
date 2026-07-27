@@ -1,0 +1,26 @@
+[package]
+name = "grumpkin_reference"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Off-circuit `ark-grumpkin` reference generators for the `grumpkin_*` circuit
+# examples. Each bin prints the constants embedded in the corresponding example's
+# `tests/vec.rs`, so the vectors are reproducible and independently checkable:
+#   deferred_msm  -> grumpkin_ipa        (+ the validated corr254 constant)
+#   ipa_fold      -> grumpkin_ipa_fold
+#   nova_fold     -> grumpkin_nova_fold
+#   ivc           -> grumpkin_ivc
+#   complete_add  -> grumpkin_complete_add
+# The Poseidon2 challenges use the published `poseidon2` crate, which is
+# KAT-identical to the in-circuit `xark-poseidon2` gadget.
+
+[dependencies]
+ark-grumpkin = "0.6"
+ark-ec = "0.6"
+ark-ff = "0.6"
+num-bigint = "0.4"
+poseidon2 = "0.0.1"
+
+[workspace]

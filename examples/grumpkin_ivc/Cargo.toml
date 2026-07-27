@@ -1,0 +1,25 @@
+[package]
+name = "grumpkin_ivc"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
+xark-grumpkin = { path = "../../gadgets/xark-grumpkin", version = "0.2.1" }
+xark-poseidon2 = { path = "../../gadgets/xark-poseidon2", version = "0.2.1" }
+
+[target.'cfg(not(xark))'.dependencies]
+xark-prover = { path = "../../crates/prover", version = "0.2.1" }
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+xark-ir = { path = "../../crates/ir", version = "0.2.1" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
+
+[workspace]

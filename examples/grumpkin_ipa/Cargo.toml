@@ -1,0 +1,27 @@
+[package]
+name = "grumpkin_ipa"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
+xark-grumpkin = { path = "../../gadgets/xark-grumpkin", version = "0.2.1" }
+
+[target.'cfg(not(xark))'.dependencies]
+# Host-only prover so this crate's tests can call the generated validator;
+# gated on `cfg(not(xark))` so a circuit build stays lean `no_std`.
+xark-prover = { path = "../../crates/prover", version = "0.2.1" }
+
+[dev-dependencies]
+# In-memory compile + solve + Groth16 for the reference-vector test.
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+xark-ir = { path = "../../crates/ir", version = "0.2.1" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
+
+[workspace]
