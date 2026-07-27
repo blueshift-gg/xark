@@ -1,0 +1,29 @@
+[package]
+name = "grumpkin_nova_prover"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Host-side Nova folding PROVER over the BN254↔Grumpkin cycle. Extracts a Xark
+# circuit's R1CS, commits the witness with a Grumpkin Pedersen commitment
+# (Grumpkin coords are Fr_BN254, so the group ops are over the repo's own Fr —
+# no ark-grumpkin, no ark-version skew with xark-ir), represents committed
+# relaxed-R1CS instances, folds them (cross-term T), and verifies the folded
+# instance satisfies `Az∘Bz = u·Cz + E`. The commitment fold it computes is
+# exactly what `grumpkin_nova_fold` verifies in-circuit.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark-ir = { path = "../../crates/ir", version = "0.2.1" }
+ark-bn254 = "0.6"
+ark-ff = "0.6"
+num-bigint = "0.4"
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+ark-bn254 = "0.6"
+
+[workspace]
