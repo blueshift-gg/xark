@@ -217,22 +217,16 @@ fn sanitize_crate_name(s: &str) -> String {
     }
 }
 
-/// The `xark-verifier` dependency written into the generated crate: a git
-/// source on this repo, **pinned to the exact revision this `xark` binary was
-/// built from** (`XARK_GIT_HASH`, the same revision `xark --version` prints).
-/// So the generated verifier is byte-for-byte the one that matches your
-/// toolchain, and the crate builds on a fresh clone with no sibling checkout —
-/// no user input, no `[patch]`. Switch to a plain version once `xark-verifier`
-/// is published to crates.io.
+/// The `xark-verifier` dependency written into the generated crate: pinned to
+/// the crates.io version matching this `xark` binary (`CARGO_PKG_VERSION`, the
+/// same version `xark --version` prints). `xark-verifier` and `xark-cli` share
+/// the workspace version and are published in lockstep, so an exact-match req
+/// resolves to the verifier that matches the CLI that generated the crate.
 ///
-/// Falls back to an unpinned git source when the revision is unknown (an `xark`
-/// built outside a git checkout).
+/// Resolved from crates.io — no git source, no sibling checkout, no user input,
+/// no `[patch]`; a fresh clone builds with just `cargo build`.
 fn verifier_dep() -> String {
-    const REPO: &str = "https://github.com/blueshift-gg/xark";
-    match env!("XARK_GIT_HASH") {
-        "unknown" => format!(r#"{{ git = "{REPO}" }}"#),
-        rev => format!(r#"{{ git = "{REPO}", rev = "{rev}" }}"#),
-    }
+    format!(r#""={}""#, env!("CARGO_PKG_VERSION"))
 }
 
 fn gen_cargo_toml(name: &str) -> String {
@@ -250,7 +244,8 @@ edition = "2024"
 [workspace]
 
 [dependencies]
-# The verifier core, pinned to the xark revision this crate was generated with.
+# The verifier core, pinned to the crates.io version of the `xark` CLI that
+# generated this crate.
 xark-verifier = {verifier_dep}
 
 # `target_os = "solana"` / `target_arch = "bpf"` are Solana-toolchain-only cfg
@@ -453,27 +448,24 @@ mod tests {
     use super::{gen_cargo_toml, verifier_dep};
 
     #[test]
-    fn generated_manifest_is_standalone_and_git_sourced() {
+    fn generated_manifest_is_standalone_and_version_pinned() {
         let manifest = gen_cargo_toml("example-verifier");
 
         // Standalone so cargo doesn't fold it into a neighbouring workspace.
         assert!(manifest.contains("\n[workspace]\n"));
-        // A GitHub git source (bare or rev-pinned) — never a version req the
-        // unpublished crate can't resolve, never a local path.
-        assert!(
-            manifest.contains(r#"xark-verifier = { git = "https://github.com/blueshift-gg/xark""#)
-        );
+        // A crates.io version req exact-pinned to this CLI's version — never a
+        // git source, never a local path.
+        assert!(manifest.contains(&format!(
+            r#"xark-verifier = "={}""#,
+            env!("CARGO_PKG_VERSION")
+        )));
     }
 
     #[test]
-    fn verifier_dep_pins_the_build_revision() {
-        // In a git checkout (as in CI/tests) the dep pins `rev` to the exact
-        // revision this binary was built from; otherwise it's an unpinned git
-        // source. Either way it targets GitHub and takes no user input.
-        let dep = verifier_dep();
-        assert!(dep.starts_with(r#"{ git = "https://github.com/blueshift-gg/xark""#));
-        if env!("XARK_GIT_HASH") != "unknown" {
-            assert!(dep.contains(&format!(r#"rev = "{}""#, env!("XARK_GIT_HASH"))));
-        }
+    fn verifier_dep_pins_the_cli_version() {
+        // The dep is an exact-match req on this binary's own version, so the
+        // generated crate resolves the verifier that matches the CLI from
+        // crates.io — no git, no user input.
+        assert_eq!(verifier_dep(), format!(r#""={}""#, env!("CARGO_PKG_VERSION")));
     }
 }
