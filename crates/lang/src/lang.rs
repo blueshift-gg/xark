@@ -37,13 +37,24 @@ use crate::intrinsics::*;
 /// A bare `Field` is intentionally **not** `PartialOrd for Field`: ordering the
 /// canonical `[0, r)` representative needs a width, so it must come from the RHS
 /// type or the `::<N>`. See `docs/integer-ops.md`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Field {
     /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
     /// Meaningful only for constants (`Field::from`/`Field::constant` `const fn`s):
     /// the compiler reads this out of a `const Field`. For witnesses the value is
     /// tracked symbolically and these limbs are never read.
     _limbs: [u64; 4],
+}
+
+/// Prints the field's **decimal value** (e.g. `Field(19900101)`) rather than the
+/// raw limbs, so you can read the value straight out of a `{:?}` dump — of a bare
+/// `Field`, a `#[derive(CircuitInput)]` struct, or a generated `<Fn>Inputs` — and
+/// feed it to `xark prove`. Like [`Field::to_decimal`], the value is meaningful
+/// only for a *constant* `Field` (a witness's limbs are symbolic).
+impl core::fmt::Debug for Field {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Field({})", self.to_decimal())
+    }
 }
 
 /// A private witness input. Transparent alias, erased during type checking; the
