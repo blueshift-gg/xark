@@ -77,6 +77,17 @@ jobs:
             crates/rustc/target
           key: ed25519-${{ hashFiles('Cargo.lock') }}
 
+      - name: Add swap space (heavy non-native EC solves exceed the 7 GB runner RAM)
+        # These KAT solves peak well above the standard runner's 7 GB (measured
+        # ~12 GB), so the job was OOM-killed (exit 143, empty logs). A swapfile on
+        # the large `/mnt` scratch disk gives headroom without a bigger runner.
+        run: |
+          sudo fallocate -l 16G /mnt/nightly-kat-swap
+          sudo chmod 600 /mnt/nightly-kat-swap
+          sudo mkswap /mnt/nightly-kat-swap
+          sudo swapon /mnt/nightly-kat-swap
+          free -h
+
       - name: cargo test (heavy EC gadget vectors, release)
         # Release is mandatory: the non-native EC solves are 10–50× slower in
         # debug (see the release-mode note in the repo). These Groth16 e2e
