@@ -25,12 +25,16 @@ program crate and pin *its* hash.
 
 | Component | Pinned version | Install |
 |---|---|---|
-| `cargo-build-sbf` (Anza / Solana CLI) | `stable` channel via `release.anza.xyz/stable/install` (currently `solana-cli 3.x`, `platform-tools v1.52`, `rustc 1.89.0`) | `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"` |
+| `platform-tools` (SBF `rustc`/`llvm`/`solana-ld`) | **`v1.54`, pinned explicitly** via `cargo-build-sbf --tools-version v1.54` | Fetched on demand by `cargo-build-sbf`. |
+| `cargo-build-sbf` (Anza / Solana CLI) | Any recent release (CI uses `v4.0.0`) — only the *orchestrator* | `sh -c "$(curl -sSfL https://release.anza.xyz/v4.0.0/install)"` |
 | Host `cargo` (only drives `cargo-build-sbf`) | Workspace `rust-version = "1.85"` | Any 1.85+ stable is fine. |
 
-`cargo-build-sbf` is the *only* thing that touches the SBF target's codegen. Its bundled
-`platform-tools` includes a pinned `rustc`/`cargo`/`llvm`/`solana-ld` — that determines the
-deterministic-codegen contract.
+The `platform-tools` bundle (a pinned `rustc`/`cargo`/`llvm`/`solana-ld`) is the *only* thing that
+determines the SBF codegen, so it — not the Anza CLI release — is what we pin, explicitly via
+`--tools-version v1.54`. This is verified **orchestrator-independent**: two different
+`cargo-build-sbf` versions (whose *defaults* were `v1.52` and `v1.54`), both invoked with
+`--tools-version v1.54`, produce byte-identical `.so`s. So the CLI release above is just a convenient
+source of `cargo-build-sbf`; bumping it does not change the hash, but bumping `--tools-version` does.
 
 The reference program's release profile (`crates/verifier/reference-program/Cargo.toml`) also pins:
 
@@ -55,8 +59,8 @@ its own `Cargo.lock`, the source of truth for the dependency graph compiled into
 
 * `xark-verifier` is a `path` dep back to `crates/verifier/`, so verifier source changes flow into
   the next build automatically.
-* All other deps (`solana-program-entrypoint`, `solana-program-error`, `solana-nostd-alt-bn128`, …)
-  are pinned to crates.io versions whose checksums are committed in `Cargo.lock`.
+* All other deps (`pinocchio` — the zero-copy entrypoint, `solana-nostd-alt-bn128`, …) are pinned to
+  crates.io versions whose checksums are committed in `Cargo.lock`.
 
 We do **not** vendor sources — `cargo` verifies each dep's registry checksum against `Cargo.lock` on
 build, so a committed `Cargo.lock` is byte-for-byte equivalent to a `vendor/` tree for
@@ -71,13 +75,14 @@ From the repo root:
 cargo build-sbf \
   --manifest-path crates/verifier/reference-program/Cargo.toml \
   --sbf-out-dir build-out/ \
+  --tools-version v1.54 \
   -- \
   --locked
 ```
 
 This (1) resolves against `crates/verifier/reference-program/Cargo.lock` (`--locked` forwarded to the
-inner `cargo`), (2) compiles for `sbpf-solana-solana` with the pinned `platform-tools` rustc, (3)
-links a single `.so` into `build-out/`. Verify:
+inner `cargo`), (2) compiles for `sbpf-solana-solana` with the **`--tools-version v1.54`** pinned
+`platform-tools` rustc, (3) links a single `.so` into `build-out/`. Verify:
 
 ```bash
 shasum -a 256 -c crates/verifier/reference-program/expected.sha256
@@ -103,7 +108,7 @@ is a security-relevant finding.
 ## Updating the pinned hash (rare)
 
 Any change affecting the compiled bytes — a verifier source edit, a `cargo update` in
-`reference-program/Cargo.lock`, a new pinned `platform-tools` — changes the SHA-256. To roll it:
+`reference-program/Cargo.lock`, or a bump to `--tools-version` — changes the SHA-256. To roll it:
 
 1. Run the `cargo build-sbf` command above.
 2. Recompute the SHA-256.

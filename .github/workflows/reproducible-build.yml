@@ -41,9 +41,12 @@ jobs:
         # pinned `platform-tools` rustc.
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Solana CLI (pinned `platform-tools`)
-        # This release bundles the platform-tools version that determines the
-        # SBF codegen. Changing it requires regenerating expected.sha256.
+      - name: Install Solana CLI (provides cargo-build-sbf)
+        # We only need this release for its `cargo-build-sbf`. The SBF codegen
+        # is pinned *explicitly* by `--tools-version` in the build step below —
+        # not by this release's default platform-tools — so the exact CLI
+        # version doesn't affect the .so hash (verified: two different
+        # orchestrators + the same `--tools-version` produce the same bytes).
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v4.0.0/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
@@ -53,14 +56,17 @@ jobs:
           cargo-build-sbf --version
           rustc --version
 
-      - name: Build reference program with cargo-build-sbf (locked)
-        # `--locked` is forwarded to the inner cargo so a dirty Cargo.lock
-        # fails the build outright (i.e. a `cargo update` in CI is forbidden).
+      - name: Build reference program with cargo-build-sbf (pinned + locked)
+        # `--tools-version` pins the platform-tools (the SBF rustc + lld) that
+        # determine codegen — this is *the* reproducibility lever; bumping it
+        # requires regenerating expected.sha256. `--locked` is forwarded to the
+        # inner cargo so a dirty Cargo.lock fails the build (no CI `cargo update`).
         run: |
           mkdir -p build-out
           cargo build-sbf \
             --manifest-path crates/verifier/reference-program/Cargo.toml \
             --sbf-out-dir build-out \
+            --tools-version v1.54 \
             -- \
             --locked
 

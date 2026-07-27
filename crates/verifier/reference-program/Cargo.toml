@@ -28,8 +28,11 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 xark-verifier = { path = ".." }
-solana-program-entrypoint = { version = "3.1.1", default-features = false }
-solana-program-error = { version = "3.0.1", default-features = false }
+# Pinocchio's zero-copy entrypoint (`AccountView`, no per-account heap alloc)
+# instead of the classic SDK entrypoint — smaller `.so`, fewer compute units,
+# no external deps. It re-exports `solana-program-error` (same major the core
+# uses), so the verifier's `From<VerifierError> for ProgramError` still applies.
+pinocchio = "0.11.2"
 
 # `target_os = "solana"` is a Solana-toolchain-only cfg value; declare it
 # so host rustc's `unexpected_cfgs` lint (1.80+) doesn't fire.

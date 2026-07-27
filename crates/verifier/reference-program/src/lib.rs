@@ -15,22 +15,30 @@
 //! `xark-verifier` README). This reference program reads it dynamically so
 //! the audit artifact is a single fixed `.so`, independent of any
 //! particular circuit.
+#![cfg_attr(target_os = "solana", no_std)]
 
-use solana_program_entrypoint::entrypoint;
-use solana_program_error::ProgramError;
+use pinocchio::{
+    AccountView, Address, ProgramResult, default_allocator, error::ProgramError,
+    nostd_panic_handler, program_entrypoint,
+};
 use xark_verifier::{FR_BYTES, PROOF_BYTES, verify_groth16};
 
-entrypoint!(process_instruction);
+// This program and all its on-chain dependencies are `no_std`, so wire up the
+// entrypoint, bump allocator, and a real `#[panic_handler]` explicitly — the
+// all-in-one `entrypoint!` macro assumes `std` provides the panic handler.
+program_entrypoint!(process_instruction);
+default_allocator!();
+nostd_panic_handler!();
 
 /// The single entry point: parses the VK out of account 0's data, splits
 /// instruction data into `proof || public_inputs`, and calls
 /// [`verify_groth16`]. A failed pairing check (`Ok(false)`) is treated as
 /// `Err(ProgramError::Custom(1))` so the runtime aborts the transaction.
 pub fn process_instruction(
-    _program_id: &solana_program_entrypoint::__Pubkey,
-    accounts: &[solana_program_entrypoint::__AccountInfo<'_>],
+    _program_id: &Address,
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
-) -> Result<(), ProgramError> {
+) -> ProgramResult {
     if instruction_data.len() < PROOF_BYTES {
         return Err(ProgramError::Custom(2));
     }
@@ -44,7 +52,7 @@ pub fn process_instruction(
     // deployment MUST authenticate the VK (bake it in, or pin the account
     // owner/address and VK hash), else an attacker's VK is accepted.
     let vk_account = accounts.first().ok_or(ProgramError::NotEnoughAccountKeys)?;
-    let vk_data = vk_account.try_borrow_data()?;
+    let vk_data = vk_account.try_borrow()?;
     match verify_groth16(&vk_data, proof, public_inputs) {
         Ok(true) => Ok(()),
         Ok(false) => Err(ProgramError::Custom(1)),
