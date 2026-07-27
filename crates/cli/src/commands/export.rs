@@ -466,6 +466,9 @@ mod tests {
         // The dep is an exact-match req on this binary's own version, so the
         // generated crate resolves the verifier that matches the CLI from
         // crates.io — no git, no user input.
-        assert_eq!(verifier_dep(), format!(r#""={}""#, env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            verifier_dep(),
+            format!(r#""={}""#, env!("CARGO_PKG_VERSION"))
+        );
     }
 }

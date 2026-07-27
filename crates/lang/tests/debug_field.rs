@@ -6,12 +6,18 @@ use xark::Field;
 
 #[test]
 fn field_debug_is_decimal() {
-    assert_eq!(format!("{:?}", Field::from_u64(19900101)), "Field(19900101)");
+    assert_eq!(
+        format!("{:?}", Field::from_u64(19900101)),
+        "Field(19900101)"
+    );
     assert_eq!(format!("{:?}", Field::zero()), "Field(0)");
     assert_eq!(format!("{:?}", Field::one()), "Field(1)");
     // A big (32-byte) constant still renders its full decimal.
     assert_eq!(
-        format!("{:?}", Field::from_u128(340282366920938463463374607431768211455)),
+        format!(
+            "{:?}",
+            Field::from_u128(340282366920938463463374607431768211455)
+        ),
         "Field(340282366920938463463374607431768211455)"
     );
 }
