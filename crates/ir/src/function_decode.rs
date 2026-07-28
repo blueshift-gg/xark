@@ -504,6 +504,738 @@ fn expand_w_top(defs: &[GDef], items: &[WItem], parallel: bool) -> Vec<WitnessGe
     }
 }
 
+/// Streaming twin of [`expand_c`]: emits each expanded R1CS row to `emit`
+/// instead of collecting into a `Vec`, so a consumer never materializes the flat
+/// system.
+fn expand_c_visit(
+    defs: &[GDef],
+    items: &[CItem],
+    subst: &dyn Fn(u32) -> LinearCombination,
+    emit: &mut dyn FnMut(R1csRow),
+) {
+    for it in items {
+        match it {
+            CItem::Row(r) => emit(R1csRow {
+                a: subst_lc(&r.a, subst),
+                b: subst_lc(&r.b, subst),
+                c: subst_lc(&r.c, subst),
+                note: None,
+            }),
+            CItem::Rolled(rows) => {
+                for r in rows {
+                    emit(R1csRow {
+                        a: subst_lc(&r.a, subst),
+                        b: subst_lc(&r.b, subst),
+                        c: subst_lc(&r.c, subst),
+                        note: None,
+                    });
+                }
+            }
+            CItem::Call(d, base, plugs) => {
+                let def = &defs[*d as usize];
+                let base = subst_out(*base, subst);
+                let sub_plugs: Vec<LinearCombination> =
+                    plugs.iter().map(|lc| subst_lc(lc, subst)).collect();
+                let sub = call_subst(def, base, sub_plugs);
+                expand_c_visit(defs, &def.c_items, &sub, emit);
+            }
+        }
+    }
+}
+
+/// Decode a function blob to the **compact** form (header + templates + top-level
+/// items) without expanding the constraint stream. Mirrors the front of
+/// `expand_function_blob_inner`, minus `expand_c_top` and the global prune.
+type CompactDecoded = (
+    FieldSpec,
+    Vec<Var>,
+    Vec<GDef>,
+    Vec<CItem>,
+    Vec<WItem>,
+    std::collections::BTreeSet<u32>,
+    usize, // num_inputs (leading input vars; used by the var prune)
+);
+
+fn decode_compact(b: &[u8]) -> CompactDecoded {
+    let mut p = 6usize;
+    let name = get_str(b, &mut p);
+    let modulus_decimal = get_str(b, &mut p);
+    let num_vars = get_uv(b, &mut p) as usize;
+    let num_inputs = get_uv(b, &mut p) as usize;
+    let mut roles = vec![VarRole::Derived; num_vars];
+    let mut names: Vec<Option<String>> = vec![None; num_vars];
+    for id in 0..num_inputs {
+        roles[id] = byte_role(b[p]);
+        p += 1;
+        names[id] = Some(get_str(b, &mut p));
+    }
+    let n_defs = get_uv(b, &mut p) as usize;
+    let mut defs = Vec::with_capacity(n_defs);
+    for _ in 0..n_defs {
+        let base_var = get_uv(b, &mut p) as u32;
+        let plugs = get_ids(b, &mut p);
+        let outputs = get_ids(b, &mut p);
+        let c_items = parse_c_items(b, &mut p);
+        let w_items = parse_w_items(b, &mut p);
+        defs.push(GDef {
+            base_var,
+            plugs,
+            outputs,
+            c_items,
+            w_items,
+        });
+    }
+    let top_c = parse_c_items(b, &mut p);
+    let top_w = parse_w_items(b, &mut p);
+    let keep_extra: std::collections::BTreeSet<u32> = get_ids(b, &mut p).into_iter().collect();
+    let vars = (0..num_vars)
+        .map(|id| Var {
+            id: id as u32,
+            name: names[id].take().unwrap_or_else(|| format!("v{id}")),
+            role: roles[id].clone(),
+        })
+        .collect();
+    (
+        FieldSpec {
+            name,
+            modulus_decimal,
+        },
+        vars,
+        defs,
+        top_c,
+        top_w,
+        keep_extra,
+        num_inputs,
+    )
+}
+
+/// **Streaming constraint check** — solve the witness, then verify every R1CS row
+/// by expanding it out of the compact bytecode and evaluating on the fly, so the
+/// flat R1CS is *never materialized*. Peak memory is the witness + one row, not
+/// the full constraint system. Correctness-equivalent to
+/// `solve_and_check(&cp.to_primitive(), inputs)`, minus the two flat copies.
+pub fn stream_check(
+    b: &[u8],
+    inputs: &std::collections::BTreeMap<u32, String>,
+) -> Result<(), String> {
+    let (field, vars, defs, top_c, top_w, _keep, _num_inputs) = decode_compact(b);
+    let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
+        .ok_or_else(|| "bad modulus".to_string())?;
+    let assign = solve_streamed(&vars, &defs, &top_w, &modulus, inputs)?;
+    // Each top-level item is an independent constraint shard (absolute var ids),
+    // so evaluate them in parallel against the shared read-only assignment,
+    // streaming+dropping rows within each shard. Short-circuits on first failure.
+    use rayon::prelude::*;
+    let ok = top_c.par_iter().all(|item| {
+        let mut shard_ok = true;
+        expand_c_visit(
+            &defs,
+            std::slice::from_ref(item),
+            &identity_lc,
+            &mut |row: R1csRow| {
+                if shard_ok
+                    && !crate::solver::row_satisfied(&row.a, &row.b, &row.c, &assign, &modulus)
+                {
+                    shard_ok = false;
+                }
+            },
+        );
+        shard_ok
+    });
+    if ok {
+        Ok(())
+    } else {
+        Err("a constraint is unsatisfied".to_string())
+    }
+}
+
+/// Decode just the variable table (roles + names) from a function blob, without
+/// expanding any constraints — cheap input resolution for a streaming check.
+pub fn decode_vars(b: &[u8]) -> Vec<Var> {
+    decode_compact(b).1
+}
+
+/// Stream the constraints and total the **distinct-variable references** across
+/// all rows — the volume a single-pass streaming analyzer (per-var univariate
+/// accumulation) would have to store (~3 field elements each). Returns
+/// `(rows, total_refs)`. Diagnostic: tells us whether streaming the analyzer can
+/// beat materializing the flat constraints, before building it.
+pub fn stream_ref_count(b: &[u8]) -> (usize, usize) {
+    use rayon::prelude::*;
+    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    top_c
+        .par_iter()
+        .map(|item| {
+            let (mut rows, mut refs) = (0usize, 0usize);
+            expand_c_visit(
+                &defs,
+                std::slice::from_ref(item),
+                &identity_lc,
+                &mut |row: R1csRow| {
+                    rows += 1;
+                    let mut seen = std::collections::BTreeSet::new();
+                    for lc in [&row.a, &row.b, &row.c] {
+                        for t in &lc.terms {
+                            seen.insert(t.var);
+                        }
+                    }
+                    refs += seen.len();
+                },
+            );
+            (rows, refs)
+        })
+        .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+}
+
+// Per-variable classification flags accumulated by the streaming pass 1.
+const F_SEEN: u8 = 1; // some constraint references this var
+const F_RESTRICTED: u8 = 2; // some referencing row has a≠0 or b≠0 (var not free)
+const F_PINNED: u8 = 4; // some referencing row is linear in the var (a=0, b≠0)
+
+/// Fold one row's contribution into the per-variable classification flags. For
+/// each distinct variable the row references, reduce the row to its univariate
+/// `A·v² + B·v + C` (fixing all other vars to the witness) and OR in: `SEEN`
+/// always; `RESTRICTED` if `A≠0 ∨ B≠0`; `PINNED` if the row is linear in the var
+/// (`A=0 ∧ B≠0`). `fetch_or` is commutative, so this is safe to call from
+/// parallel shards in any order.
+fn apply_row_flags(
+    row: &R1csRow,
+    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    modulus: &num_bigint::BigUint,
+    flags: &[std::sync::atomic::AtomicU8],
+) {
+    use std::sync::atomic::Ordering;
+    // Distinct vars in this row (a var in several LCs reduces once).
+    let mut seen = std::collections::BTreeSet::new();
+    for lc in [&row.a, &row.b, &row.c] {
+        for t in &lc.terms {
+            seen.insert(t.var);
+        }
+    }
+    for v in seen {
+        let (a, b, _c) = crate::solver::univariate_r1cs(row, v, assign, modulus);
+        let mut bits = F_SEEN;
+        if !(a.is_zero() && b.is_zero()) {
+            bits |= F_RESTRICTED;
+            if a.is_zero() {
+                bits |= F_PINNED;
+            }
+        }
+        flags[v as usize].fetch_or(bits, Ordering::Relaxed);
+    }
+}
+
+/// Streaming pass 1: classify every variable with a **dense flag byte** while
+/// (optionally) checking satisfiability, in a single parallel sweep of the
+/// compact constraint stream. Returns the flag array (indexed by var id) and
+/// whether every row `a·b = c` held.
+///
+/// This is the memory win: instead of storing each row's univariate `(a,b,c)`
+/// reduction (3 field elements per var-reference — GBs on a heavy EC circuit),
+/// we fold each reference into 3 bits. The verdict is **order-independent**
+/// (`pinned` beats everything and the two-valued candidate set is consulted only
+/// when a var is never pinned), so the parallel `fetch_or` merge across shards is
+/// sound — no need to preserve global row order.
+fn classify_and_check(
+    defs: &[GDef],
+    top_c: &[CItem],
+    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    modulus: &num_bigint::BigUint,
+    num_vars: usize,
+    check_sat: bool,
+) -> (Vec<std::sync::atomic::AtomicU8>, bool) {
+    use rayon::prelude::*;
+    use std::sync::atomic::AtomicU8;
+    let flags: Vec<AtomicU8> = (0..num_vars).map(|_| AtomicU8::new(0)).collect();
+    let sat_ok = top_c
+        .par_iter()
+        .map(|item| {
+            let mut shard_ok = true;
+            expand_c_visit(
+                defs,
+                std::slice::from_ref(item),
+                &identity_lc,
+                &mut |row: R1csRow| {
+                    if check_sat
+                        && shard_ok
+                        && !crate::solver::row_satisfied(&row.a, &row.b, &row.c, assign, modulus)
+                    {
+                        shard_ok = false;
+                    }
+                    apply_row_flags(&row, assign, modulus, &flags);
+                },
+            );
+            shard_ok
+        })
+        .reduce(|| true, |x, y| x && y);
+    (flags, sat_ok)
+}
+
+/// Streaming pass 2 (rare path): re-stream the constraints, gathering each
+/// *suspect* var's univariate `(a,b,c)` reductions, then run the exact flat
+/// two-valued test on that small set. Suspects are vars that survived pass 1
+/// restricted-but-unpinned — for a well-constrained circuit this set is empty
+/// and pass 2 never runs. Returns the subset that is genuinely two-valued.
+fn two_valued_suspects(
+    defs: &[GDef],
+    top_c: &[CItem],
+    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    modulus: &num_bigint::BigUint,
+    suspects: &std::collections::BTreeSet<u32>,
+) -> std::collections::BTreeSet<u32> {
+    use crate::solver::Fp;
+    // Gather every suspect's referencing rows (small: |suspects| is tiny).
+    let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
+        suspects.iter().map(|&v| (v, Vec::new())).collect();
+    expand_c_visit(defs, top_c, &identity_lc, &mut |row: R1csRow| {
+        let mut seen = std::collections::BTreeSet::new();
+        for lc in [&row.a, &row.b, &row.c] {
+            for t in &lc.terms {
+                if suspects.contains(&t.var) {
+                    seen.insert(t.var);
+                }
+            }
+        }
+        for v in seen {
+            polys
+                .get_mut(&v)
+                .unwrap()
+                .push(crate::solver::univariate_r1cs(&row, v, assign, modulus));
+        }
+    });
+    two_valued_from_polys(&polys, assign, modulus)
+}
+
+/// The exact flat two-valued test over already-gathered per-suspect univariate
+/// reductions: a suspect is under-constrained iff some second root `β≠α`
+/// satisfies *all* of its rows. Mirrors `analyze_*_cp`'s candidate loop. Runs in
+/// parallel over the (tiny) suspect set.
+fn two_valued_from_polys(
+    polys: &std::collections::BTreeMap<
+        u32,
+        Vec<(crate::solver::Fp, crate::solver::Fp, crate::solver::Fp)>,
+    >,
+    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    modulus: &num_bigint::BigUint,
+) -> std::collections::BTreeSet<u32> {
+    use crate::solver::Fp;
+    use rayon::prelude::*;
+    polys
+        .par_iter()
+        .filter_map(|(&v, ps)| {
+            let alpha = assign.get(&v).cloned().unwrap_or_else(|| Fp::zero(modulus));
+            let mut candidates: Vec<Fp> = Vec::new();
+            for (a, b, _c) in ps {
+                if a.is_zero() {
+                    continue;
+                }
+                let inv_a = a.inverse().expect("a != 0 in quadratic branch");
+                candidates.push(b.neg().mul(&inv_a).sub(&alpha));
+            }
+            for beta in &candidates {
+                if *beta == alpha {
+                    continue;
+                }
+                let satisfies_all = ps
+                    .iter()
+                    .all(|(a, b, c)| a.mul(beta).mul(beta).add(&b.mul(beta)).add(c).is_zero());
+                if satisfies_all {
+                    return Some(v);
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+/// Core streaming soundness pass shared by [`stream_analyze`] and
+/// [`stream_verify`]: classify (pass 1) + optional satisfiability check, then
+/// resolve the rare suspects (pass 2), and assemble the under-constraint list in
+/// var-id order. Peak extra memory over the witness is one flag byte per var (a
+/// few MB) plus the tiny suspect set — never the flat constraint system.
+#[allow(clippy::too_many_arguments)]
+fn stream_underconstrained(
+    defs: &[GDef],
+    top_c: &[CItem],
+    vars: &[Var],
+    keep_extra: &std::collections::BTreeSet<u32>,
+    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    modulus: &num_bigint::BigUint,
+    check_sat: bool,
+) -> (bool, Vec<crate::solver::UnderConstrained>) {
+    let (flags, sat_ok) = classify_and_check(defs, top_c, assign, modulus, vars.len(), check_sat);
+    let suspects = select_suspects(&flags, vars);
+    let two_valued = if suspects.is_empty() {
+        std::collections::BTreeSet::new()
+    } else {
+        two_valued_suspects(defs, top_c, assign, modulus, &suspects)
+    };
+    let out = assemble_underconstrained(&flags, vars, keep_extra, &two_valued);
+    (sat_ok, out)
+}
+
+/// Vars that survived pass-1 classification restricted-but-never-pinned — the
+/// only ones that need the (expensive, rare) pass-2 two-valued test.
+fn select_suspects(
+    flags: &[std::sync::atomic::AtomicU8],
+    vars: &[Var],
+) -> std::collections::BTreeSet<u32> {
+    use crate::primitive::VarRole;
+    use std::sync::atomic::Ordering;
+    vars.iter()
+        .filter(|var| matches!(var.role, VarRole::Derived))
+        .filter(|var| {
+            let f = flags[var.id as usize].load(Ordering::Relaxed);
+            f & F_SEEN != 0 && f & F_RESTRICTED != 0 && f & F_PINNED == 0
+        })
+        .map(|var| var.id)
+        .collect()
+}
+
+/// Turn the classification flags (+ the resolved two-valued suspect set) into the
+/// under-constraint verdict list, in var-id order — byte-identical to
+/// `analyze_underconstrained_cp`'s output on the same circuit.
+fn assemble_underconstrained(
+    flags: &[std::sync::atomic::AtomicU8],
+    vars: &[Var],
+    keep_extra: &std::collections::BTreeSet<u32>,
+    two_valued: &std::collections::BTreeSet<u32>,
+) -> Vec<crate::solver::UnderConstrained> {
+    use crate::primitive::VarRole;
+    use std::sync::atomic::Ordering;
+    vars.iter()
+        .filter(|var| matches!(var.role, VarRole::Derived))
+        .filter_map(|var| {
+            let v = var.id;
+            let f = flags[v as usize].load(Ordering::Relaxed);
+            let reason = if f & F_SEEN == 0 {
+                // Unreferenced: the flat analyzer only sees vars that survive the
+                // expand-time prune (kept only for an explicit advice-keep).
+                if keep_extra.contains(&v) {
+                    "no constraint references this variable"
+                } else {
+                    return None;
+                }
+            } else if f & F_PINNED != 0 {
+                return None; // linearly pinned → uniquely determined
+            } else if f & F_RESTRICTED == 0 {
+                "variable's coefficient is zero in every referencing constraint (free)"
+            } else if two_valued.contains(&v) {
+                "a different value also satisfies all its constraints (two-valued)"
+            } else {
+                return None; // restricted, single-valued → fine
+            };
+            Some(crate::solver::UnderConstrained {
+                var: v,
+                name: var.name.clone(),
+                reason: reason.into(),
+            })
+        })
+        .collect()
+}
+
+/// **Streaming under-constraint analyzer** — the soundness twin of
+/// [`stream_check`]. Solves the witness, then classifies every variable in a
+/// single parallel sweep of the compact bytecode using one flag byte per var
+/// (never the flat constraint system, and — unlike a naive stream — never the
+/// per-reference univariate reductions either). Results are identical to
+/// `analyze_underconstrained_cp(&cp, &assign)`.
+pub fn stream_analyze(
+    b: &[u8],
+    inputs: &std::collections::BTreeMap<u32, String>,
+) -> Result<Vec<crate::solver::UnderConstrained>, String> {
+    let (field, vars, defs, top_c, top_w, keep_extra, _num_inputs) = decode_compact(b);
+    let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
+        .ok_or_else(|| "bad modulus".to_string())?;
+    let assign = solve_streamed(&vars, &defs, &top_w, &modulus, inputs)?;
+    let (_sat, out) =
+        stream_underconstrained(&defs, &top_c, &vars, &keep_extra, &assign, &modulus, false);
+    Ok(out)
+}
+
+/// **Streaming verify** — the low-memory analogue of the flat
+/// `solve_and_check` + `analyze_underconstrained` that the test harness'
+/// `check()` runs. Solves the witness *once*, then does a single combined
+/// streaming pass that both checks every row `a·b = c` and classifies every
+/// variable, plus the rare suspect pass. Extra peak memory over the witness is a
+/// flag byte per var — it never materializes the flat constraint system nor the
+/// per-reference univariate reductions. So it strictly wins on constraint-bound
+/// circuits (the flat `Expression`/R1CS system is the bulk) and matches the flat
+/// path on witness-bound ones (where the solve dominates and neither analyzer
+/// representation matters). Returns the (unfiltered) under-constraint list, or
+/// `Err` if the inputs do not satisfy the circuit.
+pub fn stream_verify(
+    b: &[u8],
+    inputs: &std::collections::BTreeMap<u32, String>,
+) -> Result<Vec<crate::solver::UnderConstrained>, String> {
+    stream_solve_verify(b, inputs).map(|(_assign, out)| out)
+}
+
+/// Like [`stream_verify`], but also returns the solved witness assignment — so
+/// the prove path can stream-solve (never materializing the flat program or
+/// `witness_gen`), run the soundness gate, and hand the witness straight to the
+/// Groth16 backend, all from one streamed solve. On a witness-heavy circuit
+/// (non-native folding/IVC) it replaces the multi-GB `expand_function_blob` +
+/// `solve_cp`. Returns `(assignment, under-constraint list)`; on an unsatisfied
+/// witness it returns `Err`, and the caller may re-expand flat for a precise
+/// which-constraint diagnostic on that rare path.
+pub fn stream_solve_verify(
+    b: &[u8],
+    inputs: &std::collections::BTreeMap<u32, String>,
+) -> Result<
+    (
+        std::collections::BTreeMap<u32, crate::solver::Fp>,
+        Vec<crate::solver::UnderConstrained>,
+    ),
+    String,
+> {
+    let (field, vars, defs, top_c, top_w, keep_extra, _num_inputs) = decode_compact(b);
+    let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
+        .ok_or_else(|| "bad modulus".to_string())?;
+    let assign = solve_streamed(&vars, &defs, &top_w, &modulus, inputs)?;
+    let (sat_ok, out) =
+        stream_underconstrained(&defs, &top_c, &vars, &keep_extra, &assign, &modulus, true);
+    if !sat_ok {
+        return Err("a constraint is unsatisfied".to_string());
+    }
+    Ok((assign, out))
+}
+
+/// Count the R1CS constraints by **streaming** them out of the compact bytecode
+/// (never materializing the flat `Vec`). Same count as
+/// `expand_function_blob(b).constraints.len()`, but at a tiny fraction of the
+/// resident set — the memory-win measurement point. Parallel over shards.
+pub fn stream_count_constraints(b: &[u8]) -> usize {
+    use rayon::prelude::*;
+    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    top_c
+        .par_iter()
+        .map(|item| {
+            let mut n = 0usize;
+            expand_c_visit(
+                &defs,
+                std::slice::from_ref(item),
+                &identity_lc,
+                &mut |_row| n += 1,
+            );
+            n
+        })
+        .sum()
+}
+
+/// Count the **multiplication gates** (R1CS rows where both `a` and `b` carry a
+/// variable term — a genuine `a·b` product, not a linear/constant row) by
+/// streaming the constraints out of the bytecode. Same count as
+/// `expand_function_blob(b).constraints.iter().filter(|k| !k.a.terms.is_empty()
+/// && !k.b.terms.is_empty()).count()`, but O(1) resident set — for the R1CS↔Lean
+/// gate-count bridges. Parallel over shards.
+pub fn stream_count_mul_gates(b: &[u8]) -> usize {
+    use rayon::prelude::*;
+    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    top_c
+        .par_iter()
+        .map(|item| {
+            let mut n = 0usize;
+            expand_c_visit(
+                &defs,
+                std::slice::from_ref(item),
+                &identity_lc,
+                &mut |row: R1csRow| {
+                    if !row.a.terms.is_empty() && !row.b.terms.is_empty() {
+                        n += 1;
+                    }
+                },
+            );
+            n
+        })
+        .sum()
+}
+
+/// Count the witness-gen ops by **streaming** them out of the compact bytecode
+/// (never materializing the full `Vec<WitnessGen>` the flat solve builds). Same
+/// count as `expand_function_blob(b).witness_gen.len()`, at a tiny fraction of
+/// the resident set — the memory-win measurement point for the streamed solve.
+pub fn stream_count_witness(b: &[u8]) -> usize {
+    let (_field, _vars, defs, _top_c, top_w, _keep, _num_inputs) = decode_compact(b);
+    let mut n = 0usize;
+    expand_w_visit(&defs, &top_w, &identity_lc, &mut |_op| n += 1);
+    n
+}
+
+// 128-bit FNV-1a — a fixed, portable, deterministic fold (unlike `DefaultHasher`,
+// whose output is unspecified across toolchains). Stable across machines/runs, so
+// a committed digest constant is a valid regression pin.
+fn fnv1a_128(acc: &mut u128, bytes: &[u8]) {
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013B;
+    for &b in bytes {
+        *acc ^= u128::from(b);
+        *acc = acc.wrapping_mul(PRIME);
+    }
+}
+
+/// Fold one linear combination into `acc` in a canonical, order-stable way.
+fn digest_lc(acc: &mut u128, lc: &LinearCombination) {
+    fnv1a_128(acc, lc.constant.decimal().as_bytes());
+    fnv1a_128(acc, b"|");
+    for t in &lc.terms {
+        fnv1a_128(acc, &t.var.to_le_bytes());
+        fnv1a_128(acc, t.coeff.decimal().as_bytes());
+        fnv1a_128(acc, b",");
+    }
+    fnv1a_128(acc, b";");
+}
+
+/// **Streaming circuit digest** — a stable 128-bit fingerprint of the R1CS the
+/// artifact expands to, computed by folding every `a·b = c` row straight out of
+/// the bytecode (never materializing the flat system, O(1) resident set beyond
+/// the walk). Because the flat R1CS uniquely determines the *minimized* one
+/// (minimization is a pure function), this is a sound regression pin for proving
+/// cost/shape — any change to the proven circuit changes the digest — without the
+/// multi-GB expand+minimize the old constraint-count pin required. Witness-program
+/// changes that leave the R1CS intact are covered separately by the solver check.
+pub fn stream_digest(b: &[u8]) -> u128 {
+    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    // FNV-1a 128-bit offset basis.
+    let mut acc: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    expand_c_visit(&defs, &top_c, &identity_lc, &mut |row: R1csRow| {
+        digest_lc(&mut acc, &row.a);
+        digest_lc(&mut acc, &row.b);
+        digest_lc(&mut acc, &row.c);
+        fnv1a_128(&mut acc, b"\n");
+    });
+    acc
+}
+
+/// **Build-time faithfulness gate, streamed.** Verify that the just-built compact
+/// artifact `blob` expands byte-identically to the flat lowering (`r1cs` +
+/// `prim`) — same R1CS rows, same (pruned) witness ops, same (pruned) var table —
+/// WITHOUT materializing a second `CircuitProgram` on either side. The artifact's
+/// rows/ops are streamed out of the bytecode and compared in place against the
+/// already-held flat structures; only a dense referenced-var bitset (for the
+/// prune) is allocated. Returns `(constraints, witness_ops, vars)` on success, or
+/// a precise diff `Err`. Replaces the ~2 GB `from_lowered` + `expand_function_blob`
+/// pair the driver's `XARK_VERIFY` used to build.
+pub fn verify_blob_matches(
+    blob: &[u8],
+    r1cs: &crate::r1cs::R1csProgram,
+    prim: &crate::primitive::PrimitiveProgram,
+) -> Result<(usize, usize, usize), String> {
+    let (_field, decoded_vars, defs, top_c, top_w, keep_extra, num_inputs) = decode_compact(blob);
+    let num_vars = decoded_vars.len();
+
+    // Pass 1 — constraints: compare each streamed artifact row to the flat R1CS
+    // constraint at the same index, and mark referenced vars (for the prune).
+    let mut referenced = vec![false; num_vars];
+    let mut ci = 0usize;
+    let mut err: Option<String> = None;
+    expand_c_visit(&defs, &top_c, &identity_lc, &mut |row: R1csRow| {
+        if err.is_some() {
+            return;
+        }
+        match r1cs.constraints.get(ci) {
+            Some(fc) if fc.a == row.a && fc.b == row.b && fc.c == row.c => {}
+            Some(_) => {
+                err = Some(format!(
+                    "constraint #{ci} differs between flat lowering and artifact"
+                ))
+            }
+            None => {
+                err = Some(format!(
+                    "artifact has more constraints than flat (>={})",
+                    ci + 1
+                ))
+            }
+        }
+        for lc in [&row.a, &row.b, &row.c] {
+            for t in &lc.terms {
+                if (t.var as usize) < num_vars {
+                    referenced[t.var as usize] = true;
+                }
+            }
+        }
+        ci += 1;
+    });
+    if let Some(e) = err {
+        return Err(e);
+    }
+    if ci != r1cs.constraints.len() {
+        return Err(format!(
+            "constraint count flat={} vs artifact={ci}",
+            r1cs.constraints.len()
+        ));
+    }
+
+    // The exact prune `expand_function_blob` applies: keep inputs, referenced
+    // vars, and advice-keeps; drop everything else (and the witness ops that
+    // produce a dropped var).
+    let keep = |id: usize| -> bool {
+        id < num_inputs || referenced[id] || keep_extra.contains(&(id as u32))
+    };
+
+    // Pass 2 — witness ops: stream, drop pruned, compare the survivors in order.
+    let mut wi = 0usize;
+    let mut werr: Option<String> = None;
+    expand_w_visit(&defs, &top_w, &identity_lc, &mut |op: WitnessGen| {
+        if werr.is_some() {
+            return;
+        }
+        if !keep(witness_out(&op) as usize) {
+            return; // pruned — not part of the flat witness program
+        }
+        match prim.witness_gen.get(wi) {
+            Some(fo) if *fo == op => {}
+            Some(_) => {
+                werr = Some(format!(
+                    "witness op #{wi} differs between flat lowering and artifact"
+                ))
+            }
+            None => {
+                werr = Some(format!(
+                    "artifact has more witness ops than flat (>={})",
+                    wi + 1
+                ))
+            }
+        }
+        wi += 1;
+    });
+    if let Some(e) = werr {
+        return Err(e);
+    }
+    if wi != prim.witness_gen.len() {
+        return Err(format!(
+            "witness-op count flat={} vs artifact={wi}",
+            prim.witness_gen.len()
+        ));
+    }
+
+    // Vars: the pruned artifact var table (id + role) vs the flat one.
+    let mut vi = 0usize;
+    for (id, dv) in decoded_vars.iter().enumerate() {
+        if !keep(id) {
+            continue;
+        }
+        let fv = prim
+            .vars
+            .get(vi)
+            .ok_or_else(|| format!("artifact has more vars than flat (>={})", vi + 1))?;
+        if fv.id as usize != id || fv.role != dv.role {
+            return Err(format!(
+                "variable differs — flat (id={}, {:?}) vs artifact (id={id}, {:?})",
+                fv.id, fv.role, dv.role
+            ));
+        }
+        vi += 1;
+    }
+    if vi != prim.vars.len() {
+        return Err(format!(
+            "variable count flat={} vs artifact={vi}",
+            prim.vars.len()
+        ));
+    }
+
+    Ok((ci, wi, vi))
+}
+
 fn expand_c(
     defs: &[GDef],
     items: &[CItem],
@@ -570,6 +1302,61 @@ fn expand_w(
             }
         }
     }
+}
+
+/// Streaming twin of [`expand_w`]: emits each witness-gen op to `emit` in the
+/// same topological order (dependencies before uses) instead of collecting the
+/// whole `Vec<WitnessGen>`. Lets the solver consume ops in bounded batches so the
+/// fully-expanded hint program (the dominant footprint on heavy non-native EC
+/// circuits — GBs of substituted `LinearCombination`s) is never materialized.
+fn expand_w_visit(
+    defs: &[GDef],
+    items: &[WItem],
+    subst: &dyn Fn(u32) -> LinearCombination,
+    emit: &mut dyn FnMut(WitnessGen),
+) {
+    for it in items {
+        match it {
+            WItem::Row(w) => {
+                let mut w = w.clone();
+                subst_witness(&mut w, subst);
+                emit(w);
+            }
+            WItem::Rolled(wits) => {
+                for w in wits {
+                    let mut w = w.clone();
+                    subst_witness(&mut w, subst);
+                    emit(w);
+                }
+            }
+            WItem::Call(d, base, plugs) => {
+                let def = &defs[*d as usize];
+                let base = subst_out(*base, subst);
+                let sub_plugs: Vec<LinearCombination> =
+                    plugs.iter().map(|lc| subst_lc(lc, subst)).collect();
+                let sub = call_subst(def, base, sub_plugs);
+                expand_w_visit(defs, &def.w_items, &sub, emit);
+            }
+        }
+    }
+}
+
+/// Solve the witness by **streaming** the hint program: expand the top-level
+/// witness items op-by-op (topological order) and feed them to the batched
+/// solver, which never holds more than one batch of ops at a time. Produces the
+/// identical assignment to `expand_w_top` + `solve`, at a fraction of the peak
+/// (the full expanded `Vec<WitnessGen>` is the bulk of a heavy EC circuit's RSS).
+fn solve_streamed(
+    vars: &[Var],
+    defs: &[GDef],
+    top_w: &[WItem],
+    modulus: &num_bigint::BigUint,
+    inputs: &BTreeMap<u32, String>,
+) -> Result<BTreeMap<u32, crate::solver::Fp>, String> {
+    crate::solver::solve_witness_streamed(vars, modulus, inputs, |sink| {
+        expand_w_visit(defs, top_w, &identity_lc, &mut |op| sink(op));
+    })
+    .map_err(|e| format!("solve: {e:?}"))
 }
 
 /// Parse an `XBC` (version 1) container and expand it to a full `CircuitProgram`.
@@ -960,5 +1747,162 @@ mod tests {
         // Sanity: the streams actually produced output (calls expanded).
         assert!(c_par.len() > top_c.len());
         assert!(w_par.len() > top_w.len());
+    }
+
+    // ---- streaming under-constraint analyzer equivalence ----
+
+    use crate::solver::Fp;
+
+    /// Drive the streaming analyzer's shared core (the same `apply_row_flags` /
+    /// `select_suspects` / `two_valued_from_polys` / `assemble_underconstrained`
+    /// the real streaming path uses) over an explicit row list — so a test can
+    /// feed a deliberately under-constrained circuit that `tiny` can't express.
+    fn analyze_rows(
+        rows: &[R1csRow],
+        vars: &[Var],
+        keep_extra: &std::collections::BTreeSet<u32>,
+        assign: &std::collections::BTreeMap<u32, Fp>,
+        modulus: &num_bigint::BigUint,
+    ) -> Vec<crate::solver::UnderConstrained> {
+        use std::sync::atomic::AtomicU8;
+        let flags: Vec<AtomicU8> = (0..vars.len()).map(|_| AtomicU8::new(0)).collect();
+        for r in rows {
+            apply_row_flags(r, assign, modulus, &flags);
+        }
+        let suspects = select_suspects(&flags, vars);
+        let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
+            suspects.iter().map(|&v| (v, Vec::new())).collect();
+        for r in rows {
+            let mut seen = std::collections::BTreeSet::new();
+            for lc in [&r.a, &r.b, &r.c] {
+                for t in &lc.terms {
+                    if suspects.contains(&t.var) {
+                        seen.insert(t.var);
+                    }
+                }
+            }
+            for v in seen {
+                polys
+                    .get_mut(&v)
+                    .unwrap()
+                    .push(crate::solver::univariate_r1cs(r, v, assign, modulus));
+            }
+        }
+        let two_valued = two_valued_from_polys(&polys, assign, modulus);
+        assemble_underconstrained(&flags, vars, keep_extra, &two_valued)
+    }
+
+    fn bn254_modulus() -> num_bigint::BigUint {
+        num_bigint::BigUint::parse_bytes(
+            b"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+            10,
+        )
+        .unwrap()
+    }
+
+    fn dvar(id: u32, name: &str, role: VarRole) -> Var {
+        Var {
+            id,
+            name: name.into(),
+            role,
+        }
+    }
+
+    /// The streaming core must reproduce `analyze_underconstrained_cp` exactly on
+    /// a circuit with all three verdicts: a linearly-pinned product (fine), a
+    /// booleanity-only bit (two-valued — forgeable), and a dangling advice var
+    /// (unreferenced). `tiny` only exercises the pinned case, so this is the real
+    /// soundness-equivalence test.
+    #[test]
+    fn streaming_core_matches_flat_on_underconstrained() {
+        let m = bn254_modulus();
+        let fp = |n: i64| Fp::from_decimal(&n.to_string(), &m);
+
+        // vars: 0,1 public inputs; 2 = a·b (pinned); 3 = booleanity bit
+        // (two-valued); 4 = dangling advice (unreferenced, advice-kept).
+        let vars = vec![
+            dvar(0, "a", VarRole::PublicInput),
+            dvar(1, "b", VarRole::PublicInput),
+            dvar(2, "p", VarRole::Derived),
+            dvar(3, "bit", VarRole::Derived),
+            dvar(4, "dangling", VarRole::Derived),
+        ];
+        // r0: a·b = p ; r1: bit·(bit−1) = 0
+        let bit_minus_one = LinearCombination {
+            constant: FieldConst::from_i64(-1),
+            terms: vec![Term {
+                coeff: FieldConst::from_i64(1),
+                var: 3,
+            }],
+        };
+        let zero = LinearCombination {
+            constant: FieldConst::from_i64(0),
+            terms: vec![],
+        };
+        let rows = vec![
+            R1csRow {
+                a: LinearCombination::var(0),
+                b: LinearCombination::var(1),
+                c: LinearCombination::var(2),
+                note: None,
+            },
+            R1csRow {
+                a: LinearCombination::var(3),
+                b: bit_minus_one,
+                c: zero,
+                note: None,
+            },
+        ];
+        // Satisfying witness: 3·4 = 12, bit = 0, dangling = 0.
+        let assign: std::collections::BTreeMap<u32, Fp> = [
+            (0u32, fp(3)),
+            (1, fp(4)),
+            (2, fp(12)),
+            (3, fp(0)),
+            (4, fp(0)),
+        ]
+        .into_iter()
+        .collect();
+        let keep_extra: std::collections::BTreeSet<u32> = [4].into_iter().collect();
+
+        let cp = CircuitProgram {
+            field: FieldSpec {
+                name: "bn254".into(),
+                modulus_decimal:
+                    "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+                        .into(),
+            },
+            vars: vars.clone(),
+            constraints: rows.clone(),
+            witness_gen: vec![],
+        };
+
+        let key = |u: &crate::solver::UnderConstrained| (u.var, u.reason.clone());
+        let mut flat: Vec<_> = crate::solver::analyze_underconstrained_cp(&cp, &assign)
+            .iter()
+            .map(key)
+            .collect();
+        let mut stream: Vec<_> = analyze_rows(&rows, &vars, &keep_extra, &assign, &m)
+            .iter()
+            .map(key)
+            .collect();
+        flat.sort();
+        stream.sort();
+        assert_eq!(stream, flat, "streaming core must match the flat analyzer");
+        // And it must actually flag the two forgeable vars.
+        assert!(
+            stream
+                .iter()
+                .any(|(v, r)| *v == 3 && r.contains("two-valued"))
+        );
+        assert!(
+            stream
+                .iter()
+                .any(|(v, r)| *v == 4 && r.contains("no constraint"))
+        );
+        assert!(
+            !stream.iter().any(|(v, _)| *v == 2),
+            "pinned var must be clean"
+        );
     }
 }

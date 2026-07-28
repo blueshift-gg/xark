@@ -212,6 +212,13 @@ pub fn to_json_pretty(program: &PrimitiveProgram) -> String {
     serde_json::to_string_pretty(program).expect("PrimitiveProgram is always serializable")
 }
 
+/// Serialize compact JSON straight into `w` (a file/`BufWriter`), never building
+/// the whole JSON string in memory first — the multi-GB `circuit.json` write on
+/// heavy circuits is otherwise a full extra copy of the program.
+pub fn write_json<W: std::io::Write>(program: &PrimitiveProgram, w: W) -> std::io::Result<()> {
+    serde_json::to_writer(w, program).map_err(std::io::Error::from)
+}
+
 /// Parse a primitive program from JSON (the inverse of [`to_json`]).
 pub fn from_json(s: &str) -> Result<PrimitiveProgram, serde_json::Error> {
     serde_json::from_str(s)

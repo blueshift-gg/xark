@@ -1397,14 +1397,16 @@ dependencies = [
 
 [[package]]
 name = "xark"
-version = "0.0.1"
+version = "0.2.1"
 dependencies = [
+ "ark-bn254",
+ "ark-ff",
  "xark-macros",
 ]
 
 [[package]]
 name = "xark-ir"
-version = "0.0.1"
+version = "0.2.1"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -1418,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "xark-macros"
-version = "0.0.1"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1427,13 +1429,15 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.0.1"
+version = "0.2.1"
 dependencies = [
  "ark-bn254",
+ "ark-ec",
  "ark-ff",
  "ark-groth16",
  "ark-relations",
  "ark-snark",
+ "ark-std",
  "num-bigint",
  "rand",
  "xark-ir",

@@ -95,13 +95,14 @@ fn eddsa_verify_matches_dalek() {
     let c = xark_test_harness::compile_file(&src, "ed25519", "bn254");
     assert!(c.status_success, "compiling ed25519 failed: {}", c.stderr);
 
-    // Constraint-count regression pin (minimized R1CS, what the prover proves).
-    // Sound lazy extended-coordinate path (was 4_554_355 affine).
-    let n = c.minimized_r1cs_len();
-    eprintln!("ed25519 eddsa_verify (lazy): {n} constraints");
+    // Circuit regression pin — a streaming 128-bit digest of the expanded R1CS
+    // (O(1) memory, ~1 s), NOT expand + minimize (which peaked ~15 GB). The proven
+    // (minimized) circuit is ~2_358_142 constraints on the lazy extended-coordinate
+    // path (was 4_554_355 affine); any change to the circuit flips the digest.
     assert_eq!(
-        n, 2_358_142,
-        "ed25519 eddsa_verify constraint count changed"
+        c.circuit_digest(),
+        0x9599ff02a0de291433e1e6e33d30870f,
+        "ed25519 eddsa_verify circuit changed (re-derive the digest if intentional)"
     );
 
     // A genuine ed25519-dalek signature satisfies the circuit (fully constrained).

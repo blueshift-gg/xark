@@ -1417,10 +1417,12 @@ name = "xark-prover"
 version = "0.2.1"
 dependencies = [
  "ark-bn254",
+ "ark-ec",
  "ark-ff",
  "ark-groth16",
  "ark-relations",
  "ark-snark",
+ "ark-std",
  "num-bigint",
  "rand",
  "xark-ir",

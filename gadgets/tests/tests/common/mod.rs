@@ -215,12 +215,21 @@ pub fn xark_build(name: &str, out: &Path, target: &Path) -> (bool, String) {
 /// Uses the dev-mode setup with deterministic seed (1) for reproducibility.
 /// Returns `(success, stderr)`.
 pub fn xark_setup(out: &Path) -> (bool, String) {
-    let o = Command::new(xark_bin())
-        .arg("setup")
+    xark_setup_opts(out, false)
+}
+
+/// As [`xark_setup`], writing an uncompressed proving key when `uncompressed`.
+pub fn xark_setup_opts(out: &Path, uncompressed: bool) -> (bool, String) {
+    let mut c = Command::new(xark_bin());
+    c.arg("setup")
         .arg(out)
         .arg("--insecure-dev-mode")
         .arg("--deterministic-rng")
-        .arg("1")
+        .arg("1");
+    if uncompressed {
+        c.arg("--uncompressed");
+    }
+    let o = c
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -245,8 +254,17 @@ fn inputs_json(inputs: &[(&str, &str)]) -> String {
 /// `xark prove <out-dir> --inputs '{...}'` (solve witness + Groth16 prove/verify).
 /// Returns `(success, combined stdout+stderr)`.
 pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
+    xark_prove_opts(out, inputs, false)
+}
+
+/// As [`xark_prove`], with `--stream` when `stream` is set (streams the proving
+/// key from disk instead of loading it into RAM).
+pub fn xark_prove_opts(out: &Path, inputs: &[(&str, &str)], stream: bool) -> (bool, String) {
     let mut c = Command::new(xark_bin());
     c.arg("prove").arg(out);
+    if stream {
+        c.arg("--stream");
+    }
     c.arg("--inputs").arg(inputs_json(inputs));
     let o = c
         .stdout(Stdio::piped())

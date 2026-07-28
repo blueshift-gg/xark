@@ -16,9 +16,50 @@ pub struct Groth16Keys {
     pub verifying_key: VerifyingKey<Bn254>,
 }
 
+/// Self-describing proving-key header: `XKPK` + version + point-compression mode
+/// (`0` = compressed, `1` = uncompressed). Compressed keys are ~half the size;
+/// uncompressed keys skip the per-point square-root on load (~2× faster prove) at
+/// 2× disk. A file without this magic is a legacy key — read as compressed.
+const PK_MAGIC: &[u8; 4] = b"XKPK";
+const PK_VERSION: u8 = 1;
+
+/// `(point-compression, key body)` for a proving-key file, honoring the header if
+/// present, else defaulting to compressed for legacy keys.
+pub(crate) fn pk_compression(bytes: &[u8]) -> (Compress, &[u8]) {
+    if bytes.len() >= 6 && &bytes[..4] == PK_MAGIC {
+        let mode = if bytes[5] == 1 {
+            Compress::No
+        } else {
+            Compress::Yes
+        };
+        (mode, &bytes[6..])
+    } else {
+        (Compress::Yes, bytes)
+    }
+}
+
 impl Groth16Keys {
+    /// Write the proving key compressed (the default, smaller-on-disk format).
     pub fn write_proving_key(&self, path: &Path) -> std::io::Result<()> {
-        canonical_write_to_file(&self.proving_key, path)
+        self.write_proving_key_mode(path, Compress::Yes)
+    }
+
+    /// Write the proving key at the chosen point-compression. `Compress::No`
+    /// (uncompressed) doubles the file but skips the decompression sqrt on every
+    /// load — a large prove-time win when disk/bandwidth isn't the constraint.
+    pub fn write_proving_key_mode(&self, path: &Path, compress: Compress) -> std::io::Result<()> {
+        let mut buf = Vec::with_capacity(6 + self.proving_key.serialized_size(compress));
+        buf.extend_from_slice(PK_MAGIC);
+        buf.push(PK_VERSION);
+        buf.push(if matches!(compress, Compress::No) {
+            1
+        } else {
+            0
+        });
+        self.proving_key
+            .serialize_with_mode(&mut buf, compress)
+            .map_err(std::io::Error::other)?;
+        std::fs::write(path, buf)
     }
 
     pub fn write_verifying_key(&self, path: &Path) -> std::io::Result<()> {
@@ -35,7 +76,8 @@ impl Groth16Keys {
     /// point is still rejected.
     pub fn read_proving_key(path: &Path) -> std::io::Result<ProvingKey<Bn254>> {
         let bytes = std::fs::read(path)?;
-        read_proving_key_parallel(&bytes).map_err(|e| std::io::Error::other(e.to_string()))
+        let (compress, body) = pk_compression(&bytes);
+        read_proving_key_parallel(body, compress).map_err(|e| std::io::Error::other(e.to_string()))
     }
 
     pub fn read_verifying_key(path: &Path) -> std::io::Result<VerifyingKey<Bn254>> {
@@ -49,8 +91,9 @@ impl Groth16Keys {
 /// Compressed, `Validate::No` (see `read_proving_key`).
 fn read_proving_key_parallel(
     bytes: &[u8],
+    compress: Compress,
 ) -> Result<ProvingKey<Bn254>, ark_serialize::SerializationError> {
-    let (c, v) = (Compress::Yes, Validate::No);
+    let (c, v) = (compress, Validate::No);
     let mut cur: &[u8] = bytes;
     // Header (verifying key + two points) is small — deserialize sequentially.
     let vk = VerifyingKey::<Bn254>::deserialize_with_mode(&mut cur, c, v)?;

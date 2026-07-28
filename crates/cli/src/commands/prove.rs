@@ -25,7 +25,7 @@ use xark_snarkjs::{proof_to_snarkjs, public_inputs_to_snarkjs};
 
 use super::{
     load_backend_r1cs, load_circuit_auto, parse_inputs_arg, resolve_input_ids, setup,
-    soundness_check, soundness_check_r1cs, synth_err,
+    soundness_check_r1cs, stream_soundness, synth_err,
 };
 use crate::xark_project::XarkProject;
 
@@ -83,6 +83,13 @@ pub struct ProveArgs {
     /// flag only controls *writing* it. Ideal for producing many proofs.
     #[arg(long, default_value_t = false)]
     pub cache: bool,
+
+    /// Stream the proving key from disk instead of loading it fully into RAM.
+    /// The five Groth16 MSMs read the pk in chunks, so prove peaks at the
+    /// witness + h-poly instead of + the whole key — a large win on
+    /// constraint-heavy circuits. The proof is identical (self-verified).
+    #[arg(long, default_value_t = false)]
+    pub stream: bool,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -133,6 +140,15 @@ pub fn run(args: ProveArgs) -> Result<()> {
         .proving_key
         .clone()
         .unwrap_or_else(|| project.proving_key());
+    // Stream the proving key from disk (never materialize it) when it's large:
+    // the memory saving is decisive past a few hundred MB and the speed is ~neutral
+    // (both paths pay the same point decompression). Small keys load faster whole
+    // (no chunk overhead), so keep that path. `--stream` forces it on regardless.
+    const STREAM_PK_THRESHOLD: u64 = 512 * 1024 * 1024; // 512 MB
+    let stream = args.stream
+        || std::fs::metadata(&pk_path)
+            .map(|m| m.len() > STREAM_PK_THRESHOLD)
+            .unwrap_or(false);
     let proof_out = args.out.clone().unwrap_or_else(|| project.proof());
     let out_dir = proof_out
         .parent()
@@ -171,18 +187,23 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // deserialization, so the key load is largely hidden under it.
     let t_conc = std::time::Instant::now();
     let (pk_res, circuit_res) = rayon::join(
-        || {
+        || -> anyhow::Result<Option<_>> {
+            // Streaming proves without loading the pk (it's streamed from disk
+            // during the Groth16 MSMs), so skip the multi-GB deserialize here.
+            if stream {
+                return Ok(None);
+            }
             let tk = std::time::Instant::now();
             let pk = Groth16Keys::read_proving_key(&pk_path).with_context(|| {
                 format!(
                     "reading proving key {} (run `xark setup` first?)",
                     pk_path.display()
                 )
-            });
+            })?;
             if timing {
                 eprintln!("PROVE_TIME:   [key]     load={:?}", tk.elapsed());
             }
-            pk
+            Ok(Some(pk))
         },
         || -> anyhow::Result<_> {
             if args.r1cs.is_none() && args.circuit.is_none() && xbc.exists() {
@@ -196,13 +217,16 @@ pub fn run(args: ProveArgs) -> Result<()> {
                 // modes use the full expand for the proof's R1CS too.
                 let template_min =
                     !super::dbg_flag("XARK_FLAT_MINIMIZE") && !super::dbg_flag("XARK_NO_MINIMIZE");
-                // Full circuit — used to SOLVE the witness (all vars computed).
-                let cp = xark_ir::function_decode::expand_function_blob(&bytes)
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                // Resolve inputs from the (cheap) decoded var table — no full expand.
+                let vars = xark_ir::function_decode::decode_vars(&bytes);
                 let t_expand = te.elapsed();
-                let id_inputs = resolve_input_ids(&cp.vars, &inputs)?;
+                let id_inputs = resolve_input_ids(&vars, &inputs)?;
+                drop(vars);
                 let ts = std::time::Instant::now();
-                let assign_fp = soundness_check(&cp, profile.as_ref(), &id_inputs)?;
+                // SOLVE the witness by streaming the hint program straight from the
+                // bytecode — never materializing the full flat program / `witness_gen`
+                // (the multi-GB bulk on non-native folding/IVC circuits).
+                let assign_fp = stream_soundness(&bytes, profile.as_ref(), &id_inputs)?;
                 let t_solve = ts.elapsed();
                 let ti = std::time::Instant::now();
                 // Groth16 R1CS view — the reduced (per-template minimized) circuit,
@@ -222,7 +246,13 @@ pub fn run(args: ProveArgs) -> Result<()> {
                         ),
                     }
                 } else {
-                    (cp.into_r1cs(), false)
+                    // Flat/no-minimize debug mode: expand the full R1CS for the proof.
+                    (
+                        xark_ir::function_decode::expand_function_blob(&bytes)
+                            .map_err(|e| anyhow::anyhow!(e))?
+                            .into_r1cs(),
+                        false,
+                    )
                 };
                 if timing {
                     eprintln!(
@@ -241,7 +271,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
             }
         },
     );
-    let pk = pk_res?;
+    let pk_opt = pk_res?;
     let (prog, assign_fp, circuit_fingerprint, preminimized) = circuit_res?;
     let t_load_solve = t_conc.elapsed();
 
@@ -323,7 +353,12 @@ pub fn run(args: ProveArgs) -> Result<()> {
         None => ProveRng::Os(OsRng),
     };
     let t_prove_start = std::time::Instant::now();
-    let proof = prove(&pk, circuit, &public, &mut rng).map_err(synth_err)?;
+    let proof = match pk_opt {
+        Some(pk) => prove(&pk, circuit, &public, &mut rng).map_err(synth_err)?,
+        // `--stream`: prove without ever materializing the proving key.
+        None => xark_backend::stream_prove(&pk_path, circuit, &public, &mut rng)
+            .map_err(|e| anyhow::anyhow!("streaming prove: {e}"))?,
+    };
     if timing {
         eprintln!(
             "PROVE_TIME: load+solve+key (concurrent) = {:?}  groth16-prove = {:?}  \
@@ -517,6 +552,9 @@ fn autobuild_and_setup(
             // point of the cache. Independent of the user's `--cache` (which governs
             // whether a *standalone* `xark setup` persists it for later proofs).
             cache: true,
+            // If this prove is streaming, pair it with an uncompressed key so the
+            // stream skips decompression too (the auto-setup feeds only this prove).
+            uncompressed: args.stream,
         })?;
     }
     Ok(())

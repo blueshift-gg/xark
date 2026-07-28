@@ -14,6 +14,7 @@ use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
+use ark_serialize::Compress;
 use xark_backend::{keys::KeyMetadata, setup};
 use xark_ir::Visibility;
 use xark_prover::XarkCircuit;
@@ -66,6 +67,13 @@ pub struct SetupArgs {
     /// for the produce-many-proofs / production flow.
     #[arg(long, default_value_t = false)]
     pub cache: bool,
+
+    /// Write the proving key UNCOMPRESSED (2× on disk) so `xark prove` skips the
+    /// per-point square-root decompression on load — a large prove-time win (the
+    /// decompress is ~half of prove). Default is compressed (smaller on disk /
+    /// bandwidth). `xark prove` auto-detects which format the key is in.
+    #[arg(long, default_value_t = false)]
+    pub uncompressed: bool,
 }
 
 /// Wrapper RNG threading `CryptoRng + RngCore` through both the OS RNG path and
@@ -231,7 +239,14 @@ pub fn run(args: SetupArgs) -> Result<()> {
         let keys = xark_backend::ptau::setup_from_ptau(circuit, &ptau, &seed_arr)
             .map_err(|e| anyhow::anyhow!("phase-2 setup failed: {e}"))?;
 
-        keys.write_proving_key(&pk_path)?;
+        keys.write_proving_key_mode(
+            &pk_path,
+            if args.uncompressed {
+                Compress::No
+            } else {
+                Compress::Yes
+            },
+        )?;
         keys.write_verifying_key(&vk_path)?;
 
         let mut metadata = KeyMetadata::new_dev(hash, num_pi, num_constraints);
@@ -310,7 +325,14 @@ pub fn run(args: SetupArgs) -> Result<()> {
     }
 
     let t_write = std::time::Instant::now();
-    keys.write_proving_key(&pk_path)?;
+    keys.write_proving_key_mode(
+        &pk_path,
+        if args.uncompressed {
+            Compress::No
+        } else {
+            Compress::Yes
+        },
+    )?;
     keys.write_verifying_key(&vk_path)?;
 
     let snarkjs_vk = vk_to_snarkjs(&keys.verifying_key, num_pi);

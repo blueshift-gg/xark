@@ -184,10 +184,19 @@ impl R1csCallbacks {
         // as before) still hold. Compact `circuit.json`: machine-consumed, and
         // pretty-printing more than doubled it for no benefit.
         if self.emit_json {
-            let circuit_json = xark_ir::primitive::to_json(&output.primitive);
+            use std::io::Write;
+            // Stream each JSON straight to its file via a BufWriter — serializing
+            // to a `String` first (then `format!`-ing a newline onto it) was two
+            // full extra copies of a multi-GB document on heavy circuits.
             let circuit_path = self.output_dir.join("circuit.json");
-            std::fs::write(&circuit_path, format!("{circuit_json}\n"))
-                .unwrap_or_else(|e| panic!("failed to write {circuit_path:?}: {e}"));
+            {
+                let file = std::fs::File::create(&circuit_path)
+                    .unwrap_or_else(|e| panic!("failed to create {circuit_path:?}: {e}"));
+                let mut w = std::io::BufWriter::new(file);
+                xark_ir::primitive::write_json(&output.primitive, &mut w)
+                    .and_then(|()| w.write_all(b"\n"))
+                    .unwrap_or_else(|e| panic!("failed to write {circuit_path:?}: {e}"));
+            }
 
             // For very large circuits skip only the *pretty-print* (multi-GB) and
             // the human-oriented DOT graph, emitting compact JSON instead.
@@ -195,8 +204,11 @@ impl R1csCallbacks {
             let n_r1cs = output.r1cs.constraints.len();
             let json_path = self.output_dir.join("r1cs.json");
             if n_r1cs <= DEBUG_R1CS_MAX_CONSTRAINTS {
-                let json = xark_ir::to_json_pretty(&output.r1cs);
-                std::fs::write(&json_path, format!("{json}\n"))
+                let file = std::fs::File::create(&json_path)
+                    .unwrap_or_else(|e| panic!("failed to create {json_path:?}: {e}"));
+                let mut w = std::io::BufWriter::new(file);
+                xark_ir::json::write_json_pretty(&output.r1cs, &mut w)
+                    .and_then(|()| w.write_all(b"\n"))
                     .unwrap_or_else(|e| panic!("failed to write {json_path:?}: {e}"));
 
                 let dot = xark_ir::to_dot(&output.r1cs);
@@ -204,8 +216,11 @@ impl R1csCallbacks {
                 std::fs::write(&dot_path, dot)
                     .unwrap_or_else(|e| panic!("failed to write {dot_path:?}: {e}"));
             } else {
-                let json = xark_ir::json::to_json(&output.r1cs);
-                std::fs::write(&json_path, format!("{json}\n"))
+                let file = std::fs::File::create(&json_path)
+                    .unwrap_or_else(|e| panic!("failed to create {json_path:?}: {e}"));
+                let mut w = std::io::BufWriter::new(file);
+                xark_ir::json::write_json(&output.r1cs, &mut w)
+                    .and_then(|()| w.write_all(b"\n"))
                     .unwrap_or_else(|e| panic!("failed to write {json_path:?}: {e}"));
                 eprintln!(
                     "xark: wrote compact r1cs.json ({n_r1cs} R1CS constraints > \
@@ -254,60 +269,14 @@ fn verify_function_artifact(
     primitive: &xark_ir::primitive::PrimitiveProgram,
     blob: &[u8],
 ) {
-    let flat = xark_ir::CircuitProgram::from_lowered(r1cs, primitive);
-    let art = xark_ir::function_decode::expand_function_blob(blob)
-        .expect("XARK_VERIFY: the just-built function artifact must decode");
-
-    assert_eq!(
-        flat.constraints.len(),
-        art.constraints.len(),
-        "XARK_VERIFY: constraint count flat={} vs artifact={}",
-        flat.constraints.len(),
-        art.constraints.len()
-    );
-    for (i, (f, a)) in flat.constraints.iter().zip(&art.constraints).enumerate() {
-        assert!(
-            f.a == a.a && f.b == a.b && f.c == a.c,
-            "XARK_VERIFY: constraint #{i} differs between flat lowering and artifact"
-        );
-    }
-
-    assert_eq!(
-        flat.witness_gen.len(),
-        art.witness_gen.len(),
-        "XARK_VERIFY: witness-op count flat={} vs artifact={}",
-        flat.witness_gen.len(),
-        art.witness_gen.len()
-    );
-    for (i, (f, a)) in flat.witness_gen.iter().zip(&art.witness_gen).enumerate() {
-        assert!(
-            f == a,
-            "XARK_VERIFY: witness op #{i} differs between flat lowering and artifact"
-        );
-    }
-
-    assert_eq!(
-        flat.vars.len(),
-        art.vars.len(),
-        "XARK_VERIFY: variable count flat={} vs artifact={}",
-        flat.vars.len(),
-        art.vars.len()
-    );
-    for (f, a) in flat.vars.iter().zip(&art.vars) {
-        assert!(
-            f.id == a.id && f.role == a.role,
-            "XARK_VERIFY: variable differs — flat (id={}, {:?}) vs artifact (id={}, {:?})",
-            f.id,
-            f.role,
-            a.id,
-            a.role
-        );
-    }
-
+    // Stream the artifact's rows / witness ops / vars straight out of the compact
+    // blob and compare each against the flat lowering *in place* — never
+    // materializing a second `CircuitProgram` (neither a `from_lowered` clone of
+    // the flat side nor a fully-expanded artifact). On a heavy circuit this was
+    // ~2 GB of the build peak; the streaming check adds only a small referenced-set.
+    let (n_c, n_w, n_v) = xark_ir::function_decode::verify_blob_matches(blob, r1cs, primitive)
+        .unwrap_or_else(|e| panic!("XARK_VERIFY: {e}"));
     eprintln!(
-        "XARK_VERIFY: artifact ≡ flat lowering ✓ ({} constraints, {} witness ops, {} vars)",
-        flat.constraints.len(),
-        flat.witness_gen.len(),
-        flat.vars.len()
+        "XARK_VERIFY: artifact ≡ flat lowering ✓ ({n_c} constraints, {n_w} witness ops, {n_v} vars)"
     );
 }

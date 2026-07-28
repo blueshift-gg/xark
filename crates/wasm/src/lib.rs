@@ -202,7 +202,7 @@ fn load_artifacts(circuit_xbc: &[u8], pk_bytes: &[u8]) -> Result<PreparedArtifac
         .map(|v| (v.name.clone(), v.id))
         .collect();
     let r1cs = XarkCircuit::for_setup(reduced).prog().clone();
-    let pk = deserialize_bytes::<ProvingKey<Bn254>>(pk_bytes, "proving key")?;
+    let pk = deserialize_proving_key(pk_bytes)?;
 
     Ok(PreparedArtifacts {
         circuit,
@@ -355,4 +355,27 @@ fn deserialize_bytes<T: CanonicalDeserialize>(
 ) -> Result<T, js_sys::Error> {
     T::deserialize_with_mode(bytes, Compress::Yes, Validate::Yes)
         .map_err(|e| js_error(&format!("deserializing {what}: {e}")))
+}
+
+/// Deserialize a `pk.bin` written by `xark setup`, honoring the optional
+/// self-describing header so both compressed and `--uncompressed` keys load.
+///
+/// The layout must match `pk_compression`/`write_proving_key_mode` in
+/// `crates/backend/src/keys.rs`: a 6-byte header `b"XKPK"` + version + mode
+/// (mode `1` = uncompressed, else compressed) precedes the serialized key.
+/// Legacy untagged keys are compressed. Keep this in sync with keys.rs.
+fn deserialize_proving_key(bytes: &[u8]) -> Result<ProvingKey<Bn254>, js_sys::Error> {
+    const PK_MAGIC: &[u8; 4] = b"XKPK";
+    let (compress, body) = if bytes.len() >= 6 && &bytes[..4] == PK_MAGIC {
+        let mode = if bytes[5] == 1 {
+            Compress::No
+        } else {
+            Compress::Yes
+        };
+        (mode, &bytes[6..])
+    } else {
+        (Compress::Yes, bytes)
+    };
+    ProvingKey::<Bn254>::deserialize_with_mode(body, compress, Validate::Yes)
+        .map_err(|e| js_error(&format!("deserializing proving key: {e}")))
 }

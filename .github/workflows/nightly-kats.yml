@@ -77,20 +77,15 @@ jobs:
             crates/rustc/target
           key: ed25519-${{ hashFiles('Cargo.lock') }}
 
-      - name: Add swap space (heavy non-native EC solves exceed the 7 GB runner RAM)
-        # These KAT solves peak well above the standard runner's 7 GB (measured
-        # ~12 GB), so the job was OOM-killed (exit 143, empty logs). A swapfile on
-        # the large `/mnt` scratch disk gives headroom without a bigger runner.
-        run: |
-          sudo fallocate -l 16G /mnt/nightly-kat-swap
-          sudo chmod 600 /mnt/nightly-kat-swap
-          sudo mkswap /mnt/nightly-kat-swap
-          sudo swapon /mnt/nightly-kat-swap
-          free -h
-
       - name: cargo test (heavy EC gadget vectors, release)
         # Release is mandatory: the non-native EC solves are 10–50× slower in
-        # debug (see the release-mode note in the repo). These Groth16 e2e
-        # ECDSA/EdDSA proves are too heavy for the quick `ci.yml` step, so they
-        # live here (mirrors why ed25519 was already excluded there).
+        # debug (see the release-mode note in the repo). These heavy KATs live
+        # here (too slow for the quick `ci.yml` step).
+        #
+        # No swapfile: these KATs used to peak ~12 GB (OOM-killed on the 7 GB
+        # runner) because the harness materialized the flat R1CS to solve/analyze
+        # and the constraint-count pins ran a full expand+minimize. They now
+        # stream — `check()`/`check_named` solve+analyze straight from `circuit.xbc`
+        # (never the flat system), and the count pins are a streamed digest — so
+        # the peak is the compiler subprocess (~5 GB), well under the runner.
         run: cargo test -p xark-ed25519 -p xark-secp256k1 -p xark-secp256r1 --release

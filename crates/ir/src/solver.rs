@@ -403,6 +403,67 @@ fn solve_witness(
     Ok(assign.into_btreemap())
 }
 
+/// Solve the witness by **streaming** the hint program in bounded batches: the
+/// caller's `feed` closure emits ops one at a time (in topological order); we
+/// accumulate up to `BATCH` of them, level-solve that batch in parallel, apply
+/// its outputs, and drop it before taking the next. Because ops are topologically
+/// ordered, any op depends only on outputs already in `assign` (earlier batch) or
+/// earlier in its own batch — so the result is identical to solving the whole
+/// program at once, but peak memory is one batch of `WitnessGen` instead of the
+/// full expanded `Vec` (the dominant footprint on heavy non-native EC circuits).
+pub(crate) fn solve_witness_streamed(
+    vars: &[crate::primitive::Var],
+    modulus: &BigUint,
+    inputs: &BTreeMap<VarId, String>,
+    feed: impl FnOnce(&mut dyn FnMut(WitnessGen)),
+) -> Result<BTreeMap<VarId, Fp>, SolveError> {
+    use crate::primitive::VarRole;
+    let n = vars
+        .iter()
+        .map(|v| v.id as usize)
+        .max()
+        .map_or(0, |m| m + 1);
+    let mut assign = DenseAssign::with_len(n);
+    // Seed inputs (identical to `solve_witness`); the hint ops read but never
+    // produce them.
+    for var in vars {
+        if matches!(var.role, VarRole::PublicInput | VarRole::PrivateInput) {
+            let decimal = inputs
+                .get(&var.id)
+                .ok_or(SolveError::MissingInput(var.id))?;
+            assign.set(var.id, Fp::from_decimal(decimal, modulus));
+        }
+    }
+    // Op-count cap: keeps peak batch memory bounded regardless of circuit size.
+    // ~10^5 ops is a few hundred MB even for wide non-native limbs, vs multi-GB
+    // for the whole program, while still giving each batch ample same-level width.
+    const BATCH: usize = 100_000;
+    let mut batch: Vec<WitnessGen> = Vec::with_capacity(BATCH);
+    let mut err: Option<SolveError> = None;
+    {
+        let mut sink = |op: WitnessGen| {
+            if err.is_some() {
+                return;
+            }
+            batch.push(op);
+            if batch.len() >= BATCH {
+                if let Err(e) = solve_witness_parallel(&batch, modulus, &mut assign) {
+                    err = Some(e);
+                }
+                batch.clear();
+            }
+        };
+        feed(&mut sink);
+    }
+    if let Some(e) = err {
+        return Err(e);
+    }
+    if !batch.is_empty() {
+        solve_witness_parallel(&batch, modulus, &mut assign)?;
+    }
+    Ok(assign.into_btreemap())
+}
+
 /// Execute one witness-gen op against the immutable assignment, reporting each
 /// output via `emit`. Pure over its inputs, so independent ops run concurrently.
 fn exec_witness_op(
@@ -754,6 +815,18 @@ pub fn solve_and_check(
     Ok(assign)
 }
 
+/// `a·b == c` for one R1CS row against a solved assignment — the streaming
+/// check's per-row test (reuses [`eval_lc`]). Never holds more than one row.
+pub(crate) fn row_satisfied(
+    a: &LinearCombination,
+    b: &LinearCombination,
+    c: &LinearCombination,
+    assign: &BTreeMap<VarId, Fp>,
+    modulus: &BigUint,
+) -> bool {
+    eval_lc(a, assign, modulus).mul(&eval_lc(b, assign, modulus)) == eval_lc(c, assign, modulus)
+}
+
 // Under-constraint (soundness smoke-test) analyzer.
 
 /// A derived variable the analyzer could not prove is uniquely pinned by the
@@ -950,7 +1023,7 @@ pub fn solve_and_check_cp(
 /// fixing every variable except `v`. Splitting each of `a`, `b`, `c` into its
 /// `v`-coefficient and the rest gives, for `a = aᵥ·v + a₀` etc.:
 /// `A = aᵥ·bᵥ`, `B = aᵥ·b₀ + a₀·bᵥ − cᵥ`, `C = a₀·b₀ − c₀`.
-fn univariate_r1cs(
+pub(crate) fn univariate_r1cs(
     row: &crate::circuit::R1csRow,
     v: VarId,
     assign: &BTreeMap<VarId, Fp>,

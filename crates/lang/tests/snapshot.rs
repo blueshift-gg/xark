@@ -22,7 +22,10 @@ fn compile(src: &Path, out_name: &str) -> Compiled {
 }
 
 fn compile_with_field(src: &Path, out_name: &str, field: &str) -> Compiled {
-    xark_test_harness::compile_file(src, out_name, field)
+    // The snapshot suite reads `r1cs.json` / `circuit.json` / `graph.dot`
+    // directly, so it opts into `--emit-json` (a normal build writes only the
+    // compact `circuit.xbc`).
+    xark_test_harness::compile_file_json(src, out_name, field)
 }
 
 fn check_snapshot(snapshot_rel: &str, actual: &str) {
@@ -612,18 +615,10 @@ fn merkle_membership_gadget() {
 /// mux/booleanity shape or the compression changes this and fails here.
 #[test]
 fn merkle_matches_lean_model() {
-    let c = compile_with_field(&example("merkle"), "merkle_lean_bridge", "bn254");
+    let c = xark_test_harness::compile_file(&example("merkle"), "merkle_lean_bridge", "bn254");
     assert!(c.status_success, "merkle gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-
-    let mul_gates = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul_gates = c.mul_gate_count();
 
     // 4 levels × (240 Poseidon S-box muls + 1 booleanity + 2 select muxes) = 972.
     // The shape `merkle_level_swap_sound` + `poseidon_permutation_determined` are
@@ -1066,7 +1061,6 @@ fn field_int_operators_lower_and_solve() {
 fn sha256_matches_abc_vector() {
     use std::collections::BTreeMap;
     use std::fmt::Write as _;
-    use xark_ir::{primitive, solver};
 
     // Build the 16-block-word + 8-output-word validation circuit.
     let mut src = String::from(
@@ -1101,18 +1095,10 @@ fn sha256_matches_abc_vector() {
     );
 
     let path = write_case("sha256_abc", &src);
-    let c = compile_with_field(&path, "sha256_abc", "bn254");
+    // Streamed correctness KAT: no `--emit-json`, no materialized flat program —
+    // `check_named` solves + checks + analyzes straight from `circuit.xbc`.
+    let c = xark_test_harness::compile_file(&path, "sha256_abc", "bn254");
     assert!(c.status_success, "sha256_abc failed: {}", c.stderr);
-    let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
-    let program = primitive::from_json(&json).unwrap();
-    let id = |name: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == name)
-            .map(|v| v.id)
-            .unwrap()
-    };
 
     let block = [
         "1633837952",
@@ -1142,29 +1128,25 @@ fn sha256_matches_abc_vector() {
         "3021012833",
         "4060091821",
     ];
-    let mut inputs = BTreeMap::new();
+    let mut inputs: BTreeMap<String, String> = BTreeMap::new();
     for (i, v) in block.iter().enumerate() {
-        inputs.insert(id(&format!("b{i}")), v.to_string());
+        inputs.insert(format!("b{i}"), v.to_string());
     }
     for (i, v) in out.iter().enumerate() {
-        inputs.insert(id(&format!("o{i}")), v.to_string());
+        inputs.insert(format!("o{i}"), v.to_string());
     }
 
-    // The gadget computes real SHA-256("abc") and all constraints hold.
-    let assign = solver::solve_and_check(&program, &inputs).expect("SHA-256(\"abc\") must verify");
-
-    // Soundness smoke-test: no derived variable is under-constrained.
-    let holes = solver::analyze_underconstrained(&program, &assign);
-    assert!(
-        holes.is_empty(),
-        "SHA-256 has {} under-constrained vars: {:?}",
-        holes.len(),
-        &holes[..holes.len().min(5)]
-    );
+    // The gadget computes real SHA-256("abc"): all constraints hold and no derived
+    // variable is under-constrained (both checked, streamed, by `check_named`).
+    c.check_named(&inputs)
+        .expect("SHA-256(\"abc\") must verify and be fully constrained");
 
     // Negative control: a wrong digest word must violate a constraint.
-    inputs.insert(id("o0"), "123456".to_string());
-    assert!(solver::solve_and_check(&program, &inputs).is_err());
+    inputs.insert("o0".to_string(), "123456".to_string());
+    assert!(
+        c.check_named(&inputs).is_err(),
+        "a wrong SHA-256 digest word must be rejected"
+    );
 }
 
 /// Correctness against a real vector: compile the Keccak-256 gadget and solve
@@ -1174,32 +1156,21 @@ fn sha256_matches_abc_vector() {
 #[ignore]
 fn keccak_matches_empty_vector() {
     use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
 
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("keccak_empty", &keccak_block_src()),
         "keccak",
         "bn254",
     );
     assert!(c.status_success, "keccak failed: {}", c.stderr);
-    let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
-    let program = primitive::from_json(&json).unwrap();
-    let id = |name: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == name)
-            .map(|v| v.id)
-            .unwrap()
-    };
 
     // Empty-message padded block (little-endian lanes): words[0]=1, words[16]=2^63.
-    let mut inputs = BTreeMap::new();
+    let mut inputs: BTreeMap<String, String> = BTreeMap::new();
     for i in 0..17 {
-        inputs.insert(id(&format!("words[{i}]")), "0".to_string());
+        inputs.insert(format!("words[{i}]"), "0".to_string());
     }
-    inputs.insert(id("words[0]"), "1".to_string());
-    inputs.insert(id("words[16]"), "9223372036854775808".to_string());
+    inputs.insert("words[0]".to_string(), "1".to_string());
+    inputs.insert("words[16]".to_string(), "9223372036854775808".to_string());
     // keccak256("") = c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
     let digest = [
         "4333579421379646149",
@@ -1208,22 +1179,18 @@ fn keccak_matches_empty_vector() {
         "8116759062988257915",
     ];
     for (i, v) in digest.iter().enumerate() {
-        inputs.insert(id(&format!("d[{i}]")), v.to_string());
+        inputs.insert(format!("d[{i}]"), v.to_string());
     }
-    let assign = solver::solve_and_check(&program, &inputs).expect("keccak256(\"\") must verify");
+    // Correctness + soundness (every fused-XOR output and advice bit uniquely
+    // pinned), streamed from `circuit.xbc`.
+    c.check_named(&inputs)
+        .expect("keccak256(\"\") must verify and be fully constrained");
 
-    // Soundness smoke-test: no derived variable is under-constrained (in
-    // particular, every fused-XOR output and advice bit is uniquely pinned).
-    let holes = solver::analyze_underconstrained(&program, &assign);
+    inputs.insert("d[0]".to_string(), "42".to_string());
     assert!(
-        holes.is_empty(),
-        "Keccak has {} under-constrained vars: {:?}",
-        holes.len(),
-        &holes[..holes.len().min(5)]
+        c.check_named(&inputs).is_err(),
+        "a wrong keccak digest word must be rejected"
     );
-
-    inputs.insert(id("d[0]"), "42".to_string());
-    assert!(solver::solve_and_check(&program, &inputs).is_err());
 }
 
 /// Variable-length Keccak-256 sponge against a REAL 2-block reference vector.
@@ -1241,29 +1208,18 @@ fn keccak_matches_empty_vector() {
 #[ignore]
 fn keccak256_varlen_matches_real_vector() {
     use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
 
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("keccak256_varlen", &keccak256_varlen_src()),
         "keccak256",
         "bn254",
     );
     assert!(c.status_success, "keccak256 varlen failed: {}", c.stderr);
-    let json = std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap();
-    let program = primitive::from_json(&json).unwrap();
-    let id = |name: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == name)
-            .map(|v| v.id)
-            .unwrap()
-    };
 
     // Private message = bytes 0..200.
-    let mut inputs = BTreeMap::new();
+    let mut inputs: BTreeMap<String, String> = BTreeMap::new();
     for i in 0..200usize {
-        inputs.insert(id(&format!("msg[{i}]")), i.to_string());
+        inputs.insert(format!("msg[{i}]"), i.to_string());
     }
     // Public digest, little-endian 64-bit lanes of
     // 0xbfb0aa97863e797943cf7c33bb7e880bb4543f3d2703c0923c6901c2af57b890.
@@ -1274,25 +1230,20 @@ fn keccak256_varlen_matches_real_vector() {
         "10428181349562149180",
     ];
     for (i, v) in digest.iter().enumerate() {
-        inputs.insert(id(&format!("d[{i}]")), v.to_string());
+        inputs.insert(format!("d[{i}]"), v.to_string());
     }
 
-    // (1) Correctness: the sponge reproduces the genuine keccak256 digest.
-    let assign =
-        solver::solve_and_check(&program, &inputs).expect("keccak256(bytes(0..200)) must verify");
+    // Correctness (reproduces the genuine keccak256 digest) + soundness (no
+    // under-constrained var), streamed from `circuit.xbc`.
+    c.check_named(&inputs)
+        .expect("keccak256(bytes(0..200)) must verify and be fully constrained");
 
-    // (2) Soundness: no derived variable is under-constrained.
-    let holes = solver::analyze_underconstrained(&program, &assign);
+    // Negative control: a wrong digest word must violate a constraint.
+    inputs.insert("d[0]".to_string(), "42".to_string());
     assert!(
-        holes.is_empty(),
-        "keccak256 has {} under-constrained vars: {:?}",
-        holes.len(),
-        &holes[..holes.len().min(5)]
+        c.check_named(&inputs).is_err(),
+        "a wrong keccak digest word must be rejected"
     );
-
-    // (3) Negative control: a wrong digest word must violate a constraint.
-    inputs.insert(id("d[0]"), "42".to_string());
-    assert!(solver::solve_and_check(&program, &inputs).is_err());
 }
 
 /// Fused subtract `(a-b-c) mod p`: correctness, analyzer, forgery rejection, and
@@ -1416,27 +1367,16 @@ fn sub2_matches_vector_and_rejects_forgery() {
 #[ignore]
 fn ec_incomplete_r1_matches_vectors() {
     use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
 
-    let c = compile_with_field(&example("ec_incomplete_r1"), "ec_incomplete_r1", "bn254");
+    let c =
+        xark_test_harness::compile_file(&example("ec_incomplete_r1"), "ec_incomplete_r1", "bn254");
     assert!(c.status_success, "ec_incomplete_r1 failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |name: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == name)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let set = |m: &mut BTreeMap<u32, String>, pre: &str, v: [&str; 3]| {
+    let set = |m: &mut BTreeMap<String, String>, pre: &str, v: [&str; 3]| {
         for (i, vi) in v.iter().enumerate() {
-            m.insert(id(&format!("{pre}[{i}]")), vi.to_string());
+            m.insert(format!("{pre}[{i}]"), vi.to_string());
         }
     };
-    let mut inputs = BTreeMap::new();
+    let mut inputs: BTreeMap<String, String> = BTreeMap::new();
     set(
         &mut inputs,
         "g.x.limbs",
@@ -1492,10 +1432,13 @@ fn ec_incomplete_r1_matches_vectors() {
         ],
     );
 
-    let assign = solver::solve_and_check(&program, &inputs).expect("r1 3-limb 2G/3G must verify");
-    assert!(solver::analyze_underconstrained(&program, &assign).is_empty());
-    inputs.insert(id("two_g.y.limbs[0]"), "7".to_string());
-    assert!(solver::solve_and_check(&program, &inputs).is_err());
+    c.check_named(&inputs)
+        .expect("r1 3-limb 2G/3G must verify and be fully constrained");
+    inputs.insert("two_g.y.limbs[0]".to_string(), "7".to_string());
+    assert!(
+        c.check_named(&inputs).is_err(),
+        "a wrong EC output limb must be rejected"
+    );
 }
 
 /// Validate the 3-limb (86-bit) incomplete EC ops: `2G` and `3G` from `G`.
@@ -1504,27 +1447,15 @@ fn ec_incomplete_r1_matches_vectors() {
 #[ignore]
 fn ec_incomplete_matches_vectors() {
     use std::collections::BTreeMap;
-    use xark_ir::{primitive, solver};
 
-    let c = compile_with_field(&example("ec_incomplete"), "ec_incomplete", "bn254");
+    let c = xark_test_harness::compile_file(&example("ec_incomplete"), "ec_incomplete", "bn254");
     assert!(c.status_success, "ec_incomplete failed: {}", c.stderr);
-    let program =
-        primitive::from_json(&std::fs::read_to_string(c.out_dir.join("circuit.json")).unwrap())
-            .unwrap();
-    let id = |name: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == name)
-            .map(|v| v.id)
-            .unwrap()
-    };
-    let set = |m: &mut BTreeMap<u32, String>, pre: &str, v: [&str; 3]| {
+    let set = |m: &mut BTreeMap<String, String>, pre: &str, v: [&str; 3]| {
         for (i, vi) in v.iter().enumerate() {
-            m.insert(id(&format!("{pre}[{i}]")), vi.to_string());
+            m.insert(format!("{pre}[{i}]"), vi.to_string());
         }
     };
-    let mut inputs = BTreeMap::new();
+    let mut inputs: BTreeMap<String, String> = BTreeMap::new();
     set(
         &mut inputs,
         "g.x.limbs",
@@ -1580,10 +1511,13 @@ fn ec_incomplete_matches_vectors() {
         ],
     );
 
-    let assign = solver::solve_and_check(&program, &inputs).expect("3-limb 2G/3G must verify");
-    assert!(solver::analyze_underconstrained(&program, &assign).is_empty());
-    inputs.insert(id("two_g.x.limbs[0]"), "1".to_string());
-    assert!(solver::solve_and_check(&program, &inputs).is_err());
+    c.check_named(&inputs)
+        .expect("3-limb 2G/3G must verify and be fully constrained");
+    inputs.insert("two_g.x.limbs[0]".to_string(), "1".to_string());
+    assert!(
+        c.check_named(&inputs).is_err(),
+        "a wrong EC output limb must be rejected"
+    );
 }
 
 /// Prototype: validate the 3×86-bit `mod_mul` computes `a·b mod p` correctly
@@ -1960,18 +1894,11 @@ fn rejects_recursion() {
 /// re-checked against the new shape.
 #[test]
 fn poseidon2_matches_lean_t3_model() {
-    let c = compile_with_field(&example("poseidon2"), "poseidon2_lean_bridge", "bn254");
+    let c =
+        xark_test_harness::compile_file(&example("poseidon2"), "poseidon2_lean_bridge", "bn254");
     assert!(c.status_success, "poseidon2 gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-
-    let mul_gates = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul_gates = c.mul_gate_count();
 
     // 80 S-boxes × 3 multiplications — the shape `poseidon2_bn254_t3_determined`
     // is stated over. If this fails, reconcile the gadget with the Lean model.
@@ -1994,21 +1921,14 @@ fn poseidon2_matches_lean_t3_model() {
 /// re-checked against the new shape.
 #[test]
 fn sha256_matches_lean_model() {
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("sha256_lean", &sha256_block_src()),
         "sha256_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "sha256 gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     // The Lean model proves the bit *primitives* (and32/xor32/rotr/Ch/Maj/Σ/σ
     // and MessageScheduleStep); the wrapping-add carry is discharged separately
     // (Bitwise/Arith.lean). Tightening `reduce::<N>` to each site's true bound
@@ -2032,21 +1952,14 @@ fn sha256_matches_lean_model() {
 /// permutation `[2,6,3,10,7,0,4,13,…]`). Pins the Rust gadget's mult-gate count.
 #[test]
 fn blake3_matches_lean_model() {
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("blake3_lean", &blake3_block_src()),
         "blake3_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "blake3 gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     // The `g` mixing's `a + b + m` steps use a single 34-bit `add3` range-check
     // (Blake.lean `add3Mod32_bit_sound`, bridged to the nested-`addMod32` spec by
     // `add3Mod32_eq_nested`) instead of two chained `add32`s — 2 fewer carry
@@ -2062,21 +1975,14 @@ fn blake3_matches_lean_model() {
 /// (10-round schedule, the 10 SIGMA rows). Pins the Rust gadget's mult-gate count.
 #[test]
 fn blake2s_matches_lean_model() {
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("blake2s_lean", &blake2s_block_src()),
         "blake2s_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "blake2s gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     // Same `add3` (34-bit) mixing tightening as BLAKE3 (Blake.lean
     // `add3Mod32_bit_sound`): 26720 → 21600 mult-gates.
     assert_eq!(
@@ -2093,21 +1999,14 @@ fn blake2s_matches_lean_model() {
 #[test]
 #[ignore]
 fn keccak_matches_lean_model() {
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("keccak_lean", &keccak_block_src()),
         "keccak_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "keccak gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(mul, 153664, "Keccak mult-gate count; got {mul}");
 }
 
@@ -2120,17 +2019,10 @@ fn keccak_matches_lean_model() {
 #[test]
 #[ignore]
 fn aes_matches_lean_model() {
-    let c = compile_with_field(&example("aes"), "aes_lean_bridge", "bn254");
+    let c = xark_test_harness::compile_file(&example("aes"), "aes_lean_bridge", "bn254");
     assert!(c.status_success, "aes gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(mul, 145816, "AES-128 mult-gate count; got {mul}");
 }
 
@@ -2152,21 +2044,14 @@ fn aes256_matches_lean_model() {
         pub fn circuit(pt: Private<[Field; 16]>, key: Private<[Field; 32]>, ct: Public<[Field; 16]>) {\n\
         aes256_constrain(pt, key, ct);\n\
         }\n";
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &write_case("aes256_lean", src),
         "aes256_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "aes256 gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(mul, 201484, "AES-256 mult-gate count; got {mul}");
 }
 
@@ -2189,17 +2074,14 @@ fn gf128_mul_matches_lean_model() {
         pub fn circuit(x: Private<[Field; 16]>, y: Private<[Field; 16]>, z: Public<[Field; 16]>) {\n\
         let p = gf128_to_bytes(gf128_mul(bytes_to_gf128(x), bytes_to_gf128(y)));\n\
         let mut i = 0usize;\n  while i < 16usize { require_eq(p[i], z[i]); i += 1; }\n}\n";
-    let c = compile_with_field(&write_case("gf128_lean", src), "gf128_lean_bridge", "bn254");
+    let c = xark_test_harness::compile_file(
+        &write_case("gf128_lean", src),
+        "gf128_lean_bridge",
+        "bn254",
+    );
     assert!(c.status_success, "gf128_mul gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(mul, 33280, "GF(2^128) multiply mult-gate count; got {mul}");
 }
 
@@ -2213,17 +2095,10 @@ fn gf128_mul_matches_lean_model() {
 #[test]
 #[ignore]
 fn aes_gcm_matches_lean_model() {
-    let c = compile_with_field(&example("aes_gcm"), "aes_gcm_lean_bridge", "bn254");
+    let c = xark_test_harness::compile_file(&example("aes_gcm"), "aes_gcm_lean_bridge", "bn254");
     assert!(c.status_success, "aes_gcm gadget compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(mul, 715240, "AES-128-GCM mult-gate count; got {mul}");
 }
 
@@ -2233,17 +2108,10 @@ fn aes_gcm_matches_lean_model() {
 /// `mod_mul` / `fp_mul` gadget's constraint shape.
 #[test]
 fn fp_mul_matches_lean_model() {
-    let c = compile_with_field(&example("fp_mul"), "fp_mul_lean_bridge", "bn254");
+    let c = xark_test_harness::compile_file(&example("fp_mul"), "fp_mul_lean_bridge", "bn254");
     assert!(c.status_success, "fp_mul compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(
         mul, 1154,
         "fp_mul mult-gate count pins mul_mod_via_Fr_limbwise_constraints_3; got {mul}"
@@ -2256,21 +2124,14 @@ fn fp_mul_matches_lean_model() {
 /// generic `Curve` algebra. Pins the `ec_add_incomplete` gadget's shape.
 #[test]
 fn ec_incomplete_matches_lean_model() {
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &example("ec_incomplete"),
         "ec_incomplete_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "ec_incomplete compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(
         mul, 15369,
         "ec_incomplete mult-gate count pins ec_add_incomplete_secp256k1_sound; got {mul}"
@@ -2281,21 +2142,14 @@ fn ec_incomplete_matches_lean_model() {
 /// `Secp256r1.lean`'s `ec_add_incomplete_secp256r1_sound` (same shape at `a=−3`).
 #[test]
 fn ec_incomplete_r1_matches_lean_model() {
-    let c = compile_with_field(
+    let c = xark_test_harness::compile_file(
         &example("ec_incomplete_r1"),
         "ec_incomplete_r1_lean_bridge",
         "bn254",
     );
     assert!(c.status_success, "ec_incomplete_r1 compiles: {}", c.stderr);
-    let r1cs = xark_ir::json::from_json(
-        &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
-    )
-    .expect("parse r1cs.json");
-    let mul = r1cs
-        .constraints
-        .iter()
-        .filter(|k| !k.a.terms.is_empty() && !k.b.terms.is_empty())
-        .count();
+    // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
+    let mul = c.mul_gate_count();
     assert_eq!(
         mul, 15891,
         "ec_incomplete_r1 mult-gate count pins ec_add_incomplete_secp256r1_sound; got {mul}"

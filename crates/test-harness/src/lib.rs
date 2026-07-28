@@ -30,12 +30,35 @@ pub struct Compiled {
 }
 
 impl Compiled {
-    /// Parse the emitted primitive program (`circuit.json`).
+    /// The primitive program — decoded from the compact `circuit.xbc` (the sole
+    /// default artifact), not the `--emit-json`-only `circuit.json`. So tests that
+    /// need the program don't force the slow multi-GB JSON emission.
     pub fn program(&self) -> PrimitiveProgram {
-        let json = std::fs::read_to_string(self.out_dir.join("circuit.json")).unwrap_or_else(|e| {
-            panic!("read {}: {e}", self.out_dir.join("circuit.json").display())
-        });
-        primitive::from_json(&json).expect("valid circuit.json")
+        let xbc = self.out_dir.join("circuit.xbc");
+        let bytes = std::fs::read(&xbc).unwrap_or_else(|e| panic!("read {}: {e}", xbc.display()));
+        xark_ir::function_decode::expand_function_blob(&bytes)
+            .unwrap_or_else(|e| panic!("expand {}: {e}", xbc.display()))
+            .to_primitive()
+    }
+
+    /// The number of R1CS **multiplication gates** (`a·b` rows where both sides
+    /// carry a variable), streamed from `circuit.xbc` — O(1) memory, no flat R1CS.
+    /// For the R1CS↔Lean gate-count bridges, in place of parsing `r1cs.json`.
+    pub fn mul_gate_count(&self) -> usize {
+        let xbc = self.out_dir.join("circuit.xbc");
+        let bytes = std::fs::read(&xbc).unwrap_or_else(|e| panic!("read {}: {e}", xbc.display()));
+        xark_ir::function_decode::stream_count_mul_gates(&bytes)
+    }
+
+    /// A stable 128-bit fingerprint of the R1CS the circuit expands to, streamed
+    /// straight from `circuit.xbc` — O(1) memory, no expand-then-minimize. Use it
+    /// as a regression pin (`assert_eq!(c.circuit_digest(), 0x…)`) in place of a
+    /// materializing constraint-count check; any change to the proven circuit
+    /// flips the digest.
+    pub fn circuit_digest(&self) -> u128 {
+        let xbc = self.out_dir.join("circuit.xbc");
+        let bytes = std::fs::read(&xbc).unwrap_or_else(|e| panic!("read {}: {e}", xbc.display()));
+        xark_ir::function_decode::stream_digest(&bytes)
     }
 
     /// The **minimized** R1CS constraint count — the invariant the prover
@@ -66,11 +89,57 @@ impl Compiled {
     /// signature is `check(..).unwrap()` and a tampered one
     /// `assert!(check(..).is_err())`.
     pub fn check(&self, inputs: &[(&str, &dyn bignum::LeafInput)]) -> Result<(), String> {
-        use xark_ir::primitive::VarRole;
+        let (bytes, id_inputs) = self.resolve_inputs(inputs)?;
 
-        let program = self.program();
-        let input_vars: Vec<&primitive::Var> = program
-            .vars
+        // Satisfiability + the global under-constraint soundness pass, both
+        // streamed straight from the compact `circuit.xbc`: the witness is solved
+        // once, then a single parallel sweep checks every row `a·b = c` and
+        // classifies every variable into one flag byte (never the flat
+        // `Expression` system, and — unlike a naive stream — never the
+        // per-reference univariate reductions either). Peak memory is the witness
+        // plus ~1 byte/var, so this beats the flat path even when the witness
+        // dominates (heavy non-native EC). Verdicts are identical to
+        // `analyze_underconstrained` (asserted by `streaming_core_matches_flat_on_underconstrained`,
+        // `stream_analyze_matches_flat_analyzer`, and `cp_solver_matches_primitive_path`).
+        let under = xark_ir::function_decode::stream_verify(&bytes, &id_inputs)
+            .map_err(|e| format!("inputs do not satisfy the circuit: {e}"))?;
+
+        // The analyzer inspects only `Derived` (advice/internal) vars. A
+        // `witness_only` derivation (e.g. the secp256k1 GLV lattice reduction)
+        // computes advice through SCRATCH vars that no constraint references; they
+        // only derive pinned outputs and are removed by `minimize` before proving.
+        // Such a var is causally disconnected — in no constraint, so changing it
+        // alters no constraint's satisfaction and no public output — hence not a
+        // forgery vector. Ignore that benign reason; still fail on a var that IS
+        // referenced but left free (a genuine, forgeable under-constraint).
+        const UNREFERENCED: &str = "no constraint references this variable";
+        let real: Vec<_> = under
+            .into_iter()
+            .filter(|u| u.reason != UNREFERENCED)
+            .collect();
+        if !real.is_empty() {
+            return Err(format!(
+                "circuit is under-constrained ({} forgeable witness var(s): {:?})",
+                real.len(),
+                real.iter().take(12).collect::<Vec<_>>()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Read `circuit.xbc` and resolve named `inputs` to the compiled circuit's
+    /// input var ids, without expanding any constraints. Shared by [`check`] and
+    /// [`check_satisfies`]; returns the raw bytes (so the caller can stream) plus
+    /// the `var id -> decimal` witness inputs.
+    fn resolve_inputs(
+        &self,
+        inputs: &[(&str, &dyn bignum::LeafInput)],
+    ) -> Result<(Vec<u8>, std::collections::BTreeMap<u32, String>), String> {
+        use xark_ir::primitive::VarRole;
+        let bytes = std::fs::read(self.out_dir.join("circuit.xbc"))
+            .map_err(|e| format!("read circuit.xbc: {e}"))?;
+        let vars = xark_ir::function_decode::decode_vars(&bytes);
+        let input_vars: Vec<&primitive::Var> = vars
             .iter()
             .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
             .collect();
@@ -97,30 +166,56 @@ impl Compiled {
             })?;
             id_inputs.insert(*id, val);
         }
+        Ok((bytes, id_inputs))
+    }
 
-        let assign = xark_ir::solver::solve_and_check(&program, &id_inputs)
-            .map_err(|e| format!("inputs do not satisfy the circuit: {e:?}"))?;
-        // `analyze_underconstrained` inspects only `Derived` (advice/internal) vars.
-        // A `witness_only` derivation (e.g. the secp256k1 GLV lattice reduction)
-        // computes advice through SCRATCH vars that no constraint references; they
-        // only derive pinned outputs and are removed by `minimize` before proving.
-        // Such a var is causally disconnected — in no constraint, so changing it
-        // alters no constraint's satisfaction and no public output — hence not a
-        // forgery vector. Ignore that benign reason; still fail on a var that IS
-        // referenced but left free (a genuine, forgeable under-constraint).
+    /// Streaming correctness check for circuits with **raw field inputs** given by
+    /// variable name → decimal value (e.g. a hash KAT that feeds the message block
+    /// and the expected digest words). Solves + checks satisfiability + runs the
+    /// under-constraint analyzer, all streamed from `circuit.xbc` — the low-memory
+    /// analogue of `from_json` + `solve_and_check` + `analyze_underconstrained`.
+    /// `Ok(())` iff every constraint holds and no referenced var is forgeable.
+    pub fn check_named(
+        &self,
+        inputs: &std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let xbc = self.out_dir.join("circuit.xbc");
+        let bytes = std::fs::read(&xbc).map_err(|e| format!("read {}: {e}", xbc.display()))?;
+        let vars = xark_ir::function_decode::decode_vars(&bytes);
+        let by_name: std::collections::BTreeMap<&str, u32> =
+            vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
+        let mut id_inputs: std::collections::BTreeMap<u32, String> =
+            std::collections::BTreeMap::new();
+        for (name, val) in inputs {
+            let id = by_name
+                .get(name.as_str())
+                .ok_or_else(|| format!("unknown circuit input `{name}`"))?;
+            id_inputs.insert(*id, val.clone());
+        }
         const UNREFERENCED: &str = "no constraint references this variable";
-        let real: Vec<_> = xark_ir::solver::analyze_underconstrained(&program, &assign)
+        let real: Vec<_> = xark_ir::function_decode::stream_verify(&bytes, &id_inputs)?
             .into_iter()
             .filter(|u| u.reason != UNREFERENCED)
             .collect();
         if !real.is_empty() {
             return Err(format!(
-                "circuit is under-constrained ({} forgeable witness var(s): {:?})",
+                "circuit is under-constrained ({} forgeable var(s): {:?})",
                 real.len(),
-                real.iter().take(12).collect::<Vec<_>>()
+                real.iter().take(8).collect::<Vec<_>>()
             ));
         }
         Ok(())
+    }
+
+    /// **Streaming** satisfiability check — like [`check`](Self::check) but
+    /// verifies the witness by streaming each R1CS row out of the compact
+    /// `circuit.xbc` (never materializing the flat system), so peak memory is the
+    /// witness + one row and the walk is parallel. Skips the global
+    /// under-constraint analyzer (a separate soundness pass that must
+    /// materialize) — use [`check`](Self::check) when you want that too.
+    pub fn check_satisfies(&self, inputs: &[(&str, &dyn bignum::LeafInput)]) -> Result<(), String> {
+        let (bytes, id_inputs) = self.resolve_inputs(inputs)?;
+        xark_ir::function_decode::stream_check(&bytes, &id_inputs)
     }
 }
 
@@ -272,8 +367,23 @@ fn externs(deps: &Path) -> Vec<String> {
 
 static LOCK: Mutex<()> = Mutex::new(());
 
-/// Compile a circuit source **file** to R1CS + IR under `target/test-out/<out_name>`.
+/// Compile a circuit source **file** to `circuit.xbc` under `target/test-out/<out_name>`.
+/// Matches a normal `xark build`: the compact artifact only, no JSON. Tests read
+/// the program via [`Compiled::program`]/[`Compiled::circuit_digest`] (both from
+/// `circuit.xbc`); use [`compile_file_json`] only when a test reads the
+/// `--emit-json`-only `circuit.json` / `r1cs.json` / `graph.dot` directly.
 pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
+    compile_file_inner(src, out_name, field, false)
+}
+
+/// Like [`compile_file`], but also emits `circuit.json` / `r1cs.json` /
+/// `graph.dot` (`--emit-json`). Serializing those is slow (multi-GB on heavy
+/// circuits), so reserve it for the snapshot suite and fixture regeneration.
+pub fn compile_file_json(src: &Path, out_name: &str, field: &str) -> Compiled {
+    compile_file_inner(src, out_name, field, true)
+}
+
+fn compile_file_inner(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let (bin, deps) = built();
     let root = workspace_root();
@@ -297,14 +407,14 @@ pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
     for e in externs(deps) {
         cmd.arg("--extern").arg(e);
     }
-    let output = cmd
-        .arg("-L")
+    cmd.arg("-L")
         .arg(format!("dependency={}", deps.display()))
         .arg("--field")
-        .arg(field)
-        // The snapshot suite and gadget `vec.rs` tests read `circuit.json`, so the
-        // harness opts into it (a normal `xark build` writes only `circuit.xbc`).
-        .arg("--emit-json")
+        .arg(field);
+    if emit_json {
+        cmd.arg("--emit-json");
+    }
+    let output = cmd
         .arg(src)
         .arg("--r1cs-out")
         .arg(&out_dir)
@@ -319,9 +429,16 @@ pub fn compile_file(src: &Path, out_name: &str, field: &str) -> Compiled {
     }
 }
 
-/// Compile a circuit source **string** (written to a temp file) to R1CS + IR.
+/// Compile a circuit source **string** (written to a temp file) to `circuit.xbc`.
 pub fn compile_source(name: &str, src: &str, field: &str) -> Compiled {
     let path = std::env::temp_dir().join(format!("xark_harness_{name}.rs"));
     std::fs::write(&path, src).expect("write temp source");
     compile_file(&path, name, field)
+}
+
+/// [`compile_source`] but with `--emit-json` (for tests reading `r1cs.json` etc.).
+pub fn compile_source_json(name: &str, src: &str, field: &str) -> Compiled {
+    let path = std::env::temp_dir().join(format!("xark_harness_{name}.rs"));
+    std::fs::write(&path, src).expect("write temp source");
+    compile_file_json(&path, name, field)
 }

@@ -68,7 +68,11 @@ pub struct Relaxed {
 impl Relaxed {
     /// A fresh (strict) instance from a satisfying witness: `u = 1`, `E = 0`.
     pub fn fresh(r1cs: &R1csProgram, z: BTreeMap<VarId, Fr>) -> Self {
-        Relaxed { z, u: Fr::from(1u64), e: vec![Fr::zero(); r1cs.constraints.len()] }
+        Relaxed {
+            z,
+            u: Fr::from(1u64),
+            e: vec![Fr::zero(); r1cs.constraints.len()],
+        }
     }
 }
 
@@ -84,8 +88,9 @@ pub fn fold(r1cs: &R1csProgram, i1: &Relaxed, i2: &Relaxed, r: Fr) -> (Relaxed, 
     let (a1, b1, c1) = abc(r1cs, &i1.z, i1.u);
     let (a2, b2, c2) = abc(r1cs, &i2.z, i2.u);
     let m = r1cs.constraints.len();
-    let t: Vec<Fr> =
-        (0..m).map(|k| a1[k] * b2[k] + a2[k] * b1[k] - i1.u * c2[k] - i2.u * c1[k]).collect();
+    let t: Vec<Fr> = (0..m)
+        .map(|k| a1[k] * b2[k] + a2[k] * b1[k] - i1.u * c2[k] - i2.u * c1[k])
+        .collect();
 
     let u = i1.u + r * i2.u;
     let mut z = BTreeMap::new();
@@ -94,7 +99,9 @@ pub fn fold(r1cs: &R1csProgram, i1: &Relaxed, i2: &Relaxed, r: Fr) -> (Relaxed, 
         let v2 = i2.z.get(&v.id).copied().unwrap_or_else(Fr::zero);
         z.insert(v.id, v1 + r * v2);
     }
-    let e: Vec<Fr> = (0..m).map(|k| i1.e[k] + r * t[k] + r * r * i2.e[k]).collect();
+    let e: Vec<Fr> = (0..m)
+        .map(|k| i1.e[k] + r * t[k] + r * r * i2.e[k])
+        .collect();
     (Relaxed { z, u, e }, t)
 }
 
@@ -103,11 +110,7 @@ pub fn fold(r1cs: &R1csProgram, i1: &Relaxed, i2: &Relaxed, r: Fr) -> (Relaxed, 
 /// its challenge. The returned accumulator satisfies the relaxed R1CS iff every
 /// step folded a satisfying instance — the invariant an IVC maintains across
 /// steps. (`challenges.len() + 1 == steps.len()`.)
-pub fn run_ivc(
-    r1cs: &R1csProgram,
-    steps: &[BTreeMap<VarId, Fr>],
-    challenges: &[Fr],
-) -> Relaxed {
+pub fn run_ivc(r1cs: &R1csProgram, steps: &[BTreeMap<VarId, Fr>], challenges: &[Fr]) -> Relaxed {
     assert_eq!(challenges.len() + 1, steps.len(), "one challenge per fold");
     let mut acc = Relaxed::fresh(r1cs, steps[0].clone());
     for i in 1..steps.len() {

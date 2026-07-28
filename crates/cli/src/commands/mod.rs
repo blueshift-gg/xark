@@ -764,6 +764,42 @@ pub fn soundness_check(
     Ok(assign_fp)
 }
 
+/// **Streaming** witness solve + soundness gate for the default `xark prove`
+/// path, straight from the compact `circuit.xbc` bytes — never materializing the
+/// full flat program (`witness_gen` is the multi-GB bulk on non-native
+/// folding/IVC circuits). Returns the witness assignment for the Groth16 backend.
+///
+/// The happy path holds only the witness + a flag byte per var. On the rare
+/// failure path (the witness does not satisfy the circuit, or solving fails) it
+/// re-expands the flat program once and defers to [`soundness_check`] for the
+/// precise which-constraint / source-line diagnostic — trading memory for a good
+/// error message exactly when a proof is going to fail anyway.
+pub fn stream_soundness(
+    bytes: &[u8],
+    profile: Option<&ProfileProgram>,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<BTreeMap<VarId, Fp>> {
+    let timing = dbg_flag("PROVE_TIME");
+    let t = std::time::Instant::now();
+    match xark_ir::function_decode::stream_solve_verify(bytes, id_inputs) {
+        Ok((assign_fp, holes)) => {
+            if timing {
+                eprintln!("PROVE_TIME:   stream solve+check+analyze={:?}", t.elapsed());
+            }
+            report_underconstrained(holes)?;
+            Ok(assign_fp)
+        }
+        Err(_) => {
+            // Rare: unsatisfied/solve error. Re-expand flat for the rich diagnostic
+            // (same explanation `xark test` surfaces); on success (shouldn't differ
+            // from the stream) just return its assignment.
+            let cp = xark_ir::function_decode::expand_function_blob(bytes)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            soundness_check(&cp, profile, id_inputs)
+        }
+    }
+}
+
 /// The `--r1cs`/`--circuit` override path of `xark prove`: the same gate over a
 /// `PrimitiveProgram` (Expression) + `R1csProgram` loaded from JSON, rather than
 /// a `circuit.xbc`. The default path uses [`soundness_check`] on the
