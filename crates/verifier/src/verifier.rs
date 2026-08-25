@@ -289,6 +289,117 @@ fn g16_assemble_pairs(
     [(a, b), (alpha, beta), (vk_x, gamma), (c, delta)]
 }
 
+// -- small-scalar fast path ---------------------------------------------------
+//
+// The `alt_bn128` syscalls are fixed-price: the runtime charges the same for
+// `1 · P` as for a full 254-bit scalar mul. Measured all-in (mollusk-svm,
+// sbpf v3, LE syscalls, `overflow-checks` + `lto = "fat"`), five inputs:
+//
+// ```text
+// g1_add          539 CU
+// g1_scalar_mul 4,016 CU     -> one mul is worth 7.45 adds
+// ```
+//
+// Three scalars are therefore overpaying, and each substitution below is a
+// group identity rather than an approximation:
+//
+// ```text
+// k == 0   0·P is the identity and acc + identity == acc   -> skip both ops
+// k == 1   1·P == P                                        -> skip the mul
+// k small  double-and-add costs (add_count(k) + 1) adds    -> skip the mul
+// ```
+//
+// A Rust-derived circuit hits this constantly: `bool` flags, enum
+// discriminants, loop counts and array indices all reach the verifier as
+// public inputs equal to 0, 1, or a single digit.
+
+/// Largest number of group additions the double-and-add substitution may spend
+/// before the mul syscall becomes the cheaper option.
+///
+/// One mul-path input costs `g1_scalar_mul + g1_add`; one addition-path input
+/// costs `add_count(k) + 1` `g1_add`s. Measured over five inputs, against
+/// 22,773 CU for the mul path:
+///
+/// ```text
+/// add_count = 7  (k = 128)   20,780 CU   -> win by 1,993
+/// add_count = 8  (k = 192)   23,165 CU   -> loss by 392
+/// ```
+const MAX_ADDS: u32 = 7;
+
+/// Largest scalar the fast path accepts.
+///
+/// `add_count(k) >= msb(k)`, so `add_count(k) <= MAX_ADDS` already implies
+/// `k <= 2^MAX_ADDS`. Naming the bound separately lets [`mul_small`] iterate
+/// over a *compile-time* number of bit positions, which keeps the loop
+/// statically bounded for Kani's unwinding.
+const MAX_SMALL_SCALAR: u64 = 1 << MAX_ADDS;
+
+/// Group additions left-to-right double-and-add needs for `k >= 1`: one
+/// doubling per bit position below the MSB, plus one add per set bit below the
+/// MSB. Returns `0` for `k == 0`, which the caller never passes.
+#[inline(always)]
+const fn add_count(k: u64) -> u32 {
+    if k == 0 {
+        return 0;
+    }
+    let msb = 63 - k.leading_zeros();
+    msb + (k.count_ones() - 1)
+}
+
+/// `Some(k)` when the 32-byte LE scalar encodes exactly the integer `k`, and
+/// double-and-add is cheaper for it than the mul syscall. `None` means "use
+/// `g1_scalar_mul`".
+///
+/// The `Some` case asserts the scalar's *whole* 32 bytes are the LE encoding of
+/// `k` — the fast path must never fire on a scalar that merely looks small in
+/// its low limb.
+#[inline(always)]
+fn small_scalar(s: &[u8; FR_BYTES]) -> Option<u64> {
+    // Everything at or above 2^64 is far past the break-even. Bail before the
+    // limb read so the common (large-scalar) case exits after one byte.
+    let mut i = 8;
+    while i < FR_BYTES {
+        if s[i] != 0 {
+            return None;
+        }
+        i += 1;
+    }
+    let mut limb = [0u8; 8];
+    limb.copy_from_slice(&s[..8]);
+    let k = u64::from_le_bytes(limb);
+    if k == 0 || k > MAX_SMALL_SCALAR || add_count(k) > MAX_ADDS {
+        return None;
+    }
+    Some(k)
+}
+
+/// `k · p` by left-to-right double-and-add, for `1 <= k <= MAX_SMALL_SCALAR`.
+///
+/// The bit loop runs over the fixed range `MAX_ADDS-1 ..= 0` and skips
+/// positions at or above the MSB, so it performs exactly `msb(k)` doublings
+/// while keeping its trip count a compile-time constant.
+///
+/// `k >= 1` means `acc` starts at `p` and is never the identity, so the only
+/// unusual operand pattern is the doubling `acc + acc`, which the `alt_bn128`
+/// addition handles.
+#[inline]
+fn mul_small(p: G1Point, k: u64) -> Result<G1Point, AltBn128Error> {
+    let msb = 63 - k.leading_zeros();
+    let mut acc = p;
+    let mut bit = MAX_ADDS;
+    while bit > 0 {
+        bit -= 1;
+        if bit >= msb {
+            continue; // above the MSB: contributes nothing
+        }
+        acc = g1_add(acc, acc)?;
+        if (k >> bit) & 1 == 1 {
+            acc = g1_add(acc, p)?;
+        }
+    }
+    Ok(acc)
+}
+
 // -- core verifier ------------------------------------------------------------
 
 /// Verify a Groth16 proof. The curve arithmetic resolves to the `alt_bn128`
@@ -356,13 +467,24 @@ pub fn verify_groth16(
     // ---- Compute vk_x = ic[0] + Σ inputs[i] · ic[i+1] ----------------------
     let mut acc = g1_at(ic_slice, 0);
     for i in 0..num_inputs as usize {
-        let ic_i = g1_at(ic_slice, (i + 1) * G1_BYTES);
         let mut scalar = [0u8; FR_BYTES];
         scalar.copy_from_slice(&public_inputs[i * FR_BYTES..(i + 1) * FR_BYTES]);
         if !scalar_is_canonical(&scalar) {
             return Err(VerifierError::NonCanonicalPublicInput { index: i as u32 });
         }
-        let term = g1_scalar_mul(ic_i, &scalar)?;
+        // 0 · ic[i+1] is the identity and acc + identity == acc, so the whole
+        // term drops out. This also skips the mul syscall's incidental on-curve
+        // check of ic[i+1] — that operand comes from the VK, which is already
+        // trusted input (a caller who can choose the VK can prove anything).
+        if scalar == [0u8; FR_BYTES] {
+            continue;
+        }
+        let ic_i = g1_at(ic_slice, (i + 1) * G1_BYTES);
+        let term = match small_scalar(&scalar) {
+            // k == 1 returns ic_i with no syscall at all.
+            Some(k) => mul_small(ic_i, k)?,
+            None => g1_scalar_mul(ic_i, &scalar)?,
+        };
         acc = g1_add(acc, term)?;
     }
 
@@ -517,6 +639,90 @@ mod tests {
         assert!(coords_canonical(&buf));
         buf[2 * FR_BYTES + (FR_BYTES - 1)] = 0xFF; // make the 3rd chunk >= q
         assert!(!coords_canonical(&buf));
+    }
+
+    /// BN254's G1 generator in the LE wire format: `x = 1`, `y = 2`.
+    fn g1_generator() -> G1Point {
+        let mut bytes = [0u8; G1_BYTES];
+        bytes[0] = 1;
+        bytes[G1_BYTES / 2] = 2;
+        G1Point(bytes)
+    }
+
+    /// `add_count` counts one doubling per bit below the MSB plus one add per
+    /// set bit below it.
+    #[test]
+    fn add_count_boundaries() {
+        assert_eq!(add_count(0), 0, "k = 0 never reaches the adder");
+        assert_eq!(add_count(1), 0, "1 * P is P, no group op");
+        assert_eq!(add_count(2), 1, "one doubling");
+        assert_eq!(add_count(3), 2, "one doubling, one add");
+        assert_eq!(add_count(5), 3, "0b101: two doublings, one add");
+        assert_eq!(add_count(128), 7, "0b1000_0000: seven doublings, no adds");
+        assert_eq!(add_count(192), 8, "0b1100_0000: seven doublings, one add");
+    }
+
+    /// The fast path accepts exactly the scalars whose double-and-add fits the
+    /// measured budget, and nothing that merely looks small in its low limb.
+    #[test]
+    fn small_scalar_domain() {
+        let le = |k: u64| {
+            let mut s = [0u8; FR_BYTES];
+            s[..8].copy_from_slice(&k.to_le_bytes());
+            s
+        };
+        assert_eq!(small_scalar(&le(1)), Some(1));
+        assert_eq!(small_scalar(&le(5)), Some(5));
+        assert_eq!(
+            small_scalar(&le(MAX_SMALL_SCALAR)),
+            Some(MAX_SMALL_SCALAR),
+            "2^MAX_ADDS costs exactly MAX_ADDS doublings"
+        );
+        assert_eq!(small_scalar(&le(0)), None, "zero is handled by the caller");
+        assert_eq!(
+            small_scalar(&le(MAX_SMALL_SCALAR + 1)),
+            None,
+            "past the budget"
+        );
+        assert_eq!(small_scalar(&le(192)), None, "add_count 8 > MAX_ADDS");
+
+        // Small low limb, non-zero high limb: must not be mistaken for small.
+        let mut spoofed = le(5);
+        spoofed[FR_BYTES - 1] = 1;
+        assert_eq!(small_scalar(&spoofed), None, "high limbs are not ignored");
+    }
+
+    /// Exhaustive over the whole fast-path domain: `mul_small` is bit-identical
+    /// to the reference scalar mul for every `k` the fast path accepts.
+    #[test]
+    fn mul_small_matches_reference_mul_over_the_whole_domain() {
+        let g = g1_generator();
+        let mut checked = 0;
+        for k in 1..=MAX_SMALL_SCALAR {
+            let mut s = [0u8; FR_BYTES];
+            s[..8].copy_from_slice(&k.to_le_bytes());
+            if small_scalar(&s).is_none() {
+                continue;
+            }
+            let want = g1_scalar_mul(g, &s).expect("reference mul");
+            let got = mul_small(g, k).expect("double-and-add");
+            assert_eq!(got.0, want.0, "k = {k}");
+            checked += 1;
+        }
+        assert!(checked > 0, "the domain must not be empty");
+    }
+
+    /// The `k == 0` skip relies on `0 · P` being the additive identity: adding
+    /// it back leaves the accumulator unchanged.
+    #[test]
+    fn zero_scalar_term_is_the_additive_identity() {
+        let g = g1_generator();
+        let zero_term = g1_scalar_mul(g, &[0u8; FR_BYTES]).expect("0 * G");
+        assert_eq!(
+            g1_add(g, zero_term).expect("G + O").0,
+            g.0,
+            "acc + 0*P must equal acc"
+        );
     }
 }
 
@@ -1037,5 +1243,22 @@ mod proofs {
             flat[i * PAIRING_PAIR_BYTES..(i + 1) * PAIRING_PAIR_BYTES].copy_from_slice(slot);
         }
         assert!(flat == expected);
+    }
+
+    /// **The fast path only fires on a scalar that *is* the integer it
+    /// reports.** If `small_scalar` returns `Some(k)` then the full 32-byte
+    /// input equals the little-endian encoding of `k`, and `k` sits inside the
+    /// budgeted domain. This is what stops a large scalar with a small low limb
+    /// from being routed through `mul_small` and multiplied by the wrong value.
+    #[kani::proof]
+    fn small_scalar_is_exact_and_budgeted() {
+        let s: [u8; FR_BYTES] = kani::any();
+        if let Some(k) = small_scalar(&s) {
+            assert!(k >= 1 && k <= MAX_SMALL_SCALAR);
+            assert!(add_count(k) <= MAX_ADDS);
+            let mut expect = [0u8; FR_BYTES];
+            expect[..8].copy_from_slice(&k.to_le_bytes());
+            assert!(s == expect, "Some(k) implies the scalar is exactly k");
+        }
     }
 }
