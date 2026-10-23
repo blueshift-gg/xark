@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 // return_values_only: main(x: priv) -> pub Field { x*x }.
@@ -14,11 +12,11 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        return_values_only("6".into(), "36".into()).unwrap(); // 6² = 36
+        return_values_only(6, 36).unwrap(); // 6² = 36
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(return_values_only("6".into(), "37".into()).is_err());
+        assert!(return_values_only(6, 37).is_err());
     }
 }

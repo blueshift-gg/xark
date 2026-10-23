@@ -186,8 +186,10 @@ impl<const N: usize> Verifier<N> {
     /// Strict variant of [`verify`](Self::verify): additionally rejects any VK
     /// or proof coordinate whose 32-byte LE encoding is non-canonical (`>= q`).
     /// The syscall masks the unused top bits, so plain [`verify`](Self::verify)
-    /// accepts byte-distinct encodings of the same point; use this when the
-    /// proof's exact bytes matter (hashed, signed, or used as a replay key).
+    /// accepts byte-distinct encodings of the same point; this rejects them. It
+    /// does not make proofs unique: Groth16 proofs are re-randomizable, so never
+    /// use proof bytes as a replay key (see
+    /// [`verify_groth16_strict`](crate::verify_groth16_strict)).
     /// See [`verify_groth16_strict`](crate::verify_groth16_strict).
     pub fn verify_strict(&self, proof: &Proof, public_inputs: &[[u8; FR_BYTES]; N]) -> bool {
         self.try_verify_strict(proof, public_inputs)

@@ -1,10 +1,9 @@
 //! `xark doctor` — check the local machine is set up to build and prove
 //! circuits, and print the exact fix for anything missing.
 //!
-//! The `xark build`/`check` path drives `cargo` with `xark` as `RUSTC` under a
-//! pinned nightly (with `rustc-dev` / `rust-src` / `llvm-tools`). That toolchain
-//! is the single most common thing a newcomer gets wrong, so `doctor` verifies
-//! it up front — turning a cryptic mid-build failure into a one-line fix.
+//! Building needs only a stable Rust toolchain (1.89+) and its
+//! `wasm32-unknown-unknown` standard library (`xark build` adds it with `rustup` on
+//! first use).
 
 use std::process::Command;
 
@@ -14,24 +13,10 @@ use clap::Args;
 #[derive(Args, Debug)]
 pub struct DoctorArgs {}
 
-pub fn run(_args: DoctorArgs) -> Result<()> {
-    // The pinned toolchain, queried from the `xark-rustc` driver — which bakes it
-    // at build time (`--print-toolchain`), the single source of truth. Falls back
-    // to a bare `nightly` if the driver isn't installed (doctor flags that missing
-    // driver separately below).
-    let toolchain_owned = crate::cli::find_rustc_shim()
-        .and_then(|d| Command::new(d).arg("--print-toolchain").output().ok())
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "nightly".to_string());
-    let toolchain = toolchain_owned.as_str();
-    let channel = channel_of(toolchain);
-    let install_tc = format!(
-        "rustup toolchain install {channel} --profile minimal \
-         --component rust-src --component rustc-dev --component llvm-tools"
-    );
+/// Oldest `rustc` that builds a circuit (the `xark` crate's `rust-version`).
+const MIN_RUSTC: (u32, u32) = (1, 89);
 
+pub fn run(_args: DoctorArgs) -> Result<()> {
     println!(
         "{}",
         crate::style::brand("xark doctor — checking your setup\n")
@@ -47,7 +32,20 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
         cargo.as_deref(),
         "install Rust from https://rustup.rs",
     );
-
+    let rustc = cmd_ok("rustc", &["--version"]);
+    let version = rustc.as_deref().and_then(|v| {
+        let mut it = v.split_whitespace().nth(1)?.split('.');
+        Some((
+            it.next()?.parse::<u32>().ok()?,
+            it.next()?.parse::<u32>().ok()?,
+        ))
+    });
+    problems += check(
+        version.is_some_and(|v| v >= MIN_RUSTC),
+        &format!("rustc {}.{}+", MIN_RUSTC.0, MIN_RUSTC.1),
+        rustc.as_deref(),
+        "rustup update stable",
+    );
     let rustup = cmd_ok("rustup", &["--version"]);
     problems += check(
         rustup.is_some(),
@@ -55,51 +53,47 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
         rustup.as_deref(),
         "install Rust from https://rustup.rs",
     );
-
-    let toolchains = cmd_ok("rustup", &["toolchain", "list"]).unwrap_or_default();
-    let tc_ok = toolchains
-        .lines()
-        .any(|l| l.starts_with(toolchain) || l.starts_with(channel.as_str()));
-    problems += check(
-        tc_ok,
-        &format!("toolchain {channel}"),
-        tc_ok.then_some(toolchain),
-        &install_tc,
+    let targets = cmd_ok("rustup", &["target", "list", "--installed"]).unwrap_or_default();
+    info(
+        targets
+            .lines()
+            .any(|l| l.trim() == "wasm32-unknown-unknown"),
+        "target wasm32-unknown-unknown",
+        "installed automatically on the first `xark build`",
+        "rustup target add wasm32-unknown-unknown",
     );
-
-    // Toolchain components (required; only checked if the toolchain is present).
-    let comps = if tc_ok {
-        cmd_ok(
-            "rustup",
-            &["component", "list", "--toolchain", toolchain, "--installed"],
-        )
-        .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    for comp in ["rustc-dev", "rust-src", "llvm-tools"] {
-        // Match a whole component line — `llvm-tools` or a target-suffixed
-        // `llvm-tools-<triple>` — not any incidental substring.
-        let installed = tc_ok
-            && comps
-                .lines()
-                .any(|l| l.trim() == comp || l.trim().starts_with(&format!("{comp}-")));
-        problems += check(
-            installed,
-            &format!("component {comp}"),
-            None,
-            &format!("rustup component add {comp} --toolchain {channel}"),
-        );
-    }
 
     // Optional (informational — never a hard failure).
-    let onpath = cmd_ok("xark", &["--version"]);
-    info(
-        onpath.is_some(),
-        "xark on PATH",
-        "needed for `xark init` and rust-analyzer diagnostics",
-        "cargo +nightly-… install --path crates/lang --features cli",
-    );
+    // The `xark` that `cargo test` runs (`$XARK`, else `PATH`) builds with its
+    // own version: an older one can't build this release's circuits.
+    let from_env = std::env::var("XARK").ok();
+    let bin = from_env.clone().unwrap_or_else(|| "xark".to_string());
+    let onpath = cmd_ok(&bin, &["--version"]);
+    let theirs = onpath.as_deref().and_then(|v| v.split_whitespace().nth(1));
+    let label = match &from_env {
+        Some(p) => format!("$XARK ({p})"),
+        None => "xark on PATH".to_string(),
+    };
+    match theirs {
+        Some(v) if !xark_ir::same_release(v, env!("CARGO_PKG_VERSION")) => {
+            let found = onpath.unwrap_or_default();
+            info(
+                false,
+                &label,
+                &format!(
+                    "is `{found}`, another release than {}: `cargo test` and rust-analyzer would build with it",
+                    env!("CARGO_PKG_VERSION")
+                ),
+                "cargo install xark-cli --force",
+            );
+        }
+        _ => info(
+            onpath.is_some(),
+            &label,
+            "used by rust-analyzer diagnostics, and by `cargo test` to build a missing or out-of-date circuit",
+            "cargo install xark-cli",
+        ),
+    }
     let node = cmd_ok("node", &["--version"]);
     info(
         node.is_some(),
@@ -166,20 +160,5 @@ fn info(ok: bool, label: &str, note: &str, fix: &str) {
             crate::style::dim(note)
         );
         println!("       {}", crate::style::dim(&format!("fix: {fix}")));
-    }
-}
-
-/// Reduce a full toolchain name to its rustup channel:
-/// `nightly-2026-05-03-aarch64-apple-darwin` → `nightly-2026-05-03`.
-fn channel_of(tc: &str) -> String {
-    let parts: Vec<&str> = tc.split('-').collect();
-    if parts.len() >= 4
-        && parts[0] == "nightly"
-        && parts[1].len() == 4
-        && parts[1].bytes().all(|b| b.is_ascii_digit())
-    {
-        format!("nightly-{}-{}-{}", parts[1], parts[2], parts[3])
-    } else {
-        tc.to_string()
     }
 }

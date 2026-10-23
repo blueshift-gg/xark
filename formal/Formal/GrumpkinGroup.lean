@@ -7,6 +7,7 @@ import Formal.Gadgets
 import Formal.Curve
 import Formal.EcdsaVerify
 import Mathlib
+import Formal.CurvePrimes
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -28,23 +29,18 @@ Same recipe as `Formal.Secp256k1Group`: instantiate mathlib's
 `ZMod r` (`r` defined in `Formal.Gadgets`). The `AddCommGroup` instance is
 then inherited via the class-group injection.
 
-## Trusted base addition: primality of `r` (BN254 Fr modulus)
+## Primality of `r` (BN254 Fr modulus)
 
 `r = 21888242871839275222246405745257275088548364400416034343698204186575808495617`
-is the 254-bit BN254 scalar field prime — the standard `ark_bn254::Fr`
-modulus, well-known across the zk ecosystem. As with `secp256k1_p` and
-`secp256r1_p`, mathlib's `decide` is infeasible at this size, so we declare
-
-    axiom bn254_r_prime : Fact (Nat.Prime r)
-
-as a **trusted base addition** — verifiable in seconds outside Lean using a
-standard primality test (`openssl prime 21888242871839275222246405745257275088548364400416034343698204186575808495617`).
+is the 254-bit BN254 scalar field prime — the standard `ark_bn254::Fr` modulus.
+`bn254_r_prime : Fact (Nat.Prime r)` is a **theorem**, proven by a Pratt certificate
+(`Formal.CurvePrimes`, kernel-checked; see `Formal.Pratt`).
 
 ## Theorem / instance index
 
 | Name                              | Statement                                              |
 |-----------------------------------|--------------------------------------------------------|
-| `bn254_r_prime`                   | trusted primality axiom for the BN254 scalar prime `r` |
+| `bn254_r_prime`                   | primality of the BN254 scalar prime `r` (Pratt)        |
 | `grumpkinCurve`                   | the short Weierstrass curve `y² = x³ − 17` over `ZMod r` |
 | `GrumpkinPoint`                   | nonsingular points of `grumpkinCurve` ∪ {∞}            |
 | `GrumpkinPoint.addCommGroup`      | inherited `AddCommGroup` instance                      |
@@ -53,31 +49,13 @@ standard primality test (`openssl prime 2188824287183927522224640574525727508854
 
 namespace Xark
 
-/-! ## Trusted primality of the BN254 scalar field modulus `r` -/
+/-! ## Primality of the BN254 scalar field modulus `r` -/
 
-/-- **Trusted primality fact for `r`** (the BN254 scalar prime).
-
-The BN254 scalar field modulus `r` is the well-known 254-bit prime used as
-`ark_bn254::Fr` (the embedded curve scalar field). Independently verifiable
-outside Lean (e.g. `openssl prime
-21888242871839275222246405745257275088548364400416034343698204186575808495617`).
-Declared as `Fact (Nat.Prime r)` because mathlib's `decide` is infeasible
-and `native_decide` also doesn't terminate at this size.
-
-Discharge path (verified viable, not yet mechanised): apply
-`Mathlib.NumberTheory.LucasPrimality.lucas_primality` with witness
-`a = 5` and the published factorisation
-`r - 1 = 2^28 · 3^2 · 13 · 29 · 983 · 11003 · 237073 · 405928799 · 1670836401704629 · 13818364434197438864469338081`.
-The factorisation and `5^(r-1) = 1 (mod r)` both verify under
-`native_decide` (factorisation: ~1s; exponentiation: ~50s). Each
-per-divisor `5^((r-1)/q) ≠ 1` is similarly tractable. The recursion
-bottoms out at the 93-bit factor `13818364434197438864469338081`,
-which is too large for `native_decide` trial-division and needs its
-own recursive Lucas certificate. Eliminating this axiom is a
-multi-day undertaking that requires either (a) a custom Pratt-certificate
-tactic + nested factorisation data for each large recursive prime,
-or (b) waiting for the mathlib `norm_num` Pratt extension. -/
-axiom bn254_r_prime : Fact (Nat.Prime r)
+/-- **Primality of `r`** (the BN254 scalar prime), proven by the Pratt certificate
+`Pratt.prime_21888242871839275222246405745257275088548364400416034343698204186575808495617` (`Formal/CurvePrimes.lean`: `r - 1`'s factorization, a witness of
+order `r - 1`, and recursive certificates for its large factors). -/
+theorem bn254_r_prime : Fact (Nat.Prime r) :=
+  ⟨by rw [show r = 21888242871839275222246405745257275088548364400416034343698204186575808495617 from rfl]; exact Pratt.prime_21888242871839275222246405745257275088548364400416034343698204186575808495617⟩
 
 attribute [instance] bn254_r_prime
 

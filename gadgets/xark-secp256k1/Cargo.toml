@@ -6,6 +6,7 @@ categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -14,24 +15,22 @@ name = "xark_secp256k1"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
-xark-bignum = { path = "../xark-bignum", version = "0.2.1" }
-xark-curve = { path = "../xark-curve", version = "0.2.1" }
+xark = { path = "../../crates/lang", version = "0.3.0" }
+xark-bignum = { path = "../xark-bignum", version = "0.3.0" }
+xark-curve = { path = "../xark-curve", version = "0.3.0" }
 
-# Host-only deps for the `NativeInput` impls (native bytes → circuit inputs).
-# Gated on `cfg(not(xark))`: the `xark-rustc` driver reports the `xark` cfg, so a
+# Host-only deps for the host conversions (native bytes → circuit inputs).
+# Gated on `cfg(not(xark))`: the circuit build sets the `xark` cfg, so a
 # circuit build drops these and the crate stays lean `no_std`; an ordinary host
 # build (tests, downstream provers) pulls them in with no feature flag.
 [target.'cfg(not(xark))'.dependencies]
 num-bigint = "0.4"
-xark-prover = { path = "../../crates/prover", version = "0.2.1" }
 
 [dev-dependencies]
 k256 = "0.13"
 num-bigint = "0.4"
 sha2 = "0.10"
-xark-ir = { path = "../../crates/ir", version = "0.2.1" }
-xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

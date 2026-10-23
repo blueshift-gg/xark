@@ -1,4 +1,4 @@
-//! `xark-keccak`: Keccak-f[1600] permutation and Keccak-256 (Ethereum-flavour)
+//! `xark-keccak`: Keccak-f\[1600\] permutation and Keccak-256 (Ethereum-flavour)
 //! gadget written entirely in the `xark` `Field` subset, on top of `xark-bits`.
 //! Everything is `while`-loop unrolled at compile time.
 //!
@@ -1908,7 +1908,7 @@ fn rc_bits() -> [[Field; 64]; 24] {
 // The permutation and the Keccak-256 single-block hash.
 // ===========================================================================
 
-/// Keccak-f[1600]: apply all 24 rounds (θ, ρ, π, χ, ι) to the 25-lane state.
+/// Keccak-f\[1600\]: apply all 24 rounds (θ, ρ, π, χ, ι) to the 25-lane state.
 pub fn keccak_f(state: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     let zero = [Field::from(0u8); 64];
 

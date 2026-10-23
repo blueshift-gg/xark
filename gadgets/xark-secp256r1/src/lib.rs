@@ -16,7 +16,7 @@
 //! The public inputs are the transparent [`Point`] / [`Signature`] / [`Scalar`]
 //! types, each a 256-bit value in the compact **2×128-bit half** form (2 public
 //! field elements per value) — matching secp256k1. The 3×86-bit limbs the field
-//! arithmetic uses are recomposed in-circuit by [`unpack`]; the affine curve
+//! arithmetic uses are recomposed in-circuit by `unpack`; the affine curve
 //! gadget (`Point`/`Fq`/`Fp`, emitted by [`xark_curve::weierstrass!`]) lives in
 //! the [`affine`] submodule.
 
@@ -46,16 +46,15 @@ pub mod affine {
 #[cfg(not(xark))]
 pub use affine::{order, reduce_scalar};
 
-use xark::{Field, Transparent, require_eq};
+use xark::{Field, input, require_eq};
 
 /// A P-256 256-bit value (a scalar `r`/`s`/`e`, or a point coordinate) in the
 /// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =
 /// `[lo128, hi128]` in-circuit (2 public field elements vs 3 raw 86-bit limbs),
 /// `[u8; 32]` big-endian on the host. Recomposed to the internal 3×86 limbs by
-/// [`unpack`]. `#[derive(Transparent)]` derives the host `NativeInput` (`[u8; 32]`
+/// `unpack`. `#[input]` derives its host conversions (`[u8; 32]`
 /// → `<name>.limbs[0..2]`) from this declaration.
-#[derive(Clone, Copy, Transparent)]
-#[transparent(bits = 128)]
+#[input(number(bits = 128))]
 pub struct Scalar {
     pub limbs: [Field; 2],
 }
@@ -64,7 +63,7 @@ pub struct Scalar {
 /// `[u8; 64]` (`x ‖ y`, SEC1 minus the `0x04` tag) on the host, `{ x, y }`
 /// (flattening to `<name>.x.limbs[i]` / `<name>.y.limbs[i]`) in-circuit. Verify a
 /// signature against it with [`Point::verify`].
-#[derive(Clone, Copy, Transparent)]
+#[input(bytes)]
 pub struct Point {
     pub x: Scalar,
     pub y: Scalar,
@@ -72,7 +71,7 @@ pub struct Point {
 
 /// A P-256 ECDSA signature `(r, s)` — `[u8; 64]` (`r ‖ s`) on the host, `{ r, s }`
 /// in-circuit. Pass it to [`Point::verify`] with the message digest.
-#[derive(Clone, Copy, Transparent)]
+#[input(bytes)]
 pub struct Signature {
     pub r: Scalar,
     pub s: Scalar,
@@ -152,7 +151,7 @@ impl Point {
 
 /// P-256 ECDSA verification core (3×86-bit incomplete-affine path). P-256 has no
 /// efficient endomorphism, so there's no GLV variant as on secp256k1. Each of
-/// `q`, `r`, `s`, `e` is a 256-bit value in compact 2×128 form, [`unpack`]ed to the
+/// `q`, `r`, `s`, `e` is a 256-bit value in compact 2×128 form, `unpack`ed to the
 /// 3×86 limbs the macro's shared primitives (`double_scalar_mul_incomplete`, `Fq`,
 /// `Fp`, `Point`) operate on. Wrapped by [`Point::verify`] — callers use that.
 pub fn ecdsa_verify(q: Point, r: Scalar, s: Scalar, e: Scalar) {

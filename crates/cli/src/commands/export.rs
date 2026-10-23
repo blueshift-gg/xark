@@ -17,7 +17,6 @@
 //!   public_inputs.solana.bin   # sample public inputs (N * 32 B LE)
 //!   instruction_data.bin       # proof || public_inputs (the on-chain ix data)
 //!   README.md
-//!   client_call_example.rs     # off-chain submission snippet
 //! ```
 //!
 //! All field elements are 32-byte little-endian, matching the `alt_bn128` LE
@@ -41,24 +40,25 @@ use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
 pub struct ExportArgs {
-    /// Circuit crate directory (or its `target/xark/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/`.
+    /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
+    /// the current directory; paths are inferred from `target/xark/<name>/`.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
-    /// Verifying key. Inferred as `target/xark/vk.bin` when omitted.
+    /// Verifying key. Inferred as `target/xark/<name>/vk.bin` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
     /// Proof, bundled as the generated crate's self-test vector. Inferred as
-    /// `target/xark/proof.bin`.
+    /// `target/xark/<name>/proof.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
     /// Public inputs file produced by `xark prove`. Inferred as
-    /// `target/xark/public_inputs.bin`.
+    /// `target/xark/<name>/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
-    /// Output directory — the root of the generated verifier crate. Inferred as
-    /// `target/xark/verifier`.
+    /// Output directory — the root of the generated verifier crate (a warning if it
+    /// isn't empty; a `Cargo.toml` or `src/lib.rs` it didn't write is never
+    /// replaced). Inferred as `target/xark/<name>/verifier`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Name for the generated crate. Defaults to the `--out` directory name.
@@ -72,6 +72,17 @@ pub struct ExportArgs {
 
 pub fn run(args: ExportArgs) -> Result<()> {
     let project = XarkProject::resolve(args.path.clone())?;
+    // The export carries the keys as they are: a newer source means they may be for
+    // an older circuit.
+    if project.circuit_xbc().exists()
+        && let Some(why) = crate::cli::stale_build(&project.xark_dir, "circuit.xbc", None)
+    {
+        eprintln!(
+            "{} {why}: these keys may be for an older circuit (run `xark build` and \
+             `xark setup`, then export again)",
+            crate::style::warn("warning:")
+        );
+    }
     let vk_path = args
         .verifying_key
         .clone()
@@ -84,13 +95,29 @@ pub fn run(args: ExportArgs) -> Result<()> {
     let out_dir = args.out.clone().unwrap_or_else(|| project.export_dir());
 
     // Load inputs.
-    let vk = Groth16Keys::read_verifying_key(&vk_path)
-        .with_context(|| format!("reading verifying key {}", vk_path.display()))?;
+    let vk = super::read_artifact(
+        &vk_path,
+        "verifying key",
+        "xark setup",
+        "run `xark setup` first?",
+        || Groth16Keys::read_verifying_key(&vk_path),
+    )?;
     check_key_safe_for_export(&vk_path, args.allow_insecure)?;
-    let proof = ProofBundle::read_proof(&proof_path)
-        .with_context(|| format!("reading proof {}", proof_path.display()))?;
-    let public_inputs = read_public_inputs(&public_inputs_path)
-        .with_context(|| format!("reading public inputs {}", public_inputs_path.display()))?;
+    super::ensure_key_matches_circuit(&vk_path, &project.circuit_xbc())?;
+    let proof = super::read_artifact(
+        &proof_path,
+        "proof",
+        "xark prove",
+        "run `xark prove` first?",
+        || ProofBundle::read_proof(&proof_path),
+    )?;
+    let public_inputs = super::read_artifact(
+        &public_inputs_path,
+        "public inputs file",
+        "xark prove",
+        "run `xark prove` first?",
+        || read_public_inputs(&public_inputs_path),
+    )?;
 
     let num_public_inputs = public_inputs.len();
     let ic_len = vk.gamma_abc_g1.len();
@@ -99,6 +126,16 @@ pub fn run(args: ExportArgs) -> Result<()> {
             "VK ic length ({ic_len}) does not match num_public_inputs+1 ({}); \
              ic_len must equal num_public_inputs + 1 in Groth16",
             num_public_inputs + 1
+        );
+    }
+
+    // The proof is the generated crate's self-test: one that doesn't verify (a
+    // proof from an earlier key) would only fail there, after the export.
+    if !xark_backend::verify(&vk, &proof, &public_inputs)? {
+        anyhow::bail!(
+            "the proof {} doesn't verify with {}: run `xark prove` again",
+            proof_path.display(),
+            vk_path.display()
         );
     }
 
@@ -117,8 +154,26 @@ pub fn run(args: ExportArgs) -> Result<()> {
             .unwrap_or("groth16-verifier")
     }));
 
-    // Write the generated crate.
+    // Write the generated crate: over an earlier export, never over anything
+    // else (an `--out` naming your own program must not lose its code).
     let out = &out_dir;
+    for (file, marker) in [
+        ("Cargo.toml", "# Auto-generated by `xark export`"),
+        ("src/lib.rs", "//! Auto-generated by `xark export`"),
+    ] {
+        if let Ok(text) = fs::read_to_string(out.join(file))
+            && !text.starts_with(marker)
+        {
+            anyhow::bail!(
+                "{} exists and wasn't written by `xark export`; refusing to overwrite it \
+                 (pick a new --out directory)",
+                out.join(file).display()
+            );
+        }
+    }
+    if args.out.is_some() {
+        super::warn_if_not_empty(out, "verifier crate");
+    }
     fs::create_dir_all(out.join("src"))
         .with_context(|| format!("creating {}", out.join("src").display()))?;
 
@@ -133,7 +188,6 @@ pub fn run(args: ExportArgs) -> Result<()> {
         &out.join("README.md"),
         &gen_readme(&crate_name, num_public_inputs),
     )?;
-    write_str(&out.join("client_call_example.rs"), CLIENT_CALL_EXAMPLE)?;
 
     println!(
         "Generated verifier crate `{crate_name}` at {} ({} public input(s), \
@@ -153,7 +207,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
         crate::style::next_steps(&[
             (
                 format!("xark client {p}"),
-                "scaffold a TypeScript client (verify + calldata)",
+                "generate a typed TypeScript client (prove + verify in JS)",
             ),
             (
                 "cargo test".to_string(),
@@ -288,9 +342,12 @@ pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
 /// a non-holding pairing, a malformed point, or a non-canonical public input.
 ///
 /// This matches the on-chain `alt_bn128` syscall, which masks the unused top
-/// bits of each coordinate limb. If you need to reject non-canonical
-/// *coordinate* encodings as well — e.g. when proof bytes are hashed, signed,
-/// or used as a replay/dedup key — use [`verify_strict`].
+/// bits of each coordinate limb. To also reject non-canonical *coordinate*
+/// encodings, use [`verify_strict`]. Neither makes a proof's bytes unique:
+/// Groth16 proofs are re-randomizable, so anyone holding a valid proof can
+/// derive a different valid proof of the same statement. Never key replay
+/// protection on proof bytes; put it in the public inputs (a nullifier, nonce
+/// or signer the circuit binds).
 #[inline]
 pub fn verify(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
     VERIFIER.verify(proof, public_inputs)
@@ -298,8 +355,9 @@ pub fn verify(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> b
 
 /// Strict [`verify`]: additionally rejects any proof/VK coordinate whose
 /// encoding is non-canonical (`>= q`, e.g. an unused top bit set). `xark`
-/// proofs are always canonical, so this never rejects an honest proof — it
-/// only removes byte-level proof malleability.
+/// proofs are always canonical, so this never rejects an honest proof. It
+/// removes *encoding* malleability only: a re-randomized proof is still
+/// accepted (see [`verify`]).
 #[inline]
 pub fn verify_strict(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
     VERIFIER.verify_strict(proof, public_inputs)
@@ -350,21 +408,38 @@ updates.
 {name} = {{ path = "path/to/{name}" }}   # or a git/published source
 ```
 
+The proof comes in the instruction data (256 bytes: a client's `proof.toBytes()`);
+the public inputs are what your program requires, from its own state (a policy, a
+root, a nullifier), each 32 bytes little-endian:
+
 ```rust
-// instruction_data = proof (256 B) || public_inputs ({n} * 32 B)
-if {ident}::verify_instruction_data(instruction_data) {{
-    // proof valid — proceed
+let Some(proof) = instruction_data.first_chunk::<256>() else {{
+    return Err(ProgramError::InvalidInstructionData);
+}};
+let proof = {ident}::Proof::from_le_bytes(proof);
+let public_inputs: [[u8; 32]; {n}] = [/* from your program's state */];
+if !{ident}::verify(&proof, &public_inputs) {{
+    return Err(ProgramError::InvalidArgument);
 }}
 ```
 
-Or, with proof and public inputs already separated:
+When the transaction does carry the public inputs too (`proof || public_inputs`),
+`{ident}::verify_instruction_data(instruction_data)` checks both.
 
-```rust
-let ok = {ident}::verify(&proof, &public_inputs); // public_inputs: &[[u8; 32]; {n}]
-```
+## Replay protection
+
+A valid proof is not unique: anyone holding one can re-randomize it into a
+different valid proof of the same public inputs (a property of Groth16;
+`verify_strict` does not change it). So never use proof bytes, or their hash,
+as a replay or "already used" key. Put replay protection in the public inputs
+instead: a nullifier or nonce the circuit derives from a secret, or the signer
+or context the proof is for, and record *that* on-chain.
 
 `cargo test` in this crate verifies the bundled sample proof against the
-embedded VK. `client_call_example.rs` shows how to submit a proof off-chain.
+embedded VK. `instruction_data.bin` is that proof as your program receives it
+(`proof || public_inputs`): send those bytes as an instruction's data, in a
+transaction built however your client builds them. A TypeScript client from
+`xark client` sends a proof in this format: `proof.toBytes()`.
 "#
     )
 }
@@ -379,69 +454,6 @@ fn write_str(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
-
-// Off-chain client snippet.
-
-const CLIENT_CALL_EXAMPLE: &str = r#"//! Submit an xark-exported Groth16 proof to your on-chain verifier program.
-//!
-//! Your program embeds the verifying key via the generated verifier crate
-//! (`<crate>::verify_instruction_data(...)`); the client just submits
-//! `instruction_data.bin` (= `proof_bytes || public_inputs`, no VK).
-//!
-//! Uses Anza's broken-out client crates rather than the monolithic
-//! `solana-sdk`. Copy this file into a fresh Cargo project with:
-//!
-//! ```toml
-//! [dependencies]
-//! anyhow = "1"
-//! solana-address = "2"
-//! solana-client = "2"
-//! solana-commitment-config = "3"
-//! solana-instruction = "3"
-//! solana-keypair = "3"
-//! solana-message = "3"
-//! solana-signer = "3"
-//! solana-transaction = "3"
-//! ```
-
-use std::str::FromStr;
-
-use anyhow::Result;
-use solana_address::Address;
-use solana_client::rpc_client::RpcClient;
-use solana_commitment_config::CommitmentConfig;
-use solana_instruction::Instruction;
-use solana_keypair::read_keypair_file;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
-
-// ---- Fill these in ---------------------------------------------------------
-const PROGRAM_ID: &str = "REPLACE_WITH_DEPLOYED_PROGRAM_ID";
-const RPC_URL: &str = "https://api.devnet.solana.com";
-/// Absolute path to the `instruction_data.bin` produced by `xark export`.
-/// Contents: `proof_bytes (256 B) || public_inputs (N * 32 B)`.
-const INSTRUCTION_DATA_PATH: &str = "/absolute/path/to/instruction_data.bin";
-const PAYER_KEYPAIR_PATH: &str = "/absolute/path/to/payer.json";
-
-fn main() -> Result<()> {
-    let instruction_data = std::fs::read(INSTRUCTION_DATA_PATH)?;
-    let program_id = Address::from_str(PROGRAM_ID)?;
-    let ix = Instruction {
-        program_id,
-        accounts: vec![],
-        data: instruction_data,
-    };
-    let rpc = RpcClient::new_with_commitment(RPC_URL.to_string(), CommitmentConfig::confirmed());
-    let payer = read_keypair_file(PAYER_KEYPAIR_PATH)
-        .map_err(|e| anyhow::anyhow!("read keypair: {e}"))?;
-    let blockhash = rpc.get_latest_blockhash()?;
-    let tx =
-        Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
-    let sig = rpc.send_and_confirm_transaction(&tx)?;
-    println!("Proof verified on-chain. Signature: {sig}");
-    Ok(())
-}
-"#;
 
 #[cfg(test)]
 mod tests {

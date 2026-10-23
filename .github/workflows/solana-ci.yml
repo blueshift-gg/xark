@@ -12,8 +12,8 @@ name: Solana E2E
 # (syscall path) and must produce byte-identical results — the only
 # out-of-Lean trust assumption flagged by name in the formal sources.
 #
-# This needs the Anza Solana toolchain, so it lives in its own workflow
-# gated to verifier changes.
+# This needs the Anza Solana toolchain, so it lives in its own workflow,
+# run when the verifier, these tests or their fixtures change.
 
 on:
   push:
@@ -21,15 +21,25 @@ on:
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
+      # The tests themselves, the fixtures they embed, and their dependencies.
+      - "gadgets/tests/tests/sbpf.rs"
       - "gadgets/tests/tests/differential_alt_bn128.rs"
+      - "gadgets/tests/src/**"
+      - "gadgets/tests/fixtures/**"
       - "gadgets/tests/Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/solana-ci.yml"
   pull_request:
     paths:
       - "crates/verifier/**"
       - "crates/backend/src/solana.rs"
+      # The tests themselves, the fixtures they embed, and their dependencies.
+      - "gadgets/tests/tests/sbpf.rs"
       - "gadgets/tests/tests/differential_alt_bn128.rs"
+      - "gadgets/tests/src/**"
+      - "gadgets/tests/fixtures/**"
       - "gadgets/tests/Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/solana-ci.yml"
   workflow_dispatch:
 

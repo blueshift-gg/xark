@@ -2,7 +2,7 @@
 //! `nested_calls`), driven through the `xark` CLI (`build` + `prove`).
 //!
 //! The circuit crates use plain Rust helper functions (`#[inline(never)] fn
-//! square`, `square_plus_one`); the xark compiler inlines their MIR across
+//! square`, `square_plus_one`); the xark compiler inlines them across
 //! function boundaries, so `main`'s constraints incorporate the helper bodies.
 //! These tests confirm the whole build → solve → Groth16 prove/verify pipeline
 //! works for multi-function circuits.

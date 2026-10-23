@@ -13,7 +13,9 @@
 //! them by parsing this source, so they can't be macro-generated.
 
 use svm_unit_test::svm_test;
-use xark_tests::{fixtures, verify_proof_only, verify_proof_only_strict};
+use xark_tests::{
+    PAIRING_PAIR_BYTES, fixtures, verify_groth16_batch, verify_proof_only, verify_proof_only_strict,
+};
 
 /// Dynamic byte path: `verify_proof_only(vk_bytes, instruction_data)`.
 #[svm_test]
@@ -269,4 +271,65 @@ fn reject_offcurve_proof_a() {
 fn reject_truncated_instruction_data() {
     let ix = fixtures::ARITHMETIC_SQUARE_INSTRUCTION_DATA;
     assert!(!verify_proof_only(fixtures::ARITHMETIC_SQUARE_VK_LE, &ix[..200]).unwrap_or(false));
+}
+
+// Batch verification: `n` proofs of `arithmetic_square` in one pairing call
+// (`n + 3` pairs). The scratch buffer is on the stack here; a program can use
+// the heap or account data. Compare with `separate_4` (four single verifies).
+
+const ENTRY: usize = 256 + 32;
+
+#[svm_test]
+fn batch_1() {
+    let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 1 + 3];
+    let batch = &fixtures::ARITHMETIC_SQUARE_BATCH16[..ENTRY];
+    assert!(verify_groth16_batch(fixtures::ARITHMETIC_SQUARE_VK_LE, batch, &mut scratch).unwrap());
+}
+
+#[svm_test]
+fn batch_2() {
+    let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 2 + 3];
+    let batch = &fixtures::ARITHMETIC_SQUARE_BATCH16[..2 * ENTRY];
+    assert!(verify_groth16_batch(fixtures::ARITHMETIC_SQUARE_VK_LE, batch, &mut scratch).unwrap());
+}
+
+#[svm_test]
+fn batch_4() {
+    let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 4 + 3];
+    let batch = &fixtures::ARITHMETIC_SQUARE_BATCH16[..4 * ENTRY];
+    assert!(verify_groth16_batch(fixtures::ARITHMETIC_SQUARE_VK_LE, batch, &mut scratch).unwrap());
+}
+
+#[svm_test]
+fn batch_8() {
+    let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 8 + 3];
+    let batch = &fixtures::ARITHMETIC_SQUARE_BATCH16[..8 * ENTRY];
+    assert!(verify_groth16_batch(fixtures::ARITHMETIC_SQUARE_VK_LE, batch, &mut scratch).unwrap());
+}
+
+#[svm_test]
+fn batch_16() {
+    let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 16 + 3];
+    let batch = fixtures::ARITHMETIC_SQUARE_BATCH16;
+    assert!(verify_groth16_batch(fixtures::ARITHMETIC_SQUARE_VK_LE, batch, &mut scratch).unwrap());
+}
+
+/// A wrong public input in the last of four proofs fails the batch on chain.
+#[svm_test]
+fn batch_rejects_a_bad_proof() {
+    let mut batch = [0u8; 4 * ENTRY];
+    batch.copy_from_slice(&fixtures::ARITHMETIC_SQUARE_BATCH16[..4 * ENTRY]);
+    batch[3 * ENTRY + 256] ^= 1;
+    let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 4 + 3];
+    assert!(
+        !verify_groth16_batch(fixtures::ARITHMETIC_SQUARE_VK_LE, &batch, &mut scratch).unwrap()
+    );
+}
+
+/// The same four proofs verified one by one (strict, like the batch).
+#[svm_test]
+fn separate_4() {
+    for e in fixtures::ARITHMETIC_SQUARE_BATCH16[..4 * ENTRY].chunks(ENTRY) {
+        assert!(verify_proof_only_strict(fixtures::ARITHMETIC_SQUARE_VK_LE, e).unwrap());
+    }
 }

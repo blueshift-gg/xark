@@ -13,7 +13,7 @@ set_option linter.style.header false
 # xark gadget soundness — mechanised in Lean 4 / mathlib
 
 Machine-checked soundness lemmas for the R1CS gadgets emitted by the xark
-frontend gadget crates (`crates/lang-*/src/lib.rs`). Each theorem mirrors the
+frontend (`crates/frontend/src/builder.rs`, `crates/lang/src/lang.rs`). Each theorem mirrors the
 *exact* constraints the Rust builder enforces, so a proof here is a statement
 about the real circuit.
 

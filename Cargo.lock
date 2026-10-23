@@ -3,14 +3,13 @@
 version = 4
 
 [[package]]
-name = "aes"
-version = "0.9.1"
+name = "addr2line"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1fc76eaeac4c9164506c466d4ffdd8ec9d0c5bf57ee97177c4d8eceb3a0e138"
+checksum = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b"
 dependencies = [
- "cipher",
- "cpubits",
- "cpufeatures 0.3.0",
+ "gimli",
+ "rustc-demangle",
 ]
 
 [[package]]
@@ -966,16 +965,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cipher"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
-dependencies = [
- "crypto-common 0.2.2",
- "inout",
-]
-
-[[package]]
 name = "clap"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1076,12 +1065,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "cpubits"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b85f9c39137c3a891689859392b1bd49812121d0d61c9caf00d46ed5ce06ae"
 
 [[package]]
 name = "cpufeatures"
@@ -1522,6 +1505,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1691,6 +1680,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gimli"
+version = "0.32.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
+dependencies = [
+ "fallible-iterator",
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1742,6 +1741,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+dependencies = [
+ "ahash",
+ "serde",
 ]
 
 [[package]]
@@ -1852,15 +1861,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inout"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
-dependencies = [
- "hybrid-array",
-]
-
-[[package]]
 name = "is-terminal"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1967,16 +1967,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
  "cpufeatures 0.2.17",
-]
-
-[[package]]
-name = "keccak"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e24a010dd405bd7ed803e5253182815b41bf2e6a80cc3bfc066658e03a198aa"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.0",
 ]
 
 [[package]]
@@ -2113,7 +2103,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58c38e2799fc0978b65dfff8023ec7843e2330bb462f19198840b34b6582397d"
 dependencies = [
  "byteorder",
- "keccak 0.1.6",
+ "keccak",
  "rand_core 0.6.4",
  "zeroize",
 ]
@@ -2880,17 +2870,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-wasm-bindgen"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
-dependencies = [
- "js-sys",
- "serde",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "serde_bytes"
 version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3000,17 +2979,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
 dependencies = [
  "digest 0.10.7",
- "keccak 0.1.6",
-]
-
-[[package]]
-name = "sha3"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be176f1a57ce4e3d31c1a166222d9768de5954f811601fb7ca06fc8203905ce1"
-dependencies = [
- "digest 0.11.3",
- "keccak 0.2.0",
+ "keccak",
 ]
 
 [[package]]
@@ -3415,7 +3384,7 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed1c0d16d6fdeba12291a1f068cdf0d479d9bff1141bf44afd7aa9d485f65ef8"
 dependencies = [
- "sha3 0.10.9",
+ "sha3",
  "solana-define-syscall 4.0.1",
  "solana-hash 4.2.0",
 ]
@@ -3528,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "solana-nostd-alt-bn128"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b881117c294543b5ab41c6996bc3f122d3796a557589e3486d3e728ac806dc4a"
+checksum = "76e63e16ca0adae07b1513b21aceacfce4276bb620c30b4a80ce41562e6dd2b4"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4040,6 +4009,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "stable_deref_trait"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4470,6 +4445,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.219.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5220ee4c6ffcc0cb9d7c47398052203bc902c8ef3985b0c8134118440c0b2921"
+dependencies = [
+ "ahash",
+ "bitflags 2.13.0",
+ "hashbrown 0.14.5",
+ "indexmap 2.14.0",
+ "semver",
+ "serde",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4619,16 +4608,20 @@ dependencies = [
 
 [[package]]
 name = "xark"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
+ "num-bigint 0.4.8",
+ "serde_json",
  "xark-macros",
+ "xark-prover",
+ "xark-schema",
 ]
 
 [[package]]
 name = "xark-aes"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ghash",
  "xark",
@@ -4638,16 +4631,12 @@ dependencies = [
 
 [[package]]
 name = "xark-backend"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
- "ark-groth16",
- "ark-poly 0.6.0",
- "ark-relations",
  "ark-serialize 0.6.0",
- "ark-snark",
  "ark-std 0.6.0",
  "chrono",
  "hex",
@@ -4656,53 +4645,49 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
- "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.18",
+ "xark-groth16",
+ "xark-ir",
 ]
 
 [[package]]
 name = "xark-bignum"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-bits"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-blake2s"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-bits",
  "xark-hash",
- "xark-ir",
- "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-blake3"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-bits",
  "xark-hash",
- "xark-ir",
- "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
@@ -4714,25 +4699,24 @@ dependencies = [
  "num-bigint 0.4.8",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
- "rayon",
  "serde_json",
  "sha2 0.11.0",
- "smallvec",
  "tracing-subscriber",
- "xark",
  "xark-backend",
+ "xark-frontend",
+ "xark-groth16",
  "xark-ir",
  "xark-prover",
- "xark-snarkjs",
+ "xark-schema",
 ]
 
 [[package]]
 name = "xark-curve"
-version = "0.2.1"
+version = "0.3.0"
 
 [[package]]
 name = "xark-ed25519"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ed25519-dalek",
  "num-bigint 0.4.8",
@@ -4741,31 +4725,63 @@ dependencies = [
  "xark-bignum",
  "xark-curve",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
+name = "xark-frontend"
+version = "0.3.0"
+dependencies = [
+ "addr2line",
+ "num-bigint 0.4.8",
+ "rayon",
+ "rustc-demangle",
+ "serde_json",
+ "wasmparser",
+ "xark-ir",
+]
+
+[[package]]
+name = "xark-groth16"
+version = "0.3.0"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-groth16",
+ "ark-poly 0.6.0",
+ "ark-relations",
+ "ark-serialize 0.6.0",
+ "ark-snark",
+ "num-bigint 0.4.8",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "serde_json",
+ "xark-backend",
+ "xark-ir",
+ "xark-prover",
+]
+
+[[package]]
 name = "xark-grumpkin"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-hash"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
- "xark-prover",
 ]
 
 [[package]]
 name = "xark-ir"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4774,12 +4790,11 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "wincode",
 ]
 
 [[package]]
 name = "xark-keccak"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4788,7 +4803,7 @@ dependencies = [
 
 [[package]]
 name = "xark-macros"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4797,7 +4812,7 @@ dependencies = [
 
 [[package]]
 name = "xark-merkle"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
@@ -4808,7 +4823,7 @@ dependencies = [
 
 [[package]]
 name = "xark-mimc"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4817,7 +4832,7 @@ dependencies = [
 
 [[package]]
 name = "xark-pedersen"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4826,15 +4841,17 @@ dependencies = [
 
 [[package]]
 name = "xark-poseidon"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-poseidon2"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "xark",
  "xark-ir",
  "xark-test-harness",
@@ -4842,24 +4859,32 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ark-bn254 0.6.0",
- "ark-ec 0.6.0",
  "ark-ff 0.6.0",
- "ark-groth16",
- "ark-relations",
- "ark-snark",
- "ark-std 0.6.0",
+ "ark-serialize 0.6.0",
  "num-bigint 0.4.8",
  "rand 0.8.6",
  "serde_json",
+ "sha2 0.11.0",
+ "xark-groth16",
  "xark-ir",
 ]
 
 [[package]]
+name = "xark-schema"
+version = "0.3.0"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "num-bigint 0.4.8",
+ "serde_json",
+]
+
+[[package]]
 name = "xark-secp256k1"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "k256",
  "num-bigint 0.4.8",
@@ -4867,14 +4892,12 @@ dependencies = [
  "xark",
  "xark-bignum",
  "xark-curve",
- "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-secp256r1"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "num-bigint 0.4.8",
  "p256",
@@ -4882,14 +4905,12 @@ dependencies = [
  "xark",
  "xark-bignum",
  "xark-curve",
- "xark-ir",
- "xark-prover",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-sha256"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4897,29 +4918,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "xark-snarkjs"
-version = "0.2.1"
-dependencies = [
- "ark-bn254 0.6.0",
- "ark-ec 0.6.0",
- "ark-groth16",
- "num-bigint 0.4.8",
- "serde",
-]
-
-[[package]]
 name = "xark-test-harness"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "num-bigint 0.4.8",
+ "serde_json",
+ "xark-frontend",
  "xark-ir",
 ]
 
 [[package]]
 name = "xark-tests"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
- "aes",
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
@@ -4928,52 +4939,63 @@ dependencies = [
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
- "blake2",
- "blake3",
  "criterion",
  "hex",
- "num-bigint 0.4.8",
  "proptest",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "rayon",
  "serde_json",
  "sha2 0.11.0",
- "sha3 0.11.0",
  "solana-nostd-alt-bn128",
  "svm-unit-test",
  "xark-backend",
+ "xark-groth16",
  "xark-ir",
  "xark-prover",
- "xark-snarkjs",
  "xark-verifier",
 ]
 
 [[package]]
 name = "xark-verifier"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
 name = "xark-wasm"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ark-bn254 0.6.0",
- "ark-groth16",
+ "ark-ff 0.6.0",
  "ark-serialize 0.6.0",
- "ark-snark",
  "console_error_panic_hook",
  "getrandom 0.2.17",
  "js-sys",
  "rand 0.8.6",
- "serde-wasm-bindgen",
+ "rand_chacha 0.3.1",
+ "serde_json",
+ "sha2 0.11.0",
  "wasm-bindgen",
+ "xark-groth16",
  "xark-ir",
+ "xark-poseidon2",
  "xark-prover",
- "xark-snarkjs",
+ "xark-schema",
+]
+
+[[package]]
+name = "xtask"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "xark-frontend",
+ "xark-ir",
 ]
 
 [[package]]

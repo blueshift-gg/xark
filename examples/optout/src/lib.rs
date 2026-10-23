@@ -1,7 +1,7 @@
-#![cfg_attr(xark, no_std)]
 use xark::{circuit, require_eq, Field, Private, Public};
 
-// all-Field, called many times → gadget by default, UNLESS the user opts out.
+// `#[inline(never)]` keeps `sq` a separate wasm call. That only affects how the
+// artifact is encoded (a repeated call can become a template), never the circuit.
 #[inline(never)]
 fn sq(x: Field) -> Field {
     x * x
@@ -26,13 +26,13 @@ mod tests {
     fn accepts_valid() {
         optout(
             [1, 2, 3, 4, 5, 6, 7, 8],
-            "53086056457022411804685755744397384".into(),
+            "53086056457022411804685755744397384",
         )
         .unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(optout([1, 2, 3, 4, 5, 6, 7, 8], "1".into()).is_err());
+        assert!(optout([1, 2, 3, 4, 5, 6, 7, 8], 1).is_err());
     }
 }

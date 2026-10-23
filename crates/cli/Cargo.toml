@@ -2,6 +2,7 @@
 name = "xark-cli"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The xark toolchain CLI"
@@ -20,12 +21,12 @@ debug = ["xark-ir/debug", "xark-prover/debug"]
 
 [dependencies]
 num-bigint = "0.4"
-# The circuit-author prelude — `cli.rs` scaffolds crates that `use xark::prelude`.
-xark = { path = "../lang", version = "0.2.1" }
-xark-ir = { path = "../ir", version = "0.2.1" }
-xark-prover = { path = "../prover", version = "0.2.1" }
-xark-backend = { path = "../backend", version = "0.2.1" }
-xark-snarkjs = { path = "../snarkjs", version = "0.2.1" }
+xark-ir = { path = "../ir", version = "0.3.0" }
+xark-prover = { path = "../prover", version = "0.3.0" }
+xark-schema = { path = "../schema", version = "0.3.0" }
+xark-backend = { path = "../backend", version = "0.3.0" }
+xark-groth16 = { path = "../groth16", version = "0.3.0" }
+xark-frontend = { path = "../frontend", version = "0.3.0" }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
@@ -38,6 +39,3 @@ rand_chacha = "0.3"
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
 ark-serialize = { version = "0.6", default-features = false }
 mimalloc = "0.1"
-rayon = "1"
-# Inline storage for MIR-lowering projection paths — hot slot-map keys.
-smallvec = "1"

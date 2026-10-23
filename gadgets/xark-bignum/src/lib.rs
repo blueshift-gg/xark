@@ -13,19 +13,18 @@
 //! schoolbook column products could overflow BN254 `Fr`.
 
 #![no_std]
-// Circuit-lowered gadget code: the xark compiler rejects compound assignment on
-// `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
+// Gadget code keeps the `x = x + y` style it was written in (the old compiler
+// rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
 /// Re-exported so the [`fp!`] macro can name `$crate::Field`.
 pub use xark::Field;
 use xark::require_eq;
 
-/// Host-only re-export so the [`fp!`] macro can generate a decimal `NativeInput`
-/// without the caller depending on `xark_prover` by name.
-#[cfg(not(xark))]
+/// Re-exported so the [`fp!`] macro can name `xark` items (`Input`, the host
+/// helpers) from the caller's crate.
 #[doc(hidden)]
-pub use xark_prover as __prover;
+pub use xark as __xark;
 
 // Width-generic non-native modular arithmetic (`Bignum<LIMBS, BITS>`).
 
@@ -41,26 +40,83 @@ const MAX_COLS: usize = 2 * MAX_LIMBS - 1;
 /// (value `Σ limb[i]·2^(BITS·i)`). A zero-cost newtype over `[Field; LIMBS]` whose
 /// methods forward to the free functions, so the emitted R1CS is byte-identical.
 /// Callers alias a concrete width, e.g. `type Fp = Bignum<3, 86>`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Bignum<const LIMBS: usize, const BITS: usize> {
     pub limbs: [Field; LIMBS],
 }
 
-// Host-side `NativeInput`: a `Bignum` circuit input is one whole number, taken as
-// a decimal (or `0x`-hex) string and split into its `LIMBS` little-endian `BITS`-bit
-// limbs — callers pass the value, never hand-decompose. Distinct from the
-// curve/`fp!` newtypes (own byte-host), so no coherence clash. `NativeInput` lives
-// in `std` `xark_prover` while this crate is `#![no_std]`, so pull `std` in inside
-// an anonymous const.
+/// A circuit input given as a whole number (a decimal or `0x`-hex string in a
+/// client), split into `LIMBS` little-endian `BITS`-bit limbs `<name>.limbs[i]`.
+impl<const LIMBS: usize, const BITS: usize> xark::Input for Bignum<LIMBS, BITS> {
+    const TYPE: xark::input::Type = crate::number_type!("Bignum", LIMBS, BITS);
+    fn read(r: &mut xark::input::Reader<'_>) -> Self {
+        Bignum { limbs: r.read() }
+    }
+    fn write(&self, w: &mut xark::input::Writer<'_>) {
+        w.write(&self.limbs)
+    }
+}
+
+/// The `Input::TYPE` of a limbed number type `$name`: `{ limbs: [Field; $limbs] }`,
+/// given as a whole number of `$bits`-bit limbs. What [`fp!`] types use.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! number_type {
+    ($name:expr, $limbs:expr, $bits:expr) => {
+        $crate::__xark::input::Type::Named(&$crate::__xark::input::Named {
+            name: $name,
+            arg: ::core::option::Option::None,
+            layout: $crate::__xark::input::Layout::Struct(&[$crate::__xark::input::Member::new(
+                "limbs",
+                <[$crate::Field; $limbs] as $crate::__xark::Input>::TYPE,
+            )]),
+            encoding: $crate::__xark::input::Encoding::Number { bits: $bits },
+        })
+    };
+}
+
+// Host side: a `Bignum` value is one whole number, from a decimal or `0x`-hex string
+// or its big-endian bytes, split into `LIMBS` little-endian `BITS`-bit limbs: callers
+// pass the value, never hand-decompose. `std` is pulled in inside an anonymous const
+// (this crate is `#![no_std]`).
 #[cfg(not(xark))]
 const _: () = {
     extern crate std;
     use std::string::String;
-    use std::vec::Vec;
-    impl<const LIMBS: usize, const BITS: usize> xark_prover::NativeInput for Bignum<LIMBS, BITS> {
-        type Native = String;
-        fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
-            xark_prover::limb_leaves_decimal(native, prefix, LIMBS, BITS as u32)
+    impl<const LIMBS: usize, const BITS: usize> xark::host::FromBeBytes for Bignum<LIMBS, BITS> {
+        const BYTES: usize = xark::host::natural_bytes(LIMBS, BITS);
+        fn from_be_bytes(bytes: &[u8]) -> Self {
+            Bignum {
+                limbs: xark::host::limb_fields::<LIMBS>(bytes, BITS as u32),
+            }
+        }
+    }
+    impl<const LIMBS: usize, const BITS: usize> From<&str> for Bignum<LIMBS, BITS> {
+        fn from(value: &str) -> Self {
+            Bignum {
+                limbs: xark::host::limb_fields_str::<LIMBS>(value, BITS as u32),
+            }
+        }
+    }
+    impl<const LIMBS: usize, const BITS: usize> From<String> for Bignum<LIMBS, BITS> {
+        fn from(value: String) -> Self {
+            Self::from(value.as_str())
+        }
+    }
+    impl<const LIMBS: usize, const BITS: usize> From<u128> for Bignum<LIMBS, BITS> {
+        fn from(value: u128) -> Self {
+            <Self as xark::host::FromBeBytes>::from_be_bytes(&value.to_be_bytes())
+        }
+    }
+    impl<const LIMBS: usize, const BITS: usize> From<u64> for Bignum<LIMBS, BITS> {
+        fn from(value: u64) -> Self {
+            Self::from(value as u128)
+        }
+    }
+    /// An untyped literal (`Bignum::from(6)`); panics on a negative value.
+    impl<const LIMBS: usize, const BITS: usize> From<i32> for Bignum<LIMBS, BITS> {
+        fn from(value: i32) -> Self {
+            Self::from(u128::try_from(value).expect("a bignum value is non-negative"))
         }
     }
 };
@@ -190,6 +246,20 @@ pub const fn modulus_limbs<const N: usize, const BITS: usize>(s: &str) -> [Field
     to_field_limbs(parse_limbs::<N, BITS>(s))
 }
 
+/// The headroom an [`fp!`] field needs: `3·m < 2^(N·BITS)`. `mod_add` sums two
+/// canonical values and `triple` / `sub2` build `3·v` / `a + 2m` in `N` limbs, each
+/// with its top carry required to be zero, so a modulus closer to the limb capacity
+/// would make honest operations fail (a completeness bug, not a soundness one).
+/// Checked on the top limb (`(top + 1)·3 ≤ 2^BITS` implies it); every curve field
+/// here (≤ 256 bits in 3 × 86) has two bits to spare. A compile error otherwise.
+pub const fn assert_fp_headroom<const N: usize, const BITS: usize>(s: &str) {
+    let v = parse_limbs::<N, BITS>(s);
+    assert!(
+        N > 0 && v[N - 1] < ((1u128 << BITS) - 1) / 3,
+        "fp!: modulus too close to the limb capacity — need 3·m < 2^(LIMBS·BITS)"
+    );
+}
+
 /// `modulus − 1` as limbs (the canonical remainder range bound).
 pub const fn modulus_minus_1<const N: usize, const BITS: usize>(s: &str) -> [Field; N] {
     let mut v = parse_limbs::<N, BITS>(s);
@@ -251,10 +321,36 @@ macro_rules! fp {
         $crate::fp!(@build $vis $name, $modulus, 3, 86);
         $crate::fp!(@host $name, 3, 86);
     };
-    // Same, but WITHOUT a `NativeInput` host impl: for callers that supply their own
-    // (e.g. curves give a byte host via `curve_host_inputs!`), so the two don't clash.
+    // Same, but WITHOUT the host conversions: for callers that supply their own (e.g.
+    // curves give a byte host via `curve_host_inputs!`), so the two don't clash.
     (no_host $vis:vis $name:ident, $modulus:literal) => {
         $crate::fp!(@build $vis $name, $modulus, 3, 86);
+    };
+    // Storage only: `LIMBS` × `BITS`-bit limbs with no modulus and no arithmetic — an
+    // input wrapper for code that does its own limb arithmetic (e.g. a lazy-reduction
+    // path whose modulus has no headroom for `fp!`'s operators).
+    (storage $vis:vis $name:ident, $limbs:literal, $bits:literal) => {
+        #[derive(Clone, Copy, Debug)]
+        $vis struct $name {
+            pub limbs: [$crate::Field; $limbs],
+        }
+        $crate::fp!(@input $name, $limbs, $bits);
+        #[allow(dead_code)]
+        impl $name {
+            /// Wrap `LIMBS` little-endian `BITS`-bit limbs.
+            pub fn new(limbs: [$crate::Field; $limbs]) -> Self {
+                Self { limbs }
+            }
+            /// Range-check every limb to `[0, 2^BITS)`.
+            pub fn range_check(self) {
+                $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs)
+            }
+        }
+        $crate::fp!(@host $name, $limbs, $bits);
+    };
+    // `no_host` with an explicit limb layout.
+    (no_host $vis:vis $name:ident, $modulus:literal, $limbs:literal, $bits:literal) => {
+        $crate::fp!(@build $vis $name, $modulus, $limbs, $bits);
     };
     // Geometry from a `Bignum<LIMBS, BITS>` type — `fp!(Fp, "0x…", Scalar)`.
     ($vis:vis $name:ident, $modulus:literal, $geom:ty) => {
@@ -266,30 +362,81 @@ macro_rules! fp {
         $crate::fp!(@build $vis $name, $modulus, $limbs, $bits);
         $crate::fp!(@host $name, $limbs, $bits);
     };
-    // Host-side `NativeInput`: take the element as one decimal (or `0x`-hex) string,
-    // split into `$limbs` little-endian `$bits`-bit limbs. Host-only.
+    // A circuit input given as one whole number (a decimal or `0x`-hex string in a
+    // client), split into `$limbs` little-endian `$bits`-bit limbs `<name>.limbs[i]`.
+    (@input $name:ident, $limbs:expr, $bits:expr) => {
+        impl $crate::__xark::Input for $name {
+            const TYPE: $crate::__xark::input::Type =
+                $crate::number_type!(stringify!($name), $limbs, $bits);
+            fn read(r: &mut $crate::__xark::input::Reader<'_>) -> Self {
+                Self { limbs: r.read() }
+            }
+            fn write(&self, w: &mut $crate::__xark::input::Writer<'_>) {
+                w.write(&self.limbs)
+            }
+        }
+    };
+    // Host conversions: the element from its 32 big-endian bytes, a decimal (or
+    // `0x`-hex) string, or an integer, split into `$limbs` little-endian `$bits`-bit
+    // limbs. Host-only.
     (@host $name:ident, $limbs:expr, $bits:expr) => {
         #[cfg(not(xark))]
         const _: () = {
             extern crate std;
             use std::string::String;
-            use std::vec::Vec;
-            impl $crate::__prover::NativeInput for $name {
-                type Native = String;
-                fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
-                    $crate::__prover::limb_leaves_decimal(native, prefix, $limbs, $bits as u32)
+            impl $crate::__xark::host::FromBeBytes for $name {
+                const BYTES: usize = 32;
+                fn from_be_bytes(bytes: &[u8]) -> Self {
+                    Self { limbs: $crate::__xark::host::limb_fields::<{ $limbs }>(bytes, $bits as u32) }
+                }
+            }
+            /// From the value's 32 big-endian bytes.
+            impl From<[u8; 32]> for $name {
+                fn from(bytes: [u8; 32]) -> Self {
+                    <Self as $crate::__xark::host::FromBeBytes>::from_be_bytes(&bytes)
+                }
+            }
+            /// From a decimal or `0x`-hex string.
+            impl From<&str> for $name {
+                fn from(value: &str) -> Self {
+                    Self { limbs: $crate::__xark::host::limb_fields_str::<{ $limbs }>(value, $bits as u32) }
+                }
+            }
+            impl From<String> for $name {
+                fn from(value: String) -> Self {
+                    Self::from(value.as_str())
+                }
+            }
+            impl From<u128> for $name {
+                fn from(value: u128) -> Self {
+                    Self { limbs: $crate::__xark::host::limb_fields::<{ $limbs }>(&value.to_be_bytes(), $bits as u32) }
+                }
+            }
+            impl From<u64> for $name {
+                fn from(value: u64) -> Self {
+                    Self::from(value as u128)
+                }
+            }
+            /// An untyped literal; panics on a negative value.
+            impl From<i32> for $name {
+                fn from(value: i32) -> Self {
+                    Self::from(u128::try_from(value).expect("a field value is non-negative"))
                 }
             }
         };
     };
     (@build $vis:vis $name:ident, $modulus:literal, $limbs:expr, $bits:expr) => {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         $vis struct $name {
             pub limbs: [$crate::Field; $limbs],
         }
+        $crate::fp!(@input $name, $limbs, $bits);
         #[allow(dead_code)]
         impl $name {
-            const M: [$crate::Field; $limbs] = $crate::modulus_limbs::<{ $limbs }, { $bits }>($modulus);
+            const M: [$crate::Field; $limbs] = {
+                $crate::assert_fp_headroom::<{ $limbs }, { $bits }>($modulus);
+                $crate::modulus_limbs::<{ $limbs }, { $bits }>($modulus)
+            };
             const M1: [$crate::Field; $limbs] = $crate::modulus_minus_1::<{ $limbs }, { $bits }>($modulus);
             const C: [$crate::Field; $limbs] = $crate::complement::<{ $limbs }, { $bits }>($modulus);
             /// Wrap `LIMBS` little-endian `BITS`-bit limbs.
@@ -445,7 +592,9 @@ pub fn range_check_limbs<const LIMBS: usize, const BITS: usize>(x: [Field; LIMBS
     }
 }
 
-/// Modular negation `(m - b) mod m` (enforces `b <= m`).
+/// Modular negation `(m - b) mod m`, canonical (enforces `b <= m`; `b = 0` and
+/// `b = m` give `0`). `b`'s limbs must be range-checked (`< 2^BITS`): `b ≤ m` is
+/// read off the borrow chain, which assumes them.
 pub fn mod_neg<const LIMBS: usize, const BITS: usize>(
     b: [Field; LIMBS],
     m: [Field; LIMBS],
@@ -462,11 +611,38 @@ pub fn mod_neg<const LIMBS: usize, const BITS: usize>(
         i += 1;
     }
     require_eq(borrow, Field::from(0u8));
+    // `b = 0` gives `out = m`: map it to the canonical `0`. `out = m` is tested
+    // limb-wise — `Σ (out[i] − m[i])²` is an integer below Fr (every `out[i]` is
+    // range-checked, so each square is `< 2^(2·BITS)`), hence zero exactly when every
+    // limb matches. (Comparing the two recompositions in Fr is not exact: 256-bit
+    // values wrap, so `b = k·Fr` would also match.)
+    const {
+        assert!(
+            2 * BITS + ((usize::BITS - LIMBS.leading_zeros()) as usize) < 253,
+            "mod_neg: the limb-difference sum must stay below Fr"
+        )
+    };
+    let mut sq = Field::from(0u8);
+    let mut i = 0usize;
+    while i < LIMBS {
+        let d = out[i] - m[i];
+        sq = sq + d * d;
+        i += 1;
+    }
+    let is_m = Field::from(sq == Field::from(0u8));
+    let mut i = 0usize;
+    while i < LIMBS {
+        out[i] = out[i] - is_m * m[i];
+        i += 1;
+    }
     out
 }
 
 /// Modular addition `(a + b) mod m`. Precondition `a, b < m`, so `a+b < 2m` fits
-/// in `LIMBS` limbs and one conditional subtraction of `m` suffices.
+/// in `LIMBS` limbs and one conditional subtraction of `m` suffices; the output is
+/// then canonical. Outside it (a non-canonical operand, e.g. a `mod_inverse`
+/// output), a sum that overflows the limbs is rejected (its top carry is pinned to
+/// 0) rather than wrapped, so the result is always `≡ a + b (mod m)`.
 pub fn mod_add<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     b: [Field; LIMBS],
@@ -483,6 +659,7 @@ pub fn mod_add<const LIMBS: usize, const BITS: usize>(
         carry = bits[BITS];
         i += 1;
     }
+    require_eq(carry, Field::from(0u8));
     let mut diff = [Field::from(0u8); LIMBS];
     let mut borrow = Field::from(0u8);
     let mut k = Field::from(0u8);
@@ -539,7 +716,7 @@ pub fn mod_sub<const LIMBS: usize, const BITS: usize>(
 }
 
 /// `(3·v) mod m` for `v < m`. Forms the exact triple `3v < 3m` (per-limb
-/// `3·v[i] + carry < 2^(BITS+2)`, carry ∈ [0,3]) in one scaling pass, then reduces
+/// `3·v[i] + carry < 2^(BITS+2)`, `carry ∈ [0,3]`) in one scaling pass, then reduces
 /// `[0,3m) → [0,m)` with two conditional subtractions.
 pub fn triple_mod<const LIMBS: usize, const BITS: usize>(
     v: [Field; LIMBS],
@@ -707,6 +884,10 @@ fn mulmod_columns<const LIMBS: usize, const BITS: usize>(
 pub const P_25519_L: [Field; 3] = modulus_limbs::<3, 85>(
     "57896044618658097711785492504343953926634992332820282019728792003956564819949",
 );
+/// `2^255 − 19 − 1` in 3 × 85 bits (the canonical-coordinate bound).
+pub const P1_25519_L: [Field; 3] = modulus_minus_1::<3, 85>(
+    "57896044618658097711785492504343953926634992332820282019728792003956564819949",
+);
 
 /// SOUND lazy multiply mod (2^255-19), 3x85. Pseudo-Mersenne fold with carries
 /// range-checked (deterministic — NO free choice), NO quotient, NO canonical
@@ -763,6 +944,9 @@ pub fn mul_lazy_25519(a: [Field; 3], b: [Field; 3]) -> [Field; 3] {
 /// (deterministic). NO canonical reduce. Used after biased subtractions.
 pub const M_K1: [Field; 4] =
     modulus_limbs::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+/// secp256k1 `p − 1` (the canonical-coordinate bound).
+pub const M1_K1: [Field; 4] =
+    modulus_minus_1::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
 
 /// Sound 4×64 lazy multiply mod secp256k1 p (fold ×c, c=2^32+977). Inputs <2^70;
 /// carries range-checked (sound); output ≡ a·b (mod p), limbs <2^65.
@@ -863,7 +1047,10 @@ pub fn weak_reduce_k1(v: [Field; 4]) -> [Field; 4] {
     [s0, s1, r2, r3]
 }
 
-/// Canonical (< p) reduction of a loosely-reduced secp256k1 value.
+/// Canonical (< p) reduction of a loosely-reduced secp256k1 value. Exact when every
+/// limb is `< 2^64` and the value `< 2p` (what `mul_lazy_k1` and `weak_reduce_k1`
+/// produce, bar a `2^-24`-rare carry into limb 1); otherwise the input is rejected or
+/// passed through un-normalized — `≡` the input, never a different value.
 pub fn finalize_k1(v: [Field; 4]) -> [Field; 4] {
     reduce_once::<4, 64>(v, M_K1)
 }
@@ -969,10 +1156,14 @@ pub fn ec_add_k1(
     (x3, y3)
 }
 
-/// Sound on-curve check for secp256k1 (y² = x³ + 7), loosely-reduced coords.
+/// Sound on-curve check for secp256k1 (y² = x³ + 7). The coordinates must be
+/// canonical (`< p`), so each point has exactly one accepted encoding — as for
+/// secp256r1 and the Edwards curves.
 pub fn on_curve_k1(x: [Field; 4], y: [Field; 4]) {
     range_check_limbs::<4, 64>(x);
     range_check_limbs::<4, 64>(y);
+    require_lt::<4, 64>(x, M1_K1);
+    require_lt::<4, 64>(y, M1_K1);
     let y2 = mul_lazy_k1(y, y);
     let x2 = mul_lazy_k1(x, x);
     let x3 = mul_lazy_k1(x2, x);
@@ -1038,7 +1229,10 @@ pub fn weak_reduce_25519(v: [Field; 3]) -> [Field; 3] {
     [s0, s1, r2]
 }
 
-/// Canonical (< p) reduction of a loosely-reduced value — the BOUNDARY reduce.
+/// Canonical (< p) reduction of a loosely-reduced value — the BOUNDARY reduce. Exact
+/// when every limb is `< 2^85` and the value `< 2p` (what `mul_lazy_25519` and
+/// `weak_reduce_25519` produce in practice); otherwise rejected or passed through
+/// un-normalized — `≡` the input, never a different value.
 pub fn finalize_25519(v: [Field; 3]) -> [Field; 3] {
     reduce_once::<3, 85>(v, P_25519_L)
 }

@@ -20,7 +20,6 @@
 //! per-step *fresh instances* with the augmented step circuit's own folded
 //! instance (true self-referential Nova) — the verifier core is identical.
 
-#![cfg_attr(xark, no_std)]
 #![allow(clippy::assign_op_pattern)]
 
 use xark_grumpkin::prelude::*;
@@ -92,58 +91,47 @@ fn challenge(t: [Field; 15]) -> [Field; 128] {
     out
 }
 
-/// One Nova folding step, challenge bound to `z_next`. Returns the folded
-/// instance flattened as `[cw.x, cw.y, ce.x, ce.y, u, x]`.
-#[allow(clippy::too_many_arguments)]
-fn fold_step(
-    a_cw: [Field; 2],
-    a_ce: [Field; 2],
-    a_u: Field,
-    a_x: Field,
-    b_cw: [Field; 2],
-    b_ce: [Field; 2],
-    b_u: Field,
-    b_x: Field,
-    t: [Field; 2],
-    z_next: Field,
-) -> [Field; 6] {
-    let r_bits = challenge([
-        a_cw[0], a_cw[1], a_ce[0], a_ce[1], a_u, a_x, b_cw[0], b_cw[1], b_ce[0], b_ce[1], b_u, b_x,
-        t[0], t[1], z_next,
-    ]);
+/// One Nova folding step `a ⊕ r·b` with cross-term `t`, the challenge
+/// `r = low128(Poseidon2(a, b, t, z_next))` bound to `z_next`.
+fn fold_step(a: Instance, b: Instance, t: Affine, z_next: Field) -> Instance {
+    let (a6, b6) = (a.to_fields(), b.to_fields());
+    let mut tr = [Field::from(0u8); 15];
+    let mut i = 0usize;
+    while i < 6usize {
+        tr[i] = a6[i];
+        tr[6 + i] = b6[i];
+        i += 1;
+    }
+    tr[12] = t.x;
+    tr[13] = t.y;
+    tr[14] = z_next;
+    let r_bits = challenge(tr);
     let r_fr = Field::from_bits::<128>(r_bits);
-    let cw = ec_add(a_cw, scalar_mul(r_bits, b_cw));
-    let r_t = scalar_mul(r_bits, t);
-    let r2_e2 = scalar_mul(r_bits, scalar_mul(r_bits, b_ce));
-    let ce = ec_add(ec_add(a_ce, r_t), r2_e2);
-    let u = a_u + r_fr * b_u;
-    let x = a_x + r_fr * b_x;
-    [cw[0], cw[1], ce[0], ce[1], u, x]
+    let pt = |p: Affine| [p.x, p.y];
+    let cw = ec_add(pt(a.cw), scalar_mul(r_bits, pt(b.cw)));
+    let r_t = scalar_mul(r_bits, pt(t));
+    let r2_e2 = scalar_mul(r_bits, scalar_mul(r_bits, pt(b.ce)));
+    let ce = ec_add(ec_add(pt(a.ce), r_t), r2_e2);
+    Instance {
+        cw: Affine { x: cw[0], y: cw[1] },
+        ce: Affine { x: ce[0], y: ce[1] },
+        u: a.u + r_fr * b.u,
+        x: a.x + r_fr * b.x,
+    }
 }
 
 /// Verify a 2-step folding IVC: the computation `z0 →F z1 →F z2` and the
-/// accumulator `U0 →fold U1 →fold U2`, tied together through the FS transcript.
+/// accumulator `U0 →fold U1 →fold U2` (folding the fresh instances `s0`, `s1` with
+/// cross-terms `t0`, `t1`), tied together through the FS transcript.
 #[circuit]
 #[allow(clippy::too_many_arguments)]
 pub fn grumpkin_ivc(
-    u0_cw: Public<Affine>,
-    u0_ce: Public<Affine>,
-    u0_u: Public<Field>,
-    u0_x: Public<Field>,
-    s0_cw: Public<Affine>,
-    s0_ce: Public<Affine>,
-    s0_u: Public<Field>,
-    s0_x: Public<Field>,
+    u0: Public<Instance>,
+    s0: Public<Instance>,
     t0: Public<Affine>,
-    s1_cw: Public<Affine>,
-    s1_ce: Public<Affine>,
-    s1_u: Public<Field>,
-    s1_x: Public<Field>,
+    s1: Public<Instance>,
     t1: Public<Affine>,
-    u2_cw: Public<Affine>,
-    u2_ce: Public<Affine>,
-    u2_u: Public<Field>,
-    u2_x: Public<Field>,
+    u2: Public<Instance>,
     z0: Public<Field>,
     z2: Public<Field>,
 ) {
@@ -154,35 +142,7 @@ pub fn grumpkin_ivc(
     require_eq(z2c, z2);
 
     // accumulator chain: U1 = fold(U0, s0, T0; z1), U2 = fold(U1, s1, T1; z2)
-    let u1 = fold_step(
-        [u0_cw.x, u0_cw.y],
-        [u0_ce.x, u0_ce.y],
-        u0_u,
-        u0_x,
-        [s0_cw.x, s0_cw.y],
-        [s0_ce.x, s0_ce.y],
-        s0_u,
-        s0_x,
-        [t0.x, t0.y],
-        z1,
-    );
-    let u2 = fold_step(
-        [u1[0], u1[1]],
-        [u1[2], u1[3]],
-        u1[4],
-        u1[5],
-        [s1_cw.x, s1_cw.y],
-        [s1_ce.x, s1_ce.y],
-        s1_u,
-        s1_x,
-        [t1.x, t1.y],
-        z2,
-    );
-
-    require_eq(u2[0], u2_cw.x);
-    require_eq(u2[1], u2_cw.y);
-    require_eq(u2[2], u2_ce.x);
-    require_eq(u2[3], u2_ce.y);
-    require_eq(u2[4], u2_u);
-    require_eq(u2[5], u2_x);
+    let u1 = fold_step(u0, s0, t0, z1);
+    let folded = fold_step(u1, s1, t1, z2);
+    require_eq(folded.to_fields(), u2.to_fields());
 }

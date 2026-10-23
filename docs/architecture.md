@@ -1,22 +1,24 @@
 # Architecture
 
 xark is one tool with two faces — a **language** (write a circuit as ordinary
-`#![no_std]` Rust) and a **toolchain** (`xark build` / `xark prove`) — split into
+Rust) and a **toolchain** (`xark build` / `xark prove`) — split into
 focused crates with strict layering so that:
 
 * the circuit-author surface (`xark`'s prelude: `Field`, `require_eq`,
   `Private`/`Public`, `bits`) stays small and stable,
-* MIR → xark-IR → R1CS lowering can be tested without a proving system,
+* Rust → xark-IR → R1CS lowering can be tested without a proving system,
 * the Groth16 layer can be swapped without touching lowering,
 * the on-chain verifier stays tiny, `no_std`, and dependency-light,
 * gadgets are ordinary Rust library crates, not per-gadget backend opcodes.
 
 ```text
 Rust circuit source (uses `xark::prelude::*` + gadget crates)
-  │  rustc frontend (nightly): parse, type-check, borrow-check, monomorphize
+  │  stable rustc (wasm32, `--cfg xark`): parse, type-check, borrow-check,
+  │  monomorphize, optimize — circuit ops are calls to `xark.*` wasm imports
   ▼
-rustc MIR  ──(-Zalways-encode-mir inlines cross-crate gadget calls)
-  │  extract the `circuit` fn's MIR, sanitize + validate the accepted subset
+wasm module
+  │  xark-frontend runs it symbolically: known values execute (loops unroll),
+  │  witness values flow into constraints; imports build the circuit
   ▼
 xark-IR (primitive constraint / hint program)
   │  lower to rank-1 constraints
@@ -30,40 +32,30 @@ proof + verifying key ──▶ on-chain Solana verifier (alt_bn128 syscalls)
 The backend never grows a per-gadget opcode: gadgets (hashes, curves, ECDSA, …)
 are plain Rust crates that lower to the *same* small primitive constraint set.
 
-## How MIR is used
+## How the frontend works
 
-The `xark` binary is both the friendly CLI and, when `cargo` invokes it as
-`RUSTC` during `xark build`, a `rustc_driver` (nightly, `#![feature(rustc_private)]`).
-`xark build` runs `cargo build` on the circuit crate with itself as the compiler
-under one pinned nightly, so every dependency (the `xark` lib and gadget crates)
-is built with matching MIR-encoded rlibs. Only the primary crate
-(`CARGO_PRIMARY_PACKAGE`) is extracted; the rest compile normally so their MIR is
-available for cross-crate inlining.
-
-For the primary crate the driver, in `after_analysis`, obtains the `TyCtxt`, finds
-`pub fn circuit(..)`, reads its signature to recover `Private`/`Public` visibility,
-pulls its MIR body (gadget calls inlined via `-Zalways-encode-mir`), validates that
-only the accepted MIR subset is present (rejecting arbitrary control flow,
-references, aggregates, unknown calls, …), lowers it to xark-IR and then R1CS, and
-writes the output. Signalling intrinsics recognised in MIR are named `__xark_*`
-(`__xark_add`, `__xark_mul`, `__xark_hint_bit`, …).
-
-Nightly is required only because there is no stable API for MIR access, and it is
-hidden inside the tool: **circuit authors write stable Rust**; only the tool touches
-nightly (pinned in `crates/lang/rust-toolchain.toml`). See
-[`docs/toolchain.md`](toolchain.md) for the pin and bump procedure.
+`xark build` runs `cargo build` on the circuit crate for `wasm32-unknown-unknown`
+with `--cfg xark` (any stable toolchain, 1.89+). Under that cfg each intrinsic
+(`Field` arithmetic, comparisons, hints, `require_eq`, input binding) is a call to
+an `xark.*` wasm import. `crates/frontend` then interprets the module: concrete
+values execute as ordinary wasm, and the imports, implemented by the circuit
+builder, turn witness values into constraints. Witness branches run both arms and
+merge with selects; an arm that can only panic is pruned and its condition
+constrained. Because every circuit operation is an opaque import, the circuit is
+the same under every rustc (CI checks 1.89, stable and beta). Details:
+[`crates/frontend/README.md`](../crates/frontend/README.md); toolchains:
+[`docs/toolchain.md`](toolchain.md).
 
 ## Crates
 
 ### `xark` (the language + CLI) — `crates/lang`
 
-The library defines the marker primitives — `Field`, `require_eq`,
-`Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics the compiler
-recognises in MIR — in its `lang` module, re-exported via its `prelude` (so an
-author needs only `use xark::prelude::*`; the marker bodies never run, as the tool
-stops after MIR extraction). The binary (feature-gated behind `cli`) is the `xark`
-command — `build`, `prove`/`verify` — and doubles as the `rustc_driver`. Compiler
-internals live in `crates/rustc/src/{driver,find_entry,validate,lower_mir,diagnostics}.rs`.
+The library defines the circuit primitives — `Field`, `require_eq`,
+`Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics (wasm imports in the
+circuit build) — in its `lang` module, re-exported via its `prelude` (so an author
+needs only `use xark::prelude::*`). The `xark` command is the `xark-cli` crate
+(`crates/cli`); the frontend that lowers a circuit's wasm is `xark-frontend`
+(`crates/frontend`).
 
 ### `xark-ir`
 
@@ -86,16 +78,22 @@ arithmetic, used by the EC gadgets), `xark-curve` (shared curve macros), `xark-h
 
 ### `xark-prover` — `crates/prover`
 
-Solves the witness from `--inputs` values, synthesizes the R1CS as an Arkworks
-`ConstraintSynthesizer`, and runs Groth16 `prove` / `verify`.
+Solves the witness from `--inputs` values and proves with `xark-groth16`
+(`circuit("name").prove(inputs)` returns the proof bytes). `xark` re-exports it
+as `xark::prover` in host builds, so circuit crates depend on `xark` alone.
+
+### `xark-groth16` — `crates/groth16`
+
+The Groth16 implementation: key generation (dev and Powers-of-Tau phase 2), the
+streaming prover, verification, and the key/proof types, which serialize
+byte-for-byte like `ark-groth16`'s (checked against it in tests).
 
 ### `xark-backend` — `crates/backend`
 
 Frontend-agnostic Groth16 over BN254:
 
-* Groth16 setup / prove / verify. `setup`/`prove` take explicit `CryptoRng + RngCore`
-  bounds; `prove` self-verifies before returning.
-* `ptau.rs` / `setup_phase2.rs` / `ceremony.rs` — the real trusted-setup path:
+* `verify.rs` — Groth16 verification (`xark-groth16`'s pairing check).
+* `ptau.rs` / `ceremony.rs` — the real trusted-setup path:
   ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup,
   run a multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency
   pairing checks (see `docs/trusted-setup.md`).

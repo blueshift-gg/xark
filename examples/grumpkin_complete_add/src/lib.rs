@@ -10,7 +10,6 @@
 //! conditional inverses, and arithmetic muxes. Grumpkin is prime-order (no
 //! 2-torsion), so `y=0` never occurs for a real point — the only ∞ is the flag.
 
-#![cfg_attr(xark, no_std)]
 #![allow(clippy::assign_op_pattern)]
 
 use xark::prelude::*;

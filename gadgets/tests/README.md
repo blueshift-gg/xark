@@ -37,8 +37,6 @@ on `CARGO_BIN_EXE_xark` (which is only set for tests inside the `cli` crate).
  `keccak`, `poseidon`, …), the on-chain `sbpf` suite, public-input `binding`,
  `fuzz`, backend `ptau` / `serialization` / `solana_format` / `soundness`.
 - `benches/groth16.rs` — proving/verifying benchmarks (`harness = false`).
-- `examples/to_snarkjs.rs` — exports fixtures into snarkjs-compatible JSON for
- differential testing.
 
 Fixtures live under `gadgets/tests/fixtures/groth16/` and are
 embedded with `include_bytes!`; regenerate them with `xark export`.

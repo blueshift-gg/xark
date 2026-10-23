@@ -1,0 +1,64 @@
+name: Scheduled checks
+
+# Checks that can fail when nothing in this repository changes, so they run on
+# a timer: a new Rust beta that would change a circuit, and the semantics fuzzer
+# with a fresh seed. The slow checks of this repository's own code run on every
+# pull request instead (slow.yml).
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  semantics-fuzz-long:
+    # The native-semantics fuzzer at depth: random circuits checked against Rust,
+    # each input decided by exhaustive witness search (no forged witness, exactly
+    # one honest one). A new seed every run, so coverage grows run by run; a
+    # failure prints it for reproduction (`XARK_FUZZ_SEED=<seed>
+    # XARK_FUZZ_CASES=5000`).
+    name: semantics fuzz (5,000 programs, rotating seed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/lang
+      - name: cargo test (semantics fuzz)
+        env:
+          XARK_FUZZ_CASES: "5000"
+          XARK_FUZZ_SEED: ${{ github.run_id }}
+        run: cd crates/lang && cargo test --release --test semantics_fuzz -- --nocapture
+
+  toolchain-drift:
+    # Early warning for a Rust release that would change a circuit (and so break
+    # every key made for it): rebuild every example with this week's stable and
+    # beta and compare with tests/stable-digests.txt. `ci.yml` runs the same check
+    # on 1.89/stable/beta, but only when something is pushed; this catches a new
+    # beta about six weeks before it becomes stable, even when nothing is. See
+    # "Toolchain policy" in docs/toolchain.md.
+    name: circuit digests on ${{ matrix.toolchain }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install workspace toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install toolchain under test
+        run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --target wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Compare circuit digests
+        run: cargo xtask digests --check --toolchain ${{ matrix.toolchain }}

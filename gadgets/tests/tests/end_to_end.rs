@@ -1,15 +1,13 @@
 //! End-to-end integration tests driving the `xark` CLI (`build` + `prove`)
 //! against the purpose-built circuit crates under `examples/`.
 //!
-//! `xark build <crate> --out <dir>` compiles a circuit crate (rustc-MIR →
+//! `xark build <crate> --out <dir>` compiles a circuit crate (wasm32 →
 //! xark-IR → R1CS) to the self-contained `<dir>/circuit.xbc`; `xark prove <dir>
 //! --inputs '{...}'` solves the witness and produces + verifies a Groth16 proof
 //! in one shot.
 
 mod common;
-use common::{
-    tempdir, xark_build, xark_check_input, xark_prove, xark_prove_opts, xark_setup, xark_setup_opts,
-};
+use common::{tempdir, xark_build, xark_check_input, xark_prove, xark_setup, xark_setup_opts};
 
 #[test]
 fn arithmetic_square_build_prove_verify() {
@@ -42,39 +40,8 @@ fn arithmetic_square_build_prove_verify() {
     );
 }
 
-/// `xark prove --stream` streams the proving key from disk instead of loading
-/// it into RAM; it must produce a proof that self-verifies, exactly like the
-/// default path. (Memory win is measured on large circuits; here we pin
-/// correctness parity.)
-#[test]
-fn streaming_prove_verifies() {
-    let tmp = tempdir();
-    let out = tmp.path().join("out");
-    let target = tmp.path().join("target");
-    assert!(
-        xark_build("arithmetic_square", &out, &target).0,
-        "build failed"
-    );
-    assert!(xark_setup(&out).0, "setup failed");
-
-    // Both paths must accept the valid witness...
-    let (ok_full, _) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
-    assert!(ok_full, "default prove failed");
-    let (ok_stream, err) = xark_prove_opts(&out, &[("x", "3"), ("y", "9")], true);
-    assert!(ok_stream, "--stream prove/verify failed: {err}");
-    assert!(
-        err.contains("Proof produced and self-checked"),
-        "unexpected --stream output: {err}"
-    );
-
-    // ...and both must reject a wrong public output.
-    let (bad_stream, _) = xark_prove_opts(&out, &[("x", "3"), ("y", "10")], true);
-    assert!(!bad_stream, "--stream must reject an unsatisfied witness");
-}
-
 /// An **uncompressed** proving key (`xark setup --uncompressed`) must prove and
-/// verify on both the default and `--stream` paths — `xark prove` auto-detects
-/// the key's compression from its header.
+/// verify — `xark prove` auto-detects the key's compression from its header.
 #[test]
 fn uncompressed_key_proves_and_verifies() {
     let tmp = tempdir();
@@ -89,8 +56,6 @@ fn uncompressed_key_proves_and_verifies() {
 
     let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
     assert!(ok, "prove on uncompressed key failed: {err}");
-    let (ok, err) = xark_prove_opts(&out, &[("x", "3"), ("y", "9")], true);
-    assert!(ok, "--stream prove on uncompressed key failed: {err}");
     // A wrong output is still rejected.
     let (bad, _) = xark_prove(&out, &[("x", "3"), ("y", "10")]);
     assert!(!bad, "uncompressed key must reject a wrong witness");

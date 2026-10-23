@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
@@ -13,11 +11,11 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        cube("3".into(), "27".into()).unwrap(); // 3³ = 27
+        cube(3, 27).unwrap(); // 3³ = 27
     }
 
     #[test]
     fn rejects_wrong_result() {
-        assert!(cube("3".into(), "28".into()).is_err());
+        assert!(cube(3, 28).is_err());
     }
 }

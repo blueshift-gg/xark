@@ -46,7 +46,7 @@ pub use affine::{order, reduce_scalar};
 // SOUND LAZY ECDSA verify (4×64 lazy-affine point arithmetic + eager 4×64
 // scalar ops). Alongside the macro's eager 3×86 gadget. ~30% fewer constraints.
 // ===========================================================================
-use xark::{Field, Transparent, require_eq as aeq, witness_begin, witness_end};
+use xark::{Field, input, require_eq as aeq, witness_begin, witness_end};
 use xark_bignum::{
     M_K1, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
     modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
@@ -60,10 +60,9 @@ type Pt = [L4; 2];
 /// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =
 /// `[lo128, hi128]` in-circuit (2 public field elements vs 4 raw 64-bit limbs),
 /// `[u8; 32]` big-endian on the host. Recomposed to the internal 4×64 limbs by the
-/// gadget. `#[derive(Transparent)]` derives the host `NativeInput` (`[u8; 32]` →
+/// gadget. `#[input]` derives its host conversions (`[u8; 32]` →
 /// `<name>.limbs[0..2]`) from this declaration.
-#[derive(Clone, Copy, Transparent)]
-#[transparent(bits = 128)]
+#[input(number(bits = 128))]
 pub struct Scalar {
     pub limbs: [Field; 2],
 }
@@ -72,7 +71,7 @@ pub struct Scalar {
 /// `[u8; 64]` (`x ‖ y`, SEC1 minus the `0x04` tag) on the host, `{ x, y }`
 /// (flattening to `<name>.x.limbs[i]` / `<name>.y.limbs[i]`) in-circuit. Verify a
 /// signature against it with [`Point::verify`].
-#[derive(Clone, Copy, Transparent)]
+#[input(bytes)]
 pub struct Point {
     pub x: Scalar,
     pub y: Scalar,
@@ -80,7 +79,7 @@ pub struct Point {
 
 /// An ECDSA signature `(r, s)` — `[u8; 64]` (`r ‖ s`) on the host, `{ r, s }`
 /// in-circuit. Pass it to [`Point::verify`] with the message digest.
-#[derive(Clone, Copy, Transparent)]
+#[input(bytes)]
 pub struct Signature {
     pub r: Scalar,
     pub s: Scalar,

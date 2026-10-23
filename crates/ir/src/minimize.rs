@@ -73,10 +73,7 @@ struct Lc {
 /// majority) go through `i64`, rare big constants via `BigInt` bytes. The string
 /// path was ~half of `minimize`'s wall-clock over a ~million-constraint program.
 fn fc_to_fp(fc: &FieldConst, m: &BigUint) -> Fp {
-    match fc.as_i64() {
-        Some(n) => Fp::from_i64(n, m),
-        None => Fp::from_bigint(&fc.big(), m),
-    }
+    Fp::from_const(fc, m)
 }
 
 impl Lc {

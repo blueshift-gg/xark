@@ -32,7 +32,7 @@
 
 use ark_bn254::{Fq, Fq2, Fr, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
-use ark_ff::{PrimeField, Zero};
+use ark_ff::PrimeField;
 use num_bigint::BigUint;
 
 /// Width in bytes of an encoded Fq / Fr field element.
@@ -132,19 +132,6 @@ pub fn decode_fr(bytes: &[u8; FR_BYTES]) -> Fr {
     Fr::from_be_bytes_mod_order(bytes)
 }
 
-/// Return `-p` on G1: keep `x`, replace `y` with `-y mod q`. The point at
-/// infinity is its own inverse.
-///
-/// Useful for assembling the Groth16 pairing input, which needs `(-A, B)`
-/// to fold the `e(A, B)^{-1}` factor into the precompile call.
-pub fn negate_g1(p: &G1Affine) -> G1Affine {
-    if p.is_zero() {
-        return G1Affine::zero();
-    }
-    let (x, y) = p.xy().expect("g1 not at infinity");
-    G1Affine::new_unchecked(x, Fq::zero() - y)
-}
-
 // =============================================================================
 // Little-endian variants for the `alt_bn128_*_le` syscall family.
 // =============================================================================
@@ -161,136 +148,19 @@ pub fn negate_g1(p: &G1Affine) -> G1Affine {
 // `(c1, c0)` flip was a quirk of the Ethereum-compat BE format that the LE
 // variants don't preserve).
 
-/// Encode an Fq element as 32 little-endian bytes (zero-padded on the
-/// right).
-fn encode_fq_le(value: &Fq) -> [u8; FIELD_BYTES] {
-    let big: BigUint = (*value).into();
-    let mut bytes = big.to_bytes_le();
-    bytes.resize(FIELD_BYTES, 0);
-    bytes.try_into().expect("FIELD_BYTES bytes after resize")
-}
-
-/// Decode 32 little-endian bytes into an Fq element (reduced modulo `p`).
-fn decode_fq_le(bytes: &[u8]) -> Fq {
-    Fq::from_le_bytes_mod_order(bytes)
-}
-
-/// Encode a G1 affine point as 64 bytes: `x (32 LE) || y (32 LE)`.
-/// The point at infinity becomes 64 zero bytes.
-pub fn encode_g1_le(p: &G1Affine) -> [u8; G1_BYTES] {
-    let mut out = [0u8; G1_BYTES];
-    if p.is_zero() {
-        return out;
-    }
-    let (x, y) = p.xy().expect("g1 not at infinity");
-    out[..FIELD_BYTES].copy_from_slice(&encode_fq_le(&x));
-    out[FIELD_BYTES..].copy_from_slice(&encode_fq_le(&y));
-    out
-}
-
-/// Decode 64 bytes into a G1 affine point. An all-zero buffer decodes to
-/// the point at infinity.
-pub fn decode_g1_le(bytes: &[u8; G1_BYTES]) -> G1Affine {
-    if bytes.iter().all(|b| *b == 0) {
-        return G1Affine::zero();
-    }
-    let x = decode_fq_le(&bytes[..FIELD_BYTES]);
-    let y = decode_fq_le(&bytes[FIELD_BYTES..]);
-    G1Affine::new_unchecked(x, y)
-}
-
-/// Encode a G2 affine point as 128 bytes:
-/// `x.c0 || x.c1 || y.c0 || y.c1` (each component 32 B LE Fq). The point
-/// at infinity becomes 128 zero bytes.
-pub fn encode_g2_le(p: &G2Affine) -> [u8; G2_BYTES] {
-    let mut out = [0u8; G2_BYTES];
-    if p.is_zero() {
-        return out;
-    }
-    let (x, y) = p.xy().expect("g2 not at infinity");
-    out[0..32].copy_from_slice(&encode_fq_le(&x.c0));
-    out[32..64].copy_from_slice(&encode_fq_le(&x.c1));
-    out[64..96].copy_from_slice(&encode_fq_le(&y.c0));
-    out[96..128].copy_from_slice(&encode_fq_le(&y.c1));
-    out
-}
-
-/// Decode 128 bytes into a G2 affine point. Wire order: `(c0, c1)` per
-/// Fq2 coordinate (no flip — that quirk was BE-only). An all-zero buffer
-/// decodes to the point at infinity.
-pub fn decode_g2_le(bytes: &[u8; G2_BYTES]) -> G2Affine {
-    if bytes.iter().all(|b| *b == 0) {
-        return G2Affine::zero();
-    }
-    let x_c0 = decode_fq_le(&bytes[0..32]);
-    let x_c1 = decode_fq_le(&bytes[32..64]);
-    let y_c0 = decode_fq_le(&bytes[64..96]);
-    let y_c1 = decode_fq_le(&bytes[96..128]);
-    let x = Fq2::new(x_c0, x_c1);
-    let y = Fq2::new(y_c0, y_c1);
-    G2Affine::new_unchecked(x, y)
-}
-
-/// Encode an Fr scalar as 32 little-endian bytes.
-pub fn encode_fr_le(f: &Fr) -> [u8; FR_BYTES] {
-    let big: BigUint = (*f).into();
-    let mut bytes = big.to_bytes_le();
-    bytes.resize(FR_BYTES, 0);
-    bytes.try_into().expect("FR_BYTES bytes after resize")
-}
-
-/// Decode 32 little-endian bytes into an Fr scalar (reduced modulo `r`).
-pub fn decode_fr_le(bytes: &[u8; FR_BYTES]) -> Fr {
-    Fr::from_le_bytes_mod_order(bytes)
-}
-
-/// Assemble the LE VK wire blob the on-chain verifier expects:
-/// `α (G1) || β (G2) || γ (G2) || δ (G2) || gamma_abc × G1`, every field
-/// element in 32-byte little-endian.
-///
-/// The IC (`gamma_abc_g1`) count is *not* encoded: it is recoverable as
-/// `(len − 448) / 64`, and on the typed side it is fixed by the
-/// `VerifyingKey<N>` generic (`N + 1` points). One fewer thing that can
-/// disagree with the actual bytes.
-pub fn assemble_vk_bytes_le(vk: &ark_groth16::VerifyingKey<ark_bn254::Bn254>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(G1_BYTES + 3 * G2_BYTES + vk.gamma_abc_g1.len() * G1_BYTES);
-    out.extend_from_slice(&encode_g1_le(&vk.alpha_g1));
-    out.extend_from_slice(&encode_g2_le(&vk.beta_g2));
-    out.extend_from_slice(&encode_g2_le(&vk.gamma_g2));
-    out.extend_from_slice(&encode_g2_le(&vk.delta_g2));
-    for ic in &vk.gamma_abc_g1 {
-        out.extend_from_slice(&encode_g1_le(ic));
-    }
-    out
-}
-
-/// Assemble the LE proof wire blob: `-A (G1) || B (G2) || C (G1)`. `A` is
-/// pre-negated so the on-chain program can feed
-/// `(proof_a_le, proof_b_le)` straight into the pairing without doing the
-/// modular subtraction in BPF.
-pub fn assemble_proof_bytes_le(proof: &ark_groth16::Proof<ark_bn254::Bn254>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(G1_BYTES + G2_BYTES + G1_BYTES);
-    out.extend_from_slice(&encode_g1_le(&negate_g1(&proof.a)));
-    out.extend_from_slice(&encode_g2_le(&proof.b));
-    out.extend_from_slice(&encode_g1_le(&proof.c));
-    out
-}
-
-/// Assemble the LE public-inputs wire blob: concatenated 32-byte LE Fr
-/// scalars, one per input.
-pub fn assemble_public_inputs_bytes_le(inputs: &[Fr]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(inputs.len() * FR_BYTES);
-    for f in inputs {
-        out.extend_from_slice(&encode_fr_le(f));
-    }
-    out
-}
+// The encoders themselves live in `xark_groth16::solana`, shared with xark-wasm
+// so a proof made in a browser becomes the same instruction data.
+pub use xark_groth16::solana::{
+    assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le, encode_fr_le,
+    encode_g1_le, encode_g2_le, negate_g1,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ark_bn254::{Fq, Fq2, Fr, G1Affine, G2Affine};
     use ark_ec::{AffineRepr, CurveGroup};
+    use ark_ff::Zero;
 
     fn g1_for(k: u64) -> G1Affine {
         (G1Affine::generator() * Fr::from(k)).into_affine()

@@ -4679,7 +4679,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w0 * w32 = t96"
+      }
     },
     {
       "id": 99,
@@ -4710,7 +4713,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w1 * w33 = t97"
+      }
     },
     {
       "id": 100,
@@ -4741,7 +4747,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w2 * w34 = t98"
+      }
     },
     {
       "id": 101,
@@ -4772,7 +4781,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w3 * w35 = t99"
+      }
     },
     {
       "id": 102,
@@ -4803,7 +4815,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w4 * w36 = t100"
+      }
     },
     {
       "id": 103,
@@ -4834,7 +4849,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w5 * w37 = t101"
+      }
     },
     {
       "id": 104,
@@ -4865,7 +4883,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w6 * w38 = t102"
+      }
     },
     {
       "id": 105,
@@ -4896,7 +4917,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w7 * w39 = t103"
+      }
     },
     {
       "id": 106,
@@ -4927,7 +4951,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w8 * w40 = t104"
+      }
     },
     {
       "id": 107,
@@ -4958,7 +4985,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w9 * w41 = t105"
+      }
     },
     {
       "id": 108,
@@ -4989,7 +5019,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w10 * w42 = t106"
+      }
     },
     {
       "id": 109,
@@ -5020,7 +5053,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w11 * w43 = t107"
+      }
     },
     {
       "id": 110,
@@ -5051,7 +5087,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w12 * w44 = t108"
+      }
     },
     {
       "id": 111,
@@ -5082,7 +5121,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w13 * w45 = t109"
+      }
     },
     {
       "id": 112,
@@ -5113,7 +5155,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w14 * w46 = t110"
+      }
     },
     {
       "id": 113,
@@ -5144,7 +5189,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w15 * w47 = t111"
+      }
     },
     {
       "id": 114,
@@ -5175,7 +5223,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w16 * w48 = t112"
+      }
     },
     {
       "id": 115,
@@ -5206,7 +5257,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w17 * w49 = t113"
+      }
     },
     {
       "id": 116,
@@ -5237,7 +5291,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w18 * w50 = t114"
+      }
     },
     {
       "id": 117,
@@ -5268,7 +5325,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w19 * w51 = t115"
+      }
     },
     {
       "id": 118,
@@ -5299,7 +5359,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w20 * w52 = t116"
+      }
     },
     {
       "id": 119,
@@ -5330,7 +5393,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w21 * w53 = t117"
+      }
     },
     {
       "id": 120,
@@ -5361,7 +5427,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w22 * w54 = t118"
+      }
     },
     {
       "id": 121,
@@ -5392,7 +5461,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w23 * w55 = t119"
+      }
     },
     {
       "id": 122,
@@ -5423,7 +5495,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w24 * w56 = t120"
+      }
     },
     {
       "id": 123,
@@ -5454,7 +5529,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w25 * w57 = t121"
+      }
     },
     {
       "id": 124,
@@ -5485,7 +5563,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w26 * w58 = t122"
+      }
     },
     {
       "id": 125,
@@ -5516,7 +5597,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w27 * w59 = t123"
+      }
     },
     {
       "id": 126,
@@ -5547,7 +5631,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w28 * w60 = t124"
+      }
     },
     {
       "id": 127,
@@ -5578,7 +5665,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w29 * w61 = t125"
+      }
     },
     {
       "id": 128,
@@ -5609,7 +5699,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w30 * w62 = t126"
+      }
     },
     {
       "id": 129,
@@ -5640,7 +5733,10 @@
           }
         ]
       },
-      "debug": null
+      "debug": {
+        "source_span": null,
+        "note": "w31 * w63 = t127"
+      }
     },
     {
       "id": 130,

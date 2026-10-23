@@ -40,8 +40,13 @@ static-syscalls = ["solana-nostd-alt-bn128/static-syscalls"]
 # `default-features = false` so the SBPFv3 ABI is controlled by *this* crate's
 # `static-syscalls` feature above (default on), and `xark-verifier`'s own
 # `default-features = false` cleanly opts a dependent down to SBPFv0.
-solana-nostd-alt-bn128 = { version = "0.1.1", default-features = false }
+solana-nostd-alt-bn128 = { version = "0.1.3", default-features = false }
 solana-program-error = { version = "3", default-features = false }
+# The batch verifier's weights: the `sol_sha256` syscall on-chain, `sha2` off it.
+solana-sha256-hasher = { version = "3.1", default-features = false }
+
+[target.'cfg(not(any(target_os = "solana", target_arch = "bpf")))'.dependencies]
+solana-sha256-hasher = { version = "3.1", default-features = false, features = ["sha2"] }
 
 [lints]
 workspace = true

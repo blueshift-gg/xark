@@ -1,13 +1,14 @@
-//! Groth16 verification.
+//! Groth16 verification: the pairing check, in `xark-groth16`.
 
 use ark_bn254::{Bn254, Fr};
-use ark_groth16::{Groth16, Proof, VerifyingKey};
-use ark_snark::SNARK;
+use xark_groth16::{Proof, VerifyError, VerifyingKey};
 
+/// Verify `proof` for `public_inputs` under `vk`. `Ok(false)` for a proof that
+/// doesn't verify; `Err` when the public-input count doesn't match the key.
 pub fn verify(
     vk: &VerifyingKey<Bn254>,
     proof: &Proof<Bn254>,
     public_inputs: &[Fr],
-) -> Result<bool, ark_relations::gr1cs::SynthesisError> {
-    Groth16::<Bn254>::verify(vk, public_inputs, proof)
+) -> Result<bool, VerifyError> {
+    xark_groth16::verify(vk, public_inputs, proof)
 }

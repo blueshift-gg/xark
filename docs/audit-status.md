@@ -59,8 +59,8 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`Formal.Curve / Secp256k1 / Secp256r1`).
 * **Concrete point groups** — `Secp256k1Point`, `Secp256r1Point`, `GrumpkinPoint`
   (`Formal.*Group`): all three are mathlib `WeierstrassCurve.Affine.Point` aliases
-  inheriting `AddCommGroup` via `inferInstance`. Three trusted primality axioms (one per
-  base field) — see "Trusted base additions".
+  inheriting `AddCommGroup` via `inferInstance`. The three base-field primes are proven
+  prime by kernel-checked Pratt certificates (`Formal.Pratt`, `Formal.CurvePrimes`).
 * **Poseidon2** — `poseidon_permutation_determined` (width-polymorphic) and
   `poseidon2_bn254_t3_determined` (the concrete `t = 3` instance the gadget implements)
   (`Formal.Poseidon` + `Formal.Poseidon2Bn254T3`).
@@ -111,21 +111,17 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`pairing_operand_assembly`); see `#[cfg(kani)] mod proofs` in
   `crates/verifier/src/verifier.rs` and `.github/workflows/kani.yml`.
 
-`lean.yml` enumerates **all** these theorem names and rejects any proof depending on
-`sorryAx`. Standard mathlib axioms (`propext`, `Classical.choice`, `Quot.sound`) are allowed.
+`lean.yml` enumerates **all** these theorem names and checks what each depends on: only
+the standard mathlib axioms (`propext`, `Classical.choice`, `Quot.sound`), plus the
+`native_decide` of the lemmas listed below. Anything else — a `sorryAx`, a declared
+`axiom`, a new `native_decide` — fails CI.
 
-### Trusted base additions (axiomatised)
+### Trusted base additions
 
-Three axioms in `formal/`, each documented at its declaration site:
-
-| Axiom | Scope | Why |
-|---|---|---|
-| `secp256k1_p_prime : Fact (Nat.Prime secp256k1_p)` | 256-bit prime | Lean's kernel can't `decide` 256-bit primality; verifiable via `openssl prime`. |
-| `secp256r1_p_prime : Fact (Nat.Prime secp256r1_p)` | 256-bit prime | Same. |
-| `bn254_r_prime : Fact (Nat.Prime r)` | 254-bit prime | BN254 `Fr` modulus; used by `GrumpkinPoint` and field instances. |
-
-These are the only `axiom` declarations in `formal/`. No `sorry`/`sorryAx`. `lean.yml`
-prints `#print axioms` for every load-bearing theorem and fails CI on any `sorryAx`.
+There are no `axiom` declarations in `formal/`: the secp256k1, secp256r1 and BN254
+primes, once trusted axioms, are theorems proven by Pratt certificates
+(`Formal.CurvePrimes`, checked by the kernel with `decide`). No `sorry`/`sorryAx`.
+The only additions to the kernel's trust are the `native_decide` uses below.
 
 ### `native_decide` axioms
 
@@ -135,6 +131,12 @@ exhaustive computation over the 256-element byte range — `gf256_mul_inv` (`x·
 (`Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]` over all 256). These use `native_decide`, adding
 `Lean.ofReduceBool`-style axioms — strictly weaker than `axiom`, since the propositions are
 pure computations the compiled bytecode deterministically evaluates.
+
+The secp256k1 GLV constants are checked the same way in `Formal.Secp256k1Group`:
+`secp256k1_beta_cube_eq_one` (`β³ = 1`), `secp256k1_G_nonsingular` and
+`secp256k1_phi_eigenvalue_at_G` (`λ·G = φ(G)`) — and so every theorem built on them
+(`glv_endomorphism_correct_secp256k1`, `secp256k1_phi_acts_as_lambda`, …). Moving these to
+the kernel would need a kernel-evaluable scalar multiplication.
 
 ### AES S-box bit-level soundness
 
@@ -215,9 +217,9 @@ so an unpinned hint output can't force a satisfying assignment. An auditor shoul
 * construct adversarial circuits where a hint output is **not** pinned and confirm
   `solve_and_check` still rejects a bad witness.
 
-### 3. xark-IR → R1CS lowering (`crates/ir/`, `crates/lang/src/lower_mir.rs`)
+### 3. xark-IR → R1CS lowering (`crates/ir/`, `crates/frontend/`)
 
-Deliberately small: **no opcode dispatch, no predication.** The accepted MIR subset lowers to
+Deliberately small: **no opcode dispatch.** The circuit's wasm lowers to
 `add`/`sub`/`mul`/`require_eq` + `hint_*`/advice, then directly to R1CS. Auditable points:
 
 * **Each primitive → its expected constraint.** Fixed, small footprint; FV bridge tests pin
@@ -229,7 +231,7 @@ Deliberately small: **no opcode dispatch, no predication.** The accepted MIR sub
 * **Hint/advice reproduction** — the solver reproduces each hint output; `solve_and_check`
   rejects any constraint-violating witness.
 
-### 4. Trusted-setup ceremony (`crates/backend/src/setup_phase2.rs`, `ceremony.rs`, `ptau.rs`)
+### 4. Trusted-setup ceremony (`crates/groth16/src/setup.rs`, `crates/backend/src/ceremony.rs`, `ptau.rs`)
 
 * `.ptau` admissibility — degree match, subgroup membership, pairing-consistency.
 * Phase-2 contribution — Schnorr PoK per δ contribution; chain verification.
@@ -254,6 +256,12 @@ stubs for `G1Point::Mul / Add / pairing`), and pairing operand assembly. The ref
 (`crates/verifier/reference-program/`) has a pinned SHA-256 in `expected.sha256` verified in CI
 by `.github/workflows/reproducible-build.yml`.
 
+`verify_groth16_batch` (several proofs of one VK in one pairing call) is new and
+has had no review beyond its own tests and Kani harnesses. An auditor should
+check the weight derivation (SHA-256 over the domain tag, the whole VK and the
+whole batch, 252-bit weights with `r₀ = 1`), that every value the pairing sees
+is covered by that hash, and the `Σ rᵢ` reduction mod `r` (`add_mod_r`).
+
 ## Out of scope
 
 * External audit cost/scoping — not yet engaged.
@@ -268,9 +276,10 @@ by `.github/workflows/reproducible-build.yml`.
 
 | Component | Mitigation |
 |---|---|
-| `rustc` MIR shape (nightly) | Pin the nightly, validate the accepted MIR subset and reject the rest, fuzz the lowering. |
+| `rustc` codegen (wasm32) | Circuit ops are opaque wasm imports, so the circuit is rustc-independent (CI compares every example's digest on 1.89 / stable / beta); witness branches are guarded (Lean `gated_sat` & co.); the lowering is fuzzed against native Rust with exhaustive witness search. |
 | `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test `gadgets/tests/tests/differential_alt_bn128.rs`: same fixed vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change; each new `G1_ADD`/`G1_MUL`/`G2_ADD`/`PAIRING_2` vector adds an anchor. Extending to OSS-Fuzz CPU-weeks is a follow-up. |
-| Arkworks Groth16 | Cite published Groth16 mechanisations (e.g. Microsoft's verified Groth16 in F*); no in-repo proof. |
+| Groth16 (`xark-groth16`: setup, prover, verifier) | In-repo, not mechanised (cite published Groth16 mechanisations, e.g. Microsoft's verified Groth16 in F*). Cross-checked in tests against `ark-groth16` as an independent implementation: byte-identical keys and proofs for the same randomness, the same verification verdicts, and phase-2 keys byte-identical to an arkworks-based reference. |
+| BN254 arithmetic (`ark-bn254`, `ark-ff`, `ark-ec`) | The field, curve and pairing operations everything above is built on. |
 | Lean kernel + mathlib | Trusted base; replace via Coq cross-check if needed. |
 | `rustc` / `cargo` / `lake` / `Kani` / CBMC | Toolchain trust. |
 

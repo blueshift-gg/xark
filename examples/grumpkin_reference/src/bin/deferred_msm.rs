@@ -68,8 +68,7 @@ fn main() {
         println!("// G{j}: ({}, {})", dec(&gj.x), dec(&gj.y));
         println!("const G{j}X: &str = \"{}\";", dec(&gj.x));
         println!("const G{j}Y: &str = \"{}\";", dec(&gj.y));
-        println!("const S{j}LO: &str = \"{lo}\";");
-        println!("const S{j}HI: &str = \"{hi}\";");
+        println!("const S{j}: &str = \"{}\"; // lo = {lo}, hi = {hi}", sj.into_bigint());
     }
     let q = q.into_affine();
     println!("const QX: &str = \"{}\";", dec(&q.x));

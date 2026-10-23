@@ -25,7 +25,7 @@
 //! ```
 //!
 //! After the loop `acc = 2^N·O + m·G`, so subtracting the compile-time constant
-//! `2^N·O` (the correction point [`corr`]) yields `m·G`.
+//! `2^N·O` (the correction point `corr`) yields `m·G`.
 //!
 //! ## Soundness / completeness
 //!
@@ -54,8 +54,8 @@
 //! fixed non-identity point.
 
 #![no_std]
-// Circuit-lowered gadget code: the xark compiler rejects compound assignment on
-// `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
+// Gadget code keeps the `x = x + y` style it was written in (the old compiler
+// rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
 use xark::{Field, require_eq};

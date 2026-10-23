@@ -98,10 +98,11 @@ fn eddsa_verify_matches_dalek() {
     // Circuit regression pin — a streaming 128-bit digest of the expanded R1CS
     // (O(1) memory, ~1 s), NOT expand + minimize (which peaked ~15 GB). The proven
     // (minimized) circuit is ~2_358_142 constraints on the lazy extended-coordinate
-    // path (was 4_554_355 affine); any change to the circuit flips the digest.
+    // path (was 4_554_355 affine); any change to the circuit flips the digest
+    // (also pinned, per toolchain, in `tests/stable-digests.txt`).
     assert_eq!(
         c.circuit_digest(),
-        0x9599ff02a0de291433e1e6e33d30870f,
+        0x4551766810cba28f6f9f5cd6158fb82c,
         "ed25519 eddsa_verify circuit changed (re-derive the digest if intentional)"
     );
 

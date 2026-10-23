@@ -1,244 +1,140 @@
 # DAG functions & the JIT prover
 
-xark treats a circuit's functions as **reusable functions**, stores the circuit as a
-**DAG-compact bytecode artifact** (templates + call sites, not a flat constraint stream),
-and **expands it on demand** at setup/prove time — the "JIT prover" model. This covers the
-pipeline, the version-1 bytecode format byte-for-byte, the optimizations, and how soundness
-is checked at every hop.
+xark stores a circuit as a **DAG-compact bytecode artifact** (`circuit.xbc`): each repeated
+piece of the circuit is stored once as a **template**, every other occurrence is a small call
+record, and long periodic runs are rolled. Setup and proving **expand it on demand** (the "JIT
+prover" model) instead of reading a flat constraint list. This covers how templates are found,
+the container, decoding, minimization, and how soundness is checked at each step.
 
 ## Why
 
-An ed25519 scalar mult is ~7.4M constraints but built from a handful of functions
-(`ec_double`, `ec_add`, field mul, …) invoked hundreds of times. Encoding the *flat*
-expansion is wasteful on:
+A signature circuit is millions of constraints built from a handful of routines (a field
+multiply, a point add or double) run thousands of times. Storing the flat expansion wastes disk
+and load time; storing each routine once does not:
 
-- **Build time.** Function structure is captured *for free* during lowering (no separate
-  ~30s periodic-run pass). Loops of *primitives* (which a plain function capture wouldn't
-  compress) are still folded into `REPEAT` items via the same affine detection the old loop
-  encoding used, now embedded in the one format.
-- **Artifact size.** Flat ed25519 ~99MB → DAG-compact ~1.1MB (≈90×). ecdsa 33MB→2.4MB,
-  keccak 2.7MB→0.8MB.
-
-Each distinct function body is stored **once**; each call site is a small `(def, base, plugs)`
-record. Expansion replays the bodies with variable remapping to reproduce the exact flat circuit.
+| circuit | constraints | `circuit.xbc` |
+|---|---:|---:|
+| `ed25519` | 2,399,092 | 43 KB |
+| `secp256k1_ecdsa` | 1,634,595 | 441 KB |
+| `keccak256` | 156,280 | 562 KB |
 
 ## Pipeline
 
 ```
-Rust source
-  │  rustc frontend (parse / type-check / borrow-check / MIR)
+Rust circuit crate
+  │  rustc (any stable ≥ 1.89) → wasm32, with --cfg xark
   ▼
-lower_mir::lower          MIR → circuit IR
-  │   • an all-Field, not-#[inline(never)] function is a FUNCTION
-  │   • first call: WALK the body, capture a template (constraints + witness + plug/var kinds)
-  │   • later calls: REPLAY the template with vars remapped
+xark-frontend interpreter (interp.rs, builder.rs)
+  │   • runs the module with witness values symbolic, emitting rows and witness ops
+  │   • records the rows / witness ops / variables each wasm call produced (a Region)
   ▼
-LowerOutput { r1cs, primitive, function_xbc }
-  │   • function_xbc = build_function_blob(env)  (built for EVERY circuit — the sole format)
+templates::detect                   (templates.rs)
+  │   • two calls whose rows are identical up to variable renaming are one template
   ▼
-driver::emit_outputs      writes circuit.xbc = function_xbc
-  │   • XARK_VERIFY: decode(function_xbc) ≡ from_lowered(r1cs, primitive), else abort
-  ▼
-circuit.xbc  (version 1, self-describing: defs + top-level Row/Call/Repeat items)
-  │
+build_function_blob                 (output.rs) → circuit.xbc, container version 2
   ▼   setup / prove
-function_decode::expand_function_blob → CircuitProgram
-  │   • constraints + witness program + variable table, byte-identical to flat
+function_decode::expand_function_blob → CircuitProgram   (exactly the flat circuit)
+  │   or expand_function_blob_reduced: each template minimized once (what setup keys)
   ▼
-minimize  boundary pass (default) · XARK_FLAT_MINIMIZE (guarded flat) · XARK_NO_MINIMIZE
-  ▼
-Groth16 (arkworks, BN254)
+Groth16 (xark-groth16, streaming)
 ```
 
-`circuit.xbc` carries both consumer views: `to_r1cs()` for the Groth16 backend and
+`circuit.xbc` carries both consumer views, `to_r1cs()` for the Groth16 backend and
 `to_primitive()` for the witness solver, so nothing downstream needs to know the circuit was
-function-encoded.
+template-encoded.
 
-## Function capture & replay
+## Template detection
 
-A **function** is one whose signature is entirely `Field`-typed and which is *not*
-`#[inline(never)]` (operators `+ - * neg` are `#[inline(never)]`, so they always inline as free
-linear ops). Detection is cached per `DefId`. On a call with all-`Field` args:
+Templates are found **after** lowering, purely as an encoding of the finished flat circuit
+(`crates/frontend/src/templates.rs`):
 
-1. **Materialize plugs.** Each argument leaf is forced to a single variable (a *plug*). Aliased
-   plugs (same var in two positions) are copied to distinct vars so the replay remap can't
-   collapse them.
-2. **First call — walk & capture.** The body is lowered normally, but inside a function body
-   cross-call caches (bit-decomposition memo, mul→require_eq merge) are suppressed so the body
-   is a *pure function of its plugs*. The constraints, witness ops, plug vars, and per-var
-   visibilities are captured as a `FunctionTemplate`, keyed by `def_id | substs | plug-arity`.
-3. **Later calls — replay.** The template is re-emitted with variables remapped: internal var
-   `v ≥ base_var` → `call_base + (v − base_var)`; a plug → the caller's plug var. Replay is
-   byte-identical to a fresh walk (see *Soundness*).
+- The interpreter records, for every wasm call, the range of rows, witness ops and variables
+  it produced, and its enclosing call.
+- Two calls are the same template when their rows are identical once the variables the call
+  allocated are written as offsets from its first one and variables from outside become
+  positional **plugs**. The first such call becomes the template's definition; every match
+  becomes a `CALL` record `(template, base var, plug LCs)`.
+- Calls smaller than 8 rows stay inline, since a `CALL` record isn't worth it. Templates nest:
+  a template's body may itself contain calls.
 
-Recursive functions (a function calling functions) form the DAG.
+Because expansion reproduces the flat circuit exactly, templates never change the proven
+circuit, only the artifact's size and how fast it expands. A routine can only become a template
+if rustc keeps it as a separate wasm call (`#[inline(never)]` guarantees that); code rustc
+inlines is stored inline.
 
-### `#[inline(never)]` — two distinct roles
+## The container
 
-- **On lang primitives** (operator impls, `__xark_*`, `constrain_eq`, `require_eq`,
-  `Field::constant`) it is a *recognition anchor*: it guarantees rustc emits them as distinct
-  MIR calls that `classify_call` matches by `DefId`, rather than inlining the `loop {}` marker
-  bodies. These are handled as `KnownCall`s and lowered *directly* — recognition runs before
-  `is_function`, so they're never walked/functionized. This must stay; it makes recognition
-  robust rather than dependent on rustc's default MIR inlining.
-- **On a user circuit function** it is the *compactness opt-out*. `is_function` requires
-  `!inline_never`, so marking a helper `#[inline(never)]` excludes it from caching (walked/spliced
-  inline instead of stored as a template). This is *bytecode-only* — the proven R1CS is
-  byte-identical either way (checked by `XARK_VERIFY`), so it trades artifact compactness, not
-  circuit cost. With the prune/inline post-pass already inlining single-use functions, the opt-out
-  mainly forces a *multi-use* function to stay inline (e.g. to read the flat form). See
-  `examples/optout`.
+`b"XBC\0"` + a `u16` version (`2`); `is_function_artifact` rejects anything else, including
+version-1 files from the removed MIR frontend (rebuild them). After the header (field name and
+modulus, variable count, and each signature input's role and name), the body is:
 
-## The version-1 bytecode format
+- a **constant pool**, referenced by index from anywhere below;
+- the **template definitions**: each a base variable, its plug and output variables, and its
+  constraint and witness item streams;
+- the **top-level** constraint and witness item streams;
+- the variables to keep although nothing references them (rare unreferenced advice).
 
-`XBC1` container magic + a `u16` version (`1`); `is_function_artifact` checks it so a
-stale/foreign file is rejected. This is the **sole** format — it captures function defs, records
-call sites, and rolls periodic runs of inline rows, so the earlier flat/loop/function encodings
-(versions 6/7/8) collapsed into it.
-
-### Primitives
-
-- **`uv`** — LEB128 unsigned varint: 7 bits/byte, high bit = continuation.
-- **`iv`** — zig-zag signed varint (`(v<<1) ^ (v>>63)`), read back as `uv`.
-- **`fc`** (field constant) — `0x00` + `iv` for an `i64`-representable value, else `0x01` +
-  `uv(len)` + decimal-string bytes.
-- **`str`** — `uv(len)` + UTF-8 bytes.
-- **`lc`** (linear combination) — `fc(constant)` + `uv(nterms)` + `nterms × [fc(coeff) + uv(var)]`.
-- **`ids`** — `uv(len)` + `len × uv(id)`.
-- **`vis`** — one byte: `0` Public, `1` Private, `2` Internal.
-
-### Container layout
-
-```
-"XBC1"                         4 bytes magic
-u16  version = 1               little-endian
-str  field.name                e.g. "bn254"
-str  field.modulus_decimal     "" if unknown
-uv   num_vars                  total variable count (before prune)
-uv   num_inputs                signature inputs occupy ids 0..num_inputs
-     num_inputs × { vis; str name }     input role + name (matched at prove time)
-uv   n_defs                    kept function defs (see prune/inline below)
-     n_defs × FUNCTION_DEF
-     CITEMS  (top-level constraint stream)
-     WITEMS  (top-level witness stream)
-ids  keep_extra                unreferenced-advice var ids the decoder must keep
-```
-
-`FUNCTION_DEF`:
-```
-uv   base_var                  the def's internal-var base (for remap)
-ids  plugs                     the def's plug vars (its inputs)
-CITEMS                         the def body's constraint stream
-WITEMS                         the def body's witness stream
-```
-
-`CITEMS` — `uv(count)` then `count` items, each:
-- `0x00` + `lc a` + `lc b` + `lc c` — a `Row`: one R1CS constraint `a·b = c`.
-- `0x01` + `uv(def)` + `uv(base)` + `ids(plugs)` — a `Call` to def `def`, expanded at `base` with
-  `plugs`.
-- `0x02` + `uv(len)` + `len` bytes — a `Rolled` run: a maximal run of ≥2 consecutive inline rows,
-  compressed with the affine periodic-run detector, decoded back to the exact rows.
-
-`WITEMS` — `uv(count)` then `count` items, each: `0x00` + `WITNESS_OP` (a `Row`); `0x01` +
-`uv(def)` + `uv(base)` + `ids(plugs)` (same `Call` shape); `0x02` + `uv(len)` + `len` bytes
-(`Rolled` run of ≥2 witness ops).
-
-`WITNESS_OP` — a tag byte selecting the `WitnessGen` variant, then its fields (each `out`/id as
-`uv`, each LC as `lc`, id-vectors as `ids`, lc-vectors as `uv(len)+lc…`):
-
-| tag | op | fields |
-|----|----|--------|
-| 0 | `Product`       | out, a, b |
-| 1 | `Linear`        | out, lc |
-| 2 | `Xor`           | out, a, b |
-| 3 | `Or`            | out, a, b |
-| 4 | `Inverse`       | out, in |
-| 5 | `InverseOrZero` | out, in |
-| 6 | `Bit`           | out, in, index |
-| 7 | `Bits`          | outs, in |
-| 8 | `DivRem`        | q, r, num, den |
-| 9 | `MulModDivMod`  | q, r, a, b, mod, limb_bits |
-| 10| `ModInverse`    | out, a, mod, limb_bits |
-| 11| `Sub2`          | qabs, r, a, b, c, mod, limb_bits |
-
-## Bytecode optimization — prune / inline / keep
-
-After the def/call streams are built, `build_function_blob` counts static `Call`s per def:
-
-- **0 calls → prune** a captured-but-dead def.
-- **1 call → inline.** The single call is the def's own defining site (identity remap), so the
-  body is spliced in place and the def removed. Recursive: an inlined def's own calls are
-  spliced/re-pointed too.
-- **≥2 calls → keep.** Shared bodies stay as defs; calls re-pointed to contiguous new indices.
-
-The bytecode-layer optimum: store **no def that isn't reused**. Never changes the flat expansion
-(checked by `XARK_VERIFY`). Example (ed25519): 19 captured defs → 11 kept, 7 inlined, 1 pruned.
+Items are rows (`a·b = c`) and witness ops, `CALL`s, rolled `CALL` blocks, and rolled runs of
+rows or witness ops (`bytecode::roll_and_encode_ops_compact`). Variables are zigzag deltas from
+the previous one in a list, and rows can refer back to an earlier row's linear combination. The
+byte-level tag table is the header of `crates/ir/src/function_decode.rs`; the encoder
+(`output.rs`) and decoder must change together.
 
 ## Decode & variable-table reconstruction
 
 `expand_function_blob(bytes) → CircuitProgram`:
 
-1. Parse header, inputs, defs, top streams, `keep_extra`.
-2. `expand_c` / `expand_w` walk the top streams; a `Call` recurses into the def with the sub-map
-   `v ≥ def.base_var ↦ call_base + (v − def.base_var)`, `plug ↦ caller plug`, reproducing the flat
-   streams.
-3. **Roles are id-based, not visibility-based.** Ids `0..num_inputs` take the stored role/name;
-   every other var is `Derived` — *including* hint/advice vars, which carry `Visibility::Private`
-   in lowering but are computed by the witness program, never supplied. (Getting this wrong makes
-   the solver demand an input for an advice var.)
-4. **Prune to match `finish`.** `finish` drops unreferenced `Internal` vars but keeps
-   `Private`/advice ones. The decoder drops every unreferenced non-input var *except* the
-   `keep_extra` set (rare unreferenced advice), and drops witness ops whose output was dropped.
-   Result is byte-identical to the flat lowering.
+1. Parse the header, the pool, the definitions and the top-level streams.
+2. Walk the top-level streams; a `CALL` recurses into its template with the substitution
+   `v ≥ base_var ↦ call_base + (v − base_var)`, `plug ↦ caller's plug LC`, reproducing the flat
+   rows and witness program.
+3. **Roles are id-based, not visibility-based.** Ids `0..num_inputs` take the stored role and
+   name; every other variable is `Derived`, including hint/advice variables, which the witness
+   program computes and are never supplied.
+4. Drop every unreferenced non-input variable except the keep-set, and the witness ops whose
+   output was dropped, matching the flat lowering exactly.
 
 ## R1CS minimization
 
-Independent of the bytecode: a **linear-variable-elimination** pass on the `a·b=c` R1CS (Gaussian
-elimination over the prime field, occurrence-indexed). Every `Internal` var defined by a linear
-constraint (a materialized plug, a copy, or a mul output later pinned by an equality) is
-substituted away to a fixpoint. Because the eliminated var is a *function* of the survivors,
-satisfiability is preserved exactly both ways (soundness *and* completeness). It lands at or below
-the inline baseline — "optimal R1CS" for a flat prover.
+Independent of the bytecode: a **linear-variable-elimination** pass on the R1CS (Gaussian
+elimination over the field). Every internal variable defined by a linear constraint is
+substituted away to a fixpoint. The eliminated variable is a function of the survivors, so
+satisfiability is preserved exactly in both directions.
 
-By **default** this runs as a *template-minimize + boundary pass*: each template body is minimized
-once (plugs/outputs pinned) during the reduced expand, then one unguarded pass over the flattened
-result eliminates the remaining cross-template plug materializations — reaching the same fixpoint
-as a full flat minimize without materializing the full unreduced R1CS. `XARK_FLAT_MINIMIZE` selects
-the guarded flat pass over the whole expansion instead (fill cap `XARK_MAX_FILL`, default 32);
-`XARK_NO_MINIMIZE` skips it. `xark setup --cache` persists the minimized R1CS (`r1cs.min.wcz`) so a
-later `xark prove` reloads it and skips both the minimize and the structural `validate()`.
+By default this runs as a **template minimize + boundary pass**: each template body is minimized
+once during the reduced expand (plugs and outputs pinned), then one pass over the flattened
+result removes the remaining cross-template plug copies, reaching the same fixpoint as a full
+flat minimize without materializing the unreduced circuit. `xark setup` records which form a key
+was made for (`--r1cs-form`), and writes a minimized key's rows (`r1cs.stream`) beside it so `xark
+prove` skips the minimize.
 
-The cost model is vanilla Groth16, whose proving key / FFT domain is
-`next_pow2(#constraints + #public)` — so the big win is crossing below a power of two; the pk also
-scales with variable count, so elimination shrinks it even within a bucket.
+The Groth16 cost is set by the proving key and FFT domain, which scale with constraints and
+variables, so the big win is crossing below a domain-size boundary.
 
-## Soundness — preserved and checked at every hop
+## Soundness, checked at each step
 
-- **Replay ≡ walk.** A replayed function is byte-identical to a fresh walk of the body
-  (constraints sorted, `∧` unordered, notes debug-only): mathematically the same R1CS. Verified
-  canonically across the corpus.
-- **Artifact ≡ flat.** `XARK_VERIFY` (build-time, opt-in / CI) decodes the artifact with the
-  *independent* `function_decode` reimplementation and asserts it equals `from_lowered(r1cs,
-  primitive)` — constraints, witness, and var roles. Any divergence aborts the build with a
-  precise diff.
-- **Prune/inline ≡ identity** on the expansion, also under `XARK_VERIFY`.
-- **Minimizer preserves satisfiability** by construction (Gaussian elimination), and end-to-end by
-  producing verifying Groth16 proofs that reject wrong witnesses.
-- **Under-constraint gate.** Independently, `finish` rejects any hint/advice or public var left
-  unpinned by a constraint (a structural, label-independent check).
+- **Artifact ≡ flat.** `function_decode::verify_blob_matches` decodes the artifact
+  independently and checks it equals the flat lowering (rows, witness program, variable roles).
+  `crates/frontend/tests/examples.rs` runs it on every example, and so does
+  `cargo xtask digests`.
+- **The keyed (reduced) circuit is as sound as the full one.** `crates/ir/tests/reduced_soundness.rs`:
+  a forged public output is rejected by both, and every public input stays constrained.
+- **The minimizer preserves satisfiability** by construction, and end to end by producing
+  verifying proofs that reject wrong witnesses. `XARK_VERIFY` (developer builds) also asserts
+  it reached a fixpoint.
+- **Under-constraint gate.** Independently, lowering rejects any hint/advice or public variable
+  left unpinned by a constraint.
 
-## Environment flags
+## Developer flags
 
-Function detection + capture/replay and the version-1 artifact are **always on** — every all-`Field`
-function is auto-cached from its MIR (no opt-out flag); it is the sole codegen and on-disk format.
-The remaining knobs are developer-only (behind the `debug` feature) or CLI flags:
+Behind the `debug` feature, or CLI flags:
 
 | flag | effect |
 |------|--------|
-| *(minimize default)* | boundary pass: eliminate cross-template plug vars on the per-template-reduced R1CS |
-| `XARK_FLAT_MINIMIZE` | guarded flat minimize on the full expansion instead of the boundary pass |
-| `XARK_NO_MINIMIZE` | skip R1CS minimization entirely |
+| *(default)* | template minimize + boundary pass |
+| `XARK_FLAT_MINIMIZE` | guarded flat minimize on the full expansion instead |
+| `XARK_NO_MINIMIZE` | skip R1CS minimization |
 | `XARK_MAX_FILL` | fill-in cap for the guarded flat minimize (default 32) |
-| `xark setup --cache` / `xark prove --cache` | write/reuse `r1cs.min.wcz` so a later prove skips minimize + validate |
-| `XARK_VERIFY` | build-time faithfulness gate (artifact ≡ flat lowering); on for every test build |
-| `XARK_BUILD_TIME` / `PROVE_TIME` | print per-phase build / prove timings |
+| `xark prove --cache` | write the minimized rows (and a decoded key) when missing |
+| `XARK_VERIFY` | assert the minimizer reached its fixpoint |
+| `XARK_BUILD_TIME` / `PROVE_TIME` | per-phase build / prove timings |

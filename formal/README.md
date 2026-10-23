@@ -1,7 +1,7 @@
 # `formal/` — Lean 4 proofs of gadget soundness
 
 Machine-checked soundness proofs for the R1CS gadgets that xark compiles from
-its frontend gadget crates (`crates/lang-*`), written in **Lean 4** against
+its language and frontend (`crates/lang`, `crates/frontend`), written in **Lean 4** against
 **mathlib**. Covers the field-arithmetic gadgets where SMT / bit-blasting
 blows up and a proof assistant is the right tool.
 
@@ -18,8 +18,8 @@ Each theorem mirrors the exact constraints the Rust builder enforces.
 
 | Theorem | Mirrors | Statement |
 |---------|---------|-----------|
-| `boolean_sound` | `gadgets/boolean.rs::enforce_boolean` | `b * (b - 1) = 0 ↔ b ∈ {0,1}` in any field |
-| `range_unique` | `gadgets/range.rs::decompose_into_bits` | the bit-vector is **uniquely determined** by the recomposed value (no under-constraint slack), for widths `n ≤ 253 = MAX_BITS` |
+| `boolean_sound` | the booleanity row `b·b = b` (`frontend/src/builder.rs::decompose_bits`, `Field::require_bool`) | `b * (b - 1) = 0 ↔ b ∈ {0,1}` in any field |
+| `range_unique` | `frontend/src/builder.rs::decompose_bits` | the bit-vector is **uniquely determined** by the recomposed value (no under-constraint slack), for widths `n ≤ 253 = MAX_BITS` |
 | `bits_unique` | (lemma) | binary recomposition `Σᵢ 2ⁱ·bᵢ` is injective on bit-vectors over `ℕ` |
 
 [`Formal/Bitwise.lean`](Formal/Bitwise.lean) — bitwise primitives (each proves
@@ -27,9 +27,9 @@ the output bit is determined *and* equals the intended boolean op, staying in `{
 
 | Theorem | Mirrors | Statement |
 |---------|---------|-----------|
-| `and_sound` | `gadgets/bitwise.rs::and` (`aᵢ·bᵢ = outᵢ`) | `out ∈ {0,1}` and `out = 1 ↔ a = 1 ∧ b = 1` |
-| `xor_sound` | `gadgets/bitwise.rs::xor` (`(2a)·b = a + b − out`) | constraint pins `out = a + b − 2ab`; `out ∈ {0,1}` and `out = 0 ↔ a = b` |
-| `not_sound` | `gadgets/bitwise.rs::not` (`1 − a`) | `1 − a ∈ {0,1}` and `1 − a = 1 ↔ a = 0` |
+| `and_sound` | `&` on bits (`frontend/src/host.rs::int_bin`, `aᵢ·bᵢ = outᵢ`) | `out ∈ {0,1}` and `out = 1 ↔ a = 1 ∧ b = 1` |
+| `xor_sound` | `frontend/src/builder.rs::emit_xor` (`(2a)·b = a + b − out`) | constraint pins `out = a + b − 2ab`; `out ∈ {0,1}` and `out = 0 ↔ a = b` |
+| `not_sound` | `Field::not` (`lang/src/lang.rs`, `1 − a`) | `1 − a ∈ {0,1}` and `1 − a = 1 ↔ a = 0` |
 
 [`Formal/Arith.lean`](Formal/Arith.lean) — the carry-based gadgets (the new
 content is the carry arithmetic + no-wrap-below-`r` argument):
@@ -150,10 +150,45 @@ cap `n ≤ 253` is what keeps the field sum below the BN254 scalar modulus `r`
 (`two_pow_lt_r : 2^253 < r`) so it cannot wrap.
 
 The proofs use only the standard mathlib axioms (`propext`, `Classical.choice`,
-`Quot.sound`) plus three primality axioms for the secp256k1, secp256r1, and
-BN254 base-field moduli (Lean's kernel can't `decide` 254/256-bit primality;
-each is documented at its declaration site). No `sorry`. CI checks this with
-`#print axioms`.
+`Quot.sound`), plus `native_decide`'s compiled-evaluation axiom in the few places
+listed at their declaration sites (GF(2⁸) tables, the secp256k1 GLV constants). The
+secp256k1, secp256r1 and BN254 primes are proven prime by kernel-checked Pratt
+certificates ([`Formal/CurvePrimes.lean`](Formal/CurvePrimes.lean), machinery in
+[`Formal/Pratt.lean`](Formal/Pratt.lean)). No `sorry`. CI (`lean.yml`) runs
+`#print axioms` on every listed theorem and fails on anything else, including a
+`native_decide` outside that list.
+
+[`Formal/Rewrites.lean`](Formal/Rewrites.lean) — **the stable frontend's
+constraint-reducing rewrites preserve the circuit.** The theorems above are stated
+over the rows a gadget emits; the stable frontend (`crates/frontend`) emits fewer
+rows than the MIR frontend for the same program, and each saving is one of these
+rewrites. Over an explicit R1CS model (linear combinations, rows `a · b = c`, and
+syntactic substitution), each is proven *exact*: the rewritten rows' solutions are
+precisely the original solutions with the eliminated variable forgotten — nothing
+gained for a forger, nothing lost for an honest prover. So every gadget theorem,
+and the public-input relation the proof checks, carries over unchanged.
+
+| Theorem | Mirrors | Statement |
+|---------|---------|-----------|
+| `eval_subst` | substituting an LC for a variable | evaluating `l[v := e]` at `τ` is evaluating `l` at `τ[v ↦ e(τ)]` |
+| `elim_sound` | the common core | if the rows force `v = e` (`e` free of `v`), `Sat S[v := e] τ ↔ ∃ x, Sat S τ[v ↦ x]` |
+| `cse_sound` | `builder.rs::emit_mul_var` product reuse | with `A · B = x` a row, the MIR rows `A · B = y` + uses of `y` ≡ the stable rows using `x` |
+| `inline_sound` | `builder.rs::materialize` (MIR names operands over 8 terms) | the MIR `L · 1 = t` + uses of `t` ≡ the stable rows using `L` in place |
+| `fold_sound` | `host.rs` `mul` with an operand constant in the field (e.g. after mod-`p` reduction zeroes a coefficient) | a row `A · B = t` whose product equals a linear form `e` + uses of `t` ≡ `e` in place |
+| `const_mul_sound` | `host.rs` constant `pow` folding | a row `a · b = t` of constants + uses of `t` ≡ the constant `a·b` in place |
+| `gated_sat` | `host.rs::require_gated` (a `require` in a witness-branch arm) | for a `{0,1}` guard `G`, the row `G · D = 0` holds iff `G = 1 → D = 0` |
+| `guard_mul` | nested arms' guards (`host.rs::guard`) | a product of `{0,1}` values is `{0,1}`, and `1` iff both are |
+| `pin_dead` | `builder.rs::gate_input` / `pin_dead` (hints in an arm) | a hint reads `g·x` and is pinned by `(1 − g)·h = 0`: `x` and no pin where taken, `0` and `h = 0` where not |
+| `select_taken` / `select_untaken` | `interp.rs::merge` | the select `e + c·(t − e)` is `t` at `c = 1` and `e` at `c = 0`, whatever the other arm holds |
+
+The last three are why a `require` may sit in a branch arm: both arms run, but the
+untaken arm's requirements are vacuous and its values never reach the result.
+
+Reducing constants modulo `p` needs no theorem: the rows are over `ZMod p`, where
+`c` and `c mod p` are one element. The R1CS bridge tests in
+`crates/lang/tests/snapshot.rs` pin both frontends' gate counts and name the rewrite
+behind each difference (SHA-256 `Maj` reusing the previous round's `a ∧ b`, a
+3-limb square's repeated cross products, Poseidon's constant capacity-lane S-box).
 
 ## Building
 

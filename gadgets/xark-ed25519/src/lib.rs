@@ -14,11 +14,11 @@
 //! challenge hash `k = H(R‖A‖M)` is out of scope — `k` is supplied as a witness).
 
 #![no_std]
-// Circuit-lowered gadget code: the xark compiler rejects compound assignment on
-// `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
+// Gadget code keeps the `x = x + y` style it was written in (the old compiler
+// rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{Field, Transparent, require_eq};
+use xark::{Field, input, require_eq};
 
 // The Ed25519 curve: base field p = 2^255 − 19, scalar order L, constant d.
 xark_curve::edwards! {
@@ -89,20 +89,45 @@ type L3 = [Field; 3];
 type Ext = [L3; 4];
 
 // A base-field element in the lazy path's 3×85-bit limb layout (distinct from the
-// affine gadget's `Fp` at 3×86). Only used as the input-flatten wrapper so the
-// `ed25519_verify` example can take aggregate `Point` coordinates.
-xark_bignum::fp!(
-    pub FpL,
-    "57896044618658097711785492504343953926634992332820282019728792003956564819949",
-    3,
-    85
-);
+// affine gadget's `Fp` at 3×86). Only the input-flatten wrapper, so the
+// `ed25519_verify` example can take aggregate `Point` coordinates: storage only, no
+// `fp!` operators (`2²⁵⁵ − 19` leaves 3×85 limbs no headroom for them; the lazy path
+// reduces with its own carries).
+xark_bignum::fp!(storage pub FpL, 3, 85);
 /// An Ed25519 affine point with 3×85-bit coordinates — the lazy path's public
 /// input type (`x`/`y` each flatten to `<name>.x.limbs[0..2]` / `<name>.y.limbs`).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct PointL {
     pub x: FpL,
     pub y: FpL,
+}
+
+/// A circuit input given as the compressed point (32 bytes, `0x…` in a client),
+/// decompressed into `x`, `y`.
+impl xark::Input for PointL {
+    const TYPE: xark::input::Type = {
+        use xark::input::{Bytes, Encoding, Layout, Member, Type};
+        Type::Named(
+            &Type::named(
+                "PointL",
+                Layout::fields(&[
+                    Member::new("x", <FpL as xark::Input>::TYPE),
+                    Member::new("y", <FpL as xark::Input>::TYPE),
+                ]),
+            )
+            .encoded(Encoding::Bytes(Bytes::Ed25519)),
+        )
+    };
+    fn read(r: &mut xark::input::Reader<'_>) -> Self {
+        PointL {
+            x: r.read(),
+            y: r.read(),
+        }
+    }
+    fn write(&self, w: &mut xark::input::Writer<'_>) {
+        w.write(&self.x);
+        w.write(&self.y);
+    }
 }
 
 const BX85: L3 = modulus_limbs::<3, 85>(
@@ -171,11 +196,14 @@ fn select16_e(t: [Ext; 16], b3: Field, b2: Field, b1: Field, b0: Field) -> Ext {
     mux_e(b3, l3[1], l3[0])
 }
 
-/// Sound on-curve check for an affine (x,y): range-check limbs, then
-/// −x²+y² == 1 + d·x²·y² (mod p), compared canonically.
+/// Sound on-curve check for an affine (x,y): canonical coordinates (`< p`, so each
+/// point has one accepted encoding), then −x²+y² == 1 + d·x²·y² (mod p), compared
+/// canonically.
 fn on_curve_l(x: L3, y: L3) {
     range_check_limbs::<3, 85>(x);
     range_check_limbs::<3, 85>(y);
+    xark_bignum::require_lt::<3, 85>(x, xark_bignum::P1_25519_L);
+    xark_bignum::require_lt::<3, 85>(y, xark_bignum::P1_25519_L);
     let x2 = mul(x, x);
     let y2 = mul(y, y);
     let b8 = [
@@ -242,16 +270,36 @@ fn dsm_l(bits1: [Field; 256], p1: Ext, bits2: [Field; 256], p2: Ext) -> Ext {
     acc
 }
 
+/// The building blocks of `eddsa_verify`, wrapped for the block-level soundness
+/// test (`signature_blocks_are_sound` in `crates/lang/tests/snapshot.rs`), which
+/// searches each one exhaustively at full size. Not API.
+#[doc(hidden)]
+pub mod blocks {
+    use super::{Ext, Field, L3};
+    pub fn on_curve(x: L3, y: L3) {
+        super::on_curve_l(x, y)
+    }
+    pub fn eq_mod_p(u: L3, v: L3) {
+        super::eq_mod_p(u, v)
+    }
+    pub fn select16(t: [Ext; 16], b3: Field, b2: Field, b1: Field, b0: Field) -> Ext {
+        super::select16_e(t, b3, b2, b1, b0)
+    }
+    pub fn scalar_below_order(bits: [Field; 256]) {
+        super::assert_scalar_below_order(bits)
+    }
+}
+
 /// Ed25519 signature verification `[S]·B == R + [k]·A` — the sound lazy
 /// extended-coordinate gadget (3×85 limbs, ~2.40M constraints), ed25519's single
 /// `eddsa_verify` (the affine variant was ~4.55M). Point coords are raw 3×85
 /// limbs; scalars are 256 caller-decomposed bits.
 #[allow(clippy::too_many_arguments)]
 /// An Ed25519 signature `(R, S)` — a curve point `R` (compressed `[u8; 32]` on the
-/// host) and a scalar `S`. Its `#[derive(Transparent)]` host `NativeInput` composes
-/// `PointL`'s (decompressing) leaves with `Scalar`'s, so the host native form is
-/// `[u8; 64]` = compressed `R ‖ big-endian S`. Pass it to [`PointL::verify`].
-#[derive(Clone, Copy, Transparent)]
+/// host) and a scalar `S`. Its `#[input]` with `#[input(bytes)]` takes
+/// `R`'s (decompressing) bytes then `S`'s, so on the host it comes from a `[u8; 64]`:
+/// compressed `R ‖ big-endian S`. Pass it to [`PointL::verify`].
+#[input(bytes)]
 pub struct Signature {
     pub r: PointL,
     pub s: Scalar,
@@ -290,10 +338,10 @@ impl PointL {
 }
 
 /// Ed25519 signature verification core: the EdDSA equation `[S]·B == R + [k]·A`
-/// (sound lazy extended-coordinate path, 3×85 limbs). Wrapped by [`PointL::verify`]
-/// — callers use that (it takes the transparent [`Signature`] and decomposes the
-/// scalars to bits).
-pub fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits: [Field; 256]) {
+/// (sound lazy extended-coordinate path, 3×85 limbs). Wrapped by [`PointL::verify`],
+/// the public entry: it takes the transparent [`Signature`] and decomposes the
+/// scalars to pinned bits — `s_bits`/`k_bits` here are assumed boolean.
+fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits: [Field; 256]) {
     // canonical scalar S < L (else S, S+L, … all verify — EdDSA malleability)
     assert_scalar_below_order(s_bits);
     on_curve_l(ax, ay);
@@ -315,19 +363,18 @@ pub fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits
     eq_mod_p(mul(t8[1], r8[2]), mul(r8[1], t8[2]));
 }
 
-/// Host-side `NativeInput` + EdDSA helpers, behind the `host` feature. Ed25519
+/// Host-side conversions + EdDSA helpers, behind the `host` feature. Ed25519
 /// points are natively **compressed** (32-byte little-endian `y` + `x`-sign bit);
 /// these recover the affine `(x, y)` per RFC 8032 §5.1.3 so the circuit's
 /// transparent types take the exact bytes `ed25519-dalek` emits. Signatures use
 /// **little-endian** scalars, so `S`/`k` are byte-reversed to the big-endian form
-/// the macro-generated `Fq` `NativeInput` expects.
+/// the macro-generated `Fq`'s host conversions expect.
 #[cfg(not(xark))]
 mod host {
     extern crate std;
     use super::PointL;
     use num_bigint::BigUint;
     use sha2::{Digest, Sha512};
-    use std::{format, string::String, string::ToString, vec::Vec};
 
     fn dec(s: &str) -> BigUint {
         BigUint::parse_bytes(s.as_bytes(), 10).unwrap()
@@ -378,27 +425,24 @@ mod host {
         (x, y)
     }
 
-    /// Little-endian 3 × 85-bit limbs of a value, named `<prefix>.limbs[i]`.
-    fn limbs85(v: &BigUint, prefix: &str) -> Vec<(String, String)> {
-        let mask = (BigUint::from(1u8) << 85u32) - 1u8;
-        (0..3)
-            .map(|i| {
-                (
-                    format!("{prefix}.limbs[{i}]"),
-                    ((v >> (i as u32 * 85)) & &mask).to_string(),
-                )
-            })
-            .collect()
+    impl xark::host::FromBeBytes for PointL {
+        const BYTES: usize = 32;
+        /// From the compressed point (`y` little-endian with the `x`-sign bit),
+        /// decompressed to affine `(x, y)`. Panics if it isn't a curve point.
+        fn from_be_bytes(bytes: &[u8]) -> PointL {
+            let (x, y) = decompress(bytes.try_into().expect("a compressed point is 32 bytes"));
+            let limbs = |v: &BigUint| super::FpL::new(xark::host::limb_fields::<3>(&be32(v), 85));
+            PointL {
+                x: limbs(&x),
+                y: limbs(&y),
+            }
+        }
     }
 
-    impl xark_prover::NativeInput for PointL {
-        /// Ed25519 compressed point (`y` little-endian + `x`-sign bit).
-        type Native = [u8; 32];
-        fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
-            let (x, y) = decompress(native);
-            let mut out = limbs85(&x, &format!("{prefix}.x"));
-            out.extend(limbs85(&y, &format!("{prefix}.y")));
-            out
+    /// From an Ed25519 public key or `R`: the 32-byte compressed point.
+    impl From<[u8; 32]> for PointL {
+        fn from(bytes: [u8; 32]) -> PointL {
+            <PointL as xark::host::FromBeBytes>::from_be_bytes(&bytes)
         }
     }
 

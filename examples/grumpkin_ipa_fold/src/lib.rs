@@ -25,55 +25,9 @@
 //! The Fiat–Shamir binding + native folding is the reusable core of a
 //! Grumpkin-cycle folding *recursion* step's in-circuit verifier.
 
-#![cfg_attr(xark, no_std)]
 #![allow(clippy::assign_op_pattern)]
 
 use xark_grumpkin::prelude::*;
-
-fn offset_o() -> [Field; 2] {
-    [
-        Field::from(5u8),
-        Field::from("26447525821777463057023244913909144251512587297343525263882"),
-    ]
-}
-
-/// `corr₂₅₄ = −(2^254·O)` (validated against the gadget's `corr₁₂₈`).
-fn corr254() -> [Field; 2] {
-    [
-        Field::from(
-            "16553197835714973834031774601520451931051624293930580121206769559624452310037",
-        ),
-        Field::from(
-            "19649441642928946798700829372424834756358685055060237751050452085768514233992",
-        ),
-    ]
-}
-
-fn mux(bit: Field, t: [Field; 2], f: [Field; 2]) -> [Field; 2] {
-    [f[0] + bit * (t[0] - f[0]), f[1] + bit * (t[1] - f[1])]
-}
-
-/// Full-width (254-bit) variable-base scalar mul, `s = lo + hi·2^127`.
-fn wide_scalar_mul(lo: Field, hi: Field, p: [Field; 2]) -> [Field; 2] {
-    enforce_on_curve(p);
-    let lo_bits = lo.to_bits::<127>();
-    let hi_bits = hi.to_bits::<127>();
-    let mut acc = offset_o();
-    let mut i = 0usize;
-    while i < 254usize {
-        acc = ec_double(acc);
-        let idx = 253usize - i;
-        let bit = if idx < 127usize {
-            lo_bits[idx]
-        } else {
-            hi_bits[idx - 127usize]
-        };
-        let cand = ec_add(acc, p);
-        acc = mux(bit, cand, acc);
-        i += 1;
-    }
-    ec_add(acc, corr254())
-}
 
 /// Little-endian bits of the BN254 scalar-field modulus `r` (bit 253 set, so a
 /// uniform `Fr` element can be 254 bits — `to_bits::<253>` can't hold it).
@@ -159,76 +113,60 @@ fn sq_mul(x_bits: [Field; 128], p: [Field; 2]) -> [Field; 2] {
     scalar_mul(x_bits, scalar_mul(x_bits, p))
 }
 
-/// `x⁻²·P` as two wide (254-bit) muls by the witness inverse `x⁻¹ = lo + hi·2^127`.
-fn inv_sq_mul(inv_lo: Field, inv_hi: Field, p: [Field; 2]) -> [Field; 2] {
-    wide_scalar_mul(inv_lo, inv_hi, wide_scalar_mul(inv_lo, inv_hi, p))
+/// `x⁻²·P` as two wide (254-bit) muls by the witness inverse `x⁻¹`.
+fn inv_sq_mul(inv: WideScalar, p: Affine) -> [Field; 2] {
+    let q = wide_scalar_mul(inv, wide_scalar_mul(inv, p));
+    [q.x, q.y]
+}
+
+/// One IPA round's transcript points: the cross commitments `L` and `R`.
+#[input]
+pub struct Round {
+    pub l: Affine,
+    pub r: Affine,
 }
 
 /// Verify the Halo IPA reduction for `n = 4` over Grumpkin. Public: generators
 /// `Gⱼ`, `U`, and the commitment `P`. Witness: the transcript points `Lᵢ/Rᵢ`,
 /// the mod-`p` inverses `xᵢ⁻¹`, the challenge-product scalars `sⱼ`, and the
-/// final `a*` and `c = a*·b*` — all as 127-bit limb pairs.
+/// final `a*` and `c = a*·b*` — all full-width scalars.
 #[circuit]
-#[allow(clippy::too_many_arguments)]
 pub fn grumpkin_ipa_fold(
-    g0: Public<Affine>,
-    g1: Public<Affine>,
-    g2: Public<Affine>,
-    g3: Public<Affine>,
+    g: Public<[Affine; 4]>,
     u: Public<Affine>,
     p: Public<Affine>,
-    l0: Private<Affine>,
-    r0: Private<Affine>,
-    l1: Private<Affine>,
-    r1: Private<Affine>,
-    x0inv_lo: Private<Field>,
-    x0inv_hi: Private<Field>,
-    x1inv_lo: Private<Field>,
-    x1inv_hi: Private<Field>,
-    s0_lo: Private<Field>,
-    s0_hi: Private<Field>,
-    s1_lo: Private<Field>,
-    s1_hi: Private<Field>,
-    s2_lo: Private<Field>,
-    s2_hi: Private<Field>,
-    s3_lo: Private<Field>,
-    s3_hi: Private<Field>,
-    astar_lo: Private<Field>,
-    astar_hi: Private<Field>,
-    c_lo: Private<Field>,
-    c_hi: Private<Field>,
+    rounds: Private<[Round; 2]>,
+    x_inv: Private<[WideScalar; 2]>,
+    s: Private<[WideScalar; 4]>,
+    astar: Private<WideScalar>,
+    c: Private<WideScalar>,
 ) {
+    let pt = |q: Affine| [q.x, q.y];
     // --- round 0: seed with P.x, fold P ---
-    let x0 = challenge(p.x, [l0.x, l0.y], [r0.x, r0.y]);
+    let [r0, r1] = rounds;
+    let x0 = challenge(p.x, pt(r0.l), pt(r0.r));
     let p1 = ec_add(
-        ec_add(sq_mul(x0, [l0.x, l0.y]), [p.x, p.y]),
-        inv_sq_mul(x0inv_lo, x0inv_hi, [r0.x, r0.y]),
+        ec_add(sq_mul(x0, pt(r0.l)), pt(p)),
+        inv_sq_mul(x_inv[0], r0.r),
     );
 
     // --- round 1: seed with x0 (as a field element), fold again ---
     let x0_field = Field::from_bits::<128>(x0);
-    let x1 = challenge(x0_field, [l1.x, l1.y], [r1.x, r1.y]);
-    let p2 = ec_add(
-        ec_add(sq_mul(x1, [l1.x, l1.y]), p1),
-        inv_sq_mul(x1inv_lo, x1inv_hi, [r1.x, r1.y]),
-    );
+    let x1 = challenge(x0_field, pt(r1.l), pt(r1.r));
+    let p2 = ec_add(ec_add(sq_mul(x1, pt(r1.l)), p1), inv_sq_mul(x_inv[1], r1.r));
 
     // --- deferred MSM: G* = Σⱼ sⱼ·Gⱼ ---
-    let g_final = ec_add(
-        ec_add(
-            wide_scalar_mul(s0_lo, s0_hi, [g0.x, g0.y]),
-            wide_scalar_mul(s1_lo, s1_hi, [g1.x, g1.y]),
-        ),
-        ec_add(
-            wide_scalar_mul(s2_lo, s2_hi, [g2.x, g2.y]),
-            wide_scalar_mul(s3_lo, s3_hi, [g3.x, g3.y]),
-        ),
-    );
+    let t: [Affine; 4] = core::array::from_fn(|j| wide_scalar_mul(s[j], g[j]));
+    let g_final = ec_add(ec_add(pt(t[0]), pt(t[1])), ec_add(pt(t[2]), pt(t[3])));
 
     // --- final IPA relation: P₂ == a*·G* + c·U ---
+    let g_final = Affine {
+        x: g_final[0],
+        y: g_final[1],
+    };
     let rhs = ec_add(
-        wide_scalar_mul(astar_lo, astar_hi, g_final),
-        wide_scalar_mul(c_lo, c_hi, [u.x, u.y]),
+        pt(wide_scalar_mul(astar, g_final)),
+        pt(wide_scalar_mul(c, u)),
     );
     require_eq(p2[0], rhs[0]);
     require_eq(p2[1], rhs[1]);

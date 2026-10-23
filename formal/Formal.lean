@@ -28,3 +28,4 @@ import Formal.Lazy25519
 import Formal.LazyK1
 import Formal.GF128
 import Formal.Aes256
+import Formal.Rewrites

@@ -1,13 +1,14 @@
 //! The `xark` language markers used by circuit programs: the `Field` circuit
 //! type, the `Private`/`Public` visibility aliases, and `#[inline(never)]`
-//! marker/intrinsic functions the compiler recognizes in MIR. None of these
-//! functions execute — the compiler stops after MIR extraction, so their bodies
-//! are irrelevant (`loop {}`).
+//! intrinsic functions the compiler recognizes (in the circuit build, calls to its
+//! `xark.*` imports). On the host they panic with an explanation rather than
+//! computing anything.
 
-// Marker stubs are recognized by name and never run; `loop {}` is the intended shape.
+// Off the circuit build, an intrinsic's body is `intrinsics::__xark_marker` (an
+// explanatory panic on the host).
 #![allow(clippy::empty_loop)]
-// The compiler rejects compound assignment on `Field`, so `acc = acc + …` is
-// required, not `acc += …`.
+// Written in the `acc = acc + …` style (the old compiler rejected `+=` on `Field`;
+// the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
 use core::cmp::{Ordering, PartialOrd};
@@ -16,14 +17,13 @@ use core::ops::{
     Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub, SubAssign,
 };
 
-// The `__xark_*` marker stubs live in `crate::intrinsics`; recognition is by
-// name, so their module location does not affect the compiler.
+// The `__xark_*` intrinsics live in `crate::intrinsics`.
 use crate::intrinsics::*;
 
 /// The opaque circuit field element.
 ///
 /// Carries a private non-zero-sized payload so that (a) it cannot be constructed
-/// except through the recognized intrinsics, and (b) MIR optimization cannot
+/// except through the recognized intrinsics, and (b) optimization cannot
 /// collapse `Field` values to a single constant ZST (which would erase the
 /// data-flow the compiler tracks).
 ///
@@ -38,19 +38,20 @@ use crate::intrinsics::*;
 /// canonical `[0, r)` representative needs a width, so it must come from the RHS
 /// type or the `::<N>`. See `docs/integer-ops.md`.
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct Field {
-    /// Little-endian 4×64-bit value of a *compile-time-constant* field element.
-    /// Meaningful only for constants (`Field::from`/`Field::constant` `const fn`s):
-    /// the compiler reads this out of a `const Field`. For witnesses the value is
-    /// tracked symbolically and these limbs are never read.
+    /// Little-endian 4×64-bit value. In a circuit build it is meaningful only for
+    /// constants (the compiler reads it out of a `const Field`; a witness is
+    /// tracked symbolically). In a host build every `Field` holds its value here,
+    /// in `[0, p)`: circuit code runs natively there.
     _limbs: [u64; 4],
 }
 
 /// Prints the field's **decimal value** (e.g. `Field(19900101)`) rather than the
 /// raw limbs, so you can read the value straight out of a `{:?}` dump — of a bare
-/// `Field`, a `#[derive(CircuitInput)]` struct, or a generated `<Fn>Inputs` — and
+/// `Field`, a `#[input]` struct, or a generated `<Fn>Inputs` — and
 /// feed it to `xark prove`. Like [`Field::to_decimal`], the value is meaningful
-/// only for a *constant* `Field` (a witness's limbs are symbolic).
+/// on the host, or for a constant (in a circuit, a witness is symbolic).
 impl core::fmt::Debug for Field {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Field({})", self.to_decimal())
@@ -94,19 +95,17 @@ impl Field {
         Field::constant_u64(1)
     }
 
-    /// The little-endian 4×64-bit limbs of a **compile-time-constant** `Field`.
-    /// Meaningful only for constants; for witnesses the value is symbolic and
-    /// these limbs are unspecified. Exposed for *tooling* (a host-side input
+    /// The little-endian 4×64-bit limbs of a `Field`'s value: on the host, or for a
+    /// constant (in a circuit a witness is symbolic and these are unspecified). Exposed for *tooling* (a host-side input
     /// builder reads a constant's value back to decimal); authors never need it.
     #[doc(hidden)]
     pub const fn to_limbs(self) -> [u64; 4] {
         self._limbs
     }
 
-    /// The decimal value of a **compile-time-constant** `Field` (built via
-    /// `Field::from`/`Field::constant`) — the host reads a constructed input back out
-    /// to feed the prover. Meaningful only for constants (a witness's limbs are
-    /// symbolic). `#[doc(hidden)]` tooling; authors never call it.
+    /// The decimal value of a `Field` on the host (or of a constant): how the host
+    /// reads an input back out to feed the prover. In a circuit a witness's limbs
+    /// are symbolic. `#[doc(hidden)]` tooling; authors never call it.
     #[doc(hidden)]
     pub fn to_decimal(self) -> alloc::string::String {
         use alloc::string::String;
@@ -170,11 +169,49 @@ impl Field {
         Field::constant_u64(value as u64)
     }
 
+    /// The BN254 scalar field order `p`, little-endian 64-bit limbs.
+    const MODULUS: [u64; 4] = [
+        0x43e1f593f0000001,
+        0x2833e84879b97091,
+        0xb85045b68181585d,
+        0x30644e72e131a029,
+    ];
+
+    /// A 256-bit value reduced to `[0, p)`: since `2^256 < 6p`, at most five
+    /// subtractions. Keeps a constant `Field` canonical, so `to_decimal` (and so
+    /// the prover) sees the value the circuit does.
+    const fn reduced(mut limbs: [u64; 4]) -> Field {
+        loop {
+            // limbs >= p? Compare from the most significant limb.
+            let mut i = 4;
+            let mut ge = true;
+            while i > 0 {
+                i -= 1;
+                if limbs[i] != Self::MODULUS[i] {
+                    ge = limbs[i] > Self::MODULUS[i];
+                    break;
+                }
+            }
+            if !ge {
+                return Field { _limbs: limbs };
+            }
+            let mut borrow = 0u64;
+            let mut j = 0;
+            while j < 4 {
+                let (d, b1) = limbs[j].overflowing_sub(Self::MODULUS[j]);
+                let (d, b2) = d.overflowing_sub(borrow);
+                limbs[j] = d;
+                borrow = (b1 | b2) as u64;
+                j += 1;
+            }
+        }
+    }
+
     /// In-circuit constant from a decimal string, for full field-sized constants
     /// that don't fit a `u128`: `Field::constant("218882428718...")`. A `const fn`,
     /// so it works in circuit bodies (recognised by the call) and `const` items.
-    /// Parses a non-negative decimal `< 2^256`; panics (a compile error in `const`
-    /// contexts) on a non-digit or overflow.
+    /// Parses a non-negative decimal `< 2^256`, reduced mod p; panics (a compile
+    /// error in `const` contexts) on a non-digit or overflow.
     pub const fn constant(decimal: &str) -> Field {
         let bytes = decimal.as_bytes();
         let mut limbs = [0u64; 4];
@@ -183,7 +220,7 @@ impl Field {
             let b = bytes[i];
             assert!(
                 b'0' <= b && b <= b'9',
-                "Field::constant expects a decimal string"
+                "Field::constant expects a decimal string (non-numeric character)"
             );
             // limbs = limbs * 10 + (b - '0'), 256-bit little-endian.
             let mut carry = (b - b'0') as u128;
@@ -197,13 +234,14 @@ impl Field {
             assert!(carry == 0, "Field::constant literal overflows 256 bits");
             i += 1;
         }
-        Field { _limbs: limbs }
+        Self::reduced(limbs)
     }
 
     /// A field element from **little-endian** bytes (`bytes[0]` is least significant) —
     /// the direct "raw bytes → `Field`" input constructor, no `Fr`/decimal round-trip.
     /// A `const fn`, so byte-encoded inputs (an id, a random nonce) can be `const`.
-    /// At most 32 bytes; the value is reduced mod the field order at prove time.
+    /// At most 32 bytes; the value is reduced mod p (so 32 random bytes are a
+    /// uniform-enough field element, and `to_decimal` gives the value proven).
     pub const fn from_le_bytes(bytes: &[u8]) -> Field {
         assert!(bytes.len() <= 32, "Field::from_le_bytes: at most 32 bytes");
         let mut limbs = [0u64; 4];
@@ -212,7 +250,7 @@ impl Field {
             limbs[i / 8] |= (bytes[i] as u64) << ((i % 8) * 8);
             i += 1;
         }
-        Field { _limbs: limbs }
+        Self::reduced(limbs)
     }
 
     /// A field element from **big-endian** bytes (`bytes[0]` is most significant) — the
@@ -227,7 +265,7 @@ impl Field {
             limbs[i / 8] |= (bytes[n - 1 - i] as u64) << ((i % 8) * 8);
             i += 1;
         }
-        Field { _limbs: limbs }
+        Self::reduced(limbs)
     }
 
     /// Allocate a fresh *advice* (private witness) field element with no
@@ -264,6 +302,7 @@ impl Field {
     /// boolean (`b² == b`) and the bits are pinned to recompose to `self`
     /// (`Σ bitᵢ·2ⁱ == self`) — which also proves `self < 2^N`. Composed entirely
     /// from `Field` primitives (`hint_bit` + arithmetic + `require_eq`).
+    #[cfg_attr(not(xark), track_caller)]
     pub fn to_bits<const N: usize>(self) -> [Field; N] {
         // N > 253 wraps mod r, so recomposition wouldn't pin `self`
         const {
@@ -272,6 +311,12 @@ impl Field {
                 "to_bits::<N>: N must be <= 253 (BN254 field capacity)"
             )
         };
+        // The compiler's decomposition memo: a constant's bits, a sum of proven bits,
+        // or an earlier `to_bits::<N>` of the same value.
+        #[cfg(all(xark, target_arch = "wasm32"))]
+        if let Some(bits) = crate::wasm::to_bits_lookup::<N>(&self) {
+            return bits;
+        }
         let mut bits = [Field::from(0u8); N];
         let mut i = 0usize;
         while i < N {
@@ -292,6 +337,47 @@ impl Field {
             i += 1;
         }
         __xark_require_eq_scalar(acc, self); // recomposition pins the bits to `self` (⇒ self < 2^N)
+        #[cfg(all(xark, target_arch = "wasm32"))]
+        crate::wasm::to_bits_record::<N>(&self, &bits);
+        bits
+    }
+
+    /// [`Field::to_bits`] for a width known as a value, `n ≤ 253`: the low `n` bits
+    /// (the rest of the array zero), proving `self < 2^n` with `n` booleanity rows and
+    /// one recomposition. For a width that comes from a type, such as an enum's
+    /// variant count, which a const generic can't take.
+    #[cfg_attr(not(xark), track_caller)]
+    pub fn to_bits_n(self, n: usize) -> [Field; 253] {
+        assert!(
+            n <= 253,
+            "to_bits_n: n must be <= 253 (BN254 field capacity)"
+        );
+        let mut bits = [Field::from(0u8); 253];
+        #[cfg(all(xark, target_arch = "wasm32"))]
+        if crate::wasm::to_bits_lookup_n(&self, n, &mut bits) {
+            return bits;
+        }
+        let mut i = 0usize;
+        while i < n {
+            bits[i] = Field::hint_bit(self, i);
+            i += 1;
+        }
+        let mut i = 0usize;
+        while i < n {
+            bits[i].require_bool();
+            i += 1;
+        }
+        let mut acc = Field::from(0u8);
+        let mut pow = Field::from(1u8);
+        let mut i = 0usize;
+        while i < n {
+            acc = acc + bits[i] * pow;
+            pow = pow + pow;
+            i += 1;
+        }
+        __xark_require_eq_scalar(acc, self); // ⇒ self < 2^n
+        #[cfg(all(xark, target_arch = "wasm32"))]
+        crate::wasm::to_bits_record_n(&self, n, &bits);
         bits
     }
 
@@ -354,6 +440,7 @@ impl Field {
     }
 
     /// Assert `self ∈ {0, 1}` — the booleanity constraint `self² == self`.
+    #[cfg_attr(not(xark), track_caller)]
     pub fn require_bool(self) {
         __xark_require_eq_scalar(self * self, self);
     }
@@ -491,16 +578,115 @@ impl From<u128> for Field {
 /// Decimal-string constant: `Field::from("218882428718…")` / `"…".into()`, for
 /// full field-sized (up to ~254-bit) constants that don't fit in `u128`. The
 /// compiler rejects a string with any non-decimal character at compile time.
+#[cfg(xark)]
 impl From<&str> for Field {
     fn from(s: &str) -> Field {
         Field::constant(s)
     }
 }
 
+/// An input value from a decimal or `0x`-hex string, as `xark prove --inputs`
+/// takes it. Panics on anything else, or on a value `>= p`: an input outside the
+/// field is a mistake, never silently reduced (see [`Field::try_from_str`]).
+#[cfg(not(xark))]
+impl From<&str> for Field {
+    fn from(s: &str) -> Field {
+        Field::try_from_str(s).unwrap_or_else(|e| panic!("{e}"))
+    }
+}
+
+/// See `From<&str>`.
+#[cfg(not(xark))]
+impl From<alloc::string::String> for Field {
+    fn from(s: alloc::string::String) -> Field {
+        Field::from(s.as_str())
+    }
+}
+
+/// See `From<&str>`.
+#[cfg(not(xark))]
+impl From<&alloc::string::String> for Field {
+    fn from(s: &alloc::string::String) -> Field {
+        Field::from(s.as_str())
+    }
+}
+
+// Signed integers as input values, so an untyped literal (`cube(3, 27)`, which
+// Rust types as `i32`) converts. Negative values panic: inputs must be field
+// elements `0 <= x < p`, as `xark prove --inputs` requires. Host-only.
+#[cfg(not(xark))]
+impl From<i32> for Field {
+    fn from(v: i32) -> Field {
+        Field::from(i64::from(v))
+    }
+}
+
+#[cfg(not(xark))]
+impl From<i64> for Field {
+    fn from(v: i64) -> Field {
+        let v = u64::try_from(v).unwrap_or_else(|_| {
+            panic!("input value {v} is negative; inputs are field elements 0 <= x < p")
+        });
+        Field::from_u64(v)
+    }
+}
+
+/// A prover scalar (`ark_bn254::Fr`, what off-circuit reference code computes) as
+/// an input value. Host-only.
+#[cfg(not(xark))]
+impl From<ark_bn254::Fr> for Field {
+    fn from(x: ark_bn254::Fr) -> Field {
+        use ark_ff::PrimeField;
+        Field {
+            _limbs: x.into_bigint().0,
+        }
+    }
+}
+
+#[cfg(not(xark))]
+impl Field {
+    /// A field element from a decimal or `0x`-hex string, or an error naming what's
+    /// wrong: not a number, or not below `p` (out-of-range inputs are rejected, not
+    /// reduced, as everywhere else inputs are taken). Host-only.
+    pub fn try_from_str(s: &str) -> Result<Field, alloc::string::String> {
+        use alloc::format;
+        let t = s.trim();
+        let (digits, radix) = match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+            Some(h) => (h, 16u32),
+            None => (t, 10u32),
+        };
+        if digits.is_empty() {
+            return Err(format!("`{s}` is not a decimal or 0x-hex number"));
+        }
+        let mut limbs = [0u64; 4];
+        for c in digits.chars() {
+            let Some(d) = c.to_digit(radix) else {
+                return Err(format!("`{s}` is not a decimal or 0x-hex number"));
+            };
+            let mut carry = d as u128;
+            for l in limbs.iter_mut() {
+                let v = *l as u128 * radix as u128 + carry;
+                *l = v as u64;
+                carry = v >> 64;
+            }
+            if carry != 0 {
+                return Err(format!("`{s}` is larger than the field (2^256 or more)"));
+            }
+        }
+        let f = Field { _limbs: limbs };
+        if Field::reduced(limbs)._limbs != limbs {
+            return Err(format!(
+                "`{s}` is not a field element (it is p or more); inputs are not reduced mod p"
+            ));
+        }
+        Ok(f)
+    }
+}
+
 /// Circuit equality: `self == other` / `self != other` return a `bool` that is a
-/// `{0,1}` field wire (the compiler lowers this to the equality gadget). It is
-/// *not* a host comparison — `Field` holds a symbolic witness with no host
-/// value, so the derived `PartialEq`/`Eq`/`Hash` were dropped on purpose.
+/// `{0,1}` field wire (the compiler lowers this to the equality gadget). On the
+/// host it compares the values. There is no `Eq`/`Hash`: in a circuit a `Field` is
+/// a symbolic witness, not a value to key on.
 impl PartialEq for Field {
     fn eq(&self, other: &Field) -> bool {
         __xark_eq(*self, *other)
@@ -517,11 +703,9 @@ impl From<bool> for Field {
     }
 }
 
-/// A constructed **constant** `Field` to the prover's scalar (`ark_bn254::Fr`), reduced
-/// mod the field order — the same value the solver feeds the circuit. Host-only tooling
-/// (`cfg(not(xark))`); lets a `Field` input flow straight into off-circuit reference
-/// code (`poseidon2::hash([field, …])`) without a hand-written conversion. Meaningful
-/// only for constants; a witness's limbs are symbolic.
+/// A `Field` to the prover's scalar (`ark_bn254::Fr`), reduced mod the field order —
+/// the same value the solver feeds the circuit. Host-only (`cfg(not(xark))`), where a
+/// `Field` always holds its value; also what the native intrinsics compute with.
 #[cfg(not(xark))]
 impl From<Field> for ark_bn254::Fr {
     fn from(f: Field) -> ark_bn254::Fr {
@@ -682,7 +866,7 @@ macro_rules! impl_field_int_cmp {
             // satisfy the trait — a circuit compare yields a `{0,1}` wire, not an
             // `Option<Ordering>`.
             fn partial_cmp(&self, _rhs: &$t) -> Option<Ordering> {
-                loop {}
+                crate::intrinsics::__xark_marker()
             }
             fn lt(&self, rhs: &$t) -> bool {
                 let _ = self.to_bits::<$n>(); // range-check the witness operand < 2^N
@@ -815,19 +999,26 @@ impl_field_int_rem!(u8 => 8, u16 => 16, u32 => 32, u64 => 64);
 ///
 /// Dispatches through [`RequireEqCircuit`], so one `require_eq` compares scalars
 /// (`Field`/`bool`), fixed arrays `[T; N]` element-wise, and composite gadget
-/// outputs (e.g. a SHA-256 digest `[[Field; 32]; 8]` vs a [`Digest`](crate::Digest)).
+/// outputs (e.g. a SHA-256 digest `[[Field; 32]; 8]` vs a `Digest`).
 /// Every leaf bottoms out at the recognized scalar intrinsic
-/// ([`__xark_require_eq_scalar`]). A marker: the compiler lowers each leaf to an
-/// R1CS constraint rather than executing it.
+/// ([`__xark_require_eq_scalar`]). In a circuit the compiler lowers each leaf to an
+/// R1CS constraint rather than executing it. Run natively (a host build), it
+/// checks the values and panics here if they differ.
 #[inline]
+#[cfg_attr(not(xark), track_caller)]
 pub fn require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
     a.require_eq_circuit(b);
 }
 
 /// Constrain a boolean wire to be true.
 ///
-/// `require(cond)` decomposes into `require_eq(cond, true)` at lowering time.
+/// `require(cond)` decomposes into `require_eq(cond, true)` at lowering time. Run
+/// natively (a host build), it panics here if `cond` is false.
+#[cfg_attr(not(xark), track_caller)]
 pub fn require(cond: bool) {
+    #[cfg(not(xark))]
+    crate::intrinsics::native::require(cond);
+    #[cfg(xark)]
     __xark_require_eq_scalar(cond, true);
 }
 
@@ -842,7 +1033,11 @@ pub fn require(cond: bool) {
 /// Scalars only (`Field`/`bool`, via [`Into<Field>`]); there is no element-wise
 /// array form because `[a] != [b]` is ambiguous (all-differ vs not-all-equal).
 #[inline]
+#[cfg_attr(not(xark), track_caller)]
 pub fn require_ne(a: impl Into<Field>, b: impl Into<Field>) {
+    #[cfg(not(xark))]
+    crate::intrinsics::native::require(a.into() != b.into());
+    #[cfg(xark)]
     let _ = (a.into() - b.into()).inv();
 }
 
@@ -853,17 +1048,31 @@ pub fn require_ne(a: impl Into<Field>, b: impl Into<Field>) {
 /// coordinate) at **zero constraint cost**, then pin only the final result with
 /// normal constrained code after `witness_end`.
 ///
-/// Soundness is the caller's: nothing inside the region is constrained, so every
-/// value that must be trusted has to be pinned afterwards. A marker — never executes.
+/// Soundness is the caller's: nothing inside the region is constrained — a
+/// `require_eq`/`assert!` there is not enforced — so every value that must be
+/// trusted has to be pinned afterwards. Nothing done in the region counts as proven
+/// later: recomputing a value after `witness_end` (a `to_bits`, a select, a bounded
+/// subtraction) constrains it afresh. Run natively, the region's `require`s
+/// aren't checked either.
 #[inline(never)]
 pub fn witness_begin() {
-    loop {}
+    #[cfg(all(xark, target_arch = "wasm32"))]
+    crate::wasm::witness_begin();
+    #[cfg(not(xark))]
+    crate::intrinsics::native::witness_begin();
+    #[cfg(all(xark, not(target_arch = "wasm32")))]
+    crate::intrinsics::__xark_marker()
 }
 
 /// Close a [`witness_begin`] region — subsequent ops emit constraints again.
 #[inline(never)]
 pub fn witness_end() {
-    loop {}
+    #[cfg(all(xark, target_arch = "wasm32"))]
+    crate::wasm::witness_end();
+    #[cfg(not(xark))]
+    crate::intrinsics::native::witness_end();
+    #[cfg(all(xark, not(target_arch = "wasm32")))]
+    crate::intrinsics::__xark_marker()
 }
 
 /// The dispatch behind [`require_eq`]. Scalar impls (`Field`, `bool`) bottom out
@@ -877,6 +1086,7 @@ pub trait RequireEqCircuit<Rhs> {
 
 impl<R: Into<Field>> RequireEqCircuit<R> for Field {
     #[inline]
+    #[cfg_attr(not(xark), track_caller)]
     fn require_eq_circuit(self, rhs: R) {
         __xark_require_eq_scalar(self, rhs);
     }
@@ -884,10 +1094,26 @@ impl<R: Into<Field>> RequireEqCircuit<R> for Field {
 
 impl<R: Into<Field>> RequireEqCircuit<R> for bool {
     #[inline]
+    #[cfg_attr(not(xark), track_caller)]
     fn require_eq_circuit(self, rhs: R) {
         __xark_require_eq_scalar(self, rhs);
     }
 }
+
+// The other `Into<Field>` scalars, so either side of `require_eq` may be one
+// (`require_eq(7u64, x)` as well as `require_eq(x, 7u64)`).
+macro_rules! impl_require_eq_scalar {
+    ($($t:ty),*) => {$(
+        impl<R: Into<Field>> RequireEqCircuit<R> for $t {
+            #[inline]
+            #[cfg_attr(not(xark), track_caller)]
+            fn require_eq_circuit(self, rhs: R) {
+                __xark_require_eq_scalar(self, rhs);
+            }
+        }
+    )*};
+}
+impl_require_eq_scalar!(u8, u16, u32, u64, u128, &str);
 
 /// Element-wise equality for fixed-size arrays: `require_eq(out, expected)` on
 /// `[T; N]` emits the per-element constraints, unrolling to the same `N` scalar
@@ -896,6 +1122,7 @@ impl<R: Into<Field>> RequireEqCircuit<R> for bool {
 /// leaves this compares.
 impl<const N: usize, A: Copy + RequireEqCircuit<B>, B: Copy> RequireEqCircuit<[B; N]> for [A; N] {
     #[inline]
+    #[cfg_attr(not(xark), track_caller)]
     fn require_eq_circuit(self, rhs: [B; N]) {
         let mut i = 0usize;
         while i < N {
@@ -905,32 +1132,56 @@ impl<const N: usize, A: Copy + RequireEqCircuit<B>, B: Copy> RequireEqCircuit<[B
     }
 }
 
+/// Bytes to their `Field` values, element-wise: what a `[u8; N]` `#[circuit]` parameter
+/// becomes in the body (the gadgets take `[Field; N]`). Free: each byte is already a
+/// range-checked wire, so `Field::from` is the identity on it.
+#[doc(hidden)]
+pub fn bytes_to_fields<const N: usize>(bytes: [u8; N]) -> [Field; N] {
+    let mut out = [Field::from_u8(0); N];
+    let mut i = 0;
+    while i < N {
+        out[i] = Field::from(bytes[i]);
+        i += 1;
+    }
+    out
+}
+
 /// The scalar equality **intrinsic** the compiler recognizes by name and lowers
 /// to a two-`Field` R1CS constraint — the leaf every [`RequireEqCircuit`] impl
 /// bottoms out at. `#[doc(hidden)]` plumbing; authors write [`require_eq`], which
-/// dispatches here. Marker body (`loop {}`); never executed.
+/// dispatches here. Never executed in a circuit; on the host it checks the values.
 #[doc(hidden)]
 #[inline(never)]
+#[cfg_attr(not(xark), track_caller)]
 pub fn __xark_require_eq_scalar<L: Into<Field>, R: Into<Field>>(_lhs: L, _rhs: R) {
-    loop {}
+    #[cfg(all(xark, target_arch = "wasm32"))]
+    crate::wasm::require_eq(_lhs.into(), _rhs.into());
+    #[cfg(not(xark))]
+    crate::intrinsics::native::require_eq(_lhs.into(), _rhs.into());
+    #[cfg(all(xark, not(target_arch = "wasm32")))]
+    crate::intrinsics::__xark_marker()
 }
 
 /// Emit a circuit constraint `a < b` (less than).
+#[cfg_attr(not(xark), track_caller)]
 pub fn require_lt<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a < b, true);
 }
 
 /// Emit a circuit constraint `a <= b` (less than or equal).
+#[cfg_attr(not(xark), track_caller)]
 pub fn require_le<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a <= b, true);
 }
 
 /// Emit a circuit constraint `a > b` (greater than).
+#[cfg_attr(not(xark), track_caller)]
 pub fn require_gt<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a > b, true);
 }
 
 /// Emit a circuit constraint `a >= b` (greater than or equal).
+#[cfg_attr(not(xark), track_caller)]
 pub fn require_ge<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a >= b, true);
 }

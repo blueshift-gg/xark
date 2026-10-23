@@ -1,0 +1,22 @@
+[package]
+name = "xark-schema"
+description = "A xark circuit's inputs as schema.json describes them, and the one codec for their values: natural JSON forms to field elements and back."
+keywords = ["zero-knowledge", "zk", "circuit", "schema"]
+categories = ["cryptography", "encoding"]
+readme = "README.md"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+# The BN254 scalar field and JSON, nothing else: the CLI, xark-wasm (so every
+# generated client) and a circuit crate's `client.wasm` share it without the prover.
+[dependencies]
+ark-bn254 = { version = "0.6", default-features = false, features = ["scalar_field"] }
+ark-ff = { version = "0.6", default-features = false }
+num-bigint = "0.4"
+serde_json = "1"

@@ -1,0 +1,40 @@
+[package]
+name = "xark-groth16"
+description = "Streaming Groth16 (BN254) prover for xark: streams R1CS rows and proving-key points, blocked four-step FFT for the quotient polynomial."
+keywords = ["zero-knowledge", "zk", "cryptography", "groth16", "streaming"]
+categories = ["cryptography"]
+version.workspace = true
+edition = "2024"
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+xark-ir = { path = "../ir", version = "0.3.0", default-features = false }
+# Field + curve arithmetic only. The prover itself (setup, MSM, FFT, R1CS→QAP,
+# proof assembly, verification) and the key/proof types are implemented here; the
+# types serialize byte-for-byte like `ark-groth16`'s, which the tests check against
+# (it is a dev-dependency only).
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-ff = { version = "0.6", default-features = false, features = ["std"] }
+ark-ec = { version = "0.6", default-features = false, features = ["std"] }
+ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
+num-bigint = "0.4"
+rand = "0.8"
+rand_chacha = { version = "0.3", default-features = false }
+ark-poly = { version = "0.6", default-features = false, features = ["std"] }
+rayon = "1"
+
+[dev-dependencies]
+xark-prover = { path = "../prover" }
+ark-poly = { version = "0.6", default-features = false, features = ["std", "parallel"] }
+ark-relations = { version = "0.6", default-features = false, features = ["std"] }
+ark-snark = { workspace = true }
+ark-ec = { version = "0.6", default-features = false, features = ["std", "parallel"] }
+ark-groth16 = { version = "0.6", default-features = false, features = ["std", "parallel"] }
+rand_chacha = { workspace = true }
+serde_json = "1"
+xark-backend = { path = "../backend" }
+
+[lints]
+workspace = true

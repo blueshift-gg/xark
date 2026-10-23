@@ -1,76 +1,65 @@
-# Toolchain: the nightly pin
+# Toolchains
 
-xark's compiler (`crates/lang`) is a `rustc_driver` — it links against rustc internals to run the
-frontend and read MIR. That requires **nightly Rust** and the `rustc-dev` component; there is no
-stable API for MIR access. This records what is pinned, why, its fragility, and how to bump it.
+xark needs **only stable Rust, 1.89 or newer**, both to install the CLI and to build
+circuits (the workspace and `xark` crate `rust-version`). The circuit crate is compiled by the ambient
+`cargo`/`rustc` for `wasm32-unknown-unknown` (added with `rustup` on first use), and
+`crates/frontend` runs the module to lower it. Every circuit operation is an opaque
+wasm import, so the constraint system doesn't depend on the compiler version:
+`cargo xtask digests --check` rebuilds every example and compares its R1CS digest
+with `tests/stable-digests.txt` (`--toolchain 1.89` builds the circuits with another
+installed toolchain), and CI runs it on 1.89, stable and beta. It also builds the
+`client.wasm` of each example with Rust client functions (`#[input]` on an `impl`),
+which has to build on every supported rustc too.
+(All 70 examples were identical on 1.88, 1.89, 1.93, 1.96, 1.98 and a 2026-10
+nightly when this was introduced.) See `crates/frontend/README.md` for the design.
 
-## What is pinned
+`build`, `check` (editor diagnostics, `--message-format=json` included), `profile`
+and `test` all share one cache (`target/xark-wasm`). Builds carry DWARF line tables
+(`debug = "line-tables-only"`) so constraints and rejections are attributed to source
+lines; they don't change the circuit or the lowering time, and compile time is the
+same within noise (only the `.wasm` grows).
 
-The pin lives in **`crates/lang/rust-toolchain.toml`** (not the repo root — the root workspace is
-plain stable Rust):
+Nothing in the repository needs nightly. (Earlier releases had a second frontend,
+`xark-rustc`, that read MIR through `rustc_private` on a pinned nightly. It was
+removed once the stable frontend matched or beat it on every example: setup-minimized
+circuits within +0.3% everywhere and up to 7% smaller, the same accept/reject verdict
+on every example's test inputs, and faster, smaller builds.)
 
-```toml
-[toolchain]
-channel = "nightly"
-components = ["rustc-dev", "llvm-tools-preview"]
-```
+## Toolchain policy
 
-- `channel = "nightly"` — enables `#![feature(rustc_private)]` and `extern crate rustc_*`, both
-  nightly-only.
-- `rustc-dev` — ships the `librustc_*` shared libraries the driver links against (`rustc_driver`,
-  `rustc_interface`, `rustc_middle`, …).
-- `llvm-tools-preview` — LLVM tools rustc-dev's runtime expects on `PATH`.
+A circuit's proving and verifying keys are made for one exact constraint system,
+so the thing that matters is the **circuit digest**: a fingerprint of the R1CS
+that `xark build` prints and writes to `target/xark/<name>/digest`. Keys record it
+(`metadata.json`'s `digest`), and a key fits every build with that digest. The
+`circuit.xbc` file itself can differ between Rust versions (how calls were inlined
+decides how repeats are stored), so `xark prove` accepts a key from another build
+with the same digest, says so, and its self-check confirms the proof.
 
-Only the `xark` tool touches nightly. **Circuit authors write stable Rust** (see
-`docs/architecture.md` → "How MIR is used").
+- **Rust version.** Any stable Rust from 1.89 on builds circuits, and a circuit's
+  digest is the same on every one of them. That is a tested guarantee, not a
+  hope: `ci.yml` checks all 70 examples on 1.89, stable and beta on every push,
+  and `scheduled.yml` re-checks stable and beta weekly, so a Rust release that
+  would change a circuit is caught while it is still in beta. If one
+  does, we fix xark so the old digest comes back; we don't ask anyone to make new
+  keys. You don't need to pin Rust (a `rust-toolchain.toml` does no harm).
+- **xark version.** Only your code or an xark upgrade may change a circuit. An
+  xark release that changes any circuit (a gadget fix, a lowering change) gets a
+  minor version bump before 1.0 (0.3 → 0.4) and is listed under "Circuits that
+  changed" in [CHANGELOG.md](../CHANGELOG.md); a patch release never changes one.
+  Lock the xark version (commit `Cargo.lock`) for anything deployed.
+- **Minimum Rust.** Raised only in a minor release, and noted in the changelog.
+  Nightly Rust isn't supported or tested.
 
-## Why nightly
+## When a circuit digest changes
 
-`crates/lang` uses `rustc_private` to: run the frontend (`rustc_driver::Callbacks`,
-`rustc_interface`); obtain the `TyCtxt` and pull `pub fn circuit`'s MIR `Body` in `after_analysis`;
-walk MIR (`rustc_middle::mir`) to validate the accepted subset and lower it; emit diagnostics with
-source spans via `DiagCtxt`. Gadget crates are compiled with `-Zalways-encode-mir` (also nightly)
-so their MIR is available for cross-crate inlining.
+`cargo xtask digests --check` failing means one of two things:
 
-## Fragility
-
-rustc's internal APIs are **unstable and drift across nightlies**. Bumps have historically broken:
-
-- `TyCtxt` query signatures and `rustc_interface`/`rustc_driver` `Callbacks` method shapes (e.g.
-  `after_analysis`'s arguments),
-- MIR data structures in `rustc_middle::mir` (statement/rvalue/terminator variants, `Place`
-  projections),
-- the diagnostics API (`DiagCtxt`, `Diag` builder methods),
-- `-Z` flag names and defaults.
-
-Because the pin is the bare channel `nightly` (not a dated `nightly-YYYY-MM-DD`), a fresh
-`rustup update nightly` can pull a newer compiler that fails to build `crates/lang`. This is
-expected; it's why the compiler is isolated from the stable root workspace and the snapshot suite is
-a separate CI job (`compiler-snapshots` in `ci.yml`). The locally validated nightly at the time of
-writing resolves to `rustc 1.97.0-nightly (2026-05-03)`.
-
-## Bump procedure
-
-1. Update the pin in `crates/lang/rust-toolchain.toml` (change `channel`, or pin a specific
-   `nightly-YYYY-MM-DD` for reproducibility) and run
-   `rustup toolchain install nightly --component rustc-dev --component llvm-tools-preview`.
-2. Rebuild the compiler:
-   ```bash
-   cd crates/rustc && cargo build
-   ```
-   Fix any `rustc_private` API breaks (usually `TyCtxt` queries, MIR variants, or the
-   `DiagCtxt`/`Callbacks` shapes — keep the churn behind the small wrappers in `crates/rustc/src`).
-3. Run the compiler snapshot suite (must be **42 passed**):
-   ```bash
-   cd crates/lang && cargo test --test snapshot
-   ```
-   The `xark-test-harness` builds every gadget crate with `-Zalways-encode-mir` into an isolated
-   `target/xark-compile` and the compiler into `crates/rustc/target`, then diffs each example's
-   emitted R1CS/IR against the committed snapshots (`crates/lang/tests/snapshots/`). If a gate count
-   changed intentionally, refresh with `UPDATE_SNAPSHOTS=1` and re-check the Lean-model bridges.
-4. Run the heavy known-answer vectors (they gate real hash/curve correctness):
-   ```bash
-   cd crates/lang && cargo test --test snapshot -- --include-ignored
-   cargo test -p xark-ed25519 --release
-   ```
-   These also run daily in CI via `.github/workflows/nightly-kats.yml`.
+- **A toolchain changed a circuit** — rustc lowered some witness operation
+  differently (LLVM rewriting integer ops). That is a bug: report it with the
+  toolchain and example, and pin the operation through an intrinsic so the
+  circuit (and its digest) goes back to what it was.
+- **The lowering changed on purpose** — run `cargo xtask digests --update`,
+  review the diff, re-check the snapshot suite (`cd crates/lang && cargo test
+  --release --test snapshot -- --include-ignored`) and the Lean-model bridges, and
+  regenerate any keys built from the old circuits. Name every changed circuit in
+  CHANGELOG.md and bump the minor version (see the policy above).

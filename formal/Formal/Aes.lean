@@ -1430,7 +1430,7 @@ Two Lean soundness statements are exposed:
   canonical-lift step.
 
 Both statements are `theorem`s (not axioms). `#print axioms` lists
-only the three primality axioms + `native_decide`'s `ofReduceBool`
+only the standard axioms + `native_decide`'s `ofReduceBool`
 (used in `Formal.GF256` for the exhaustive `gf256_inv` and
 `aesSbox_algebraic` table identities). -/
 
