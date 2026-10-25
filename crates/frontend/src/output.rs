@@ -1335,8 +1335,34 @@ fn renumber_inputs(env: &mut Builder) {
         .collect();
     env.witness_only_vars = env.witness_only_vars.iter().map(|&v| m(v)).collect();
     // Call regions: shift; a region that binds an input is no template candidate.
-    env.regions
-        .retain(|r| (r.v0..r.v1).all(|v| !is_input[v as usize]));
+    // A kept region's parent becomes its nearest kept ancestor, at its new index.
+    let mut index: Vec<Option<usize>> = Vec::with_capacity(env.regions.len());
+    let mut kept = 0;
+    for r in &env.regions {
+        if (r.v0..r.v1).any(|v| is_input[v as usize]) {
+            index.push(None);
+        } else {
+            index.push(Some(kept));
+            kept += 1;
+        }
+    }
+    let parents: Vec<Option<usize>> = env.regions.iter().map(|r| r.parent).collect();
+    let kept_ancestor = |mut p: Option<usize>| {
+        while let Some(i) = p {
+            if let Some(j) = index[i] {
+                return Some(j);
+            }
+            p = parents[i];
+        }
+        None
+    };
+    let mut i = 0;
+    env.regions.retain_mut(|r| {
+        let keep = index[i].is_some();
+        r.parent = kept_ancestor(r.parent);
+        i += 1;
+        keep
+    });
     for r in &mut env.regions {
         if r.v1 > r.v0 {
             r.v0 = m(r.v0);

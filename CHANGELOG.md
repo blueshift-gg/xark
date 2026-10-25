@@ -297,6 +297,9 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- A circuit with a `u128` input beside a narrower integer input (`struct { x: u8,
+  z: u128 }`, or two parameters) no longer crashes the build with "index out of
+  bounds".
 - A circuit's generated test function (`zkyc_circuit(...)` in `cargo test`) looks
   for the build where `xark build` writes it, under the package's name: a crate
   named `my-circuit` (as `xark init my-circuit` makes it) said "has not been built".

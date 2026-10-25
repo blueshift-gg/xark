@@ -416,6 +416,115 @@ fn native_u64_via_circuit_macro() {
     );
 }
 
+/// An integer input is range-checked by the circuit itself, not by the client that
+/// encodes it: a prover that hands the constraints any field element for a `uN` or
+/// `bool` leaf (`2ⁿ`, or `p − 1`, which is `−1` and wraps `+ 1` to `0`) finds no
+/// witness, whether the leaf is a parameter or a struct member, used or not.
+#[test]
+fn integer_inputs_reject_out_of_range_values() {
+    const P_MINUS_1: &str =
+        "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+    for (ty, leaf, over) in [
+        ("u8", "s.x", "256"),
+        ("u16", "s.x", "65536"),
+        ("u32", "s.x", "4294967296"),
+        ("u64", "s.x", "18446744073709551616"),
+        ("u128", "s.x", "340282366920938463463374607431768211456"),
+        ("bool", "s.x", "2"),
+        ("[u8; 2]", "s.x[0]", "256"),
+    ] {
+        let name = format!(
+            "int_input_{}",
+            ty.replace(|c: char| !c.is_alphanumeric(), "_")
+        );
+        let x = if leaf.ends_with(']') { "s.x[0]" } else { "s.x" };
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\n\
+             #[input]\nstruct S {{ x: {ty}, k: Field }}\n\
+             pub fn circuit(s: Private<S>, c: Public<Field>) {{ require_eq(Field::from({x}) + s.k, c); }}\n"
+        );
+        let c = compile_with_field(&write_case(&name, &src), &name, "bn254");
+        assert!(c.status_success, "{ty}: {}", c.stderr);
+        let mut inputs = vec![(leaf, "1"), ("s.k", "0"), ("c", "1")];
+        if leaf.ends_with(']') {
+            inputs.push(("s.x[1]", "0"));
+        }
+        assert!(accepts_exactly(&c, &inputs), "{ty}: 1 is in range");
+        for bad in [over, P_MINUS_1] {
+            (inputs[0].1, inputs[2].1) = (bad, bad);
+            assert!(
+                !accepts_exactly(&c, &inputs),
+                "{ty}: no witness proves {leaf} = {bad}"
+            );
+        }
+    }
+
+    // Unused, and in native arithmetic: `p − 1` doesn't pass as `u32::MAX`'s wrap.
+    let c = compile_with_field(
+        &write_case(
+            "int_input_unused",
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(a: Private<u32>, c: Public<Field>) { let _ = a; require_eq(c, Field::from(0u8)); }\n",
+        ),
+        "int_input_unused",
+        "bn254",
+    );
+    assert!(c.status_success, "{}", c.stderr);
+    assert!(
+        !accepts_exactly(&c, &[("a", "4294967296"), ("c", "0")]),
+        "an unused u32 is checked too"
+    );
+    let c = compile_with_field(
+        &write_case(
+            "int_input_wrap",
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(a: Private<u32>, c: Public<u32>) { require(a + 1 == c); }\n",
+        ),
+        "int_input_wrap",
+        "bn254",
+    );
+    assert!(c.status_success, "{}", c.stderr);
+    assert!(
+        !accepts_exactly(&c, &[("a", P_MINUS_1), ("c", "0")]),
+        "p − 1 isn't a u32"
+    );
+}
+
+/// A `u128` input next to a narrower one (in a struct, or as parameters) builds and
+/// proves: dropping the input-binding call regions keeps the rest's parents right.
+#[test]
+fn u128_input_beside_a_narrower_one() {
+    for (name, src) in [
+        (
+            "u128_beside_struct",
+            "#![no_std]\nuse xark::prelude::*;\n\
+             #[input]\nstruct S { x: u8, z: u128 }\n\
+             pub fn circuit(s: Private<S>, c: Public<Field>) { require_eq(Field::from(s.x) + Field::from(s.z), c); }\n",
+        ),
+        (
+            "u128_beside_params",
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(z: Private<u128>, x: Private<u64>, c: Public<Field>) { require_eq(Field::from(x) + Field::from(z), c); }\n",
+        ),
+    ] {
+        let c = compile_with_field(&write_case(name, src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        let (x, z) = if name.ends_with("struct") {
+            ("s.x", "s.z")
+        } else {
+            ("x", "z")
+        };
+        assert!(
+            accepts(&c, &[(x, "2"), (z, "3"), ("c", "5")]),
+            "{name}: 2 + 3 == 5"
+        );
+        assert!(
+            !accepts(&c, &[(x, "2"), (z, "3"), ("c", "6")]),
+            "{name}: 2 + 3 != 6"
+        );
+    }
+}
+
 /// Native `u64` **wrapping arithmetic**: `wrapping_add`/`wrapping_sub` lower to the
 /// mod-2⁶⁴ gadget (carry/borrow + range check). The defining property is wraparound —
 /// `(2⁶⁴−1) + 1 == 0` and `5 − 7 == 2⁶⁴−2` — which must solve, while a wrong result is
