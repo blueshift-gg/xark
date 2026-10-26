@@ -6,7 +6,7 @@
 //!
 //! ```ignore
 //! #[input]
-//! pub struct Identity { pub born: Date, pub net_worth: u64, pub salt: Field }
+//! pub struct Identity { pub born: Days<1900, 2100>, pub net_worth: u64, pub salt: Field }
 //! ```
 //!
 //! An impl says three things, and the same impl serves the circuit build and the
@@ -47,7 +47,8 @@
 //! | `Array(Uint(8), n)`        | `[u8; N]`         | `0x`-hex, or an array of numbers           |
 //! | `Array`, `Tuple`           | `[T; N]`, `(A, B)`| an array                                   |
 //! | named, [`Encoding::Fields`]| a struct          | an object of its fields                    |
-//! | [`Encoding::Date`]         | [`Date`](crate::Date) | `"YYYY-MM-DD"`                         |
+//! | [`Encoding::Timestamp`]    | [`Timestamp`](crate::Timestamp) | `"YYYY-MM-DD"`, an ISO date-time, or Unix seconds |
+//! | [`Encoding::Time`]         | [`Time`](crate::Time), [`Days`](crate::Days) | the same, in its range |
 //! | [`Encoding::Text`]         | [`Text`](crate::Text) | a string                               |
 //! | [`Encoding::Choice`]       | [`Choice<E>`](crate::Choice) | a variant name: `"US"`          |
 //! | [`Encoding::Set`]          | [`Bitfield<E>`](crate::Bitfield) | a list of variant names     |
@@ -125,7 +126,7 @@ pub enum Type {
     Array(&'static Type, usize),
     /// Values of different types, named `name.0`, `name.1`, …
     Tuple(&'static [Type]),
-    /// A named type: a struct, or a standard type such as `Date`.
+    /// A named type: a struct, or a standard type such as `Timestamp`.
     Named(&'static Named),
 }
 
@@ -145,7 +146,7 @@ pub struct Named {
 /// A named type's leaves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
-    /// The leaves of one inner type, at the value's own name (`Date` is one field).
+    /// The leaves of one inner type, at the value's own name (`Timestamp` is one `Int(64)`).
     Newtype(Type),
     /// Named fields, each at `name.field`.
     Struct(&'static [Member]),
@@ -164,8 +165,13 @@ pub struct Member {
 pub enum Encoding {
     /// An object of its fields (a struct), or its inner type's form (a newtype).
     Fields,
-    /// A calendar day, `"YYYY-MM-DD"`; one field holding `YYYYMMDD`.
-    Date,
+    /// A moment, Unix seconds (an `Int(64)`): `"YYYY-MM-DD"`, an ISO 8601 date-time, or
+    /// a number of seconds.
+    Timestamp,
+    /// A moment from the start of year `from` to the end of year `to`, in whole
+    /// `unit`-second steps since the start (a `Uint`): given as a [`Encoding::Timestamp`]
+    /// is, rounded down to its step.
+    Time { unit: u32, from: u16, to: u16 },
     /// A string of at most this many UTF-8 bytes; one field, little-endian.
     Text(usize),
     /// One variant of an enum, by name; one field holding its position.
@@ -589,8 +595,9 @@ pub type Param = (&'static str, bool, Type);
 /// ```text
 /// {"version": 2, "xark": "0.3.0", "circuit": "zkyc",
 ///  "inputs": [{"name": "id", "visibility": "private", "type": {"ref": "Identity"}}, …],
-///  "types": {"Identity": {"struct": [{"name": "born", "type": {"ref": "Date"}}, …]},
-///            "Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}},
+///  "types": {"Identity": {"struct": [{"name": "born", "type": {"ref": "Days<1900,2100>"}}, …]},
+///            "Days<1900,2100>": {"newtype": {"uint": 17},
+///                                "encoding": {"time": {"unit": 86400, "from": 1900, "to": 2100}}},
 ///            "Bitfield<Country>": {"newtype": "field", "encoding": {"set": "Country"}},
 ///            "Country": {"enum": ["AD", "AE", …]}, …},
 ///  "public_inputs": ["commitment", "born_before", …]}
@@ -647,8 +654,17 @@ pub fn schema_json(circuit: &str, params: &[Param]) -> String {
     s
 }
 
-/// A named type's name in `schema.json`: `Identity`, `Bitfield<Country>`.
+/// A named type's name in `schema.json`: `Identity`, `Bitfield<Country>`,
+/// `Days<1900,2100>` (a `Time` is named by its parameters, so two ranges are two
+/// types).
 pub fn type_name(n: &Named) -> String {
+    if let Encoding::Time { unit, from, to } = n.encoding {
+        return if unit == crate::time::DAY {
+            alloc::format!("Days<{from},{to}>")
+        } else {
+            alloc::format!("Time<{unit},{from},{to}>")
+        };
+    }
     let mut s = String::from(n.name);
     if let Some(a) = n.arg {
         s.push('<');
@@ -788,7 +804,16 @@ fn encoding_json(n: &Named, defs: &mut Defs, s: &mut String) {
     };
     match n.encoding {
         Encoding::Fields => s.push_str("null"),
-        Encoding::Date => s.push_str("{\"date\":\"yyyymmdd\"}"),
+        Encoding::Timestamp => s.push_str("{\"timestamp\":\"unix\"}"),
+        Encoding::Time { unit, from, to } => {
+            s.push_str("{\"time\":{\"unit\":");
+            push_usize(s, unit as usize);
+            s.push_str(",\"from\":");
+            push_usize(s, from as usize);
+            s.push_str(",\"to\":");
+            push_usize(s, to as usize);
+            s.push_str("}}");
+        }
         Encoding::Text(max) => {
             s.push_str("{\"text\":");
             push_usize(s, max);

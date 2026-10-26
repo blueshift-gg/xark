@@ -552,6 +552,74 @@ fn signed_inputs_compare_and_reject_out_of_range_values() {
     );
 }
 
+/// Time inputs: a `Days<1900, 2100>` is its 17-bit day count, compared at that width
+/// (a leaf past 17 bits has no witness), and a `Timestamp` its signed seconds, before
+/// 1970 too. A signed comparison of two inputs costs what an unsigned one does: the
+/// sign bit is read off the input's range check rather than derived again.
+#[test]
+fn time_inputs_compare_at_their_width() {
+    type Born = xark::Days<1900, 2100>;
+    let day = |y, m, d| Born::new(y, m, d).steps().to_string();
+    let compile = |name: &str, params: &str| {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit({params}) {{ require(a <= b); }}\n"
+        );
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let c = compile(
+        "days_le",
+        "a: Private<Days<1900, 2100>>, b: Public<Days<1900, 2100>>",
+    );
+    assert!(accepts_exactly(
+        &c,
+        &[("a", &day(1990, 1, 1)), ("b", &day(2008, 10, 20))]
+    ));
+    assert!(accepts_exactly(
+        &c,
+        &[("a", &day(2024, 2, 29)), ("b", &day(2024, 2, 29))]
+    ));
+    assert!(!accepts_exactly(
+        &c,
+        &[("a", &day(2024, 3, 1)), ("b", &day(2024, 2, 29))]
+    ));
+    assert!(!accepts_exactly(
+        &c,
+        &[("a", &(1u32 << 17).to_string()), ("b", &day(2100, 12, 31))]
+    ));
+    let days_rows = c.program().constraints.len();
+
+    let c = compile(
+        "timestamp_le",
+        "a: Private<Timestamp>, b: Public<Timestamp>",
+    );
+    let t = |s: &str| (xark::Timestamp::parse(s).unwrap().unix() as u64).to_string();
+    assert!(accepts_exactly(
+        &c,
+        &[("a", &t("1969-12-31")), ("b", &t("1970-01-01"))]
+    ));
+    assert!(!accepts_exactly(
+        &c,
+        &[("a", &t("1970-01-01")), ("b", &t("1969-12-31T23:59:59Z"))]
+    ));
+    let signed = c.program().constraints.len();
+    let unsigned = compile("u64_le", "a: Private<u64>, b: Public<u64>")
+        .program()
+        .constraints
+        .len();
+    assert_eq!(
+        signed, unsigned,
+        "a signed comparison of inputs costs an unsigned one's"
+    );
+    // 2 × 17-bit range checks and a 17-bit comparison, against 2 × 64 and a 64-bit one.
+    assert!(
+        days_rows * 3 < signed,
+        "{days_rows} rows for days, {signed} for timestamps"
+    );
+}
+
 /// A `u128` input next to a narrower one (in a struct, or as parameters) builds and
 /// proves: dropping the input-binding call regions keeps the rest's parents right.
 #[test]
@@ -5213,9 +5281,9 @@ fn byte_inputs_are_not_repacked() {
     assert!(c.status_success, "{}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let rows = xark_ir::json::from_json(&json).unwrap().constraints.len();
-    // 3 × 9 entry range checks, 3 × 9 decompositions (`to_bits` hasn't the entry's bits),
-    // 3 products and the final equality. (A repacking shim once cost 105.)
-    assert_eq!(rows, 58, "byte inputs cost more than their range checks");
+    // 3 × 9 entry range checks (whose bits `to_bits` reads), 3 products and the final
+    // equality. (A repacking shim once cost 105; before reuse, `to_bits` cost 27 more.)
+    assert_eq!(rows, 31, "byte inputs cost more than their range checks");
 }
 
 /// Packing narrow values into a word (`c << 16 | b << 8 | a`) and taking it apart
@@ -5324,7 +5392,7 @@ fn choice_require_in_is_sound() {
 fn standard_types_compare() {
     let src = "#![no_std]\nuse xark::prelude::*;\n\
         #[input]\n\
-        pub struct Id { pub doc: Text, pub born: Date }\n\
+        pub struct Id { pub doc: Text, pub born: Days<1900, 2100> }\n\
         #[circuit]\n\
         pub fn same(a: Private<Id>, b: Public<Id>, c: Private<Choice<Country>>, s: Public<Bitfield<Country>>) {\n\
         require_eq(a, b);\n\
@@ -5343,12 +5411,18 @@ fn standard_types_compare() {
     let set =
         (num_bigint::BigUint::from(1u8) << us | num_bigint::BigUint::from(1u8) << gb).to_string();
     let us = us.to_string();
+    let day = |d: u8| {
+        xark::Days::<1900, 2100>::new(1990, 1, d)
+            .steps()
+            .to_string()
+    };
+    let (d1, d2) = (day(1), day(2));
     let run = |b_born: &str, c: &str, s: &str| {
         solves(
             &p,
             &[
                 ("a.doc", "7"),
-                ("a.born", "19900101"),
+                ("a.born", &d1),
                 ("b.doc", "7"),
                 ("b.born", b_born),
                 ("c", c),
@@ -5356,10 +5430,10 @@ fn standard_types_compare() {
             ],
         )
     };
-    assert!(run("19900101", &us, &set));
-    assert!(!run("19900102", &us, &set), "the structs differ");
-    assert!(!run("19900101", "0", &set), "not US");
-    assert!(!run("19900101", &us, "1"), "a different set");
+    assert!(run(&d1, &us, &set));
+    assert!(!run(&d2, &us, &set), "the structs differ");
+    assert!(!run(&d1, "0", &set), "not US");
+    assert!(!run(&d1, &us, "1"), "a different set");
 }
 
 /// Compile `body` as a bn254 circuit with `params` and, per case, check the

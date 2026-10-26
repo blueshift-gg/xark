@@ -10,7 +10,7 @@
 // schema (in `zkyc.schema.ts`, written with this file), exactly as `xark prove
 // --inputs` does.
 
-import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type Day, type FieldInput, type Json, type Proof, type Prover, type Text, type U16, type U64, type Verifier } from "@blueshift-gg/xark-wasm/client";
+import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type Json, type Proof, type Prover, type Text, type U16, type U64, type Verifier } from "@blueshift-gg/xark-wasm/client";
 import schema from "./zkyc.schema";
 export { CheckFailed, Field, InputError, fromHex, toHex };
 
@@ -54,17 +54,21 @@ export type Country = (typeof Country)[keyof typeof Country];
 /** An `Identity` (an input struct). */
 export interface Identity {
   document: Text;
-  born: Day;
+  /** A day from 1900-01-01 to 2100-12-31 (UTC); a moment in a day counts as that day. */
+  born: Date;
   nationality: Country;
   netWorth: U64;
-  expires: Day;
+  /** A day from 1900-01-01 to 2100-12-31 (UTC); a moment in a day counts as that day. */
+  expires: Date;
   salt: FieldInput;
 }
 
 /** A `Policy` (an input struct). */
 export interface Policy {
-  today: Day;
-  bornBy: Day;
+  /** A day from 1900-01-01 to 2100-12-31 (UTC); a moment in a day counts as that day. */
+  today: Date;
+  /** A day from 1900-01-01 to 2100-12-31 (UTC); a moment in a day counts as that day. */
+  bornBy: Date;
   minNetWorth: U64;
   /** A set of `Country`: one, or a list of them. */
   allowed: Country | readonly Country[];
@@ -85,14 +89,14 @@ export interface ZkycPublicInputs {
 
 /** A `Policy`, decoded, with its Rust methods. */
 export class PolicyValue {
-  today: Day;
-  bornBy: Day;
+  today: Date;
+  bornBy: Date;
   minNetWorth: bigint;
   allowed: Country[];
 
   constructor(v: {
-    today: Day;
-    bornBy: Day;
+    today: Date;
+    bornBy: Date;
     minNetWorth: bigint;
     allowed: Country[];
   }) {
@@ -104,8 +108,9 @@ export class PolicyValue {
 
   /**
    * Checked on `today`: the holder's document mustn't have expired by then.
+   * (Written out rather than as `Day`: a client reads the type as written.)
    */
-  on(today: Day): PolicyValue {
+  on(today: Date): PolicyValue {
     return Policy.on(this, today);
   }
 
@@ -160,7 +165,7 @@ export const Zkyc = new Circuit<ZkycInputs, ZkycPublicInputs, ZkycPublicValues, 
   schema,
   decodePublic,
   client: true,
-  digest: "be7e34aaf7c46faa1f526ca1860d5e24",
+  digest: "9837587f75d0c513b3836117168cbf2d",
 });
 
 export type ZkycProver = Prover<ZkycInputs, ZkycPublicInputs, ZkycPublicValues, ZkycStructs>;
@@ -171,8 +176,9 @@ export type ZkycProof = Proof<ZkycPublicValues>;
 export const Policy = {
   /**
    * Checked on `today`: the holder's document mustn't have expired by then.
+   * (Written out rather than as `Day`: a client reads the type as written.)
    */
-  on(policy: Policy, today: Day): PolicyValue {
+  on(policy: Policy, today: Date): PolicyValue {
     return decodePolicy(Zkyc.call<Json<PolicyValue>>("Policy.on", [policy, today]));
   },
   /**

@@ -26,7 +26,8 @@ export class Field {
 
 /**
  * A value as JSON from xark-wasm or `client.wasm`: a `Field`, `bigint`, `Date` or
- * bytes as a string (decimal, `YYYY-MM-DD`, `0x`-hex), the rest as they are.
+ * bytes as a string (decimal, an ISO 8601 date or date-time, `0x`-hex), the rest as
+ * they are.
  */
 export type Json<T> = T extends Field | bigint | Date | Uint8Array
   ? string
@@ -61,11 +62,6 @@ export class CheckFailed extends Error {
   constructor(message: string, site: Site);
 }
 
-/**
- * A calendar day: the `Date`'s UTC day, as `toISOString()` shows it
- * (`new Date("1990-01-01")` is 1990-01-01 anywhere). xark's `Date`.
- */
-export type Day = Date;
 /** A string of at most 31 UTF-8 bytes. xark's `Text`. */
 export type Text = string;
 /** An integer in [0, 2^8): Rust's `u8`. */

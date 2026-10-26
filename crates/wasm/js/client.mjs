@@ -148,7 +148,8 @@ export class Proof {
 }
 
 /**
- * JSON for xark-wasm: `bigint`s and `Field`s as decimal, a `Date` as its UTC day,
+ * JSON for xark-wasm: `bigint`s and `Field`s as decimal, a `Date` as its Unix seconds
+ * (milliseconds dropped: xark's `Timestamp`, or the step of a `Time` it falls in),
  * a `Uint8Array` as its list of bytes (little-endian, where it's an integer), a `Set`
  * as a list. A value that can't be sent (an invalid `Date`, a number past 2^53, a
  * `Map`) throws an `InputError` naming where it is.
@@ -164,7 +165,7 @@ function plain(v, path) {
   };
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) refuse("invalid Date");
-    return v.toISOString().slice(0, 10);
+    return Math.floor(v.getTime() / 1000);
   }
   if (typeof v === "bigint") return v.toString();
   // A number past 2^53 has already lost digits: refuse it rather than prove another.

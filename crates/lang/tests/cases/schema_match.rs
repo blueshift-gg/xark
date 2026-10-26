@@ -11,7 +11,8 @@ pub enum Standing {
 #[input]
 pub struct Holder {
     pub doc: Text,
-    pub born: Date,
+    pub born: Days<1900, 2100>,
+    pub seen: Timestamp,
     pub standing: Choice<Standing>,
     pub tags: [u8; 2],
     pub pair: (u64, Field),
@@ -30,5 +31,7 @@ pub fn schema_match(
     require(h.pair.0 >= min as u64);
     require_eq(h.doc, Text::new("x"));
     require_eq(h.born, h.born);
+    require(h.born < Days::new(2000, 1, 1));
+    require(h.seen >= Timestamp::new(2000, 1, 1));
     require_eq(Field::from(h.tags[0]) + salt[0] + salt[1], h.pair.1);
 }

@@ -967,6 +967,12 @@ impl Host {
             let f = (x.constant.big() + &half) % pow2(reg);
             return Ok(LinearCombination::constant(f.to_string()));
         }
+        // `x`'s bits already proven (an input's range check): the sign is its top bit,
+        // so the flip is free.
+        if let Some(bits) = self.known_bits(&x, reg as usize) {
+            let top = bits[reg as usize - 1].clone();
+            return Ok(x + lc_of(&half) - top.scale(&FieldConst::from_bigint(pow2(reg))));
+        }
         let lt = self
             .b
             .emit_less_than(reg as usize, x.clone(), lc_of(&half))?;
@@ -1048,6 +1054,19 @@ impl Host {
             self.b.bit_cache.insert(key, vars.clone());
         }
         Ok(vars.into_iter().map(LinearCombination::var).collect())
+    }
+
+    /// `x`'s `n` bits when they're already proven (a constant, a sum of proven bits, or
+    /// an earlier decomposition), without emitting anything.
+    fn known_bits(&self, x: &LinearCombination, n: usize) -> Option<Vec<LinearCombination>> {
+        if x.is_constant() {
+            return None;
+        }
+        if let Some(vars) = self.b.bit_sum_shortcut(x, n) {
+            return Some(vars.into_iter().map(LinearCombination::var).collect());
+        }
+        let vars = self.b.bit_cache.get(&(canonical_lc_key(x), n))?;
+        Some(vars.iter().map(|&v| LinearCombination::var(v)).collect())
     }
 
     fn recompose(bits: &[LinearCombination]) -> LinearCombination {
@@ -2025,11 +2044,16 @@ impl crate::interp::Host for Host {
             }
             Intr::InputsDone => {
                 // Every input is a var in `0..n_inputs`; now range-check the `uN` ones.
+                // Their bits are kept: a later `to_bits`, bitwise op or signed
+                // comparison of the input reads them instead of deriving its own.
                 for (id, n) in std::mem::take(&mut self.uint_inputs) {
+                    let x = LinearCombination::var(id);
                     self.b.kind_stack.push(ConstraintKind::RangeCheck);
-                    self.b
-                        .emit_range_proof_lc(LinearCombination::var(id), n as usize);
+                    let bits = self.b.decompose_bits(x.clone(), n as usize);
                     self.b.kind_stack.pop();
+                    self.b
+                        .bit_cache
+                        .insert((canonical_lc_key(&x), n as usize), bits);
                 }
             }
             Intr::Panic => {

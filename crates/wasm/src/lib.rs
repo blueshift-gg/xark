@@ -493,7 +493,7 @@ fn encode_public_inputs_with(
 }
 
 /// Canonical public-input bytes decoded to their natural forms: JSON text of an
-/// object keyed `camelCase` (a `Date` as `"YYYY-MM-DD"`, flags as their names, bytes
+/// object keyed `camelCase` (a time as an ISO 8601 date or date-time, flags as their names, bytes
 /// as `0x`-hex, field elements as decimal strings).
 #[wasm_bindgen(js_name = decodePublicValues)]
 pub fn decode_public_values(

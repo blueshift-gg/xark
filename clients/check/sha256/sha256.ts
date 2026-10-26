@@ -50,7 +50,7 @@ export const Sha256 = new Circuit<Sha256Inputs, Sha256PublicInputs, Sha256Public
   schema,
   decodePublic,
   client: false,
-  digest: "b64403b37d24e75de2ee0f3f41a32bfa",
+  digest: "279008d759c821bfe771d8e3d5af1a42",
 });
 
 export type Sha256Prover = Prover<Sha256Inputs, Sha256PublicInputs, Sha256PublicValues, {}>;

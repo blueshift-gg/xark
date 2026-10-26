@@ -47,6 +47,7 @@ fn poseidon_keeps_large_sums_inline() {
 
 #[test]
 fn sha256_with_byte_inputs() {
-    let l = check("sha256", 35096);
+    // The byte inputs' range checks are reused where the hash splits them into bits.
+    let l = check("sha256", 35069);
     assert_eq!(l.schema["inputs"][0]["type"]["array"]["of"]["uint"], 8);
 }

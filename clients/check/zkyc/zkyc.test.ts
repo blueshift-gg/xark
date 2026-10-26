@@ -16,8 +16,9 @@ beforeAll(async () => {
   verifier = await Zkyc.verifier(artifacts("zkyc"));
 });
 
-// The holder's credential, in the circuit's own types: `Text`, `Date`, a `Country`.
-// A `Date` is read as its UTC day: `new Date("1990-01-01")` is 1990-01-01 anywhere.
+// The holder's credential, in the circuit's own types: `Text`, a `Days` (a JS `Date`),
+// a `Country`. A day is read in UTC: `new Date("1990-01-01")` is 1990-01-01 anywhere,
+// and any moment of a day is that day.
 const id: Identity = {
   document: "A1938274",
   born: new Date("1990-01-01"),
@@ -28,7 +29,7 @@ const id: Identity = {
 };
 // The issuer's Poseidon2 commitment over `id` (the Rust `id.commitment()`; see the
 // test below, which computes it here).
-const commitment = new Field(14027122776066679586866430602253390234316410519759139985776472857287265910584n);
+const commitment = new Field(3871611513999297682123228541823586569204418180156089065518749133230561063210n);
 // 18 or older on 2026-10-20, worth ≥ 500k, a document valid that day, from US/GB/FR/DE
 // (as data; the test below builds it with the Rust constructors).
 const policy: Policy = {
@@ -49,12 +50,15 @@ test("builds the policy and the commitment with the circuit's Rust code", () => 
   const proof = prover.prove({ id, commitment: Identity.commitment(id), policy: built });
   expect(verifier.verify(proof, { commitment, policy: built })).toBe(true);
   // A Rust panic is an exception with its message, and the module keeps working.
-  expect(() => built.minAge(3000)).toThrow(/a date before year 0/);
+  expect(() => built.minAge(200)).toThrow(/200 years before Days<1900, 2100>\(2026-10-20\) is before the start of 1900/);
+  // Any moment of the day is the day.
+  expect(Policy.default().on(new Date("2026-10-20T23:59:59.999Z")).today).toEqual(new Date("2026-10-20"));
+  expect(() => Policy.default().on(new Date("2101-01-01"))).toThrow(/2101-01-01 is outside 1900-01-01 to 2100-12-31/);
   expect(Policy.default().on(new Date("2024-02-29")).minAge(1).bornBy).toEqual(new Date("2023-02-28"));
   // The default policy passes everyone; `on` sets only the day, which a minimum age needs.
   expect({ ...Policy.default().on(new Date("2026-10-20")) }).toEqual({
     today: new Date("2026-10-20"),
-    bornBy: new Date("9999-12-31"),
+    bornBy: new Date("2100-12-31"),
     minNetWorth: 0n,
     allowed: expect.arrayContaining(["US", "KP"]),
   });

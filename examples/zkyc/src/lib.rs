@@ -4,18 +4,21 @@
 //! are public, so a verifier picks the rules at proof time with no new circuit.
 use xark::prelude::*;
 
+/// A day this circuit's dates can be: 1900-01-01 to 2100-12-31, 17 bits.
+pub type Day = Days<1900, 2100>;
+
 /// What an issuer attests about a holder, committed to as a whole with Poseidon2.
 #[input]
 pub struct Identity {
     /// The ID document's number.
     pub document: Text,
-    pub born: Date,
+    pub born: Day,
     /// An ISO 3166 code.
     pub nationality: Choice<Country>,
     /// Attested net worth, in the attestor's unit (its currency and scale).
     pub net_worth: u64,
     /// The ID document's expiry.
-    pub expires: Date,
+    pub expires: Day,
     /// The issuer's random blinding secret: it hides the commitment.
     pub salt: Field,
 }
@@ -37,9 +40,9 @@ impl Identity {
 #[input]
 pub struct Policy {
     /// The day of the check: the document mustn't have expired by then.
-    pub today: Date,
+    pub today: Day,
     /// The latest birth date allowed (a minimum age on `today`).
-    pub born_by: Date,
+    pub born_by: Day,
     /// The least attested net worth allowed, in the attestor's unit.
     pub min_net_worth: u64,
     /// The nationalities allowed.
@@ -52,8 +55,8 @@ impl Default for Policy {
     /// Tighten it from there, starting with `on`.
     fn default() -> Policy {
         Policy {
-            today: Date::MIN,
-            born_by: Date::MAX,
+            today: Day::MIN,
+            born_by: Day::MAX,
             min_net_worth: 0,
             allowed: Bitfield::all(),
         }
@@ -63,7 +66,8 @@ impl Default for Policy {
 #[input]
 impl Policy {
     /// Checked on `today`: the holder's document mustn't have expired by then.
-    pub fn on(self, today: impl Into<Date>) -> Policy {
+    /// (Written out rather than as `Day`: a client reads the type as written.)
+    pub fn on(self, today: impl Into<Days<1900, 2100>>) -> Policy {
         Policy {
             today: today.into(),
             ..self
@@ -74,7 +78,7 @@ impl Policy {
     #[cfg(not(xark))]
     pub fn min_age(self, years: u16) -> Policy {
         assert!(
-            self.today != Date::MIN,
+            self.today != Day::MIN,
             "a minimum age needs the day of the check: call `on(today)` first"
         );
         Policy {

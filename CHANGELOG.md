@@ -25,7 +25,8 @@ gadgets now check more:
 - **Stable Rust only.** Circuits compile with any stable Rust from 1.89, and are
   identical on every supported version. The pinned-nightly `xark-rustc` is gone.
 - **Typed inputs.** One `xark::Input` trait, implemented by `#[input]` or by hand,
-  and everyday types (`Date`, `Text`, `Choice<E>`, `Bitfield<E>`, `Country`), in
+  and everyday types (`Timestamp`, `Days<FROM, TO>`, `Text`, `Choice<E>`,
+  `Bitfield<E>`, `Country`), in
   the circuit, in tests, on the command line and in clients.
 - **Typed TypeScript clients.** `xark client` generates a client that proves and
   verifies through xark-wasm, with the circuit's types and its Rust constructors.
@@ -42,6 +43,9 @@ gadgets now check more:
   The pinned-nightly MIR compiler `xark-rustc` is removed. A circuit's R1CS is the
   same on every supported Rust version (`cargo xtask digests` checks every example
   on 1.89, stable and beta in CI).
+- **An integer input's range check is reused.** Its bits serve a later `to_bits`,
+  bitwise operation or signed comparison of the input, so comparing two `i64` (or
+  `Timestamp`) inputs costs what comparing two `u64`s does (68 constraints, not 202).
 - **What compiles** is documented from the new frontend in
   [docs/subset.md](docs/subset.md). Branches on witness values, small witness
   indices and short witness-bounded loops work. Constructs that can't compile
@@ -88,13 +92,25 @@ gadgets now check more:
   `Debug` (and `PartialEq`, `Eq` on an enum) unless listed;
   `#[input(no_derive)]` leaves them to you. It replaces `#[derive(CircuitInput)]`,
   `#[derive(Transparent)]` and `NativeInput`.
-- **Everyday input types**: `Date`, `Text`, `Choice<E>` (one variant of an enum)
-  and `Bitfield<E>` (a set of them), each one field, with natural forms in tests
-  (`"1990-01-01"`, `[US, GB]`), `--inputs` and clients, and the ISO 3166 `Country`
+- **Everyday input types**: `Text`, `Choice<E>` (one variant of an enum) and
+  `Bitfield<E>` (a set of them), each one field, with natural forms in tests
+  (`"A1938274"`, `[US, GB]`), `--inputs` and clients, and the ISO 3166 `Country`
   enum. Each compares with `require_eq` and `==`, as does an `#[input]` struct.
   Checks are sized to the enum: a set splits into one bit per variant, and
   `Choice::require_in(set)` costs about 510 constraints over `Country`.
-  `Date::parse`/`Text::parse` return a `Result` for input you didn't write.
+  `Text::parse` and the time types' `parse` return a `Result` for input you didn't
+  write.
+- **Times, sized to their range.** `Timestamp` is any moment as Unix seconds (an
+  `i64`, as Solana's `Clock` and a JS `Date` hold it). `Time<UNIT, FROM, TO>` is a
+  moment from the start of year `FROM` to the end of `TO` in whole `UNIT`-second
+  steps (`SECOND` … `WEEK`), and `Days<FROM, TO>` its days: in the circuit an
+  unsigned integer just wide enough for the range (`Days<1900, 2100>` is 17 bits),
+  range-checked on entry and compared at that width. A moment inside a step is that
+  step (rounded down, as Unix time does), and one outside the range is refused with
+  the range named. Both read `"YYYY-MM-DD"`, an ISO 8601 date-time with a zone, or
+  Unix seconds, are a JS `Date` in a generated client, and convert on the host
+  (`Days::from_timestamp`, `years_before`), on chain too (`const fn`s, `no_std`).
+  Leap years count where a date is read or written; every day is 86,400 seconds.
   `examples/zkyc` uses them: a private `Identity` checked against a public
   `Policy` built with `Policy::default().on(today).min_age(18).worth_at_least(500_000)`.
 - **`bool` inputs.** A `bool` parameter or field is one field element, checked to
@@ -145,7 +161,7 @@ verification starter, and the `xark-client` npm package is removed.
   (`__proto__`, or `constructor` on a struct with Rust methods) is an error naming it. The
   types read like the circuit's: interfaces for input structs, enums as constants
   and a type (`Country.US` or `"US"`; `"XX"` doesn't compile), named aliases for
-  xark's standard types (`Day`, `Text`, `U8` … `U128`), and arrays of up to 16
+  xark's standard types (`Text`, `U8` … `U128`, `I8` … `I128`; a time is a `Date`), and arrays of up to 16
   elements as tuples, so a wrong length doesn't compile.
 - **Proving and verifying:** `Zkyc.prover(source)` and `Zkyc.verifier(source)`,
   from a URL serving the build output or its bytes, each with only the methods it

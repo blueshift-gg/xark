@@ -92,8 +92,13 @@ and friends. A circuit crate needs only the `xark` dependency.
 `xark` ships the types most credential-style circuits need, each one field wide
 and each with its natural form in tests, `--inputs` and the TypeScript client:
 
-- `Date`: a calendar day: `"1990-01-01"` in Rust and `--inputs`, a `Date` (its
-  UTC day) in TypeScript, and a 27-bit comparison for `<`/`>=` in the circuit.
+- `Days<FROM, TO>`: a day from the start of year `FROM` to the end of `TO` (UTC),
+  in the circuit its day count, just wide enough for the range
+  (`Days<1900, 2100>` is 17 bits). It's `"1990-01-01"` in Rust and `--inputs` and a
+  JS `Date` in TypeScript, and any moment of a day is that day. `Time<UNIT, FROM, TO>`
+  is the same in other steps (`Time<MINUTE, 2020, 2060>`).
+- `Timestamp`: any moment, as Unix seconds (an `i64`, as Solana's `Clock` and a JS
+  `Date` hold it), compared as a signed 64-bit integer.
 - `Text`: a short string, up to 31 bytes (a document number, a name).
 - `Choice<E>` and `Bitfield<E>`: one variant of an enum, or a set of them, such
   as a nationality and the allowed countries: `choice == Country::US`,
@@ -102,11 +107,11 @@ and each with its natural form in tests, `--inputs` and the TypeScript client:
 
 ```rust
 #[input]
-pub struct Identity { document: Text, born: Date, nationality: Choice<Country>, net_worth: u64, expires: Date, salt: Field }
+pub struct Identity { document: Text, born: Days<1900, 2100>, nationality: Choice<Country>, net_worth: u64, expires: Days<1900, 2100>, salt: Field }
 
 /// A verifier's rules, a public input: one circuit serves every policy.
 #[input]
-pub struct Policy { today: Date, born_by: Date, min_net_worth: u64, allowed: Bitfield<Country> }
+pub struct Policy { today: Days<1900, 2100>, born_by: Days<1900, 2100>, min_net_worth: u64, allowed: Bitfield<Country> }
 
 #[circuit]
 fn zkyc(id: Private<Identity>, commitment: Public<Field>, policy: Public<Policy>) {
@@ -219,10 +224,10 @@ export type Country = (typeof Country)[keyof typeof Country]; // "AD" | "AE" | �
 
 export interface Identity {
   document: Text;              // a string, at most 31 bytes
-  born: Day;                   // a Date: its UTC day
+  born: Date;                  // a day, 1900-01-01 to 2100-12-31 (UTC)
   nationality: Country;        // Country.US, or "US"; "XX" won't compile
   netWorth: U64;               // bigint | number, in the attestor's unit
-  expires: Day;
+  expires: Date;
   salt: FieldInput;            // a Field, or an integer
 }
 ```
@@ -285,7 +290,7 @@ impl Default for Policy {
 #[input]
 impl Policy {
     /// Checked on `today`: the holder's document mustn't have expired by then.
-    pub fn on(self, today: impl Into<Date>) -> Policy { … }
+    pub fn on(self, today: impl Into<Days<1900, 2100>>) -> Policy { … }
     /// At least `years` old on `today` (set it with `on` first).
     pub fn min_age(self, years: u16) -> Policy { … }
 }

@@ -32,8 +32,10 @@ pub enum Ty {
     },
     /// A whole number split into limbs (a non-native field element).
     Number { of: String },
-    /// A calendar day.
-    Date,
+    /// A moment: Unix seconds.
+    Timestamp,
+    /// A moment in `unit`-second steps from the start of year `from` to the end of `to`.
+    Time { unit: u64, from: u64, to: u64 },
     /// A string of at most `max` UTF-8 bytes.
     Text { max: u64 },
     /// One variant of an enum.
@@ -175,8 +177,14 @@ impl Model {
             self.enums.insert(e.to_string(), names);
             e.to_string()
         };
-        Ok(if enc.get("date").is_some() {
-            Ty::Date
+        Ok(if enc.get("timestamp").is_some() {
+            Ty::Timestamp
+        } else if let Some(t) = enc.get("time") {
+            Ty::Time {
+                unit: t["unit"].as_u64().unwrap_or(0),
+                from: t["from"].as_u64().unwrap_or(0),
+                to: t["to"].as_u64().unwrap_or(0),
+            }
         } else if let Some(max) = enc["text"].as_u64() {
             Ty::Text { max }
         } else if let Some(e) = enc["choice"].as_str() {
@@ -277,6 +285,9 @@ impl Model {
     /// A type as written in Rust (`u16`, `[u8;4]`, `Choice<Country>`), as a standard
     /// type: a primitive, or one of the circuit's input types by name.
     fn rust_ty(&mut self, schema: &Value, rust: &str) -> Result<Ty> {
+        if let Some(t) = time_ty(rust) {
+            return Ok(t);
+        }
         let ty = match rust {
             "Field" => serde_json::json!("field"),
             "bool" => serde_json::json!("bool"),
@@ -315,7 +326,9 @@ impl Model {
             }
             r => bail!(
                 "`{r}` isn't one of the circuit's input types: an exported method takes and \
-                 returns those (or `Field`, `uN`, `bool`, arrays and tuples of them)"
+                 returns those (or `Field`, `uN`, `iN`, `bool`, arrays and tuples of them), \
+                 written out: a client reads the type as written, so a type alias isn't \
+                 followed (write `Days<1900, 2100>`, not an alias of it)"
             ),
         };
         self.ty(schema, &ty)
@@ -371,6 +384,51 @@ fn byte_len(schema: &Value, r: &str) -> Option<u64> {
         .sum()
 }
 
+/// A time type as written in Rust (`Timestamp`, `Days<1900,2100>`,
+/// `Time<MINUTE,2020,2060>`, with or without a `xark::` path): it carries its range,
+/// so it needs no entry in the schema.
+fn time_ty(rust: &str) -> Option<Ty> {
+    let rust = rust.trim_start_matches("::").trim_start_matches("xark::");
+    let rust = rust.trim_start_matches("time::");
+    if rust == "Timestamp" {
+        return Some(Ty::Timestamp);
+    }
+    let unit = |u: &str| -> Option<u64> {
+        match u.trim_start_matches("xark::").trim_start_matches("time::") {
+            "SECOND" => Some(1),
+            "MINUTE" => Some(60),
+            "HOUR" => Some(3_600),
+            "DAY" => Some(86_400),
+            "WEEK" => Some(604_800),
+            n => n.replace('_', "").parse().ok(),
+        }
+    };
+    let year = |y: &str| y.replace('_', "").parse::<u64>().ok();
+    let args = |prefix: &str| -> Option<Vec<&str>> {
+        Some(
+            rust.strip_prefix(prefix)?
+                .strip_suffix('>')?
+                .split(',')
+                .collect(),
+        )
+    };
+    if let Some(a) = args("Days<") {
+        let [from, to] = a[..] else { return None };
+        return Some(Ty::Time {
+            unit: 86_400,
+            from: year(from)?,
+            to: year(to)?,
+        });
+    }
+    let a = args("Time<")?;
+    let [u, from, to] = a[..] else { return None };
+    Some(Ty::Time {
+        unit: unit(u)?,
+        from: year(from)?,
+        to: year(to)?,
+    })
+}
+
 /// A Rust type as written, from a schema type.
 fn rust_type(ty: &Value) -> String {
     if ty == "field" {
@@ -409,12 +467,13 @@ mod tests {
               "types": {
                 "Id": {"struct": [
                   {"name": "home", "type": {"ref": "Choice<Country>"}},
-                  {"name": "born", "type": {"ref": "Date"}},
+                  {"name": "born", "type": {"ref": "Days<1900,2100>"}},
                   {"name": "w", "type": {"ref": "W"}}]},
                 "W": {"newtype": {"uint": 32}},
                 "Choice<Country>": {"newtype": "field", "encoding": {"choice": "Country"}},
                 "Country": {"enum": ["AD", "US"]},
-                "Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}},
+                "Days<1900,2100>": {"newtype": {"uint": 17},
+                    "encoding": {"time": {"unit": 86400, "from": 1900, "to": 2100}}},
                 "Fp": {"struct": [{"name": "limbs", "type": {"array": {"of": "field", "len": 3}}}],
                        "encoding": {"bytes": 32, "limbs": 86}},
                 "Point": {"struct": [{"name": "x", "type": {"ref": "Fp"}}, {"name": "y", "type": {"ref": "Fp"}}],
@@ -425,7 +484,12 @@ mod tests {
         let m = Model::new(&schema).unwrap();
         let id = &m.structs["Id"];
         assert_eq!(id[0].ty, Ty::Choice("Country".into()));
-        assert_eq!((&id[1].ty, &id[2].ty), (&Ty::Date, &Ty::Uint(32)));
+        let born = Ty::Time {
+            unit: 86_400,
+            from: 1900,
+            to: 2100,
+        };
+        assert_eq!((&id[1].ty, &id[2].ty), (&born, &Ty::Uint(32)));
         assert_eq!(m.enums["Country"], ["AD", "US"]);
         assert_eq!(
             m.inputs[1].0.ty,
@@ -443,20 +507,36 @@ mod tests {
             r#"{"version": 2, "circuit": "c",
               "inputs": [{"name": "p", "visibility": "public", "type": {"ref": "P"}}],
               "types": {
-                "P": {"struct": [{"name": "day", "type": {"ref": "Date"}}]},
-                "Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}}},
+                "P": {"struct": [{"name": "day", "type": {"ref": "Timestamp"}}]},
+                "Timestamp": {"newtype": {"int": 64}, "encoding": {"timestamp": "unix"}}},
               "public_inputs": ["p.day"]}"#,
         )
         .unwrap();
         let mut m = Model::new(&schema).unwrap();
         m.add_exports(
             &schema,
-            r#"{"export":"P.on","type":"P","name":"on","self":null,"params":[{"name":"d","type":"Date"},{"name":"k","type":"(u8,[u8;2])"}],"returns":"P","doc":"x"}
+            r#"{"export":"P.on","type":"P","name":"on","self":null,"params":[{"name":"d","type":"Timestamp"},{"name":"k","type":"(u8,[u8;2])"},{"name":"b","type":"xark::Days<1900,2100>"},{"name":"m","type":"Time<MINUTE,2020,2060>"}],"returns":"P","doc":"x"}
 {"export":"P.f","type":"P","name":"f","self":"ref","params":[],"returns":"Field","doc":""}"#,
         )
         .unwrap();
         let on = &m.exports[0];
-        assert_eq!(on.params[0].ty, Ty::Date);
+        assert_eq!(on.params[0].ty, Ty::Timestamp);
+        assert_eq!(
+            on.params[2].ty,
+            Ty::Time {
+                unit: 86_400,
+                from: 1900,
+                to: 2100
+            }
+        );
+        assert_eq!(
+            on.params[3].ty,
+            Ty::Time {
+                unit: 60,
+                from: 2020,
+                to: 2060
+            }
+        );
         assert_eq!(
             on.params[1].ty,
             Ty::Tuple(vec![

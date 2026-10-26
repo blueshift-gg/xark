@@ -16,7 +16,8 @@
 //! | bool                   | `boolean`                     | `boolean`     |
 //! | bytes                  | `Uint8Array`                  | `Uint8Array`  |
 //! | number (limbed)        | an integer, or bytes          | `bigint`      |
-//! | date                   | `Date` (its UTC day)          | `Date`        |
+//! | timestamp              | `Date` (to the second)        | `Date`        |
+//! | time (`Days<…>`, …)    | `Date` (rounded down to its step) | `Date`    |
 //! | text                   | `string`                      | `string`      |
 //! | choice of `E`          | `E` (a variant name)          | `E`           |
 //! | set of `E`             | `E \| readonly E[]`           | `E[]`         |
@@ -85,7 +86,7 @@ fn input(ty: &Ty) -> String {
         Ty::Bool => "boolean".into(),
         Ty::Bytes { .. } => "Uint8Array".into(),
         Ty::Number { .. } => "bigint | number | string | Uint8Array".into(),
-        Ty::Date => "Day".into(),
+        Ty::Timestamp | Ty::Time { .. } => "Date".into(),
         Ty::Text { max: TEXT } => "Text".into(),
         Ty::Text { .. } => "string".into(),
         Ty::Choice(e) => e.clone(),
@@ -111,7 +112,7 @@ fn value(ty: &Ty, structs: &mut BTreeSet<String>) -> String {
         Ty::Uint(_) | Ty::Int(_) => "bigint".into(),
         Ty::Bool => "boolean".into(),
         Ty::Bytes { .. } => "Uint8Array".into(),
-        Ty::Date => "Day".into(),
+        Ty::Timestamp | Ty::Time { .. } => "Date".into(),
         Ty::Text { max: TEXT } => "Text".into(),
         Ty::Text { .. } => "string".into(),
         Ty::Choice(e) => e.clone(),
@@ -141,7 +142,7 @@ fn revive(ty: &Ty, e: &str) -> String {
             e.into()
         }
         Ty::Bytes { .. } => format!("fromHex({e})"),
-        Ty::Date => format!("new Date({e})"),
+        Ty::Timestamp | Ty::Time { .. } => format!("new Date({e})"),
         // Element by element, so a fixed length stays a tuple.
         Ty::Array(t, n) if *n as usize <= TUPLE => {
             let parts: Vec<String> = (0..*n).map(|i| revive(t, &format!("{e}[{i}]"))).collect();
@@ -163,11 +164,26 @@ fn revive(ty: &Ty, e: &str) -> String {
 /// A doc line for what the TS type doesn't say (widths, lengths, limits).
 fn note(ty: &Ty) -> Option<String> {
     Some(match ty {
-        // Named aliases (`U64`, `Day`, `Text`) carry their own docs, and a tuple its length.
+        // Named aliases (`U64`, `Text`) carry their own docs, and a tuple its length.
         Ty::Uint(8 | 16 | 32 | 64 | 128)
         | Ty::Int(8 | 16 | 32 | 64 | 128)
-        | Ty::Date
-        | Ty::Text { max: TEXT } => return None,
+        | Ty::Text { max: TEXT } => {
+            return None;
+        }
+        Ty::Timestamp => "A moment, to the second (UTC); milliseconds are dropped.".into(),
+        Ty::Time { unit, from, to } => {
+            let step = match unit {
+                1 => "second".into(),
+                60 => "minute".into(),
+                3_600 => "hour".into(),
+                86_400 => "day".into(),
+                604_800 => "week".into(),
+                n => format!("{n}-second step"),
+            };
+            format!(
+                "A {step} from {from}-01-01 to {to}-12-31 (UTC); a moment in a {step} counts as that {step}."
+            )
+        }
         Ty::Array(_, n) if *n as usize <= TUPLE => return None,
         Ty::Choice(_) => return None,
         Ty::Uint(w) => format!("`u{w}`: an integer in [0, 2^{w})."),
@@ -552,7 +568,6 @@ pub fn generate(m: &Model, schema_import: &str) -> Result<String> {
         })
     };
     let mut types: Vec<&str> = [
-        "Day",
         "FieldInput",
         "I128",
         "I16",
@@ -615,7 +630,7 @@ mod tests {
       "circuit": "kyc_check",
       "inputs": [
         {"name": "id", "visibility": "private", "type": {"ref": "Identity"}},
-        {"name": "born_before", "visibility": "public", "type": {"ref": "Date"}},
+        {"name": "born_before", "visibility": "public", "type": {"ref": "Days<1900,2100>"}},
         {"name": "allowed", "visibility": "public", "type": {"ref": "Bitfield<Country>"}},
         {"name": "doc", "visibility": "private", "type": {"array": {"of": {"uint": 8}, "len": 4}}},
         {"name": "commitment", "visibility": "public", "type": "field"}
@@ -629,7 +644,8 @@ mod tests {
           {"name": "tier", "type": {"ref": "Choice<Tier>"}},
           {"name": "pair", "type": {"tuple": ["field", {"uint": 16}]}},
           {"name": "offset", "type": {"int": 64}}]},
-        "Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}},
+        "Days<1900,2100>": {"newtype": {"uint": 17},
+          "encoding": {"time": {"unit": 86400, "from": 1900, "to": 2100}}},
         "Bitfield<Country>": {"newtype": "field", "encoding": {"set": "Country"}},
         "Choice<Country>": {"newtype": "field", "encoding": {"choice": "Country"}},
         "Choice<Tier>": {"newtype": "field", "encoding": {"choice": "Tier"}},
@@ -651,7 +667,7 @@ mod tests {
         let m = Model::new(&serde_json::from_str(SCHEMA).unwrap()).unwrap();
         let ts = generate(&m, "kyc_check.schema").unwrap();
         for want in [
-            "fn kyc_check(id: Private<Identity>, born_before: Public<Date>, allowed: Public<Bitfield<Country>>, doc: Private<[u8; 4]>, commitment: Public<Field>)",
+            "fn kyc_check(id: Private<Identity>, born_before: Public<Days<1900,2100>>, allowed: Public<Bitfield<Country>>, doc: Private<[u8; 4]>, commitment: Public<Field>)",
             "export const Country = {\n  AD: \"AD\", US: \"US\",\n} as const;\nexport type Country = (typeof Country)[keyof typeof Country];",
             "/** An `Identity` (an input struct). */\nexport interface Identity {\n  netWorth: U64;",
             "  home: Country;",
@@ -659,13 +675,13 @@ mod tests {
             "  pair: readonly [FieldInput, U16];",
             "  active: boolean;",
             "  offset: I64;",
-            "  bornBefore: Day;",
+            "  /** A day from 1900-01-01 to 2100-12-31 (UTC); a moment in a day counts as that day. */\n  bornBefore: Date;",
             "  allowed: Country | readonly Country[];",
             "  doc: Uint8Array;",
-            "export interface KycCheckPublicValues {\n  bornBefore: Day;\n  allowed: Country[];\n  commitment: Field;\n}",
+            "export interface KycCheckPublicValues {\n  bornBefore: Date;\n  allowed: Country[];\n  commitment: Field;\n}",
             "    bornBefore: new Date(v.bornBefore),",
             "    commitment: new Field(v.commitment),",
-            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type Day, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nimport schema from \"./kyc_check.schema\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
+            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nimport schema from \"./kyc_check.schema\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
             "  name: \"kyc_check\",\n  schema,\n",
             "export interface KycCheckStructs {\n  Identity: Identity;\n}",
             "export const KycCheck = new Circuit<KycCheckInputs, KycCheckPublicInputs, KycCheckPublicValues, KycCheckStructs>({\n  name: \"kyc_check\",",

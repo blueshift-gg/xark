@@ -6,8 +6,9 @@
 //!
 //! ```text
 //! {"version": 2,
-//!  "inputs": [{"name": "born_before", "visibility": "public", "type": {"ref": "Date"}}, …],
-//!  "types": {"Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}},
+//!  "inputs": [{"name": "born_before", "visibility": "public", "type": {"ref": "Days<1900,2100>"}}, …],
+//!  "types": {"Days<1900,2100>": {"newtype": {"uint": 17},
+//!                                 "encoding": {"time": {"unit": 86400, "from": 1900, "to": 2100}}},
 //!            "Country": {"enum": ["AD", "AE", …]}, …},
 //!  "public_inputs": ["commitment", "born_before", …]}
 //! ```
@@ -21,7 +22,8 @@
 //!
 //! | encoding                         | value                                           |
 //! |----------------------------------|-------------------------------------------------|
-//! | `{"date": "yyyymmdd"}`           | `"YYYY-MM-DD"`, or the raw integer `YYYYMMDD`   |
+//! | `{"timestamp": "unix"}`          | `"YYYY-MM-DD"`, an ISO 8601 date-time with a zone, or Unix seconds; the leaf is the seconds (`int` 64) |
+//! | `{"time": {"unit", "from", "to"}}` | the same, from the start of year `from` to the end of `to`; the leaf is the `unit`-second steps since the start, rounded down |
 //! | `{"text": 31}`                   | a string, at most 31 UTF-8 bytes                |
 //! | `{"choice": E}`                  | a variant name of enum `E`, or its position     |
 //! | `{"set": E}`                     | a variant name, a list of them, or the raw mask |
@@ -31,6 +33,8 @@
 //!
 //! Without an encoding a struct is an object of its fields. Field names may be
 //! `snake_case` (as declared) or `camelCase` (as in a generated client).
+
+pub mod time;
 
 use std::collections::BTreeMap;
 
@@ -360,8 +364,13 @@ impl Schema {
     /// A value in named type `r`'s natural encoding.
     fn encode_natural(&self, r: &str, v: &Value, at: &str, out: &mut Leaves) -> Result<(), String> {
         let enc = &self.def(r)["encoding"];
-        if enc.get("date").is_some() {
-            out.insert(at.into(), Fr::from(date(v)?));
+        if enc.get("timestamp").is_some() {
+            out.insert(
+                at.into(),
+                Fr::from(twos_complement(&BigInt::from(moment(v)?), 64)?),
+            );
+        } else if let Some(t) = time_range(enc) {
+            out.insert(at.into(), Fr::from(t.steps(moment(v)?)?));
         } else if enc.get("text").is_some() {
             let s = v.as_str().ok_or("expected a string")?;
             if s.len() > 31 {
@@ -572,18 +581,13 @@ impl Schema {
         let r = ty["ref"].as_str().unwrap_or_default();
         let def = self.def(r);
         let enc = &def["encoding"];
-        if enc.get("date").is_some() {
-            let v = BigUint::from(next()?.into_bigint())
-                .to_u64_digits()
-                .first()
-                .copied()
-                .unwrap_or(0);
-            return Ok(json!(format!(
-                "{:04}-{:02}-{:02}",
-                v / 10_000,
-                v / 100 % 100,
-                v % 100
-            )));
+        if enc.get("timestamp").is_some() {
+            let n = from_twos_complement(&BigUint::from(next()?.into_bigint()), 64)?;
+            let secs = i64::try_from(&n).map_err(|_| format!("{n} is not a timestamp"))?;
+            return Ok(json!(time::format(secs, false)));
+        }
+        if let Some(t) = time_range(enc) {
+            return Ok(json!(t.format(&BigUint::from(next()?.into_bigint()))?));
         }
         if enc.get("text").is_some() {
             let b = next()?.into_bigint().to_bytes_le();
@@ -734,8 +738,15 @@ impl Schema {
         let r = ty["ref"].as_str().unwrap_or_default();
         let def = self.def(r);
         let enc = &def["encoding"];
-        if enc.get("date").is_some() {
-            return q("YYYY-MM-DD");
+        if enc.get("timestamp").is_some() {
+            return q("YYYY-MM-DDTHH:MM:SSZ");
+        }
+        if let Some(t) = time_range(enc) {
+            return q(if t.unit % time::DAY == 0 {
+                "YYYY-MM-DD"
+            } else {
+                "YYYY-MM-DDTHH:MM:SSZ"
+            });
         }
         if enc.get("text").is_some() {
             return q("<text>");
@@ -957,31 +968,67 @@ fn bytes(v: &Value) -> Result<Vec<u8>, String> {
     }
 }
 
-/// A date: `"YYYY-MM-DD"` (checked to be a real day) or a raw integer `YYYYMMDD`.
-fn date(v: &Value) -> Result<u64, String> {
-    if let Value::Number(_) = v {
-        return integer(v)?
-            .try_into()
-            .map_err(|_| "not a YYYYMMDD integer".into());
+/// A moment as Unix seconds: `"YYYY-MM-DD"`, an ISO 8601 date-time with a zone, or
+/// a number of seconds (a JSON number or a decimal string, `-` allowed).
+fn moment(v: &Value) -> Result<i64, String> {
+    if let Value::String(t) = v {
+        let t = t.trim();
+        if t.len() >= 10 && t.as_bytes()[4] == b'-' {
+            return time::parse(t);
+        }
     }
-    let s = v.as_str().ok_or("expected a date, \"YYYY-MM-DD\"")?;
-    let d: String = s.chars().filter(|c| *c != '-').collect();
-    let n = |r: std::ops::Range<usize>| d.get(r).and_then(|x| x.parse::<u64>().ok());
-    let (Some(y), Some(m), Some(day), 8) = (n(0..4), n(4..6), n(6..8), d.len()) else {
-        return Err(format!("{s:?} is not a YYYY-MM-DD date"));
-    };
-    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let days = match m {
-        2 if leap => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        1..=12 => 31,
-        _ => 0,
-    };
-    if day == 0 || day > days {
-        return Err(format!("{s:?} is not a calendar day"));
+    let n = signed(v).map_err(|e| {
+        format!("{e} (a time is \"YYYY-MM-DD\", an ISO 8601 date-time, or Unix seconds)")
+    })?;
+    i64::try_from(&n).map_err(|_| format!("{n} seconds is out of range for a timestamp"))
+}
+
+/// A `time` encoding's range: steps of `unit` seconds from the start of year `from`
+/// to the end of year `to`.
+struct TimeRange {
+    unit: i64,
+    from: i64,
+    to: i64,
+}
+
+fn time_range(enc: &Value) -> Option<TimeRange> {
+    let t = enc.get("time")?;
+    Some(TimeRange {
+        unit: t["unit"].as_i64().filter(|u| *u > 0)?,
+        from: t["from"].as_i64()?,
+        to: t["to"].as_i64()?,
+    })
+}
+
+impl TimeRange {
+    fn start(&self) -> i64 {
+        time::days_from_civil(self.from, 1, 1) * time::DAY
     }
-    Ok(y * 10_000 + m * 100 + day)
+
+    /// The step holding `secs`, rounded down, or why it's outside the range.
+    fn steps(&self, secs: i64) -> Result<u64, String> {
+        let end = time::days_from_civil(self.to + 1, 1, 1) * time::DAY;
+        if secs < self.start() || secs >= end {
+            return Err(format!(
+                "{} is outside {}-01-01 to {}-12-31",
+                time::format(secs, self.unit % time::DAY == 0),
+                self.from,
+                self.to
+            ));
+        }
+        Ok(((secs - self.start()) / self.unit) as u64)
+    }
+
+    /// A step, as the moment it starts.
+    fn format(&self, steps: &BigUint) -> Result<String, String> {
+        let secs = u64::try_from(steps)
+            .ok()
+            .and_then(|n| i64::try_from(n).ok())
+            .and_then(|n| n.checked_mul(self.unit))
+            .and_then(|n| n.checked_add(self.start()))
+            .ok_or_else(|| format!("{steps} steps is past every time"))?;
+        Ok(time::format(secs, self.unit % time::DAY == 0))
+    }
 }
 
 /// A variant's position in enum `e`, from its name.
@@ -1082,7 +1129,7 @@ mod tests {
             r#"{"version": 2,
               "inputs": [
                 {"name": "id", "visibility": "private", "type": {"ref": "Identity"}},
-                {"name": "born_before", "visibility": "public", "type": {"ref": "Date"}},
+                {"name": "born_before", "visibility": "public", "type": {"ref": "Timestamp"}},
                 {"name": "allowed", "visibility": "public", "type": {"ref": "Bitfield<Country>"}},
                 {"name": "home", "visibility": "public", "type": {"ref": "Choice<Country>"}},
                 {"name": "k", "visibility": "private", "type": {"ref": "Fq"}},
@@ -1093,9 +1140,11 @@ mod tests {
               "types": {
                 "Identity": {"struct": [
                     {"name": "document", "type": {"ref": "Text"}},
-                    {"name": "born", "type": {"ref": "Date"}},
+                    {"name": "born", "type": {"ref": "Days<1900,2100>"}},
                     {"name": "net_worth", "type": {"uint": 64}}]},
-                "Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}},
+                "Days<1900,2100>": {"newtype": {"uint": 17},
+                    "encoding": {"time": {"unit": 86400, "from": 1900, "to": 2100}}},
+                "Timestamp": {"newtype": {"int": 64}, "encoding": {"timestamp": "unix"}},
                 "Text": {"newtype": "field", "encoding": {"text": 31}},
                 "Bitfield<Country>": {"newtype": "field", "encoding": {"set": "Country"}},
                 "Choice<Country>": {"newtype": "field", "encoding": {"choice": "Country"}},
@@ -1128,9 +1177,16 @@ mod tests {
         let l = schema().leaves(&inputs()).unwrap();
         let d = |k: &str| l[k].into_bigint().to_string();
         assert_eq!(d("id.document"), (0x4241u32).to_string()); // "AB", little-endian
-        assert_eq!(d("id.born"), "19900102");
+        let day = |y, m, d| time::days_from_civil(y, m, d);
+        assert_eq!(
+            d("id.born"),
+            (day(1990, 1, 2) - day(1900, 1, 1)).to_string()
+        );
         assert_eq!(d("id.net_worth"), "7");
-        assert_eq!(d("born_before"), "20081020");
+        assert_eq!(
+            d("born_before"),
+            (day(2008, 10, 20) * time::DAY).to_string()
+        );
         assert_eq!(d("allowed"), "6"); // FR (bit 1) | US (bit 2)
         assert_eq!(d("home"), "1");
         assert_eq!((d("k.limbs[0]"), d("k.limbs[1]")), ("0".into(), "1".into())); // 2^86
@@ -1188,6 +1244,98 @@ mod tests {
                 "{s}"
             );
         }
+    }
+
+    #[test]
+    fn times_are_steps_in_their_range() {
+        let s = Schema::parse(
+            r#"{"version": 2,
+              "inputs": [
+                {"name": "day", "visibility": "public", "type": {"ref": "Days<1900,2100>"}},
+                {"name": "min", "visibility": "public", "type": {"ref": "Time<60,2020,2060>"}},
+                {"name": "at", "visibility": "public", "type": {"ref": "Timestamp"}}],
+              "types": {
+                "Days<1900,2100>": {"newtype": {"uint": 17},
+                    "encoding": {"time": {"unit": 86400, "from": 1900, "to": 2100}}},
+                "Time<60,2020,2060>": {"newtype": {"uint": 25},
+                    "encoding": {"time": {"unit": 60, "from": 2020, "to": 2060}}},
+                "Timestamp": {"newtype": {"int": 64}, "encoding": {"timestamp": "unix"}}},
+              "public_inputs": ["day", "min", "at"]}"#,
+        )
+        .unwrap();
+        let leaves = |day: Value, min: Value, at: Value| {
+            s.public_inputs(&json!({"day": day, "min": min, "at": at}))
+        };
+        let d = |v: Vec<Fr>| {
+            v.iter()
+                .map(|x| x.into_bigint().to_string())
+                .collect::<Vec<_>>()
+        };
+        let days = |y, m, dd| time::days_from_civil(y, m, dd) - time::days_from_civil(1900, 1, 1);
+        // A day, its noon, and its Unix seconds are all that day; a minute rounds down too.
+        let noon = time::days_from_civil(1990, 1, 1) * time::DAY + 43_200;
+        for day in [
+            json!("1990-01-01"),
+            json!("1990-01-01T12:00:00Z"),
+            json!(noon),
+        ] {
+            let l = d(leaves(day.clone(), json!("2020-01-01T00:01:59Z"), json!(-1)).unwrap());
+            assert_eq!(
+                l,
+                [
+                    days(1990, 1, 1).to_string(),
+                    "1".into(),
+                    (u64::MAX).to_string()
+                ],
+                "{day}"
+            );
+        }
+        // Leap days are days.
+        let l = d(leaves(json!("2024-03-01"), json!("2020-01-01T00:00:00Z"), json!(0)).unwrap());
+        assert_eq!(l[0], (days(2024, 2, 28) + 2).to_string());
+        // The ends, and past them.
+        assert_eq!(
+            d(leaves(json!("1900-01-01"), json!(1577836800), json!(0)).unwrap())[0],
+            "0"
+        );
+        for (day, min, why) in [
+            (
+                json!("1899-12-31"),
+                json!(1577836800),
+                "1899-12-31 is outside 1900-01-01 to 2100-12-31",
+            ),
+            (
+                json!("2101-01-01"),
+                json!(1577836800),
+                "2101-01-01 is outside 1900-01-01 to 2100-12-31",
+            ),
+            (
+                json!("1990-01-01"),
+                json!("2019-12-31T23:59:59Z"),
+                "2019-12-31T23:59:59Z is outside 2020-01-01 to 2060-12-31",
+            ),
+            (json!("1990-02-30"), json!(1577836800), "not a calendar day"),
+            (
+                json!("1990-01-01T00:00:00"),
+                json!(1577836800),
+                "no time zone",
+            ),
+            (json!(true), json!(1577836800), "Unix seconds"),
+        ] {
+            let e = leaves(day.clone(), min, json!(0)).unwrap_err();
+            assert!(e.message.contains(why), "{day}: {e}");
+        }
+        // Back: a day as its date, a minute and a timestamp as date-times.
+        let pubs = leaves(
+            json!("2024-02-29"),
+            json!("2030-06-01T08:30:45+02:00"),
+            json!(-1),
+        )
+        .unwrap();
+        assert_eq!(
+            s.decode_public(&pubs, false).unwrap(),
+            json!({"day": "2024-02-29", "min": "2030-06-01T06:30:00Z", "at": "1969-12-31T23:59:59Z"})
+        );
     }
 
     #[test]
@@ -1273,7 +1421,7 @@ mod tests {
         let s = schema();
         let pubs = s.public_inputs(&inputs()).unwrap();
         let back = s.decode_public(&pubs, true).unwrap();
-        assert_eq!(back["bornBefore"], "2008-10-20");
+        assert_eq!(back["bornBefore"], "2008-10-20T00:00:00Z");
         assert_eq!(back["allowed"], json!(["FR", "US"]));
         assert_eq!(back["home"], "FR");
         assert_eq!(back["ok"], true);
@@ -1302,7 +1450,8 @@ mod tests {
             .iter()
             .map(|x| x.into_bigint().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(f, [(0x4241u32).to_string(), "19900102".into(), "7".into()]);
+        let born = time::days_from_civil(1990, 1, 2) - time::days_from_civil(1900, 1, 1);
+        assert_eq!(f, [(0x4241u32).to_string(), born.to_string(), "7".into()]);
         assert!(schema().fields("Nope", &json!({})).is_err());
     }
 

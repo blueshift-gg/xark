@@ -4,7 +4,7 @@
 //! must match the compiler's input-var order exactly.
 
 use xark::input::Type;
-use xark::{Bitfield, Choice, Country, Date, Field, Input, Text, input};
+use xark::{Bitfield, Choice, Country, Days, Field, Input, Text, Timestamp, input};
 
 /// The leaves with decimal values, for comparison.
 fn leaves<T: Input>(v: &T, prefix: &str) -> Vec<(String, String)> {
@@ -172,12 +172,13 @@ fn schema_demo(
     b: Private<[u8; 4]>,
     w: Public<[u32; 2]>,
     f: Public<Field>,
-    day: Public<Date>,
+    day: Public<Days<1900, 2100>>,
+    at: Public<Timestamp>,
     doc: Private<Text>,
     tier: Private<Choice<Tier>>,
     allowed: Public<Bitfield<Country>>,
 ) {
-    let _ = (o, n, b, w, f, day, doc, tier, allowed);
+    let _ = (o, n, b, w, f, day, at, doc, tier, allowed);
 }
 
 #[test]
@@ -194,7 +195,9 @@ fn circuit_schema_describes_every_type_once() {
         .collect();
     assert_eq!(
         names,
-        ["o", "n", "b", "w", "f", "day", "doc", "tier", "allowed"]
+        [
+            "o", "n", "b", "w", "f", "day", "at", "doc", "tier", "allowed"
+        ]
     );
     assert_eq!(
         v["types"]["Outer"].to_string(),
@@ -209,10 +212,17 @@ fn circuit_schema_describes_every_type_once() {
         serde_json::json!(["Retail", "Accredited"])
     );
     assert_eq!(v["types"]["Country"]["enum"].as_array().unwrap().len(), 249);
-    assert_eq!(v["types"]["Date"]["encoding"]["date"], "yyyymmdd");
+    assert_eq!(
+        v["types"]["Days<1900,2100>"].to_string(),
+        r#"{"encoding":{"time":{"from":1900,"to":2100,"unit":86400}},"newtype":{"uint":17}}"#
+    );
+    assert_eq!(
+        v["types"]["Timestamp"].to_string(),
+        r#"{"encoding":{"timestamp":"unix"},"newtype":{"int":64}}"#
+    );
     assert_eq!(
         v["public_inputs"],
-        serde_json::json!(["n", "w[0]", "w[1]", "f", "day", "allowed"])
+        serde_json::json!(["n", "w[0]", "w[1]", "f", "day", "at", "allowed"])
     );
 }
 
@@ -295,20 +305,20 @@ mod exported {
 
     #[input]
     pub struct Window {
-        pub from: Date,
-        pub to: Date,
+        pub from: Days<2000, 2100>,
+        pub to: Days<2000, 2100>,
     }
 
     #[input]
     impl Window {
         /// From `from` on, with no end.
-        pub fn starting(from: impl Into<Date>) -> Window {
+        pub fn starting(from: impl Into<Days<2000, 2100>>) -> Window {
             Window {
                 from: from.into(),
-                to: Date::MAX,
+                to: Days::MAX,
             }
         }
-        pub fn until(self, to: Date) -> Self {
+        pub fn until(self, to: Days<2000, 2100>) -> Self {
             Window { to, ..self }
         }
         fn private_helper(&self) -> bool {
@@ -318,7 +328,7 @@ mod exported {
 
     #[test]
     fn exported_blocks_are_plain_rust() {
-        let w = Window::starting("2026-10-20").until(Date::new(2027, 1, 1));
+        let w = Window::starting("2026-10-20").until(Days::new(2027, 1, 1));
         assert!(w.private_helper());
         let json = xark::client::to_json(&w).unwrap();
         assert_eq!(

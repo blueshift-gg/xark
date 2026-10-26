@@ -295,11 +295,17 @@ const schema = {
         "ZW"
       ]
     },
-    "Date": {
+    "Days<1900,2100>": {
       "encoding": {
-        "date": "yyyymmdd"
+        "time": {
+          "from": 1900,
+          "to": 2100,
+          "unit": 86400
+        }
       },
-      "newtype": "field"
+      "newtype": {
+        "uint": 17
+      }
     },
     "Identity": {
       "struct": [
@@ -312,7 +318,7 @@ const schema = {
         {
           "name": "born",
           "type": {
-            "ref": "Date"
+            "ref": "Days<1900,2100>"
           }
         },
         {
@@ -330,7 +336,7 @@ const schema = {
         {
           "name": "expires",
           "type": {
-            "ref": "Date"
+            "ref": "Days<1900,2100>"
           }
         },
         {
@@ -344,13 +350,13 @@ const schema = {
         {
           "name": "today",
           "type": {
-            "ref": "Date"
+            "ref": "Days<1900,2100>"
           }
         },
         {
           "name": "born_by",
           "type": {
-            "ref": "Date"
+            "ref": "Days<1900,2100>"
           }
         },
         {

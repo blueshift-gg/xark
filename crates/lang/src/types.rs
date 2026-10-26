@@ -1,115 +1,12 @@
-//! Everyday input types with a natural form on both sides: a [`Date`], a short
-//! [`Text`], one variant of an [`Enum`] ([`Choice`]) and a set of them
-//! ([`Bitfield`]). Each is one `Field` in the circuit and its plain value off it
-//! (`Date::new(1990, 1, 1)` in Rust, a JS `Date` in a generated client), with its
-//! standard type recorded in `schema.json`.
+//! Everyday input types with a natural form on both sides: a short [`Text`], one
+//! variant of an [`Enum`] ([`Choice`]) and a set of them ([`Bitfield`]). Each is one
+//! `Field` in the circuit and its plain value off it (`"A1938274"`, `Country::US`),
+//! with its standard type recorded in `schema.json`. Times are in [`crate::time`].
 
-use core::cmp::Ordering;
 use core::marker::PhantomData;
 
 use crate::input::{Encoding, Enum, Input, Layout, Reader, Type, Writer};
 use crate::lang::{Field, require, require_eq};
-
-// ---- Date ---------------------------------------------------------------------
-
-/// `YYYYMMDD ≤ 99_991_231 < 2²⁷`: the comparison width for any date.
-const DATE_BITS: usize = 27;
-
-/// A calendar date, packed as the integer `YYYYMMDD` in one `Field`, compared as
-/// such: `require(id.born < cutoff)`. Each comparison range-checks both sides to 27
-/// bits (a few dozen constraints).
-///
-/// Built off-circuit from calendar parts, checked ([`Date::new`] refuses 30 February),
-/// or from `"YYYY-MM-DD"`. Validity isn't re-checked in the circuit: a date input is
-/// one a trusted party fixed (an issuer's commitment, a verifier's public input).
-/// [`Date::MIN`] and [`Date::MAX`] bound every date ("any date of birth").
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct Date(Field);
-
-/// Days in `month` of `year` (proleptic Gregorian).
-const fn days_in_month(year: u16, month: u8) -> u8 {
-    match month {
-        2 if (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400) => {
-            29
-        }
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
-}
-
-impl Date {
-    /// The last day a `Date` holds, 9999-12-31: after every other. A policy with no
-    /// upper limit uses it (and every client can read it back, unlike a raw sentinel).
-    pub const MAX: Date = Date::new(9999, 12, 31);
-    /// The first day a `Date` holds, 0000-01-01: before every other.
-    pub const MIN: Date = Date::new(0, 1, 1);
-
-    /// A real calendar day, checked: a bad literal in a `const` is a compile error,
-    /// at run time a panic.
-    pub const fn new(year: u16, month: u8, day: u8) -> Date {
-        assert!(year <= 9999, "year must be 0..=9999");
-        assert!(month >= 1 && month <= 12, "month must be 1..=12");
-        assert!(
-            day >= 1 && day <= days_in_month(year, month),
-            "no such day in that month"
-        );
-        Date(Field::from_u64(
-            year as u64 * 10_000 + month as u64 * 100 + day as u64,
-        ))
-    }
-
-    /// A real calendar day, or `None` (30 February, month 13, year 10000).
-    pub const fn checked(year: u16, month: u8, day: u8) -> Option<Date> {
-        if year > 9999 || month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) {
-            return None;
-        }
-        Some(Date(Field::from_u64(
-            year as u64 * 10_000 + month as u64 * 100 + day as u64,
-        )))
-    }
-
-    /// The raw integer `YYYYMMDD`, unchecked. Prefer [`Date::MIN`]/[`Date::MAX`] for
-    /// "any date": a value that isn't a calendar day can't be read back by a client.
-    pub const fn from_raw(yyyymmdd: u32) -> Date {
-        Date(Field::from_u64(yyyymmdd as u64))
-    }
-
-    /// The date's `Field` (`YYYYMMDD`).
-    pub const fn field(self) -> Field {
-        self.0
-    }
-}
-
-/// `<`, `<=`, `>`, `>=` between dates: a `{0, 1}` circuit wire, both sides range-checked
-/// to 27 bits. (`==` is [`require_eq`] on [`Date::field`].)
-impl PartialOrd for Date {
-    // Never reached: the comparison operators below are overridden.
-    fn partial_cmp(&self, _: &Date) -> Option<Ordering> {
-        crate::intrinsics::__xark_marker()
-    }
-    fn lt(&self, other: &Date) -> bool {
-        self.0.lt::<DATE_BITS>(other.0)
-    }
-    fn le(&self, other: &Date) -> bool {
-        self.0.le::<DATE_BITS>(other.0)
-    }
-    fn gt(&self, other: &Date) -> bool {
-        self.0.gt::<DATE_BITS>(other.0)
-    }
-    fn ge(&self, other: &Date) -> bool {
-        self.0.ge::<DATE_BITS>(other.0)
-    }
-}
-
-/// Circuit equality (see `Field`'s `PartialEq`); with `PartialOrd`, dates compare with
-/// every operator.
-impl PartialEq for Date {
-    fn eq(&self, other: &Date) -> bool {
-        self.0 == other.0
-    }
-}
 
 // ---- Text ---------------------------------------------------------------------
 
@@ -345,17 +242,6 @@ impl<E: Enum> Bitfield<E> {
 
 // ---- inputs ---------------------------------------------------------------------
 
-impl Input for Date {
-    const TYPE: Type =
-        Type::Named(&Type::named("Date", Layout::Newtype(Type::Field)).encoded(Encoding::Date));
-    fn read(r: &mut Reader<'_>) -> Self {
-        Date(r.field())
-    }
-    fn write(&self, w: &mut Writer<'_>) {
-        w.field(self.0)
-    }
-}
-
 impl Input for Text {
     const TYPE: Type =
         Type::Named(&Type::named("Text", Layout::Newtype(Type::Field)).encoded(Encoding::Text(31)));
@@ -410,7 +296,7 @@ macro_rules! one_field_eq {
         }
     )*};
 }
-one_field_eq!(Date, Text, Choice<E: Enum>, Bitfield<E: Enum>);
+one_field_eq!(Text, Choice<E: Enum>, Bitfield<E: Enum>);
 
 macro_rules! one_field_partial_eq {
     ($($t:ident $(<$g:ident: $b:ident>)?),*) => {$(
@@ -438,11 +324,6 @@ mod circuit_debug {
 
     use super::*;
 
-    impl fmt::Debug for Date {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "Date({:?})", self.0)
-        }
-    }
     impl fmt::Debug for Text {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "Text({:?})", self.0)
@@ -470,17 +351,9 @@ mod host {
 
     use super::*;
 
-    impl Date {
-        /// The calendar parts `(year, month, day)`.
-        pub fn parts(self) -> (u16, u8, u8) {
-            let v: u64 = self.0.to_decimal().parse().unwrap_or(0);
-            ((v / 10_000) as u16, (v / 100 % 100) as u8, (v % 100) as u8)
-        }
-    }
-
     /// A value that isn't one of its type: a malformed date, text too long.
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct InvalidValue(String);
+    pub struct InvalidValue(pub(crate) String);
 
     impl fmt::Display for InvalidValue {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -489,57 +362,6 @@ mod host {
     }
 
     impl core::error::Error for InvalidValue {}
-
-    impl Date {
-        /// `"YYYY-MM-DD"` (or `"YYYYMMDD"`), checked like [`Date::new`].
-        pub fn parse(s: &str) -> Result<Date, InvalidValue> {
-            s.parse()
-        }
-
-        /// The same day `years` earlier (29 February becomes the 28th in a common
-        /// year): the latest birth date of someone `years` old today.
-        pub fn years_before(self, years: u16) -> Date {
-            let (y, m, d) = self.parts();
-            let y = y.checked_sub(years).expect("a date before year 0");
-            Date::checked(y, m, d).unwrap_or(Date::new(y, m, d - 1))
-        }
-    }
-
-    /// `"YYYY-MM-DD"` (or `"YYYYMMDD"`), checked like [`Date::new`].
-    impl core::str::FromStr for Date {
-        type Err = InvalidValue;
-        fn from_str(s: &str) -> Result<Date, InvalidValue> {
-            let d: String = s.chars().filter(|c| *c != '-').collect();
-            let bad = || InvalidValue(alloc::format!("`{s}` is not a YYYY-MM-DD date"));
-            let n = |r: core::ops::Range<usize>| d.get(r).and_then(|x| x.parse::<u16>().ok());
-            match (d.len(), n(0..4), n(4..6), n(6..8)) {
-                (8, Some(y), Some(m), Some(day)) => Date::checked(y, m as u8, day as u8)
-                    .ok_or_else(|| InvalidValue(alloc::format!("`{s}` is not a calendar day"))),
-                _ => Err(bad()),
-            }
-        }
-    }
-
-    /// `"YYYY-MM-DD"` (or `"YYYYMMDD"`), as [`Date::parse`]. Panics on anything else:
-    /// for literals in tests (`"1990-01-01".into()`); parse input you didn't write.
-    impl From<&str> for Date {
-        fn from(s: &str) -> Date {
-            Date::parse(s).unwrap_or_else(|e| panic!("{e}"))
-        }
-    }
-
-    impl From<(u16, u8, u8)> for Date {
-        fn from((y, m, d): (u16, u8, u8)) -> Date {
-            Date::new(y, m, d)
-        }
-    }
-
-    impl fmt::Debug for Date {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let (y, m, d) = self.parts();
-            write!(f, "Date({y:04}-{m:02}-{d:02})")
-        }
-    }
 
     impl Text {
         /// The string, checked to fit (at most 31 UTF-8 bytes).
@@ -633,34 +455,8 @@ mod tests {
     }
 
     #[test]
-    fn dates() {
-        assert_eq!(Date::new(1990, 1, 1).field().to_decimal(), "19900101");
-        assert_eq!(Date::from("2024-02-29").parts(), (2024, 2, 29));
-        assert_eq!(
-            alloc::format!("{:?}", Date::from("20261005")),
-            "Date(2026-10-05)"
-        );
-    }
-
-    #[test]
     fn parsing_returns_errors() {
-        assert_eq!(Date::parse("2024-02-29").unwrap().parts(), (2024, 2, 29));
-        assert_eq!(
-            alloc::format!("{}", Date::parse("2023-02-29").unwrap_err()),
-            "`2023-02-29` is not a calendar day"
-        );
-        assert!(Date::parse("1990-1-1").is_err() && Date::parse("soon").is_err());
-        assert!(Date::checked(2023, 13, 1).is_none());
-        let (today, leap) = (Date::new(2026, 10, 20), Date::new(2024, 2, 29));
-        assert_eq!(today.years_before(18).parts(), (2008, 10, 20));
-        assert_eq!(leap.years_before(1).parts(), (2023, 2, 28));
         assert!(Text::parse(&"x".repeat(32)).is_err() && Text::parse("A1").is_ok());
-    }
-
-    #[test]
-    #[should_panic(expected = "no such day")]
-    fn february_30_is_refused() {
-        let _ = Date::new(2023, 2, 29);
     }
 
     #[test]

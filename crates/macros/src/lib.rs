@@ -50,7 +50,7 @@ pub fn circuit(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// How the host-side validator takes a parameter.
 enum HostArg {
     /// `impl Into<T>`: a `Field` from an integer or string, a gadget type from its
-    /// natural form, a `Date` from `"YYYY-MM-DD"`.
+    /// natural form, a `Days` or `Timestamp` from `"YYYY-MM-DD"`.
     Into,
     /// `[impl Into<Elem>; N]`: an array of such.
     IntoArray(usize),
@@ -341,8 +341,9 @@ fn host_arg(ty: &Type) -> syn::Result<HostArg> {
         other => Err(syn::Error::new_spanned(
             other,
             "unsupported #[circuit] parameter type; a parameter is any `xark::Input` type: \
-             `Field`, `u8`..`u128`, `bool`, `[T; N]`, a tuple, a struct with `#[input]`, a \
-             standard type (`Date`, `Text`, `Choice<E>`, `Bitfield<E>`) or a gadget type",
+             `Field`, `u8`..`u128`, `i8`..`i128`, `bool`, `[T; N]`, a tuple, a struct with \
+             `#[input]`, a standard type (`Timestamp`, `Days<FROM, TO>`, `Text`, `Choice<E>`, \
+             `Bitfield<E>`) or a gadget type",
         )),
     }
 }
@@ -405,7 +406,7 @@ fn to_pascal(s: &str) -> String {
 ///
 /// ```ignore
 /// #[input]
-/// pub struct Identity { pub born: Date, pub nationality: Choice<Country>, pub salt: Field }
+/// pub struct Identity { pub born: Days<1900, 2100>, pub nationality: Choice<Country>, pub salt: Field }
 /// ```
 ///
 /// It derives `Clone`, `Copy` and `Debug` unless the type lists them already (an
@@ -444,7 +445,7 @@ fn to_pascal(s: &str) -> String {
 /// #[input]
 /// impl Policy {
 ///     /// Checked on `today`.
-///     pub fn on(self, today: impl Into<Date>) -> Policy { /* … */ }
+///     pub fn on(self, today: impl Into<Days<1900, 2100>>) -> Policy { /* … */ }
 ///     /// At least `years` old on `today`.
 ///     pub fn min_age(self, years: u16) -> Policy { /* … */ }
 /// }
@@ -452,8 +453,9 @@ fn to_pascal(s: &str) -> String {
 ///
 /// TypeScript gets `Policy.default().on(new Date()).minAge(18)`, typed from the
 /// signature, its docs from these comments. Each parameter and the result must be an
-/// `xark::Input` type (`Field`, `uN`, `bool`, `Date`, a struct with `#[input]`, …;
-/// `impl Into<T>` and `&T` take a `T`, and `Self` is the type); the receiver may be
+/// `xark::Input` type (`Field`, `uN`, `iN`, `bool`, `Days<FROM, TO>`, a struct with
+/// `#[input]`, …; `impl Into<T>` and `&T` take a `T`, and `Self` is the type), written
+/// out rather than as a type alias, since the client reads it as written; the receiver may be
 /// `self` or `&self`. The block itself compiles as
 /// written; a client build (`--cfg xark_client`) also gives each method a wasm export
 /// taking and returning JSON (see `xark::client`), described in the module's
@@ -1105,7 +1107,7 @@ fn into_target(ty: &Type) -> Option<&Type> {
     })
 }
 
-/// A type as written, without spaces: `Date`, `Choice<Country>`, `[u8;4]`.
+/// A type as written, without spaces: `Days<1900,2100>`, `Choice<Country>`, `[u8;4]`.
 fn type_string(ty: &Type) -> String {
     quote!(#ty).to_string().replace(' ', "")
 }

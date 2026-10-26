@@ -180,12 +180,17 @@ mod abi {
 #[cfg(all(test, not(xark)))]
 mod tests {
     use super::*;
-    use crate::{Bitfield, Country, Date};
+    use crate::{Bitfield, Country, Days, Timestamp};
 
     #[test]
     fn values_round_trip_through_json() {
-        let d: Date = from_json(&json!("2026-10-20")).unwrap();
+        let d: Days<1900, 2100> = from_json(&json!("2026-10-20")).unwrap();
         assert_eq!(to_json(&d).unwrap(), json!("2026-10-20"));
+        // Any moment of the day is the day; a timestamp keeps the second.
+        let noon: Days<1900, 2100> = from_json(&json!("2026-10-20T12:00:00Z")).unwrap();
+        assert!(noon == d);
+        let t: Timestamp = from_json(&json!(1_700_000_000)).unwrap();
+        assert_eq!(to_json(&t).unwrap(), json!("2023-11-14T22:13:20Z"));
         let set: Bitfield<Country> = from_json(&json!(["US", "GB"])).unwrap();
         assert_eq!(to_json(&set).unwrap(), json!(["GB", "US"]));
         let t: (i8, i64) = from_json(&json!([-1, "-86400"])).unwrap();
@@ -193,7 +198,8 @@ mod tests {
         assert_eq!(to_json(&t).unwrap(), json!([-1, "-86400"]));
         let pair: (u16, Field) = from_json(&json!([7, "9"])).unwrap();
         assert_eq!(to_json(&pair).unwrap(), json!([7, "9"]));
-        assert!(from_json::<Date>(&json!("2023-02-29")).is_err());
+        assert!(from_json::<Days<1900, 2100>>(&json!("2023-02-29")).is_err());
+        assert!(from_json::<Days<1900, 2100>>(&json!("1899-12-31")).is_err());
         let e = arg::<u8>(&[json!(1)], 1, "years").unwrap_err();
         assert!(
             e.path.is_empty() && e.message.contains("at least 2 arguments"),
@@ -207,7 +213,8 @@ mod tests {
         let e = arg::<Bitfield<Country>>(&[json!(["XX"])], 0, "allowed").unwrap_err();
         assert_eq!(e.path, "allowed");
         assert!(e.message.contains("\"XX\" is not a Country"), "{e}");
-        let e = arg::<(u16, Date)>(&[json!([7, "2023-02-29"])], 0, "born_by").unwrap_err();
+        let e =
+            arg::<(u16, Days<1900, 2100>)>(&[json!([7, "2023-02-29"])], 0, "born_by").unwrap_err();
         assert_eq!(e.path, "bornBy.1");
         assert!(e.message.contains("not a calendar day"), "{e}");
     }
