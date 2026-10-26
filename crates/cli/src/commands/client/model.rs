@@ -20,6 +20,8 @@ pub enum Ty {
     Field,
     /// An unsigned integer of this many bits.
     Uint(u64),
+    /// A signed integer of this many bits.
+    Int(u64),
     /// `true` or `false`.
     Bool,
     /// A byte string: `[u8; N]` (`of: None`), or a byte-encoded type such as a hash or
@@ -137,6 +139,9 @@ impl Model {
         }
         if let Some(w) = ty["uint"].as_u64() {
             return Ok(Ty::Uint(w));
+        }
+        if let Some(w) = ty["int"].as_u64() {
+            return Ok(Ty::Int(w));
         }
         if let Some(a) = ty.get("array") {
             let len = a["len"].as_u64().unwrap_or(0);
@@ -278,6 +283,9 @@ impl Model {
             r if r.starts_with('u') && r[1..].parse::<u64>().is_ok() => {
                 serde_json::json!({ "uint": r[1..].parse::<u64>()? })
             }
+            r if r.starts_with('i') && r[1..].parse::<u64>().is_ok() => {
+                serde_json::json!({ "int": r[1..].parse::<u64>()? })
+            }
             r if r.starts_with('[') && r.ends_with(']') => {
                 let (of, len) = r[1..r.len() - 1]
                     .rsplit_once(';')
@@ -373,6 +381,9 @@ fn rust_type(ty: &Value) -> String {
     }
     if let Some(w) = ty["uint"].as_u64() {
         return format!("u{w}");
+    }
+    if let Some(w) = ty["int"].as_u64() {
+        return format!("i{w}");
     }
     if let Some(a) = ty.get("array") {
         return format!("[{}; {}]", rust_type(&a["of"]), a["len"]);

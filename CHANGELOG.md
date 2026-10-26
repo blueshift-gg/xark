@@ -99,6 +99,10 @@ gadgets now check more:
   `Policy` built with `Policy::default().on(today).min_age(18).worth_at_least(500_000)`.
 - **`bool` inputs.** A `bool` parameter or field is one field element, checked to
   be 0 or 1, usable as a condition and a value.
+- **Signed integer inputs.** An `i8`…`i128` parameter or field is one field
+  element holding its two's complement (`-1i8` is `255`), range-checked to its
+  width like a `uN`. Clients and `--inputs` take a negative number (or a `"-…"`
+  string), and a generated client types it `I8`…`I128`.
 - **`schema.json`.** `xark build` writes every input's name, visibility and type,
   and the public inputs in proof order. A build fails if one type name would stand
   for two different types, since clients look types up by name.

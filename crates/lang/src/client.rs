@@ -188,6 +188,9 @@ mod tests {
         assert_eq!(to_json(&d).unwrap(), json!("2026-10-20"));
         let set: Bitfield<Country> = from_json(&json!(["US", "GB"])).unwrap();
         assert_eq!(to_json(&set).unwrap(), json!(["GB", "US"]));
+        let t: (i8, i64) = from_json(&json!([-1, "-86400"])).unwrap();
+        assert_eq!(t, (-1, -86_400));
+        assert_eq!(to_json(&t).unwrap(), json!([-1, "-86400"]));
         let pair: (u16, Field) = from_json(&json!([7, "9"])).unwrap();
         assert_eq!(to_json(&pair).unwrap(), json!([7, "9"]));
         assert!(from_json::<Date>(&json!("2023-02-29")).is_err());

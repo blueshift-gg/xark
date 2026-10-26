@@ -490,6 +490,68 @@ fn integer_inputs_reject_out_of_range_values() {
     );
 }
 
+/// A signed input is its two's complement, range-checked to its width: `-5i64` is
+/// the leaf `2⁶⁴ − 5`, a leaf of `2⁶⁴` or `p − 1` has no witness, and comparisons
+/// order negatives first.
+#[test]
+fn signed_inputs_compare_and_reject_out_of_range_values() {
+    const P_MINUS_1: &str =
+        "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+    let neg = |x: i64| (x as u64).to_string();
+    let c = compile_with_field(
+        &write_case(
+            "signed_i64",
+            "#![no_std]\nuse xark::prelude::*;\n\
+             pub fn circuit(a: Private<i64>, b: Public<i64>) { require(a < b); }\n",
+        ),
+        "signed_i64",
+        "bn254",
+    );
+    assert!(c.status_success, "{}", c.stderr);
+    for (a, b, ok) in [
+        (-5, 3, true),
+        (3, -5, false),
+        (-6, -5, true),
+        (-5, -5, false),
+        (i64::MIN, i64::MAX, true),
+        (i64::MAX, i64::MIN, false),
+    ] {
+        assert_eq!(
+            accepts_exactly(&c, &[("a", &neg(a)), ("b", &neg(b))]),
+            ok,
+            "{a} < {b}"
+        );
+    }
+    for bad in ["18446744073709551616", P_MINUS_1] {
+        assert!(!accepts_exactly(&c, &[("a", bad), ("b", "0")]), "a = {bad}");
+    }
+
+    // An `i8` struct member: `-1` is `255`, and `256` isn't an `i8`.
+    let c = compile_with_field(
+        &write_case(
+            "signed_i8_member",
+            "#![no_std]\nuse xark::prelude::*;\n\
+             #[input]\nstruct S { x: i8 }\n\
+             pub fn circuit(s: Private<S>, c: Public<i32>) { require((s.x as i32) == c); }\n",
+        ),
+        "signed_i8_member",
+        "bn254",
+    );
+    assert!(c.status_success, "{}", c.stderr);
+    assert!(
+        accepts_exactly(&c, &[("s.x", "255"), ("c", &(-1i32 as u32).to_string())]),
+        "-1i8 as i32 == -1"
+    );
+    assert!(
+        !accepts_exactly(&c, &[("s.x", "255"), ("c", "255")]),
+        "-1i8 as i32 != 255"
+    );
+    assert!(
+        !accepts_exactly(&c, &[("s.x", "256"), ("c", "0")]),
+        "256 isn't an i8"
+    );
+}
+
 /// A `u128` input next to a narrower one (in a struct, or as parameters) builds and
 /// proves: dropping the input-binding call regions keeps the rest's parents right.
 #[test]

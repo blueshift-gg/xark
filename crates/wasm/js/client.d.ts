@@ -78,6 +78,16 @@ export type U32 = number;
 export type U64 = bigint | number;
 /** An integer in [0, 2^128): Rust's `u128`. A `number` must be a safe integer. */
 export type U128 = bigint | number;
+/** An integer in [-2^7, 2^7): Rust's `i8`. */
+export type I8 = number;
+/** An integer in [-2^15, 2^15): Rust's `i16`. */
+export type I16 = number;
+/** An integer in [-2^31, 2^31): Rust's `i32`. */
+export type I32 = number;
+/** An integer in [-2^63, 2^63): Rust's `i64`. A `number` must be a safe integer. */
+export type I64 = bigint | number;
+/** An integer in [-2^127, 2^127): Rust's `i128`. A `number` must be a safe integer. */
+export type I128 = bigint | number;
 
 /**
  * A field input: a `Field`, or a plain integer (a `bigint`, a safe integer, a

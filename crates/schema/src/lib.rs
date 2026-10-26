@@ -13,7 +13,7 @@
 //! ```
 //!
 //! `xark::input::schema_json` writes it from each parameter's `Input::TYPE`. A type
-//! is `"field"`, `{"uint": N}`, `"bool"`, `{"array": {"of", "len"}}`, `{"tuple": […]}` or
+//! is `"field"`, `{"uint": N}`, `{"int": N}` (two's complement), `"bool"`, `{"array": {"of", "len"}}`, `{"tuple": […]}` or
 //! `{"ref": "<Name>"}`: a struct (`{"struct": [{"name", "type"}, …]}`) or a newtype
 //! (`{"newtype": <type>}`). An enum (`{"enum": [names]}`) is never an input itself,
 //! only what a `choice` or `set` names. A named type may carry an `encoding`, the
@@ -36,7 +36,7 @@ use std::collections::BTreeMap;
 
 use ark_bn254::Fr;
 use ark_ff::{BigInteger, PrimeField};
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint, Sign};
 use serde_json::{Map, Value, json};
 
 /// A circuit's input description (`schema.json`).
@@ -253,7 +253,7 @@ impl Schema {
 
     /// The leaf names of a value of `ty` at `prefix`, in flatten order.
     fn leaf_names(&self, ty: &Value, prefix: &str, out: &mut Vec<String>) {
-        if ty == "field" || ty == "bool" || ty.get("uint").is_some() {
+        if ty == "field" || ty == "bool" || ty.get("uint").is_some() || ty.get("int").is_some() {
             out.push(prefix.to_string());
         } else if let Some(a) = ty.get("array") {
             for i in 0..a["len"].as_u64().unwrap_or(0) {
@@ -297,6 +297,11 @@ impl Schema {
                 return Err(err(format!("{n} is out of range for a u{w}")));
             }
             out.insert(at.into(), Fr::from(n));
+        } else if let Some(w) = ty["int"].as_u64() {
+            out.insert(
+                at.into(),
+                Fr::from(twos_complement(&signed(v).map_err(err)?, w).map_err(err)?),
+            );
         } else if let Some(a) = ty.get("array") {
             let len = a["len"].as_u64().unwrap_or(0) as usize;
             let items: Vec<Value> = if a["of"]["uint"] == 8 && v.is_string() {
@@ -542,6 +547,13 @@ impl Schema {
                 json!(n.to_string())
             });
         }
+        if let Some(w) = ty["int"].as_u64() {
+            let n = from_twos_complement(&BigUint::from(next()?.into_bigint()), w)?;
+            return Ok(match i64::try_from(&n) {
+                Ok(i) if w <= 53 => json!(i),
+                _ => json!(n.to_string()),
+            });
+        }
         if let Some(a) = ty.get("array") {
             let len = a["len"].as_u64().unwrap_or(0);
             if a["of"]["uint"] == 8 {
@@ -705,6 +717,9 @@ impl Schema {
         if let Some(w) = ty["uint"].as_u64() {
             return q(&format!("<u{w}>"));
         }
+        if let Some(w) = ty["int"].as_u64() {
+            return q(&format!("<i{w}>"));
+        }
         let list = |xs: Vec<String>| format!("[{}]", xs.join(", "));
         if let Some(a) = ty.get("array") {
             let n = a["len"].as_u64().unwrap_or(0);
@@ -771,6 +786,9 @@ fn describe(ty: &Value) -> String {
     }
     if let Some(w) = ty["uint"].as_u64() {
         return format!("u{w}");
+    }
+    if let Some(w) = ty["int"].as_u64() {
+        return format!("i{w}");
     }
     if let Some(a) = ty.get("array") {
         return format!("[{}; {}]", describe(&a["of"]), a["len"]);
@@ -841,6 +859,60 @@ fn integer(v: &Value) -> Result<BigUint, String> {
         }
         other => Err(format!("expected a number, got {other}")),
     }
+}
+
+/// An integer of either sign: a JSON number, or a decimal / `0x`-hex string with an
+/// optional leading `-`.
+fn signed(v: &Value) -> Result<BigInt, String> {
+    match v {
+        Value::Number(n) if n.as_i64().is_some() => Ok(BigInt::from(n.as_i64().unwrap_or(0))),
+        Value::Number(n) if n.as_f64().is_some_and(|f| f < 0.0) => {
+            let f = n.as_f64().unwrap_or(f64::NAN);
+            if f.fract() != 0.0 {
+                Err(format!("{n} is not a whole number"))
+            } else if f > -9.0e15 {
+                Ok(BigInt::from(f as i64))
+            } else {
+                Err(format!(
+                    "{n} is too large to write as a JSON number exactly: put it in quotes"
+                ))
+            }
+        }
+        Value::String(s) if s.trim().starts_with('-') => {
+            let rest = Value::String(s.trim()[1..].to_string());
+            let n =
+                integer(&rest).map_err(|_| format!("{s:?} is not a decimal or 0x-hex number"))?;
+            Ok(-BigInt::from(n))
+        }
+        _ => integer(v).map(BigInt::from),
+    }
+}
+
+/// `n` as a `w`-bit two's complement word (`-1` as `2^w - 1`), or why it doesn't fit.
+fn twos_complement(n: &BigInt, w: u64) -> Result<BigUint, String> {
+    let half = BigInt::from(1u8) << (w - 1);
+    if *n < -&half || *n >= half {
+        return Err(format!("{n} is out of range for an i{w}"));
+    }
+    let word = if n.sign() == Sign::Minus {
+        n + (&half << 1)
+    } else {
+        n.clone()
+    };
+    Ok(word.to_biguint().unwrap_or_default())
+}
+
+/// A `w`-bit two's complement word as the integer it stands for.
+fn from_twos_complement(word: &BigUint, w: u64) -> Result<BigInt, String> {
+    if word.bits() > w {
+        return Err(format!("{word} is out of range for an i{w}"));
+    }
+    let n = BigInt::from(word.clone());
+    Ok(if word.bit(w - 1) {
+        n - (BigInt::from(1u8) << w)
+    } else {
+        n
+    })
 }
 
 /// A field element, `0 <= x < p` (never reduced: a value that wraps would prove
@@ -1116,6 +1188,64 @@ mod tests {
                 "{s}"
             );
         }
+    }
+
+    #[test]
+    fn signed_integers_are_twos_complement() {
+        let s = Schema::parse(
+            r#"{"version": 2,
+              "inputs": [
+                {"name": "a", "visibility": "public", "type": {"int": 8}},
+                {"name": "t", "visibility": "public", "type": {"int": 64}}],
+              "types": {}, "public_inputs": ["a", "t"]}"#,
+        )
+        .unwrap();
+        let leaves = |a: Value, t: Value| s.public_inputs(&json!({"a": a, "t": t}));
+        let d = |v: Vec<Fr>| {
+            v.iter()
+                .map(|x| x.into_bigint().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(d(leaves(json!(-1), json!(5)).unwrap()), ["255", "5"]);
+        assert_eq!(
+            d(leaves(json!(-128), json!("-9223372036854775808")).unwrap()),
+            ["128", (1u64 << 63).to_string().as_str()]
+        );
+        assert_eq!(
+            d(leaves(json!(127), json!("9223372036854775807")).unwrap()),
+            ["127", i64::MAX.to_string().as_str()]
+        );
+        // `-1` round trips; a 64-bit value comes back as a string.
+        let pubs = leaves(json!(-1), json!(-86_400)).unwrap();
+        assert_eq!(
+            s.decode_public(&pubs, false).unwrap(),
+            json!({"a": -1, "t": "-86400"})
+        );
+        for (a, t, why) in [
+            (json!(128), json!(0), "128 is out of range for an i8"),
+            (json!(-129), json!(0), "-129 is out of range for an i8"),
+            (
+                json!(0),
+                json!("9223372036854775808"),
+                "out of range for an i64",
+            ),
+            (
+                json!(0),
+                json!("-9223372036854775809"),
+                "out of range for an i64",
+            ),
+            (json!(-1.5), json!(0), "-1.5 is not a whole number"),
+            (json!("-x"), json!(0), "is not a decimal or 0x-hex number"),
+        ] {
+            let e = leaves(a.clone(), t).unwrap_err();
+            assert!(e.message.contains(why), "{a}: {e}");
+        }
+        // A leaf past the width (a proof can't carry one, but a caller can pass one).
+        assert!(
+            s.decode_public(&[Fr::from(256u32), Fr::from(0u8)], false)
+                .unwrap_err()
+                .contains("out of range for an i8")
+        );
     }
 
     #[test]

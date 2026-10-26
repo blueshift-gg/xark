@@ -97,6 +97,34 @@ fn input_uints_and_nesting_leaves() {
     assert_eq!((back.inner.a, back.tag, back.c), (u64::MAX, [1, 2], 3));
 }
 
+/// Signed members: each leaf is the two's complement of its width.
+#[input]
+struct Signed {
+    a: i8,
+    t: i64,
+    big: i128,
+}
+
+#[test]
+fn signed_members_are_twos_complement_leaves() {
+    let v = Signed {
+        a: -1,
+        t: -86_400,
+        big: i128::MIN,
+    };
+    assert_eq!(
+        leaves(&v, "s"),
+        [
+            ("s.a", "255".to_string()),
+            ("s.t", (-86_400i64 as u64).to_string()),
+            ("s.big", (1u128 << 127).to_string()),
+        ]
+        .map(|(n, v)| (n.to_string(), v))
+    );
+    let back: Signed = input::from_fields(&v.to_fields());
+    assert_eq!((back.a, back.t, back.big), (-1, -86_400, i128::MIN));
+}
+
 /// A hand-written impl: a type the derive can't express (a generic one).
 #[derive(Clone, Copy)]
 struct Pair<T>(T, T);

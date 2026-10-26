@@ -12,6 +12,7 @@
 //! |------------------------|-------------------------------|---------------|
 //! | field                  | `FieldInput` (`Field`, an integer) | `Field`  |
 //! | `uN`                   | `number` (`bigint` past 32)   | `number`/`bigint` |
+//! | `iN`                   | `number` (`bigint` past 32)   | `number`/`bigint` |
 //! | bool                   | `boolean`                     | `boolean`     |
 //! | bytes                  | `Uint8Array`                  | `Uint8Array`  |
 //! | number (limbed)        | an integer, or bytes          | `bigint`      |
@@ -78,6 +79,9 @@ fn input(ty: &Ty) -> String {
         Ty::Uint(w @ (8 | 16 | 32 | 64 | 128)) => format!("U{w}"),
         Ty::Uint(w) if *w <= 32 => "number".into(),
         Ty::Uint(_) => "bigint | number".into(),
+        Ty::Int(w @ (8 | 16 | 32 | 64 | 128)) => format!("I{w}"),
+        Ty::Int(w) if *w <= 32 => "number".into(),
+        Ty::Int(_) => "bigint | number".into(),
         Ty::Bool => "boolean".into(),
         Ty::Bytes { .. } => "Uint8Array".into(),
         Ty::Number { .. } => "bigint | number | string | Uint8Array".into(),
@@ -103,8 +107,8 @@ fn value(ty: &Ty, structs: &mut BTreeSet<String>) -> String {
     match ty {
         Ty::Field => "Field".into(),
         Ty::Number { .. } => "bigint".into(),
-        Ty::Uint(w) if *w <= 53 => "number".into(),
-        Ty::Uint(_) => "bigint".into(),
+        Ty::Uint(w) | Ty::Int(w) if *w <= 53 => "number".into(),
+        Ty::Uint(_) | Ty::Int(_) => "bigint".into(),
         Ty::Bool => "boolean".into(),
         Ty::Bytes { .. } => "Uint8Array".into(),
         Ty::Date => "Day".into(),
@@ -132,8 +136,10 @@ fn revive(ty: &Ty, e: &str) -> String {
     match ty {
         Ty::Field => format!("new Field({e})"),
         Ty::Number { .. } => format!("BigInt({e})"),
-        Ty::Uint(w) if *w > 53 => format!("BigInt({e})"),
-        Ty::Uint(_) | Ty::Bool | Ty::Text { .. } | Ty::Choice(_) | Ty::Set(_) => e.into(),
+        Ty::Uint(w) | Ty::Int(w) if *w > 53 => format!("BigInt({e})"),
+        Ty::Uint(_) | Ty::Int(_) | Ty::Bool | Ty::Text { .. } | Ty::Choice(_) | Ty::Set(_) => {
+            e.into()
+        }
         Ty::Bytes { .. } => format!("fromHex({e})"),
         Ty::Date => format!("new Date({e})"),
         // Element by element, so a fixed length stays a tuple.
@@ -158,10 +164,14 @@ fn revive(ty: &Ty, e: &str) -> String {
 fn note(ty: &Ty) -> Option<String> {
     Some(match ty {
         // Named aliases (`U64`, `Day`, `Text`) carry their own docs, and a tuple its length.
-        Ty::Uint(8 | 16 | 32 | 64 | 128) | Ty::Date | Ty::Text { max: TEXT } => return None,
+        Ty::Uint(8 | 16 | 32 | 64 | 128)
+        | Ty::Int(8 | 16 | 32 | 64 | 128)
+        | Ty::Date
+        | Ty::Text { max: TEXT } => return None,
         Ty::Array(_, n) if *n as usize <= TUPLE => return None,
         Ty::Choice(_) => return None,
         Ty::Uint(w) => format!("`u{w}`: an integer in [0, 2^{w})."),
+        Ty::Int(w) => format!("`i{w}`: an integer in [-2^{}, 2^{}).", w - 1, w - 1),
         Ty::Bytes {
             of: None,
             len: Some(n),
@@ -544,6 +554,11 @@ pub fn generate(m: &Model, schema_import: &str) -> Result<String> {
     let mut types: Vec<&str> = [
         "Day",
         "FieldInput",
+        "I128",
+        "I16",
+        "I32",
+        "I64",
+        "I8",
         "Json",
         "Proof",
         "Prover",
@@ -612,7 +627,8 @@ mod tests {
           {"name": "active", "type": "bool"},
           {"name": "home", "type": {"ref": "Choice<Country>"}},
           {"name": "tier", "type": {"ref": "Choice<Tier>"}},
-          {"name": "pair", "type": {"tuple": ["field", {"uint": 16}]}}]},
+          {"name": "pair", "type": {"tuple": ["field", {"uint": 16}]}},
+          {"name": "offset", "type": {"int": 64}}]},
         "Date": {"newtype": "field", "encoding": {"date": "yyyymmdd"}},
         "Bitfield<Country>": {"newtype": "field", "encoding": {"set": "Country"}},
         "Choice<Country>": {"newtype": "field", "encoding": {"choice": "Country"}},
@@ -642,13 +658,14 @@ mod tests {
             "  Retail: \"Retail\", Not_Set: \"Not_Set\",",
             "  pair: readonly [FieldInput, U16];",
             "  active: boolean;",
+            "  offset: I64;",
             "  bornBefore: Day;",
             "  allowed: Country | readonly Country[];",
             "  doc: Uint8Array;",
             "export interface KycCheckPublicValues {\n  bornBefore: Day;\n  allowed: Country[];\n  commitment: Field;\n}",
             "    bornBefore: new Date(v.bornBefore),",
             "    commitment: new Field(v.commitment),",
-            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type Day, type FieldInput, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nimport schema from \"./kyc_check.schema\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
+            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type Day, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nimport schema from \"./kyc_check.schema\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
             "  name: \"kyc_check\",\n  schema,\n",
             "export interface KycCheckStructs {\n  Identity: Identity;\n}",
             "export const KycCheck = new Circuit<KycCheckInputs, KycCheckPublicInputs, KycCheckPublicValues, KycCheckStructs>({\n  name: \"kyc_check\",",
