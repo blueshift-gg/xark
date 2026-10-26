@@ -7,7 +7,7 @@
 //! in one shot.
 
 mod common;
-use common::{tempdir, xark_build, xark_check_input, xark_prove, xark_setup, xark_setup_opts};
+use common::{run, tempdir, xark_build, xark_check_input, xark_prove, xark_setup, xark_setup_opts};
 
 #[test]
 fn arithmetic_square_build_prove_verify() {
@@ -81,6 +81,31 @@ fn wrong_public_output_fails_to_verify() {
         !ok,
         "prove unexpectedly succeeded on an unsatisfied witness: {err}"
     );
+}
+
+/// A public input in no constraint, `bind`ed (a recipient only the verifier
+/// supplies): the proof verifies only with the value it was made for.
+#[test]
+fn a_bound_public_input_binds_the_proof() {
+    let tmp = tempdir();
+    let out = tmp.path().join("out");
+    let target = tmp.path().join("target");
+    let (ok, err) = xark_build("bound_recipient", &out, &target);
+    assert!(ok, "build failed: {err}");
+    let (ok, err) = xark_setup(&out);
+    assert!(ok, "setup failed: {err}");
+    let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9"), ("recipient", "5")]);
+    assert!(ok, "prove failed: {err}");
+    let verify = |recipient: &str| {
+        let inputs = format!(r#"{{"y": "9", "recipient": "{recipient}"}}"#);
+        run(&["verify", out.to_str().unwrap(), "--inputs", &inputs])
+    };
+    let (ok, stdout, stderr) = verify("5");
+    assert!(ok, "{stdout}{stderr}");
+    for other in ["6", "0"] {
+        let (ok, stdout, stderr) = verify(other);
+        assert!(!ok, "recipient {other} verified: {stdout}{stderr}");
+    }
 }
 
 #[test]

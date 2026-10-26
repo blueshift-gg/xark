@@ -50,6 +50,11 @@ impl Input for Hash {
 }
 
 impl Hash {
+    /// Its two field elements, `[hi, lo]`, in input order: to hash it, or `bind` it.
+    pub fn to_fields(&self) -> [Field; 2] {
+        [self.hi, self.lo]
+    }
+
     /// Recompose 256 weighted bits into the packed pair `hi · 2¹²⁸ + lo`: `bits[i]`
     /// is bit `i` of the hash as a big-endian integer (weight `2ⁱ`), so bits
     /// `0..128` form `lo` and `128..256` form `hi`. Pure linear recomposition; each

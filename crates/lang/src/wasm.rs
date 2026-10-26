@@ -99,6 +99,8 @@ mod ffi {
         pub fn xark_field_to_uint(x: *const Field, bits: u32) -> u64;
         #[cfg_attr(target_arch = "wasm32", link_name = "field_to_bool")]
         pub fn xark_field_to_bool(x: *const Field) -> bool;
+        #[cfg_attr(target_arch = "wasm32", link_name = "bind")]
+        pub fn xark_bind(x: *const Field);
         #[cfg_attr(target_arch = "wasm32", link_name = "inputs_done")]
         pub fn xark_inputs_done();
         #[cfg_attr(target_arch = "wasm32", link_name = "panic")]
@@ -294,6 +296,12 @@ pub(crate) fn record_schema(json: &str) {
 #[inline(always)]
 pub(crate) fn field_to_uint(x: Field, bits: u32) -> u64 {
     unsafe { ffi::xark_field_to_uint(&x, bits) }
+}
+
+/// Mark `x`, a public input, as bound by the verifier alone ([`crate::bind`]).
+#[inline(always)]
+pub(crate) fn bind(x: Field) {
+    unsafe { ffi::xark_bind(&x) }
 }
 
 /// `x`, a field element that is 0 or 1, as a `bool` (proven, as [`field_to_uint`]).

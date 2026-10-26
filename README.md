@@ -39,6 +39,10 @@ pub fn cube(secret: Private<Field>, result: Public<Field>) {
 }
 ```
 
+Every public input must be used. One that only the verifier supplies, such as a
+recipient or a nonce that a proof must not be reused for, takes `bind(recipient)`:
+one constraint, and the proof then verifies only with the value it was made for.
+
 ### Testing a circuit from Rust
 
 `#[circuit]` also generates a validator under the circuit's name for tests and

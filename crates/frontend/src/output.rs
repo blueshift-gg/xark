@@ -1713,13 +1713,13 @@ pub(crate) fn check_pinning(out: &LowerOutput, n_inputs: usize) -> CompileResult
         match v.visibility {
             Visibility::Public => {
                 return Err(CompileError::new(format!(
-                    "public input `{}` is declared but no constraint references it — \
-                     the verifier's value for it would be unconstrained",
+                    "public input `{}` is declared but no constraint uses it",
                     v.name
                 ))
                 .with_note(
-                    "bind every public input/output with an `require_eq` (or remove it \
-                     from the signature)",
+                    "if only the verifier supplies it (a recipient, a nonce), say so with \
+                     `bind(it)`: the proof then verifies only with the value it was made \
+                     for. Otherwise use it in a constraint, or remove it from the signature",
                 ));
             }
             // A `Private` var allocated after the inputs is a hint/advice output.

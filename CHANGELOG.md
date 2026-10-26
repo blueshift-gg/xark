@@ -294,6 +294,11 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Added
 
+- `bind(x)`, for a public input that only the verifier supplies (a recipient, a
+  nonce): one constraint that any value satisfies, which ties the proof to the
+  value it was made for. Leaving such an input unused is refused at build time, and
+  the error now points to `bind` instead of `require_eq`. `xark_hash::Hash` gets
+  `to_fields()`.
 - `xark_verifier::verify_groth16_batch`: several proofs of one circuit in a single
   pairing call. On chain each extra proof costs about 29k CU instead of 77k, so the
   compute limit allows about 46 proofs instead of 18. Needs

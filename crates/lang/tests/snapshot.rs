@@ -707,6 +707,39 @@ fn u128_input_beside_a_narrower_one() {
     }
 }
 
+/// A public input no constraint uses is refused, and the error names `bind`;
+/// `bind` costs one row and the input is free (any value satisfies it).
+#[test]
+fn unused_public_inputs_need_bind() {
+    let unbound = "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>, y: Public<Field>, to: Public<Field>) { require_eq(x * x, y); }\n";
+    let c = compile_with_field(
+        &write_case("unbound_public", unbound),
+        "unbound_public",
+        "bn254",
+    );
+    assert!(!c.status_success, "built with an unused public input");
+    assert!(
+        c.stderr
+            .contains("`to` is declared but no constraint uses it")
+            && c.stderr.contains("bind(it)"),
+        "{}",
+        c.stderr
+    );
+    let bound = unbound.replace("require_eq(x * x, y);", "require_eq(x * x, y); bind(to);");
+    let c = compile_with_field(&write_case("bound_public", &bound), "bound_public", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    // x·x = y, and the bind row, which minimizing keeps.
+    assert_eq!(c.program().constraints.len(), 2);
+    assert_eq!(c.minimized_r1cs_len(), 2);
+    for to in ["0", "5", "123456789"] {
+        assert!(
+            accepts(&c, &[("x", "3"), ("y", "9"), ("to", to)]),
+            "to = {to}"
+        );
+    }
+}
+
 /// Native `u64` **wrapping arithmetic**: `wrapping_add`/`wrapping_sub` lower to the
 /// mod-2⁶⁴ gadget (carry/borrow + range check). The defining property is wraparound —
 /// `(2⁶⁴−1) + 1 == 0` and `5 − 7 == 2⁶⁴−2` — which must solve, while a wrong result is

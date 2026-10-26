@@ -104,7 +104,7 @@ pub mod wasm;
 /// The everyday circuit-author surface. `use xark::prelude::*;`.
 pub mod prelude {
     pub use crate::lang::{
-        Field, Private, Public, require, require_eq, require_ge, require_gt, require_le,
+        Field, Private, Public, bind, require, require_eq, require_ge, require_gt, require_le,
         require_lt, require_ne, witness_begin, witness_end,
     };
     // `#[input]` makes a struct a circuit input (`Input`), an enum a
@@ -120,8 +120,8 @@ pub mod prelude {
 // Same surface as `prelude`, re-exported at the crate root so both
 // `use xark::prelude::*;` and `use xark::{require, Field, ...};` work.
 pub use crate::lang::{
-    Field, Private, Public, require, require_eq, require_ge, require_gt, require_le, require_lt,
-    require_ne, witness_begin, witness_end,
+    Field, Private, Public, bind, require, require_eq, require_ge, require_gt, require_le,
+    require_lt, require_ne, witness_begin, witness_end,
 };
 // `require_eq` dispatches through `RequireEqCircuit`, comparing scalars, fixed
 // arrays, and composite types; downstream crates impl it for their own shapes.

@@ -1010,6 +1010,32 @@ pub fn require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
     a.require_eq_circuit(b);
 }
 
+/// Bind a public input the circuit doesn't otherwise use, such as a recipient or
+/// a nonce: the proof then verifies only with the value it was made for, so no one
+/// can reuse it for another (front-run a withdrawal to their own address, say).
+/// One constraint per field element of `value` (`x · x = s`, for a new `s`), which
+/// any value satisfies but which ties the proof to it.
+///
+/// ```ignore
+/// pub fn withdraw(note: Private<Note>, root: Public<Field>, recipient: Public<Field>) {
+///     require_eq(note.root(), root);
+///     bind(recipient);
+/// }
+/// ```
+#[inline]
+pub fn bind<T: crate::Input>(value: T) {
+    #[cfg(xark)]
+    {
+        let mut fields = alloc::vec![Field::zero(); T::LEN];
+        crate::input::write_fields(&value, &mut fields);
+        for f in fields {
+            crate::wasm::bind(f);
+        }
+    }
+    #[cfg(not(xark))]
+    let _ = value;
+}
+
 /// Constrain a boolean wire to be true.
 ///
 /// `require(cond)` decomposes into `require_eq(cond, true)` at lowering time. Run

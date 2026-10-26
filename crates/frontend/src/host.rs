@@ -57,6 +57,7 @@ enum Intr {
     InputUintHi,
     FieldToUint,
     FieldToBool,
+    Bind,
     Panic,
 }
 
@@ -93,6 +94,7 @@ fn intrinsic(name: &str) -> Option<Intr> {
         "input_uint_hi" => Intr::InputUintHi,
         "field_to_uint" => Intr::FieldToUint,
         "field_to_bool" => Intr::FieldToBool,
+        "bind" => Intr::Bind,
         "panic" => Intr::Panic,
         _ => return None,
     })
@@ -1639,6 +1641,7 @@ impl crate::interp::Host for Host {
                 | Intr::HintBit
                 | Intr::WitnessBegin
                 | Intr::WitnessEnd
+                | Intr::Bind
                 | Intr::Panic
                 | Intr::RequireEq
                 | Intr::ToBitsLookup
@@ -1907,6 +1910,14 @@ impl crate::interp::Host for Host {
                 let x = self.get_field(m, a[0])?;
                 let y = self.get_field(m, a[1])?;
                 self.require_gated(x, y);
+            }
+            Intr::Bind => {
+                // `x · x = s`, `s` used nowhere else: any `x` satisfies it, but the
+                // row puts `x` in the QAP, so the proof commits to its value.
+                let x = self.get_field(m, a[0])?;
+                if !x.is_constant() {
+                    self.b.emit_mul(x.clone(), x);
+                }
             }
             Intr::WitnessBegin => self.b.witness_only = true,
             Intr::WitnessEnd => self.b.witness_only = false,
