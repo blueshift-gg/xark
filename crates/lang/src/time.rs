@@ -536,6 +536,21 @@ mod tests {
             "Timestamp(2023-02-28T08:00:00Z)"
         );
         assert_eq!(t.years_before(4).date(), (2020, 2, 29));
+        // The first of every month, and of the range.
+        for m in 1..=12 {
+            assert_eq!(
+                Timestamp::new(2024, m, 1).years_before(18).date(),
+                (2006, m, 1)
+            );
+            assert_eq!(
+                Days::<1900, 2100>::new(2024, m, 1).years_before(18).date(),
+                (2006, m, 1)
+            );
+        }
+        assert_eq!(
+            Days::<1900, 2100>::new(2000, 1, 1).years_before(100),
+            Days::MIN
+        );
         // The calendar here agrees with the one clients parse with.
         for (y, m, d) in [
             (0u16, 1u8, 1u8),
