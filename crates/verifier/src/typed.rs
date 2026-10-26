@@ -159,16 +159,12 @@ impl<const N: usize> Verifier<N> {
         public_inputs: &[[u8; FR_BYTES]; N],
     ) -> Result<bool, VerifierError> {
         // vk_x = ic[0] + Σ inputs[i] · ic[i+1]
+        // As the byte path computes it (`add_input_term`): non-canonical inputs
+        // refused, zero and small ones cheap.
         let mut acc = G1Point::from_le_bytes(self.ic0);
         let mut i = 0;
         while i < N {
-            // Reject non-canonical (>= r) public inputs to prevent encoding
-            // malleability — see `scalar_is_canonical`.
-            if !crate::verifier::scalar_is_canonical(&public_inputs[i]) {
-                return Err(VerifierError::NonCanonicalPublicInput { index: i as u32 });
-            }
-            let term = (G1Point::from_le_bytes(self.ic[i]) * public_inputs[i])?;
-            acc = (acc + term)?;
+            acc = crate::verifier::add_input_term(acc, &self.ic[i], &public_inputs[i], i)?;
             i += 1;
         }
         groth16_pairing_check(

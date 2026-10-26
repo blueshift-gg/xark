@@ -249,7 +249,9 @@ verification starter, and the `xark-client` npm package is removed.
 - The on-chain verifier skips the scalar multiplication for public inputs of 0, 1
   or up to 128: booleans, enum values and counts verify cheaper (up to 38% less
   compute when all are small, about 0.5% more when all are large). The reference
-  program's hash changes.
+  program's hash changes. The typed `Verifier::verify` does the same as
+  `verify_instruction_data` now: it was the dearer of the two (78,538 against
+  77,043 CU for one input of 81), and is now the cheaper (76,621).
 - xark-wasm: `public_inputs_to_snarkjs` becomes `decode_public_inputs`; `Schema` and
   `VerifyingKey` parse a schema or key once.
 

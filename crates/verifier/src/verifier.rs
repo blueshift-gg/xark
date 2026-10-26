@@ -508,27 +508,47 @@ fn vk_x(ic: &[u8], public_inputs: &[u8]) -> Result<G1Point, VerifierError> {
 
     let mut acc = g1_at(ic, 0);
     for i in 0..num_inputs as usize {
-        let mut scalar = [0u8; FR_BYTES];
-        scalar.copy_from_slice(&public_inputs[i * FR_BYTES..(i + 1) * FR_BYTES]);
-        if !scalar_is_canonical(&scalar) {
-            return Err(VerifierError::NonCanonicalPublicInput { index: i as u32 });
-        }
-        // 0 · ic[i+1] is the identity and acc + identity == acc, so the whole
-        // term drops out. This also skips the mul syscall's incidental on-curve
-        // check of ic[i+1] — that operand comes from the VK, which is already
-        // trusted input (a caller who can choose the VK can prove anything).
-        if scalar == [0u8; FR_BYTES] {
-            continue;
-        }
-        let ic_i = g1_at(ic, (i + 1) * G1_BYTES);
-        let term = match small_scalar(&scalar) {
-            // k == 1 returns ic_i with no syscall at all.
-            Some(k) => mul_small(ic_i, k)?,
-            None => g1_scalar_mul(ic_i, &scalar)?,
-        };
-        acc = g1_add(acc, term)?;
+        // In bounds: the lengths are checked above.
+        let s: &[u8; FR_BYTES] = public_inputs[i * FR_BYTES..][..FR_BYTES]
+            .try_into()
+            .expect("checked");
+        let ic_i: &[u8; G1_BYTES] = ic[(i + 1) * G1_BYTES..][..G1_BYTES]
+            .try_into()
+            .expect("checked");
+        acc = add_input_term(acc, ic_i, s, i)?;
     }
     Ok(acc)
+}
+
+/// `acc + s · ic_i`: public input `index`'s term of `vk_x`, for both the byte and
+/// the typed [`Verifier`](crate::Verifier) paths. Rejects a non-canonical `s`;
+/// costs nothing for `s = 0`, and a small `s` takes additions, not the mul syscall.
+#[inline(always)]
+pub(crate) fn add_input_term(
+    acc: G1Point,
+    ic_i: &[u8; G1_BYTES],
+    s: &[u8; FR_BYTES],
+    index: usize,
+) -> Result<G1Point, VerifierError> {
+    if !scalar_is_canonical(s) {
+        return Err(VerifierError::NonCanonicalPublicInput {
+            index: index as u32,
+        });
+    }
+    // 0 · ic[i+1] is the identity and acc + identity == acc, so the whole
+    // term drops out. This also skips the mul syscall's incidental on-curve
+    // check of ic[i+1] — that operand comes from the VK, which is already
+    // trusted input (a caller who can choose the VK can prove anything).
+    if *s == [0u8; FR_BYTES] {
+        return Ok(acc);
+    }
+    let ic_i = G1Point::from_le_bytes(*ic_i);
+    let term = match small_scalar(s) {
+        // k == 1 returns ic_i with no syscall at all.
+        Some(k) => mul_small(ic_i, k)?,
+        None => g1_scalar_mul(ic_i, s)?,
+    };
+    Ok(g1_add(acc, term)?)
 }
 
 /// The final Groth16 pairing check, shared by the byte-slice
