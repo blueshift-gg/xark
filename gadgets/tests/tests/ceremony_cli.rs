@@ -84,6 +84,14 @@ fn ceremony_keys_prove_and_verify() {
         );
         let meta = std::fs::read_to_string(cer.join("metadata.json")).unwrap();
         assert!(meta.contains(&sha), "{meta}");
+        // What the keys were made from, as `xark setup` records it.
+        let m: serde_json::Value = serde_json::from_str(&meta).unwrap();
+        let rows = m["num_constraints"].as_u64().unwrap();
+        let domain = m["qap_domain_size"].as_u64().unwrap();
+        assert!(rows > 0, "{meta}");
+        assert!(domain.is_power_of_two() && domain > rows, "{meta}");
+        assert_eq!(m["ptau_source"], "test.ptau", "{meta}");
+        assert_eq!(m["r1cs_form"], "minimized", "{meta}");
     }
     // A finalized ceremony takes no more contributions …
     let (ok, log) = xark(

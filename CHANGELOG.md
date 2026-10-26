@@ -340,6 +340,10 @@ verification starter, and the `xark-client` npm package is removed.
   for, as `prove` does. A `minimized` key (which `xark setup` picks for some
   circuits) used to fail there while plain `prove` worked. A push-driven proof
   (`beginStreamingProof`, `proveFromStream`) still needs `r1cs` for such a key.
+- `xark ceremony finalize` records what the keys were made from, as `xark setup`
+  does: `num_constraints` (was 0), `ptau_source` (was null), `r1cs_form` and
+  `qap_domain_size`. A ceremony begun with an older xark still finalizes, without
+  the constraint count or the `.ptau` name.
 - A circuit's generated test function (`zkyc_circuit(...)` in `cargo test`) looks
   for the build where `xark build` writes it, under the package's name: a crate
   named `my-circuit` (as `xark init my-circuit` makes it) said "has not been built".

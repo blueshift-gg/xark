@@ -152,6 +152,7 @@ fn run_init(args: InitArgs) -> Result<()> {
     let ptau = parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
 
     let src = xark_groth16::ProgramSource::new(circuit.prog());
+    let num_constraints = xark_groth16::ConstraintSource::num_constraints(&src);
     let keys = xark_backend::ptau::setup_from_ptau(&src, &ptau, &seed_arr)
         .map_err(|e| anyhow!("phase-2 setup failed: {e}"))?;
 
@@ -187,6 +188,10 @@ fn run_init(args: InitArgs) -> Result<()> {
             "circuit_hash": hash,
             "digest": digest,
             "num_public_inputs": num_pi,
+            "num_constraints": num_constraints,
+            "ptau_source": args.ptau_file.file_name().and_then(|s| s.to_str()),
+            // `XarkCircuit::for_setup`: the boundary-minimized rows.
+            "r1cs_form": "minimized",
         }))?,
     )?;
 
@@ -290,8 +295,19 @@ fn run_finalize(args: FinalizeArgs) -> Result<()> {
         .as_str()
         .ok_or_else(|| anyhow!("circuit_meta.json missing circuit_hash"))?;
 
-    let mut metadata = KeyMetadata::new_dev(circuit_hash.to_string(), num_pi, 0);
-    metadata.digest = circuit_meta["digest"].as_str().map(str::to_string);
+    // A ceremony started before these were recorded finalizes without them
+    // (`num_constraints` 0).
+    let num_constraints = circuit_meta["num_constraints"].as_u64().unwrap_or(0) as usize;
+    let text = |k: &str| circuit_meta[k].as_str().map(str::to_string);
+    let mut metadata = KeyMetadata::new_dev(circuit_hash.to_string(), num_pi, num_constraints);
+    metadata.digest = text("digest");
+    metadata.ptau_source = text("ptau_source");
+    metadata.r1cs_form = text("r1cs_form");
+    // The key's own domain: `h_query` has one point fewer.
+    let keys = load_keys(&dir.join("proving_key.bin"), &dir.join("verifying_key.bin"))
+        .context("loading ceremony keys")?;
+    metadata.qap_domain_size = Some(keys.proving_key.h_query.len() + 1);
+    drop(keys);
     let vk = fs::read(dir.join("verifying_key.bin")).context("reading verifying_key.bin")?;
     let vk_sha256 = super::sha256_hex(&vk);
     metadata.verifying_key_sha256 = Some(vk_sha256.clone());
