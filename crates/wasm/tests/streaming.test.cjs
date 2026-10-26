@@ -93,13 +93,15 @@ test("without SharedArrayBuffer: parallel is unavailable and the fallback proves
   assert.equal(out.proof, hex(single.proof));
 });
 
-test("a minimized key proves with its r1cs.stream, and is refused without it", () => {
+test("a minimized key proves with or without its r1cs.stream", () => {
   const minimizedKey = new Uint8Array(readFileSync(join(C, "pk.bin")));
   const minimizedVk = new Uint8Array(readFileSync(join(C, "vk.bin")));
   const r1cs = new Uint8Array(readFileSync(join(C, "r1cs.stream")));
-  assert.throws(() => xark.proveStreaming(xbc, minimizedKey, INPUTS, { seed: 5 }), /r1cs\.stream/);
   const out = xark.proveStreaming(xbc, minimizedKey, INPUTS, { seed: 5, r1cs });
   assert.ok(xark.verify(minimizedVk, out.proof, out.publicInputs));
+  // Without it the rows are rebuilt from circuit.xbc, as `prove` does: the same proof.
+  const rebuilt = xark.proveStreaming(xbc, minimizedKey, INPUTS, { seed: 5 });
+  assert.equal(hex(rebuilt.proof), hex(out.proof));
   // A row file for another circuit is rejected by fingerprint.
   const other = new Uint8Array(r1cs);
   other[10] ^= 1;

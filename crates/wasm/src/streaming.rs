@@ -268,9 +268,15 @@ enum Key {
     Resident(Box<ProvingKey<Bn254>>),
 }
 
-/// The constraint rows: from `options.r1cs` (an `r1cs.stream`, for a `minimized`
-/// key) or straight from the bytecode (a `reduced` key).
-fn row_source(xbc: &[u8], options: &JsValue) -> Result<Box<dyn ConstraintSource>, js_sys::Error> {
+/// The constraint rows: from `options.r1cs` (an `r1cs.stream`) when given, else
+/// the rows a key of `a_len` variables was made for, as `prove` picks them. With
+/// no key yet (`None`: a push-driven proof), the bytecode's own rows, which only a
+/// `reduced` key fits.
+fn row_source(
+    xbc: &[u8],
+    a_len: Option<usize>,
+    options: &JsValue,
+) -> Result<Box<dyn ConstraintSource>, js_sys::Error> {
     Ok(match opt_get(options, "r1cs") {
         Some(r1cs) => {
             let bytes = to_bytes(r1cs.unchecked_ref(), "r1cs.stream")?;
@@ -287,16 +293,28 @@ fn row_source(xbc: &[u8], options: &JsValue) -> Result<Box<dyn ConstraintSource>
             }
             Box::new(src)
         }
-        None => {
+        // Benchmarking only: rebuild rows symbolically instead of evaluating the
+        // compiled templates (same results, much slower). Only a `reduced` key
+        // proves from the bytecode's own rows.
+        None if opt_get(options, "expandRows").is_some_and(|v| v.is_truthy()) => {
             let mut src = BytecodeSource::new(xbc)
                 .map_err(|e| js_error(&format!("parsing circuit.xbc: {e}")))?;
-            // Benchmarking only: rebuild rows symbolically instead of evaluating
-            // the compiled templates (same results, much slower).
-            if opt_get(options, "expandRows").is_some_and(|v| v.is_truthy()) {
-                src.set_compiled(false);
+            if a_len.is_some_and(|n| n != src.layout().num_vars()) {
+                return Err(js_error(
+                    "expandRows needs a key made with `xark setup --streamable`",
+                ));
             }
+            src.set_compiled(false);
             Box::new(src)
         }
+        // The rows the key was made for, as `prove` picks them.
+        None => match a_len {
+            Some(a_len) => auto_row_source(xbc, a_len)?,
+            None => Box::new(
+                BytecodeSource::new(xbc)
+                    .map_err(|e| js_error(&format!("parsing circuit.xbc: {e}")))?,
+            ),
+        },
     })
 }
 
@@ -363,8 +381,9 @@ fn mismatch_error(e: xark_groth16::ProveError) -> js_sys::Error {
              circuit or an earlier build of it (rerun `xark setup` and use its pk.bin)",
         ),
         xark_groth16::ProveError::KeyMismatch(m) => js_error(&format!(
-            "{m} — a `reduced` key proves from circuit.xbc alone; a `minimized` key also \
-             needs its r1cs.stream (options.r1cs)"
+            "{m} — the key was made for another circuit.xbc, or it is a `minimized` key \
+             and options.r1cs is missing (a push-driven proof needs it) or belongs to \
+             another key"
         )),
         e => js_error(&format!("proving: {e}")),
     }
@@ -377,15 +396,20 @@ fn prepare(
 ) -> Result<Prepared, js_sys::Error> {
     let xbc = to_bytes(circuit_xbc, "circuit.xbc")?;
     let vars = xark_ir::function_decode::decode_input_vars(&xbc);
-    let src = row_source(&xbc, options)?;
-    let arr = js_view(pk_bytes, "pk.bin")?;
-    let len = arr.length() as u64;
-    let reader = JsReader { arr, pos: 0, len };
+    let reader = || -> Result<JsReader, js_sys::Error> {
+        let arr = js_view(pk_bytes, "pk.bin")?;
+        let len = arr.length() as u64;
+        Ok(JsReader { arr, pos: 0, len })
+    };
+    let streamed = SerializedPk::new(reader()?).map_err(|e| js_error(&e.to_string()))?;
+    let a_len = xark_groth16::PkSource::header(&streamed).a_len;
+    let src = row_source(&xbc, Some(a_len), options)?;
     let resident = opt_get(options, "residentKey").is_some_and(|v| v.is_truthy());
     let key = if resident {
-        Key::Resident(Box::new(crate::deserialize_proving_key_from(reader)?))
+        drop(streamed);
+        Key::Resident(Box::new(crate::deserialize_proving_key_from(reader()?)?))
     } else {
-        Key::Streamed(SerializedPk::new(reader).map_err(|e| js_error(&e.to_string()))?)
+        Key::Streamed(streamed)
     };
     let sources = parse_sources(opt_get(options, "sources").and_then(|v| v.as_string()))?;
     Ok(Prepared {
@@ -483,8 +507,9 @@ fn prove_prepared(
 /// Same arguments and result as [`prove`](crate::prove), plus `options`:
 ///
 /// * `r1cs` — the `r1cs.stream` written by `xark setup` for a `minimized` key
-///   (`metadata.json` `r1cs_form`). Omit for a `reduced` key, which streams from
-///   `circuit.xbc` alone.
+///   (`metadata.json` `r1cs_form`). Optional: without it the rows come from the
+///   key, as in `prove` — straight from `circuit.xbc` for a `reduced` key, else
+///   rebuilt from it (once per call; pass `r1cs` to skip that).
 /// * `pool` — a worker pool from `js/pool.mjs` (`createPool`) to parallelize the
 ///   FFT and MSMs across Web Workers / worker threads (requires
 ///   `SharedArrayBuffer`, i.e. a cross-origin-isolated page). Omit for
@@ -636,7 +661,8 @@ pub struct StreamingProof {
 }
 
 /// Start a push-driven proof. `options` as for [`prove_streaming`] (`r1cs`,
-/// `pool`, `msmChunk`, `seed`).
+/// `pool`, `msmChunk`, `seed`), except that `r1cs` is required for a `minimized`
+/// key: the rows are needed before the key arrives.
 #[wasm_bindgen(js_name = beginStreamingProof)]
 pub fn begin_streaming_proof(
     circuit_xbc: &Bytes,
@@ -647,7 +673,7 @@ pub fn begin_streaming_proof(
     let vars = xark_ir::function_decode::decode_input_vars(&xbc);
     let ids = resolve_inputs(&vars, inputs).map_err(|e| js_error(&e))?;
     drop(vars);
-    let src = row_source(&xbc, &options)?;
+    let src = row_source(&xbc, None, &options)?;
     let z = witness(&xbc, &ids, src.layout())?;
     let (cfg, r, s) = config(&options);
     let mut host = Host::from_options(&options);
