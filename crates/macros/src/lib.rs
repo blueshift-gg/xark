@@ -461,9 +461,8 @@ fn to_pascal(s: &str) -> String {
 /// TypeScript gets `Policy.default().on(new Date()).minAge(18)`, typed from the
 /// signature, its docs from these comments. Each parameter and the result must be an
 /// `xark::Input` type (`Field`, `uN`, `iN`, `bool`, `Days<FROM, TO>`, a struct with
-/// `#[input]`, …; `impl Into<T>` and `&T` take a `T`, and `Self` is the type), written
-/// out rather than as a type alias, since the client reads it as written; the receiver may be
-/// `self` or `&self`. The block itself compiles as
+/// `#[input]`, …, or an alias of one; `impl Into<T>` and `&T` take a `T`, and `Self` is
+/// the type); the receiver may be `self` or `&self`. The block itself compiles as
 /// written; a client build (`--cfg xark_client`) also gives each method a wasm export
 /// taking and returning JSON (see `xark::client`), described in the module's
 /// `xark.exports` section. That works from any crate, so a gadget's types bring their
@@ -1052,17 +1051,12 @@ fn export_impl(block: &ItemImpl) -> syn::Result<TokenStream2> {
                     } else {
                         quote! { #v }
                     });
-                    params.push(format!(
-                        "{{\"name\":{},\"type\":{}}}",
-                        json_str(&pi.ident.unraw().to_string()),
-                        json_str(&type_string(&ty)),
-                    ));
+                    params.push((pi.ident.unraw().to_string(), ty));
                 }
             }
         }
-        let returns = match &f.sig.output {
-            ReturnType::Type(_, t) if !is_ident(t, "Self") => type_string(t),
-            ReturnType::Type(..) => type_name.clone(),
+        let returns: Type = match &f.sig.output {
+            ReturnType::Type(_, t) => syn::parse2(replace_self(quote!(#t), self_ty))?,
             ReturnType::Default => {
                 return Err(syn::Error::new_spanned(
                     &f.sig,
@@ -1073,18 +1067,29 @@ fn export_impl(block: &ItemImpl) -> syn::Result<TokenStream2> {
         // Named as written, without a raw identifier's `r#`.
         let fn_name = name.unraw().to_string();
         let export = format!("{type_name}.{fn_name}");
-        let desc = format!(
-            "{{\"export\":{},\"type\":{},\"name\":{},\"self\":{},\"params\":[{}],\"returns\":{},\"doc\":{}}}\n",
+        // The description, its types named from `Input::TYPE` (so an alias is
+        // followed), built at compile time.
+        let text = |s: String| quote! { ::xark::input::Describe::Text(#s) };
+        let of = |t: &Type| quote! { ::xark::input::Describe::Type(<#t as ::xark::Input>::TYPE) };
+        let mut desc = vec![text(format!(
+            "{{\"export\":{},\"type\":{},\"name\":{},\"self\":{},\"params\":[",
             json_str(&export),
             json_str(&type_name),
             json_str(&fn_name),
             receiver.map_or("null".to_string(), json_str),
-            params.join(","),
-            json_str(&returns),
-            json_str(&doc),
-        );
-        let bytes = syn::LitByteStr::new(desc.as_bytes(), name.span());
-        let len = desc.len();
+        ))];
+        for (i, (pname, ty)) in params.iter().enumerate() {
+            let comma = if i > 0 { "," } else { "" };
+            desc.push(text(format!(
+                "{comma}{{\"name\":{},\"type\":\"",
+                json_str(pname)
+            )));
+            desc.push(of(ty));
+            desc.push(text("\"}".into()));
+        }
+        desc.push(text("],\"returns\":\"".into()));
+        desc.push(of(&returns));
+        desc.push(text(format!("\",\"doc\":{}}}\n", json_str(&doc))));
         let shim = format_ident!("__xark_export_{}_{}", ident_part(&type_name), fn_name);
         let stat = format_ident!("__XARK_EXPORT_{}_{}", ident_part(&type_name), fn_name);
         let export_lit = LitStr::new(&export, name.span());
@@ -1103,7 +1108,13 @@ fn export_impl(block: &ItemImpl) -> syn::Result<TokenStream2> {
             #[unsafe(link_section = "xark.exports")]
             #[used]
             #[allow(non_upper_case_globals)]
-            static #stat: [u8; #len] = *#bytes;
+            static #stat: [u8; {
+                const P: &[::xark::input::Describe] = &[#(#desc),*];
+                ::xark::input::describe_len(P)
+            }] = {
+                const P: &[::xark::input::Describe] = &[#(#desc),*];
+                ::xark::input::describe(P)
+            };
         });
     }
     Ok(quote! {

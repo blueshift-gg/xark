@@ -326,9 +326,7 @@ impl Model {
             }
             r => bail!(
                 "`{r}` isn't one of the circuit's input types: an exported method takes and \
-                 returns those (or `Field`, `uN`, `iN`, `bool`, arrays and tuples of them), \
-                 written out: a client reads the type as written, so a type alias isn't \
-                 followed (write `Days<1900, 2100>`, not an alias of it)"
+                 returns those (or `Field`, `uN`, `iN`, `bool`, arrays and tuples of them)"
             ),
         };
         self.ty(schema, &ty)

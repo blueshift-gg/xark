@@ -1050,6 +1050,129 @@ pub fn type_name(n: &Named) -> String {
     s
 }
 
+/// A piece of an exported function's description (what `#[input]` on an `impl`
+/// writes to `client.wasm`'s `xark.exports` section): text, or a type written as
+/// its name, the way a client generator reads it (`Days<1900,2100>`, `[u8;32]`,
+/// `(u64,Field)`). From the type itself, so an alias of it is followed.
+#[doc(hidden)]
+pub enum Describe {
+    Text(&'static str),
+    Type(Type),
+}
+
+/// The length of [`describe`]'s bytes.
+#[doc(hidden)]
+pub const fn describe_len(parts: &[Describe]) -> usize {
+    describe_into(parts, &mut [])
+}
+
+/// `parts` as bytes, `N` ([`describe_len`]) of them.
+#[doc(hidden)]
+pub const fn describe<const N: usize>(parts: &[Describe]) -> [u8; N] {
+    let mut out = [0; N];
+    assert!(describe_into(parts, &mut out) == N);
+    out
+}
+
+/// Write `parts` to `out` as far as it reaches; the length they take.
+const fn describe_into(parts: &[Describe], out: &mut [u8]) -> usize {
+    let (mut at, mut i) = (0, 0);
+    while i < parts.len() {
+        at = match &parts[i] {
+            Describe::Text(t) => put(out, at, t),
+            Describe::Type(t) => put_type(out, at, t),
+        };
+        i += 1;
+    }
+    at
+}
+
+const fn put(out: &mut [u8], mut at: usize, s: &str) -> usize {
+    let s = s.as_bytes();
+    let mut i = 0;
+    while i < s.len() {
+        if at < out.len() {
+            out[at] = s[i];
+        }
+        at += 1;
+        i += 1;
+    }
+    at
+}
+
+const fn put_num(out: &mut [u8], at: usize, n: usize) -> usize {
+    let at = if n >= 10 {
+        put_num(out, at, n / 10)
+    } else {
+        at
+    };
+    if at < out.len() {
+        out[at] = b'0' + (n % 10) as u8;
+    }
+    at + 1
+}
+
+/// `t`'s name, as [`type_name`] writes a named one.
+const fn put_type(out: &mut [u8], at: usize, t: &Type) -> usize {
+    match t {
+        Type::Field => put(out, at, "Field"),
+        Type::Bool => put(out, at, "bool"),
+        Type::Uint(n) => {
+            let at = put(out, at, "u");
+            put_num(out, at, *n as usize)
+        }
+        Type::Int(n) => {
+            let at = put(out, at, "i");
+            put_num(out, at, *n as usize)
+        }
+        Type::Array(of, n) => {
+            let at = put(out, at, "[");
+            let at = put_type(out, at, of);
+            let at = put(out, at, ";");
+            let at = put_num(out, at, *n);
+            put(out, at, "]")
+        }
+        Type::Tuple(ts) => {
+            let mut at = put(out, at, "(");
+            let mut i = 0;
+            while i < ts.len() {
+                if i > 0 {
+                    at = put(out, at, ",");
+                }
+                at = put_type(out, at, &ts[i]);
+                i += 1;
+            }
+            put(out, at, ")")
+        }
+        Type::Named(n) => match n.encoding {
+            Encoding::Time { unit, from, to } => {
+                let mut at = if unit == crate::time::DAY {
+                    put(out, at, "Days<")
+                } else {
+                    let at = put(out, at, "Time<");
+                    let at = put_num(out, at, unit as usize);
+                    put(out, at, ",")
+                };
+                at = put_num(out, at, from as usize);
+                at = put(out, at, ",");
+                at = put_num(out, at, to as usize);
+                put(out, at, ">")
+            }
+            _ => {
+                let at = put(out, at, n.name);
+                match n.arg {
+                    Some(a) => {
+                        let at = put(out, at, "<");
+                        let at = put(out, at, a);
+                        put(out, at, ">")
+                    }
+                    None => at,
+                }
+            }
+        },
+    }
+}
+
 /// The named types described so far.
 #[derive(Default)]
 struct Defs {
@@ -1320,6 +1443,53 @@ pub fn leaves<T: Input>(value: &T, name: &str) -> Vec<(String, ark_bn254::Fr)> {
 #[cfg(all(test, not(xark)))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exports_name_types_as_the_schema_does() {
+        use crate::time::MINUTE;
+        use crate::{Bitfield, Choice, Country, Days, Text, Time, Timestamp};
+        fn name<T: Input>() -> String {
+            const MAX: usize = 64;
+            let parts = [Describe::Type(T::TYPE)];
+            let mut out = [0u8; MAX];
+            let n = describe_into(&parts, &mut out);
+            assert_eq!(n, describe_len(&parts));
+            String::from_utf8(out[..n].to_vec()).unwrap()
+        }
+        fn named<T: Input>() -> String {
+            let Type::Named(n) = T::TYPE else { panic!() };
+            type_name(n)
+        }
+        assert_eq!(name::<Field>(), "Field");
+        assert_eq!(name::<[u8; 32]>(), "[u8;32]");
+        assert_eq!(name::<(u64, i8, bool)>(), "(u64,i8,bool)");
+        assert_eq!(name::<[(u16, Field); 3]>(), "[(u16,Field);3]");
+        assert_eq!(name::<Days<1900, 2100>>(), "Days<1900,2100>");
+        assert_eq!(name::<Time<MINUTE, 2020, 2060>>(), "Time<60,2020,2060>");
+        assert_eq!(name::<Timestamp>(), "Timestamp");
+        assert_eq!(name::<Bitfield<Country>>(), "Bitfield<Country>");
+        for (a, b) in [
+            (name::<Days<1900, 2100>>(), named::<Days<1900, 2100>>()),
+            (
+                name::<Time<MINUTE, 2020, 2060>>(),
+                named::<Time<MINUTE, 2020, 2060>>(),
+            ),
+            (name::<Timestamp>(), named::<Timestamp>()),
+            (name::<Text>(), named::<Text>()),
+            (name::<Choice<Country>>(), named::<Choice<Country>>()),
+            (name::<Bitfield<Country>>(), named::<Bitfield<Country>>()),
+        ] {
+            assert_eq!(a, b);
+        }
+        // Built at compile time.
+        const PARTS: [Describe; 3] = [
+            Describe::Text("{\"type\":\""),
+            Describe::Type(<Days<1900, 2100> as Input>::TYPE),
+            Describe::Text("\"}"),
+        ];
+        const BYTES: [u8; describe_len(&PARTS)] = describe(&PARTS);
+        assert_eq!(&BYTES, br#"{"type":"Days<1900,2100>"}"#);
+    }
 
     #[test]
     fn names_follow_the_layout() {

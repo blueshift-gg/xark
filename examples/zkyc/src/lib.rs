@@ -67,7 +67,7 @@ impl Default for Policy {
 impl Policy {
     /// Checked on `today`: the holder's document mustn't have expired by then.
     /// (Written out rather than as `Day`: a client reads the type as written.)
-    pub fn on(self, today: impl Into<Days<1900, 2100>>) -> Policy {
+    pub fn on(self, today: impl Into<Day>) -> Policy {
         Policy {
             today: today.into(),
             ..self

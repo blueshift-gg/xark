@@ -345,6 +345,10 @@ verification starter, and the `xark-client` npm package is removed.
   for, as `prove` does. A `minimized` key (which `xark setup` picks for some
   circuits) used to fail there while plain `prove` worked. A push-driven proof
   (`beginStreamingProof`, `proveFromStream`) still needs `r1cs` for such a key.
+- A client function taking or returning a type alias (`type Address = Hash`), or a
+  path to a type (`xark_hash::Hash`), reaches the generated client. It used to be
+  skipped with a warning, because the client read each type as written; it now reads
+  the type's `Input::TYPE`.
 - `xark ceremony finalize` records what the keys were made from, as `xark setup`
   does: `num_constraints` (was 0), `ptau_source` (was null), `r1cs_form` and
   `qap_domain_size`. A ceremony begun with an older xark still finalizes, without

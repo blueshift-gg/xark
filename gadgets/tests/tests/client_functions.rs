@@ -44,6 +44,7 @@ fn a_gadgets_functions_reach_the_client() {
         "#![cfg_attr(xark, no_std)]\nuse xark::prelude::*;\n\
          /// A range of positions.\n\
          #[input]\npub struct Span { pub lo: u32, pub hi: u32 }\n\
+         pub type Range = Span;\n\
          #[input]\nimpl Span {\n\
          /// `lo..hi`, checked.\n\
          pub fn new(lo: u32, hi: u32) -> Span { assert!(lo <= hi, \"lo above hi\"); Span { lo, hi } }\n\
@@ -51,7 +52,8 @@ fn a_gadgets_functions_reach_the_client() {
          pub fn len(&self) -> u32 { self.hi - self.lo }\n\
          pub fn join(self, other: Self) -> Self { Span { lo: self.lo.min(other.lo), hi: self.hi.max(other.hi) } }\n\
          pub fn covers(&self, other: &Span) -> bool { self.lo <= other.lo && other.hi <= self.hi }\n\
-         pub fn join_all(self, others: [Self; 2]) -> Span { self.join(others[0]).join(others[1]) }\n}\n\
+         pub fn join_all(self, others: [Self; 2]) -> Span { self.join(others[0]).join(others[1]) }\n\
+         pub fn meet(self, other: Range) -> Range { Span { lo: self.lo.max(other.lo), hi: self.hi.min(other.hi) } }\n}\n\
          #[input]\npub struct Unused { pub x: Field }\n\
          #[input]\nimpl Unused {\npub fn zero() -> Unused { Unused { x: Field::zero() } }\n}\n",
     );
@@ -91,6 +93,8 @@ fn a_gadgets_functions_reach_the_client() {
         "  join(span: Span, other: Span): SpanValue {",
         "  covers(span: Span, other: Span): boolean {",
         "  joinAll(span: Span, others: readonly [Span, Span]): SpanValue {",
+        // An alias is its type.
+        "  meet(span: Span, other: Span): SpanValue {",
     ] {
         assert!(ts.contains(want), "missing {want:?} in:\n{ts}");
     }
