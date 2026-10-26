@@ -164,6 +164,8 @@ proveStreaming(circuit, pk, inputs, { pool });   // also accepted by proveFromSt
 await pool?.terminate();
 ```
 
+A generated client takes the pool as an option: `Zkyc.prover(url, { pool })`.
+
 The blocked FFT's sweeps and every MSM chunk run across workers (each its own wasm
 instance) via a `SharedArrayBuffer`. That needs a cross-origin-isolated page
 (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy:

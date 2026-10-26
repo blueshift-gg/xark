@@ -284,6 +284,11 @@ check is one pass over the circuit when the prover is made (about 2 s for Ed2551
 node), not per proof. A verifier pins its key the same way: `Zkyc.verifier(vk, {
 keyHash })` refuses any other `vk.bin` (`xark setup` prints its sha256).
 
+To prove on several threads, give the prover a worker pool:
+`Zkyc.prover(url, { pool: await createPool() })`, with `createPool` from
+`@blueshift-gg/xark-wasm/pool` (about 4× faster with 8 threads). A browser needs a
+cross-origin isolated page for it, and proves in a Web Worker.
+
 `Policy.default().on(…).minAge(18)` and `Identity.commitment(id)` are the crate's Rust,
 not a TypeScript copy of it: the same `#[input]`, on an `impl` block, makes its
 methods client functions, typed from their signatures and documented with their doc

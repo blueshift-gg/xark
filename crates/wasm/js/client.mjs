@@ -309,7 +309,7 @@ export class Circuit {
       }
     }
     await loadClient(this, parts.client, from);
-    return new Prover(this, wasm, parts);
+    return new Prover(this, wasm, parts, options?.pool);
   }
 
   async verifier(from, options) {
@@ -440,9 +440,11 @@ class Session {
 }
 
 export class Prover extends Session {
-  constructor(circuit, wasm, parts) {
+  constructor(circuit, wasm, parts, pool) {
     super(circuit, wasm);
     this.parts = parts;
+    /** A worker pool (`createPool` from `./pool`) the proofs run on, if any. */
+    this.pool = pool;
   }
 
   /**
@@ -459,7 +461,11 @@ export class Prover extends Session {
     const { circuit, provingKey, sources } = this.parts;
     const { proof, publicInputs } = typed(() => {
       const encoded = this.codec.encodeInputs(toJson(inputs));
-      return this.session ? this.session.prove(encoded) : this.wasm.prove(circuit, provingKey, encoded, sources);
+      const pool = this.pool;
+      if (this.session) return pool ? this.session.prove(encoded, { pool }) : this.session.prove(encoded);
+      return pool
+        ? this.wasm.proveStreaming(circuit, provingKey, encoded, { pool, sources })
+        : this.wasm.prove(circuit, provingKey, encoded, sources);
     });
     return new Proof(proof.slice(), this.decodePublicInputs(publicInputs), publicInputs.slice(), this.wasm);
   }

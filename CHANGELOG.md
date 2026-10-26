@@ -182,7 +182,7 @@ verification starter, and the `xark-client` npm package is removed.
 - **Proving and verifying:** `Zkyc.prover(source)` and `Zkyc.verifier(source)`,
   from a URL serving the build output or its bytes, each with only the methods it
   can run. They load xark-wasm themselves (node, web or workerd; `{ wasm }` passes
-  your own). `prove` returns a `Proof`: `toBytes()` is the proof as an exported
+  your own). `{ pool }` proves on a worker pool from `@blueshift-gg/xark-wasm/pool`. `prove` returns a `Proof`: `toBytes()` is the proof as an exported
   Solana verifier reads it (256 bytes, `Proof::from_le_bytes` on chain), and
   `toBytesCompressed()` is half the size; `verifier.verify(bytes, required)` reads
   either and checks it proves the public inputs you require. A malformed verifying

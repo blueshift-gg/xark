@@ -1,3 +1,5 @@
+import type { WorkerPool } from "./pool.js";
+
 /** This package's version. A client's `schema.json` must come from the same release. */
 export const VERSION: string;
 
@@ -119,8 +121,15 @@ export interface Wasm {
   prove(circuit: Uint8Array, provingKey: Uint8Array, inputs: Record<string, string>, sources?: string): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit and its proving key, decoded once, for many proofs (`Prover.preload`). */
   ProvingSession: new (circuit: Uint8Array, provingKey: Uint8Array, sources?: string) => {
-    prove(inputs: Record<string, string>): { proof: Uint8Array; publicInputs: Uint8Array };
+    prove(inputs: Record<string, string>, options?: { pool?: WorkerPool }): { proof: Uint8Array; publicInputs: Uint8Array };
   };
+  /** `prove` with options: a prover with a `pool` proves through it. */
+  proveStreaming(
+    circuit: Uint8Array,
+    provingKey: Uint8Array,
+    inputs: Record<string, string>,
+    options: { pool?: WorkerPool; sources?: string },
+  ): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit's `schema.json`, parsed once. */
   Schema: new (schema: string) => {
     encodeInputs(inputs: string): Record<string, string>;
@@ -181,6 +190,14 @@ export interface LoadOptions {
    * Ed25519 in node), not per proof.
    */
   digest?: string;
+  /**
+   * A prover only: a worker pool to prove on (`createPool()` from
+   * `@blueshift-gg/xark-wasm/pool`), spreading the FFTs and MSMs over its threads
+   * (about 4× faster with 8). It needs `SharedArrayBuffer`: in a browser, a
+   * cross-origin isolated page (`parallelSupported()` says), proving off the main
+   * thread. The pool is yours: `terminate()` it when done.
+   */
+  pool?: WorkerPool;
   /**
    * A verifier only: the sha256 its `vk.bin` must have (`xark setup` prints it, and
    * `metadata.json` records it as `verifying_key_sha256`). Another key is refused,

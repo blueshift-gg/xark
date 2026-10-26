@@ -227,7 +227,7 @@ pub fn prove_preloaded(inputs: JsValue) -> Result<ProofBundle, js_sys::Error> {
         let p = state
             .as_mut()
             .ok_or_else(|| js_error("call preload() first"))?;
-        streaming::prove_auto(p, inputs)
+        streaming::prove_auto(p, inputs, &JsValue::UNDEFINED)
     })
 }
 
@@ -251,8 +251,14 @@ impl ProvingSession {
     }
 
     /// Prove: the same arguments (bar the artifacts) and result as [`prove`].
-    pub fn prove(&mut self, inputs: JsValue) -> Result<ProofBundle, js_sys::Error> {
-        streaming::prove_auto(&mut self.0, inputs)
+    /// `options` (optional): `pool`, a worker pool from `js/pool.mjs`, as for
+    /// `proveStreaming`.
+    pub fn prove(
+        &mut self,
+        inputs: JsValue,
+        options: JsValue,
+    ) -> Result<ProofBundle, js_sys::Error> {
+        streaming::prove_auto(&mut self.0, inputs, &options)
     }
 }
 
@@ -279,7 +285,7 @@ pub fn prove(
     sources: Option<String>,
 ) -> Result<ProofBundle, js_sys::Error> {
     let mut p = streaming::prepare_auto(circuit_xbc, pk_bytes, false, sources)?;
-    streaming::prove_auto(&mut p, inputs)
+    streaming::prove_auto(&mut p, inputs, &JsValue::UNDEFINED)
 }
 
 /// Verify a Groth16 proof against its public inputs, in memory.

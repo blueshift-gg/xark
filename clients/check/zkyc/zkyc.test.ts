@@ -1,6 +1,7 @@
 // The generated `zkyc` client (`xark client`) through xark-wasm. `npm test` runs it,
 // after setup.ts builds the example and its keys.
 import { Circuit } from "@blueshift-gg/xark-wasm/client";
+import { createPool } from "@blueshift-gg/xark-wasm/pool";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { artifacts, outDir, serve } from "../artifacts";
@@ -230,6 +231,25 @@ test("a preloaded prover keeps its key decoded, and proves as before", async () 
   expect(() => fast.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } })).toThrow(
     /`id\.nationality\.require_in\(policy\.allowed\);`/,
   );
+});
+
+test("a prover with a worker pool proves through it", async () => {
+  const pool = await createPool({ threads: 2 });
+  try {
+    const pooled = await Zkyc.prover(artifacts("zkyc"), { pool });
+    for (const preloaded of [false, true]) {
+      if (preloaded) pooled.preload();
+      const proof = pooled.prove({ id, commitment, policy });
+      expect(verifier.verify(proof.toBytes(), { commitment, policy })).toBe(true);
+      // A failed check still names its statement.
+      expect(() => pooled.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } })).toThrow(
+        /`id\.nationality\.require_in\(policy\.allowed\);`/,
+      );
+    }
+    expect(pool.stats.msmCalls).toBeGreaterThan(0);
+  } finally {
+    await pool.terminate();
+  }
 });
 
 test("a prover pinned to the client's circuit refuses another", async () => {

@@ -462,9 +462,14 @@ pub(crate) fn prepare_auto(
     })
 }
 
-/// Prove with a [`prepare_auto`]d circuit and default options.
-pub(crate) fn prove_auto(p: &mut Prepared, inputs: JsValue) -> Result<ProofBundle, js_sys::Error> {
-    prove_prepared(p, inputs, &JsValue::UNDEFINED)
+/// Prove with a [`prepare_auto`]d circuit and `options` as for
+/// [`prove_streaming`] (`pool`, `msmChunk`, `seed`), or none.
+pub(crate) fn prove_auto(
+    p: &mut Prepared,
+    inputs: JsValue,
+    options: &JsValue,
+) -> Result<ProofBundle, js_sys::Error> {
+    prove_prepared(p, inputs, options)
 }
 
 fn prove_prepared(
