@@ -485,7 +485,8 @@ fn export_and_verify_check_the_key() {
     assert!(ok, "prove failed: {err}");
     let o = out.to_str().unwrap();
 
-    // A new key: the old proof no longer verifies with it.
+    // A new key: the old proof no longer verifies with it, so it isn't bundled (and
+    // named by flag, it's refused).
     let (ok, _, err) = run(&[
         "setup",
         o,
@@ -495,8 +496,20 @@ fn export_and_verify_check_the_key() {
     ]);
     assert!(ok, "second setup failed: {err}");
     let (ok, _, err) = run(&["export", o, "--allow-insecure"]);
+    assert!(ok && err.contains("is for another key"), "{err}");
+    assert!(
+        !out.join("verifier/instruction_data.bin").exists(),
+        "bundled anyway"
+    );
+    let proof = out.join("proof.bin");
+    let (ok, _, err) = run(&[
+        "export",
+        o,
+        "--allow-insecure",
+        "--proof",
+        proof.to_str().unwrap(),
+    ]);
     assert!(!ok && err.contains("doesn't verify"), "{err}");
-    assert!(!out.join("verifier").exists(), "exported anyway");
 
     // As if the circuit had been rebuilt with a change since setup.
     let meta = out.join("metadata.json");

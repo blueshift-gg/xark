@@ -195,8 +195,8 @@ xark prove examples/cube --inputs '{"secret": "3", "result": "27"}'
 # Check a proof against the verifying key and its public inputs.
 xark verify examples/cube
 
-# Generate the Solana verifier crate (the key embedded, the proof bundled as its
-# self-test). Refuses a dev key unless you pass --allow-insecure.
+# Generate the Solana verifier crate (the key embedded; the proof, if there is one,
+# bundled as its self-test). Refuses a dev key unless you pass --allow-insecure.
 xark export examples/cube
 
 # Validate a circuit WITHOUT emitting artifacts — subset violations as rustc

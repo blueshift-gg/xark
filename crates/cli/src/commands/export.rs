@@ -13,9 +13,9 @@
 //!   Cargo.toml                 # depends on xark-verifier
 //!   src/lib.rs                 # const VK<N> + verify(...) (generated)
 //!   verifying_key.solana.bin   # LE VK, embedded by lib.rs
-//!   proof.solana.bin           # sample proof (256 B)
-//!   public_inputs.solana.bin   # sample public inputs (N * 32 B LE)
-//!   instruction_data.bin       # proof || public_inputs (the on-chain ix data)
+//!   proof.solana.bin           # sample proof (256 B)            } when there is a proof
+//!   public_inputs.solana.bin   # sample public inputs (N * 32 B)  } (`xark prove`):
+//!   instruction_data.bin       # proof || public_inputs          } the crate's self-test
 //!   README.md
 //! ```
 //!
@@ -49,7 +49,8 @@ pub struct ExportArgs {
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
     /// Proof, bundled as the generated crate's self-test vector. Inferred as
-    /// `target/xark/<name>/proof.bin`.
+    /// `target/xark/<name>/proof.bin`; without one (or with one for another key),
+    /// the crate has no self-test.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
     /// Public inputs file produced by `xark prove`. Inferred as
@@ -92,6 +93,9 @@ pub fn run(args: ExportArgs) -> Result<()> {
         .public_inputs
         .clone()
         .unwrap_or_else(|| project.public_inputs());
+    // A proof given by flag must be there and verify; the inferred one is a sample,
+    // left out when missing or made with another key.
+    let explicit = args.proof.is_some() || args.public_inputs.is_some();
     let out_dir = args.out.clone().unwrap_or_else(|| project.export_dir());
 
     // Load inputs.
@@ -104,48 +108,54 @@ pub fn run(args: ExportArgs) -> Result<()> {
     )?;
     check_key_safe_for_export(&vk_path, args.allow_insecure)?;
     super::ensure_key_matches_circuit(&vk_path, &project.circuit_xbc())?;
-    let proof = super::read_artifact(
-        &proof_path,
-        "proof",
-        "xark prove",
-        "run `xark prove` first?",
-        || ProofBundle::read_proof(&proof_path),
-    )?;
-    let public_inputs = super::read_artifact(
-        &public_inputs_path,
-        "public inputs file",
-        "xark prove",
-        "run `xark prove` first?",
-        || read_public_inputs(&public_inputs_path),
-    )?;
-
-    let num_public_inputs = public_inputs.len();
-    let ic_len = vk.gamma_abc_g1.len();
-    if ic_len != num_public_inputs + 1 {
-        anyhow::bail!(
-            "VK ic length ({ic_len}) does not match num_public_inputs+1 ({}); \
-             ic_len must equal num_public_inputs + 1 in Groth16",
-            num_public_inputs + 1
-        );
-    }
-
-    // The proof is the generated crate's self-test: one that doesn't verify (a
-    // proof from an earlier key) would only fail there, after the export.
-    if !xark_backend::verify(&vk, &proof, &public_inputs)? {
-        anyhow::bail!(
-            "the proof {} doesn't verify with {}: run `xark prove` again",
-            proof_path.display(),
-            vk_path.display()
-        );
-    }
+    let num_public_inputs = vk.gamma_abc_g1.len().saturating_sub(1);
+    let sample = if explicit || proof_path.exists() {
+        let proof = super::read_artifact(
+            &proof_path,
+            "proof",
+            "xark prove",
+            "run `xark prove` first?",
+            || ProofBundle::read_proof(&proof_path),
+        )?;
+        let public_inputs = super::read_artifact(
+            &public_inputs_path,
+            "public inputs file",
+            "xark prove",
+            "run `xark prove` first?",
+            || read_public_inputs(&public_inputs_path),
+        )?;
+        if public_inputs.len() != num_public_inputs {
+            anyhow::bail!(
+                "{} holds {} public input(s), but the verifying key takes {num_public_inputs}",
+                public_inputs_path.display(),
+                public_inputs.len()
+            );
+        }
+        // The proof is the generated crate's self-test: one that doesn't verify (a
+        // proof from an earlier key) would only fail there, after the export.
+        if xark_backend::verify(&vk, &proof, &public_inputs)? {
+            Some((proof, public_inputs))
+        } else if explicit {
+            anyhow::bail!(
+                "the proof {} doesn't verify with {}: run `xark prove` again",
+                proof_path.display(),
+                vk_path.display()
+            );
+        } else {
+            eprintln!(
+                "{} {} is for another key, so the crate gets no self-test (run `xark \
+                 prove` and export again to bundle one)",
+                crate::style::warn("warning:"),
+                proof_path.display()
+            );
+            None
+        }
+    } else {
+        None
+    };
 
     // Encode (little-endian, the only on-chain wire format).
     let vk_bytes = assemble_vk_bytes_le(&vk);
-    let proof_bytes = assemble_proof_bytes_le(&proof);
-    let public_inputs_bytes = assemble_public_inputs_bytes_le(&public_inputs);
-    let mut instruction_data = Vec::with_capacity(proof_bytes.len() + public_inputs_bytes.len());
-    instruction_data.extend_from_slice(&proof_bytes);
-    instruction_data.extend_from_slice(&public_inputs_bytes);
 
     let crate_name = sanitize_crate_name(args.crate_name.as_deref().unwrap_or_else(|| {
         out_dir
@@ -178,15 +188,36 @@ pub fn run(args: ExportArgs) -> Result<()> {
         .with_context(|| format!("creating {}", out.join("src").display()))?;
 
     write_file(out, "verifying_key.solana.bin", &vk_bytes)?;
-    write_file(out, "proof.solana.bin", &proof_bytes)?;
-    write_file(out, "public_inputs.solana.bin", &public_inputs_bytes)?;
-    write_file(out, "instruction_data.bin", &instruction_data)?;
+    const SAMPLE: [&str; 3] = [
+        "proof.solana.bin",
+        "public_inputs.solana.bin",
+        "instruction_data.bin",
+    ];
+    if let Some((proof, public_inputs)) = &sample {
+        let proof_bytes = assemble_proof_bytes_le(proof);
+        let public_inputs_bytes = assemble_public_inputs_bytes_le(public_inputs);
+        let instruction_data = [proof_bytes.as_slice(), &public_inputs_bytes].concat();
+        for (name, bytes) in SAMPLE
+            .iter()
+            .zip([proof_bytes, public_inputs_bytes, instruction_data])
+        {
+            write_file(out, name, &bytes)?;
+        }
+    } else {
+        // An earlier export's sample, for whatever key it had.
+        for name in SAMPLE {
+            let _ = fs::remove_file(out.join(name));
+        }
+    }
 
     write_str(&out.join("Cargo.toml"), &gen_cargo_toml(&crate_name))?;
-    write_str(&out.join("src/lib.rs"), &gen_lib_rs(num_public_inputs))?;
+    write_str(
+        &out.join("src/lib.rs"),
+        &gen_lib_rs(num_public_inputs, sample.is_some()),
+    )?;
     write_str(
         &out.join("README.md"),
-        &gen_readme(&crate_name, num_public_inputs),
+        &gen_readme(&crate_name, num_public_inputs, sample.is_some()),
     )?;
 
     println!(
@@ -202,19 +233,17 @@ pub fn run(args: ExportArgs) -> Result<()> {
         crate::style::brand("✅ On-chain verifier crate ready (verifying key embedded).")
     );
     let p = super::path_arg(&args.path);
-    println!(
-        "\n{}",
-        crate::style::next_steps(&[
-            (
-                format!("xark client {p}"),
-                "generate a typed TypeScript client (prove + verify in JS)",
-            ),
-            (
-                "cargo test".to_string(),
-                "run inside the generated crate to self-check the bundled proof",
-            ),
-        ])
-    );
+    let mut next = vec![(
+        format!("xark client {p}"),
+        "generate a typed TypeScript client (prove + verify in JS)",
+    )];
+    if sample.is_some() {
+        next.push((
+            "cargo test".to_string(),
+            "run inside the generated crate to self-check the bundled proof",
+        ));
+    }
+    println!("\n{}", crate::style::next_steps(&next));
     Ok(())
 }
 
@@ -313,7 +342,23 @@ unexpected_cfgs = {{ level = "warn", check-cfg = [
     )
 }
 
-fn gen_lib_rs(n: usize) -> String {
+fn gen_lib_rs(n: usize, sample: bool) -> String {
+    let tests = if sample {
+        r#"
+#[cfg(test)]
+mod tests {
+    /// The proof bundled at export time verifies against the embedded VK.
+    #[test]
+    fn bundled_proof_verifies() {
+        assert!(super::verify_instruction_data(include_bytes!(
+            "../instruction_data.bin"
+        )));
+    }
+}
+"#
+    } else {
+        ""
+    };
     format!(
         r#"//! Auto-generated by `xark export` — do not edit by hand.
 //!
@@ -376,23 +421,21 @@ pub fn verify_instruction_data(data: &[u8]) -> bool {{
 pub fn verify_instruction_data_strict(data: &[u8]) -> bool {{
     xark_verifier::verify_proof_only_strict(VK_BYTES, data).unwrap_or(false)
 }}
-
-#[cfg(test)]
-mod tests {{
-    /// The proof bundled at export time verifies against the embedded VK.
-    #[test]
-    fn bundled_proof_verifies() {{
-        assert!(super::verify_instruction_data(include_bytes!(
-            "../instruction_data.bin"
-        )));
-    }}
-}}
-"#
+{tests}"#
     )
 }
 
-fn gen_readme(name: &str, n: usize) -> String {
+fn gen_readme(name: &str, n: usize, sample: bool) -> String {
     let ident = name.replace('-', "_");
+    let sample = if sample {
+        "`cargo test` in this crate verifies the bundled sample proof against the
+embedded VK. `instruction_data.bin` is that proof as your program receives it
+(`proof || public_inputs`): send those bytes as an instruction's data, in a
+transaction built however your client builds them. "
+    } else {
+        "Export after `xark prove` to bundle a sample proof, which `cargo test` in this
+crate then verifies against the embedded VK. "
+    };
     format!(
         r#"# {name}
 
@@ -435,11 +478,8 @@ as a replay or "already used" key. Put replay protection in the public inputs
 instead: a nullifier or nonce the circuit derives from a secret, or the signer
 or context the proof is for, and record *that* on-chain.
 
-`cargo test` in this crate verifies the bundled sample proof against the
-embedded VK. `instruction_data.bin` is that proof as your program receives it
-(`proof || public_inputs`): send those bytes as an instruction's data, in a
-transaction built however your client builds them. A TypeScript client from
-`xark client` sends a proof in this format: `proof.toBytes()`.
+{sample}A TypeScript client from `xark client` sends a proof in this format:
+`proof.toBytes()`.
 "#
     )
 }

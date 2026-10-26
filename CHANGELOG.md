@@ -349,6 +349,9 @@ verification starter, and the `xark-client` npm package is removed.
   path to a type (`xark_hash::Hash`), reaches the generated client. It used to be
   skipped with a warning, because the client read each type as written; it now reads
   the type's `Input::TYPE`.
+- `xark export` no longer needs a proof. Without one, or with one made for another
+  key, it writes the verifier crate without its self-test (and says why in the
+  second case). A proof named with `--proof` must still verify.
 - `xark ceremony finalize` records what the keys were made from, as `xark setup`
   does: `num_constraints` (was 0), `ptau_source` (was null), `r1cs_form` and
   `qap_domain_size`. A ceremony begun with an older xark still finalizes, without
