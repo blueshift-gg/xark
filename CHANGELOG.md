@@ -354,6 +354,10 @@ verification starter, and the `xark-client` npm package is removed.
 - `xark export` no longer needs a proof. Without one, or with one made for another
   key, it writes the verifier crate without its self-test (and says why in the
   second case). A proof named with `--proof` must still verify.
+- `xark-verifier` no longer turns on `static-syscalls` by default. An SBPFv3 build
+  is byte-identical without it (the v3 target sets it), and an SBPFv0 build now
+  works with the default features, where it used to build a `.so` the loader
+  rejects.
 - `xark ceremony finalize` records what the keys were made from, as `xark setup`
   does: `num_constraints` (was 0), `ptau_source` (was null), `r1cs_form` and
   `qap_domain_size`. A ceremony begun with an older xark still finalizes, without
