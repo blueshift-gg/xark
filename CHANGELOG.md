@@ -115,6 +115,22 @@ gadgets now check more:
   `Policy` built with `Policy::default().on(today).min_age(18).worth_at_least(500_000)`.
 - **`bool` inputs.** A `bool` parameter or field is one field element, checked to
   be 0 or 1, usable as a condition and a value.
+- **Struct fields are packed.** An `#[input]` struct's consecutive fields of known
+  width (`uN`, `iN`, `bool`, a `Time`/`Days` or `Timestamp`, a `Choice` and a
+  `Bitfield`) share one field element, in declaration order, the first in its lowest
+  bits, until the next would pass 253 bits. In the circuit the element is split into
+  its bits once, which is also every field's range check (so a packed `Choice` or
+  `Days` is range-checked on entry), and each field reads its own bits. A `Field`, a
+  `Text`, an array, a nested struct or a field marked `#[unpacked]` keeps its own
+  leaves and starts a new run, and a field with no packable neighbour stays as it
+  is. Fewer leaves means fewer public inputs (fewer multiplications for the
+  verifier, less instruction data, a smaller verifying key) and fewer hash rounds
+  over `to_fields()`, which returns the packed elements: order a struct's fields
+  so that narrow ones sit together. The packed element is named by its fields
+  (`policy.{born_by,min_net_worth}`) and `schema.json` records each field's bits,
+  so clients, `--inputs` and decoded public inputs keep every field by name. A
+  hand-written `Input` impl packs only what it declares with `Member::packed` and
+  reads and writes with `Reader::member` / `Writer::member`.
 - **Signed integer inputs.** An `i8`…`i128` parameter or field is one field
   element holding its two's complement (`-1i8` is `255`), range-checked to its
   width like a `uN`. Clients and `--inputs` take a negative number (or a `"-…"`

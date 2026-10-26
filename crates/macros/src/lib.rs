@@ -409,6 +409,13 @@ fn to_pascal(s: &str) -> String {
 /// pub struct Identity { pub born: Days<1900, 2100>, pub nationality: Choice<Country>, pub salt: Field }
 /// ```
 ///
+/// Its narrow fields are packed: consecutive fields of known width (integers,
+/// `bool`, a `Days`/`Time`/`Timestamp`, a `Choice`, a `Bitfield`) share one field
+/// element, in declaration order, until the next would pass 253 bits, so a struct
+/// takes fewer leaves (and fewer public inputs, and fewer hash rounds over
+/// `to_fields()`). Keep narrow fields together; `#[unpacked]` on a field gives it its
+/// own leaves (see `xark::input::Pack`).
+///
 /// It derives `Clone`, `Copy` and `Debug` unless the type lists them already (an
 /// enum also `PartialEq` and `Eq`); `#[input(no_derive)]` leaves them to you, for a
 /// type with its own impl of one.
@@ -482,6 +489,12 @@ pub fn input(attr: TokenStream, item: TokenStream) -> TokenStream {
             let enum_ = matches!(derive.data, Data::Enum(_));
             if !args.no_derive {
                 add_derives(attrs, enum_);
+            }
+            // `#[unpacked]` is `#[input]`'s, not the compiler's: read above, then dropped.
+            if let syn::Item::Struct(s) = &mut item {
+                for f in s.fields.iter_mut() {
+                    f.attrs.retain(|a| !a.path().is_ident("unpacked"));
+                }
             }
             match &derive.data {
                 Data::Struct(d) => struct_input(&derive, d, args.encoding),
@@ -621,13 +634,43 @@ fn struct_input(
             }
         })
         .collect();
-    let members = fields.iter().map(|(fname, _, ty)| {
-        let lit = LitStr::new(fname, name.span());
-        quote! { ::xark::input::Member::new(#lit, <#ty as ::xark::Input>::TYPE) }
-    });
-    let reads = fields.iter().map(|(_, acc, _)| match &data.fields {
-        syn::Fields::Named(_) => quote! { #acc: __r.read() },
-        _ => quote! { __r.read() },
+    // Packing is for a struct given as an object of its fields; an encoding lays
+    // its leaves out itself.
+    let packing = matches!(enc, StructEncoding::Fields);
+    let unpacked: Vec<bool> = data
+        .fields
+        .iter()
+        .map(|f| f.attrs.iter().any(|a| a.path().is_ident("unpacked")))
+        .collect();
+    if !packing && let Some(f) = data.fields.iter().zip(&unpacked).find(|(_, u)| **u) {
+        return Err(syn::Error::new_spanned(
+            f.0,
+            "`#[unpacked]` is for a struct given as its fields: an encoding has no packing",
+        ));
+    }
+    let members = fields
+        .iter()
+        .zip(&unpacked)
+        .map(|((fname, _, ty), unpacked)| {
+            let lit = LitStr::new(fname, name.span());
+            if packing && !unpacked {
+                quote! { ::xark::input::Member::packed(#lit, <#ty as ::xark::Input>::TYPE) }
+            } else {
+                quote! { ::xark::input::Member::new(#lit, <#ty as ::xark::Input>::TYPE) }
+            }
+        });
+    let n_fields = fields.len();
+    let plan = quote! {
+        #[allow(dead_code)]
+        const __PLAN: [::xark::input::Pack; #n_fields] =
+            ::xark::input::pack_plan::<#n_fields>(<#name as ::xark::Input>::TYPE);
+    };
+    let reads = fields.iter().enumerate().map(|(i, (_, acc, _))| {
+        let read = quote! { __r.member(__PLAN[#i]) };
+        match &data.fields {
+            syn::Fields::Named(_) => quote! { #acc: #read },
+            _ => read,
+        }
     });
     let ctor = match &data.fields {
         syn::Fields::Named(_) => quote! { #name { #( #reads ),* } },
@@ -636,7 +679,8 @@ fn struct_input(
     };
     let writes = fields
         .iter()
-        .map(|(_, acc, _)| quote! { __w.write(&self.#acc); });
+        .enumerate()
+        .map(|(i, (_, acc, _))| quote! { __w.member(__PLAN[#i], &self.#acc); });
 
     let encoding = match enc {
         StructEncoding::Fields => quote! { ::xark::input::Encoding::Fields },
@@ -664,9 +708,11 @@ fn struct_input(
                 encoding: #encoding,
             });
             fn read(__r: &mut ::xark::input::Reader<'_>) -> Self {
+                #plan
                 #ctor
             }
             fn write(&self, __w: &mut ::xark::input::Writer<'_>) {
+                #plan
                 #( #writes )*
             }
         }

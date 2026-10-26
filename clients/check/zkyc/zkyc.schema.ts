@@ -24,9 +24,7 @@ const schema = {
   ],
   "public_inputs": [
     "commitment",
-    "policy.today",
-    "policy.born_by",
-    "policy.min_net_worth",
+    "policy.{today,born_by,min_net_worth}",
     "policy.allowed"
   ],
   "types": {
@@ -317,24 +315,40 @@ const schema = {
         },
         {
           "name": "born",
+          "packed": {
+            "bits": 17,
+            "offset": 0
+          },
           "type": {
             "ref": "Days<1900,2100>"
           }
         },
         {
           "name": "nationality",
+          "packed": {
+            "bits": 8,
+            "offset": 17
+          },
           "type": {
             "ref": "Choice<Country>"
           }
         },
         {
           "name": "net_worth",
+          "packed": {
+            "bits": 64,
+            "offset": 25
+          },
           "type": {
             "uint": 64
           }
         },
         {
           "name": "expires",
+          "packed": {
+            "bits": 17,
+            "offset": 89
+          },
           "type": {
             "ref": "Days<1900,2100>"
           }
@@ -349,18 +363,30 @@ const schema = {
       "struct": [
         {
           "name": "today",
+          "packed": {
+            "bits": 17,
+            "offset": 0
+          },
           "type": {
             "ref": "Days<1900,2100>"
           }
         },
         {
           "name": "born_by",
+          "packed": {
+            "bits": 17,
+            "offset": 17
+          },
           "type": {
             "ref": "Days<1900,2100>"
           }
         },
         {
           "name": "min_net_worth",
+          "packed": {
+            "bits": 64,
+            "offset": 34
+          },
           "type": {
             "uint": 64
           }

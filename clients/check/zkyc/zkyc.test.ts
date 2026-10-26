@@ -29,7 +29,7 @@ const id: Identity = {
 };
 // The issuer's Poseidon2 commitment over `id` (the Rust `id.commitment()`; see the
 // test below, which computes it here).
-const commitment = new Field(3871611513999297682123228541823586569204418180156089065518749133230561063210n);
+const commitment = new Field(15259518381313933288057087670471640202846278730574611248166313700185929730327n);
 // 18 or older on 2026-10-20, worth ≥ 500k, a document valid that day, from US/GB/FR/DE
 // (as data; the test below builds it with the Rust constructors).
 const policy: Policy = {
@@ -127,8 +127,10 @@ test("names the check a holder fails", () => {
 
 test("computes the issuer's commitment as the circuit does", () => {
   // `xark_poseidon2::hash(id.to_fields())`, the circuit's `id.commitment()`.
+  // Three: the document, the packed `born`, `nationality`, `netWorth` and
+  // `expires`, and the salt.
   const fields = prover.fields("Identity", id);
-  expect(fields).toHaveLength(6);
+  expect(fields).toHaveLength(3);
   expect(prover.poseidon2(fields)).toEqual(commitment);
   // @ts-expect-error: `fields` takes the circuit's structs by name (tsc checks this line)
   expect(() => prover.fields("Nope", id)).toThrow();

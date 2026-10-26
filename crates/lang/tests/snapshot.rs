@@ -620,6 +620,58 @@ fn time_inputs_compare_at_their_width() {
     );
 }
 
+/// Packed struct fields in the circuit: one leaf for the run, split once (each
+/// field's range check), each field read off its bits, and `to_fields` rebuilding the
+/// very leaf. A leaf with a bit past the run's width, or `p − 1`, has no witness.
+#[test]
+fn packed_fields_read_their_own_bits() {
+    use num_bigint::BigUint;
+    const P_MINUS_1: &str =
+        "21888242871839275222246405745257275088548364400416034343698204186575808495616";
+    let src = "#![no_std]\nuse xark::prelude::*;\n\
+        #[input]\npub struct S { pub a: u8, pub on: bool, pub t: i64, pub born: Days<1900, 2100> }\n\
+        #[circuit]\n\
+        pub fn packed(s: Private<S>, a: Public<u8>, t: Public<i64>, k: Public<Field>) {\n\
+        require(s.a == a);\n\
+        require(s.on);\n\
+        require(s.t == t);\n\
+        require(s.born >= Days::new(1990, 1, 1));\n\
+        require_eq(s.to_fields()[0], k);\n}\n";
+    let c = compile_with_field(&write_case("packed_fields", src), "packed_fields", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    let born = xark::Days::<1900, 2100>::new(2000, 6, 1).steps();
+    let leaf = |a: u64, on: u64, t: i64, born: u64| {
+        (BigUint::from(a)
+            | BigUint::from(on) << 8u32
+            | BigUint::from(t as u64) << 9u32
+            | BigUint::from(born) << 73u32)
+            .to_string()
+    };
+    let ok = leaf(7, 1, -5, born);
+    let neg5 = (-5i64 as u64).to_string();
+    let run = |s: &str, a: &str, t: &str, k: &str| {
+        accepts_exactly(&c, &[("s.{a,on,t,born}", s), ("a", a), ("t", t), ("k", k)])
+    };
+    assert!(
+        run(&ok, "7", &neg5, &ok),
+        "the fields read back their values"
+    );
+    assert!(!run(&ok, "8", &neg5, &ok), "a is 7");
+    assert!(
+        !run(&leaf(7, 0, -5, born), "7", &neg5, &leaf(7, 0, -5, born)),
+        "on is set"
+    );
+    let early = xark::Days::<1900, 2100>::new(1989, 12, 31).steps();
+    assert!(
+        !run(&leaf(7, 1, -5, early), "7", &neg5, &leaf(7, 1, -5, early)),
+        "born too early"
+    );
+    // Past the 90 bits the run takes: no witness, whatever the fields' values.
+    let over = (BigUint::from(1u8) << 90u32 | ok.parse::<BigUint>().unwrap()).to_string();
+    assert!(!run(&over, "7", &neg5, &over), "a bit past the run");
+    assert!(!run(P_MINUS_1, "7", &neg5, P_MINUS_1), "p - 1");
+}
+
 /// A `u128` input next to a narrower one (in a struct, or as parameters) builds and
 /// proves: dropping the input-binding call regions keeps the rest's parents right.
 #[test]
@@ -628,7 +680,7 @@ fn u128_input_beside_a_narrower_one() {
         (
             "u128_beside_struct",
             "#![no_std]\nuse xark::prelude::*;\n\
-             #[input]\nstruct S { x: u8, z: u128 }\n\
+             #[input]\nstruct S { #[unpacked] x: u8, #[unpacked] z: u128 }\n\
              pub fn circuit(s: Private<S>, c: Public<Field>) { require_eq(Field::from(s.x) + Field::from(s.z), c); }\n",
         ),
         (
@@ -5335,13 +5387,14 @@ fn bool_inputs() {
     let c = compile_with_field(&write_case("bool_in", src), "bool_in", "bn254");
     assert!(c.status_success, "{}", c.stderr);
     let p = c.program();
+    // `open` and `level` share a packed leaf: `open + 2·level`, here level 2.
     let run = |flag: &str, open: &str, out: &str| {
+        let gate = (open.parse::<u32>().unwrap() + 4).to_string();
         solves(
             &p,
             &[
                 ("flag", flag),
-                ("g.open", open),
-                ("g.level", "2"),
+                ("g.{open,level}", &gate),
                 ("x", "5"),
                 ("out", out),
             ],

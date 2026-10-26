@@ -97,11 +97,15 @@ fn input_uints_and_nesting_leaves() {
     assert_eq!((back.inner.a, back.tag, back.c), (u64::MAX, [1, 2], 3));
 }
 
-/// Signed members: each leaf is the two's complement of its width.
+/// Signed members: each leaf is the two's complement of its width. (`#[unpacked]`:
+/// each its own leaf; packed, they'd share one.)
 #[input]
 struct Signed {
+    #[unpacked]
     a: i8,
+    #[unpacked]
     t: i64,
+    #[unpacked]
     big: i128,
 }
 
@@ -123,6 +127,77 @@ fn signed_members_are_twos_complement_leaves() {
     );
     let back: Signed = input::from_fields(&v.to_fields());
     assert_eq!((back.a, back.t, back.big), (-1, -86_400, i128::MIN));
+}
+
+/// Packed fields: consecutive fields of known width share a field element, the
+/// first in its lowest bits, until the next would pass 253 bits; a `Field`, a
+/// `#[unpacked]` field or a full element starts a new one, and a lone field stays as
+/// it is.
+#[input]
+struct Packed {
+    a: u8,
+    on: bool,
+    born: Days<1900, 2100>,
+    t: i64,
+    salt: Field,
+    tier: Choice<Tier>,
+    big: u128,
+    more: u128,
+    #[unpacked]
+    n: u32,
+    m: u32,
+}
+
+#[test]
+fn fields_pack_in_runs() {
+    use num_bigint::BigUint;
+    let v = Packed {
+        a: 7,
+        on: true,
+        born: Days::new(1990, 1, 1),
+        t: -1,
+        salt: Field::from(9u8),
+        tier: Tier::Accredited.into(),
+        big: u128::MAX,
+        more: 5,
+        n: 3,
+        m: 4,
+    };
+    let born = BigUint::from(v.born.steps());
+    // a: bits 0..8, on: 8, born: 9..26, t: 26..90.
+    let first = BigUint::from(7u8)
+        | BigUint::from(1u8) << 8u32
+        | born << 9u32
+        | BigUint::from(u64::MAX) << 26u32;
+    // tier (1 bit, two variants) and big share one; `more` would pass 253 bits.
+    let second = BigUint::from(1u8) | BigUint::from(u128::MAX) << 1u32;
+    let got = leaves(&v, "p");
+    let want = [
+        ("p.{a,on,born,t}", first.to_string()),
+        ("p.salt", "9".into()),
+        ("p.{tier,big}", second.to_string()),
+        ("p.more", "5".into()),
+        ("p.n", "3".into()),
+        ("p.m", "4".into()),
+    ]
+    .map(|(n, v)| (n.to_string(), v));
+    assert_eq!(got, want);
+    assert_eq!(<Packed as Input>::LEN, 6);
+    let back: Packed = input::from_fields(&v.to_fields());
+    assert_eq!(
+        (back.a, back.on, back.t, back.big, back.more, back.n, back.m),
+        (7, true, -1, u128::MAX, 5, 3, 4)
+    );
+    assert!(back.born == v.born && back.tier == Tier::Accredited);
+    // The schema says where each packed field sits, and a client reads it back.
+    let json = xark::client::to_json(&v).unwrap();
+    assert_eq!(json["born"], "1990-01-01");
+    assert_eq!(json["t"], "-1");
+    let again: Packed = xark::client::from_json(&json).unwrap();
+    assert_eq!(
+        again.to_fields().map(|f| f.to_decimal()),
+        v.to_fields().map(|f| f.to_decimal())
+    );
 }
 
 /// A hand-written impl: a type the derive can't express (a generic one).

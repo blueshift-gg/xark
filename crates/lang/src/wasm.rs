@@ -95,6 +95,10 @@ mod ffi {
         pub fn xark_input_bool(name: *const u8, len: usize, vis: u32) -> bool;
         #[cfg_attr(target_arch = "wasm32", link_name = "input_uint_hi")]
         pub fn xark_input_uint_hi() -> u64;
+        #[cfg_attr(target_arch = "wasm32", link_name = "field_to_uint")]
+        pub fn xark_field_to_uint(x: *const Field, bits: u32) -> u64;
+        #[cfg_attr(target_arch = "wasm32", link_name = "field_to_bool")]
+        pub fn xark_field_to_bool(x: *const Field) -> bool;
         #[cfg_attr(target_arch = "wasm32", link_name = "inputs_done")]
         pub fn xark_inputs_done();
         #[cfg_attr(target_arch = "wasm32", link_name = "panic")]
@@ -283,6 +287,19 @@ pub(crate) fn bind_u128(name: &str, public: bool) -> u128 {
 /// Hand the compiler the circuit's `schema.json`.
 pub(crate) fn record_schema(json: &str) {
     unsafe { ffi::xark_input_schema(json.as_ptr(), json.len()) }
+}
+
+/// `x`, a field element of at most `bits ≤ 64` bits, as that integer (the compiler
+/// proves the bound, free where `x` is a sum of proven bits).
+#[inline(always)]
+pub(crate) fn field_to_uint(x: Field, bits: u32) -> u64 {
+    unsafe { ffi::xark_field_to_uint(&x, bits) }
+}
+
+/// `x`, a field element that is 0 or 1, as a `bool` (proven, as [`field_to_uint`]).
+#[inline(always)]
+pub(crate) fn field_to_bool(x: Field) -> bool {
+    unsafe { ffi::xark_field_to_bool(&x) }
 }
 
 /// All inputs are bound: the compiler range-checks the `uN` ones now.

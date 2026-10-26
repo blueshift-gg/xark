@@ -55,6 +55,8 @@ enum Intr {
     InputsDone,
     InputSchema,
     InputUintHi,
+    FieldToUint,
+    FieldToBool,
     Panic,
 }
 
@@ -89,6 +91,8 @@ fn intrinsic(name: &str) -> Option<Intr> {
         "inputs_done" => Intr::InputsDone,
         "input_schema" => Intr::InputSchema,
         "input_uint_hi" => Intr::InputUintHi,
+        "field_to_uint" => Intr::FieldToUint,
+        "field_to_bool" => Intr::FieldToBool,
         "panic" => Intr::Panic,
         _ => return None,
     })
@@ -2035,6 +2039,27 @@ impl crate::interp::Host for Host {
                 )
                 .into_owned();
                 self.schema = Some(json);
+            }
+            Intr::FieldToUint | Intr::FieldToBool => {
+                // (x, width) -> i64 ; (x) -> i32: a field element as an integer of that
+                // width, its bits proven (free for a sum of proven bits: a packed
+                // field's slice).
+                let x = self.get_field(m, a[0])?;
+                let w = match intr {
+                    Intr::FieldToBool => 1,
+                    _ => int_of(a[1], "the width of `field_to_uint`")? as u32,
+                };
+                if w == 0 {
+                    return Ok(Some(V::c(0)));
+                }
+                if w > 64 {
+                    return Err(CompileError::new(
+                        "internal error: `field_to_uint` is at most 64 bits wide",
+                    ));
+                }
+                let bits = self.bits_of(&x, w as usize)?;
+                let lc = Self::recompose(&bits);
+                return Ok(Some(self.new_wire(m, lc, w)));
             }
             Intr::InputUintHi => {
                 let hi = self.pending_hi.take().ok_or_else(|| {

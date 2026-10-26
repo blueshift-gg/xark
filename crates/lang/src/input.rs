@@ -157,6 +157,8 @@ pub enum Layout {
 pub struct Member {
     pub name: &'static str,
     pub ty: Type,
+    /// Whether it may share a field element with its neighbours (see [`Pack`]).
+    pub pack: bool,
 }
 
 /// How a client gives a value of a named type. Each is a standard type every
@@ -209,6 +211,36 @@ impl Type {
         }
     }
 
+    /// The width of a value of this type when it is packed ([`Pack`]), or `None` for
+    /// one that isn't packable: an integer's width, 1 for a `bool`, enough bits for an
+    /// enum's variants in a `Choice`, one per variant in a `Bitfield`, and a time's
+    /// integer's. A `Field`, a `Text`, an array or a struct has its own leaves.
+    pub const fn bits(&self) -> Option<u32> {
+        match self {
+            Type::Uint(n) | Type::Int(n) => Some(*n),
+            Type::Bool => Some(1),
+            Type::Named(n) => match (n.layout, n.encoding) {
+                (Layout::Newtype(_), Encoding::Choice(v)) => {
+                    let len = v.names.len();
+                    Some(if len <= 2 {
+                        1
+                    } else {
+                        usize::BITS - (len - 1).leading_zeros()
+                    })
+                }
+                (Layout::Newtype(_), Encoding::Set(v)) if !v.names.is_empty() => {
+                    Some(v.names.len() as u32)
+                }
+                (
+                    Layout::Newtype(t),
+                    Encoding::Fields | Encoding::Timestamp | Encoding::Time { .. },
+                ) => t.bits(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// The number of leaves a value of this type takes.
     pub const fn leaves(&self) -> usize {
         match self {
@@ -254,7 +286,12 @@ impl Layout {
             Layout::Struct(ms) => {
                 let (mut n, mut i) = (0, 0);
                 while i < ms.len() {
-                    n += ms[i].ty.leaves();
+                    let p = pack_of(ms, i);
+                    if !p.packed() {
+                        n += ms[i].ty.leaves();
+                    } else if p.offset == 0 {
+                        n += 1;
+                    }
                     i += 1;
                 }
                 n
@@ -264,9 +301,230 @@ impl Layout {
 }
 
 impl Member {
+    /// A field with its own leaves.
     pub const fn new(name: &'static str, ty: Type) -> Member {
-        Member { name, ty }
+        Member {
+            name,
+            ty,
+            pack: false,
+        }
     }
+
+    /// A field that shares a field element with its packable neighbours (see
+    /// [`Pack`]): what `#[input]` makes of every field not marked `#[unpacked]`. An
+    /// impl with packed members reads and writes them with [`Reader::member`] and
+    /// [`Writer::member`].
+    pub const fn packed(name: &'static str, ty: Type) -> Member {
+        Member {
+            name,
+            ty,
+            pack: true,
+        }
+    }
+}
+
+// ---- packing ------------------------------------------------------------------------
+
+/// The most bits a packed field element holds: every value below `2^253` is a
+/// distinct BN254 scalar, so a packed element splits back one way only.
+pub const PACK_BITS: u32 = 253;
+
+/// Where a struct field sits in its packed field element. `#[input]` packs a struct's
+/// fields in declaration order: consecutive packable fields (each of known width:
+/// [`Type::bits`]) share one field element, the first in its lowest bits, until the
+/// next would take it past [`PACK_BITS`]. A field that isn't packable (a `Field`, a
+/// `Text`, an array, a nested struct, or one marked `#[unpacked]`) has its own leaves
+/// and starts a new run, and a field packed with no neighbour stays as it is.
+///
+/// In the circuit a packed element is split into its bits once, which is also each
+/// field's range check; each field reads its own bits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pack {
+    /// The field's lowest bit in the element.
+    pub offset: u32,
+    /// The field's width.
+    pub bits: u32,
+    /// The element's width (0: the field isn't packed).
+    pub total: u32,
+    /// Whether the field is the element's last.
+    pub last: bool,
+    /// Whether a value written must be checked to fit its width (a `Choice` or
+    /// `Bitfield`, one field element; an integer fits its width already).
+    pub check: bool,
+}
+
+impl Pack {
+    /// Not packed: its own leaves.
+    pub const ALONE: Pack = Pack {
+        offset: 0,
+        bits: 0,
+        total: 0,
+        last: true,
+        check: false,
+    };
+
+    /// Whether the field shares a packed element.
+    pub const fn packed(&self) -> bool {
+        self.total > 0
+    }
+}
+
+const fn packable(m: &Member) -> Option<u32> {
+    if m.pack { m.ty.bits() } else { None }
+}
+
+/// Where field `i` of a struct with these fields sits ([`Pack`]).
+pub const fn pack_of(ms: &[Member], i: usize) -> Pack {
+    let mut start = 0;
+    while start < ms.len() {
+        let w0 = match packable(&ms[start]) {
+            Some(w) => w,
+            None => {
+                start += 1;
+                continue;
+            }
+        };
+        let (mut end, mut total) = (start + 1, w0);
+        while end < ms.len() {
+            match packable(&ms[end]) {
+                Some(w) if total + w <= PACK_BITS => {
+                    total += w;
+                    end += 1;
+                }
+                _ => break,
+            }
+        }
+        if i < start {
+            break;
+        }
+        if i < end {
+            if end - start == 1 {
+                return Pack::ALONE;
+            }
+            let (mut offset, mut j) = (0, start);
+            while j < i {
+                offset += match packable(&ms[j]) {
+                    Some(w) => w,
+                    None => 0,
+                };
+                j += 1;
+            }
+            let check = matches!(
+                ms[i].ty,
+                Type::Named(Named {
+                    encoding: Encoding::Choice(_) | Encoding::Set(_),
+                    ..
+                })
+            );
+            return Pack {
+                offset,
+                bits: match packable(&ms[i]) {
+                    Some(w) => w,
+                    None => 0,
+                },
+                total,
+                last: i + 1 == end,
+                check,
+            };
+        }
+        start = end;
+    }
+    Pack::ALONE
+}
+
+/// Where each of a struct type's `N` fields sits ([`pack_of`]): what `#[input]`
+/// reads and writes them by.
+pub const fn pack_plan<const N: usize>(ty: Type) -> [Pack; N] {
+    let mut plan = [Pack::ALONE; N];
+    if let Type::Named(Named {
+        layout: Layout::Struct(ms),
+        encoding: Encoding::Fields,
+        ..
+    }) = ty
+    {
+        let mut i = 0;
+        while i < N && i < ms.len() {
+            plan[i] = pack_of(ms, i);
+            i += 1;
+        }
+    }
+    plan
+}
+
+/// `2^k` (`k < 256`).
+const fn pow2(k: u32) -> Field {
+    let mut b = [0u8; 32];
+    b[(k / 8) as usize] = 1 << (k % 8);
+    Field::from_le_bytes(&b)
+}
+
+/// The bits a packed value is made of, to read its fields off.
+#[derive(Clone, Copy)]
+struct Group {
+    /// In the circuit: the element's bits (proven, so each field's range check).
+    #[cfg(xark)]
+    bits: [Field; 253],
+    /// On the host: the element's value.
+    #[cfg(not(xark))]
+    limbs: [u64; 4],
+}
+
+impl Group {
+    const EMPTY: Group = Group {
+        #[cfg(xark)]
+        bits: [Field::zero(); 253],
+        #[cfg(not(xark))]
+        limbs: [0; 4],
+    };
+
+    fn of(f: Field, total: u32) -> Group {
+        #[cfg(xark)]
+        return Group {
+            bits: f.to_bits_n(total as usize),
+        };
+        #[cfg(not(xark))]
+        {
+            let limbs = f.to_limbs();
+            assert!(
+                fits(limbs, total),
+                "a packed value past its {total} bits isn't one this type packs"
+            );
+            Group { limbs }
+        }
+    }
+
+    /// The `bits` bits from `offset`, as a field element.
+    fn slice(&self, offset: u32, bits: u32) -> Field {
+        #[cfg(xark)]
+        {
+            let (mut acc, mut pow, mut j) = (Field::zero(), Field::from_u8(1), 0);
+            while j < bits {
+                acc = acc + self.bits[(offset + j) as usize] * pow;
+                pow = pow + pow;
+                j += 1;
+            }
+            acc
+        }
+        #[cfg(not(xark))]
+        {
+            let mut b = [0u8; 32];
+            let mut j = 0;
+            while j < bits {
+                let k = offset + j;
+                if self.limbs[(k / 64) as usize] >> (k % 64) & 1 == 1 {
+                    b[(j / 8) as usize] |= 1 << (j % 8);
+                }
+                j += 1;
+            }
+            Field::from_le_bytes(&b)
+        }
+    }
+}
+
+/// Whether a value's limbs fit `bits` bits.
+#[cfg(not(xark))]
+fn fits(limbs: [u64; 4], bits: u32) -> bool {
+    (0..256u32).all(|k| k < bits || limbs[(k / 64) as usize] >> (k % 64) & 1 == 0)
 }
 
 // ---- reading and writing ----------------------------------------------------------
@@ -276,6 +534,9 @@ impl Member {
 pub struct Reader<'a> {
     src: Source<'a>,
     at: usize,
+    /// The packed element being read, and the next field's bits in it.
+    group: Group,
+    slot: Option<(u32, u32)>,
 }
 
 enum Source<'a> {
@@ -293,6 +554,8 @@ impl<'a> Reader<'a> {
         Reader {
             src: Source::Values(values),
             at: 0,
+            group: Group::EMPTY,
+            slot: None,
         }
     }
 
@@ -301,8 +564,36 @@ impl<'a> Reader<'a> {
         T::read(self)
     }
 
+    /// The next struct field, packed as `p` says ([`pack_plan`]): from its bits in a
+    /// packed element (the first field of one reads the element), or its own leaves.
+    pub fn member<T: Input>(&mut self, p: Pack) -> T {
+        if !p.packed() {
+            return T::read(self);
+        }
+        if p.offset == 0 {
+            let f = self.field();
+            self.group = Group::of(f, p.total);
+        }
+        self.slot = Some((p.offset, p.bits));
+        let v = T::read(self);
+        assert!(
+            self.slot.is_none(),
+            "a packed field's `Input` impl reads no leaf"
+        );
+        v
+    }
+
+    /// The packed field being read, if one is: its bits, as a field element.
+    fn packed(&mut self) -> Option<(Field, u32)> {
+        let (offset, bits) = self.slot.take()?;
+        Some((self.group.slice(offset, bits), bits))
+    }
+
     /// The next leaf, a field element.
     pub fn field(&mut self) -> Field {
+        if let Some((f, _)) = self.packed() {
+            return f;
+        }
         let at = self.next();
         match &self.src {
             #[cfg(all(xark, target_arch = "wasm32"))]
@@ -316,6 +607,10 @@ impl<'a> Reader<'a> {
     /// The next leaf, an unsigned integer of `bits ≤ 64` bits (range-checked when
     /// it is a circuit input).
     pub fn uint(&mut self, bits: u32) -> u64 {
+        if let Some((f, w)) = self.packed() {
+            debug_assert!(w <= bits);
+            return field_to_uint(f, w);
+        }
         let at = self.next();
         match &self.src {
             #[cfg(all(xark, target_arch = "wasm32"))]
@@ -333,6 +628,12 @@ impl<'a> Reader<'a> {
 
     /// The next leaf, a `bool` (checked to be `0` or `1` when it is a circuit input).
     pub fn bool(&mut self) -> bool {
+        if let Some((f, _)) = self.packed() {
+            #[cfg(all(xark, target_arch = "wasm32"))]
+            return crate::wasm::field_to_bool(f);
+            #[cfg(not(all(xark, target_arch = "wasm32")))]
+            return !f.is_zero();
+        }
         let at = self.next();
         match &self.src {
             #[cfg(all(xark, target_arch = "wasm32"))]
@@ -345,6 +646,12 @@ impl<'a> Reader<'a> {
 
     /// The next leaf, a `u128` (range-checked when it is a circuit input).
     pub fn u128(&mut self) -> u128 {
+        if let Some((offset, bits)) = self.slot.take() {
+            let lo = self.group.slice(offset, bits.min(64));
+            let hi = self.group.slice(offset + 64, bits.saturating_sub(64));
+            return (field_to_uint(hi, bits.saturating_sub(64)) as u128) << 64
+                | field_to_uint(lo, bits.min(64)) as u128;
+        }
         let at = self.next();
         match &self.src {
             #[cfg(all(xark, target_arch = "wasm32"))]
@@ -364,6 +671,18 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// A field element known to fit `bits ≤ 64` bits (a packed field's slice) as an
+/// integer: in the circuit the same wire, at that width.
+fn field_to_uint(f: Field, bits: u32) -> u64 {
+    #[cfg(all(xark, target_arch = "wasm32"))]
+    return crate::wasm::field_to_uint(f, bits);
+    #[cfg(not(all(xark, target_arch = "wasm32")))]
+    {
+        let _ = bits;
+        f.to_limbs()[0]
+    }
+}
+
 /// Leaf `at`'s name, without a panicking branch (an impl reading past its `TYPE` is
 /// reported after the body, by [`Binder::finish`]).
 #[cfg(all(xark, target_arch = "wasm32"))]
@@ -376,17 +695,56 @@ fn leaf(names: &[String], at: usize) -> &str {
 pub struct Writer<'a> {
     out: &'a mut [Field],
     at: usize,
+    /// The packed element being written.
+    acc: Field,
 }
 
 impl<'a> Writer<'a> {
     /// A writer filling `out` (`Input::LEN` long).
     pub fn new(out: &'a mut [Field]) -> Writer<'a> {
-        Writer { out, at: 0 }
+        Writer {
+            out,
+            at: 0,
+            acc: Field::zero(),
+        }
     }
 
     /// Write `value`'s field elements.
     pub fn write<T: Input>(&mut self, value: &T) {
         value.write(self)
+    }
+
+    /// Write a struct field, packed as `p` says ([`pack_plan`]): into its bits of a
+    /// packed element (written out after its last field), or as its own leaves.
+    pub fn member<T: Input>(&mut self, p: Pack, value: &T) {
+        if !p.packed() {
+            return value.write(self);
+        }
+        let mut one = [Field::zero()];
+        let mut w = Writer::new(&mut one);
+        value.write(&mut w);
+        assert!(w.at == 1, "a packed field's `Input` impl writes one leaf");
+        let f = one[0];
+        // An integer's value fits its width already; a `Choice` or `Bitfield` (a field
+        // element) is checked, which is free for one read off a packed element.
+        #[cfg(xark)]
+        if p.check {
+            let _ = f.to_bits_n(p.bits as usize);
+        }
+        #[cfg(not(xark))]
+        assert!(
+            fits(f.to_limbs(), p.bits),
+            "a value past its {} bits can't be packed",
+            p.bits
+        );
+        if p.offset == 0 {
+            self.acc = Field::zero();
+        }
+        self.acc += f * pow2(p.offset);
+        if p.last {
+            let acc = self.acc;
+            self.field(acc);
+        }
     }
 
     /// Write one field element.
@@ -545,11 +903,29 @@ fn names_into(ty: &Type, name: &mut String, out: &mut Vec<String>) {
         Type::Named(n) => match n.layout {
             Layout::Newtype(t) => names_into(&t, name, out),
             Layout::Struct(ms) => {
-                for m in ms {
-                    name.push('.');
-                    name.push_str(m.name);
-                    names_into(&m.ty, name, out);
-                    name.truncate(at);
+                for (i, m) in ms.iter().enumerate() {
+                    let p = pack_of(ms, i);
+                    if !p.packed() {
+                        name.push('.');
+                        name.push_str(m.name);
+                        names_into(&m.ty, name, out);
+                        name.truncate(at);
+                    } else if p.offset == 0 {
+                        // A packed element: named by its fields, `id.{born,net_worth}`.
+                        name.push_str(".{");
+                        let mut j = i;
+                        loop {
+                            name.push_str(ms[j].name);
+                            if pack_of(ms, j).last {
+                                break;
+                            }
+                            name.push(',');
+                            j += 1;
+                        }
+                        name.push('}');
+                        out.push(name.clone());
+                        name.truncate(at);
+                    }
                 }
             }
         },
@@ -762,6 +1138,7 @@ fn named_json(n: &Named, defs: &mut Defs) -> String {
         }
         Layout::Struct(ms) => {
             s.push_str("\"struct\":[");
+            let packing = n.encoding == Encoding::Fields;
             for (i, m) in ms.iter().enumerate() {
                 if i > 0 {
                     s.push(',');
@@ -770,6 +1147,15 @@ fn named_json(n: &Named, defs: &mut Defs) -> String {
                 push_str_json(&mut s, m.name);
                 s.push_str(",\"type\":");
                 type_json(&m.ty, defs, &mut s);
+                let p = pack_of(ms, i);
+                if packing && p.packed() {
+                    // Its bits in the packed element it shares (offset 0 starts one).
+                    s.push_str(",\"packed\":{\"offset\":");
+                    push_usize(&mut s, p.offset as usize);
+                    s.push_str(",\"bits\":");
+                    push_usize(&mut s, p.bits as usize);
+                    s.push('}');
+                }
                 s.push('}');
             }
             s.push(']');
@@ -883,6 +1269,8 @@ impl<const N: usize> Binder<N> {
                 public,
             },
             at: 0,
+            group: Group::EMPTY,
+            slot: None,
         };
         let v = T::read(&mut r);
         self.read[I] = r.at;

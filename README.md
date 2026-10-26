@@ -105,6 +105,11 @@ and each with its natural form in tests, `--inputs` and the TypeScript client:
   `require_in`, `require_one_of`, `contains`. Any fieldless enum with `#[input]` works;
   `xark` ships ISO 3166 `Country`.
 
+An `#[input]` struct's narrow fields are packed: consecutive integers, flags, days
+and enum values share one field element (up to 253 bits) in declaration order, so
+`Identity` below is 3 leaves and `Policy` 2 public inputs. Keep narrow fields
+together, and mark a field `#[unpacked]` to give it its own leaf.
+
 ```rust
 #[input]
 pub struct Identity { document: Text, born: Days<1900, 2100>, nationality: Choice<Country>, net_worth: u64, expires: Days<1900, 2100>, salt: Field }

@@ -204,6 +204,11 @@ impl Schema {
                 .ok_or_else(|| format!("unknown input `{k}`; expected {}", self.names(&wanted)))?;
             self.encode(&ty, v, k, &mut out)?;
         }
+        // Packed struct fields into their elements.
+        for input in &wanted {
+            let name = input["name"].as_str().unwrap_or_default();
+            self.pack(&input["type"], name, &mut out)?;
+        }
         // Every leaf of every wanted input, given.
         for input in &wanted {
             let name = input["name"].as_str().unwrap_or_default();
@@ -272,11 +277,64 @@ impl Schema {
             if def.get("newtype").is_some() {
                 out.push(prefix.to_string());
             }
-            for f in def["struct"].as_array().into_iter().flatten() {
-                let n = f["name"].as_str().unwrap_or_default();
-                self.leaf_names(&f["type"], &format!("{prefix}.{n}"), out);
+            for g in groups(def) {
+                match g {
+                    Group::Alone(f) => {
+                        let n = f["name"].as_str().unwrap_or_default();
+                        self.leaf_names(&f["type"], &format!("{prefix}.{n}"), out);
+                    }
+                    Group::Packed(fs) => out.push(packed_name(prefix, &fs)),
+                }
             }
         }
+    }
+
+    /// Combine the leaves of packed struct fields (each encoded at its own path, as
+    /// `id.born`) into their packed elements (`id.{born,net_worth}`), throughout a
+    /// `ty` value at `prefix`. A packed element whose fields aren't all given is left
+    /// for the missing-leaf check to name.
+    fn pack(&self, ty: &Value, prefix: &str, out: &mut Leaves) -> Result<(), InputError> {
+        if let Some(a) = ty.get("array") {
+            for i in 0..a["len"].as_u64().unwrap_or(0) {
+                self.pack(&a["of"], &format!("{prefix}[{i}]"), out)?;
+            }
+        } else if let Some(t) = ty["tuple"].as_array() {
+            for (i, e) in t.iter().enumerate() {
+                self.pack(e, &format!("{prefix}.{i}"), out)?;
+            }
+        } else if let Some(r) = ty["ref"].as_str() {
+            for g in groups(self.def(r)) {
+                match g {
+                    Group::Alone(f) => {
+                        let n = f["name"].as_str().unwrap_or_default();
+                        self.pack(&f["type"], &format!("{prefix}.{n}"), out)?;
+                    }
+                    Group::Packed(fs) => {
+                        let at = |f: &Value| {
+                            format!("{prefix}.{}", f["name"].as_str().unwrap_or_default())
+                        };
+                        if !fs.iter().all(|f| out.contains_key(&at(f))) {
+                            continue;
+                        }
+                        let mut v = BigUint::from(0u8);
+                        for f in &fs {
+                            let x =
+                                BigUint::from(out.remove(&at(f)).unwrap_or_default().into_bigint());
+                            let (offset, bits) = packing(f);
+                            if x.bits() > bits {
+                                return Err(InputError {
+                                    path: at(f),
+                                    message: format!("{x} doesn't fit its {bits} packed bits"),
+                                });
+                            }
+                            v |= x << offset;
+                        }
+                        out.insert(packed_name(prefix, &fs), Fr::from(v));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Encode `v`, a value of `ty`, into its leaves under `at`.
@@ -495,6 +553,7 @@ impl Schema {
         let ty = json!({ "ref": name });
         let mut leaves = Leaves::new();
         self.encode(&ty, value, "value", &mut leaves)?;
+        self.pack(&ty, "value", &mut leaves)?;
         let mut names = Vec::new();
         self.leaf_names(&ty, "value", &mut names);
         names
@@ -625,10 +684,33 @@ impl Schema {
             )));
         }
         let mut obj = Map::new();
-        for f in def["struct"].as_array().into_iter().flatten() {
+        let key = |f: &Value| {
             let n = f["name"].as_str().unwrap_or_default();
-            let key = if camel_keys { camel(n) } else { n.to_string() };
-            obj.insert(key, self.decode(&f["type"], it, camel_keys)?);
+            if camel_keys { camel(n) } else { n.to_string() }
+        };
+        for g in groups(def) {
+            match g {
+                Group::Alone(f) => {
+                    obj.insert(key(f), self.decode(&f["type"], it, camel_keys)?);
+                }
+                Group::Packed(fs) => {
+                    let v = BigUint::from(
+                        it.next()
+                            .ok_or("too few public input values")?
+                            .into_bigint(),
+                    );
+                    let total: u64 = fs.iter().map(|f| packing(f).1).sum();
+                    if v.bits() > total {
+                        return Err(format!("{v} is past the {total} bits it packs"));
+                    }
+                    for f in &fs {
+                        let (offset, bits) = packing(f);
+                        let x = (&v >> offset) & ((BigUint::from(1u8) << bits) - 1u8);
+                        let mut one = std::iter::once(Fr::from(x));
+                        obj.insert(key(f), self.decode(&f["type"], &mut one, camel_keys)?);
+                    }
+                }
+            }
         }
         Ok(Value::Object(obj))
     }
@@ -788,6 +870,44 @@ impl Schema {
 }
 
 /// A schema type as Rust spells it.
+/// A struct's fields, each alone or in a run sharing a packed field element.
+enum Group<'a> {
+    Alone(&'a Value),
+    Packed(Vec<&'a Value>),
+}
+
+/// A struct definition's fields, grouped by the packed element each shares (a run
+/// of fields with `"packed"`, each run starting at offset 0).
+fn groups(def: &Value) -> Vec<Group<'_>> {
+    let mut out: Vec<Group> = Vec::new();
+    for f in def["struct"].as_array().into_iter().flatten() {
+        match (f.get("packed"), out.last_mut()) {
+            (Some(p), Some(Group::Packed(fs))) if p["offset"].as_u64() != Some(0) => fs.push(f),
+            (Some(_), _) => out.push(Group::Packed(vec![f])),
+            (None, _) => out.push(Group::Alone(f)),
+        }
+    }
+    out
+}
+
+/// A packed field's `(offset, bits)` in its element.
+fn packing(f: &Value) -> (u64, u64) {
+    let p = &f["packed"];
+    (
+        p["offset"].as_u64().unwrap_or(0),
+        p["bits"].as_u64().unwrap_or(0),
+    )
+}
+
+/// A packed element's leaf name: its fields' names, `id.{born,net_worth}`.
+fn packed_name(prefix: &str, fs: &[&Value]) -> String {
+    let names: Vec<&str> = fs
+        .iter()
+        .map(|f| f["name"].as_str().unwrap_or_default())
+        .collect();
+    format!("{prefix}.{{{}}}", names.join(","))
+}
+
 fn describe(ty: &Value) -> String {
     if ty == "field" {
         return "Field".into();
