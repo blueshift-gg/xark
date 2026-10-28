@@ -464,16 +464,20 @@ impl<R: Read + Seek> SerializedPk<R> {
             }
         }
         let res = self.stream_bytes(v, chunk, &mut |off, bytes| {
-            pts.clear();
+            // Decoded in place: collecting a fallible parallel iterator copies
+            // every point twice more (per-thread lists, then into `pts`), which
+            // costs more than decoding an uncompressed point.
+            pts.resize(bytes.len() / sz, A::zero());
             // `Validate::No`: the proving key is our own setup output; a corrupt
             // point can only yield a proof that fails verification (and point
             // decompression still rejects off-curve x).
-            pts.try_par_extend(
-                bytes
-                    .par_chunks(sz)
-                    .map(|b| crate::decode::point::<A>(b, c)),
-            )
-            .map_err(PkError::Deserialize)?;
+            pts.par_iter_mut()
+                .zip(bytes.par_chunks(sz))
+                .try_for_each(|(p, b)| {
+                    *p = crate::decode::point::<A>(b, c)?;
+                    Ok(())
+                })
+                .map_err(PkError::Deserialize)?;
             if let Some(t) = tee.as_mut().filter(|t| t.ok) {
                 for p in &pts {
                     if p.serialize_uncompressed(&mut t.w).is_err() {
@@ -490,24 +494,6 @@ impl<R: Read + Seek> SerializedPk<R> {
         }
         self.tee = tee;
         res
-    }
-}
-
-/// `par_extend` from a fallible iterator, keeping the first error.
-trait ParExtendResult<T> {
-    fn try_par_extend<I>(&mut self, it: I) -> Result<(), ark_serialize::SerializationError>
-    where
-        I: IndexedParallelIterator<Item = Result<T, ark_serialize::SerializationError>>;
-}
-
-impl<T: Send> ParExtendResult<T> for Vec<T> {
-    fn try_par_extend<I>(&mut self, it: I) -> Result<(), ark_serialize::SerializationError>
-    where
-        I: IndexedParallelIterator<Item = Result<T, ark_serialize::SerializationError>>,
-    {
-        let v: Result<Vec<T>, _> = it.collect();
-        self.extend(v?);
-        Ok(())
     }
 }
 
