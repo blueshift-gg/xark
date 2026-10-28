@@ -105,7 +105,8 @@ jobs:
 
   msrv:
     # The minimum Rust (`rust-version`, 1.89) builds the CLI and every crate, not
-    # only the circuits `reproducible` checks.
+    # only the circuits `reproducible` checks. Except `xark-tests`, which isn't
+    # published: its on-chain tests run in Mollusk, which needs a newer Rust.
     name: builds on Rust 1.89
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -120,7 +121,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: cargo check
         run: |
-          cargo check --workspace --all-targets --locked
+          cargo check --workspace --exclude xark-tests --all-targets --locked
           cargo check --all-targets --locked --manifest-path crates/lang/Cargo.toml
 
   compiler-snapshots:

@@ -1,7 +1,8 @@
 # Toolchains
 
 xark needs **only stable Rust, 1.89 or newer**, both to install the CLI and to build
-circuits (the workspace and `xark` crate `rust-version`). The circuit crate is compiled by the ambient
+circuits (the workspace and `xark` crate `rust-version`). Only the repository's own
+integration tests (`gadgets/tests`, unpublished) need newer, for Mollusk. The circuit crate is compiled by the ambient
 `cargo`/`rustc` for `wasm32-unknown-unknown` (added with `rustup` on first use), and
 `crates/frontend` runs the module to lower it. Every circuit operation is an opaque
 wasm import, so the constraint system doesn't depend on the compiler version:
