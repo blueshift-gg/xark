@@ -337,40 +337,54 @@ mod ark_fr_hex {
 mod tests {
     use super::*;
     use crate::keys::Groth16Keys;
-    use crate::setup_phase2;
-    use ark_bn254::{Bn254, Fr};
+    use ark_bn254::Fr;
     use ark_ec::CurveGroup;
     use ark_ec::PrimeGroup;
     use ark_ff::UniformRand;
-    use ark_groth16::Groth16;
-    use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
-    use ark_snark::SNARK;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
+    use xark_groth16::{ConstraintSource, InMemoryPk, ProgramSource, ProverConfig};
+    use xark_ir::LinearCombination;
+    use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 
     /// A test circuit: `x · x = y` with `y` public.
-    #[derive(Clone)]
-    struct Square {
-        x: Option<Fr>,
-        y: Option<Fr>,
-    }
-
-    impl ConstraintSynthesizer<Fr> for Square {
-        fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-            use ark_ff::One;
-            let y = cs.new_input_variable(|| self.y.ok_or(SynthesisError::AssignmentMissing))?;
-            let x = cs.new_witness_variable(|| self.x.ok_or(SynthesisError::AssignmentMissing))?;
-            cs.enforce_r1cs_constraint(
-                || ark_relations::gr1cs::LinearCombination::from((Fr::one(), x)),
-                || ark_relations::gr1cs::LinearCombination::from((Fr::one(), x)),
-                || ark_relations::gr1cs::LinearCombination::from((Fr::one(), y)),
-            )?;
-            Ok(())
+    fn square() -> R1csProgram {
+        let var = |id, name: &str, visibility| Variable {
+            id,
+            name: name.into(),
+            visibility,
+        };
+        R1csProgram {
+            field: FieldSpec::bn254(),
+            variables: vec![
+                var(0, "y", Visibility::Public),
+                var(1, "x", Visibility::Private),
+            ],
+            constraints: vec![R1csConstraint::mul(
+                0,
+                LinearCombination::var(1),
+                LinearCombination::var(1),
+                0,
+                "x * x = y",
+            )],
         }
     }
 
-    /// Build a fake phase-2-ready Groth16Keys via setup_phase2 against a
-    /// synthetic ptau. Used as the starting point for ceremony tests.
+    /// Prove `x · x = y` with `keys` and verify it.
+    fn proves(keys: &Groth16Keys, x: u64, rng: &mut ChaCha20Rng) -> bool {
+        let prog = square();
+        let src = ProgramSource::new(&prog);
+        let y = Fr::from(x * x);
+        let z = src
+            .layout()
+            .assignment(|id| Some(if id == 0 { y } else { Fr::from(x) }));
+        let pk = &mut InMemoryPk::new(&keys.proving_key);
+        let proof = xark_groth16::prove(&src, &z, pk, rng, &ProverConfig::default()).unwrap();
+        xark_groth16::verify(&keys.verifying_key, &[y], &proof).unwrap()
+    }
+
+    /// Phase-2 keys for [`square`] from a synthetic ptau: the starting point for
+    /// the ceremony tests.
     fn fresh_phase2_keys() -> Groth16Keys {
         let mut rng = ChaCha20Rng::seed_from_u64(0xDEADBEEF);
         let tau = Fr::rand(&mut rng);
@@ -378,8 +392,7 @@ mod tests {
         let beta = Fr::rand(&mut rng);
         let ptau = fake_ptau(4, tau, alpha, beta);
         let seed = [7u8; 32];
-        let circuit_for_setup = Square { x: None, y: None };
-        setup_phase2::setup_from_ptau(circuit_for_setup, &ptau, &seed)
+        crate::ptau::setup_from_ptau(&ProgramSource::new(&square()), &ptau, &seed)
             .expect("phase-2 setup succeeds")
     }
 
@@ -421,13 +434,7 @@ mod tests {
         verify_chain(initial_delta_g1, &[c]).expect("verify chain");
 
         // The post-contribution keys still produce a valid proof.
-        let circuit = Square {
-            x: Some(Fr::from(9u64)),
-            y: Some(Fr::from(81u64)),
-        };
-        let proof = Groth16::<Bn254>::prove(&keys.proving_key, circuit, &mut rng).unwrap();
-        let ok = Groth16::<Bn254>::verify(&keys.verifying_key, &[Fr::from(81u64)], &proof).unwrap();
-        assert!(ok);
+        assert!(proves(&keys, 9, &mut rng));
     }
 
     #[test]
@@ -443,14 +450,7 @@ mod tests {
         verify_chain(initial_delta_g1, &contributions).expect("verify chain");
 
         // End-to-end proof still works.
-        let circuit = Square {
-            x: Some(Fr::from(11u64)),
-            y: Some(Fr::from(121u64)),
-        };
-        let proof = Groth16::<Bn254>::prove(&keys.proving_key, circuit, &mut rng).unwrap();
-        let ok =
-            Groth16::<Bn254>::verify(&keys.verifying_key, &[Fr::from(121u64)], &proof).unwrap();
-        assert!(ok);
+        assert!(proves(&keys, 11, &mut rng));
     }
 
     #[test]

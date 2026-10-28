@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 use xark_bits::{and32, xor32};
 
@@ -25,11 +23,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // 12&10=8, 12^10=6
-        bitwise_basic("12".into(), "10".into(), "8".into(), "6".into()).unwrap();
+        bitwise_basic(12, 10, 8, 6).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(bitwise_basic("12".into(), "10".into(), "8".into(), "7".into()).is_err());
+        assert!(bitwise_basic(12, 10, 8, 7).is_err());
     }
 }

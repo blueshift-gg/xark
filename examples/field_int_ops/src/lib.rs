@@ -1,5 +1,4 @@
 //! Field arithmetic with native-integer constant operands (`a * 3 + 5`).
-#![cfg_attr(xark, no_std)]
 use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
@@ -15,11 +14,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // 10·3 + 5 = 35
-        field_int_ops("10".into(), "35".into()).unwrap();
+        field_int_ops(10, 35).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(field_int_ops("10".into(), "36".into()).is_err());
+        assert!(field_int_ops(10, 36).is_err());
     }
 }

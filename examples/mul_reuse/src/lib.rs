@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 //! A product reused across two `require_eq`s must stay bound to `a*b` in BOTH:
 //! folding the product's defining row into the first would leave the second
 //! pinning a free witness, letting a prover pick `c != d`. Must enforce
@@ -20,11 +18,11 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        mul_reuse("3".into(), "4".into(), "12".into(), "12".into()).unwrap();
+        mul_reuse(3, 4, 12, 12).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(mul_reuse("3".into(), "4".into(), "12".into(), "13".into()).is_err());
+        assert!(mul_reuse(3, 4, 12, 13).is_err());
     }
 }

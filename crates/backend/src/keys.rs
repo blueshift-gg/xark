@@ -2,11 +2,11 @@
 
 use ark_bn254::{Bn254, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
-use ark_groth16::{ProvingKey, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use xark_groth16::{ProvingKey, VerifyingKey};
 
 use crate::serialization::{canonical_read_from_file, canonical_write_to_file};
 
@@ -17,14 +17,16 @@ pub struct Groth16Keys {
 }
 
 /// Self-describing proving-key header: `XKPK` + version + point-compression mode
-/// (`0` = compressed, `1` = uncompressed). Compressed keys are ~half the size;
-/// uncompressed keys skip the per-point square-root on load (~2× faster prove) at
-/// 2× disk. A file without this magic is a legacy key — read as compressed.
+/// (`0` = compressed, `1` = uncompressed), and for version 2 the QAP domain size
+/// (`u64` LE), so a streaming prover knows it from the first bytes. Compressed
+/// keys are ~half the size; uncompressed keys skip the per-point square-root on
+/// load (~2× faster prove) at 2× disk. A file without this magic is a legacy key —
+/// read as compressed. Same format as `xark_groth16::pk::KeyFormat`.
 const PK_MAGIC: &[u8; 4] = b"XKPK";
-const PK_VERSION: u8 = 1;
+const PK_VERSION: u8 = 2;
 
 /// `(point-compression, key body)` for a proving-key file, honoring the header if
-/// present, else defaulting to compressed for legacy keys.
+/// present (v1: 6 bytes, v2: 14), else defaulting to compressed for legacy keys.
 pub(crate) fn pk_compression(bytes: &[u8]) -> (Compress, &[u8]) {
     if bytes.len() >= 6 && &bytes[..4] == PK_MAGIC {
         let mode = if bytes[5] == 1 {
@@ -32,7 +34,8 @@ pub(crate) fn pk_compression(bytes: &[u8]) -> (Compress, &[u8]) {
         } else {
             Compress::Yes
         };
-        (mode, &bytes[6..])
+        let len = if bytes[4] >= 2 { 14 } else { 6 };
+        (mode, &bytes[len.min(bytes.len())..])
     } else {
         (Compress::Yes, bytes)
     }
@@ -48,7 +51,7 @@ impl Groth16Keys {
     /// (uncompressed) doubles the file but skips the decompression sqrt on every
     /// load — a large prove-time win when disk/bandwidth isn't the constraint.
     pub fn write_proving_key_mode(&self, path: &Path, compress: Compress) -> std::io::Result<()> {
-        let mut buf = Vec::with_capacity(6 + self.proving_key.serialized_size(compress));
+        let mut buf = Vec::with_capacity(14 + self.proving_key.serialized_size(compress));
         buf.extend_from_slice(PK_MAGIC);
         buf.push(PK_VERSION);
         buf.push(if matches!(compress, Compress::No) {
@@ -56,6 +59,8 @@ impl Groth16Keys {
         } else {
             0
         });
+        // QAP domain size: arkworks' `h_query` has one point fewer.
+        buf.extend_from_slice(&(self.proving_key.h_query.len() as u64 + 1).to_le_bytes());
         self.proving_key
             .serialize_with_mode(&mut buf, compress)
             .map_err(std::io::Error::other)?;
@@ -75,8 +80,12 @@ impl Groth16Keys {
     /// by verifiers). Decompression's on-curve check still runs, so a corrupt
     /// point is still rejected.
     pub fn read_proving_key(path: &Path) -> std::io::Result<ProvingKey<Bn254>> {
-        let bytes = std::fs::read(path)?;
-        let (compress, body) = pk_compression(&bytes);
+        Self::decode_proving_key(&std::fs::read(path)?)
+    }
+
+    /// [`Self::read_proving_key`] from bytes already in memory (header included).
+    pub fn decode_proving_key(bytes: &[u8]) -> std::io::Result<ProvingKey<Bn254>> {
+        let (compress, body) = pk_compression(bytes);
         read_proving_key_parallel(body, compress).map_err(|e| std::io::Error::other(e.to_string()))
     }
 
@@ -156,7 +165,17 @@ pub struct KeyMetadata {
     pub curve: String,
     pub setup_mode: String,
     pub production_safe: bool,
+    /// SHA-256 of the `circuit.xbc` the key was made from.
     pub circuit_hash: String,
+    /// The R1CS digest of that circuit (what `xark build` prints). Another build of
+    /// the same circuit (another Rust version) can have another `circuit_hash` but
+    /// this same digest, and its key still fits. `None` on older keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    /// SHA-256 of `vk.bin`: what a client pins its verifier to
+    /// (`verifier(from, { keyHash })`). `None` on older keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifying_key_sha256: Option<String>,
     pub backend_version: String,
     pub created_at: String,
     pub num_public_inputs: usize,
@@ -175,6 +194,17 @@ pub struct KeyMetadata {
     /// setup (Groth16 soundness). `None` for dev-mode keys.
     #[serde(default)]
     pub phase2_seed_hash: Option<String>,
+    /// Which R1CS form the key is generated for: `None` = the boundary-minimized
+    /// circuit (default `xark setup`); `Some("reduced")` = the template-reduced
+    /// circuit `circuit.xbc` streams directly (`xark setup --streamable`), which the
+    /// streaming prover proves without ever materializing the constraint system.
+    #[serde(default)]
+    pub r1cs_form: Option<String>,
+    /// QAP evaluation-domain size (`h_query` has one point fewer). A power of two
+    /// unless setup ran with `--domain smooth` (`3·2^k`/`9·2^k`), in which case
+    /// only xark's prover can prove against the key. `None` on older keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qap_domain_size: Option<usize>,
 }
 
 impl KeyMetadata {
@@ -185,6 +215,8 @@ impl KeyMetadata {
             setup_mode: "insecure-dev-mode".into(),
             production_safe: false,
             circuit_hash,
+            digest: None,
+            verifying_key_sha256: None,
             backend_version: env!("CARGO_PKG_VERSION").into(),
             created_at: chrono::Utc::now().to_rfc3339(),
             num_public_inputs,
@@ -192,6 +224,8 @@ impl KeyMetadata {
             deterministic_rng_seed: None,
             ptau_source: None,
             phase2_seed_hash: None,
+            r1cs_form: None,
+            qap_domain_size: None,
         }
     }
 }

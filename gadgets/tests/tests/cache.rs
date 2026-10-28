@@ -1,8 +1,10 @@
-//! `--cache` (minimized-R1CS cache) end-to-end behavior: `setup --cache` writes
-//! it, `prove` reloads it (skipping the minimize + validate) and still verifies,
-//! and an absent / stale / corrupt cache falls back to a recompute that also
-//! verifies. Uses `bignum_ops` — a function (v8) circuit — so the cache path is
-//! actually exercised (only function artifacts read the cache).
+//! Minimized-circuit cache end-to-end behavior. A `minimized`-form key proves from
+//! the `r1cs.stream` setup writes next to it (the minimized rows, so `prove` never
+//! re-runs the minimize) and still verifies; an absent or corrupt `r1cs.stream`
+//! falls back to rebuilding the minimized circuit, which also verifies, and
+//! `prove --cache` writes it back. Uses `bignum_ops` — a function (v8) circuit —
+//! with `--r1cs-form minimized` so the cache path is always exercised (`auto` may
+//! pick `reduced`, which streams from `circuit.xbc` and never minimizes).
 
 mod common;
 
@@ -21,16 +23,15 @@ const INPUTS: &[(&str, &str)] = &[
     ("out", "1"),
 ];
 
-fn setup(out: &Path, cache: bool) -> (bool, String) {
+fn setup(out: &Path) -> (bool, String) {
     let mut c = Command::new(xark_bin());
     c.arg("setup")
         .arg(out)
         .arg("--insecure-dev-mode")
         .arg("--deterministic-rng")
-        .arg("1");
-    if cache {
-        c.arg("--cache");
-    }
+        .arg("1")
+        .arg("--r1cs-form")
+        .arg("minimized");
     let o = c
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -78,15 +79,11 @@ fn cache_hit_fallback_and_warm_all_verify() {
     let (ok, err) = xark_build("bignum_ops", &out, &target);
     assert!(ok, "build failed: {err}");
 
-    // `setup --cache` writes the minimized-R1CS cache next to the keys.
-    let (ok, err) = setup(&out, true);
-    assert!(ok, "setup --cache failed: {err}");
-    let cache = out.join("r1cs.min.wcz");
-    assert!(
-        cache.exists(),
-        "setup --cache did not write {}",
-        cache.display()
-    );
+    // Setup writes the minimized rows (`r1cs.stream`) next to the keys.
+    let (ok, err) = setup(&out);
+    assert!(ok, "setup failed: {err}");
+    let cache = out.join("r1cs.stream");
+    assert!(cache.exists(), "setup did not write {}", cache.display());
 
     // Cache HIT: prove reloads it (cached=true) and verifies.
     let (ok, o) = prove(&out, false);
@@ -129,17 +126,19 @@ fn bare_prove_auto_setup_warms_cache_and_hits() {
     let target = tmp.path().join("target");
     let (ok, err) = xark_build("bignum_ops", &out, &target);
     assert!(ok, "build failed: {err}");
-    let cache = out.join("r1cs.min.wcz");
-
     // No explicit setup — a plain `prove` (no `--cache`). Auto-setup runs because
     // no proving key exists yet.
     let (ok, o) = prove(&out, false);
     assert!(ok, "bare auto-setup prove failed: {o}");
-    assert!(
-        cache.exists(),
-        "auto-setup should have warmed the cache at {}",
-        cache.display()
-    );
+    // A `minimized` key comes with its rows; a `reduced` one streams `circuit.xbc`.
+    let meta = std::fs::read_to_string(out.join("metadata.json")).unwrap();
+    if meta.contains("\"minimized\"") {
+        assert!(
+            out.join("r1cs.stream").exists(),
+            "auto-setup should have written {}",
+            out.join("r1cs.stream").display()
+        );
+    }
     assert!(
         o.contains("cached=true"),
         "expected the first prove after auto-setup to be a cache hit (minimize once), got:\n{o}"
@@ -152,11 +151,11 @@ fn corrupt_cache_is_ignored_and_recomputes() {
     let out = tmp.path().join("out");
     let target = tmp.path().join("target");
     assert!(xark_build("bignum_ops", &out, &target).0, "build failed");
-    assert!(setup(&out, true).0, "setup --cache failed");
+    assert!(setup(&out).0, "setup failed");
 
     // Corrupt the cache: prove must fall back to a recompute (never panic) and
     // still produce a verifying proof.
-    std::fs::write(out.join("r1cs.min.wcz"), b"XBC1 not a real cache").unwrap();
+    std::fs::write(out.join("r1cs.stream"), b"XRS1 not a real row file").unwrap();
     let (ok, o) = prove(&out, false);
     assert!(ok, "prove with a corrupt cache failed: {o}");
     assert!(

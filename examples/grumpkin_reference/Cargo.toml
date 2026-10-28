@@ -13,14 +13,14 @@ publish = false
 #   nova_fold     -> grumpkin_nova_fold
 #   ivc           -> grumpkin_ivc
 #   complete_add  -> grumpkin_complete_add
-# The Poseidon2 challenges use the published `poseidon2` crate, which is
-# KAT-identical to the in-circuit `xark-poseidon2` gadget.
+# The Poseidon2 challenges use `xark-poseidon2`'s host `native` module: the same
+# permutation code as the in-circuit gadget.
 
 [dependencies]
 ark-grumpkin = "0.6"
 ark-ec = "0.6"
 ark-ff = "0.6"
 num-bigint = "0.4"
-poseidon2 = "0.0.1"
+xark-poseidon2 = { path = "../../gadgets/xark-poseidon2" }
 
 [workspace]

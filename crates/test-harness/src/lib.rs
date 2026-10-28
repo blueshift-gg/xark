@@ -2,17 +2,10 @@
 //! read back its emitted artifacts (no shell script). Used by the snapshot
 //! suite and every gadget crate's `vec.rs`.
 //!
-//! Handles the repo's build layout once per test process. `crates/lang` (the
-//! compiler) is excluded from the root workspace and needs nightly
-//! (`rustc_private`) with its own `target/`; the gadget crates are root-workspace
-//! members. So this builds:
-//!   1. the gadget rlibs (`-Zalways-encode-mir`, so their MIR is inlinable) into
-//!      an isolated `target/xark-compile`, apart from the root `target/` so a
-//!      `cargo test -p <gadget>` can't collide with them (rustc E0514);
-//!   2. the compiler binary in `crates/lang`'s own target (a rustc *driver*, so
-//!      its deps needn't match the circuit's).
-//!
-//! Then it invokes the compiler with an `--extern` per gadget rlib.
+//! Builds the `xark` lib and the gadget crates once per test process for wasm32
+//! (`--cfg xark`, in an isolated `target/xark-compile-wasm`), then compiles each
+//! circuit source with stable `rustc` against them and lowers the module with
+//! `xark-frontend`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -70,15 +63,18 @@ impl Compiled {
     pub fn minimized_r1cs_len(&self) -> usize {
         let bytes = std::fs::read(self.out_dir.join("circuit.xbc"))
             .unwrap_or_else(|e| panic!("read {}: {e}", self.out_dir.join("circuit.xbc").display()));
-        let cp = xark_ir::function_decode::expand_function_blob(&bytes)
+        // From the per-template-reduced expansion: unbounded fill-in is safe (and
+        // reaches the same fixpoint) there, but not on the raw flat expansion,
+        // where it took 34 GB on grumpkin_ipa_fold.
+        let cp = xark_ir::function_decode::expand_function_blob_reduced(&bytes)
             .unwrap_or_else(|e| panic!("expand circuit.xbc: {e}"));
-        xark_ir::minimize::minimize_with_fill(&cp.to_r1cs(), usize::MAX)
+        xark_ir::minimize::minimize_with_fill(&cp.into_r1cs(), usize::MAX)
             .constraints
             .len()
     }
 
     /// Check that native `inputs` **satisfy** this compiled circuit — the
-    /// in-memory analogue of [`xark_prover::Circuit::check`], for a circuit
+    /// in-memory analogue of `xark_prover::Circuit::check`, for a circuit
     /// compiled straight from source with [`compile_file`] (no `xark build`).
     ///
     /// Each `(name, value)` fans out to witness leaves via [`bignum::LeafInput`],
@@ -206,17 +202,6 @@ impl Compiled {
         }
         Ok(())
     }
-
-    /// **Streaming** satisfiability check — like [`check`](Self::check) but
-    /// verifies the witness by streaming each R1CS row out of the compact
-    /// `circuit.xbc` (never materializing the flat system), so peak memory is the
-    /// witness + one row and the walk is parallel. Skips the global
-    /// under-constraint analyzer (a separate soundness pass that must
-    /// materialize) — use [`check`](Self::check) when you want that too.
-    pub fn check_satisfies(&self, inputs: &[(&str, &dyn bignum::LeafInput)]) -> Result<(), String> {
-        let (bytes, id_inputs) = self.resolve_inputs(inputs)?;
-        xark_ir::function_decode::stream_check(&bytes, &id_inputs)
-    }
 }
 
 /// The workspace root, computed from *this* crate's manifest dir (stable no
@@ -227,98 +212,6 @@ fn workspace_root() -> PathBuf {
         .join("..")
         .canonicalize()
         .expect("canonicalize workspace root")
-}
-
-/// The nightly channel the compiler is pinned to (in `crates/rustc`, the
-/// rustc-driver crate, not root).
-fn nightly_channel(root: &Path) -> String {
-    let toml =
-        std::fs::read_to_string(root.join("crates/rustc/rust-toolchain.toml")).unwrap_or_default();
-    for line in toml.lines() {
-        let t = line.trim();
-        if t.starts_with("channel")
-            && let Some(v) = t.split('"').nth(1)
-        {
-            return v.to_string();
-        }
-    }
-    "nightly".to_string()
-}
-
-const RUSTFLAGS: &str = "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0";
-
-/// Build the compiler binary + gadget rlibs once; return `(binary, deps_dir)`.
-fn built() -> &'static (PathBuf, PathBuf) {
-    static BUILT: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
-    BUILT.get_or_init(|| {
-        let root = workspace_root();
-        let target = root.join("target/xark-compile");
-        let channel = nightly_channel(&root);
-
-        // 1. The rustc-driver binary in crates/rustc's own target (excluded
-        //    nightly pkg with its own pinned `rust-toolchain.toml`). Built *first*
-        //    so it can serve as `RUSTC` for the gadget rlibs below.
-        let ok = Command::new("cargo")
-            // `--features debug` compiles in the diagnostic markers the tests require
-            // on; a `--features` build still lands at `target/release/xark-rustc`.
-            .args(["build", "--release", "--features", "debug"])
-            .env("RUSTUP_TOOLCHAIN", &channel)
-            .env("RUSTFLAGS", RUSTFLAGS)
-            .env_remove("CARGO_TARGET_DIR")
-            .current_dir(root.join("crates/rustc"))
-            .status()
-            .expect("run cargo build (compiler)")
-            .success();
-        assert!(ok, "building the xark-rustc driver failed");
-        let driver = root.join("crates/rustc/target/release/xark-rustc");
-
-        // 2. Gadget rlibs → isolated target (all root-member `xark-*` crates
-        //    except the non-circuit libraries and excluded packages). Built with
-        //    the driver as `RUSTC` (like the real `xark build`): it reports the
-        //    `xark` cfg on `--print cfg`, so Cargo gates each crate's
-        //    `[target.'cfg(not(xark))'.dependencies]` (host prover/num-bigint) out
-        //    and the sources compile their lean circuit shape — exactly what links
-        //    into the circuit crate. No `RUSTUP_TOOLCHAIN`: the driver resolves its
-        //    own pinned sysroot.
-        let mut args = vec!["build".to_string(), "--release".to_string()];
-        let mut names: Vec<String> = std::fs::read_dir(root.join("crates"))
-            .expect("read crates/")
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| {
-                n.starts_with("xark-")
-                    && !matches!(
-                        n.as_str(),
-                        "xark"
-                            | "xark-ir"
-                            | "xark-prover"
-                            | "xark-test-harness"
-                            | "xark-cli"
-                            | "xark-rustc"
-                            | "xark-wasm"
-                    )
-            })
-            .collect();
-        names.sort();
-        for n in names {
-            args.push("-p".to_string());
-            args.push(n);
-        }
-        let ok = Command::new("cargo")
-            .args(&args)
-            .env("RUSTC", &driver)
-            .env("RUSTFLAGS", RUSTFLAGS)
-            .env("CARGO_TARGET_DIR", &target)
-            .current_dir(&root)
-            .status()
-            .expect("run cargo build (gadgets)")
-            .success();
-        assert!(ok, "building gadget rlibs failed");
-
-        // The rustc_driver shim (invoked directly with `--r1cs-out`), not the
-        // `xark` CLI — the driver lives in a separate binary/crate now.
-        (driver, target.join("release/deps"))
-    })
 }
 
 /// One `--extern name=path` per circuit rlib (newest per crate; skip stray
@@ -383,50 +276,192 @@ pub fn compile_file_json(src: &Path, out_name: &str, field: &str) -> Compiled {
     compile_file_inner(src, out_name, field, true)
 }
 
-fn compile_file_inner(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
+/// The gadget crates (`gadgets/xark-*`) plus the `xark` lib, built once for wasm32
+/// with `--cfg xark`; returns `(wasm deps dir, host deps dir)` (the proc macros
+/// are host artifacts).
+fn built_wasm() -> &'static (PathBuf, PathBuf) {
+    static BUILT: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
+    BUILT.get_or_init(|| {
+        let root = workspace_root();
+        let target = root.join("target/xark-compile-wasm");
+        let mut args: Vec<String> = [
+            "build",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown",
+            "-p",
+            "xark",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let mut names: Vec<String> = std::fs::read_dir(root.join("gadgets"))
+            .expect("read gadgets/")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("xark-"))
+            .collect();
+        names.sort();
+        for n in names {
+            args.push("-p".into());
+            args.push(n);
+        }
+        let ok = Command::new("cargo")
+            .args(&args)
+            .env("RUSTFLAGS", "--cfg xark --allow=unexpected_cfgs")
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("RUSTUP_TOOLCHAIN")
+            .current_dir(&root)
+            .status()
+            .expect("run cargo build (wasm gadgets)")
+            .success();
+        assert!(ok, "building wasm gadget rlibs failed");
+        (
+            target.join("wasm32-unknown-unknown/release/deps"),
+            target.join("release/deps"),
+        )
+    })
+}
+
+fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let (bin, deps) = built();
+    let (deps, host_deps) = built_wasm();
     let root = workspace_root();
     let out_dir = root.join("target/test-out").join(out_name);
     let _ = std::fs::remove_dir_all(&out_dir);
-
-    let mut cmd = Command::new(bin);
-    // Soundness gate: the driver is built with `--features debug`, so
-    // `XARK_VERIFY=1` makes every compiled circuit self-check that its bytecode
-    // artifact expands byte-identically to the flat R1CS. The prover proves the
-    // artifact, so an artifact≠flat drift (e.g. a revived mul-product missing from
-    // the artifact) is a forgeable under-constraint — caught on every test build
-    // (the drift is invisible to solve tests, which use the flat).
-    cmd.env("XARK_VERIFY", "1");
-    cmd.args([
-        "--crate-type=lib",
+    std::fs::create_dir_all(&out_dir).expect("create out dir");
+    let wasm = out_dir.join("circuit.wasm");
+    // The frontend's entry is the `#[circuit]` fn. A test source written as a bare
+    // `pub fn` whose params are all `Private<…>`/`Public<…>` gets the attribute
+    // added here.
+    let text = std::fs::read_to_string(src).expect("read circuit source");
+    let src_path = if text.contains("circuit]") {
+        src.to_path_buf()
+    } else {
+        let annotated = annotate_entry(&text);
+        let p = out_dir.join("annotated.rs");
+        std::fs::write(&p, annotated).expect("write annotated source");
+        p
+    };
+    let src = src_path.as_path();
+    let mut cmd = Command::new("rustc");
+    cmd.env_remove("RUSTUP_TOOLCHAIN").args([
+        "--crate-type=cdylib",
         "--edition=2021",
-        "-Z",
-        "mir-opt-level=0",
+        "--target=wasm32-unknown-unknown",
+        "--cfg=xark",
+        "--allow=unexpected_cfgs",
+        "-Copt-level=s",
+        "-Cpanic=abort",
+        "-Coverflow-checks=on",
     ]);
     for e in externs(deps) {
         cmd.arg("--extern").arg(e);
     }
     cmd.arg("-L")
         .arg(format!("dependency={}", deps.display()))
-        .arg("--field")
-        .arg(field);
-    if emit_json {
-        cmd.arg("--emit-json");
-    }
+        .arg("-L")
+        .arg(format!("dependency={}", host_deps.display()));
     let output = cmd
         .arg(src)
-        .arg("--r1cs-out")
-        .arg(&out_dir)
+        .arg("-o")
+        .arg(&wasm)
         .current_dir(&root)
         .output()
-        .expect("run xark compiler");
-
-    Compiled {
-        status_success: output.status.success(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        out_dir,
+        .expect("run rustc");
+    if !output.status.success() {
+        return Compiled {
+            status_success: false,
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            out_dir,
+        };
     }
+    let bytes = std::fs::read(&wasm).expect("read circuit.wasm");
+    let spec = if field == "unknown" {
+        xark_ir::FieldSpec::unknown()
+    } else {
+        xark_ir::FieldSpec::named(field)
+    };
+    // Debug notes and variable names only for the JSON views that show them:
+    // `circuit.xbc` is the same either way, and on a large circuit they cost GBs
+    // (34 GB on grumpkin_ipa_fold).
+    match xark_frontend::lower_module(&bytes, spec, false, emit_json) {
+        Ok(l) => {
+            xark_frontend::write_outputs(&out_dir, &l.output, emit_json, false)
+                .expect("write outputs");
+            let _ = std::fs::write(
+                out_dir.join("schema.json"),
+                serde_json::to_string_pretty(&l.schema).unwrap_or_default() + "\n",
+            );
+            Compiled {
+                status_success: true,
+                stderr: String::new(),
+                out_dir,
+            }
+        }
+        Err(e) => Compiled {
+            status_success: false,
+            stderr: format!("error: {e}"),
+            out_dir,
+        },
+    }
+}
+
+/// Add `#[::xark::circuit]` before the first top-level `pub fn` whose parameters
+/// all use the `Private<…>`/`Public<…>` markers.
+fn annotate_entry(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut done = false;
+    let mut rest = text;
+    while let Some(i) = rest.find("pub fn ") {
+        let (head, tail) = rest.split_at(i);
+        out.push_str(head);
+        let sig_end = tail.find('{').unwrap_or(tail.len());
+        let sig = &tail[..sig_end];
+        let params = sig
+            .split_once('(')
+            .and_then(|(_, p)| p.rsplit_once(')'))
+            .map(|(p, _)| p)
+            .unwrap_or("");
+        let at_line_start = head.is_empty() || head.ends_with('\n');
+        let all_marked = !params.trim().is_empty()
+            && params
+                .split(',')
+                .filter(|a| a.contains(':'))
+                .all(|a| a.contains("Private<") || a.contains("Public<"));
+        // Failing that, a `pub fn circuit(…)` with unmarked params: annotate it so
+        // `#[circuit]` rejects the params with its diagnostic.
+        let fallback = !text_has_marked_entry(text) && sig.starts_with("pub fn circuit(");
+        if !done && at_line_start && (all_marked || fallback) {
+            out.push_str("#[::xark::circuit]\n");
+            done = true;
+        }
+        out.push_str("pub fn ");
+        rest = &tail["pub fn ".len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Whether some top-level `pub fn` has only `Private<…>`/`Public<…>` params.
+fn text_has_marked_entry(text: &str) -> bool {
+    text.split("pub fn ").skip(1).any(|f| {
+        let sig = &f[..f.find('{').unwrap_or(f.len())];
+        let params = sig
+            .split_once('(')
+            .and_then(|(_, p)| p.rsplit_once(')'))
+            .map(|(p, _)| p)
+            .unwrap_or("");
+        !params.trim().is_empty()
+            && params
+                .split(',')
+                .filter(|a| a.contains(':'))
+                .all(|a| a.contains("Private<") || a.contains("Public<"))
+    })
+}
+
+fn compile_file_inner(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
+    compile_file_stable(src, out_name, field, emit_json)
 }
 
 /// Compile a circuit source **string** (written to a temp file) to `circuit.xbc`.
@@ -434,11 +469,4 @@ pub fn compile_source(name: &str, src: &str, field: &str) -> Compiled {
     let path = std::env::temp_dir().join(format!("xark_harness_{name}.rs"));
     std::fs::write(&path, src).expect("write temp source");
     compile_file(&path, name, field)
-}
-
-/// [`compile_source`] but with `--emit-json` (for tests reading `r1cs.json` etc.).
-pub fn compile_source_json(name: &str, src: &str, field: &str) -> Compiled {
-    let path = std::env::temp_dir().join(format!("xark_harness_{name}.rs"));
-    std::fs::write(&path, src).expect("write temp source");
-    compile_file_json(&path, name, field)
 }

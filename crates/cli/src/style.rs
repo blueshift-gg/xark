@@ -13,7 +13,7 @@ const DIM: &str = "\x1b[2m"; // faint — for inline `# comment` hints
 const RESET: &str = "\x1b[0m";
 
 /// Whether to emit escape codes: only for an interactive stderr, and never when
-/// `NO_COLOR` is set (https://no-color.org). Cached after the first check.
+/// `NO_COLOR` is set (<https://no-color.org>). Cached after the first check.
 fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {

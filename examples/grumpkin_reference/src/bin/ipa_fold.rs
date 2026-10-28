@@ -1,6 +1,6 @@
 //! Real Halo/Bulletproofs IPA transcript over Grumpkin, n=4 / k=2 rounds, with
-//! Poseidon2 Fiat-Shamir challenges (host `poseidon2` crate == the in-circuit
-//! `xark-poseidon2` gadget). SELF-VALIDATING: asserts the final IPA relation
+//! Poseidon2 Fiat-Shamir challenges (`xark_poseidon2::native`, the in-circuit
+//! gadget's own permutation). SELF-VALIDATING: asserts the final IPA relation
 //! `P_final == a*·G* + (a*·b*)·U` and `G* == Σ sⱼ·Gⱼ`, then emits the values the
 //! Milestone-2 circuit will verify. Challenges are the low 128 bits of the
 //! Poseidon2 output (Halo-style short challenge), reused verbatim in-circuit.
@@ -16,12 +16,6 @@ fn base_dec(x: &Base) -> String {
 fn scalar_dec(x: &Scalar) -> String {
     x.into_bigint().to_string()
 }
-// Grumpkin scalar (< p < 2^254) → (lo, hi) 127-bit limbs.
-fn limbs127(s: &Scalar) -> (String, String) {
-    let v = BigUint::from_bytes_le(&s.into_bigint().to_bytes_le());
-    let mask = (BigUint::from(1u8) << 127u32) - 1u8;
-    ((&v & &mask).to_string(), (&v >> 127u32).to_string())
-}
 // A Grumpkin scalar's canonical integer < 2^128, as a base-field element (for hashing).
 fn scalar_to_base(s: &Scalar) -> Base {
     Base::from(BigUint::from_bytes_le(&s.into_bigint().to_bytes_le()))
@@ -29,10 +23,10 @@ fn scalar_to_base(s: &Scalar) -> Base {
 
 // Poseidon2(inputs) → challenge = low 128 bits, as a Grumpkin scalar.
 fn challenge(inputs: &[Base]) -> Scalar {
-    // host poseidon2::hash needs a fixed-size array; we only ever pass 5 or 6.
+    // native::hash needs a fixed-size array; we only ever pass 5 or 6.
     let h: Base = match inputs.len() {
-        6 => poseidon2::hash([inputs[0], inputs[1], inputs[2], inputs[3], inputs[4], inputs[5]]),
-        5 => poseidon2::hash([inputs[0], inputs[1], inputs[2], inputs[3], inputs[4]]),
+        6 => xark_poseidon2::native::hash([inputs[0], inputs[1], inputs[2], inputs[3], inputs[4], inputs[5]]),
+        5 => xark_poseidon2::native::hash([inputs[0], inputs[1], inputs[2], inputs[3], inputs[4]]),
         _ => unreachable!(),
     };
     let hbig = BigUint::from_bytes_le(&h.into_bigint().to_bytes_le());
@@ -146,21 +140,13 @@ fn main() {
         println!("const R{i}X: &str = \"{}\";", base_dec(&r.x));
         println!("const R{i}Y: &str = \"{}\";", base_dec(&r.y));
         println!("const X{i}: &str = \"{}\";       // in-circuit-derived (128-bit)", scalar_dec(&xs[i]));
-        let (lo, hi) = limbs127(&xinvs[i]);
-        println!("const X{i}INV_LO: &str = \"{lo}\";");
-        println!("const X{i}INV_HI: &str = \"{hi}\";");
+        println!("const X{i}INV: &str = \"{}\";", scalar_dec(&xinvs[i]));
     }
     for (j, sj) in s.iter().enumerate() {
-        let (lo, hi) = limbs127(sj);
-        println!("const S{j}LO: &str = \"{lo}\";");
-        println!("const S{j}HI: &str = \"{hi}\";");
+        println!("const S{j}: &str = \"{}\";", scalar_dec(sj));
     }
-    let (alo, ahi) = limbs127(&a_star);
-    println!("const ASTAR_LO: &str = \"{alo}\";");
-    println!("const ASTAR_HI: &str = \"{ahi}\";");
-    let (clo, chi) = limbs127(&c);
-    println!("const C_LO: &str = \"{clo}\";");
-    println!("const C_HI: &str = \"{chi}\";");
+    println!("const ASTAR: &str = \"{}\";", scalar_dec(&a_star));
+    println!("const C: &str = \"{}\";", scalar_dec(&c));
     for (j, bj) in b.iter().enumerate() {
         println!("const B{j}: &str = \"{}\";", scalar_dec(bj));
     }

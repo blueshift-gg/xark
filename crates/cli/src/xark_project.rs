@@ -24,16 +24,14 @@ impl XarkProject {
     /// directory to the nearest crate root).
     pub fn resolve(path: Option<PathBuf>) -> Result<Self> {
         let base = match path {
-            Some(p) => p,
+            Some(p) if !p.exists() => bail!("no such directory: {}", p.display()),
+            // Absolute, so the walk up to the crate root below can leave it.
+            Some(p) => p.canonicalize().unwrap_or(p),
             None => std::env::current_dir().context("resolving current directory")?,
         };
         Ok(Self {
             xark_dir: resolve_xark_dir(&base)?,
         })
-    }
-
-    pub fn r1cs_json(&self) -> PathBuf {
-        self.xark_dir.join("r1cs.json")
     }
 
     pub fn circuit_xbc(&self) -> PathBuf {
@@ -56,50 +54,15 @@ impl XarkProject {
         self.xark_dir.join("public_inputs.bin")
     }
 
-    /// The circuit's name — the `target/xark/<name>/` subdirectory name, which
-    /// `xark build` scopes to the crate's `[package] name`. Falls back to
-    /// `"circuit"` when the output dir has no usable file name.
-    pub fn circuit_name(&self) -> String {
-        self.xark_dir
-            .file_name()
-            .and_then(|s| s.to_str())
-            .filter(|s| !s.is_empty() && *s != "xark")
-            .unwrap_or("circuit")
-            .to_string()
-    }
-
-    /// The circuit's entry function name, from the `entry` marker `xark build`
-    /// writes beside the artifacts. Names the proof bundle and generated
-    /// `<Fn>Inputs` struct. Falls back to the crate name when the marker is
-    /// absent or the entry is the generic `circuit`.
-    pub fn entry_name(&self) -> String {
-        std::fs::read_to_string(self.xark_dir.join("entry"))
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty() && s != "circuit")
-            .unwrap_or_else(|| self.circuit_name())
-    }
-
-    /// snarkjs verifying key (`snarkjs-verification_key.json`) written by setup —
-    /// the file a JS/snarkjs client (or `xark-client`) verifies against.
-    pub fn snarkjs_vk(&self) -> PathBuf {
-        self.xark_dir.join("snarkjs-verification_key.json")
-    }
-
     /// Default output directory for `xark export`'s generated verifier crate.
     pub fn export_dir(&self) -> PathBuf {
         self.xark_dir.join("verifier")
     }
 
-    /// Default output directory for `xark client`'s generated TypeScript client.
-    pub fn client_dir(&self) -> PathBuf {
-        self.xark_dir.join("client")
-    }
-
     /// Auto-detect a Powers-of-Tau (`.ptau`) transcript for production setup.
     ///
-    /// Searches `target/xark/`, `target/xark/ptau/`, the crate root, and
-    /// `<root>/ptau/`, returning the first `*.ptau` found.
+    /// Searches `target/xark/<name>/`, `target/xark/`, and the crate root, each
+    /// with its `ptau/` subdir, returning the first `*.ptau` found.
     pub fn find_ptau(&self) -> Option<PathBuf> {
         let mut dirs = vec![self.xark_dir.clone(), self.xark_dir.join("ptau")];
         // `target/xark/<pkg>/` → the shared `target/xark/` is one level up …
@@ -131,12 +94,8 @@ impl XarkProject {
 /// writes.
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
     // 1. `base` is already a scoped output dir (a `target/xark/<name>/` holding
-    //    circuit.xbc — the artifact every build writes — or the `--emit-json`
-    //    JSON siblings) — use it directly.
-    if base.join("circuit.xbc").is_file()
-        || base.join("r1cs.json").is_file()
-        || base.join("circuit.json").is_file()
-    {
+    //    circuit.xbc, the artifact every build writes) — use it directly.
+    if base.join("circuit.xbc").is_file() {
         return Ok(base.to_path_buf());
     }
     // 2. `base` is a crate dir → `target/xark/<pkg-name>/`.
@@ -163,7 +122,7 @@ fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
         }
     }
     // 5. Fallback: treat `base` itself as the output dir (setup will surface a
-    //    clear "missing r1cs.json" error if it is wrong).
+    //    clear "run `xark build` first" error if it is wrong).
     Ok(base.to_path_buf())
 }
 
@@ -183,7 +142,7 @@ fn scoped_dir(crate_dir: &Path) -> PathBuf {
 }
 
 /// When `base` is a bare `target/xark/`, find the single circuit subdir under
-/// it (a `<name>/` holding r1cs.json / circuit.json). Returns `Ok(None)` if
+/// it (a `<name>/` holding `circuit.xbc`). Returns `Ok(None)` if
 /// there are none; errors if there is more than one (the user must name one).
 fn single_named_subdir(base: &Path) -> Result<Option<PathBuf>> {
     if !base.is_dir() {
@@ -193,11 +152,7 @@ fn single_named_subdir(base: &Path) -> Result<Option<PathBuf>> {
     if let Ok(entries) = std::fs::read_dir(base) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.is_dir()
-                && (p.join("circuit.xbc").is_file()
-                    || p.join("r1cs.json").is_file()
-                    || p.join("circuit.json").is_file())
-            {
+            if p.is_dir() && p.join("circuit.xbc").is_file() {
                 candidates.push(p);
             }
         }

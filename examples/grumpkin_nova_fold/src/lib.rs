@@ -21,7 +21,6 @@
 //! the remaining IVC scaffolding (augmented step circuit, IO hashing, driver) is
 //! systems assembly around this verified core.
 
-#![cfg_attr(xark, no_std)]
 #![allow(clippy::assign_op_pattern)]
 
 use xark_grumpkin::prelude::*;
@@ -97,43 +96,41 @@ fn challenge(t: [Field; 14]) -> [Field; 128] {
 /// Verify one Nova folding step: given two committed relaxed-R1CS instances, the
 /// cross-term commitment `comm_T`, and the claimed folded instance, check the
 /// fold is correct with the in-circuit Fiat–Shamir challenge `r`.
+/// One Nova fold, `folded = a ⊕ r·b` with cross-term `t`, the challenge
+/// `r = low128(Poseidon2(a, b, t))` (the host reference's transcript order).
 #[circuit]
-#[allow(clippy::too_many_arguments)]
 pub fn grumpkin_nova_fold(
-    cw1: Public<Affine>,
-    ce1: Public<Affine>,
-    cw2: Public<Affine>,
-    ce2: Public<Affine>,
-    ct: Public<Affine>,
-    u1: Public<Field>,
-    x1: Public<Field>,
-    u2: Public<Field>,
-    x2: Public<Field>,
-    cw: Public<Affine>,
-    ce: Public<Affine>,
-    u: Public<Field>,
-    x: Public<Field>,
+    a: Public<Instance>,
+    b: Public<Instance>,
+    t: Public<Affine>,
+    folded: Public<Instance>,
 ) {
-    // r = low128(Poseidon2(transcript)) — same order as the host reference.
-    let r_bits = challenge([
-        cw1.x, cw1.y, ce1.x, ce1.y, u1, x1, cw2.x, cw2.y, ce2.x, ce2.y, u2, x2, ct.x, ct.y,
-    ]);
+    let (a6, b6) = (a.to_fields(), b.to_fields());
+    let mut tr = [Field::from(0u8); 14];
+    let mut i = 0usize;
+    while i < 6usize {
+        tr[i] = a6[i];
+        tr[6 + i] = b6[i];
+        i += 1;
+    }
+    tr[12] = t.x;
+    tr[13] = t.y;
+    let r_bits = challenge(tr);
     let r_fr = Field::from_bits::<128>(r_bits);
 
+    let pt = |p: Affine| [p.x, p.y];
     // comm_W = comm_W1 + r·comm_W2
-    let cw_c = ec_add([cw1.x, cw1.y], scalar_mul(r_bits, [cw2.x, cw2.y]));
+    let cw = ec_add(pt(a.cw), scalar_mul(r_bits, pt(b.cw)));
     // comm_E = comm_E1 + r·comm_T + r²·comm_E2
-    let r_t = scalar_mul(r_bits, [ct.x, ct.y]);
-    let r2_e2 = scalar_mul(r_bits, scalar_mul(r_bits, [ce2.x, ce2.y]));
-    let ce_c = ec_add(ec_add([ce1.x, ce1.y], r_t), r2_e2);
+    let r_t = scalar_mul(r_bits, pt(t));
+    let r2_e2 = scalar_mul(r_bits, scalar_mul(r_bits, pt(b.ce)));
+    let ce = ec_add(ec_add(pt(a.ce), r_t), r2_e2);
     // u = u1 + r·u2 ; x = x1 + r·x2  (native Fr)
-    let u_c = u1 + r_fr * u2;
-    let x_c = x1 + r_fr * x2;
-
-    require_eq(cw_c[0], cw.x);
-    require_eq(cw_c[1], cw.y);
-    require_eq(ce_c[0], ce.x);
-    require_eq(ce_c[1], ce.y);
-    require_eq(u_c, u);
-    require_eq(x_c, x);
+    let want = Instance {
+        cw: Affine { x: cw[0], y: cw[1] },
+        ce: Affine { x: ce[0], y: ce[1] },
+        u: a.u + r_fr * b.u,
+        x: a.x + r_fr * b.x,
+    };
+    require_eq(want.to_fields(), folded.to_fields());
 }

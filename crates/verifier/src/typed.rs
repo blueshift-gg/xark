@@ -159,16 +159,12 @@ impl<const N: usize> Verifier<N> {
         public_inputs: &[[u8; FR_BYTES]; N],
     ) -> Result<bool, VerifierError> {
         // vk_x = ic[0] + Σ inputs[i] · ic[i+1]
+        // As the byte path computes it (`add_input_term`): non-canonical inputs
+        // refused, zero and small ones cheap.
         let mut acc = G1Point::from_le_bytes(self.ic0);
         let mut i = 0;
         while i < N {
-            // Reject non-canonical (>= r) public inputs to prevent encoding
-            // malleability — see `scalar_is_canonical`.
-            if !crate::verifier::scalar_is_canonical(&public_inputs[i]) {
-                return Err(VerifierError::NonCanonicalPublicInput { index: i as u32 });
-            }
-            let term = (G1Point::from_le_bytes(self.ic[i]) * public_inputs[i])?;
-            acc = (acc + term)?;
+            acc = crate::verifier::add_input_term(acc, &self.ic[i], &public_inputs[i], i)?;
             i += 1;
         }
         groth16_pairing_check(
@@ -186,8 +182,10 @@ impl<const N: usize> Verifier<N> {
     /// Strict variant of [`verify`](Self::verify): additionally rejects any VK
     /// or proof coordinate whose 32-byte LE encoding is non-canonical (`>= q`).
     /// The syscall masks the unused top bits, so plain [`verify`](Self::verify)
-    /// accepts byte-distinct encodings of the same point; use this when the
-    /// proof's exact bytes matter (hashed, signed, or used as a replay key).
+    /// accepts byte-distinct encodings of the same point; this rejects them. It
+    /// does not make proofs unique: Groth16 proofs are re-randomizable, so never
+    /// use proof bytes as a replay key (see
+    /// [`verify_groth16_strict`](crate::verify_groth16_strict)).
     /// See [`verify_groth16_strict`](crate::verify_groth16_strict).
     pub fn verify_strict(&self, proof: &Proof, public_inputs: &[[u8; FR_BYTES]; N]) -> bool {
         self.try_verify_strict(proof, public_inputs)

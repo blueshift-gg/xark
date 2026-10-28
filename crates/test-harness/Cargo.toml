@@ -4,9 +4,13 @@ description = "Test harness for xark circuits: compile-and-solve helpers shared 
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 license.workspace = true
+repository.workspace = true
 readme = "README.md"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 [dependencies]
 num-bigint = "0.4"
-xark-ir = { path = "../ir", version = "0.2.1" }
+xark-ir = { path = "../ir", version = "0.3.0" }
+xark-frontend = { path = "../frontend", version = "0.3.0" }
+serde_json = "1"

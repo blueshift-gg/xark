@@ -3,8 +3,6 @@
 //! Here a 256-bit prime field as `Bignum<3, 86>` (the secp256k1 shape). Each
 //! `Private<Fp>`/`Public<Fp>` is a typed circuit input — a single whole number on
 //! the host, split into its 3 limbs automatically; the caller never thinks in limbs.
-#![cfg_attr(xark, no_std)]
-
 use xark_bignum::prelude::*;
 
 type Fp = Bignum<3, 86>;
@@ -34,11 +32,11 @@ mod tests {
 
     #[test]
     fn accepts_valid() {
-        bignum("2".into(), "3".into(), P.into(), P_M1.into(), "6".into()).unwrap();
+        bignum(2, 3, P, P_M1, 6).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(bignum("2".into(), "3".into(), P.into(), P_M1.into(), "7".into()).is_err());
+        assert!(bignum(2, 3, P, P_M1, 7).is_err());
     }
 }

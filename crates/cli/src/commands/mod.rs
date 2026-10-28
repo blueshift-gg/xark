@@ -1,9 +1,9 @@
 //! The clap-driven `xark` CLI.
 //!
-//! Frontend subcommands (`init`/`build`/`check`) drive `cargo` with `xark` as
-//! `RUSTC`; their implementations live in [`crate::cli`]. Backend subcommands
+//! Frontend subcommands (`init`/`build`/`check`) drive `cargo` (for wasm32) and
+//! the frontend; their implementations live in [`crate::cli`]. Backend subcommands
 //! (`setup`/`prove`/`verify`/`export`/`ceremony`/`inspect`) read the xark-IR
-//! produced by `xark build` and run the shared Arkworks Groth16 backend.
+//! produced by `xark build` and run the shared Groth16 backend.
 
 use std::collections::BTreeMap;
 
@@ -12,8 +12,8 @@ use ark_bn254::Fr;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use xark_ir::primitive::{PrimitiveProgram, VarRole};
-use xark_ir::profile::ProfileProgram;
+use xark_ir::SourceMap;
+use xark_ir::primitive::PrimitiveProgram;
 use xark_ir::solver::Fp;
 use xark_ir::{R1csProgram, VarId, Visibility};
 
@@ -45,13 +45,6 @@ pub mod prove;
 pub mod setup;
 pub mod verify;
 
-/// Wrap an Arkworks `gr1cs` `SynthesisError` (or any backend error) into an
-/// `anyhow::Error`. The ark error types are `no_std` and don't implement
-/// `std::error::Error`, so we wrap via their `Display` impl.
-pub fn synth_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
-    anyhow::anyhow!("R1CS synthesis error: {e}")
-}
-
 /// `xark` — write, compile, prove and verify zero-knowledge circuits in Rust.
 #[derive(Parser, Debug)]
 #[command(
@@ -59,11 +52,10 @@ pub fn synth_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
     version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("XARK_GIT_HASH"), ")"),
     styles = crate::style::clap_styles(),
     about = "Write, compile, prove and verify zero-knowledge circuits in Rust",
-    long_about = "xark compiles a restricted Rust circuit (via rustc MIR) into \
-xark-IR + R1CS, then proves and verifies it with an Arkworks Groth16 backend \
-over BN254. `xark build` emits `circuit.json` + `r1cs.json` under \
-`<crate>/target/xark/`; the backend commands read them from there \
-automatically."
+    long_about = "xark compiles a Rust circuit (built for wasm32 with any stable \
+toolchain) into xark-IR + R1CS, then proves and verifies it with Groth16 over \
+BN254. `xark build` emits `circuit.xbc` under `<crate>/target/xark/`; the \
+backend commands read it from there automatically."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -77,13 +69,14 @@ pub enum Command {
     /// Scaffold a starter circuit crate (rust-analyzer ready).
     #[command(alias = "new")]
     Init(InitArgs),
-    /// Compile a circuit crate (rustc-MIR → xark-IR → R1CS) into target/xark/.
+    /// Compile a circuit crate (Rust → wasm32 → R1CS) into target/xark/.
     Build(BuildArgs),
     /// Validate a circuit crate and report subset rejections as diagnostics.
     Check(CheckArgs),
     /// Build the circuit, then run its `cargo test` circuit tests.
     Test(TestArgs),
-    /// Remove all xark build output (every `target/xark/` under the current dir).
+    /// Remove all xark build output (every `target/xark/`, `target/xark-wasm/` and
+    /// `target/xark-client/` under the current dir).
     Clean(CleanArgs),
     /// Generate Groth16 proving and verifying keys.
     Setup(setup::SetupArgs),
@@ -93,11 +86,13 @@ pub enum Command {
     Verify(verify::VerifyArgs),
     /// Export a self-contained Solana verifier crate.
     Export(export::ExportArgs),
-    /// Scaffold a TypeScript client (verify with snarkjs + on-chain calldata).
+    /// Generate a typed TypeScript client from the build's `schema.json` (prove +
+    /// verify through xark-wasm; builds the circuit if needed, no setup or proof).
     Client(client::ClientArgs),
     /// Phase-2 MPC ceremony for trusted setup.
     Ceremony(ceremony::CeremonyArgs),
-    /// Print circuit statistics (variables, constraints, public inputs).
+    /// Print circuit statistics (variables, constraints, public inputs), building
+    /// the circuit first if it's missing or stale.
     Inspect(inspect::InspectArgs),
     /// Profile a circuit: attribute each constraint to its source line, function
     /// chain, and kind, then print a sorted drill-down.
@@ -132,7 +127,7 @@ fn run(cli: Cli) -> Result<()> {
         // Frontend commands delegate to the hand-rolled `cargo`-driving
         // implementations, which return a process exit code.
         Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
-        Command::Build(a) => exit_code("build", crate::cli::cmd_build(&a.to_argv())),
+        Command::Build(a) => exit_code("build", crate::cli::cmd_build_command(&a.to_argv())),
         // Bare `xark check` stays the fast, artifact-free `cargo check` validator.
         // `xark check --inputs …` opts into the witness-based soundness analyzer
         // (build + solve + `analyze_underconstrained`), which is `anyhow`-based.
@@ -184,17 +179,17 @@ pub struct BuildArgs {
     /// Circuit crate directory to build.
     #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
     pub crate_dir: String,
-    /// Output directory for `circuit.json` / `r1cs.json`
-    /// (default: `<crate>/target/xark/`).
+    /// Output directory for the build artifacts (`circuit.xbc`, `schema.json`, …;
+    /// default: `<crate>/target/xark/<name>/`).
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<String>,
-    /// Field the circuit is defined over.
-    #[arg(long, default_value = "bn254")]
+    /// Field the circuit is defined over: `bn254` (the one Groth16 keys and proofs
+    /// use), or a prime modulus in decimal (to count constraints over another field).
+    #[arg(long, default_value = "bn254", value_parser = parse_field)]
     pub field: String,
-    /// Also emit the human-readable `circuit.json` (the primitive program as
-    /// JSON). Off by default: `xark prove`/`check` load the compact binary
-    /// `circuit.xbc` instead, so a normal build skips the (multi-GB on large
-    /// circuits) JSON serialization. `r1cs.json` is always written.
+    /// Also write `circuit.json` and `r1cs.json`, human-readable views of the
+    /// circuit for debugging. Every command reads `circuit.xbc`; the JSON is
+    /// never read back, and is multi-GB on large circuits, so it's off by default.
     #[arg(long = "emit-json", default_value_t = false)]
     pub emit_json: bool,
 }
@@ -240,8 +235,8 @@ pub struct CheckArgs {
     /// `check` stays the fast validator.
     #[arg(long = "inputs", value_name = "JSON|FILE")]
     pub inputs: Option<String>,
-    /// Output directory for the intermediate `circuit.json` / `r1cs.json` built
-    /// by `--inputs` (default: `<crate>/target/xark/`). Only used with `--inputs`.
+    /// Output directory for the build `--inputs` runs (default:
+    /// `<crate>/target/xark/<name>/`). Only used with `--inputs`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<String>,
 }
@@ -261,23 +256,92 @@ pub struct TestArgs {
     /// Circuit crate directory to build and test.
     #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
     pub crate_dir: String,
-    /// Extra arguments forwarded verbatim to `cargo test` (after `--`).
-    #[arg(last = true)]
+    /// Arguments for `cargo test`, passed through verbatim, as you'd give them to
+    /// `cargo test` itself: a test-name filter, cargo flags, and after `--` the
+    /// test binary's (`xark test . -- --include-ignored`).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub cargo_args: Vec<String>,
 }
 
 impl TestArgs {
+    /// `[crate dir, cargo test args…]`, read from the raw command line: clap
+    /// swallows a `--` that `cargo test` needs (`xark test . -- --list` must reach
+    /// cargo as `-- --list`). The first argument is the crate dir if it is one or
+    /// looks like a path (so a mistyped path is reported, not taken as a filter);
+    /// `xark test my_test` filters in the current crate.
     fn to_argv(&self) -> Vec<String> {
-        let mut v = vec![self.crate_dir.clone()];
-        if !self.cargo_args.is_empty() {
-            v.push("--".into());
+        let raw: Vec<String> = std::env::args().collect();
+        let Some(i) = raw.iter().skip(1).position(|a| a == "test") else {
+            let mut v = vec![self.crate_dir.clone()];
             v.extend(self.cargo_args.iter().cloned());
+            return v;
+        };
+        let rest = &raw[i + 2..];
+        match rest.first() {
+            Some(d)
+                if !d.starts_with('-')
+                    && (std::path::Path::new(d).is_dir() || looks_like_path(d)) =>
+            {
+                rest.to_vec()
+            }
+            _ => std::iter::once(".".to_string())
+                .chain(rest.iter().cloned())
+                .collect(),
         }
-        v
     }
 }
 
+/// A path rather than a test-name filter: test names never hold a separator or
+/// start with `.` or `~`.
+fn looks_like_path(s: &str) -> bool {
+    s.contains('/') || s.contains(std::path::MAIN_SEPARATOR) || s.starts_with(['.', '~'])
+}
+
 // Shared helpers for the backend commands.
+
+/// Read the artifact at `path` with `read`, saying plainly what's wrong when it
+/// fails: missing (`missing` says what makes it), empty, or not a `what` at all
+/// (`by` wrote the real one; the decoder's error follows, as the detail).
+pub fn read_artifact<T, E: std::fmt::Display>(
+    path: &std::path::Path,
+    what: &str,
+    by: &str,
+    missing: &str,
+    read: impl FnOnce() -> std::result::Result<T, E>,
+) -> Result<T> {
+    read().map_err(|e| match std::fs::metadata(path) {
+        Err(_) => anyhow::anyhow!("no {what} at {} ({missing})", path.display()),
+        Ok(m) if m.len() == 0 => {
+            anyhow::anyhow!(
+                "{} is empty: it isn't a {what} written by `{by}`",
+                path.display()
+            )
+        }
+        Ok(_) => {
+            // A truncated file: the decoder reports the io error's debug form.
+            let e = e.to_string();
+            let detail = if e.contains("UnexpectedEof") || e.contains("failed to fill whole buffer")
+            {
+                "it's cut short".to_string()
+            } else {
+                e
+            };
+            anyhow::anyhow!(
+                "{} isn't a {what} written by `{by}` ({detail})",
+                path.display()
+            )
+        }
+    })
+}
+
+/// `--field`: `bn254` (or `bn128`), or a prime modulus in decimal; normalized.
+pub fn parse_field(s: &str) -> std::result::Result<String, String> {
+    let f = xark_ir::FieldSpec::parse(s)?;
+    Ok(match f.name.as_str() {
+        "bn254" => "bn254".into(),
+        _ => f.modulus_decimal.unwrap_or_default(),
+    })
+}
 
 /// Render the path argument the user passed (for the guided "Next:" hints) so
 /// suggested commands are copy-pasteable. Falls back to `.` when none was given.
@@ -288,45 +352,93 @@ pub fn path_arg(path: &Option<std::path::PathBuf>) -> String {
     }
 }
 
-/// Parse the `--inputs` argument: a leading `{` selects inline JSON, anything
-/// else is a file path (JSON object, or `name = value` lines). Array elements
-/// use the flat names `xark inspect` prints, e.g. `path[0]`.
-pub fn parse_inputs_arg(arg: &str) -> Result<BTreeMap<String, String>> {
-    if arg.trim_start().starts_with('{') {
-        parse_input_text(arg, std::path::Path::new("<--inputs>"))
-    } else {
-        let text = std::fs::read_to_string(arg)
-            .with_context(|| format!("reading --inputs file `{arg}`"))?;
-        parse_input_text(&text, std::path::Path::new(arg))
+/// Warn that `--out` directory `dir` isn't empty (when it holds anything): what a
+/// command writes there replaces any file of the same name.
+pub fn warn_if_not_empty(dir: &std::path::Path, what: &str) {
+    if std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
+        eprintln!(
+            "{} {} isn't empty: writing the {what} there anyway, replacing any already there",
+            crate::style::warn("warning:"),
+            dir.display()
+        );
     }
 }
 
-/// Parse input text: either a `{ "name": value, … }` JSON object, or lines of
-/// `name = value` (`#` comments and blank lines ignored). Values are kept as
-/// decimal strings; array elements use the flat names `xark inspect` prints.
+/// `path` as a command line takes it: relative to the current directory when under it.
+pub fn shown(path: &std::path::Path) -> String {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    path.strip_prefix(&cwd)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+/// The circuit's `schema.json`, if the build wrote a current one (for summaries
+/// and hints).
+pub fn load_schema(xark_dir: &std::path::Path) -> Option<xark_schema::Schema> {
+    require_schema(xark_dir).ok()
+}
+
+/// The circuit's `schema.json`: how `--inputs` values are read. Missing, or written
+/// by an older xark: rebuild.
+pub fn require_schema(xark_dir: &std::path::Path) -> Result<xark_schema::Schema> {
+    let path = xark_dir.join("schema.json");
+    let text = std::fs::read_to_string(&path).map_err(|_| {
+        anyhow::anyhow!(
+            "no {} (it describes the circuit's inputs): run `xark build`",
+            path.display()
+        )
+    })?;
+    xark_schema::Schema::parse(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
+}
+
+/// `--inputs` as a JSON object: inline JSON (a leading `{`), or a file of JSON or
+/// `name = value` lines.
+fn inputs_json(arg: &str) -> Result<serde_json::Value> {
+    let (text, source) = if arg.trim_start().starts_with('{') {
+        (arg.to_string(), "<--inputs>".to_string())
+    } else {
+        let t = std::fs::read_to_string(arg)
+            .with_context(|| format!("reading --inputs file `{arg}`"))?;
+        (t, arg.to_string())
+    };
+    if text.trim_start().starts_with('{') {
+        return serde_json::from_str(&text).with_context(|| format!("parsing {source} as JSON"));
+    }
+    let map: serde_json::Map<String, serde_json::Value> =
+        parse_input_text(&text, std::path::Path::new(&source))?
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect();
+    Ok(serde_json::Value::Object(map))
+}
+
+/// `--inputs` as the circuit's input leaves (`name → decimal`), every value taken in
+/// its type's natural form (a date as `"YYYY-MM-DD"`, a key as its bytes) and checked
+/// against `schema.json` (a `uN` against its range, a field element against `p`).
+pub fn read_inputs(xark_dir: &std::path::Path, arg: &str) -> Result<BTreeMap<String, String>> {
+    let leaves = require_schema(xark_dir)?
+        .leaves(&inputs_json(arg)?)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    Ok(leaves
+        .into_iter()
+        .map(|(k, v)| (k, v.to_string()))
+        .collect())
+}
+
+/// `--inputs` as the public inputs, in proof order (only the public ones need be
+/// given).
+pub fn read_public_inputs(xark_dir: &std::path::Path, arg: &str) -> Result<Vec<Fr>> {
+    require_schema(xark_dir)?
+        .public_inputs(&inputs_json(arg)?)
+        .map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Parse an inputs file of `name = value` lines (`#` comments and blank lines
+/// ignored). A name may be a nested path (`id.born`, `msg[0]`), as `--inputs` JSON
+/// keys may.
 pub fn parse_input_text(text: &str, source: &std::path::Path) -> Result<BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
-
-    if text.trim_start().starts_with('{') {
-        let obj: serde_json::Value = serde_json::from_str(text)
-            .with_context(|| format!("parsing {} as JSON", source.display()))?;
-        let map = obj.as_object().ok_or_else(|| {
-            anyhow::anyhow!("{}: expected a JSON object of name→value", source.display())
-        })?;
-        for (name, value) in map {
-            let v = match value {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Number(n) => n.to_string(),
-                other => anyhow::bail!(
-                    "{}: input `{name}` must be a decimal string or number, got {other}",
-                    source.display()
-                ),
-            };
-            out.insert(name.clone(), v);
-        }
-        return Ok(out);
-    }
-
     for (lineno, raw) in text.lines().enumerate() {
         let line = raw.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
@@ -356,25 +468,12 @@ pub fn inputs_hint(names: &[&str]) -> String {
     format!("--inputs '{{{body}}}'")
 }
 
-/// Load and parse an `r1cs.json` file.
-pub fn load_r1cs(path: &std::path::Path) -> Result<R1csProgram> {
-    let s = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {} (run `xark build` first?)", path.display()))?;
-    xark_ir::json::from_json(&s).with_context(|| format!("parsing {}", path.display()))
-}
-
-/// Load and parse a `circuit.json` (primitive / witness-gen) file.
-pub fn load_circuit(path: &std::path::Path) -> Result<PrimitiveProgram> {
-    let s = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {} (run `xark build` first?)", path.display()))?;
-    xark_ir::primitive::from_json(&s).with_context(|| format!("parsing {}", path.display()))
-}
-
-/// True if `bytes` is a current `XBC` version-1 circuit container. The magic +
-/// u16 version guard rejects stale/foreign files so every loader can dispatch on
-/// it (version 1 is the only format).
+/// True if `bytes` is a current `XBC` circuit container: version 2, what `xark
+/// build` writes. (Version 1 came from the removed MIR frontend: rebuild.) The
+/// magic + u16 version guard rejects stale/foreign files so every loader can
+/// dispatch on it.
 pub fn is_function_artifact(bytes: &[u8]) -> bool {
-    bytes.len() >= 6 && bytes[0..4] == *b"XBC\0" && u16::from_le_bytes([bytes[4], bytes[5]]) == 1
+    bytes.len() >= 6 && bytes[0..4] == *b"XBC\0" && u16::from_le_bytes([bytes[4], bytes[5]]) == 2
 }
 
 pub fn load_circuit_program(path: &std::path::Path) -> Result<xark_ir::CircuitProgram> {
@@ -389,330 +488,51 @@ pub fn load_circuit_program(path: &std::path::Path) -> Result<xark_ir::CircuitPr
     xark_ir::function_decode::expand_function_blob(&bytes).map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Load the Groth16 backend's [`R1csProgram`] from a built circuit, preferring
-/// the self-contained `circuit.xbc` (deriving the R1CS from it) and falling back
-/// to `r1cs.json` — either an explicit `--r1cs <path>` override or an
-/// `--emit-json` / legacy build. Also returns the SHA-256 fingerprint of the
-/// bytes it read, used to stamp the proof bundle's `circuit_hash`.
-pub fn load_backend_r1cs(
-    xbc_path: &std::path::Path,
-    r1cs_override: Option<&std::path::Path>,
-    r1cs_default: &std::path::Path,
-) -> Result<(R1csProgram, String)> {
-    if let Some(p) = r1cs_override {
-        let s = std::fs::read_to_string(p)
-            .with_context(|| format!("reading {} (run `xark build` first?)", p.display()))?;
-        let prog =
-            xark_ir::json::from_json(&s).with_context(|| format!("parsing {}", p.display()))?;
-        return Ok((prog, sha256_hex(s.as_bytes())));
+/// Load the Groth16 backend's [`R1csProgram`] from a built `circuit.xbc`, with
+/// the SHA-256 fingerprint of its bytes (the key metadata's circuit hash).
+pub fn load_backend_r1cs(xbc_path: &std::path::Path) -> Result<(R1csProgram, String)> {
+    let bytes = std::fs::read(xbc_path)
+        .with_context(|| format!("reading {} (run `xark build` first?)", xbc_path.display()))?;
+    let fingerprint = sha256_hex(&bytes);
+    if !is_function_artifact(&bytes) {
+        anyhow::bail!(
+            "{} is not a current circuit artifact — rebuild with `xark build`",
+            xbc_path.display()
+        );
     }
-    if xbc_path.exists() {
-        let bytes =
-            std::fs::read(xbc_path).with_context(|| format!("reading {}", xbc_path.display()))?;
-        let fingerprint = sha256_hex(&bytes);
-        if !is_function_artifact(&bytes) {
-            anyhow::bail!(
-                "{} is not a current circuit artifact — rebuild with `xark build`",
-                xbc_path.display()
-            );
-        }
-        // Groth16 view. By default expand the reduced R1CS (each template
-        // minimized once), avoiding the full flat expansion + flat minimize.
-        // `XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE` fall back to the full expand.
-        let use_reduced = !dbg_flag("XARK_FLAT_MINIMIZE") && !dbg_flag("XARK_NO_MINIMIZE");
-        let cp = if use_reduced {
-            xark_ir::function_decode::expand_function_blob_reduced(&bytes)
-        } else {
-            xark_ir::function_decode::expand_function_blob(&bytes)
-        }
-        .map_err(|e| anyhow::anyhow!(e))?;
-        return Ok((cp.into_r1cs(), fingerprint));
+    // Groth16 view. By default expand the reduced R1CS (each template
+    // minimized once), avoiding the full flat expansion + flat minimize.
+    // `XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE` fall back to the full expand.
+    let use_reduced = !dbg_flag("XARK_FLAT_MINIMIZE") && !dbg_flag("XARK_NO_MINIMIZE");
+    let cp = if use_reduced {
+        xark_ir::function_decode::expand_function_blob_reduced(&bytes)
+    } else {
+        xark_ir::function_decode::expand_function_blob(&bytes)
     }
-    let s = std::fs::read_to_string(r1cs_default).with_context(|| {
-        format!(
-            "reading {} (run `xark build` first?)",
-            r1cs_default.display()
-        )
-    })?;
-    let prog = xark_ir::json::from_json(&s)
-        .with_context(|| format!("parsing {}", r1cs_default.display()))?;
-    Ok((prog, sha256_hex(s.as_bytes())))
+    .map_err(|e| anyhow::anyhow!(e))?;
+    Ok((cp.into_r1cs(), fingerprint))
 }
 
 /// Load the solver-facing [`PrimitiveProgram`] from a `circuit.xbc`.
-pub fn load_circuit_xbc_parallel(path: &std::path::Path) -> Result<PrimitiveProgram> {
+pub fn load_primitive(path: &std::path::Path) -> Result<PrimitiveProgram> {
     load_circuit_program(path).map(|cp| cp.to_primitive())
 }
 
-/// Load a [`PrimitiveProgram`] from either the binary `circuit.xbc` (default,
-/// via the parallel bytecode expander) or a `circuit.json` — dispatched on the
-/// path's extension. `xark build` always writes `circuit.xbc` and only writes
-/// `circuit.json` under `--emit-json`, so the default backend path resolves to
-/// the `.xbc`; an explicit `--circuit foo.json` still works.
-pub fn load_circuit_auto(path: &std::path::Path) -> Result<PrimitiveProgram> {
-    if path.extension().is_some_and(|e| e == "xbc") {
-        load_circuit_xbc_parallel(path)
-    } else {
-        load_circuit(path)
-    }
+/// Best-effort load of `sources.json` (each constraint's source statement) from a
+/// build directory, so a failing constraint names its line. `None` for a build
+/// from before it existed, or a malformed file.
+pub fn load_sources(dir: &std::path::Path) -> Option<SourceMap> {
+    SourceMap::load(dir)
 }
 
-/// Best-effort load of `profile.json` (per-constraint source/function attribution)
-/// from a build directory, for richer failure diagnostics. Returns `None` when
-/// the circuit was built without `--profile` (or the file is malformed).
-pub fn load_profile(dir: &std::path::Path) -> Option<ProfileProgram> {
-    std::fs::read_to_string(dir.join("profile.json"))
-        .ok()
-        .and_then(|s| xark_ir::profile::from_json(&s).ok())
-}
-
-/// A `0x`-prefixed hex string → raw bytes (rejects a missing prefix / odd length).
-fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
-    let h = s
-        .strip_prefix("0x")
-        .or_else(|| s.strip_prefix("0X"))
-        .ok_or_else(|| anyhow::anyhow!("expected a 0x-prefixed hex string, got `{s}`"))?;
-    hex::decode(h).map_err(|e| anyhow::anyhow!("invalid hex `{s}`: {e}"))
-}
-
-/// A 256-bit input value → big-endian bytes: a `0x`-hex string (the natural form
-/// of a crypto scalar/coordinate) or a plain decimal.
-fn value_to_be_bytes(v: &str) -> Result<Vec<u8>> {
-    if v.starts_with("0x") || v.starts_with("0X") {
-        parse_hex_bytes(v)
-    } else {
-        num_bigint::BigUint::parse_bytes(v.trim().as_bytes(), 10)
-            .map(|n| n.to_bytes_be())
-            .ok_or_else(|| anyhow::anyhow!("expected a decimal or `0x`-hex value, got `{v}`"))
-    }
-}
-
-/// The limb bit-width for an `N`-limb non-native value: 2×128 (the packed secp
-/// half form) or 3×86 (the default field-element layout).
-fn limb_bits(n_limbs: usize) -> Result<u32> {
-    match n_limbs {
-        2 => Ok(128),
-        3 => Ok(86),
-        n => anyhow::bail!("unsupported {n}-limb layout (expected 2×128 or 3×86)"),
-    }
-}
-
-/// Count the `prefix.limbs[i]` leaves present in `vars` (`0` if none).
-fn count_limbs(vars: &[xark_ir::primitive::Var], prefix: &str) -> usize {
-    let key = format!("{prefix}.limbs");
-    vars.iter()
-        .filter(|v| array_index(&v.name, &key).is_some())
-        .count()
-}
-
-/// The distinct `<field>` names of a compound input `prefix.<field>.limbs[i]`
-/// (e.g. `["x", "y"]` for a point, `["r", "s"]` for a signature), name-sorted.
-fn sub_fields(vars: &[xark_ir::primitive::Var], prefix: &str) -> Vec<String> {
-    let pre = format!("{prefix}.");
-    let mut fs: Vec<String> = vars
-        .iter()
-        .filter_map(|v| {
-            let (f, tail) = v.name.strip_prefix(&pre)?.split_once('.')?;
-            tail.starts_with("limbs[").then(|| f.to_string())
-        })
-        .collect();
-    fs.sort_unstable();
-    fs.dedup();
-    fs
-}
-
-/// A byte-array leaf `name[i]` → its index `i` (only a flat 1-D index; nested /
-/// multi-dim names like `x.bits[0][1]` return `None`).
-fn array_index(leaf: &str, name: &str) -> Option<usize> {
-    let inner = leaf
-        .strip_prefix(name)?
-        .strip_prefix('[')?
-        .strip_suffix(']')?;
-    if inner.contains('[') {
-        return None;
-    }
-    inner.parse().ok()
-}
-
-/// A SHA-256 digest leaf `name.bits[w][j]` → `(word, bit)`.
-fn digest_index(leaf: &str, name: &str) -> Option<(usize, usize)> {
-    let rest = leaf.strip_prefix(name)?.strip_prefix(".bits[")?;
-    let (w, rest) = rest.split_once("][")?;
-    let j = rest.strip_suffix(']')?;
-    Some((w.parse().ok()?, j.parse().ok()?))
-}
-
-/// The logical input a leaf belongs to (`input[3]` → `input`, `d.bits[0][1]` → `d`).
-fn logical_root(leaf: &str) -> &str {
-    let cut = leaf.find(['[', '.']).unwrap_or(leaf.len());
-    &leaf[..cut]
-}
-
-/// Resolve `name → value` inputs to `VarId → decimal` for the solver.
-///
-/// Shared by `xark prove` and `xark check --inputs`. A name may be a single leaf
-/// or a **logical input** that fans out to its leaves:
-///   * scalar `Field` → decimal, or `0x`-hex (reduced mod p);
-///   * byte array `[u8; N]` (leaves `name[i]`) → a `0x`-hex string of exactly `N`
-///     bytes, one byte per leaf;
-///   * hash (leaves `name.hi` / `name.lo`) → a `0x`-hex string of 32 bytes packed
-///     into two 128-bit field halves (top 16 bytes → `hi`, low 16 → `lo`);
-///   * SHA-256 digest (leaves `name.bits[w][j]`) → a `0x`-hex string of 32 bytes,
-///     decomposed into the 256 bit leaves in the gadget's word/byte/bit layout.
-///
-/// A wrong value can only yield an unsatisfiable witness (a clear failure), never
-/// a false proof, so this stays a convenience over the always-safe flat form.
+/// Resolve `name → value` inputs to `VarId → decimal` for the solver. Shared by
+/// `xark prove` and `xark check --inputs`; the logic lives in
+/// [`xark_prover::resolve_input_ids`] so the wasm prover accepts exactly the same inputs.
 pub fn resolve_input_ids(
     vars: &[xark_ir::primitive::Var],
     inputs: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<VarId, String>> {
-    let by_name: BTreeMap<&str, VarId> = vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
-    let is_hex = |s: &str| s.starts_with("0x") || s.starts_with("0X");
-    let mut id_inputs: BTreeMap<VarId, String> = BTreeMap::new();
-
-    for (k, v) in inputs {
-        // 1. Exact leaf — a scalar value (decimal, or `0x`-hex reduced mod p).
-        if let Some(&id) = by_name.get(k.as_str()) {
-            let dec = if is_hex(v) {
-                xark_prover::hex_to_field_decimal(v)
-                    .map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?
-            } else {
-                xark_prover::try_fr_from_decimal(v)
-                    .map_err(|e| anyhow::anyhow!("invalid value for input `{k}`: {e}"))?;
-                v.clone()
-            };
-            id_inputs.insert(id, dec);
-            continue;
-        }
-
-        // 2. Byte array `name[i]` — a `0x`-hex string, one byte per leaf.
-        let mut arr: Vec<(usize, VarId)> = vars
-            .iter()
-            .filter_map(|var| array_index(&var.name, k).map(|i| (i, var.id)))
-            .collect();
-        if !arr.is_empty() {
-            arr.sort_unstable_by_key(|(i, _)| *i);
-            let bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
-            if bytes.len() != arr.len() {
-                anyhow::bail!(
-                    "input `{k}` is a {}-byte array, but the hex value has {} bytes",
-                    arr.len(),
-                    bytes.len()
-                );
-            }
-            for ((_, id), byte) in arr.iter().zip(bytes) {
-                id_inputs.insert(*id, byte.to_string());
-            }
-            continue;
-        }
-
-        // 3. Packed hash `name.hi` / `name.lo` — a 32-byte `0x`-hex value split into
-        //    two 128-bit field halves (top 16 bytes → hi, low 16 → lo, big-endian).
-        if let (Some(&hi_id), Some(&lo_id)) = (
-            by_name.get(format!("{k}.hi").as_str()),
-            by_name.get(format!("{k}.lo").as_str()),
-        ) {
-            let bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
-            if bytes.len() != 32 {
-                anyhow::bail!(
-                    "hash input `{k}` needs a 32-byte hex value, but got {} bytes",
-                    bytes.len()
-                );
-            }
-            let pack = |chunk: &[u8]| chunk.iter().fold(0u128, |acc, &b| (acc << 8) | b as u128);
-            id_inputs.insert(hi_id, pack(&bytes[..16]).to_string());
-            id_inputs.insert(lo_id, pack(&bytes[16..]).to_string());
-            continue;
-        }
-
-        // 4. SHA-256 digest `name.bits[w][j]` — a 32-byte `0x`-hex hash. Byte `idx`
-        //    occupies word `idx/4`, big-endian slot within the word; leaf bit `j`
-        //    of word `w` is bit `j%8` of hash byte `4w + (3 - j/8)`.
-        let dig: Vec<((usize, usize), VarId)> = vars
-            .iter()
-            .filter_map(|var| digest_index(&var.name, k).map(|wj| (wj, var.id)))
-            .collect();
-        if !dig.is_empty() {
-            let bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
-            if bytes.len() != 32 {
-                anyhow::bail!(
-                    "digest input `{k}` needs a 32-byte hex value, but got {} bytes",
-                    bytes.len()
-                );
-            }
-            for ((w, j), id) in dig {
-                let byte = bytes[4 * w + (3 - j / 8)];
-                id_inputs.insert(id, ((byte >> (j % 8)) & 1).to_string());
-            }
-            continue;
-        }
-
-        // 5. Non-native scalar `name.limbs[i]` — a 256-bit value (a `0x`-hex crypto
-        //    scalar or a decimal) fanned out to its `N` little-endian limbs via the
-        //    same `limb_leaves` the gadget's host `NativeInput` uses. `N` picks the
-        //    layout: 2 → 128-bit halves (packed secp), 3 → 86-bit limbs.
-        let n_scalar = count_limbs(vars, k);
-        if n_scalar > 0 {
-            let be = value_to_be_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
-            let bits = limb_bits(n_scalar)?;
-            for (name, dec) in xark_prover::limb_leaves(&be, k, n_scalar, bits) {
-                if let Some(&id) = by_name.get(name.as_str()) {
-                    id_inputs.insert(id, dec);
-                }
-            }
-            continue;
-        }
-
-        // 6. Non-native compound `name.<field>.limbs[i]` (an affine point `x ‖ y`,
-        //    an ECDSA signature `r ‖ s`, …) — a big-endian concatenation of its
-        //    32-byte fields (with an optional SEC1 `0x04` tag), each field fanned
-        //    out like case 5. Fields are taken in name order (`r`<`s`, `x`<`y`),
-        //    matching the wire concatenation.
-        let fields = sub_fields(vars, k);
-        if !fields.is_empty() {
-            let mut bytes = parse_hex_bytes(v).map_err(|e| anyhow::anyhow!("input `{k}`: {e}"))?;
-            let want = fields.len() * 32;
-            if bytes.len() == want + 1 && bytes[0] == 0x04 {
-                bytes.remove(0); // strip the SEC1 uncompressed-point tag
-            }
-            if bytes.len() != want {
-                anyhow::bail!(
-                    "compound input `{k}` ({} fields: {fields:?}) needs a {want}-byte \
-                     big-endian value{}, but got {} bytes",
-                    fields.len(),
-                    if fields.len() == 2 {
-                        " (or 65 with the 0x04 SEC1 tag)"
-                    } else {
-                        ""
-                    },
-                    bytes.len()
-                );
-            }
-            for (i, f) in fields.iter().enumerate() {
-                let chunk = &bytes[i * 32..(i + 1) * 32];
-                let n = count_limbs(vars, &format!("{k}.{f}"));
-                for (name, dec) in
-                    xark_prover::limb_leaves(chunk, &format!("{k}.{f}"), n, limb_bits(n)?)
-                {
-                    if let Some(&id) = by_name.get(name.as_str()) {
-                        id_inputs.insert(id, dec);
-                    }
-                }
-            }
-            continue;
-        }
-
-        // Unknown — list the circuit's logical inputs (deduped roots, not leaves).
-        let mut roots: Vec<&str> = vars
-            .iter()
-            .filter(|v| !matches!(v.role, VarRole::Derived))
-            .map(|v| logical_root(&v.name))
-            .collect();
-        roots.sort_unstable();
-        roots.dedup();
-        anyhow::bail!("unknown input `{k}` (circuit inputs: {roots:?})");
-    }
-    Ok(id_inputs)
+    xark_prover::resolve_input_ids(vars, inputs).map_err(anyhow::Error::msg)
 }
 
 /// The witness-based under-constrained soundness gate, shared by `xark prove`
@@ -729,18 +549,18 @@ pub fn resolve_input_ids(
 /// `xark build`/`check` is planned.
 pub fn soundness_check(
     cp: &xark_ir::CircuitProgram,
-    profile: Option<&ProfileProgram>,
+    sources: Option<&SourceMap>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
     // Solve + check directly on the R1CS rows (no `to_primitive` flattening). On
-    // an unsatisfied witness, name *which* constraint (and, when profiled, its
+    // an unsatisfied witness, name *which* constraint (and its
     // source line / function) failed — the same explanation `xark test` surfaces;
     // the R1CS is materialized only here, on the (rare) error path.
     let describe = |e| {
         let r1cs = cp.to_r1cs();
         anyhow::anyhow!(
             "{}",
-            xark_ir::diagnose::describe_unsatisfied(&e, &r1cs, profile)
+            xark_ir::diagnose::describe_unsatisfied(&e, &r1cs, sources)
         )
     };
     let timing = dbg_flag("PROVE_TIME");
@@ -776,7 +596,7 @@ pub fn soundness_check(
 /// error message exactly when a proof is going to fail anyway.
 pub fn stream_soundness(
     bytes: &[u8],
-    profile: Option<&ProfileProgram>,
+    sources: Option<&SourceMap>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
     let timing = dbg_flag("PROVE_TIME");
@@ -795,42 +615,9 @@ pub fn stream_soundness(
             // from the stream) just return its assignment.
             let cp = xark_ir::function_decode::expand_function_blob(bytes)
                 .map_err(|e| anyhow::anyhow!(e))?;
-            soundness_check(&cp, profile, id_inputs)
+            soundness_check(&cp, sources, id_inputs)
         }
     }
-}
-
-/// The `--r1cs`/`--circuit` override path of `xark prove`: the same gate over a
-/// `PrimitiveProgram` (Expression) + `R1csProgram` loaded from JSON, rather than
-/// a `circuit.xbc`. The default path uses [`soundness_check`] on the
-/// `CircuitProgram` directly.
-pub fn soundness_check_r1cs(
-    prim: &PrimitiveProgram,
-    r1cs: &R1csProgram,
-    profile: Option<&ProfileProgram>,
-    id_inputs: &BTreeMap<VarId, String>,
-) -> Result<BTreeMap<VarId, Fp>> {
-    let assign_fp = xark_ir::solver::solve_and_check(prim, id_inputs).map_err(|e| {
-        // A missing input names the *declared* input the user actually types,
-        // e.g. `MissingInput(1)` → "missing input `result`". Every other failure
-        // defers to the shared diagnostic, which names the failing constraint
-        // (and its source line / gadget when profiled) — the same explanation
-        // `xark test` surfaces.
-        if let xark_ir::solver::SolveError::MissingInput(id) = e
-            && let Some(v) = prim.vars.iter().find(|v| v.id == id)
-        {
-            return anyhow::anyhow!(
-                "missing input `{0}` (add it to --inputs, e.g. --inputs '{{\"{0}\": <value>}}')",
-                v.name
-            );
-        }
-        anyhow::anyhow!(
-            "{}",
-            xark_ir::diagnose::describe_unsatisfied(&e, r1cs, profile)
-        )
-    })?;
-    report_underconstrained(xark_ir::solver::analyze_underconstrained(prim, &assign_fp))?;
-    Ok(assign_fp)
 }
 
 /// `bail!` with the shared under-constraint diagnostic if any hole was found.
@@ -868,42 +655,67 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-/// A stable circuit identifier: the SHA-256 (hex) of the `r1cs.json` text.
+/// The R1CS digest of a `circuit.xbc` (what `xark build` prints): the same for every
+/// build of a circuit, whichever Rust compiled it.
+pub fn r1cs_digest(xbc: &[u8]) -> String {
+    xark_ir::function_decode::stream_digest_hex(xbc)
+}
+
+/// How a key (by the `metadata.json` beside it) relates to a `circuit.xbc`.
+#[derive(Debug, PartialEq)]
+pub enum KeyFit {
+    /// Made from this very file, or nothing to compare (no metadata, or no build).
+    Same,
+    /// Made from another build of the same constraint system (another Rust version
+    /// laid out `circuit.xbc` differently): it fits. The prover's self-check still
+    /// catches a key whose rows turn out not to.
+    SameCircuit,
+    /// Made for a different circuit.
+    Different,
+}
+
+/// Whether the key at `key` was made for the circuit in `xbc` (its bytes).
+pub fn key_fit(key: &std::path::Path, xbc: &[u8]) -> KeyFit {
+    let Some(meta) = key
+        .parent()
+        .and_then(|dir| std::fs::read_to_string(dir.join("metadata.json")).ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    else {
+        return KeyFit::Same;
+    };
+    let field = |k: &str| meta.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    match (field("circuit_hash"), field("digest")) {
+        (None, _) => KeyFit::Same,
+        (Some(h), _) if h == sha256_hex(xbc) => KeyFit::Same,
+        (_, Some(d)) if d == r1cs_digest(xbc) => KeyFit::SameCircuit,
+        _ => KeyFit::Different,
+    }
+}
+
+/// Refuse a key made for a different circuit (see [`key_fit`]). No check when the
+/// metadata or the build is missing (keys copied alone, or shipped without the build).
+pub fn ensure_key_matches_circuit(key: &std::path::Path, xbc: &std::path::Path) -> Result<()> {
+    let Ok(bytes) = std::fs::read(xbc) else {
+        return Ok(());
+    };
+    if key_fit(key, &bytes) == KeyFit::Different {
+        anyhow::bail!(
+            "the key {} was made for a different build of the circuit (the circuit \
+             changed since `xark setup`): run `xark setup` and `xark prove` again",
+            key.display()
+        );
+    }
+    Ok(())
+}
+
+/// The SHA-256 (hex) of a string (e.g. a phase-2 seed, recorded in key metadata).
 pub fn circuit_hash(r1cs_json: &str) -> String {
     sha256_hex(r1cs_json.as_bytes())
 }
 
-/// Public inputs in variable-id (allocation) order, taken from `--inputs`
-/// values. This matches how the prover derives them from the solved witness:
-/// the public portion of the assignment, in var-id order.
-pub fn public_inputs_from_inputs(
-    prog: &R1csProgram,
-    inputs: &BTreeMap<String, String>,
-) -> Result<Vec<Fr>> {
-    let mut vars: Vec<_> = prog
-        .variables
-        .iter()
-        .filter(|v| v.visibility == Visibility::Public)
-        .collect();
-    vars.sort_by_key(|v| v.id);
-    let mut out = Vec::with_capacity(vars.len());
-    for v in vars {
-        let value = inputs.get(&v.name).with_context(|| {
-            format!(
-                "missing public input `{0}` (add it to --inputs, e.g. --inputs '{{\"{0}\": <value>}}')",
-                v.name
-            )
-        })?;
-        let fr = xark_prover::try_fr_from_decimal(value)
-            .map_err(|e| anyhow::anyhow!("public input `{}`: {e}", v.name))?;
-        out.push(fr);
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{inputs_hint, parse_input_text, parse_inputs_arg};
+    use super::{inputs_hint, parse_input_text, read_inputs};
     use std::path::Path;
 
     #[test]
@@ -918,49 +730,38 @@ mod tests {
         assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
     }
 
+    /// `--inputs` is read against `schema.json`: values in natural forms, ranges
+    /// checked, and a missing or old schema asks for a rebuild.
     #[test]
-    fn parses_json_without_losing_large_values() {
-        let inputs = parse_input_text(
-            r#"{"amount": 34, "field": "21888242871839275222246405745257275088548364400416034343698204186575808495616"}"#,
-            Path::new("witness.json"),
+    fn inputs_follow_the_schema() {
+        let dir = std::env::temp_dir().join(format!("xark-inputs-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = read_inputs(&dir, r#"{"b": 1}"#).unwrap_err().to_string();
+        assert!(missing.contains("run `xark build`"), "{missing}");
+        std::fs::write(dir.join("schema.json"), r#"{"version": 1, "inputs": []}"#).unwrap();
+        let old = read_inputs(&dir, r#"{"b": 1}"#).unwrap_err().to_string();
+        assert!(old.contains("rebuild"), "{old}");
+        std::fs::write(
+            dir.join("schema.json"),
+            r#"{"version": 2, "circuit": "c",
+              "inputs": [{"name": "b", "visibility": "private", "type": {"uint": 8}},
+                         {"name": "msg", "visibility": "public", "type": {"array": {"of": {"uint": 8}, "len": 2}}}],
+              "types": {}, "public_inputs": ["msg[0]", "msg[1]"]}"#,
         )
         .unwrap();
-
-        assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
+        let leaves = read_inputs(&dir, r#"{"b": 255, "msg": "0x6162"}"#).unwrap();
         assert_eq!(
-            inputs.get("field").map(String::as_str),
-            Some("21888242871839275222246405745257275088548364400416034343698204186575808495616")
+            (leaves["b"].as_str(), leaves["msg[1]"].as_str()),
+            ("255", "98")
         );
-    }
-
-    #[test]
-    fn rejects_non_scalar_json_values() {
-        let err = parse_input_text(r#"{"path": [1, 2]}"#, Path::new("witness.json")).unwrap_err();
-
-        assert!(
-            err.to_string()
-                .contains("input `path` must be a decimal string or number")
-        );
-    }
-
-    #[test]
-    fn inputs_arg_accepts_inline_json() {
-        // A leading `{` is read as inline JSON — no file on disk.
-        let inputs = parse_inputs_arg(r#"{"secret": 3, "result": 27}"#).unwrap();
-        assert_eq!(inputs.get("secret").map(String::as_str), Some("3"));
-        assert_eq!(inputs.get("result").map(String::as_str), Some("27"));
-    }
-
-    #[test]
-    fn inputs_arg_reads_a_file_path() {
-        let dir = std::env::temp_dir().join("xark-inputs-arg-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("w.inputs");
-        std::fs::write(&path, "secret = 3\nresult = 27\n").unwrap();
-
-        let inputs = parse_inputs_arg(path.to_str().unwrap()).unwrap();
-        assert_eq!(inputs.get("secret").map(String::as_str), Some("3"));
-        assert_eq!(inputs.get("result").map(String::as_str), Some("27"));
+        let err = read_inputs(&dir, r#"{"b": 256, "msg": "0x6162"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("out of range for a u8"), "{err}");
+        let file = dir.join("w.inputs");
+        std::fs::write(&file, "b = 7\nmsg[0] = 1\nmsg[1] = 2\n").unwrap();
+        assert_eq!(read_inputs(&dir, file.to_str().unwrap()).unwrap()["b"], "7");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

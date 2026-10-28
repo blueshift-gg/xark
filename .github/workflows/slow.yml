@@ -1,0 +1,151 @@
+name: Slow checks
+
+# The heavy checks of this repository's own code, too slow for ci.yml's quick
+# jobs: known-answer vectors for the hash and curve circuits, the Ed25519 and
+# secp256k1/r1 gadget vectors, the adversarial sweep over every example, and the
+# crates.io release rehearsal. They run on every pull request, side by side with
+# ci.yml, so a break shows on the PR that caused it.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compiler-kats:
+    name: compiler KAT vectors (ignored snapshot tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            crates/lang/target
+          key: kats-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo test (ignored KAT vectors)
+        # Only the `#[ignore]`d known-answer vectors: ci.yml runs the rest of the
+        # snapshot suite.
+        run: cd crates/lang && cargo test --release --test snapshot -- --ignored
+
+  ec-gadget-vectors:
+    name: heavy EC gadget vectors (ed25519 + secp256k1/r1, release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry, git, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            crates/lang/target
+          key: ed25519-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo test (heavy EC gadget vectors, release)
+        # Release is mandatory: the non-native EC solves are 10–50× slower in
+        # debug (see the release-mode note in the repo). These heavy KATs live
+        # here (too slow for the quick `ci.yml` step).
+        #
+        # No swapfile: these KATs used to peak ~12 GB (OOM-killed on the 7 GB
+        # runner) because the harness materialized the flat R1CS to solve/analyze
+        # and the constraint-count pins ran a full expand+minimize. They now
+        # stream — `check()`/`check_named` solve+analyze straight from `circuit.xbc`
+        # (never the flat system), and the count pins are a streamed digest — so
+        # the peak is the compiler subprocess (~5 GB), well under the runner.
+        run: cargo test -p xark-ed25519 -p xark-secp256k1 -p xark-secp256r1 --release
+
+  example-sweep:
+    # Every example on its own test inputs, plus single-leaf mutations of them,
+    # each decided by exhaustive witness search: exactly one witness where the
+    # test accepts, none where it rejects (`cargo xtask difftest`). Split
+    # into four shards that run side by side; a failure names the example and the
+    # input. A whole-ed25519 search peaks near 7 GB.
+    name: adversarial example sweep (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Sweep this shard's examples
+        run: cargo xtask difftest --shard ${{ matrix.shard }}/4 --jobs 2
+
+  host-examples:
+    # The two examples that aren't circuits, so the sweep skips them: the Nova
+    # folding prover (with its own tests) and the Grumpkin reference tools that
+    # generate the grumpkin examples' test vectors. Each is its own workspace.
+    name: host-side example crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        # wasm32: the Nova prover's tests build the circuits they fold.
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            examples/grumpkin_nova_prover
+            examples/grumpkin_reference
+      - name: grumpkin_nova_prover tests
+        run: cd examples/grumpkin_nova_prover && cargo test --release
+      - name: grumpkin_reference builds
+        run: cd examples/grumpkin_reference && cargo build --release
+
+  publish-dry:
+    # A crates.io release rehearsal: every publishable crate is packaged and built
+    # from its own `.crate`, as crates.io will see it (`cargo xtask publish --dry-run`).
+    # Catches a packaging break (a file left out, missing metadata, a path-only
+    # dependency) before release day rather than halfway through a publish.
+    name: publish dry run (crates.io)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Package and build every crate
+        run: cargo xtask publish --dry-run

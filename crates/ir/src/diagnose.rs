@@ -1,17 +1,17 @@
 //! Human-readable diagnostics for a witness that fails to satisfy the circuit.
 //!
-//! Turns a [`SolveError`] into an actionable explanation naming the failing
-//! constraint and — when `profile.json` attribution is available — the source
-//! line and function chain it came from. Shared by the `xark_prover` test harness
+//! Turns a [`SolveError`] into an actionable explanation: the source statement
+//! the failing constraint came from (from `sources.json`, which every build
+//! writes), then the constraint itself. Shared by the `xark_prover` test harness
 //! ([`Circuit::check`](../../xark_prover/struct.Circuit.html)) and the CLI
 //! soundness gate (`xark prove` / `xark check --inputs`), so both worlds surface
 //! the *same* explanation from one place.
 
 use crate::Visibility;
 use crate::linear_combination::LinearCombination;
-use crate::profile::ProfileProgram;
 use crate::r1cs::R1csProgram;
 use crate::solver::SolveError;
+use crate::sources::SourceMap;
 
 /// ANSI palette for the diagnostic, matching the `xark` CLI. Empty strings when
 /// stderr is not a terminal or `NO_COLOR` is set, so piped output / CI logs stay
@@ -87,28 +87,44 @@ fn render_lc(lc: &LinearCombination, r1cs: &R1csProgram, p: &Palette) -> String 
 /// Render a solve/check failure into a colored, multi-line explanation.
 ///
 /// For a constraint violation ([`SolveError::ConstraintFailed`]) this shows the
-/// constraint's `a·b = c` form (with the implicated input underlined), the debug
-/// note, and — if `profile` is `Some` — the `file:line:col`, function chain, and
-/// kind. Constraint ids are index-aligned across the primitive IR, `r1cs.json`,
-/// and `profile.json`, so the failing index resolves all three. Any other error
-/// renders via `Display`.
+/// statement it came from (`file:line:col`, the source line, the function it
+/// failed in) when `sources` is given, then the constraint's `a·b = c` form (with
+/// the implicated input underlined) and its debug note. Constraint ids are
+/// index-aligned across the primitive IR, `r1cs.json` and `sources.json`. Any
+/// other error renders via `Display`.
 pub fn describe_unsatisfied(
     err: &SolveError,
     r1cs: &R1csProgram,
-    profile: Option<&ProfileProgram>,
+    sources: Option<&SourceMap>,
 ) -> String {
     let p = palette();
     let SolveError::ConstraintFailed(i) = err else {
         return format!("{}witness could not be solved:{} {err}", p.err, p.reset);
     };
     let i = *i;
-    let prof = profile.and_then(|pr| pr.constraints.iter().find(|c| c.id as usize == i));
-    let kind = prof
-        .map(|c| format!(" ({})", c.kind.as_str()))
-        .unwrap_or_default();
+    let site = sources.and_then(|s| s.at(i));
 
     let mut msg = format!("{}witness does not satisfy the circuit{}", p.err, p.reset);
-    msg.push_str(&format!("\n\n  constraint #{i}{kind} does not hold"));
+    // The statement first: it's what the reader wrote.
+    if let Some(s) = site {
+        msg.push_str(&format!(
+            "\n\n  {}{}{}  {}",
+            p.dim,
+            s.location(),
+            p.reset,
+            s.text
+        ));
+        // The functions it went through, when the line alone doesn't say.
+        if s.chain.last().is_some_and(|f| !s.text.contains(f.as_str())) {
+            msg.push_str(&format!(
+                "\n  {}in{} {}",
+                p.dim,
+                p.reset,
+                s.chain.join(" → ")
+            ));
+        }
+    }
+    msg.push_str(&format!("\n\n  constraint #{i} does not hold"));
 
     let failing = r1cs.constraints.iter().find(|c| c.id as usize == i);
 
@@ -157,30 +173,11 @@ pub fn describe_unsatisfied(
         }
     }
 
-    // Source location + function chain when built with `--profile` (as `xark test`
-    // does); otherwise a hint on how to get it.
-    match prof {
-        Some(c) => {
-            if !c.file.is_empty() {
-                msg.push_str(&format!(
-                    "\n\n  {}at {}:{}:{}{}",
-                    p.dim, c.file, c.line, c.col, p.reset
-                ));
-            }
-            if !c.chain.is_empty() {
-                msg.push_str(&format!(
-                    "\n  {}via {}{}",
-                    p.dim,
-                    c.chain.join(" → "),
-                    p.reset
-                ));
-            }
-        }
-        None => msg.push_str(&format!(
-            "\n\n  {}(build with `--profile`, or run `xark test`, for the source line \
-             and function chain){}",
+    if sources.is_none() {
+        msg.push_str(&format!(
+            "\n\n  {}(rebuild with `xark build` for the source line){}",
             p.dim, p.reset
-        )),
+        ));
     }
     msg
 }

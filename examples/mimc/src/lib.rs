@@ -1,10 +1,8 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 /// A small 3-round MiMC-structured permutation (exponent 3) with key addition,
 /// hand-unrolled. Compiler-feature demo, not the real hash — for cryptographic
-/// MiMC-p/p use the `xark-mimc` gadget crate (see `examples/mimc_gadget`).
+/// MiMC-p/p use the `xark-mimc` gadget crate.
 ///
 /// `state ← (state + k + c_i)^3` per round (`c_0 = 0`), finalized with a key
 /// addition, then constrained to equal the public digest `h`. Round constants are
@@ -46,15 +44,15 @@ mod tests {
     fn accepts_valid() {
         // MiMC(x=3, k=5)
         mimc(
-            "3".into(),
-            "5".into(),
-            "20571574433789244246851793328630243816385775205591326058386183977315966726389".into(),
+            3,
+            5,
+            "20571574433789244246851793328630243816385775205591326058386183977315966726389",
         )
         .unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(mimc("3".into(), "5".into(), "1".into()).is_err());
+        assert!(mimc(3, 5, 1).is_err());
     }
 }

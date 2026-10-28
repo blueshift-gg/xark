@@ -2,9 +2,7 @@
 //! type from just its modulus, with zero-cost `core::ops` (`+`, `-`, `*`, unary `-`)
 //! and `.inverse()`/`.sub2()`/… forwarding to the width-generic free functions. Each
 //! `Private<El>` is a typed circuit input — a single whole number on the host, split
-//! into its 3 limbs automatically by the `fp!`-generated `NativeInput`.
-#![cfg_attr(xark, no_std)]
-
+//! into its 3 limbs automatically by the `fp!`-generated `Input` impl.
 use xark::{circuit, require_eq, Field, Private, Public};
 
 // A concrete 256-bit prime field (3 × 86-bit limbs), defined by its modulus alone.
@@ -23,11 +21,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // (2·3 + 2 − 3) mod M = 5; low limb = 5.
-        bignum_ops("2".into(), "3".into(), "5".into()).unwrap();
+        bignum_ops(2, 3, 5).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(bignum_ops("2".into(), "3".into(), "6".into()).is_err());
+        assert!(bignum_ops(2, 3, 6).is_err());
     }
 }

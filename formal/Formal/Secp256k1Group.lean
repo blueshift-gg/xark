@@ -7,6 +7,7 @@ import Formal.Secp256k1
 import Formal.EcdsaVerify
 import Formal.Glv
 import Mathlib
+import Formal.CurvePrimes
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -49,30 +50,20 @@ We instantiate this machinery with the secp256k1 short Weierstrass curve
 `F := ZMod secp256k1_p`, and define `Secp256k1Point` as an alias for the
 resulting `Point` type. The `AddCommGroup` is then automatically inherited.
 
-## Trusted base addition: primality of secp256k1_p
+## Primality of secp256k1_p
 
-`secp256k1_p = 2^256 - 2^32 - 977` is a 256-bit prime. Mathlib's `Nat.Prime`
-*can* in principle be decided by trial division, but the decision procedure
-is not practical at this size at elaboration time (~ minutes to TB of
-allocations for naive `decide`). We therefore declare
-
-    axiom secp256k1_p_prime : Fact (Nat.Prime secp256k1_p)
-
-as a **trusted base addition**. This is a single, audit-checkable
-mathematical fact (verifiable in seconds outside Lean using any standard
-primality test, e.g. Miller–Rabin via `openssl prime` or sage). It and
-the matching primality axioms for `secp256r1_p` (`Formal.Secp256r1Group`)
-and BN254's `r` (`Formal.GrumpkinGroup`) are the only `axiom` declarations
-in the Lean development. It supplies the `Fact p.Prime` needed to derive
-`Field (ZMod secp256k1_p)`, which in turn enables mathlib's `AddCommGroup`
-instance on the affine-point type.
+`secp256k1_p = 2^256 - 2^32 - 977` is a 256-bit prime.
+`secp256k1_p_prime : Fact (Nat.Prime secp256k1_p)` is a **theorem**, proven by a
+Pratt certificate (`Formal.CurvePrimes`, kernel-checked; see `Formal.Pratt`). It
+supplies the `Fact p.Prime` needed to derive `Field (ZMod secp256k1_p)`, which in
+turn enables mathlib's `AddCommGroup` instance on the affine-point type.
 
 ## Theorem / instance index
 
 | Name                          | Statement                                       |
 |-------------------------------|-------------------------------------------------|
 | `secp256k1_p`                 | `2^256 - 2^32 - 977` as `ℕ`                     |
-| `secp256k1_p_prime`           | trusted primality axiom for `secp256k1_p`       |
+| `secp256k1_p_prime`           | primality of `secp256k1_p` (Pratt)              |
 | `secp256k1Curve`              | the short Weierstrass curve `y² = x³ + 7`       |
 | `Secp256k1Point`              | nonsingular points of `secp256k1Curve` ∪ {∞}    |
 | `Secp256k1Point.addCommGroup` | inherited `AddCommGroup` instance               |
@@ -86,18 +77,10 @@ namespace Xark
 /-- **The secp256k1 base-field prime** `p = 2^256 − 2^32 − 977`. -/
 def secp256k1_p : ℕ := 2^256 - 2^32 - 977
 
-/-- **Trusted primality fact for `secp256k1_p`** (standard public parameter).
-
-This is the single `axiom` in the development. `secp256k1_p` is a well-known
-256-bit prime listed in SEC 2 §2.4.1 / FIPS 186-4 D.1.2; its primality is
-independently verifiable outside Lean (e.g. `openssl prime
-0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F`). We
-declare it as `Fact (Nat.Prime secp256k1_p)` rather than computing it,
-because mathlib's `decide` tactic is infeasible on 256-bit naturals and
-`native_decide` also doesn't terminate in reasonable time (kernel-recursive
-trial division is exponential even compiled). Lucas/Pratt-certificate
-tooling would discharge this with hand-supplied factorizations of `p − 1`. -/
-axiom secp256k1_p_prime : Fact (Nat.Prime secp256k1_p)
+/-- **Primality of `secp256k1_p`**, proven by the Pratt certificate
+`Pratt.prime_115792089237316195423570985008687907853269984665640564039457584007908834671663` (`Formal/CurvePrimes.lean`). -/
+theorem secp256k1_p_prime : Fact (Nat.Prime secp256k1_p) :=
+  ⟨by rw [show secp256k1_p = 115792089237316195423570985008687907853269984665640564039457584007908834671663 by norm_num [secp256k1_p]]; exact Pratt.prime_115792089237316195423570985008687907853269984665640564039457584007908834671663⟩
 
 attribute [instance] secp256k1_p_prime
 
@@ -147,7 +130,7 @@ The `AddCommGroup` instance on `WeierstrassCurve.Affine.Point W` (with
 `W : Affine F`, `[Field F]`, `[DecidableEq F]`) is mathlib-proved via the
 `toClass` group homomorphism into the class group of the affine coordinate
 ring. Since `Secp256k1Point` is definitionally `secp256k1Curve.Point` and
-`ZMod secp256k1_p` is a field (given the primality axiom above) with
+`ZMod secp256k1_p` is a field (by the primality theorem above) with
 decidable equality, we inherit the instance for free. -/
 
 /-- **`Secp256k1Point` is an additive abelian group** under the secp256k1

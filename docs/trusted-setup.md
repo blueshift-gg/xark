@@ -22,15 +22,13 @@ throwaway *test* transcript you can mint a small one yourself — see
 
 [Perpetual Powers of Tau]: https://github.com/privacy-scaling-explorations/perpetualpowersoftau
 
-A fully **self-contained, in-process** regression test of this whole path lives in
-`gadgets/tests/tests/ceremony_e2e.rs`: it synthesizes a valid phase-1 transcript in memory (no
-snarkjs, no committed `.ptau`), runs `setup_from_ptau` → two `contribute` → `verify_chain`, then
-proves and verifies a witness with the finalized keys — across circuits with **1, 2, and 16 public
-inputs** (`arithmetic_square`, `mixed_pi`, `large_pi`). It also rejects a reordered contribution
-chain and, per circuit, confirms **every** public input is bound (flipping any one fails). Runs in
-well under a second, so CI exercises the pipeline on every push. Because the test builds phase-1
-itself it *knows* the toxic waste — it proves the pipeline is **correct**, not that a real ceremony
-is **secret**.
+The ceremony is tested at two levels. `crates/backend/src/ceremony.rs` checks the library: one and
+three contributions compose and verify, and a tampered chain link, Schnorr response or δ, a zero δ,
+or keys that don't match the chain are all rejected. `gadgets/tests/tests/ceremony_cli.rs` runs the
+CLI end to end on every push: `xark build` → `ceremony init` (over a synthetic phase-1 transcript)
+→ two `contribute`s → `verify` → `finalize`, then proves and verifies with the ceremony's keys and
+rejects a wrong public input. Both build phase 1 themselves, so they *know* the toxic waste: they
+prove the pipeline is **correct**, not that a real ceremony is **secret**.
 
 ## Reproduce (single circuit, end-to-end)
 
@@ -46,37 +44,29 @@ snarkjs powersoftau contribute p0.ptau p1.ptau --name=c1 -e="<entropy>"
 snarkjs powersoftau beacon p1.ptau pb.ptau 0102..1f20 10 -n=beacon
 snarkjs powersoftau prepare phase2 pb.ptau final.ptau
 
-# --- phase 2: multi-party MPC over the circuit (xark) ---
-SEED=00112233... # 32-byte hex
-xark ceremony init --artifact gadgets/tests/fixtures/arithmetic_square.json \
- --ptau-file final.ptau --phase2-seed $SEED --out ceremony/
+# --- phase 2: multi-party MPC over the circuit (xark), inside the circuit crate ---
+cd examples/cube && xark build
+xark ceremony init --ptau-file final.ptau --out ceremony/   # reads target/xark/…/circuit.xbc
 xark ceremony contribute --ceremony-dir ceremony/ --label alice
 xark ceremony contribute --ceremony-dir ceremony/ --label bob
 xark ceremony verify --ceremony-dir ceremony/ # checks the chain
 xark ceremony finalize --ceremony-dir ceremony/
 
 # --- prove + verify with the finalized keys ---
-xark prove --artifact … --witness … --proving-key ceremony/proving_key.bin --out proof.bin
-xark verify --verifying-key ceremony/verifying_key.bin --proof proof.bin --public-inputs public_inputs.json
-# => Proof verified: true
+xark prove --inputs '{"secret": "3", "result": "27"}' \
+ --proving-key ceremony/proving_key.bin --out proof/
+xark verify --verifying-key ceremony/verifying_key.bin --proof proof/proof.bin \
+ --public-inputs proof/public_inputs.bin
+# => ✅ Proof verified
 ```
 
 ## Regenerating all committed test vectors
 
-`scripts/ceremony_vectors.sh <power> [circuit …]` runs the whole pipeline and installs the resulting
-`*.solana.bin` over the committed fixtures, sanity-checking each ceremony-keyed proof with snarkjs.
-`<power>` must cover the circuit's constraint count (`2^power ≥ constraints`):
-
-| power | covers (committed circuits) |
-|------:|-----------------------------|
-| 12 (4 096) | cube, difference_of_squares, linear, inverse, range, bitwise, poseidon, mimc |
-| 15 (32 768) | + curve (21 568), blake3 (23 014) |
-| 16 (65 536) | + blake2s (33 174), sha256 (54 632) |
-| 17 (131 072) | + aes128 (82 704) |
-| 18 (262 144) | + keccak (253 782) |
-
-`ecdsa_basic` / `ecdsa_r1_basic` have millions of constraints and need a correspondingly large
-phase-1; treat them separately.
+Run the steps above for each circuit, then install the resulting `*.solana.bin` over the committed
+fixtures. The phase-1 power must cover the circuit: `2^power` at least its constraint count plus
+public inputs (`xark inspect` prints both). If the transcript is too small, `ceremony init` says
+how big it needs to be. `secp256k1_ecdsa` and `secp256r1_ecdsa` have millions of constraints and
+need a correspondingly large phase 1; treat them separately.
 
 Caveats when regenerating:
 - A full regen must be **consistent** — regenerate every artifact in a circuit's fixture dir from the
@@ -87,8 +77,7 @@ Caveats when regenerating:
 
 ## For a real production ceremony
 
-The fixed entropy/seed/beacon in `ceremony_vectors.sh` make *test* vectors reproducible; they are
-**not** secure. A production ceremony needs:
+Fixed entropy, seeds and beacons make *test* vectors reproducible; they are **not** secure. A production ceremony needs:
 - multiple **independent** phase-1 contributors and a **public randomness beacon** (e.g. a future
   block hash / drand round) for phase 1;
 - multiple independent phase-2 `contribute` participants, each publishing their attestation, with

@@ -78,6 +78,9 @@ pub struct ProfileProgram {
     /// Absolute path the compile ran from (the crate dir under `xark build`),
     /// used to resolve relative `file` paths back to readable source.
     pub source_root: String,
+    /// The field it was built for, so `xark profile` reuses it only for that field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<crate::r1cs::FieldSpec>,
     pub constraints: Vec<ConstraintProfile>,
 }
 

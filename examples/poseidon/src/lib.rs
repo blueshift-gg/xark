@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark_poseidon::prelude::*;
 
 /// Prove knowledge of a Poseidon(t=3, alpha=5) 2-to-1 preimage: `hash2(a, b) == out`.
@@ -16,20 +14,18 @@ mod tests {
     use super::poseidon;
 
     #[test]
-    #[ignore = "heavy: original-Poseidon solve (big-coefficient MDS-fold LCs)"]
     fn accepts_valid() {
         // poseidon.hash2(3, 5)
         poseidon(
-            "3".into(),
-            "5".into(),
-            "7003178825990875955236852857865616475160076985313430133088248668396799513116".into(),
+            3,
+            5,
+            "7003178825990875955236852857865616475160076985313430133088248668396799513116",
         )
         .unwrap();
     }
 
     #[test]
-    #[ignore = "heavy: original-Poseidon solve (big-coefficient MDS-fold LCs)"]
     fn rejects_wrong() {
-        assert!(poseidon("3".into(), "5".into(), "1".into()).is_err());
+        assert!(poseidon(3, 5, 1).is_err());
     }
 }

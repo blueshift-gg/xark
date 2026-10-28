@@ -9,8 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use ark_bn254::Bn254;
-use ark_groth16::{Proof, VerifyingKey};
 use sha2::{Digest, Sha256};
+use xark_groth16::{Proof, ProvingKey, VerifyingKey};
 
 use xark_backend::keys::Groth16Keys;
 use xark_backend::proof::ProofBundle;
@@ -68,7 +68,7 @@ fn vk_roundtrip() {
     let keys = Groth16Keys {
         // The proving key is irrelevant here; reuse the parsed verifying key
         // through a throwaway bundle by going via the file helper directly.
-        proving_key: ark_groth16::ProvingKey {
+        proving_key: ProvingKey {
             vk: vk.clone(),
             beta_g1: ark_bn254::G1Affine::default(),
             delta_g1: ark_bn254::G1Affine::default(),

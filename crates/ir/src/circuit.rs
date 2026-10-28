@@ -49,40 +49,54 @@ pub struct CircuitProgram {
 }
 
 impl CircuitProgram {
-    /// Assemble from the compiler's two lowered views: the R1CS carries the
-    /// factored constraints, the primitive program carries the vars + witness
-    /// program (both share the same `VarId`s and ordering).
-    pub fn from_lowered(r1cs: &R1csProgram, prim: &PrimitiveProgram) -> Self {
-        CircuitProgram {
-            field: prim.field.clone(),
-            vars: prim.vars.clone(),
-            constraints: r1cs
-                .constraints
-                .iter()
-                .map(|c| R1csRow {
-                    a: c.a.clone(),
-                    b: c.b.clone(),
-                    c: c.c.clone(),
-                    note: c.debug.as_ref().and_then(|d| d.note.clone()),
-                })
-                .collect(),
-            witness_gen: prim.witness_gen.clone(),
-        }
-    }
-
     /// The reference-solver view: each R1CS row flattened to an AssertZero
     /// `Expression` via [`expr_from_r1cs`]. Identical to the compiler's
     /// `circuit.json`, so the solver behaves the same from JSON or bytecode.
     pub fn to_primitive(&self) -> PrimitiveProgram {
+        let mut vars = self.vars.clone();
+        let mut witness_gen = self.witness_gen.clone();
+        let mut next = vars.iter().map(|v| v.id + 1).max().unwrap_or(0);
+        let mut extra = Vec::new();
+        let mut constraints: Vec<Expression> = self
+            .constraints
+            .iter()
+            .map(|r| {
+                // `a·b` multiplies out to `|a|·|b|` product terms: two 500-term sides
+                // (bit sums) make 250k. Past `MAX_PRODUCTS`, name the larger side as
+                // a fresh variable `t` (`t = side`, a linear row appended at the end
+                // so row `i` stays row `i` for `profile.json`) and multiply by `t`.
+                // `t` is determined by the inputs, so the constraint system accepts
+                // exactly what it did.
+                if r.a.terms.len() * r.b.terms.len() <= MAX_PRODUCTS {
+                    return expr_from_r1cs(&r.a, &r.b, &r.c, r.note.clone());
+                }
+                let (big, small) = if r.a.terms.len() >= r.b.terms.len() {
+                    (&r.a, &r.b)
+                } else {
+                    (&r.b, &r.a)
+                };
+                let t = next;
+                next += 1;
+                vars.push(Var {
+                    id: t,
+                    name: format!("$factor{t}"),
+                    role: VarRole::Derived,
+                });
+                witness_gen.push(primitive::WitnessGen::Linear {
+                    out: t,
+                    lc: big.clone(),
+                });
+                let tv = LinearCombination::var(t);
+                extra.push(expr_from_r1cs(big, &LinearCombination::one(), &tv, None));
+                expr_from_r1cs(&tv, small, &r.c, r.note.clone())
+            })
+            .collect();
+        constraints.extend(extra);
         PrimitiveProgram {
             field: self.field.clone(),
-            vars: self.vars.clone(),
-            constraints: self
-                .constraints
-                .iter()
-                .map(|r| expr_from_r1cs(&r.a, &r.b, &r.c, r.note.clone()))
-                .collect(),
-            witness_gen: self.witness_gen.clone(),
+            vars,
+            constraints,
+            witness_gen,
         }
     }
 
@@ -166,6 +180,10 @@ impl CircuitProgram {
         }
     }
 }
+
+/// Above this many `a·b` product terms, [`CircuitProgram::to_primitive`] factors a
+/// row through a fresh variable rather than multiplying it out.
+const MAX_PRODUCTS: usize = 4096;
 
 /// Expand an R1CS constraint `a · b = c` into an AssertZero-style expression
 /// `a·b − c == 0`. Pure over xark-ir types (no `rustc` dependency).

@@ -5,8 +5,6 @@
 //! endomorphism decomposition is derived inside the circuit (a `witness_only`
 //! region at zero constraint cost, pinned by `glv_decomp`), so the caller supplies
 //! only the signature.
-#![cfg_attr(xark, no_std)]
-
 use xark_secp256k1::prelude::*;
 
 #[circuit]

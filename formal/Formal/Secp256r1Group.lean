@@ -6,6 +6,7 @@ Authors: Blueshift Labs Limited
 import Formal.Secp256r1
 import Formal.EcdsaVerify
 import Mathlib
+import Formal.CurvePrimes
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -26,24 +27,19 @@ short Weierstrass curve `y² = x³ + a·x + b` with `a = −3` and the standard
 NIST b-constant. The `AddCommGroup` instance is then automatically inherited
 via the class-group injection of an affine Weierstrass curve.
 
-## Trusted base addition: primality of `secp256r1_p`
+## Primality of `secp256r1_p`
 
 `secp256r1_p = 2^256 − 2^224 + 2^192 + 2^96 − 1` is the 256-bit NIST P-256
-base-field prime (FIPS 186-4 D.1.2.3 / SEC 2 §2.4.2). As with `secp256k1_p`,
-mathlib's `decide` is infeasible at this size, so we declare
-
-    axiom secp256r1_p_prime : Fact (Nat.Prime secp256r1_p)
-
-as a **trusted base addition** — verifiable in seconds outside Lean using a
-standard primality test (e.g. `openssl prime
-0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF`).
+base-field prime (FIPS 186-4 D.1.2.3 / SEC 2 §2.4.2).
+`secp256r1_p_prime : Fact (Nat.Prime secp256r1_p)` is a **theorem**, proven by a
+Pratt certificate (`Formal.CurvePrimes`, kernel-checked; see `Formal.Pratt`).
 
 ## Theorem / instance index
 
 | Name                              | Statement                                              |
 |-----------------------------------|--------------------------------------------------------|
 | `secp256r1_p`                     | `2^256 − 2^224 + 2^192 + 2^96 − 1` as `ℕ`              |
-| `secp256r1_p_prime`               | trusted primality axiom for `secp256r1_p`              |
+| `secp256r1_p_prime`               | primality of `secp256r1_p` (Pratt)                     |
 | `secp256r1_b`                     | the NIST P-256 b-constant                              |
 | `secp256r1Curve`                  | the short Weierstrass curve `y² = x³ − 3·x + b`        |
 | `Secp256r1Point`                  | nonsingular points of `secp256r1Curve` ∪ {∞}           |
@@ -60,14 +56,10 @@ namespace Xark
 def secp256r1_p : ℕ :=
   0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
 
-/-- **Trusted primality fact for `secp256r1_p`** (standard public parameter).
-
-NIST P-256's base-field prime is a well-known 256-bit prime listed in
-FIPS 186-4 D.1.2.3 and SEC 2 §2.4.2. Independently verifiable outside Lean
-(e.g. `openssl prime 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF`).
-Declared as `Fact (Nat.Prime secp256r1_p)` because mathlib's `decide` is
-infeasible and `native_decide` also doesn't terminate at this size. -/
-axiom secp256r1_p_prime : Fact (Nat.Prime secp256r1_p)
+/-- **Primality of `secp256r1_p`**, proven by the Pratt certificate
+`Pratt.prime_115792089210356248762697446949407573530086143415290314195533631308867097853951` (`Formal/CurvePrimes.lean`). -/
+theorem secp256r1_p_prime : Fact (Nat.Prime secp256r1_p) :=
+  ⟨by rw [show secp256r1_p = 115792089210356248762697446949407573530086143415290314195533631308867097853951 by norm_num [secp256r1_p]]; exact Pratt.prime_115792089210356248762697446949407573530086143415290314195533631308867097853951⟩
 
 attribute [instance] secp256r1_p_prime
 

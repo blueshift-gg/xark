@@ -20,91 +20,15 @@ pub use xark_verifier::*;
 // stable way to share the API.
 pub use solana_nostd_alt_bn128;
 
-/// The nightly channel the `xark-rustc` driver is pinned to (read from its
-/// `rust-toolchain.toml`), used to build it via the `cargo` shim on a clean
-/// checkout. Falls back to `"nightly"`.
-#[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
-fn nightly_channel(rustc_crate: &std::path::Path) -> String {
-    let toml = std::fs::read_to_string(rustc_crate.join("rust-toolchain.toml")).unwrap_or_default();
-    for line in toml.lines() {
-        let t = line.trim();
-        if t.starts_with("channel")
-            && let Some(v) = t.split('"').nth(1)
-        {
-            return v.to_string();
-        }
-    }
-    "nightly".to_string()
-}
-
-/// Path to the built `xark` toolchain/CLI binary, for the CLI integration tests.
-///
-/// The toolchain is now two crates: `xark-cli` (the stable `xark` CLI, a normal
-/// workspace member) and `xark-rustc` (the nightly `rustc_driver` shim, which is
-/// *excluded* from the workspace under its own pinned nightly `rust-toolchain.toml`
-/// and so is not built by a normal workspace `cargo build`).
-///
-/// This builds/locates both and — crucially — points the CLI at the separately
-/// built driver by exporting `XARK_RUSTC` into this process's environment, which
-/// every spawned `xark …` child inherits (the CLI's `rustc_shim()` honors it).
+/// Path to the built `xark` CLI binary, for the CLI integration tests.
 /// Returns the `xark` CLI binary path.
 #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
 pub fn xark_bin() -> std::path::PathBuf {
     use std::sync::OnceLock;
     static BIN: OnceLock<std::path::PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        // CARGO_MANIFEST_DIR is gadgets/tests; the toolchain crates live in
-        // <repo>/crates (the nightly driver is `crates/rustc`, package `xark-rustc`).
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let rustc_crate = workspace_root.join("crates/rustc");
-
-        // 1. The nightly `rustc_driver` shim. It's excluded from the workspace and
-        //    pins its own nightly (its `rust-toolchain.toml`), so build it in place.
-        let rustc_bin = 'found: {
-            for profile in ["release", "debug"] {
-                let p = rustc_crate.join("target").join(profile).join("xark-rustc");
-                if p.exists() {
-                    break 'found p;
-                }
-            }
-            // The driver is nightly (`rustc_private`). `env!("CARGO")` is a concrete
-            // binary that bypasses rustup's `rust-toolchain.toml`, so a clean
-            // checkout (e.g. CI, no pre-built binary) would build it on the ambient
-            // (stable) toolchain and fail. Invoke the `cargo` shim with
-            // `RUSTUP_TOOLCHAIN` = the pinned channel instead (mirrors
-            // `xark-test-harness`). `--features debug` compiles in the diagnostic
-            // markers (`cached=`, timing) the harness asserts on; a `--features`
-            // build still lands at `target/release/xark-rustc`.
-            let channel = nightly_channel(&rustc_crate);
-            let status = std::process::Command::new("cargo")
-                .args([
-                    "build",
-                    "--release",
-                    "--features",
-                    "debug",
-                    "--bin",
-                    "xark-rustc",
-                ])
-                .current_dir(&rustc_crate)
-                .env("RUSTUP_TOOLCHAIN", &channel)
-                .env(
-                    "RUSTFLAGS",
-                    "--allow=unexpected_cfgs -Zalways-encode-mir -Zmir-opt-level=0",
-                )
-                .env_remove("CARGO_TARGET_DIR")
-                .status()
-                .expect("spawn cargo build for the xark-rustc driver");
-            assert!(status.success(), "failed to build the `xark-rustc` driver");
-            rustc_crate
-                .join("target")
-                .join("release")
-                .join("xark-rustc")
-        };
-        // Every child `xark …` command inherits this and uses it as the driver.
-        // SAFETY: single-threaded test setup, before any threads are spawned.
-        unsafe { std::env::set_var("XARK_RUSTC", &rustc_bin) };
-
-        // 2. The stable `xark` CLI (a workspace member → workspace target dir).
+        // The `xark` CLI (a workspace member → workspace target dir).
         // Always (re)build it with `--features debug` — do NOT reuse a pre-built
         // `target/release/xark`: the surrounding `cargo test --workspace` builds it
         // *without* the feature, and this harness asserts on the `debug`-only
@@ -148,6 +72,11 @@ pub mod fixtures {
     /// `xark_verifier::verify_proof_only(VK, INSTRUCTION_DATA)`.
     pub const ARITHMETIC_SQUARE_INSTRUCTION_DATA: &[u8] =
         include_bytes!("../fixtures/groth16/arithmetic_square/instruction_data.bin");
+
+    /// 16 distinct valid `arithmetic_square` proofs, each `proof || input`
+    /// (288 B): the batch for `verify_groth16_batch` (see `tests/batch.rs`).
+    pub const ARITHMETIC_SQUARE_BATCH16: &[u8] =
+        include_bytes!("../fixtures/groth16/arithmetic_square/batch16.bin");
 
     /// Generate the typed fixture consts (`<NAME>_VK: Verifier<N>`,
     /// `<NAME>_PROOF: Proof`, `<NAME>_INPUTS: [[u8; 32]; N]`) for one

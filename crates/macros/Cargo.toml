@@ -1,8 +1,10 @@
 [package]
 name = "xark-macros"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
+repository = "https://github.com/blueshift-gg/xark"
 description = "Proc macros for xark circuits (the `#[circuit]` attribute)."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]

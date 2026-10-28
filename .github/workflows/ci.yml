@@ -19,25 +19,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install pinned compiler toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-05-03
-          components: rustc-dev, llvm-tools-preview
-
       - name: Install stable Rust toolchain
+        # wasm32: the CLI end-to-end tests build circuits with `xark build`.
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - name: Install pinned nightly for the xark-rustc driver
-        # The xark-tests integration tests build the `xark-rustc` rustc_driver
-        # (a workspace-excluded, nightly-pinned crate) via the test harness,
-        # which selects it with `RUSTUP_TOOLCHAIN` — that does NOT auto-install,
-        # so the pinned nightly + `rustc-dev` must be present. Installed here
-        # WITHOUT `rustup default`, so stable stays the default for the workspace
-        # fmt / clippy / test steps.
-        run: rustup toolchain install nightly-2026-05-03 --profile minimal --component rustc-dev --component llvm-tools-preview
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry, git, and target
         uses: Swatinem/rust-cache@v2
@@ -51,15 +38,28 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
+      - name: Every crate can publish
+        # No publishable crate depends on an unpublished one or on a path alone, and
+        # their dependencies have an order.
+        run: cargo xtask publish --plan
+
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo doc
+        # Broken doc links and examples fail: what docs.rs would render broken.
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --no-deps --workspace --exclude xark-wasm
+          cargo doc --no-deps --manifest-path crates/lang/Cargo.toml
 
       - name: cargo test (release)
         # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
         # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
         # in debug. The heaviest Groth16 e2e proves — the Ed25519 scalar-mul/EdDSA
         # and secp256k1/r1 ECDSA vectors — take longer than the per-step CI limit
-        # and run in nightly-kats.yml (60-min timeout); exclude those packages here
+        # and run in slow.yml (60-min timeout); exclude those packages here
         # rather than terminating mid-test.
         #
         # The `sbpf` and `differential_alt_bn128` integration tests under
@@ -77,92 +77,151 @@ jobs:
           done
           cargo test -p xark-tests --release "${tests_args[@]}"
 
-  compiler-snapshots:
-    name: compiler snapshot suite (nightly)
+  reproducible:
+    # A circuit is identical (same R1CS digest) under every supported rustc. Rebuild every example with the oldest supported
+    # toolchain, stable and beta, and compare with tests/stable-digests.txt; an example
+    # with Rust client functions must also build its client.wasm on each.
+    name: circuit reproducibility (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.89", stable, beta]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Install workspace toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install toolchain under test
+        # Installed, not made the default: `cargo xtask` builds with the workspace
+        # toolchain (its dependencies need 1.89); only the circuits are built with
+        # the toolchain under test (`--toolchain`).
+        run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --target wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Compare circuit digests
+        run: cargo xtask digests --check --toolchain ${{ matrix.toolchain }}
 
-      - name: Install pinned nightly (rustc_private) toolchain
-        # `crates/rustc` is the `rustc_driver`, built on this pinned nightly
-        # with `rustc-dev`; it is excluded from the root workspace, so the `check`
-        # job's `cargo test --workspace` never builds it. The harness selects it via
-        # `RUSTUP_TOOLCHAIN=nightly-2026-05-03`, so the pin here must match.
-        # See docs/toolchain.md for the pin and the bump procedure.
+  msrv:
+    # The minimum Rust (`rust-version`, 1.89) builds the CLI and every crate, not
+    # only the circuits `reproducible` checks. Except `xark-tests`, which isn't
+    # published: its on-chain tests run in Mollusk, which needs a newer Rust.
+    name: builds on Rust 1.89
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install Rust 1.89
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-05-03
-          components: rustc-dev, llvm-tools-preview, clippy
-
-      - name: Cache cargo registry, git, and target
+          toolchain: "1.89"
+      - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            crates/lang/target
-            crates/rustc/target
-          key: snapshots-${{ hashFiles('Cargo.lock') }}
-
-      - name: cargo clippy (xark-rustc driver)
-        # The workspace `check` job runs on stable and excludes this nightly
-        # `rustc_private` crate, so lint it here where the pinned nightly +
-        # `rustc-dev` are available. `--features debug` covers the diagnostic
-        # paths (timing / XARK_VERIFY) too.
-        run: cd crates/rustc && cargo clippy --all-targets --features debug -- -D warnings
-
-      - name: cargo test (compiler snapshots)
-        # Runs `crates/lang/tests/snapshot.rs` — the byte-identical count bridges
-        # (fp_mul 1154, ec_incomplete 15369/15891, sha256 39018, blake2s 21600,
-        # blake3 15248, keccak 153664, aes 145816, poseidon2 240, bignum 1189,
-        # struct_point, aggregate-input + int-operator solves, …).
-        #
-        # The `xark-test-harness` builds every gadget crate with
-        # `-Zalways-encode-mir` into an isolated `target/xark-compile` (so their
-        # MIR is inlinable) and the `xark-rustc` compiler into
-        # `crates/rustc/target`, then
-        # compiles each example and diffs its emitted R1CS/IR against the
-        # committed snapshots. The heavy `#[ignore]`d known-answer-vector tests
-        # run separately in `nightly-kats.yml`.
-        run: cd crates/lang && cargo test --test snapshot
-
-      # ---- xark-wasm smoke test ----
-      # Reuse the nightly toolchain and xark-rustc binary already built above, then
-      # produce the cube artifacts the wasm smoke test cross-checks (build + setup +
-      # prove). Cube is rebuilt with a real field (bn254): the snapshot test compiled
-      # it field-independent (`unknown`), which the prover can't solve.
-
-      - name: Rebuild cube with bn254 field
-        # Drop the field-independent `unknown` output the snapshot test wrote, then
-        # rebuild with the default bn254 field.
+      - name: cargo check
         run: |
-          # The driver crate is `xark-rustc` but it lives under `crates/rustc`
-          # (renamed from `crates/xark-rustc` in the `1a19385 reorg`); the path
-          # below must match the dir the snapshot test built it into.
-          export XARK_RUSTC="$PWD/crates/rustc/target/release/xark-rustc"
-          rm -rf target/test-out/cube
-          cargo run --release -p xark-cli -- build examples/cube --out target/test-out/cube
+          cargo check --workspace --exclude xark-tests --all-targets --locked
+          cargo check --all-targets --locked --manifest-path crates/lang/Cargo.toml
 
-      - name: Generate proving + verifying keys for cube
-        run: cargo run --release -p xark-cli -- setup target/test-out/cube
-
-      - name: Generate host proof + public inputs for cube
-        # The smoke test cross-checks the wasm-generated public inputs against
-        # the host's (same circuit, same witness — must be byte-identical).
-        run: cargo run --release -p xark-cli -- prove target/test-out/cube --inputs '{"secret":"3","result":"27"}'
-
-      - name: Activate stable Rust for wasm steps
+  compiler-snapshots:
+    # The snapshot suite (count bridges to the Lean models, rejection diagnostics,
+    # solves) and the native-semantics fuzzer. The heavy `#[ignore]`d known-answer
+    # vectors run in `slow.yml`.
+    name: compiler snapshot suite + semantics fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/lang
+      - name: cargo test (snapshots, semantics fuzz, input and host tests)
+        # Every test in the crate: naming files here let the others go stale
+        # unnoticed. The heavy KAT vectors are `#[ignore]`d (slow.yml).
+        env:
+          XARK_FUZZ_CASES: "200"
+        run: cd crates/lang && cargo test --release --no-fail-fast
+
+  wasm-smoke:
+    # The xark-wasm prover package (`npm test` in crates/wasm): against host
+    # artifacts for `examples/cube`, the wasm build must reproduce the public
+    # inputs byte-for-byte; against `examples/sha256` (a 2^16 domain), the
+    # streaming prover with and without workers, both key layouts, and the
+    # wrong-key guard.
+    name: xark-wasm smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build xark
+        run: cargo build --release -p xark-cli --bin xark
+
+      - name: Build, set up and prove cube
+        # The smoke test cross-checks the wasm-generated public inputs against
+        # the host's (same circuit, same witness — must be byte-identical).
+        run: |
+          target/release/xark setup examples/cube --insecure-dev-mode
+          target/release/xark prove examples/cube --inputs '{"secret":"3","result":"27"}'
+
+      - name: Build sha256 and its three keys
+        # The streaming test's prerequisites (crates/wasm/tests/streaming.test.cjs).
+        run: |
+          x=target/release/xark
+          k=examples/sha256/target/xark
+          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7
+          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form reduced --out $k/sha256-streamable
+          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --out $k/sha256-smooth
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
       - name: Build xark-wasm node package
-        run: cd crates/wasm && wasm-pack build --target nodejs --dev --out-dir dist/node
+        run: cd crates/wasm && wasm-pack build --target nodejs --release --out-dir dist/node
 
-      - name: Run xark-wasm smoke test
-        run: CIRCUIT_ARTIFACTS_DIR=target/test-out/cube node --test crates/wasm/tests/wasm-smoke.test.cjs
+      - name: Run xark-wasm tests
+        run: cd crates/wasm && npm test
+
+  clients:
+    # `xark client` for the representative examples must match the committed
+    # clients, typecheck, and prove + verify through xark-wasm (clients/check:
+    # `npm test`, whose vitest setup builds xark, xark-wasm and each example).
+    name: generated clients
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generated clients (cube, zkyc, sha256, merkle)
+        working-directory: clients/check
+        run: npm ci && npm test

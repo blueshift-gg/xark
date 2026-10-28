@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 // memory_var: a dynamic `arr[idx]` read. xark has no runtime
@@ -38,15 +36,15 @@ mod tests {
     fn accepts_valid() {
         // one-hot sel1 → arr[1] = 20
         memory_var(
-            "10".into(),
-            "20".into(),
-            "30".into(),
-            "40".into(),
-            "0".into(),
-            "1".into(),
-            "0".into(),
-            "0".into(),
-            "20".into(),
+            10,
+            20,
+            30,
+            40,
+            0,
+            1,
+            0,
+            0,
+            20,
         )
         .unwrap();
     }
@@ -54,15 +52,15 @@ mod tests {
     #[test]
     fn rejects_wrong() {
         assert!(memory_var(
-            "10".into(),
-            "20".into(),
-            "30".into(),
-            "40".into(),
-            "0".into(),
-            "1".into(),
-            "0".into(),
-            "0".into(),
-            "21".into()
+            10,
+            20,
+            30,
+            40,
+            0,
+            1,
+            0,
+            0,
+            21
         )
         .is_err());
     }

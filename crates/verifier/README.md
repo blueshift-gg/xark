@@ -28,6 +28,58 @@ that updates. Or call `verify_groth16(vk_bytes, proof_bytes, public_inputs)`
 directly when the VK is loaded dynamically — in that case the program **must**
 authenticate the VK (e.g. pin its hash).
 
+## Batches
+
+`verify_groth16_batch(vk_bytes, batch, scratch)` checks several proofs of one
+circuit (one VK) with a single pairing call: `M + 3` pairs instead of `4M`.
+`batch` is the proofs' instruction data back to back (`proof || public_inputs`
+each), and `scratch` holds the `M + 3` pairing operands (192 bytes each). For a small batch it fits on the stack (a Solana stack frame
+is 4 KB, so up to about 16 proofs); otherwise use the heap or account data:
+
+```rust
+let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 4 + 3];
+let ok = verify_groth16_batch(VK_BYTES, instruction_data, &mut scratch)?;
+```
+
+Measured on chain (Mollusk), proofs with one public input:
+
+| proofs | batched | one at a time |
+|---|---|---|
+| 1 | 77,560 CU | 77,043 CU |
+| 4 | 168,199 CU | 309,633 CU |
+| 16 | 513,223 CU | ~1,240,000 CU |
+
+Each extra proof costs about 29k CU instead of 77k, so the 1.4M CU compute
+limit allows about 46 proofs instead of 18. How many fit in the transaction
+itself depends on the transaction format (each one-input entry is 288 bytes);
+past that, pass the batch in account data. A `false` result says some proof in the
+batch is invalid, not which one: verify them one by one to find it.
+
+Each proof's check is weighted by a 252-bit number taken from a SHA-256 of the
+VK and the whole batch, so invalid proofs can't be built to cancel each other
+out: a batch with an invalid proof passes with probability about 2⁻²⁵² for
+each batch an attacker tries (the weights are public, so the margin has to
+cover grinding; full-width weights cost the same as narrow ones). The batch is
+always strict: non-canonical coordinates are rejected.
+
+### Using batches safely
+
+- **Reject duplicates inside the batch.** Anyone can copy or re-randomize a
+  valid proof, so one batch can hold the same statement twice. Check each
+  entry's nullifier (or nonce) against the others in the batch as well as
+  against storage, before recording any of them. Checking every entry against
+  storage first and writing afterwards lets the same nullifier through twice.
+- **Act only on the bytes you verified.** The result covers exactly the
+  `batch` buffer passed in: read each entry's public inputs (amounts,
+  recipients, …) from that same buffer, not from another account or offset.
+- **One bad proof fails the batch.** If you batch other people's proofs (a
+  relayer), verify each one off-chain first, or a single invalid proof keeps
+  everyone else's from landing.
+- **Don't alias `scratch` and `batch`.** Safe Rust can't, but a program that
+  builds both from raw account memory with `unsafe` must keep them apart: the
+  pairing operands are written while entries are still being read.
+- As with single proofs, anything but `Ok(true)` is a rejection.
+
 ## Wire format (little-endian, `x || y`)
 
 ```
@@ -47,6 +99,11 @@ for the canonical encoder.
 
 - Off-curve / non-subgroup proof points are rejected by the syscalls.
 - Non-canonical public inputs (`>= r`) are rejected (prevents encoding malleability).
+- The `*_strict` entry points also reject non-canonical proof/VK coordinates.
+  Neither makes a proof unique: Groth16 proofs are re-randomizable, so anyone
+  holding a valid proof can make a different valid proof of the same public
+  inputs. Never use proof bytes as a replay or dedup key; bind a nullifier,
+  nonce or signer into the public inputs instead.
 - Every public input is cryptographically bound (`binding` test).
 - `verify_groth16` never panics and never accepts adversarial bytes (`fuzz` test).
 - The entrypoint is fail-closed (anything not `Ok(true)` → reject).

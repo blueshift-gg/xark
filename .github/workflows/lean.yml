@@ -2,8 +2,8 @@ name: Lean (gadget soundness)
 
 # Builds the Lean 4 / mathlib proofs of gadget soundness in `formal/`.
 # `lake build` type-checks every theorem; the axiom check then fails the job
-# if any proof slipped in a `sorry` (`sorryAx`) or otherwise stopped depending
-# only on mathlib's standard axioms.
+# if any listed proof depends on anything beyond mathlib's standard axioms and
+# the documented `native_decide` lemmas (a `sorry`, a declared `axiom`, …).
 
 on:
   push:
@@ -240,6 +240,21 @@ jobs:
           #print axioms mul_mod_via_Fr_limbwise_constraints
           #print axioms ec_add_incomplete_secp256k1_sound
           #print axioms ec_add_incomplete_secp256r1_sound
+          -- constraint-reducing rewrites (stable frontend)
+          #print axioms Xark.R1cs.elim_sound
+          #print axioms Xark.R1cs.cse_sound
+          #print axioms Xark.R1cs.inline_sound
+          #print axioms Xark.R1cs.fold_sound
+          #print axioms Xark.R1cs.const_mul_sound
+          #print axioms Xark.R1cs.gated_sat
+          #print axioms Xark.R1cs.guard_mul
+          #print axioms Xark.R1cs.pin_dead
+          #print axioms Xark.R1cs.select_taken
+          #print axioms Xark.R1cs.select_untaken
+          #print axioms Pratt.prime_of_certificate
+          #print axioms bn254_r_prime
+          #print axioms secp256k1_p_prime
+          #print axioms secp256r1_p_prime
           EOF
           # Capture stdout+stderr separately from the exit code; under bash -e
           # `out=$(cmd)` exits the whole script if `cmd` returns non-zero,
@@ -249,7 +264,6 @@ jobs:
           lake env lean axcheck.lean > axout.txt 2>&1
           status=$?
           set -e
-          rm -f axcheck.lean
           echo "===== axcheck output (lean exit status=$status) ====="
           cat axout.txt
           echo "===== end axcheck output ====="
@@ -257,8 +271,35 @@ jobs:
             echo "::error::lake env lean axcheck.lean failed (exit $status) — see axcheck output above"
             exit "$status"
           fi
-          if grep -qi 'sorryAx' axout.txt; then
-            echo "::error::a proof depends on sorryAx (incomplete proof)"
-            exit 1
-          fi
-          rm -f axout.txt
+          # Every printed theorem may depend only on the three standard axioms, plus
+          # `native_decide` from the documented lemmas below (GLV constants, AES /
+          # GF(2^8) tables — see formal/README.md). Anything else fails the job: a
+          # `sorryAx`, a declared `axiom`, or a new `native_decide`.
+          python3 - axout.txt <<'PY'
+          import re, sys
+          text = open(sys.argv[1]).read()
+          standard = {"propext", "Classical.choice", "Quot.sound"}
+          native_ok = {
+              "secp256k1_beta_cube_eq_one", "secp256k1_G_nonsingular",
+              "secp256k1_phi_eigenvalue_at_G", "aesSbox_algebraic_eq_table_all",
+              "gf256_inv_unique_all", "gf256_inv_zero", "Xark.aesAffine_nat_lt_256_all",
+              "Xark.aesSbox_algebraic_lt_256_all", "Xark.gf256_bit_xor_byte_all",
+              "gf256_pow254_eq_inv_all",
+          }
+          printed = re.findall(r"^#print axioms (\S+)", open("axcheck.lean").read(), re.M)
+          seen, bad = 0, []
+          seen += len(re.findall(r"' does not depend on any axioms", text))
+          for name, axs in re.findall(r"'([^']+)' depends on axioms: \[(.*?)\]", text, re.S):
+              seen += 1
+              for ax in (a.strip().rstrip("\u271d") for a in axs.split(",")):
+                  head = ax.split("._native.native_decide.")[0]
+                  if ax not in standard and not (head != ax and head in native_ok):
+                      bad.append(f"{name}: {ax}")
+          if seen != len(printed):
+              sys.exit(f"::error::parsed {seen} axiom reports for {len(printed)} theorems")
+          if bad:
+              print("::error::non-standard axioms:\n" + "\n".join(bad))
+              sys.exit(1)
+          print(f"{seen} theorems: standard axioms only (plus the documented native_decide lemmas)")
+          PY
+          rm -f axcheck.lean axout.txt

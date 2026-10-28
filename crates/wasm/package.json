@@ -1,6 +1,6 @@
 {
   "name": "@blueshift-gg/xark-wasm",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -10,12 +10,13 @@
   "main": "./dist/node/xark_wasm.js",
   "types": "./dist/node/xark_wasm.d.ts",
   "scripts": {
-    "test": "node --test tests/wasm-smoke.test.cjs"
+    "test": "node --test tests/wasm-smoke.test.cjs tests/streaming.test.cjs"
   },
   "files": [
     "dist/node/*",
     "dist/web/*",
-    "dist/module/*"
+    "dist/module/*",
+    "js/*"
   ],
   "exports": {
     ".": {
@@ -35,6 +36,18 @@
         "types": "./dist/web/xark_wasm.d.ts",
         "default": "./dist/web/xark_wasm.js"
       }
+    },
+    "./pool": {
+      "types": "./js/pool.d.ts",
+      "default": "./js/pool.mjs"
+    },
+    "./stream": {
+      "types": "./js/stream.d.ts",
+      "default": "./js/stream.mjs"
+    },
+    "./client": {
+      "types": "./js/client.d.ts",
+      "default": "./js/client.mjs"
     }
   }
 }

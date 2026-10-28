@@ -1,7 +1,6 @@
 //! Numeric constants for `u8`..`u128` via both `Field::from(x)` and `x.into()`
 //! (the public surface; the backing intrinsics are private). Values above `u128`
 //! use `Field::constant("...")` with a decimal string.
-#![cfg_attr(xark, no_std)]
 use xark::{circuit, require_eq, Field, Private, Public};
 #[circuit]
 pub fn from_const(a: Private<Field>, doubled: Public<Field>, plus_big: Public<Field>) {
@@ -22,9 +21,9 @@ mod tests {
     fn accepts_valid() {
         // 2·5 = 10
         from_const(
-            "5".into(),
-            "10".into(),
-            "123456789012345678901234567895".into(),
+            5,
+            10,
+            "123456789012345678901234567895",
         )
         .unwrap();
     }
@@ -32,9 +31,9 @@ mod tests {
     #[test]
     fn rejects_wrong() {
         assert!(from_const(
-            "5".into(),
-            "11".into(),
-            "123456789012345678901234567895".into()
+            5,
+            11,
+            "123456789012345678901234567895"
         )
         .is_err());
     }

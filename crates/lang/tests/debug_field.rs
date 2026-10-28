@@ -1,5 +1,5 @@
 //! `Field`'s `Debug` prints its decimal value, so the values are grab-able
-//! straight out of a `{:?}` dump (of a bare `Field`, a `#[derive(CircuitInput)]`
+//! straight out of a `{:?}` dump (of a bare `Field`, a `#[input]`
 //! struct, or a generated `<Fn>Inputs`) to feed `xark prove --inputs`.
 
 use xark::Field;

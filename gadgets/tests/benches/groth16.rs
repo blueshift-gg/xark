@@ -28,12 +28,10 @@
 use std::collections::BTreeMap;
 
 use ark_bn254::{Bn254, Fr};
-use ark_groth16::{Groth16, Proof};
-use ark_snark::SNARK;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
-use xark_backend::setup::setup;
-use xark_backend::{Groth16Keys, test_rng, verify};
+use xark_backend::{test_rng, verify};
+use xark_groth16::{ConstraintSource, InMemoryPk, ProgramSource, Proof, ProverConfig, ProvingKey};
 use xark_ir::solver;
 use xark_ir::{R1csProgram, VarId, primitive};
 use xark_prover::{XarkCircuit, fr_from_decimal};
@@ -78,6 +76,40 @@ fn load_and_solve(name: &str, inputs: &[(&str, &str)]) -> (R1csProgram, BTreeMap
     (r1cs, assign)
 }
 
+/// Dev-mode keys for `prog` (xark-groth16's setup, as `xark setup --insecure-dev-mode`).
+fn setup(prog: &R1csProgram, rng: &mut xark_backend::ChaCha20Rng) -> ProvingKey<Bn254> {
+    let mut pk = Vec::new();
+    xark_groth16::setup::dev_setup(
+        &ProgramSource::new(prog),
+        rng,
+        &mut pk,
+        ark_serialize::Compress::No,
+        xark_groth16::DomainKind::Radix2,
+    )
+    .expect("setup");
+    xark_backend::Groth16Keys::decode_proving_key(&pk).expect("decode")
+}
+
+/// A proof for `circ` with `pk` (xark-groth16's prover, as `xark prove`).
+fn prove(
+    pk: &ProvingKey<Bn254>,
+    circ: &XarkCircuit,
+    rng: &mut xark_backend::ChaCha20Rng,
+) -> Proof<Bn254> {
+    let src = ProgramSource::new(circ.prog());
+    let z = src
+        .layout()
+        .assignment(|id| circ.assignment().get(&id).copied());
+    xark_groth16::prove(
+        &src,
+        &z,
+        &mut InMemoryPk::new(pk),
+        rng,
+        &ProverConfig::default(),
+    )
+    .expect("prove")
+}
+
 fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
     let (r1cs, assign) = load_and_solve(name, inputs);
 
@@ -88,7 +120,7 @@ fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
         b.iter_batched(
             || (XarkCircuit::for_setup(r1cs.clone()), test_rng()),
             |(circuit, mut rng)| {
-                let keys = setup(circuit, &mut rng).expect("setup");
+                let keys = setup(circuit.prog(), &mut rng);
                 criterion::black_box(keys);
             },
             BatchSize::SmallInput,
@@ -96,12 +128,8 @@ fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
     });
 
     // Cache setup output once for the prove / verify benches.
-    let keys: Groth16Keys = {
-        let mut rng = test_rng();
-        setup(XarkCircuit::for_setup(r1cs.clone()), &mut rng).expect("setup")
-    };
-    let pk = keys.proving_key.clone();
-    let vk = keys.verifying_key.clone();
+    let pk = setup(XarkCircuit::for_setup(r1cs.clone()).prog(), &mut test_rng());
+    let vk = pk.vk.clone();
 
     // Prove ---------------------------------------------------------------
     group.bench_function("prove", |b| {
@@ -113,8 +141,7 @@ fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
                 )
             },
             |(circuit, mut rng)| {
-                let proof = Groth16::<Bn254>::prove(&pk, circuit, &mut rng).expect("prove");
-                criterion::black_box(proof);
+                criterion::black_box(prove(&pk, &circuit, &mut rng));
             },
             BatchSize::SmallInput,
         );
@@ -125,8 +152,11 @@ fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
         XarkCircuit::for_proving(r1cs.clone(), assign.clone()).public_inputs();
     let proof: Proof<Bn254> = {
         let mut rng = test_rng();
-        let circuit = XarkCircuit::for_proving(r1cs.clone(), assign.clone());
-        Groth16::<Bn254>::prove(&pk, circuit, &mut rng).expect("prove")
+        prove(
+            &pk,
+            &XarkCircuit::for_proving(r1cs.clone(), assign.clone()),
+            &mut rng,
+        )
     };
     group.bench_function("verify", |b| {
         b.iter(|| {

@@ -27,7 +27,7 @@ program crate and pin *its* hash.
 |---|---|---|
 | `platform-tools` (SBF `rustc`/`llvm`/`solana-ld`) | **`v1.54`, pinned explicitly** via `cargo-build-sbf --tools-version v1.54` | Fetched on demand by `cargo-build-sbf`. |
 | `cargo-build-sbf` (Anza / Solana CLI) | Any recent release (CI uses `v4.0.0`) — only the *orchestrator* | `sh -c "$(curl -sSfL https://release.anza.xyz/v4.0.0/install)"` |
-| Host `cargo` (only drives `cargo-build-sbf`) | Workspace `rust-version = "1.85"` | Any 1.85+ stable is fine. |
+| Host `cargo` (only drives `cargo-build-sbf`) | Workspace `rust-version = "1.89"` | Any 1.89+ stable is fine. |
 
 The `platform-tools` bundle (a pinned `rustc`/`cargo`/`llvm`/`solana-ld`) is the *only* thing that
 determines the SBF codegen, so it — not the Anza CLI release — is what we pin, explicitly via

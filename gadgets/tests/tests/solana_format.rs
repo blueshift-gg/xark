@@ -42,7 +42,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Encode the verifying key into the Solana on-chain format:
 /// `alpha_g1 || beta_g2 || gamma_g2 || delta_g2 || ic[0] || ic[1] ||...`.
-fn encode_vk_solana(vk: &ark_groth16::VerifyingKey<ark_bn254::Bn254>) -> Vec<u8> {
+fn encode_vk_solana(vk: &xark_groth16::VerifyingKey<ark_bn254::Bn254>) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&encode_g1(&vk.alpha_g1));
     out.extend_from_slice(&encode_g2(&vk.beta_g2));
@@ -55,7 +55,7 @@ fn encode_vk_solana(vk: &ark_groth16::VerifyingKey<ark_bn254::Bn254>) -> Vec<u8>
 }
 
 /// Encode a proof into the Solana on-chain format: `A || B || C`.
-fn encode_proof_solana(proof: &ark_groth16::Proof<ark_bn254::Bn254>) -> Vec<u8> {
+fn encode_proof_solana(proof: &xark_groth16::Proof<ark_bn254::Bn254>) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + 128 + 64);
     out.extend_from_slice(&encode_g1(&proof.a));
     out.extend_from_slice(&encode_g2(&proof.b));
@@ -65,7 +65,7 @@ fn encode_proof_solana(proof: &ark_groth16::Proof<ark_bn254::Bn254>) -> Vec<u8> 
 
 /// Same as `encode_proof_solana`, but with `A` already negated so the
 /// on-chain code can drop it straight into the pairing input.
-fn encode_proof_solana_negated_a(proof: &ark_groth16::Proof<ark_bn254::Bn254>) -> Vec<u8> {
+fn encode_proof_solana_negated_a(proof: &xark_groth16::Proof<ark_bn254::Bn254>) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + 128 + 64);
     out.extend_from_slice(&encode_g1(&negate_g1(&proof.a)));
     out.extend_from_slice(&encode_g2(&proof.b));

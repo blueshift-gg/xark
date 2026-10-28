@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/backend",
     "crates/verifier",
+    "crates/groth16",
+    "crates/frontend",
     "gadgets/tests",
     "gadgets/xark-aes",
     "gadgets/xark-bits",
@@ -17,6 +19,8 @@ members = [
     "crates/macros",
     "crates/cli",
     "crates/prover",
+    "crates/schema",
+    "xtask",
     "gadgets/xark-merkle",
     "gadgets/xark-mimc",
     "gadgets/xark-pedersen",
@@ -25,7 +29,6 @@ members = [
     "gadgets/xark-secp256k1",
     "gadgets/xark-secp256r1",
     "gadgets/xark-sha256",
-    "crates/snarkjs",
     "crates/test-harness",
     "crates/wasm",
     "gadgets/xark-curve",
@@ -36,17 +39,18 @@ members = [
 # reproducible-build target. See `docs/reproducible-build.md`.
 exclude = [
     "crates/lang",
-    "crates/rustc",
     "examples",
     "crates/verifier/reference-program",
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/blueshift-gg/xark"
-rust-version = "1.85"
+# 1.89, for the host tools (their dependencies need it) and for circuits (the
+# `xark` crate's own `rust-version`) — see docs/toolchain.md.
+rust-version = "1.89"
 
 [workspace.dependencies]
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
@@ -74,8 +78,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 # `target_os = "solana"` / `target_arch = "bpf"` are Solana-toolchain-only cfg
 # values; declare them so upstream rustc's `unexpected_cfgs` lint (1.80+) doesn't
 # fire when host CI compiles the `#[cfg(target_os = "solana")] no_std` crates.
-# `xark` is set by the `xark-rustc` driver (reported on `--print cfg`) so circuit
-# crates gate host-only code/deps on `cfg(not(xark))`; declare it for host builds.
+# `xark` is set for the circuit build (`--cfg xark`) so circuit crates gate
+# host-only code/deps on `cfg(not(xark))`; declare it for host builds.
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(target_os, values("solana"))',

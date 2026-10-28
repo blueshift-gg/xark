@@ -26,8 +26,16 @@
 /// ```
 #[macro_export]
 macro_rules! weierstrass {
+    // optional limb width (default 86): `weierstrass! { bits = 4, base = …, … }` — the
+    // same gadget code over narrow limbs, for exhaustive small-field checks.
+    (bits = $bits:literal, $($rest:tt)*) => {
+        $crate::weierstrass! { @width $bits, $($rest)* }
+    };
+    (base = $($rest:tt)*) => {
+        $crate::weierstrass! { @width 86, base = $($rest)* }
+    };
     // public entry: a = 0 (no `a` term in the doubling numerator)
-    (
+    (@width $bits:literal,
         base = $base:literal,
         scalar = $scalar:literal,
         a = 0,
@@ -36,6 +44,7 @@ macro_rules! weierstrass {
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal $(,)? ] $(,)?
     ) => {
         $crate::weierstrass! { @build
+            bits = $bits,
             base = $base,
             scalar = $scalar,
             // a = 0: numerator is exactly `3x²` (no subtraction)
@@ -47,7 +56,7 @@ macro_rules! weierstrass {
         }
     };
     // public entry: a = -3 (numerator gains a `- 3`)
-    (
+    (@width $bits:literal,
         base = $base:literal,
         scalar = $scalar:literal,
         a = -3,
@@ -56,6 +65,7 @@ macro_rules! weierstrass {
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal $(,)? ] $(,)?
     ) => {
         $crate::weierstrass! { @build
+            bits = $bits,
             base = $base,
             scalar = $scalar,
             // a = -3: numerator is `3x² - 3` (`Fp` resolves to the type generated
@@ -71,6 +81,7 @@ macro_rules! weierstrass {
 
     // internal builder: one expansion, so `Point` exists before use
     (@build
+        bits = $bits:literal,
         base = $base:literal,
         scalar = $scalar:literal,
         numerator_sub = { $($nsub:tt)* },
@@ -79,15 +90,35 @@ macro_rules! weierstrass {
         generators = [ $( [ $gx0:literal, $gx1:literal, $gx2:literal, $gy0:literal, $gy1:literal, $gy2:literal ] ),* ],
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal ]
     ) => {
-        // base field `Fp` (mod p), scalar field `Fq` (mod n), 3 × 86-bit limbs
-        xark_bignum::fp!(pub Fp, $base);
-        xark_bignum::fp!(no_host pub Fq, $scalar);
+        // base field `Fp` (mod p), scalar field `Fq` (mod n), 3 × `$bits`-bit limbs
+        xark_bignum::fp!(pub Fp, $base, 3, $bits);
+        xark_bignum::fp!(pub Fq, $scalar, 3, $bits);
 
         /// An affine curve point: two base-field (`Fp`) coordinates.
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct Point {
             pub x: Fp,
             pub y: Fp,
+        }
+        /// A circuit input given as `x ‖ y` (64 bytes, or SEC1's 65 with `0x04`).
+        impl ::xark::Input for Point {
+            const TYPE: ::xark::input::Type = ::xark::input::Type::Named(
+                &::xark::input::Type::named(
+                    "Point",
+                    ::xark::input::Layout::fields(&[
+                        ::xark::input::Member::new("x", <Fp as ::xark::Input>::TYPE),
+                        ::xark::input::Member::new("y", <Fp as ::xark::Input>::TYPE),
+                    ]),
+                )
+                .encoded(::xark::input::Encoding::Bytes(::xark::input::Bytes::Sec1)),
+            );
+            fn read(r: &mut ::xark::input::Reader<'_>) -> Self {
+                Point { x: r.read(), y: r.read() }
+            }
+            fn write(&self, w: &mut ::xark::input::Writer<'_>) {
+                w.write(&self.x);
+                w.write(&self.y);
+            }
         }
         /// A scalar-field (`Fq`) element — an ECDSA multiplier `u1`/`u2`, `r`, `s`, `e`.
         pub type Scalar = Fq;
@@ -97,7 +128,7 @@ macro_rules! weierstrass {
             pub fn new(x: Fp, y: Fp) -> Self {
                 Point { x, y }
             }
-            /// A point from six little-endian 86-bit limbs (`x`, then `y`).
+            /// A point from six little-endian `bits`-bit limbs (`x`, then `y`).
             fn from_limbs(x: [xark::Field; 3], y: [xark::Field; 3]) -> Self {
                 Point { x: Fp::new(x), y: Fp::new(y) }
             }
@@ -111,16 +142,17 @@ macro_rules! weierstrass {
             }
         }
 
-        /// Build an `Fp` coordinate from three little-endian 86-bit limbs.
+        /// Build an `Fp` coordinate from three little-endian `bits`-bit limbs.
         fn fp(a: u128, b: u128, c: u128) -> Fp {
             Fp::new([xark::Field::from(a), xark::Field::from(b), xark::Field::from(c)])
         }
 
-        /// Pin `p` to the curve `y² = x³ + a·x + b` (range-checks limbs, then the
-        /// equation). Required before the incomplete group law.
+        /// Pin `p` to the curve `y² = x³ + a·x + b`: canonical coordinates (`< p`, which
+        /// the field gadgets' `a, b < m` precondition needs), then the equation.
+        /// Required before the incomplete group law on any point from outside.
         pub fn enforce_on_curve(p: Point) {
-            p.x.range_check();
-            p.y.range_check();
+            p.x.assert_canonical();
+            p.y.assert_canonical();
             let b = fp($b0, $b1, $b2);
             let a_coeff = $($acoeff)*;
             // y² == x³ + a·x + b, reduced for an exact per-limb compare
@@ -133,7 +165,9 @@ macro_rules! weierstrass {
             }
         }
 
-        /// Incomplete affine addition, 3-limb (slope-based, `a`-independent).
+        /// Incomplete affine addition, 3-limb (slope-based, `a`-independent). Inputs
+        /// must be canonical (`< p`) — true of every gadget output; check outside
+        /// points with [`enforce_on_curve`] first.
         pub fn ec_add_incomplete(p: Point, q: Point) -> Point {
             let dx = q.x - p.x;
             let dy = q.y - p.y;
@@ -144,7 +178,8 @@ macro_rules! weierstrass {
             Point::new(x3, y3)
         }
 
-        /// Incomplete affine doubling, 3-limb: `λ = (3x² + a)/(2y)`.
+        /// Incomplete affine doubling, 3-limb: `λ = (3x² + a)/(2y)`. Inputs must be
+        /// canonical, as for [`ec_add_incomplete`].
         pub fn ec_double_incomplete(p: Point) -> Point {
             let x_sq = p.x * p.x;
             let three_x_sq = x_sq.triple();
@@ -214,23 +249,26 @@ macro_rules! weierstrass {
         // a hand-written affine one over these primitives), so this macro emits only
         // the shared field/point/group-law primitives.
 
-        $crate::curve_host_inputs!($scalar);
+        $crate::curve_host_inputs!($scalar, $bits);
     };
 }
 
-/// Emit host-side `NativeInput` impls for the macro-generated `Fq`/`Point`
-/// (3 × 86-bit limbs). Shared by `weierstrass!` and `edwards!`: a scalar is 32
-/// big-endian bytes, a point is the compact uncompressed 64-byte `x ‖ y` form.
-/// Requires the caller to depend (host-gated) on `num-bigint` and `xark-prover`.
+/// Emit the host side of the macro-generated `Point` (3 × `bits`-bit limbs,
+/// default 86) and the scalar helpers. Shared by `weierstrass!` and `edwards!`: a
+/// point comes from the uncompressed `x ‖ y` (64 bytes, or SEC1's 65). Requires
+/// the caller to depend (host-gated) on `num-bigint`.
 #[macro_export]
 macro_rules! curve_host_inputs {
     ($scalar:literal) => {
+        $crate::curve_host_inputs!($scalar, 86);
+    };
+    ($scalar:literal, $bits:literal) => {
         #[cfg(not(xark))]
         mod __curve_host {
             extern crate std;
-            use super::{Fq, Point};
+            use super::{Fp, Point};
             use ::num_bigint::BigUint;
-            use std::{format, string::String, string::ToString, vec::Vec};
+            use std::{format, string::String, vec::Vec};
 
             /// The scalar field order (group order `n` / `L`) as a big integer.
             pub fn order() -> BigUint {
@@ -248,35 +286,30 @@ macro_rules! curve_host_inputs {
                 out
             }
 
-            /// Little-endian 3 × 86-bit limbs of a big-endian integer, named
-            /// `<prefix>.limbs[i]` (matching the compiler's aggregate flattening).
-            fn limbs86(be: &[u8], prefix: &str) -> Vec<(String, String)> {
-                let v = BigUint::from_bytes_be(be);
-                let mask = (BigUint::from(1u8) << 86u32) - 1u8;
-                (0..3)
-                    .map(|i| {
-                        (
-                            format!("{prefix}.limbs[{i}]"),
-                            ((&v >> (i as u32 * 86)) & &mask).to_string(),
-                        )
-                    })
-                    .collect()
-            }
-
-            impl ::xark_prover::NativeInput for Fq {
-                type Native = [u8; 32];
-                fn leaves(native: &[u8; 32], prefix: &str) -> Vec<(String, String)> {
-                    limbs86(native, prefix)
+            impl ::xark::host::FromBeBytes for Point {
+                const BYTES: usize = 64;
+                fn from_be_bytes(bytes: &[u8]) -> Point {
+                    assert_eq!(bytes.len(), 64, "a point is x ‖ y, 64 bytes");
+                    let half = |b: &[u8]| -> [u8; 32] { b.try_into().unwrap() };
+                    Point {
+                        x: Fp::from(half(&bytes[..32])),
+                        y: Fp::from(half(&bytes[32..])),
+                    }
                 }
             }
 
-            impl ::xark_prover::NativeInput for Point {
-                /// Compact uncompressed point: `x(32) ‖ y(32)` big-endian.
-                type Native = [u8; 64];
-                fn leaves(native: &[u8; 64], prefix: &str) -> Vec<(String, String)> {
-                    let mut out = limbs86(&native[0..32], &format!("{prefix}.x"));
-                    out.extend(limbs86(&native[32..64], &format!("{prefix}.y")));
-                    out
+            /// From the uncompressed coordinates `x ‖ y`, 32 big-endian bytes each.
+            impl From<[u8; 64]> for Point {
+                fn from(bytes: [u8; 64]) -> Point {
+                    <Point as ::xark::host::FromBeBytes>::from_be_bytes(&bytes)
+                }
+            }
+
+            /// From a SEC1 uncompressed point: `0x04 ‖ x ‖ y`.
+            impl From<[u8; 65]> for Point {
+                fn from(bytes: [u8; 65]) -> Point {
+                    assert_eq!(bytes[0], 0x04, "a SEC1 uncompressed point starts with 0x04");
+                    <Point as ::xark::host::FromBeBytes>::from_be_bytes(&bytes[1..])
                 }
             }
         }
@@ -315,13 +348,33 @@ macro_rules! edwards {
     ) => {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod L), 3 × 86-bit limbs.
         xark_bignum::fp!(pub Fp, $base);
-        xark_bignum::fp!(no_host pub Fq, $scalar);
+        xark_bignum::fp!(pub Fq, $scalar);
 
         /// An affine twisted-Edwards point: two base-field (`Fp`) coordinates.
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct Point {
             pub x: Fp,
             pub y: Fp,
+        }
+        /// A circuit input given as `x ‖ y` (64 bytes).
+        impl ::xark::Input for Point {
+            const TYPE: ::xark::input::Type = ::xark::input::Type::Named(
+                &::xark::input::Type::named(
+                    "Point",
+                    ::xark::input::Layout::fields(&[
+                        ::xark::input::Member::new("x", <Fp as ::xark::Input>::TYPE),
+                        ::xark::input::Member::new("y", <Fp as ::xark::Input>::TYPE),
+                    ]),
+                )
+                .encoded(::xark::input::Encoding::Bytes(::xark::input::Bytes::Concat)),
+            );
+            fn read(r: &mut ::xark::input::Reader<'_>) -> Self {
+                Point { x: r.read(), y: r.read() }
+            }
+            fn write(&self, w: &mut ::xark::input::Writer<'_>) {
+                w.write(&self.x);
+                w.write(&self.y);
+            }
         }
         /// A scalar-field (`Fq`) element.
         pub type Scalar = Fq;
@@ -331,7 +384,7 @@ macro_rules! edwards {
             pub fn new(x: Fp, y: Fp) -> Self {
                 Point { x, y }
             }
-            /// A point from six little-endian 86-bit limbs (`x`, then `y`).
+            /// A point from six little-endian `bits`-bit limbs (`x`, then `y`).
             fn from_limbs(x: [xark::Field; 3], y: [xark::Field; 3]) -> Self {
                 Point { x: Fp::new(x), y: Fp::new(y) }
             }
@@ -356,18 +409,18 @@ macro_rules! edwards {
         }
 
         /// The curve constant `d` as compile-time 86-bit limbs (only the `&str`
-        /// literal `$d` is parsed here, in `const`-eval — never in circuit MIR).
+        /// literal `$d` is parsed here, in `const`-eval — never in the circuit).
         const D_LIMBS: [xark::Field; 3] = xark_bignum::modulus_limbs::<3, 86>($d);
         /// The curve constant `d` as an `Fp` (its limbs are the compile-time const).
         fn d_const() -> Fp {
             Fp::new(D_LIMBS)
         }
 
-        /// Pin `p` to the twisted-Edwards curve `−x² + y² = 1 + d·x²·y²`
-        /// (range-checks limbs, then the equation).
+        /// Pin `p` to the twisted-Edwards curve `−x² + y² = 1 + d·x²·y²`: canonical
+        /// coordinates (`< p`, the field gadgets' precondition), then the equation.
         pub fn enforce_on_curve(p: Point) {
-            p.x.range_check();
-            p.y.range_check();
+            p.x.assert_canonical();
+            p.y.assert_canonical();
             let x2 = p.x * p.x;
             let y2 = p.y * p.y;
             // y² − x² == 1 + d·x²·y², reduced for an exact per-limb compare
@@ -446,11 +499,13 @@ macro_rules! edwards {
         /// of 4 bits). Precomputes `table[i] = [i]·P` for `i ∈ 0..16`, then per window
         /// does 4 doublings and one 16-way select+add. The complete law keeps `acc`
         /// (starting at the identity) always valid — no offset accumulator needed.
+        /// `p` must be on the curve (`enforce_on_curve`; completeness of the law needs
+        /// it) and `bits` pinned booleans; only canonical coordinates are checked here.
         pub fn scalar_mul(bits: [xark::Field; 256], p: Point) -> Point {
-            // pin coordinates to < 2^BITS before the non-native group law
-            // (`mod_mul` assumes in-range operand limbs, else products wrap `Fr`)
-            p.x.range_check();
-            p.y.range_check();
+            // pin coordinates canonical (< p) before the non-native group law: `mod_mul`
+            // needs in-range limbs (else products wrap `Fr`), `mod_add` needs `a, b < p`
+            p.x.assert_canonical();
+            p.y.assert_canonical();
             let mut table = [identity(); 16];
             let mut i = 1usize;
             while i < 16usize {
@@ -473,13 +528,14 @@ macro_rules! edwards {
         /// scalars (MSB→LSB, 128 windows of 2+2 bits). Precomputes the 16-entry
         /// combined table `T[i·4 + j] = [i]·P1 + [j]·P2` (`i, j ∈ 0..4`), then per
         /// window does 2 doublings and one 16-way select+add. Complete law → no
-        /// correction term.
+        /// correction term. `p1`, `p2` must be on the curve and the bits pinned
+        /// booleans, as for `scalar_mul`.
         pub fn double_scalar_mul(bits1: [xark::Field; 256], p1: Point, bits2: [xark::Field; 256], p2: Point) -> Point {
-            // pin coordinates to < 2^BITS before the non-native group law (see `scalar_mul`)
-            p1.x.range_check();
-            p1.y.range_check();
-            p2.x.range_check();
-            p2.y.range_check();
+            // pin coordinates canonical before the non-native group law (see `scalar_mul`)
+            p1.x.assert_canonical();
+            p1.y.assert_canonical();
+            p2.x.assert_canonical();
+            p2.y.assert_canonical();
             let jp1 = [p1, p1.double(), p1.double().add(p1)];
             let jp2 = [p2, p2.double(), p2.double().add(p2)];
             let mut table = [identity(); 16];

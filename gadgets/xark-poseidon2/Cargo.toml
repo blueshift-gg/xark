@@ -6,6 +6,7 @@ categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -14,9 +15,17 @@ name = "xark_poseidon2"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
+xark = { path = "../../crates/lang", version = "0.3.0" }
+
+# The host-side `native` module (not in a circuit build).
+[target.'cfg(not(xark))'.dependencies]
+ark-bn254 = { version = "0.6", default-features = false, features = ["scalar_field"] }
+ark-ff = { version = "0.6", default-features = false }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.2.1" }
-xark-ir = { path = "../../crates/ir", version = "0.2.1" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
+xark-ir = { path = "../../crates/ir", version = "0.3.0" }
 
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }
