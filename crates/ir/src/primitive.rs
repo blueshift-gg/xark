@@ -72,65 +72,37 @@ pub struct Expression {
 /// A single witness-generation instruction. Evaluating it (against the
 /// assignment built so far) fills in its output variable(s).
 ///
-/// Linear combinations reference only already-computed variables.
+/// Linear combinations reference only already-computed variables. `L` and `V`
+/// are the LC and output-variable types: the IR's own, or the solver's compiled
+/// template-local forms.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
-pub enum WitnessGen {
+pub enum WitnessGen<L = LinearCombination, V = VarId> {
     /// `out = eval(left) * eval(right)` — a multiplication-gate output.
-    Product {
-        out: VarId,
-        left: LinearCombination,
-        right: LinearCombination,
-    },
+    Product { out: V, left: L, right: L },
     /// `out = eval(lc)` — names a linear combination as a fresh variable (used to
     /// bound the size of linear combinations in long bitwise chains).
-    Linear { out: VarId, lc: LinearCombination },
+    Linear { out: V, lc: L },
     /// `out = eval(a) + eval(b) - 2·eval(a)·eval(b)` — boolean XOR, produced as a
     /// single variable via one fused constraint `(2a)·b = a + b - out`.
-    Xor {
-        out: VarId,
-        a: LinearCombination,
-        b: LinearCombination,
-    },
+    Xor { out: V, a: L, b: L },
     /// `out = eval(a) + eval(b) - eval(a)·eval(b)` — boolean OR, via the fused
     /// constraint `a·b = a + b - out`.
-    Or {
-        out: VarId,
-        a: LinearCombination,
-        b: LinearCombination,
-    },
+    Or { out: V, a: L, b: L },
     /// `out = 1 / eval(input)` — modular inverse hint (`input` must be nonzero).
-    Inverse {
-        out: VarId,
-        input: LinearCombination,
-    },
+    Inverse { out: V, input: L },
     /// `out = 1 / eval(input)` if `input ≠ 0`, else `0` — backs the `is_zero` function.
-    InverseOrZero {
-        out: VarId,
-        input: LinearCombination,
-    },
+    InverseOrZero { out: V, input: L },
     /// `out = the `index`-th least-significant bit of eval(input)` — one bit of a
     /// bit-decomposition hint (functions emit one per bit).
-    Bit {
-        out: VarId,
-        input: LinearCombination,
-        index: u32,
-    },
+    Bit { out: V, input: L, index: u32 },
     /// Batched bit-decomposition: `outs[i] = i-th least-significant bit of
     /// eval(input)`. Like emitting one `Bit` per `i`, but serializes the shared
     /// `input` once (major size win for bit-heavy circuits).
-    Bits {
-        outs: Vec<VarId>,
-        input: LinearCombination,
-    },
+    Bits { outs: Vec<V>, input: L },
     /// `q = eval(num) / eval(den)`, `r = eval(num) % eval(den)` over the
     /// integers on the canonical representatives — quotient/remainder hint.
-    DivRem {
-        q: VarId,
-        r: VarId,
-        num: LinearCombination,
-        den: LinearCombination,
-    },
+    DivRem { q: V, r: V, num: L, den: L },
     /// Big-integer non-native multiply-reduce hint. Reconstructs `A`, `B`, `M`
     /// from their little-endian `limb_bits`-bit limbs, computes `P = A·B`, and
     /// outputs `q = P / M`, `r = P % M` split back into limbs. Makes foreign-field
@@ -138,12 +110,12 @@ pub enum WitnessGen {
     /// element and the scalar `product`/`div_rem` hints don't suffice.
     MulModDivMod {
         /// Quotient output limbs (little-endian).
-        q: Vec<VarId>,
+        q: Vec<V>,
         /// Remainder output limbs (little-endian).
-        r: Vec<VarId>,
-        a: Vec<LinearCombination>,
-        b: Vec<LinearCombination>,
-        modulus: Vec<LinearCombination>,
+        r: Vec<V>,
+        a: Vec<L>,
+        b: Vec<L>,
+        modulus: Vec<L>,
         limb_bits: u32,
     },
     /// Big-integer modular inverse hint: reconstructs `A` and (prime) `M` from
@@ -151,9 +123,9 @@ pub enum WitnessGen {
     /// the output `w` with a non-native `A·w == 1 (mod M)` check. Errors if
     /// `A ≡ 0`.
     ModInverse {
-        out: Vec<VarId>,
-        a: Vec<LinearCombination>,
-        modulus: Vec<LinearCombination>,
+        out: Vec<V>,
+        a: Vec<L>,
+        modulus: Vec<L>,
         limb_bits: u32,
     },
     /// Linear multi-subtract hint for the fused subtract `(a - b - c) mod m`.
@@ -162,14 +134,112 @@ pub enum WitnessGen {
     /// `r = val mod m ∈ [0,m)` (as limbs) plus `qabs = (r - val)/m ∈ {0,1,2}`.
     /// Pin with the linear identity `a + qabs·m == b + c + r`.
     Sub2 {
-        qabs: VarId,
-        r: Vec<VarId>,
-        a: Vec<LinearCombination>,
-        b: Vec<LinearCombination>,
-        c: Vec<LinearCombination>,
-        modulus: Vec<LinearCombination>,
+        qabs: V,
+        r: Vec<V>,
+        a: Vec<L>,
+        b: Vec<L>,
+        c: Vec<L>,
+        modulus: Vec<L>,
         limb_bits: u32,
     },
+}
+
+impl<L, V> WitnessGen<L, V> {
+    /// The same op with every input LC mapped by `lc` and every output var by `var`.
+    pub(crate) fn map<L2, V2>(
+        &self,
+        mut lc: impl FnMut(&L) -> L2,
+        mut var: impl FnMut(&V) -> V2,
+    ) -> WitnessGen<L2, V2> {
+        let mut lcs = |v: &[L]| v.iter().map(&mut lc).collect();
+        match self {
+            WitnessGen::Product { out, left, right } => WitnessGen::Product {
+                out: var(out),
+                left: lc(left),
+                right: lc(right),
+            },
+            WitnessGen::Linear { out, lc: l } => WitnessGen::Linear {
+                out: var(out),
+                lc: lc(l),
+            },
+            WitnessGen::Xor { out, a, b } => WitnessGen::Xor {
+                out: var(out),
+                a: lc(a),
+                b: lc(b),
+            },
+            WitnessGen::Or { out, a, b } => WitnessGen::Or {
+                out: var(out),
+                a: lc(a),
+                b: lc(b),
+            },
+            WitnessGen::Inverse { out, input } => WitnessGen::Inverse {
+                out: var(out),
+                input: lc(input),
+            },
+            WitnessGen::InverseOrZero { out, input } => WitnessGen::InverseOrZero {
+                out: var(out),
+                input: lc(input),
+            },
+            WitnessGen::Bit { out, input, index } => WitnessGen::Bit {
+                out: var(out),
+                input: lc(input),
+                index: *index,
+            },
+            WitnessGen::Bits { outs, input } => WitnessGen::Bits {
+                outs: outs.iter().map(&mut var).collect(),
+                input: lc(input),
+            },
+            WitnessGen::DivRem { q, r, num, den } => WitnessGen::DivRem {
+                q: var(q),
+                r: var(r),
+                num: lc(num),
+                den: lc(den),
+            },
+            WitnessGen::MulModDivMod {
+                q,
+                r,
+                a,
+                b,
+                modulus,
+                limb_bits,
+            } => WitnessGen::MulModDivMod {
+                q: q.iter().map(&mut var).collect(),
+                r: r.iter().map(&mut var).collect(),
+                a: lcs(a),
+                b: lcs(b),
+                modulus: lcs(modulus),
+                limb_bits: *limb_bits,
+            },
+            WitnessGen::ModInverse {
+                out,
+                a,
+                modulus,
+                limb_bits,
+            } => WitnessGen::ModInverse {
+                out: out.iter().map(&mut var).collect(),
+                a: lcs(a),
+                modulus: lcs(modulus),
+                limb_bits: *limb_bits,
+            },
+            WitnessGen::Sub2 {
+                qabs,
+                r,
+                a,
+                b,
+                c,
+                modulus,
+                limb_bits,
+            } => WitnessGen::Sub2 {
+                qabs: var(qabs),
+                r: r.iter().map(&mut var).collect(),
+                a: lcs(a),
+                b: lcs(b),
+                c: lcs(c),
+                modulus: lcs(modulus),
+                limb_bits: *limb_bits,
+            },
+        }
+    }
 }
 
 /// The prime field the circuit is defined over.
