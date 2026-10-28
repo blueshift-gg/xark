@@ -42,6 +42,10 @@ pub fn cube(secret: Private<Field>, result: Public<Field>) {
 Every public input must be used. One that only the verifier supplies, such as a
 recipient or a nonce that a proof must not be reused for, takes `bind(recipient)`:
 one constraint, and the proof then verifies only with the value it was made for.
+A 32-byte address is a `[Field; 2]` of its halves,
+`[Field::from_be_bytes(&key[..16]), Field::from_be_bytes(&key[16..])]`: as public
+inputs on chain, each half is zero-padded to 32 bytes. One `Field` would be reduced
+mod p, which most addresses exceed, so the program would have to reduce it too.
 
 ### Testing a circuit from Rust
 

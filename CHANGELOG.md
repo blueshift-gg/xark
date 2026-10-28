@@ -300,7 +300,8 @@ verification starter, and the `xark-client` npm package is removed.
   nonce): one constraint that any value satisfies, which ties the proof to the
   value it was made for. Leaving such an input unused is refused at build time, and
   the error now points to `bind` instead of `require_eq`. `xark_hash::Hash` gets
-  `to_fields()`.
+  `to_fields()`. `examples/bound_recipient` binds a 32-byte address as two field
+  elements, its 16-byte halves, so a program passes the address in unchanged.
 - `xark_verifier::verify_groth16_batch`: several proofs of one circuit in a single
   pairing call. On chain each extra proof costs about 29k CU instead of 77k, so the
   compute limit allows about 46 proofs instead of 18. Needs

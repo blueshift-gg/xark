@@ -84,7 +84,8 @@ fn wrong_public_output_fails_to_verify() {
 }
 
 /// A public input in no constraint, `bind`ed (a recipient only the verifier
-/// supplies): the proof verifies only with the value it was made for.
+/// supplies, as its two 16-byte halves): the proof verifies only with the address
+/// it was made for.
 #[test]
 fn a_bound_public_input_binds_the_proof() {
     let tmp = tempdir();
@@ -94,15 +95,23 @@ fn a_bound_public_input_binds_the_proof() {
     assert!(ok, "build failed: {err}");
     let (ok, err) = xark_setup(&out);
     assert!(ok, "setup failed: {err}");
-    let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9"), ("recipient", "5")]);
-    assert!(ok, "prove failed: {err}");
+    // An address above p, so neither half may be reduced on the way in.
+    let alice = r#"["0xf1e2d3c4b5a69788796a5b4c3d2e1f00", "0x00112233445566778899aabbccddeeff"]"#;
+    let inputs = format!(r#"{{"x": "3", "y": "9", "recipient": {alice}}}"#);
+    let (ok, stdout, stderr) = run(&["prove", out.to_str().unwrap(), "--inputs", &inputs]);
+    assert!(ok, "prove failed: {stdout}{stderr}");
     let verify = |recipient: &str| {
-        let inputs = format!(r#"{{"y": "9", "recipient": "{recipient}"}}"#);
+        let inputs = format!(r#"{{"y": "9", "recipient": {recipient}}}"#);
         run(&["verify", out.to_str().unwrap(), "--inputs", &inputs])
     };
-    let (ok, stdout, stderr) = verify("5");
+    let (ok, stdout, stderr) = verify(alice);
     assert!(ok, "{stdout}{stderr}");
-    for other in ["6", "0"] {
+    for other in [
+        // One bit different.
+        r#"["0xf1e2d3c4b5a69788796a5b4c3d2e1f00", "0x00112233445566778899aabbccddeefe"]"#,
+        // The halves swapped.
+        r#"["0x00112233445566778899aabbccddeeff", "0xf1e2d3c4b5a69788796a5b4c3d2e1f00"]"#,
+    ] {
         let (ok, stdout, stderr) = verify(other);
         assert!(!ok, "recipient {other} verified: {stdout}{stderr}");
     }
