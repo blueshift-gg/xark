@@ -21,9 +21,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::types::VerifyingKey;
 use ark_bn254::{Bn254, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::scalar_mul::BatchMulPreprocessing;
+use ark_ec::short_weierstrass::{Affine, Projective, SWCurveConfig};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{Field, One, UniformRand, Zero};
+use ark_ff::{AdditiveGroup, Field, One, PrimeField, UniformRand, Zero};
 use ark_poly::{EvaluationDomain, GeneralEvaluationDomain, MixedRadixEvaluationDomain};
 use ark_serialize::{CanonicalSerialize, Compress};
 use rand::{RngCore, SeedableRng};
@@ -112,6 +112,128 @@ impl<W: Write> PkWriter<W> {
     }
 }
 
+/// Scalars per batch-affine chunk: enough to amortize its one field inversion.
+const FIXED_BASE_BATCH: usize = 1024;
+
+/// Multiples of one fixed point for setup's batch multiplications. Window `k`
+/// holds `j·2^{wk}·G` for `j = 1..=2^{w-1}` in affine form. A scalar is split
+/// into signed `w`-bit digits, so each window costs at most one addition, and the
+/// accumulators stay affine: one chunk shares a single field inversion per
+/// window (Montgomery's trick). The result is the same affine point as any other
+/// method, so keys are byte-identical to arkworks' `BatchMulPreprocessing`.
+struct FixedBase<P: SWCurveConfig> {
+    w: usize,
+    table: Vec<Vec<Affine<P>>>,
+}
+
+impl<P: SWCurveConfig<ScalarField = Fr>> FixedBase<P> {
+    fn new(base: Projective<P>, num_scalars: usize) -> Self {
+        // Signed digits halve the table per window, so w can be up to one bit
+        // wider than arkworks' window and the table is still no larger.
+        let w = if num_scalars < 32 {
+            4
+        } else {
+            num_scalars.ilog2() as usize * 69 / 100 + 1
+        };
+        // One spare bit absorbs the carry out of the top digit.
+        let windows = (Fr::MODULUS_BIT_SIZE as usize + 1).div_ceil(w);
+        let mut bases = Vec::with_capacity(windows);
+        let mut b = base;
+        for _ in 0..windows {
+            bases.push(b);
+            for _ in 0..w {
+                b.double_in_place();
+            }
+        }
+        let table = bases
+            .into_par_iter()
+            .map(|b| {
+                let mut acc = b;
+                let multiples: Vec<Projective<P>> = (0..1usize << (w - 1))
+                    .map(|_| {
+                        let m = acc;
+                        acc += b;
+                        m
+                    })
+                    .collect();
+                Projective::normalize_batch(&multiples)
+            })
+            .collect();
+        FixedBase { w, table }
+    }
+
+    fn mul(&self, scalars: &[Fr]) -> Vec<Affine<P>> {
+        let mut out = vec![Affine::identity(); scalars.len()];
+        out.par_chunks_mut(FIXED_BASE_BATCH)
+            .zip(scalars.par_chunks(FIXED_BASE_BATCH))
+            .for_each(|(acc, sc)| self.mul_chunk(sc, acc));
+        out
+    }
+
+    /// `acc[i] = sc[i]·G`, with `acc` starting at the identity.
+    fn mul_chunk(&self, sc: &[Fr], acc: &mut [Affine<P>]) {
+        let windows = self.table.len();
+        let mut digits = vec![0i64; sc.len() * windows];
+        for (s, d) in sc.iter().zip(digits.chunks_mut(windows)) {
+            self.digits(s, d);
+        }
+        let mut pending: Vec<(usize, Affine<P>)> = Vec::with_capacity(sc.len());
+        let mut den = Vec::with_capacity(sc.len());
+        for (k, tab) in self.table.iter().enumerate() {
+            pending.clear();
+            for (i, a) in acc.iter_mut().enumerate() {
+                let d = digits[i * windows + k];
+                if d == 0 {
+                    continue;
+                }
+                let q = tab[d.unsigned_abs() as usize - 1];
+                let q = if d < 0 { -q } else { q };
+                if a.is_zero() {
+                    *a = q;
+                } else if a.x == q.x {
+                    // a = ±q: a doubling or the identity, which the affine
+                    // chord formula can't express.
+                    *a = (*a + q).into_affine();
+                } else {
+                    pending.push((i, q));
+                }
+            }
+            // Montgomery's trick: invert every x_q − x_a with one inversion.
+            den.clear();
+            let mut prod = P::BaseField::one();
+            for &(i, q) in &pending {
+                den.push(prod);
+                prod *= q.x - acc[i].x;
+            }
+            let mut inv = prod.inverse().expect("every pending x_q − x_a is non-zero");
+            for (&(i, q), before) in pending.iter().zip(&mut den).rev() {
+                let a = acc[i];
+                let dx = q.x - a.x;
+                let l = (q.y - a.y) * (inv * *before);
+                inv *= dx;
+                let x = l.square() - a.x - q.x;
+                acc[i] = Affine::new_unchecked(x, l * (a.x - x) - a.y);
+            }
+        }
+    }
+
+    /// Signed base-`2^w` digits of `s`, each in `(-2^{w-1}, 2^{w-1}]`.
+    fn digits(&self, s: &Fr, out: &mut [i64]) {
+        let limbs = s.into_bigint().0;
+        let limb = |i: usize| limbs.get(i).copied().unwrap_or(0) as u128;
+        let (w, half) = (self.w, 1i64 << (self.w - 1));
+        let mut carry = 0;
+        for (k, d) in out.iter_mut().enumerate() {
+            let (i, sh) = ((k * w) / 64, (k * w) % 64);
+            let bits = ((limb(i) | limb(i + 1) << 64) >> sh) as i64 & ((1 << w) - 1);
+            let v = bits + carry;
+            carry = (v > half) as i64;
+            *d = v - (carry << w);
+        }
+        debug_assert_eq!(carry, 0);
+    }
+}
+
 /// `t` (drawn from `rng` outside the domain), `Z(t)`, the domain size and all
 /// Lagrange basis values at `t` — as ark-groth16's generator computes them.
 fn qap_point<D: EvaluationDomain<Fr>>(
@@ -189,25 +311,25 @@ where
     drop(c);
 
     let num_scalars = non_zero_a + non_zero_b + qap_nv + m_raw + 1;
-    let g1_table = BatchMulPreprocessing::new(g1, num_scalars);
+    let g1_table = FixedBase::new(g1, num_scalars);
     let vk = VerifyingKey::<Bn254> {
         alpha_g1: (g1 * alpha).into_affine(),
         beta_g2: (g2 * beta).into_affine(),
         gamma_g2: (g2 * gamma).into_affine(),
         delta_g2: (g2 * delta).into_affine(),
-        gamma_abc_g1: g1_table.batch_mul(&gamma_abc),
+        gamma_abc_g1: g1_table.mul(&gamma_abc),
     };
 
     let mut w = PkWriter::new(out, compress, m_raw)?;
     w.put(&vk)?;
     w.put(&(g1 * beta).into_affine())?;
     w.put(&(g1 * delta).into_affine())?;
-    w.vec(nv, |r| g1_table.batch_mul(&a[r]))?;
+    w.vec(nv, |r| g1_table.mul(&a[r]))?;
     drop(a);
-    w.vec(nv, |r| g1_table.batch_mul(&b[r]))?;
+    w.vec(nv, |r| g1_table.mul(&b[r]))?;
     {
-        let g2_table = BatchMulPreprocessing::new(g2, non_zero_b);
-        w.vec(nv, |r| g2_table.batch_mul(&b[r]))?;
+        let g2_table = FixedBase::new(g2, non_zero_b);
+        w.vec(nv, |r| g2_table.mul(&b[r]))?;
     }
     drop(b);
     // h_i = zt·δ⁻¹·tⁱ, i < m_raw − 1.
@@ -222,9 +344,9 @@ where
                 Some(v)
             })
             .collect();
-        g1_table.batch_mul(&sc)
+        g1_table.mul(&sc)
     })?;
-    w.vec(nv - ninst, |r| g1_table.batch_mul(&l[r]))?;
+    w.vec(nv - ninst, |r| g1_table.mul(&l[r]))?;
     w.finish()?;
     Ok(vk)
 }
