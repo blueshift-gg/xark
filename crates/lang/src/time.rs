@@ -9,7 +9,7 @@
 //!
 //! ```ignore
 //! #[input]
-//! pub struct Identity { pub born: Days<1900, 2100>, … } // 17 bits
+//! pub struct Identity { pub born: Days<1900, 2100>, /* … */ } // 17 bits
 //! require(id.born <= policy.born_by);
 //! ```
 
