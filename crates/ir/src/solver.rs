@@ -1171,6 +1171,42 @@ pub(crate) fn univariate_r1cs(
     (a, b, c)
 }
 
+/// [`univariate_r1cs`] for every distinct variable of `row`, in ascending var
+/// order, from one evaluation of `a`, `b`, `c`: each var's rest is the full value
+/// minus its own share (`a₀ = a − aᵥ·xᵥ`, likewise `b₀`, `c₀`), which is the same
+/// field element, so a row costs O(width) instead of O(width²).
+pub(crate) fn univariate_r1cs_row(
+    row: &crate::circuit::R1csRow,
+    assign: &BTreeMap<VarId, Fp>,
+    modulus: &BigUint,
+) -> Vec<(VarId, (Fp, Fp, Fp))> {
+    let zero = Fp::zero(modulus);
+    let zeros = || std::array::from_fn::<Fp, 3, _>(|_| zero.clone());
+    let mut full = zeros();
+    let mut coeffs: BTreeMap<VarId, [Fp; 3]> = BTreeMap::new();
+    for (i, lc) in [&row.a, &row.b, &row.c].into_iter().enumerate() {
+        full[i] = Fp::from_const(&lc.constant, modulus);
+        for t in &lc.terms {
+            let coeff = Fp::from_const(&t.coeff, modulus);
+            full[i] = full[i].add(&coeff.mul(assign.get(&t.var).unwrap_or(&zero)));
+            let own = &mut coeffs.entry(t.var).or_insert_with(zeros)[i];
+            *own = own.add(&coeff);
+        }
+    }
+    coeffs
+        .into_iter()
+        .map(|(v, [av, bv, cv])| {
+            let x = assign.get(&v).unwrap_or(&zero);
+            let a0 = full[0].sub(&av.mul(x));
+            let b0 = full[1].sub(&bv.mul(x));
+            let c0 = full[2].sub(&cv.mul(x));
+            let a = av.mul(&bv);
+            let b = av.mul(&b0).add(&a0.mul(&bv)).sub(&cv);
+            (v, (a, b, a0.mul(&b0).sub(&c0)))
+        })
+        .collect()
+}
+
 /// [`analyze_underconstrained`] over R1CS rows (`a·b = c`) directly.
 pub fn analyze_underconstrained_cp(
     program: &crate::circuit::CircuitProgram,

@@ -1057,15 +1057,7 @@ fn apply_row_flags(
     flags: &[std::sync::atomic::AtomicU8],
 ) {
     use std::sync::atomic::Ordering;
-    // Distinct vars in this row (a var in several LCs reduces once).
-    let mut seen = std::collections::BTreeSet::new();
-    for lc in [&row.a, &row.b, &row.c] {
-        for t in &lc.terms {
-            seen.insert(t.var);
-        }
-    }
-    for v in seen {
-        let (a, b, _c) = crate::solver::univariate_r1cs(row, v, assign, modulus);
+    for (v, (a, b, _c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
         let mut bits = F_SEEN;
         if !(a.is_zero() && b.is_zero()) {
             bits |= F_RESTRICTED;
@@ -1140,19 +1132,14 @@ fn two_valued_suspects(
     let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
         suspects.iter().map(|&v| (v, Vec::new())).collect();
     expand_c_visit(defs, top_c, &IDENTITY, &mut |row: R1csRow| {
-        let mut seen = std::collections::BTreeSet::new();
-        for lc in [&row.a, &row.b, &row.c] {
-            for t in &lc.terms {
-                if suspects.contains(&t.var) {
-                    seen.insert(t.var);
-                }
-            }
+        let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
+        if !terms.any(|t| suspects.contains(&t.var)) {
+            return;
         }
-        for v in seen {
-            polys
-                .get_mut(&v)
-                .unwrap()
-                .push(crate::solver::univariate_r1cs(&row, v, assign, modulus));
+        for (v, poly) in crate::solver::univariate_r1cs_row(&row, assign, modulus) {
+            if let Some(ps) = polys.get_mut(&v) {
+                ps.push(poly);
+            }
         }
     });
     two_valued_from_polys(&polys, assign, modulus)
@@ -2606,19 +2593,10 @@ mod tests {
         let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
             suspects.iter().map(|&v| (v, Vec::new())).collect();
         for r in rows {
-            let mut seen = std::collections::BTreeSet::new();
-            for lc in [&r.a, &r.b, &r.c] {
-                for t in &lc.terms {
-                    if suspects.contains(&t.var) {
-                        seen.insert(t.var);
-                    }
+            for (v, poly) in crate::solver::univariate_r1cs_row(r, assign, modulus) {
+                if let Some(ps) = polys.get_mut(&v) {
+                    ps.push(poly);
                 }
-            }
-            for v in seen {
-                polys
-                    .get_mut(&v)
-                    .unwrap()
-                    .push(crate::solver::univariate_r1cs(r, v, assign, modulus));
             }
         }
         let two_valued = two_valued_from_polys(&polys, assign, modulus);
@@ -2645,7 +2623,10 @@ mod tests {
     /// a circuit with all three verdicts: a linearly-pinned product (fine), a
     /// booleanity-only bit (two-valued — forgeable), and a dangling advice var
     /// (unreferenced). `tiny` only exercises the pinned case, so this is the real
-    /// soundness-equivalence test.
+    /// soundness-equivalence test. Two more rows guard the one-pass row reduction:
+    /// `q`'s two terms in `a` cancel, so it is free only if duplicate coefficients
+    /// are summed; `r·2r = 2r` with `r = 1` is two-valued only if each var's own
+    /// share, with its own LC's coefficient, is subtracted from the full row value.
     #[test]
     fn streaming_core_matches_flat_on_underconstrained() {
         let m = bn254_modulus();
@@ -2659,8 +2640,14 @@ mod tests {
             dvar(2, "p", VarRole::Derived),
             dvar(3, "bit", VarRole::Derived),
             dvar(4, "dangling", VarRole::Derived),
+            dvar(5, "q", VarRole::Derived),
+            dvar(6, "r", VarRole::Derived),
         ];
-        // r0: a·b = p ; r1: bit·(bit−1) = 0
+        // r0: a·b = p ; r1: bit·(bit−1) = 0 ; r2: (q − q + a)·1 = a ; r3: r·2r = 2r
+        let term = |coeff: i64, var: u32| Term {
+            coeff: FieldConst::from_i64(coeff),
+            var,
+        };
         let bit_minus_one = LinearCombination {
             constant: FieldConst::from_i64(-1),
             terms: vec![Term {
@@ -2685,6 +2672,27 @@ mod tests {
                 c: zero,
                 note: None,
             },
+            R1csRow {
+                a: LinearCombination {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![term(1, 5), term(-1, 5), term(1, 0)],
+                },
+                b: LinearCombination::constant("1"),
+                c: LinearCombination::var(0),
+                note: None,
+            },
+            R1csRow {
+                a: LinearCombination::var(6),
+                b: LinearCombination {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![term(2, 6)],
+                },
+                c: LinearCombination {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![term(2, 6)],
+                },
+                note: None,
+            },
         ];
         // Satisfying witness: 3·4 = 12, bit = 0, dangling = 0.
         let assign: std::collections::BTreeMap<u32, Fp> = [
@@ -2693,6 +2701,8 @@ mod tests {
             (2, fp(12)),
             (3, fp(0)),
             (4, fp(0)),
+            (5, fp(12)),
+            (6, fp(1)),
         ]
         .into_iter()
         .collect();
@@ -2732,6 +2742,12 @@ mod tests {
             stream
                 .iter()
                 .any(|(v, r)| *v == 4 && r.contains("no constraint"))
+        );
+        assert!(stream.iter().any(|(v, r)| *v == 5 && r.contains("free")));
+        assert!(
+            stream
+                .iter()
+                .any(|(v, r)| *v == 6 && r.contains("two-valued"))
         );
         assert!(
             !stream.iter().any(|(v, _)| *v == 2),
