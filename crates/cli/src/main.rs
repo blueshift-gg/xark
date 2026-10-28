@@ -13,6 +13,7 @@ mod style;
 mod xark_project;
 
 fn main() {
+    cli::EXE.get_or_init(|| std::env::current_exe().and_then(std::fs::File::open).ok());
     // A bare `xark` shows the roadmap; otherwise clap owns the process (it calls
     // `std::process::exit` on error / for completions, and re-reads argv itself).
     if std::env::args().len() == 1 {

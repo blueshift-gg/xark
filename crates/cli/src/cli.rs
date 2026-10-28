@@ -7,6 +7,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+/// This process's executable, opened as it starts: what [`build_key`] hashes, so a
+/// build names the `xark` that lowered it even when another replaces it meanwhile.
+pub static EXE: std::sync::OnceLock<Option<std::fs::File>> = std::sync::OnceLock::new();
+
 /// `xark build <crate-dir> [--out DIR] [--field F]`
 ///
 /// Builds the circuit crate for wasm32 with `cargo` (any stable toolchain), then
@@ -270,6 +274,93 @@ const BUILD_OUTPUTS: [&str; 9] = [
     "schema.json",
 ];
 
+/// Written beside the outputs, after them: the [`build_key`] they came from, then
+/// `<sha256> <file>` for each output.
+const BUILD_KEY: &str = "build-key";
+const UNCHANGED: &str = "unchanged since the last build";
+
+/// What a build's outputs are made from, hashed: this `xark` (its executable's
+/// bytes), the options, the crate's path (the outputs' paths are relative to
+/// it), the `XARK_*` variables (lowering's knobs), the module, and every source
+/// file the module came from (`sources.json` quotes them). `None` when one can't
+/// be read: then nothing is reused.
+fn build_key(
+    built: &xark_frontend::Built,
+    crate_abs: &std::path::Path,
+    field: &str,
+    profile: bool,
+    emit_json: bool,
+) -> Option<String> {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    let mut part = |bytes: &[u8]| {
+        h.update((bytes.len() as u64).to_le_bytes());
+        h.update(bytes);
+    };
+    let mut exe = Vec::new();
+    let mut file = EXE.get()?.as_ref()?;
+    std::io::Seek::rewind(&mut file).ok()?;
+    std::io::Read::read_to_end(&mut file, &mut exe).ok()?;
+    part(&exe);
+    part(format!("{field} {profile} {emit_json}").as_bytes());
+    part(crate_abs.as_os_str().as_encoded_bytes());
+    let mut vars: Vec<_> = std::env::vars_os()
+        .filter(|(k, _)| k.as_encoded_bytes().starts_with(b"XARK_"))
+        .collect();
+    vars.sort();
+    for (k, v) in vars {
+        part(k.as_encoded_bytes());
+        part(v.as_encoded_bytes());
+    }
+    part(&built.wasm);
+    for src in &built.sources {
+        part(src.as_os_str().as_encoded_bytes());
+        part(&std::fs::read(src).ok()?);
+    }
+    Some(hex::encode(h.finalize()))
+}
+
+/// The `build-key` stamp for the outputs now in `out_abs`, made from `key`.
+fn build_stamp(out_abs: &std::path::Path, key: &str) -> Option<String> {
+    let mut stamp = format!("{key}\n");
+    for f in BUILD_OUTPUTS {
+        match std::fs::read(out_abs.join(f)) {
+            Ok(bytes) => stamp += &format!("{} {f}\n", crate::commands::sha256_hex(&bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    Some(stamp)
+}
+
+fn write_build_key(out_abs: &std::path::Path, key: &Option<String>) {
+    if let Some(stamp) = key.as_ref().and_then(|k| build_stamp(out_abs, k)) {
+        let _ = std::fs::write(out_abs.join(BUILD_KEY), stamp);
+    }
+}
+
+/// Whether the outputs in `out_abs` are the ones a build with `key` made, untouched
+/// since: then they're marked current (as if written now) for `stale_build`.
+fn reuse_build(out_abs: &std::path::Path, key: &Option<String>) -> bool {
+    let (Some(key), Ok(stamp)) = (key, std::fs::read_to_string(out_abs.join(BUILD_KEY))) else {
+        return false;
+    };
+    if build_stamp(out_abs, key).is_none_or(|now| now != stamp) {
+        return false;
+    }
+    let now = std::time::SystemTime::now();
+    // `deps` last, as a build writes it.
+    let mut files = BUILD_OUTPUTS.map(|f| out_abs.join(f));
+    files.sort_by_key(|f| f.ends_with("deps"));
+    files.iter().filter(|f| f.exists()).all(|f| {
+        std::fs::File::options()
+            .write(true)
+            .open(f)
+            .and_then(|f| f.set_modified(now))
+            .is_ok()
+    })
+}
+
 /// `xark build`: `cargo` (any toolchain) builds the circuit
 /// for wasm32, then `xark-frontend` runs it to lower the circuit.
 fn build_stable(
@@ -281,34 +372,61 @@ fn build_stable(
     emit_json: bool,
 ) -> i32 {
     eprintln!("{} building circuit `{name}`", crate::style::tag());
-    // Clear the previous build's outputs first: if this build fails, `prove`,
-    // `setup` and `export` must not go on with the old circuit, and a build
-    // without `--emit-json`/`--profile` must not leave stale views beside it.
-    // Keys stay: `prove` checks them against the circuit they were made for.
-    for f in BUILD_OUTPUTS {
-        let path = out_abs.join(f);
-        if let Err(e) = std::fs::remove_file(&path)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!("xark: removing {}: {e}", path.display());
+    // One build at a time in `out_abs`: the outputs a build reuses or stamps are
+    // all one build's.
+    let lock = std::fs::create_dir_all(out_abs)
+        .and_then(|()| std::fs::File::create(out_abs.join(".build-lock")))
+        .and_then(|f| f.lock().map(|()| f));
+    let _lock = match lock {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("xark: locking {}: {e}", out_abs.display());
             return 1;
         }
-    }
+    };
+    // Clear the previous build's outputs unless they're reused: if this build
+    // fails, `prove`, `setup` and `export` must not go on with the old circuit, and
+    // a build without `--emit-json`/`--profile` must not leave stale views beside
+    // it. Keys stay: `prove` checks them against the circuit they were made for.
+    let clear = || {
+        for f in BUILD_OUTPUTS.iter().chain([&BUILD_KEY]) {
+            let path = out_abs.join(f);
+            if let Err(e) = std::fs::remove_file(&path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("xark: removing {}: {e}", path.display());
+                return false;
+            }
+        }
+        true
+    };
     // Every build carries DWARF line tables (free; see `BuildOptions`), so errors
     // and `--profile` attribution name source lines.
-    let (target_dir, opts) = (
-        crate_abs.join("target/xark-wasm"),
-        xark_frontend::BuildOptions::default(),
-    );
-    let wasm = match xark_frontend::build_crate_with(crate_abs, &target_dir, &opts) {
-        Ok(w) => w,
+    let target_dir = crate_abs.join("target/xark-wasm");
+    let built = xark_frontend::build_crate_with(crate_abs, &target_dir, &Default::default());
+    let built = match built {
+        Ok(b) => b,
         Err(e) => {
+            clear();
             eprintln!("xark: {e}");
             return 1;
         }
     };
+    let key = build_key(&built, crate_abs, field, profile, emit_json);
+    if reuse_build(out_abs, &key) {
+        let digest = std::fs::read_to_string(out_abs.join("digest")).unwrap_or_default();
+        eprintln!(
+            "{} {UNCHANGED}: reusing its circuit (digest {})",
+            crate::style::tag(),
+            digest.trim()
+        );
+        return 0;
+    }
+    if !clear() {
+        return 1;
+    }
     let mut lowered = match xark_frontend::lower_module(
-        &wasm,
+        &built.wasm,
         xark_ir::FieldSpec::named(field),
         profile,
         emit_json,
@@ -341,18 +459,25 @@ fn build_stable(
         );
         return 1;
     }
-    let _ = std::fs::write(out_abs.join("digest"), format!("{digest}\n"));
-    let _ = std::fs::write(
-        out_abs.join("schema.json"),
-        serde_json::to_string_pretty(&lowered.schema).unwrap_or_default() + "\n",
-    );
+    let wrote = std::fs::write(out_abs.join("digest"), format!("{digest}\n")).is_ok();
+    let wrote = wrote
+        & std::fs::write(
+            out_abs.join("schema.json"),
+            serde_json::to_string_pretty(&lowered.schema).unwrap_or_default() + "\n",
+        )
+        .is_ok();
     // The source files the circuit came from, gadgets included: how a plain `cargo
     // test` notices the circuit is out of date (`xark_prover::circuit`). Written
     // last: a build is only complete with it (`stale_build`), so one stopped
     // before here is rebuilt rather than used without its schema.
-    if let Ok(deps) = xark_frontend::circuit_sources(crate_abs, &target_dir) {
-        let list: String = deps.iter().map(|p| format!("{}\n", p.display())).collect();
-        let _ = std::fs::write(out_abs.join("deps"), list);
+    let list: String = built
+        .sources
+        .iter()
+        .map(|p| format!("{}\n", p.display()))
+        .collect();
+    // Only a build whose every output was written is reused.
+    if wrote & std::fs::write(out_abs.join("deps"), list).is_ok() {
+        write_build_key(out_abs, &key);
     }
     let p = &lowered.output.primitive;
     eprintln!(
@@ -570,7 +695,7 @@ fn check_stable(crate_abs: &std::path::Path, json: bool) -> i32 {
     };
     let target_dir = crate_abs.join("target/xark-wasm");
     let wasm = match xark_frontend::build_crate_with(crate_abs, &target_dir, &opts) {
-        Ok(w) => w,
+        Ok(b) => b.wasm,
         // Cargo already reported why (on stdout as JSON when asked).
         Err(e) => {
             if !json {
