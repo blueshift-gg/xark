@@ -2474,9 +2474,10 @@ fn aes_matches_lean_model() {
     assert!(c.status_success, "aes gadget compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    // 145816 for the block + 384 booleanity rows range-checking the example's 48
-    // `u8` inputs (8 bits each; the inputs became `[u8; 16]` in c0b63cd).
-    assert_eq!(mul, 146200, "AES-128 mult-gate count; got {mul}");
+    // 145816 for the block + 128 booleanity rows range-checking `ct`'s 16 `u8`s.
+    // `pt` and `key` are range-checked too, but the block splits them into bits
+    // anyway and reuses the range check's.
+    assert_eq!(mul, 145944, "AES-128 mult-gate count; got {mul}");
 }
 
 /// **R1CS ↔ Lean bridge (AES-256).** The AES-256 block reuses the exact round-step
@@ -2554,8 +2555,10 @@ fn aes_gcm_matches_lean_model() {
     let mul = c.mul_gate_count();
     // Flat (no templates). 160 fewer than before AND outputs (products of pinned
     // bits) were known boolean: a `to_bits` of a sum of them now reuses those bits
-    // (the bit-sum shortcut) instead of re-decomposing.
-    let want = 715824;
+    // (the bit-sum shortcut) instead of re-decomposing. 488 fewer again since the
+    // `u8` inputs' range-check bits are kept: the gadget's split of `aad`, `pt`,
+    // `key` and `nonce` (61 bytes) reuses them.
+    let want = 715336;
     assert_eq!(mul, want, "AES-128-GCM mult-gate count; got {mul}");
 }
 
