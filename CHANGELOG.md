@@ -296,6 +296,10 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Added
 
+- Tests that the `alt_bn128` syscalls and their Arkworks fallback reject a G1 point
+  off the curve or with a coordinate `>= q`, and an off-subgroup G2 point in a
+  pairing. The verifier relies on them for those checks, and nothing pinned it.
+
 - `bind(x)`, for a public input that only the verifier supplies (a recipient, a
   nonce): one constraint that any value satisfies, which ties the proof to the
   value it was made for. Leaving such an input unused is refused at build time, and
