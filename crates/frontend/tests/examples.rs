@@ -37,6 +37,30 @@ fn cube() {
     );
 }
 
+/// The check `xark build` runs catches an artifact that differs from the lowering:
+/// constraints reordered, or one missing.
+#[test]
+fn a_mismatched_circuit_xbc_is_caught() {
+    let l = example("poseidon");
+    let out = &l.output;
+    let verify = |r1cs: &xark_ir::r1cs::R1csProgram| {
+        xark_ir::function_decode::verify_blob_matches(&out.xbc, r1cs, &out.primitive)
+    };
+    assert!(verify(&out.r1cs).is_ok());
+    let mut swapped = out.r1cs.clone();
+    let i = (1..swapped.constraints.len())
+        .find(|&i| {
+            let (x, y) = (&swapped.constraints[i], &swapped.constraints[0]);
+            (&x.a, &x.b, &x.c) != (&y.a, &y.b, &y.c)
+        })
+        .unwrap();
+    swapped.constraints.swap(0, i);
+    assert!(verify(&swapped).is_err());
+    let mut short = out.r1cs.clone();
+    short.constraints.pop();
+    assert!(verify(&short).is_err());
+}
+
 #[test]
 fn poseidon_keeps_large_sums_inline() {
     // Naming every multiplication operand over 8 terms (as the removed MIR

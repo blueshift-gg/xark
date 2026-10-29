@@ -341,6 +341,10 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- `xark build` checks that the `circuit.xbc` it writes expands to exactly the
+  circuit it lowered, and fails before writing anything if not. The check used to
+  run only in xark's own tests, so a compaction bug on a user's circuit would have
+  shipped silently. It adds 0–15% to a build (1.8s of 12s on `secp256r1_ecdsa`).
 - `Field::to_bits::<N>` of a constant takes the bits of its field element. A constant
   above `p/2` (e.g. `2^253 - 1`) is stored as a negative integer, so it failed to
   build with "does not fit in N bits", and in a witness branch it ruled the branch

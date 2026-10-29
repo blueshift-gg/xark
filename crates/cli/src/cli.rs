@@ -319,6 +319,19 @@ fn build_stable(
             return 1;
         }
     };
+    // The artifact must expand to exactly the circuit just lowered: the keys and
+    // the prover only ever see `circuit.xbc`.
+    if let Err(e) = xark_ir::function_decode::verify_blob_matches(
+        &lowered.output.xbc,
+        &lowered.output.r1cs,
+        &lowered.output.primitive,
+    ) {
+        eprintln!(
+            "{} internal: circuit.xbc does not match the lowered circuit: {e}",
+            crate::style::err("error:")
+        );
+        return 1;
+    }
     // The R1CS digest: what the proving/verifying keys depend on, and the same
     // under every supported rustc (docs/toolchain.md).
     let digest = format!(
