@@ -345,6 +345,10 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- The `xark` crate docs said `^` on `Field` is exponentiation. It is boolean XOR, and
+  it doesn't check that its operands are 0 or 1, so `x ^ Field::from(3u8)` built and
+  constrained `3 - 5x`, not `x³`. The example now uses `x.pow(3)` and is compiled as a
+  doctest, and the `^` / `Field::xor` docs say booleanity is unchecked.
 - `xark build` checks that the `circuit.xbc` it writes expands to exactly the
   circuit it lowered, and fails before writing anything if not. The check used to
   run only in xark's own tests, so a compaction bug on a user's circuit would have

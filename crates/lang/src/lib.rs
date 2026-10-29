@@ -4,18 +4,24 @@
 //! wasm32 → xark-IR → R1CS → Groth16) with no per-gadget backend support — gadgets are
 //! ordinary frontend library code lowering to the same primitive constraint set.
 //!
-//! ```rust,ignore
-//! use xark::prelude::*;
+//! ```rust,no_run
+//! use xark::{circuit, require_eq, Field, Private, Public};
 //!
-//! /// Prove knowledge of a cube root: `secret^3 == result`.
-//! pub fn circuit(secret: Private<Field>, result: Public<Field>) {
-//!     require_eq(secret ^ 3, result);
+//! /// Prove knowledge of a cube root: `secret³ == result`.
+//! #[circuit]
+//! pub fn cube(secret: Private<Field>, result: Public<Field>) {
+//!     require_eq(secret.pow(3), result);
 //! }
+//!
+//! // On the host (in a circuit crate's tests), calling it checks these inputs.
+//! cube(3, 27).unwrap();
+//! assert!(cube(3, 28).is_err());
 //! ```
 //!
 //! [`Private<T>`]/[`Public<T>`] are transparent aliases the compiler recovers from
 //! the signature; [`require_eq`] emits an equality constraint (circuit `==`, not
-//! native `bool`); `Field` supports `+ - * ^` (`^ n` = exponentiation). Lower-level
+//! native `bool`); `Field` supports `+ - * /`, and [`Field::pow`] for powers. `^` is
+//! not a power: it is boolean XOR, for operands already known to be 0 or 1. Lower-level
 //! bit/word helpers (`xark-bits`) and gadgets (`xark-bignum`, `xark-poseidon`, …)
 //! are separate crates.
 

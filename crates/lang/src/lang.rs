@@ -415,6 +415,11 @@ impl Field {
     /// Boolean XOR: for `self, rhs ∈ {0,1}`, returns `self ^ rhs` as a single
     /// constrained variable (one fused R1CS constraint), avoiding the linear-
     /// combination growth of writing `self + rhs - 2*self*rhs` by hand.
+    ///
+    /// Booleanity is **not** checked: the result is constrained to
+    /// `self + rhs - 2·self·rhs` whatever the operands are, so for other values it
+    /// is not XOR (`x ^ Field::from(3u8)` is `3 - 5x`). Use it only on values
+    /// already constrained to 0 or 1, such as bits from `to_bits`.
     #[inline(never)]
     pub fn xor(self, rhs: Field) -> Field {
         __xark_xor(self, rhs)
@@ -790,6 +795,7 @@ impl DivAssign for Field {
 
 /// Bitwise XOR `^` on `Field`, matching Rust's meaning: for `self, rhs ∈ {0,1}`
 /// this is boolean XOR, one fused R1CS constraint (sugar for [`Field::xor`]).
+/// Booleanity is not checked; for other operands the result is not XOR.
 /// Exponentiation is now [`Field::pow`] (`x.pow(3)`), *not* `^` — overloading `^`
 /// for powers silently reversed the meaning of valid-looking Rust.
 impl BitXor for Field {
