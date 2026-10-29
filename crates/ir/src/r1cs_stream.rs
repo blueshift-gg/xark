@@ -239,6 +239,9 @@ impl RowFile {
         w: usize,
         lc: &mut dyn FnMut(u32, &[(u32, u32)]),
     ) -> Result<(), String> {
+        if w >= self.offsets.len() {
+            return Err(format!("r1cs.stream window {w} is out of range"));
+        }
         let bad = || "malformed r1cs.stream row".to_string();
         let b = &self.bytes;
         let mut p = self.rows_start + self.offsets[w] as usize;
@@ -349,6 +352,7 @@ mod tests {
             .unwrap();
         }
         assert_eq!(row, prog.constraints.len());
+        assert!(rf.decode_window(rf.num_windows(), &mut |_, _| {}).is_err());
         // Truncation is an error, never a panic.
         let bytes = encode("fp", &prog);
         for cut in [3, 10, bytes.len() / 2] {
