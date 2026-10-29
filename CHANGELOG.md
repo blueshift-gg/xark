@@ -341,6 +341,15 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- `xark ceremony verify` and `finalize` check the whole of the shipped keys, not just
+  δ. They took any α, β, γ and public-input points, so a coordinator could ship `γ =
+  δ` (which lets anyone prove anything) behind an honest contribution chain and have
+  it marked `production_safe`. They now recompute the keys `init` made from the
+  circuit, the `.ptau` (a new required `--ptau-file`) and the phase-2 seed, which
+  `init` records in `circuit_meta.json`, and require the shipped keys to be those
+  with only δ changed, by exactly the chain. `baseline_delta_g1.bin` is checked
+  against them too. A ceremony begun with an older xark (no recorded seed) can't be
+  checked: start it again.
 - Native integer arithmetic inside a `witness_begin()`/`witness_end()` region is
   constrained. It used to be free there like `Field` ops, so an integer computed in
   the region was trusted afterwards with no range proof (a `u32` quotient could be

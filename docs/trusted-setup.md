@@ -49,8 +49,10 @@ cd examples/cube && xark build
 xark ceremony init --ptau-file final.ptau --out ceremony/   # reads target/xark/…/circuit.xbc
 xark ceremony contribute --ceremony-dir ceremony/ --label alice
 xark ceremony contribute --ceremony-dir ceremony/ --label bob
-xark ceremony verify --ceremony-dir ceremony/ # checks the chain
-xark ceremony finalize --ceremony-dir ceremony/
+# checks the chain, and that the keys are the circuit's (from final.ptau and the
+# recorded seed) with only δ changed
+xark ceremony verify --ceremony-dir ceremony/ --ptau-file final.ptau
+xark ceremony finalize --ceremony-dir ceremony/ --ptau-file final.ptau
 
 # --- prove + verify with the finalized keys ---
 xark prove --inputs '{"secret": "3", "result": "27"}' \
@@ -81,5 +83,6 @@ Fixed entropy, seeds and beacons make *test* vectors reproducible; they are **no
 - multiple **independent** phase-1 contributors and a **public randomness beacon** (e.g. a future
   block hash / drand round) for phase 1;
 - multiple independent phase-2 `contribute` participants, each publishing their attestation, with
-  `xark ceremony verify` run by third parties;
+  `xark ceremony verify` run by third parties, each from their own build of the circuit and their
+  own copy of the phase-1 `.ptau`;
 - the full transcript (per-contributor attestations) published for public verification.

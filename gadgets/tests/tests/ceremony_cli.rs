@@ -69,9 +69,23 @@ fn ceremony_keys_prove_and_verify() {
         "--label",
         "bob",
     ]);
-    let log = step(&["ceremony", "verify", "--ceremony-dir", cer_s]);
+    let log = step(&[
+        "ceremony",
+        "verify",
+        "--ceremony-dir",
+        cer_s,
+        "--ptau-file",
+        ptau_s,
+    ]);
     assert!(log.contains("alice") && log.contains("bob"), "{log}");
-    let log = step(&["ceremony", "finalize", "--ceremony-dir", cer_s]);
+    let log = step(&[
+        "ceremony",
+        "finalize",
+        "--ceremony-dir",
+        cer_s,
+        "--ptau-file",
+        ptau_s,
+    ]);
     // The final verifying key's sha256 (a client pins its verifier to it): printed
     // and recorded.
     {
@@ -192,7 +206,14 @@ fn ceremony_keys_prove_and_verify() {
             .trim(),
         "0"
     );
-    let log = step(&["ceremony", "verify", "--ceremony-dir", cer_s]);
+    let log = step(&[
+        "ceremony",
+        "verify",
+        "--ceremony-dir",
+        cer_s,
+        "--ptau-file",
+        ptau_s,
+    ]);
     assert!(log.contains("Verified 0 contribution"), "{log}");
 }
 
@@ -206,10 +227,11 @@ fn a_wrong_or_damaged_ceremony_dir_says_so() {
     assert!(ok, "xark build: {log}");
     let missing = tmp.path().join("no-such-ceremony");
     for cmd in ["contribute", "verify", "finalize"] {
-        let (ok, log) = xark(
-            &["ceremony", cmd, "--ceremony-dir", missing.to_str().unwrap()],
-            &out,
-        );
+        let mut args = vec!["ceremony", cmd, "--ceremony-dir", missing.to_str().unwrap()];
+        if cmd != "contribute" {
+            args.extend(["--ptau-file", "test.ptau"]);
+        }
+        let (ok, log) = xark(&args, &out);
         assert!(
             !ok && log.contains("isn't a ceremony directory") && log.contains("ceremony init"),
             "ceremony {cmd}: {log}"
@@ -240,4 +262,65 @@ fn a_wrong_or_damaged_ceremony_dir_says_so() {
         !ok && log.contains("proving_key.bin isn't a proving key written by `xark ceremony`"),
         "{log}"
     );
+}
+
+/// A coordinator ships keys with `γ = δ` behind an honest contribution chain (which
+/// lets anyone prove anything): `verify` and `finalize` recompute the initial keys
+/// from the circuit, the `.ptau` and the recorded seed, and refuse them. A ceremony
+/// without a recorded seed (begun with an older xark) can't be checked, and says so.
+#[test]
+fn keys_changed_beyond_delta_are_refused() {
+    use xark_backend::keys::Groth16Keys;
+    let tmp = tempdir();
+    let (out, target) = (tmp.path().join("cube"), tmp.path().join("target"));
+    let (ok, log) = xark_build("cube", &out, &target);
+    assert!(ok, "xark build: {log}");
+    let ptau = tmp.path().join("test.ptau");
+    std::fs::write(&ptau, build_valid_ptau(12)).unwrap();
+    let cer = tmp.path().join("ceremony");
+    let (cer_s, ptau_s) = (cer.to_str().unwrap(), ptau.to_str().unwrap());
+    let run = |cmd: &str| {
+        let mut args = vec!["ceremony", cmd, "--ceremony-dir", cer_s];
+        if cmd != "contribute" {
+            args.extend(["--ptau-file", ptau_s]);
+        }
+        xark(&args, &out)
+    };
+    let (ok, log) = xark(
+        &["ceremony", "init", "--ptau-file", ptau_s, "--out", cer_s],
+        &out,
+    );
+    assert!(ok, "init: {log}");
+    let (ok, log) = run("contribute");
+    assert!(ok, "contribute: {log}");
+    let (ok, log) = run("verify");
+    assert!(ok, "an honest ceremony verifies: {log}");
+
+    let (pk_path, vk_path) = (cer.join("proving_key.bin"), cer.join("verifying_key.bin"));
+    let honest_pk = std::fs::read(&pk_path).unwrap();
+    let honest_vk = std::fs::read(&vk_path).unwrap();
+    let mut keys = Groth16Keys {
+        proving_key: Groth16Keys::read_proving_key(&pk_path).unwrap(),
+        verifying_key: Groth16Keys::read_verifying_key(&vk_path).unwrap(),
+    };
+    keys.verifying_key.gamma_g2 = keys.verifying_key.delta_g2;
+    keys.proving_key.vk = keys.verifying_key.clone();
+    keys.write_proving_key(&pk_path).unwrap();
+    keys.write_verifying_key(&vk_path).unwrap();
+    for cmd in ["verify", "finalize"] {
+        let (ok, log) = run(cmd);
+        assert!(!ok && log.contains("γ"), "{cmd} took γ = δ: {log}");
+    }
+    assert!(!cer.join("metadata.json").exists());
+
+    // The honest keys back, but no recorded seed.
+    std::fs::write(&pk_path, honest_pk).unwrap();
+    std::fs::write(&vk_path, honest_vk).unwrap();
+    let meta_path = cer.join("circuit_meta.json");
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    meta.as_object_mut().unwrap().remove("phase2_seed");
+    std::fs::write(&meta_path, meta.to_string()).unwrap();
+    let (ok, log) = run("verify");
+    assert!(!ok && log.contains("older xark"), "{log}");
 }

@@ -11,6 +11,7 @@ use xark_groth16::{ProvingKey, VerifyingKey};
 use crate::serialization::{canonical_read_from_file, canonical_write_to_file};
 
 /// Bundle of Arkworks Groth16 keys for BN254.
+#[derive(Clone)]
 pub struct Groth16Keys {
     pub proving_key: ProvingKey<Bn254>,
     pub verifying_key: VerifyingKey<Bn254>,

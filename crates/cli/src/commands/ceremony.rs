@@ -7,8 +7,10 @@
 //!   `delta_g1` is recorded so verifiers can re-anchor the contribution chain.
 //! * `contribute` — apply this contributor's secret `δ_i` to the keys in place,
 //!   writing a `contribution_<n>.json` attestation.
-//! * `verify` — walk the contribution chain against the original `delta_g1`
-//!   baseline and confirm every Schnorr proof + δ-consistency pairing check.
+//! * `verify` — recompute the initial keys from the circuit, the `.ptau` and the
+//!   recorded seed, walk the contribution chain from their `delta_g1` (every
+//!   Schnorr proof + δ-consistency pairing check), and confirm the shipped keys
+//!   are the initial ones with only δ changed.
 //! * `finalize` — verify, then write the final `metadata.json`.
 
 use std::fs;
@@ -22,6 +24,7 @@ use rand::rngs::OsRng;
 
 use xark_backend::ceremony::{
     Contribution, contribute, verify_chain, verify_keys_consistent_with_chain,
+    verify_keys_match_initial,
 };
 use xark_backend::keys::{Groth16Keys, KeyMetadata};
 use xark_backend::ptau::parse_ptau;
@@ -84,17 +87,21 @@ pub struct ContributeArgs {
 
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
+    /// Circuit crate directory (or its `target/xark/<name>/` output dir) the
+    /// ceremony is for. Defaults to the current directory.
+    #[arg(value_hint = clap::ValueHint::DirPath)]
+    pub path: Option<PathBuf>,
     /// The directory `xark ceremony init --out` created.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub ceremony_dir: PathBuf,
+    /// The Powers-of-Tau transcript the ceremony was begun from: the initial keys
+    /// are recomputed from it, and the shipped keys must be them with only δ changed.
+    #[arg(long, value_hint = clap::ValueHint::FilePath)]
+    pub ptau_file: PathBuf,
 }
 
-#[derive(Args, Debug)]
-pub struct FinalizeArgs {
-    /// The directory `xark ceremony init --out` created.
-    #[arg(long, value_hint = clap::ValueHint::DirPath)]
-    pub ceremony_dir: PathBuf,
-}
+/// `finalize` verifies first, so it takes what `verify` does.
+pub type FinalizeArgs = VerifyArgs;
 
 pub fn run(args: CeremonyArgs) -> Result<()> {
     match args.command {
@@ -121,16 +128,6 @@ fn run_init(args: InitArgs) -> Result<()> {
             f.file_name().unwrap_or_default().to_string_lossy()
         );
     }
-    // The build's `circuit.xbc`, loaded as `xark setup` does.
-    let project = XarkProject::resolve(args.path.clone())?;
-    crate::cli::require_bn254(&project.circuit_xbc())?;
-    let (prog, hash) = load_backend_r1cs(&project.circuit_xbc())?;
-    let digest = fs::read(project.circuit_xbc())
-        .ok()
-        .map(|b| super::r1cs_digest(&b));
-    let num_pi = num_public_inputs(&prog);
-    let circuit = XarkCircuit::for_setup(prog);
-
     let mut seed_arr = [0u8; 32];
     if let Some(ref seed_hex) = args.phase2_seed {
         let seed_bytes = hex::decode(seed_hex.trim_start_matches("0x"))
@@ -147,14 +144,13 @@ fn run_init(args: InitArgs) -> Result<()> {
         OsRng.fill_bytes(&mut seed_arr);
     }
 
-    let ptau_bytes = fs::read(&args.ptau_file)
-        .with_context(|| format!("reading {}", args.ptau_file.display()))?;
-    let ptau = parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
-
-    let src = xark_groth16::ProgramSource::new(circuit.prog());
-    let num_constraints = xark_groth16::ConstraintSource::num_constraints(&src);
-    let keys = xark_backend::ptau::setup_from_ptau(&src, &ptau, &seed_arr)
-        .map_err(|e| anyhow!("phase-2 setup failed: {e}"))?;
+    let Initial {
+        keys,
+        hash,
+        digest,
+        num_pi,
+        num_constraints,
+    } = initial_keys(args.path.clone(), &args.ptau_file, &seed_arr)?;
 
     // The new keys exist, so `--force` can now clear the old ceremony.
     for f in &existing {
@@ -192,6 +188,9 @@ fn run_init(args: InitArgs) -> Result<()> {
             "ptau_source": args.ptau_file.file_name().and_then(|s| s.to_str()),
             // `XarkCircuit::for_setup`: the boundary-minimized rows.
             "r1cs_form": "minimized",
+            // Public: `verify` recomputes the initial keys from it. The δ it gives
+            // is overwritten by every contribution.
+            "phase2_seed": hex::encode(seed_arr),
         }))?,
     )?;
 
@@ -245,10 +244,83 @@ fn run_contribute(args: ContributeArgs) -> Result<()> {
     Ok(())
 }
 
+/// The keys `init` made, recomputed from the build's `circuit.xbc`, a `.ptau` and
+/// the phase-2 seed, with what `circuit_meta.json` records about them.
+struct Initial {
+    keys: Groth16Keys,
+    hash: String,
+    digest: Option<String>,
+    num_pi: usize,
+    num_constraints: usize,
+}
+
+fn initial_keys(
+    path: Option<PathBuf>,
+    ptau_file: &std::path::Path,
+    seed: &[u8; 32],
+) -> Result<Initial> {
+    // The build's `circuit.xbc`, loaded as `xark setup` does.
+    let project = XarkProject::resolve(path)?;
+    crate::cli::require_bn254(&project.circuit_xbc())?;
+    let (prog, hash) = load_backend_r1cs(&project.circuit_xbc())?;
+    let digest = fs::read(project.circuit_xbc())
+        .ok()
+        .map(|b| super::r1cs_digest(&b));
+    let num_pi = num_public_inputs(&prog);
+    let circuit = XarkCircuit::for_setup(prog);
+
+    let ptau_bytes =
+        fs::read(ptau_file).with_context(|| format!("reading {}", ptau_file.display()))?;
+    let ptau = parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
+
+    let src = xark_groth16::ProgramSource::new(circuit.prog());
+    let num_constraints = xark_groth16::ConstraintSource::num_constraints(&src);
+    let keys = xark_backend::ptau::setup_from_ptau(&src, &ptau, seed)
+        .map_err(|e| anyhow!("phase-2 setup failed: {e}"))?;
+    Ok(Initial {
+        keys,
+        hash,
+        digest,
+        num_pi,
+        num_constraints,
+    })
+}
+
 fn run_verify(args: VerifyArgs) -> Result<()> {
     let dir = &args.ceremony_dir;
     require_ceremony(dir)?;
-    let baseline = read_baseline_delta_g1(dir)?;
+    let meta: serde_json::Value = serde_json::from_slice(
+        &fs::read(dir.join("circuit_meta.json")).context("reading circuit_meta.json")?,
+    )
+    .context("parsing circuit_meta.json")?;
+    let seed_hex = meta["phase2_seed"].as_str().ok_or_else(|| {
+        anyhow!(
+            "{} was begun with an older xark, which didn't record the phase-2 seed, so its \
+             keys can't be checked against the circuit: start it again with `xark ceremony \
+             init`",
+            dir.display()
+        )
+    })?;
+    let seed: [u8; 32] = hex::decode(seed_hex)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| anyhow!("circuit_meta.json's phase2_seed isn't 32 bytes of hex"))?;
+    let initial = initial_keys(args.path.clone(), &args.ptau_file, &seed)?;
+    if meta["circuit_hash"].as_str() != Some(initial.hash.as_str()) {
+        bail!(
+            "the ceremony in {} is for another circuit than this build (its circuit_hash \
+             differs): verify it from the build it was begun from",
+            dir.display()
+        );
+    }
+    // The chain starts from the recomputed keys' δ, not one the directory claims.
+    let baseline = initial.keys.proving_key.delta_g1;
+    if read_baseline_delta_g1(dir)? != baseline {
+        bail!(
+            "verify failed: baseline_delta_g1.bin isn't the initial keys' δ·G1 (recomputed \
+             from the circuit, the .ptau and the seed)"
+        );
+    }
     let count = read_contribution_count(dir)?;
     // no with_capacity: count is attacker-supplied
     let mut contributions: Vec<Contribution> = Vec::new();
@@ -265,9 +337,11 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
         .context("loading ceremony keys to bind them to the transcript")?;
     verify_keys_consistent_with_chain(&keys, baseline, &contributions)
         .map_err(|e| anyhow!("verify failed: {e}"))?;
+    verify_keys_match_initial(&keys, &initial.keys, &mut OsRng)
+        .map_err(|e| anyhow!("verify failed: {e}"))?;
     println!(
-        "Verified {count} contribution(s); chain anchored to baseline_delta_g1 \
-         and bound to the shipped keys."
+        "Verified {count} contribution(s); the shipped keys are the circuit's initial \
+         keys (from the .ptau and the recorded seed) with only δ changed, by the chain."
     );
     for (i, c) in contributions.iter().enumerate() {
         println!("  contribution {:04}: {}", i + 1, c.contributor_label);
@@ -276,11 +350,9 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
 }
 
 fn run_finalize(args: FinalizeArgs) -> Result<()> {
-    let dir = &args.ceremony_dir;
-    // Re-run verify first so finalize fails fast on tampered chains.
-    run_verify(VerifyArgs {
-        ceremony_dir: dir.clone(),
-    })?;
+    let dir = &args.ceremony_dir.clone();
+    // Verify first: only keys that pass are marked production-safe.
+    run_verify(args)?;
 
     let meta_path = dir.join("metadata.json");
     let circuit_meta_raw =
