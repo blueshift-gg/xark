@@ -341,6 +341,12 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- Native integer arithmetic inside a `witness_begin()`/`witness_end()` region is
+  constrained. It used to be free there like `Field` ops, so an integer computed in
+  the region was trusted afterwards with no range proof (a `u32` quotient could be
+  `3⁻¹ mod p`, proving `1 = 3·q`). And because the optimizer may merge integer code
+  across the region's ends, a value recomputed after the region could be the
+  region's unconstrained one. No example or gadget circuit changes.
 - A circuit with a `u128` input beside a narrower integer input (`struct { x: u8,
   z: u128 }`, or two parameters) no longer crashes the build with "index out of
   bounds".

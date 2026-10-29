@@ -1116,8 +1116,26 @@ impl Host {
     }
 }
 
-impl crate::interp::Host for Host {
-    fn int_bin(&mut self, m: &mut Machine, o: Bin, wide: bool, a: V, b: V) -> CompileResult<V> {
+impl Host {
+    /// Run a native-integer op with every constraint it emits kept, even inside a
+    /// `witness_begin` region. Integer ops are plain wasm, which LLVM may move or
+    /// merge across the region markers (a value recomputed after `witness_end` can
+    /// become the region's own), so only `Field` imports may be free there.
+    fn native_int<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let wo = core::mem::replace(&mut self.b.witness_only, false);
+        let r = f(self);
+        self.b.witness_only = wo;
+        r
+    }
+
+    fn int_bin_impl(
+        &mut self,
+        m: &mut Machine,
+        o: Bin,
+        wide: bool,
+        a: V,
+        b: V,
+    ) -> CompileResult<V> {
         probe_guard(m)?;
         self.mark_site(m);
         let reg = if wide { 64 } else { 32 };
@@ -1371,7 +1389,14 @@ impl crate::interp::Host for Host {
         })
     }
 
-    fn int_cmp(&mut self, m: &mut Machine, o: Cmp, wide: bool, a: V, b: V) -> CompileResult<V> {
+    fn int_cmp_impl(
+        &mut self,
+        m: &mut Machine,
+        o: Cmp,
+        wide: bool,
+        a: V,
+        b: V,
+    ) -> CompileResult<V> {
         probe_guard(m)?;
         self.mark_site(m);
         let reg = if wide { 64 } else { 32 };
@@ -1420,7 +1445,7 @@ impl crate::interp::Host for Host {
         Ok(out)
     }
 
-    fn index_form(&mut self, m: &mut Machine, p: V) -> Option<(u64, Vec<u64>, V)> {
+    fn index_form_impl(&mut self, m: &mut Machine, p: V) -> Option<(u64, Vec<u64>, V)> {
         if m.probing {
             return None;
         }
@@ -1503,10 +1528,77 @@ impl crate::interp::Host for Host {
         Some((base, offsets, idx))
     }
 
-    fn sign_extend(&mut self, m: &mut Machine, x: V, width: u32, reg: u32) -> CompileResult<V> {
+    fn sign_extend_impl(
+        &mut self,
+        m: &mut Machine,
+        x: V,
+        width: u32,
+        reg: u32,
+    ) -> CompileResult<V> {
         probe_guard(m)?;
         self.mark_site(m);
         self.sext_impl(m, x, width, reg)
+    }
+
+    fn int_trunc_impl(&mut self, m: &mut Machine, v: V, bits: u32) -> CompileResult<V> {
+        probe_guard(m)?;
+        self.mark_site(m);
+        let (lc, w) = self.int_parts(m, v)?;
+        self.int_result(m, lc, w, bits)
+    }
+
+    fn not_impl(&mut self, m: &mut Machine, c: V) -> CompileResult<V> {
+        if !c.is_sym() {
+            return Ok(V::i32((c.b == 0) as u32));
+        }
+        let lc = LinearCombination::one() - self.int_lc(m, c)?;
+        Ok(self.new_wire(m, lc, 1))
+    }
+
+    fn bool_op_impl(&mut self, m: &mut Machine, op: BoolOp, a: V, b: V) -> CompileResult<V> {
+        probe_guard(m)?;
+        self.mark_site(m);
+        // Fold a concrete operand first (`x & 1`, `x | 0`, …).
+        for (x, y) in [(a, b), (b, a)] {
+            if !y.is_sym() {
+                return Ok(match (op, y.b != 0) {
+                    (BoolOp::And, true) | (BoolOp::Or, false) | (BoolOp::Xor, false) => x,
+                    (BoolOp::And, false) => V::i32(0),
+                    (BoolOp::Or, true) => V::i32(1),
+                    (BoolOp::Xor, true) => return self.not_impl(m, x),
+                });
+            }
+        }
+        let la = self.int_lc(m, a)?;
+        let lb = self.int_lc(m, b)?;
+        let out = match op {
+            BoolOp::And => {
+                self.b.consume_pending(&la);
+                self.b.consume_pending(&lb);
+                self.b.emit_mul(la, lb)
+            }
+            BoolOp::Or => self.b.emit_or(la, lb),
+            BoolOp::Xor => self.b.emit_xor(la, lb),
+        };
+        Ok(self.new_wire(m, out, 1))
+    }
+}
+
+impl crate::interp::Host for Host {
+    fn int_bin(&mut self, m: &mut Machine, o: Bin, wide: bool, a: V, b: V) -> CompileResult<V> {
+        self.native_int(|h| h.int_bin_impl(m, o, wide, a, b))
+    }
+
+    fn int_cmp(&mut self, m: &mut Machine, o: Cmp, wide: bool, a: V, b: V) -> CompileResult<V> {
+        self.native_int(|h| h.int_cmp_impl(m, o, wide, a, b))
+    }
+
+    fn index_form(&mut self, m: &mut Machine, p: V) -> Option<(u64, Vec<u64>, V)> {
+        self.native_int(|h| h.index_form_impl(m, p))
+    }
+
+    fn sign_extend(&mut self, m: &mut Machine, x: V, width: u32, reg: u32) -> CompileResult<V> {
+        self.native_int(|h| h.sign_extend_impl(m, x, width, reg))
     }
 
     fn require_cond(&mut self, m: &mut Machine, cond: u32, value: bool) -> CompileResult<()> {
@@ -1541,10 +1633,7 @@ impl crate::interp::Host for Host {
     }
 
     fn int_trunc(&mut self, m: &mut Machine, v: V, bits: u32) -> CompileResult<V> {
-        probe_guard(m)?;
-        self.mark_site(m);
-        let (lc, w) = self.int_parts(m, v)?;
-        self.int_result(m, lc, w, bits)
+        self.native_int(|h| h.int_trunc_impl(m, v, bits))
     }
 
     fn link(&mut self, module: &Module) -> CompileResult<()> {
@@ -1585,39 +1674,11 @@ impl crate::interp::Host for Host {
     }
 
     fn not(&mut self, m: &mut Machine, c: V) -> CompileResult<V> {
-        if !c.is_sym() {
-            return Ok(V::i32((c.b == 0) as u32));
-        }
-        let lc = LinearCombination::one() - self.int_lc(m, c)?;
-        Ok(self.new_wire(m, lc, 1))
+        self.native_int(|h| h.not_impl(m, c))
     }
 
     fn bool_op(&mut self, m: &mut Machine, op: BoolOp, a: V, b: V) -> CompileResult<V> {
-        probe_guard(m)?;
-        self.mark_site(m);
-        // Fold a concrete operand first (`x & 1`, `x | 0`, …).
-        for (x, y) in [(a, b), (b, a)] {
-            if !y.is_sym() {
-                return Ok(match (op, y.b != 0) {
-                    (BoolOp::And, true) | (BoolOp::Or, false) | (BoolOp::Xor, false) => x,
-                    (BoolOp::And, false) => V::i32(0),
-                    (BoolOp::Or, true) => V::i32(1),
-                    (BoolOp::Xor, true) => return self.not(m, x),
-                });
-            }
-        }
-        let la = self.int_lc(m, a)?;
-        let lb = self.int_lc(m, b)?;
-        let out = match op {
-            BoolOp::And => {
-                self.b.consume_pending(&la);
-                self.b.consume_pending(&lb);
-                self.b.emit_mul(la, lb)
-            }
-            BoolOp::Or => self.b.emit_or(la, lb),
-            BoolOp::Xor => self.b.emit_xor(la, lb),
-        };
-        Ok(self.new_wire(m, out, 1))
+        self.native_int(|h| h.bool_op_impl(m, op, a, b))
     }
 
     fn call(&mut self, m: &mut Machine, import: u32, a: &[V]) -> CompileResult<Option<V>> {
@@ -2068,7 +2129,8 @@ impl crate::interp::Host for Host {
                         "internal error: `field_to_uint` is at most 64 bits wide",
                     ));
                 }
-                let bits = self.bits_of(&x, w as usize)?;
+                // An integer from here on: its range proof is kept even in a region.
+                let bits = self.native_int(|h| h.bits_of(&x, w as usize))?;
                 let lc = Self::recompose(&bits);
                 return Ok(Some(self.new_wire(m, lc, w)));
             }

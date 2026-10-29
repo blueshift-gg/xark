@@ -1067,9 +1067,11 @@ pub fn require_ne(a: impl Into<Field>, b: impl Into<Field>) {
     let _ = (a.into() - b.into()).inv();
 }
 
-/// Open a **witness-only** region. Until [`witness_end`], value-producing ops
-/// (multiplications, `hint_*` calls) still fill their witness but emit **no R1CS
-/// constraints**, and the vars they allocate are pinning-exempt. This lets a
+/// Open a **witness-only** region. Until [`witness_end`], value-producing [`Field`]
+/// ops (multiplications, `hint_*` calls) still fill their witness but emit **no R1CS
+/// constraints**, and the vars they allocate are pinning-exempt. Native integer
+/// (`u8`…`u64`, `bool`) arithmetic is constrained as usual inside the region: it is
+/// plain wasm, which the optimizer may move or merge across the region's ends. This lets a
 /// gadget *derive* advice (an inverse chain, a GLV reduction, a decompressed
 /// coordinate) at **zero constraint cost**, then pin only the final result with
 /// normal constrained code after `witness_end`.

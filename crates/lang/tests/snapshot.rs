@@ -5605,6 +5605,32 @@ fn witness_regions_leave_no_proven_facts() {
     );
 }
 
+/// Native integer ops stay constrained inside a `witness_begin()` region: they are
+/// plain wasm, which LLVM may merge across the markers, so an integer computed there
+/// can be the very value used afterwards. A quotient taken in the region keeps its
+/// range proof (else `q = 3⁻¹ mod p` proves `1 = 3·q`); a product recomputed after
+/// the region (merged into the region's) is still pinned to `x·y`.
+#[test]
+fn witness_regions_constrain_native_integers() {
+    probe(
+        "wo_div",
+        "n: Public<u32>",
+        "witness_begin();\nlet q = core::hint::black_box(n / 3);\nwitness_end();\n\
+         require((q as u64) * 3 == n as u64);",
+        &[(&[("n", "3")], true), (&[("n", "1")], false)],
+    );
+    probe(
+        "wo_merged",
+        "x: Private<u32>, y: Private<u32>, z: Public<u32>",
+        "witness_begin();\nlet t = core::hint::black_box(x.wrapping_mul(y));\nwitness_end();\n\
+         let _ = t;\nrequire(x.wrapping_mul(y) == z);",
+        &[
+            (&[("x", "2"), ("y", "3"), ("z", "6")], true),
+            (&[("x", "2"), ("y", "3"), ("z", "7")], false),
+        ],
+    );
+}
+
 /// Memory reached through a select of pointers: a `memory.copy` from a nested
 /// select, an unaligned store whose two possible targets overlap, and a
 /// sign-extending byte load of a select with a negative constant arm.
