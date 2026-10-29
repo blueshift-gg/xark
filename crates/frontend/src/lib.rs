@@ -507,12 +507,64 @@ pub fn build_crate_with(
         cmd.status().map_err(|e| format!("running cargo: {e}"))?
     };
     if !status.success() {
+        // Two `#[circuit]`s clash on the symbols the entry is found by, with an
+        // error about those symbols; name the real cause.
+        let circuits = circuit_attributes(crate_dir);
+        if circuits.len() > 1 {
+            return Err(format!(
+                "the crate has {} #[circuit] functions ({}); xark builds one circuit \
+                 per crate. Put each in its own crate (a workspace member works) and \
+                 share code between them as plain functions",
+                circuits.len(),
+                circuits.join(", ")
+            ));
+        }
         return Err("cargo build of the circuit failed".into());
     }
     let wasm = target_dir
         .join("wasm32-unknown-unknown/release")
         .join(format!("{}.wasm", name.replace('-', "_")));
     std::fs::read(&wasm).map_err(|e| format!("reading {}: {e}", wasm.display()))
+}
+
+/// Where `crate_dir`'s sources put a `#[circuit]` attribute, as `src/lib.rs:3`.
+/// A line scan, so a commented-out or `cfg`-disabled one counts too: used only to
+/// explain a build that already failed.
+fn circuit_attributes(crate_dir: &std::path::Path) -> Vec<String> {
+    fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, files);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                files.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&crate_dir.join("src"), &mut files);
+    files.sort();
+    let mut found = Vec::new();
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(&f) else {
+            continue;
+        };
+        let rel = f
+            .strip_prefix(crate_dir)
+            .unwrap_or(&f)
+            .display()
+            .to_string();
+        for (i, line) in text.lines().enumerate() {
+            let l = line.trim_start();
+            if l.starts_with("#[circuit") || l.starts_with("#[xark::circuit") {
+                found.push(format!("{rel}:{}", i + 1));
+            }
+        }
+    }
+    found
 }
 
 /// Hold `target_dir` for one build, from cargo's start until its `.wasm` is read.

@@ -87,6 +87,7 @@ and `select_taken` in `formal/Formal/Rewrites.lean`.
 | `x as u8` on a `Field` | `Field` isn't a primitive integer | `Field::to_bits::<N>()` and recombine, or keep values as `uN` |
 | `memory.grow` / a memory fill or copy whose size depends on a witness | the memory layout would depend on the witness | use fixed-size buffers |
 | `f32` / `f64` arithmetic on a witness | floats only run on constants (compile-time evaluation) | fixed-point integers or `Field` |
+| two `#[circuit]` functions in one crate | a crate builds one circuit; its `#[circuit]` is the entry | one crate per circuit (workspace members work), sharing plain functions |
 
 If you hit a rejection not covered here, the diagnostic names the exact construct and source line —
 that message is the source of truth.

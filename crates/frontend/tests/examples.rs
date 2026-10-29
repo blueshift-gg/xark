@@ -75,3 +75,69 @@ fn sha256_with_byte_inputs() {
     let l = check("sha256", 35069);
     assert_eq!(l.schema["inputs"][0]["type"]["array"]["of"]["uint"], 8);
 }
+
+/// Two `#[circuit]`s in one crate fail with the real cause, wherever they are,
+/// not the clash of the entry symbols they both define.
+#[test]
+fn two_circuits_in_one_crate_are_explained() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let lang = root.join("crates/lang").canonicalize().unwrap();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("two_circuits");
+    let cases: [(&str, &[(&str, &str)]); 2] = [
+        (
+            "same_module",
+            &[(
+                "lib.rs",
+                "use xark::{circuit, require_eq, Field, Private, Public};\n\
+                 #[circuit]\npub fn cube(x: Private<Field>, y: Public<Field>) { require_eq(x.pow(3), y); }\n\
+                 #[circuit]\npub fn square(x: Private<Field>, y: Public<Field>) { require_eq(x * x, y); }\n",
+            )],
+        ),
+        (
+            "two_modules",
+            &[
+                (
+                    "lib.rs",
+                    "use xark::{circuit, require_eq, Field, Private, Public};\nmod other;\n\
+                     #[circuit]\npub fn cube(x: Private<Field>, y: Public<Field>) { require_eq(x.pow(3), y); }\n",
+                ),
+                (
+                    "other.rs",
+                    "use xark::{circuit, require_eq, Field, Private, Public};\n\
+                     #[circuit]\npub fn square(x: Private<Field>, y: Public<Field>) { require_eq(x * x, y); }\n",
+                ),
+            ],
+        ),
+    ];
+    for (name, files) in cases {
+        let dir = base.join(name);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+                 [dependencies]\nxark = {{ path = {:?} }}\n\n[workspace]\n\n\
+                 [lints.rust]\nunexpected_cfgs = {{ level = \"warn\", check-cfg = ['cfg(xark)'] }}\n",
+                lang.display().to_string()
+            ),
+        )
+        .unwrap();
+        for (file, text) in files {
+            std::fs::write(dir.join("src").join(file), text).unwrap();
+        }
+        let err = xark_frontend::build_crate(&dir, &base.join("target")).unwrap_err();
+        assert!(
+            err.contains("2 #[circuit] functions") && err.contains("one circuit per crate"),
+            "{name}: {err}"
+        );
+        let other = if name == "same_module" {
+            "src/lib.rs:4"
+        } else {
+            "src/other.rs:2"
+        };
+        assert!(
+            err.contains("src/lib.rs:") && err.contains(other),
+            "{name}: {err}"
+        );
+    }
+}

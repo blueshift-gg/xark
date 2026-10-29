@@ -16,6 +16,10 @@
 //! (3) implements `ProveInputs` for it from the same impls; (4) generates
 //! `<Fn>Inputs::schema()`, the circuit's `schema.json`.
 //!
+//! A crate holds one `#[circuit]`: it is the crate's entry, the way `main` is a
+//! binary's. For several circuits, give each its own crate (a workspace member
+//! works) and share code between them as plain functions.
+//!
 //! `#[input]` — see [`input`] — implements `xark::Input` for a struct (its fields in
 //! order) and `xark::Enum` for a fieldless enum, and on an `impl` block makes its
 //! methods callable from generated clients.
