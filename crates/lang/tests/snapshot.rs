@@ -5631,6 +5631,50 @@ fn witness_regions_constrain_native_integers() {
     );
 }
 
+/// `to_bits` of a constant takes the bits of its field element, even when it is
+/// stored as a negative integer (`2^253 - 1` folds to `-(p - 2^253 + 1)`), on
+/// the main path and in a witness branch.
+#[test]
+fn to_bits_of_large_constants() {
+    probe(
+        "const_bits_big",
+        "x: Public<Field>",
+        "let c = Field::from(2u8).pow(253) - Field::from(1u8);\n\
+         require_eq(Field::from_bits::<253>(c.to_bits::<253>()), x);",
+        &[
+            (
+                &[(
+                    "x",
+                    "14474011154664524427946373126085988481658748083205070504932198000989141204991",
+                )],
+                true,
+            ),
+            (&[("x", "0")], false),
+        ],
+    );
+    probe(
+        "const_bits_branch",
+        "w: Private<u32>, x: Public<Field>",
+        "let c = Field::from(2u8).pow(253) - Field::from(1u8);\n\
+         let y = if w == 1 { Field::from_bits::<253>(c.to_bits::<253>()) } else { Field::from(0u8) };\n\
+         require_eq(y, x);",
+        &[
+            (
+                &[
+                    ("w", "1"),
+                    (
+                        "x",
+                        "14474011154664524427946373126085988481658748083205070504932198000989141204991",
+                    ),
+                ],
+                true,
+            ),
+            (&[("w", "0"), ("x", "0")], true),
+            (&[("w", "1"), ("x", "0")], false),
+        ],
+    );
+}
+
 /// Memory reached through a select of pointers: a `memory.copy` from a nested
 /// select, an unaligned store whose two possible targets overlap, and a
 /// sign-extending byte load of a select with a negative constant arm.

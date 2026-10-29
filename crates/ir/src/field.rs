@@ -222,16 +222,19 @@ impl FieldConst {
         FieldConst::from_bigint(-&*self.big_cow())
     }
 
-    /// If this constant fits in `n` bits (non-negative, `< 2^n`), return its
-    /// little-endian bits; else `None`. Lets `Field::to_bits::<N>` of a constant
-    /// const-fold, avoiding booleanity/recomposition constraints.
+    /// If this constant's field element fits in `n` bits (its canonical value in
+    /// `[0, p)` is `< 2^n`), return its little-endian bits; else `None`. Lets
+    /// `Field::to_bits::<N>` of a constant const-fold, avoiding
+    /// booleanity/recomposition constraints.
     pub fn to_bits_le(&self, n: usize) -> Option<Vec<bool>> {
-        // `to_biguint` is `None` for a negative value (cannot fit in `n` unsigned bits).
-        let v = self.big().to_biguint()?;
-        if v.bits() as usize > n {
+        use ark_ff::{BigInteger, PrimeField};
+        // Reduce first: the stored integer is any representative (`p - 1` may be
+        // stored as `-1`), and only the field element's bits mean anything.
+        let v = self.to_bn254_fr().into_bigint();
+        if v.num_bits() as usize > n {
             return None;
         }
-        Some((0..n).map(|i| v.bit(i as u64)).collect())
+        Some((0..n).map(|i| i < 256 && v.get_bit(i)).collect())
     }
 
     /// Single-parse rendering helper: returns `(is_negative, abs_is_one,

@@ -341,6 +341,10 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- `Field::to_bits::<N>` of a constant takes the bits of its field element. A constant
+  above `p/2` (e.g. `2^253 - 1`) is stored as a negative integer, so it failed to
+  build with "does not fit in N bits", and in a witness branch it ruled the branch
+  out, so honest witnesses taking it were rejected.
 - `xark ceremony verify` and `finalize` check the whole of the shipped keys, not just
   δ. They took any α, β, γ and public-input points, so a coordinator could ship `γ =
   δ` (which lets anyone prove anything) behind an honest contribution chain and have
