@@ -6373,6 +6373,33 @@ fn require_eq_integer_matches_explicit_conversion() {
     );
 }
 
+/// Untyped integer literals (`i32` to Rust) mix with `Field`: `x * 2`, `2 * x`,
+/// `1 - x`, `Field::from(2)`, `0.into()`, `x == 0`. A negative one fails the build.
+#[test]
+fn integer_literals_mix_with_field() {
+    probe(
+        "lit_ops",
+        "x: Private<Field>, out: Public<Field>",
+        "let mut f: Field = 0.into();\nf += Field::from(2);\n\
+         require_eq(x * 2 + 1 + (2 * x - 1) + (1 - x) + f, out);",
+        &[
+            (&[("x", "4"), ("out", "15")], true),
+            (&[("x", "4"), ("out", "14")], false),
+        ],
+    );
+    probe(
+        "lit_eq",
+        "x: Private<Field>",
+        "require(x == 0);",
+        &[(&[("x", "0")], true), (&[("x", "1")], false)],
+    );
+    let src = "#![no_std]\nuse xark::prelude::*;\n\
+         pub fn circuit(x: Private<Field>) { require_eq(x, Field::from(-1)); }\n";
+    let c = compile_with_field(&write_case("lit_negative", src), "lit_negative", "bn254");
+    assert!(!c.status_success, "a negative literal was accepted");
+    assert!(c.stderr.contains("integer -1 is negative"), "{}", c.stderr);
+}
+
 /// An array parameter's length may be a constant, not just a literal, for byte
 /// arrays too; the circuit is the one the literal gives.
 #[test]

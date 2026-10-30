@@ -616,21 +616,26 @@ impl From<&alloc::string::String> for Field {
     }
 }
 
-// Signed integers as input values, so an untyped literal (`cube(3, 27)`, which
-// Rust types as `i32`) converts. Negative values panic: inputs must be field
-// elements `0 <= x < p`, as `xark prove --inputs` requires. Host-only.
-#[cfg(not(xark))]
+/// Signed integers, so an untyped literal (`Field::from(2)`, `x * 2`, `cube(3, 27)`,
+/// all `i32` to Rust) converts. A negative value panics in both builds (in a
+/// circuit, the build fails): a value is a field element `0 <= x < p`, as `xark
+/// prove --inputs` requires, never silently reduced. Write `-Field::from(1u8)`
+/// for `p - 1`.
 impl From<i32> for Field {
     fn from(v: i32) -> Field {
         Field::from(i64::from(v))
     }
 }
 
-#[cfg(not(xark))]
+/// See `From<i32>`.
 impl From<i64> for Field {
     fn from(v: i64) -> Field {
         let v = u64::try_from(v).unwrap_or_else(|_| {
-            panic!("input value {v} is negative; inputs are field elements 0 <= x < p")
+            panic!(
+                "integer {v} is negative; a `Field` from an integer is 0 <= x < p \
+                 (write `-Field::from({})` for its negation)",
+                v.unsigned_abs()
+            )
         });
         Field::from_u64(v)
     }
@@ -811,7 +816,10 @@ impl BitXor for Field {
 /// `a * 3`, `a - 2` — as sugar for `a op Field::from(n)`. Each forwards to the
 /// recognized `Field`-`Field` operator, so it lowers to the exact same R1CS; the
 /// integer must be a compile-time constant (a circuit has no runtime integers).
-/// (Exponentiation is [`Field::pow`], not `^` — `^` is Rust's XOR.)
+/// (Exponentiation is [`Field::pow`], not `^` — `^` is Rust's XOR.) An untyped
+/// literal is an `i32` to Rust, so `i32` is here too; a negative one is refused (see
+/// `From<i32>`). A literal can't become a `Field` *argument* (`hash2(k, 0)`): write
+/// `Field::from(0)` or `0.into()` there.
 macro_rules! impl_field_int_ops {
     ($($t:ty),+ $(,)?) => {$(
         impl Add<$t> for Field {
@@ -844,7 +852,31 @@ macro_rules! impl_field_int_ops {
         }
     )+};
 }
-impl_field_int_ops!(u8, u16, u32, u64, u128);
+impl_field_int_ops!(u8, u16, u32, u64, u128, i32, i64);
+
+/// A native-integer constant on the left — `2 * a`, `1 - a`, `1 + a`, `1 / a` — as
+/// sugar for `Field::from(n) op a`, lowering to the same R1CS.
+macro_rules! impl_int_field_ops {
+    ($($t:ty),+ $(,)?) => {$(
+        impl Add<Field> for $t {
+            type Output = Field;
+            fn add(self, rhs: Field) -> Field { Field::from(self) + rhs }
+        }
+        impl Sub<Field> for $t {
+            type Output = Field;
+            fn sub(self, rhs: Field) -> Field { Field::from(self) - rhs }
+        }
+        impl Mul<Field> for $t {
+            type Output = Field;
+            fn mul(self, rhs: Field) -> Field { Field::from(self) * rhs }
+        }
+        impl Div<Field> for $t {
+            type Output = Field;
+            fn div(self, rhs: Field) -> Field { Field::from(self) / rhs }
+        }
+    )+};
+}
+impl_int_field_ops!(u8, u16, u32, u64, u128, i32, i64);
 
 /// Integer comparison of a `Field` against a native-integer *constant*, whose
 /// type supplies the domain width `N = bitwidth(T)` (`bool → 1`, …, `u128 → 128`).
@@ -892,6 +924,14 @@ macro_rules! impl_field_int_cmp {
     )+};
 }
 impl_field_int_cmp!(bool => 1, u8 => 8, u16 => 16, u32 => 32, u64 => 64, u128 => 128);
+
+/// `x == 0` with an untyped literal (`i32` to Rust). Equality has no width, so it
+/// needs none; an ordered `x < 5` does (its type's), so write `x < 5u32`.
+impl PartialEq<i32> for Field {
+    fn eq(&self, rhs: &i32) -> bool {
+        __xark_eq(*self, Field::from(*rhs))
+    }
+}
 
 /// Integer shifts of a `Field` against a native-integer *constant*, whose type
 /// supplies the domain width `N = bitwidth(T)` and whose value is the shift

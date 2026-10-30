@@ -85,6 +85,7 @@ and `select_taken` in `formal/Formal/Rewrites.lean`.
 | `let n = read_len(); [Field; n]` | array length must be constant | use a `const` / const-generic `N` |
 | `#[circuit] fn c<const N: usize>(xs: Private<[Field; N]>)` | the entry is built once, with fixed sizes | a `const N` for the parameter, or a generic helper called with a fixed `N` |
 | calling through a fn pointer / trait object chosen by a witness | the call target would depend on the witness | branch on the witness and call each function directly |
+| `hash2(k, 0)` where the parameter is a `Field` | Rust never turns a literal into a `Field` argument (`x * 2`, `2 * x`, `x == 0` do work) | `hash2(k, 0.into())` or `Field::from(0)` |
 | `x as u8` on a `Field` | `Field` isn't a primitive integer | `Field::to_bits::<N>()` and recombine, or keep values as `uN` |
 | `memory.grow` / a memory fill or copy whose size depends on a witness | the memory layout would depend on the witness | use fixed-size buffers |
 | `f32` / `f64` arithmetic on a witness | floats only run on constants (compile-time evaluation) | fixed-point integers or `Field` |

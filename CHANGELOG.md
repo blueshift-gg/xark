@@ -296,6 +296,13 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Added
 
+- Untyped integer literals mix with `Field`: `x * 2`, `2 * x`, `1 - x`, `x += 1`,
+  `Field::from(2)`, `0.into()`, `x == 0`. They failed to build, because a literal is
+  an `i32` and only `u8`..`u128` had impls; `Field::from(2)` built in `cargo test`
+  but not in `xark build`. A negative literal is refused in both builds (write
+  `-Field::from(1u8)` for `p - 1`). Ordered comparisons still need a typed literal
+  (`x < 5u32`), whose type gives the bit width.
+
 - Tests that the `alt_bn128` syscalls and their Arkworks fallback reject a G1 point
   off the curve or with a coordinate `>= q`, and an off-subgroup G2 point in a
   pairing. The verifier relies on them for those checks, and nothing pinned it.
