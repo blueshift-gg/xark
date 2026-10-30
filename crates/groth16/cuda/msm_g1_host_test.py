@@ -2,6 +2,7 @@
 import random
 import subprocess
 import sys
+import tempfile
 
 
 Q = 21888242871839275222246405745257275088696311157297823662689037894645226208583
@@ -75,9 +76,20 @@ def main() -> None:
         cases.append((2, point, (scalar, 0), multiply(point, scalar)))
 
     input_text = "".join(input_row(op, left, right) for op, left, right, _ in cases)
-    output = subprocess.run(
-        [executable], input=input_text, text=True, capture_output=True, check=True
-    ).stdout.splitlines()
+    with tempfile.TemporaryFile(mode="w+t") as input_file, tempfile.TemporaryFile(
+        mode="w+t"
+    ) as output_file:
+        input_file.write(input_text)
+        input_file.seek(0)
+        subprocess.run(
+            [executable],
+            stdin=input_file,
+            stdout=output_file,
+            text=True,
+            check=True,
+        )
+        output_file.seek(0)
+        output = output_file.read().splitlines()
     if len(output) != len(cases):
         raise SystemExit(f"probe returned {len(output)} rows for {len(cases)} cases")
 

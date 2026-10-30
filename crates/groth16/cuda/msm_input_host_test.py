@@ -2,6 +2,7 @@
 import random
 import subprocess
 import sys
+import tempfile
 
 
 Q = 21888242871839275222246405745257275088696311157297823662689037894645226208583
@@ -60,13 +61,20 @@ def main():
         encode_row(None, (1, 0)),
     ]
 
-    output = subprocess.run(
-        [executable],
-        input="".join(row for row, _ in cases) + "".join(invalid),
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.splitlines()
+    with tempfile.TemporaryFile(mode="w+t") as input_file, tempfile.TemporaryFile(
+        mode="w+t"
+    ) as output_file:
+        input_file.write("".join(row for row, _ in cases) + "".join(invalid))
+        input_file.seek(0)
+        subprocess.run(
+            [executable],
+            stdin=input_file,
+            stdout=output_file,
+            text=True,
+            check=True,
+        )
+        output_file.seek(0)
+        output = output_file.read().splitlines()
     expected_count = len(cases) + len(invalid)
     if len(output) != expected_count:
         raise SystemExit(f"probe returned {len(output)} rows, expected {expected_count}")
