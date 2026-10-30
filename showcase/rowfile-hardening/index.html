@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f2ec">
+  <title>Xark row stream hardening</title>
+  <style>
+    :root { color-scheme: light; --ink:#202724; --muted:#69716c; --line:#cdd2c9; --paper:#f3f2ec; --green:#b5ef76; --dark:#202724; --orange:#a64c2e; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    main { max-width:1100px; margin:auto; padding:36px 28px 72px; }
+    header { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:18px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
+    .mark { display:flex; align-items:center; gap:10px; font-weight:700; }
+    .dot { width:13px; height:13px; background:#4e7350; border-radius:50%; box-shadow:0 0 0 4px #dce6d5; }
+    .hero { padding:74px 0 52px; display:grid; grid-template-columns:1.3fr .7fr; gap:48px; align-items:end; }
+    .eyebrow { color:#4e7350; font-size:12px; text-transform:uppercase; letter-spacing:.12em; }
+    h1 { font:600 clamp(40px,7vw,78px)/.98 system-ui,sans-serif; letter-spacing:-.06em; margin:18px 0 20px; max-width:750px; }
+    .lead { max-width:680px; color:#505b54; font:18px/1.55 system-ui,sans-serif; }
+    .metric { border-left:1px solid var(--line); padding:10px 0 10px 24px; }
+    .metric strong { display:block; font:600 54px/1 system-ui,sans-serif; letter-spacing:-.06em; }
+    .metric span { color:var(--muted); font-size:12px; }
+    .trace { background:var(--dark); color:#edf0e9; padding:24px 28px; border-radius:3px; overflow:auto; }
+    .trace-label { color:var(--green); font-size:11px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:15px; }
+    .flow { display:flex; align-items:center; gap:12px; white-space:nowrap; font-size:13px; }
+    .flow b { color:var(--green); font-weight:400; }
+    .section-head { display:flex; justify-content:space-between; gap:20px; align-items:baseline; border-bottom:1px solid var(--line); margin:54px 0 0; padding-bottom:12px; }
+    h2 { font:600 25px system-ui,sans-serif; letter-spacing:-.04em; margin:0; }
+    .section-head span { color:var(--muted); font-size:11px; }
+    .issues { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); margin-top:1px; }
+    article { background:var(--paper); padding:26px 28px 30px; min-height:245px; }
+    .tag { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:3px 9px; color:#536158; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+    article h3 { font:600 21px/1.2 system-ui,sans-serif; letter-spacing:-.03em; margin:18px 0 10px; }
+    article p { color:#5b645e; font:14px/1.55 system-ui,sans-serif; max-width:510px; }
+    code { color:#304d3a; background:#e5e9df; padding:1px 4px; font-size:.9em; }
+    a { color:#345c3c; text-underline-offset:3px; }
+    .bottom { display:grid; grid-template-columns:1fr 1fr; gap:40px; padding-top:26px; }
+    .bottom p { color:#5b645e; font:14px/1.6 system-ui,sans-serif; }
+    .status { border-left:3px solid #c47d45; padding-left:15px; }
+    .status strong { color:var(--orange); }
+    footer { border-top:1px solid var(--line); margin-top:48px; padding-top:16px; color:var(--muted); font-size:11px; display:flex; justify-content:space-between; gap:20px; }
+    @media(max-width:700px) { main{padding:22px 18px 50px}.hero{grid-template-columns:1fr;gap:24px;padding:50px 0 34px}.metric{border-left:0;border-top:1px solid var(--line);padding:18px 0 0}.issues,.bottom{grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column;gap:4px}.flow{font-size:11px;gap:7px}footer{flex-direction:column} }
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="mark"><i class="dot"></i> Xark / prover input</div><div>Engineering note · 01</div></header>
+  <section class="hero">
+    <div><div class="eyebrow">Malformed stream hardening</div><h1>Make bad proof input fail cleanly.</h1><p class="lead">The row stream is a compact input to Xark’s streaming prover. This work hardens its parser against hostile lengths, window indexes, and encoded variable deltas before those bytes reach constraint decoding.</p></div>
+    <div class="metric"><strong>11</strong><span>new focused test functions across CLI and row parsing<br>Cargo test execution is blocked by dependency access</span></div>
+  </section>
+  <section class="trace" aria-label="Proof input path"><div class="trace-label">Where the parser sits</div><div class="flow"><span>r1cs.stream</span><b>→</b><span>RowFile::parse</span><b>→</b><span>decode_window</span><b>→</b><span>ConstraintSource</span><b>→</b><span>Groth16 prover</span></div></section>
+  <div class="section-head"><h2>Two separate failure classes</h2><span>Parser hardening is local; PR update is pending</span></div>
+  <section class="issues">
+    <article><span class="tag">PR #33 · combined branch</span><h3>Out-of-range window panicked</h3><p><code>decode_window(w)</code> indexed the offset table directly. An invalid public API index could panic instead of returning an error. The guard is part of the combined branch submitted as <a href="https://github.com/blueshift-gg/xark/pull/33">PR #33</a>.</p></article>
+    <article><span class="tag">Local branch · parser hardening</span><h3>Malformed bytes could overflow or mislead</h3><p>Header lengths and counts were cast or used in unchecked arithmetic. Window offsets were not checked against row data, and delta-encoded variable IDs could overflow. The local branch adds checked reads, bounded offsets, count-vs-file validation, and error returns. These changes are not on PR #33 until the branch push succeeds.</p></article>
+  </section>
+  <div class="bottom">
+    <section><div class="eyebrow">Reproduction standard</div><p>Regression tests cover oversized fingerprint and pool lengths, overflowing LEB128, impossible row/window counts, invalid offsets, and variable-delta overflow. They are in <code>crates/ir/src/r1cs_stream.rs</code>.</p><p>This is input validation for the existing proof path. It does not add a proof system or GPU backend.</p></section>
+    <section class="status"><div class="eyebrow">Verification status</div><p><strong>Cargo tests have not passed yet.</strong> The local run cannot resolve the workspace dependency <code>ark-bn254</code> because it is absent from the cache and network DNS is unavailable.</p><p>Formatting, whitespace checks, and dependency-free Cargo metadata can be checked locally. The focused Rust tests need a connected build environment before the Rust changes can be called verified.</p></section>
+  </div>
+  <footer><span>Local project demo · source and status are kept explicit</span><span>Branch: rowfile-window-bounds</span></footer>
+</main>
+</body>
+</html>
