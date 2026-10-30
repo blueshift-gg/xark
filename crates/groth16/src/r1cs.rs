@@ -16,7 +16,7 @@
 //! that fails verification — `tests/prover.rs` pins this against arkworks
 //! (`ordering_contract_matches_arkworks_allocation`, `reordering_variables_breaks_the_proof`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 
 use ark_bn254::Fr;
@@ -29,11 +29,17 @@ use xark_ir::{FieldConst, LinearCombination, R1csProgram, VarId, Visibility};
 /// IR variable id → assignment position, matching arkworks' allocation order.
 #[derive(Clone, Debug)]
 pub struct VarLayout {
-    /// `pos[id]` = assignment position (`u32::MAX` = no such variable).
-    pos: Vec<u32>,
+    /// Dense IDs use a vector; sparse IDs use storage proportional to vars.
+    positions: PositionMap,
     /// `ids[p-1]` = IR id at assignment position `p ≥ 1`.
     ids: Vec<VarId>,
     num_instance: usize,
+}
+
+#[derive(Clone, Debug)]
+enum PositionMap {
+    Dense(Vec<u32>),
+    Sparse(HashMap<VarId, u32>),
 }
 
 impl VarLayout {
@@ -41,8 +47,11 @@ impl VarLayout {
     pub fn new(vars: impl IntoIterator<Item = (VarId, bool)>) -> Self {
         let mut vars: Vec<(VarId, bool)> = vars.into_iter().collect();
         vars.sort_unstable_by_key(|v| v.0);
-        let max_id = vars.last().map_or(0, |v| v.0 as usize + 1);
-        let mut pos = vec![u32::MAX; max_id];
+        let dense_len = vars
+            .last()
+            .and_then(|v| v.0.checked_add(1))
+            .and_then(|len| usize::try_from(len).ok())
+            .filter(|len| *len <= vars.len().saturating_mul(2));
         let mut ids = Vec::with_capacity(vars.len());
         for &(id, public) in &vars {
             if public {
@@ -55,11 +64,22 @@ impl VarLayout {
                 ids.push(id);
             }
         }
-        for (p, &id) in ids.iter().enumerate() {
-            pos[id as usize] = p as u32 + 1;
-        }
+        let positions = if let Some(len) = dense_len {
+            let mut pos = vec![u32::MAX; len];
+            for (p, &id) in ids.iter().enumerate() {
+                pos[id as usize] = p as u32 + 1;
+            }
+            PositionMap::Dense(pos)
+        } else {
+            PositionMap::Sparse(
+                ids.iter()
+                    .enumerate()
+                    .map(|(p, &id)| (id, p as u32 + 1))
+                    .collect(),
+            )
+        };
         VarLayout {
-            pos,
+            positions,
             ids,
             num_instance,
         }
@@ -92,9 +112,13 @@ impl VarLayout {
     /// Assignment position of IR var `id`, if it is allocated.
     #[inline]
     pub fn position(&self, id: VarId) -> Option<usize> {
-        match self.pos.get(id as usize) {
-            Some(&p) if p != u32::MAX => Some(p as usize),
-            _ => None,
+        match &self.positions {
+            PositionMap::Dense(pos) => pos
+                .get(id as usize)
+                .copied()
+                .filter(|&p| p != u32::MAX)
+                .map(|p| p as usize),
+            PositionMap::Sparse(pos) => pos.get(&id).copied().map(|p| p as usize),
         }
     }
 
@@ -621,5 +645,20 @@ impl ConstraintSource for RowFileSource {
                 })
                 .expect("row file validated at load");
         }
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{PositionMap, VarLayout};
+
+    #[test]
+    fn sparse_variable_ids_do_not_require_id_sized_storage() {
+        let layout = VarLayout::new([(0, true), (u32::MAX, false)]);
+
+        assert_eq!(layout.position(0), Some(1));
+        assert_eq!(layout.position(u32::MAX), Some(2));
+        assert_eq!(layout.position(1), None);
+        assert!(matches!(layout.positions, PositionMap::Sparse(_)));
     }
 }
