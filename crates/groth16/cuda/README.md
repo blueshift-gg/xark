@@ -20,8 +20,8 @@ digit[j] = (s >> 11j) mod 2^11
 
 The kernel stores digits window-major as `digits[window * scalar_count +
 scalar]`. Adjacent threads therefore write adjacent values. The limb input is
-structure-of-arrays for the same reason. The final window contains only the
-remaining eight bits of a 256-bit input.
+structure-of-arrays for the same reason. The final window starts at bit 253 and
+contains the remaining three bits of a 256-bit input.
 
 The test compares device output with a separate CPU bit-extraction routine for
 boundary patterns and 1,024 deterministic 256-bit inputs. Those inputs test bit
@@ -42,7 +42,8 @@ make -C crates/groth16/cuda test-host
 
 This host target checks digit extraction and the independent CSR reference,
 including repeated bucket members, zero digits, maximum bucket IDs, and rejected
-out-of-range digits. It does not compile or execute either `.cu` kernel.
+out-of-range digits. It also runs BN254 Fq and G1 arithmetic against Python
+integer/affine references. It does not compile or execute a `.cu` kernel.
 
 ## Bucket-index stage
 
@@ -52,9 +53,22 @@ creates bucket offsets, and a scatter pass writes scalar indices. Zero digits
 are omitted. The CUDA test checks offsets and compares every bucket's member
 indices with a host-built reference over repeated-digit, zero-digit, and maximum
 bucket inputs. The lists are
-ready for a later point-accumulation stage, but this test does not add or reduce
-curve points. `make test` runs this stage only on a CUDA device; no bucketization
+ready for a later point-accumulation stage. This kernel still does not add or
+reduce curve points. `make test` runs bucketization on a CUDA device; no CUDA
 kernel compile or execution has been verified on this Mac.
+
+## BN254 arithmetic foundation
+
+`bn254_fq.cuh` implements canonical-input Fq addition/subtraction and
+Montgomery multiplication. `bn254_g1.cuh` implements Jacobian G1 doubling,
+mixed affine addition, and affine conversion. The host probes compare those
+operations with independent Python big-integer field and affine-curve formulas.
+The CUDA test additionally runs doubling, equal-point mixed addition, and
+inverse-point cancellation on the device. These routines are a testable
+arithmetic foundation only: they are not yet used by bucket accumulation or
+connected to `Accelerator::msm`. The current G1 affine conversion uses
+exponentiation for inversion, suitable for checking formulas but not a
+production normalization strategy for an MSM.
 
 ## Adapter validation
 
