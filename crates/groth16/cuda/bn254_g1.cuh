@@ -33,7 +33,8 @@ XARK_G1_HD inline Fq fq_one() {
 
 XARK_G1_HD inline bool fq_is_zero(Fq value) {
   for (unsigned i = 0; i < 8; ++i) {
-    if (value.limbs[i] != 0) return false;
+    if (value.limbs[i] != 0)
+      return false;
   }
   return true;
 }
@@ -46,15 +47,24 @@ XARK_G1_HD inline Fq fq_triple(Fq value) {
 
 XARK_G1_HD inline std::uint32_t fq_inverse_exponent_limb(unsigned index) {
   switch (index) {
-    case 0: return 0xd87cfd45u;
-    case 1: return 0x3c208c16u;
-    case 2: return 0x6871ca8du;
-    case 3: return 0x97816a91u;
-    case 4: return 0x8181585du;
-    case 5: return 0xb85045b6u;
-    case 6: return 0xe131a029u;
-    case 7: return 0x30644e72u;
-    default: return 0;
+  case 0:
+    return 0xd87cfd45u;
+  case 1:
+    return 0x3c208c16u;
+  case 2:
+    return 0x6871ca8du;
+  case 3:
+    return 0x97816a91u;
+  case 4:
+    return 0x8181585du;
+  case 5:
+    return 0xb85045b6u;
+  case 6:
+    return 0xe131a029u;
+  case 7:
+    return 0x30644e72u;
+  default:
+    return 0;
   }
 }
 
@@ -77,17 +87,19 @@ XARK_G1_HD inline G1Jacobian g1_infinity() {
   return G1Jacobian{fq_zero(), fq_one(), fq_zero()};
 }
 
-XARK_G1_HD inline bool g1_is_infinity(const G1Jacobian& point) {
+XARK_G1_HD inline bool g1_is_infinity(const G1Jacobian &point) {
   return fq_is_zero(point.z);
 }
 
-XARK_G1_HD inline G1Jacobian g1_from_affine(const G1Affine& point) {
-  if (point.infinity) return g1_infinity();
+XARK_G1_HD inline G1Jacobian g1_from_affine(const G1Affine &point) {
+  if (point.infinity)
+    return g1_infinity();
   return G1Jacobian{point.x, point.y, fq_one()};
 }
 
-XARK_G1_HD inline G1Jacobian g1_double(const G1Jacobian& point) {
-  if (g1_is_infinity(point) || fq_is_zero(point.y)) return g1_infinity();
+XARK_G1_HD inline G1Jacobian g1_double(const G1Jacobian &point) {
+  if (g1_is_infinity(point) || fq_is_zero(point.y))
+    return g1_infinity();
 
   const Fq a = fq_square(point.x);
   const Fq b = fq_square(point.y);
@@ -103,15 +115,16 @@ XARK_G1_HD inline G1Jacobian g1_double(const G1Jacobian& point) {
   return G1Jacobian{x3, y3, z3};
 }
 
-XARK_G1_HD inline G1Jacobian g1_add_mixed(const G1Jacobian& left,
-                                          const G1Affine& right) {
-  if (right.infinity) return left;
-  if (g1_is_infinity(left)) return g1_from_affine(right);
+XARK_G1_HD inline G1Jacobian g1_add_mixed(const G1Jacobian &left,
+                                          const G1Affine &right) {
+  if (right.infinity)
+    return left;
+  if (g1_is_infinity(left))
+    return g1_from_affine(right);
 
   const Fq z1z1 = fq_square(left.z);
   const Fq u2 = montgomery_multiply(right.x, z1z1);
-  const Fq s2 = montgomery_multiply(
-      right.y, montgomery_multiply(left.z, z1z1));
+  const Fq s2 = montgomery_multiply(right.y, montgomery_multiply(left.z, z1z1));
   const Fq h = subtract(u2, left.x);
   const Fq hh = fq_square(h);
   const Fq i = fq_double(fq_double(hh));
@@ -129,8 +142,40 @@ XARK_G1_HD inline G1Jacobian g1_add_mixed(const G1Jacobian& left,
   return G1Jacobian{x3, y3, z3};
 }
 
-XARK_G1_HD inline G1Affine g1_to_affine(const G1Jacobian& point) {
-  if (g1_is_infinity(point)) return G1Affine{fq_zero(), fq_zero(), true};
+XARK_G1_HD inline G1Jacobian g1_add_jacobian(const G1Jacobian &left,
+                                             const G1Jacobian &right) {
+  if (g1_is_infinity(left))
+    return right;
+  if (g1_is_infinity(right))
+    return left;
+
+  const Fq z1z1 = fq_square(left.z);
+  const Fq z2z2 = fq_square(right.z);
+  const Fq u1 = montgomery_multiply(left.x, z2z2);
+  const Fq u2 = montgomery_multiply(right.x, z1z1);
+  const Fq s1 = montgomery_multiply(left.y, montgomery_multiply(right.z, z2z2));
+  const Fq s2 = montgomery_multiply(right.y, montgomery_multiply(left.z, z1z1));
+  const Fq h = subtract(u2, u1);
+  const Fq r0 = subtract(s2, s1);
+  if (fq_is_zero(h)) {
+    return fq_is_zero(r0) ? g1_double(left) : g1_infinity();
+  }
+
+  const Fq i = fq_square(fq_double(h));
+  const Fq j = montgomery_multiply(h, i);
+  const Fq r = fq_double(r0);
+  const Fq v = montgomery_multiply(u1, i);
+  const Fq x3 = subtract(subtract(fq_square(r), j), fq_double(v));
+  const Fq y3 = subtract(montgomery_multiply(r, subtract(v, x3)),
+                         fq_double(montgomery_multiply(s1, j)));
+  const Fq z3 = montgomery_multiply(
+      subtract(subtract(fq_square(add(left.z, right.z)), z1z1), z2z2), h);
+  return G1Jacobian{x3, y3, z3};
+}
+
+XARK_G1_HD inline G1Affine g1_to_affine(const G1Jacobian &point) {
+  if (g1_is_infinity(point))
+    return G1Affine{fq_zero(), fq_zero(), true};
   const Fq z_inv = fq_inverse(point.z);
   const Fq z_inv2 = fq_square(z_inv);
   const Fq z_inv3 = montgomery_multiply(z_inv2, z_inv);
@@ -138,6 +183,6 @@ XARK_G1_HD inline G1Affine g1_to_affine(const G1Jacobian& point) {
                   montgomery_multiply(point.y, z_inv3), false};
 }
 
-}  // namespace xark_cuda
+} // namespace xark_cuda
 
 #undef XARK_G1_HD
