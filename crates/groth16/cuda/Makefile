@@ -1,11 +1,17 @@
 NVCC ?= nvcc
 CUDA_TEST_BIN ?= /tmp/xark-msm-digits-test
+HOST_TEST_BIN ?= /tmp/xark-msm-digits-host-test
+CXX ?= c++
 
-.PHONY: test clean
+.PHONY: test test-host clean
 
-test:
+test: test-host
 	$(NVCC) -std=c++17 -O3 -Xcompiler=-Wall,-Wextra,-Werror msm_digits_test.cu -o $(CUDA_TEST_BIN)
 	$(CUDA_TEST_BIN)
 
+test-host:
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror msm_digits_host_test.cpp -o $(HOST_TEST_BIN)
+	$(HOST_TEST_BIN)
+
 clean:
-	rm -f $(CUDA_TEST_BIN)
+	rm -f $(CUDA_TEST_BIN) $(HOST_TEST_BIN)
