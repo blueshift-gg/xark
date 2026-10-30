@@ -193,7 +193,14 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
         if in_package && let Some(rest) = line.strip_prefix("name") {
             let rest = rest.trim_start();
             if let Some(val) = rest.strip_prefix('=') {
-                let val = val.trim().trim_matches('"').trim_matches('\'');
+                let val = val.trim();
+                let val = if let Some(rest) = val.strip_prefix('"') {
+                    rest.split_once('"').map(|(name, _)| name)?
+                } else if let Some(rest) = val.strip_prefix('\'') {
+                    rest.split_once('\'').map(|(name, _)| name)?
+                } else {
+                    return None;
+                };
                 if !val.is_empty() {
                     return Some(val.to_string());
                 }
@@ -276,5 +283,38 @@ mod tests {
         fs::write(&real_file, b"transcript").unwrap();
 
         assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
+
+    #[test]
+    fn package_name_with_inline_comment_scopes_build_output_correctly() {
+        let temp = TestDir::new();
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[package]\nname = \"example-circuit\" # comment after the value\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let project = XarkProject::resolve(Some(temp.0.clone())).unwrap();
+        let crate_dir = temp.0.canonicalize().unwrap();
+
+        assert_eq!(
+            project.xark_dir,
+            crate_dir.join("target/xark/example-circuit")
+        );
+    }
+
+    #[test]
+    fn package_name_accepts_a_toml_literal_string() {
+        let temp = TestDir::new();
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[package]\nname = 'example-circuit' # comment\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            super::read_pkg_name(&temp.0).as_deref(),
+            Some("example-circuit")
+        );
     }
 }
