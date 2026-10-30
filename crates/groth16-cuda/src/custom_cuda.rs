@@ -197,9 +197,8 @@ mod tests {
     use super::{decode_result, field_from_words, field_words, prepare_inputs};
     use ark_bn254::{Fq, Fr, G1Affine};
     use ark_ec::AffineRepr;
-    use ark_ff::PrimeField;
+    use ark_ff::{BigInt, PrimeField};
     use ark_serialize::{CanonicalSerialize, Compress};
-    use xark_groth16::msm::Scalar;
 
     #[test]
     fn canonical_field_words_round_trip() {
@@ -220,7 +219,7 @@ mod tests {
         point
             .serialize_with_mode(&mut encoded, Compress::Yes)
             .unwrap();
-        let scalars = [Scalar([5, 0, 0, 0]), Scalar([7, 0, 0, 0])];
+        let scalars = [BigInt([5, 0, 0, 0]), BigInt([7, 0, 0, 0])];
         let (points, limbs) = prepare_inputs(&[encoded.clone(), encoded].concat(), true, &scalars)
             .expect("canonical inputs prepare");
 
@@ -236,7 +235,7 @@ mod tests {
         point.serialize_compressed(&mut encoded_point).unwrap();
         let scalars: Vec<_> = (0..super::PARALLEL_PREPARE_THRESHOLD)
             .map(|index| {
-                Scalar([
+                BigInt([
                     index as u64,
                     2 * index as u64,
                     3 * index as u64,
@@ -266,15 +265,10 @@ mod tests {
         point
             .serialize_with_mode(&mut encoded, Compress::Yes)
             .unwrap();
-        let noncanonical = [xark_groth16::msm::Scalar(Fr::MODULUS.0)];
+        let noncanonical = [Fr::MODULUS];
         assert!(prepare_inputs(&encoded, true, &noncanonical).is_none());
         assert!(
-            prepare_inputs(
-                &encoded[..encoded.len() - 1],
-                true,
-                &[xark_groth16::msm::Scalar([1, 0, 0, 0])]
-            )
-            .is_none()
+            prepare_inputs(&encoded[..encoded.len() - 1], true, &[BigInt([1, 0, 0, 0])]).is_none()
         );
 
         let off_curve = G1Affine::new_unchecked(Fq::from(1u64), Fq::from(1u64));
@@ -282,7 +276,7 @@ mod tests {
         off_curve
             .serialize_compressed(&mut off_curve_bytes)
             .unwrap();
-        assert!(prepare_inputs(&off_curve_bytes, true, &[Scalar([1, 0, 0, 0])]).is_none());
+        assert!(prepare_inputs(&off_curve_bytes, true, &[BigInt([1, 0, 0, 0])]).is_none());
     }
 
     #[test]
