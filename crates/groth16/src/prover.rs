@@ -15,7 +15,7 @@ use ark_ec::CurveGroup;
 use ark_ff::{PrimeField, UniformRand, Zero};
 use rand::RngCore;
 
-use crate::accel::{Accelerator, Local, sum_g1, sum_g2};
+use crate::accel::{Accelerator, Local, sum_g1, sum_g2, valid_msm_output};
 use crate::fft::FftConfig;
 use crate::msm::{Scalar, StreamingMsm};
 use crate::pk::{G1Query, KeyVector, PkError, PkSource};
@@ -182,9 +182,10 @@ fn accel_msm<P: PkSource + ?Sized>(
             return;
         }
         let n = bytes.len() / point_bytes(v, compressed);
-        match accel.msm(v == KeyVector::BG2, bytes, compressed, &sc(off, n)) {
-            Some(p) => parts.extend_from_slice(&p),
-            None => declined = true,
+        let g2 = v == KeyVector::BG2;
+        match accel.msm(g2, bytes, compressed, &sc(off, n)) {
+            Some(p) if valid_msm_output(g2, &p) => parts.extend_from_slice(&p),
+            Some(_) | None => declined = true,
         }
     })?;
     Ok((supported && !declined).then_some(parts))

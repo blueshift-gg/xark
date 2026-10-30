@@ -174,6 +174,26 @@ pub fn scalars_to_bytes(sc: &[Scalar]) -> Vec<u8> {
     out
 }
 
+/// Whether an accelerator returned one or more valid uncompressed partial sums.
+/// A malformed response must be declined before `sum_g1` / `sum_g2` consumes it.
+pub(crate) fn valid_msm_output(g2: bool, bytes: &[u8]) -> bool {
+    if g2 {
+        let point_size = G2Affine::default().uncompressed_size();
+        !bytes.is_empty()
+            && bytes.len() % point_size == 0
+            && bytes
+                .chunks_exact(point_size)
+                .all(|part| G2Affine::deserialize_uncompressed(part).is_ok())
+    } else {
+        let point_size = G1Affine::default().uncompressed_size();
+        !bytes.is_empty()
+            && bytes.len() % point_size == 0
+            && bytes
+                .chunks_exact(point_size)
+                .all(|part| G1Affine::deserialize_uncompressed(part).is_ok())
+    }
+}
+
 /// Decode a sum returned by [`Accelerator::msm`] / [`kernel_msm`] (possibly the
 /// concatenation of several partial sums) and add it up.
 pub fn sum_g1(bytes: &[u8]) -> G1Projective {
@@ -204,8 +224,8 @@ pub fn fr_bytes_mut(v: &mut [Fr]) -> &mut [u8] {
 
 #[cfg(test)]
 mod tests {
-    use super::try_kernel_msm;
-    use ark_bn254::G1Affine;
+    use super::{try_kernel_msm, valid_msm_output};
+    use ark_bn254::{G1Affine, G2Affine};
     use ark_ec::AffineRepr;
     use ark_serialize::CanonicalSerialize;
 
@@ -243,5 +263,28 @@ mod tests {
             .serialize_uncompressed(&mut expected)
             .unwrap();
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn validates_accelerator_partial_sum_buffers() {
+        let mut g1 = Vec::new();
+        G1Affine::generator()
+            .serialize_uncompressed(&mut g1)
+            .unwrap();
+        let mut g2 = Vec::new();
+        G2Affine::generator()
+            .serialize_uncompressed(&mut g2)
+            .unwrap();
+
+        assert!(valid_msm_output(false, &g1));
+        assert!(valid_msm_output(
+            false,
+            &[g1.as_slice(), g1.as_slice()].concat()
+        ));
+        assert!(!valid_msm_output(false, &[]));
+        assert!(!valid_msm_output(false, &[g1.as_slice(), &[0]].concat()));
+        assert!(!valid_msm_output(false, &[0xff; 64]));
+        assert!(valid_msm_output(true, &g2));
+        assert!(!valid_msm_output(true, &g1));
     }
 }
