@@ -83,6 +83,7 @@ and `select_taken` in `formal/Formal/Rewrites.lean`.
 | `while i < n` / `for i in 0..n` with `n` an unbounded witness | the loop length would depend on the witness | bound it with a constant (`for i in 0..MAX { if i < n { … } }`) |
 | `arr[i]` with `i` a wide witness (a `u32`, a `Field`) | a select over more than 1024 slots | narrow the index (`(i & 7) as usize`), or mux by hand |
 | `let n = read_len(); [Field; n]` | array length must be constant | use a `const` / const-generic `N` |
+| `#[circuit] fn c<const N: usize>(xs: Private<[Field; N]>)` | the entry is built once, with fixed sizes | a `const N` for the parameter, or a generic helper called with a fixed `N` |
 | calling through a fn pointer / trait object chosen by a witness | the call target would depend on the witness | branch on the witness and call each function directly |
 | `x as u8` on a `Field` | `Field` isn't a primitive integer | `Field::to_bits::<N>()` and recombine, or keep values as `uN` |
 | `memory.grow` / a memory fill or copy whose size depends on a witness | the memory layout would depend on the witness | use fixed-size buffers |

@@ -345,6 +345,11 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- A `#[circuit]` array parameter's length may be a `const`: `Private<[Field; DEPTH]>`
+  failed with "array lengths must be integer literals". The circuit is the one the
+  literal gives (`examples/merkle` now uses `const DEPTH`, same digest). A generic
+  entry (`fn c<const N: usize>`) is refused with a pointer to a `const` or a generic
+  helper; its generics used to be dropped silently.
 - Two `#[circuit]` functions in one crate fail with "the crate has 2 #[circuit]
   functions (src/lib.rs:2, …); xark builds one circuit per crate", not a clash of the
   internal `__xark_main` / `__XARK_ENTRY` symbols. The rule is now documented.

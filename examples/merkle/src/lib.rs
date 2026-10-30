@@ -5,11 +5,14 @@
 //! computed root equals the public one.
 use xark_merkle::prelude::*;
 
+/// The tree's depth: a `const` sizes the path parameters.
+pub const DEPTH: usize = 4;
+
 #[circuit]
 pub fn merkle(
     leaf: Private<Field>,
-    siblings: Private<[Field; 4]>,
-    index_bits: Private<[Field; 4]>,
+    siblings: Private<[Field; DEPTH]>,
+    index_bits: Private<[Field; DEPTH]>,
     root: Public<Field>,
 ) {
     merkle_verify(leaf, siblings, index_bits, root);
@@ -17,13 +20,13 @@ pub fn merkle(
 
 #[cfg(test)]
 mod tests {
-    use super::merkle;
+    use super::{DEPTH, merkle};
 
     // Concrete leaf, path, and LSB-first position (0b0101). The Poseidon root was
     // derived once by solving the circuit (`xark-merkle`'s `vec` test), then pinned.
     const LEAF: u64 = 7;
-    const SIBLINGS: [u64; 4] = [11, 22, 33, 44];
-    const INDEX_BITS: [u64; 4] = [1, 0, 1, 0];
+    const SIBLINGS: [u64; DEPTH] = [11, 22, 33, 44];
+    const INDEX_BITS: [u64; DEPTH] = [1, 0, 1, 0];
     const ROOT: &str =
         "19217897426496189115890594488318047711322540293288184119629031241572428947159";
 

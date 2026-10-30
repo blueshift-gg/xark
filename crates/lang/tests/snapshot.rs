@@ -6373,6 +6373,41 @@ fn require_eq_integer_matches_explicit_conversion() {
     );
 }
 
+/// An array parameter's length may be a constant, not just a literal, for byte
+/// arrays too; the circuit is the one the literal gives.
+#[test]
+fn circuit_array_lengths_may_be_constants() {
+    let src = |len: &str| {
+        format!(
+            "use xark::prelude::*;\nconst N: usize = 3;\n#[circuit]\n\
+             pub fn sums(xs: Private<[Field; {len}]>, bs: Private<[u8; {len}]>, out: Public<Field>) {{\n\
+             require_eq(xs[0] + xs[1] + xs[2] + bs[0] + bs[1] + bs[2], out);\n}}\n"
+        )
+    };
+    let c = compile_with_field(&write_case("len_const", &src("N")), "len_const", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    let lit = compile_with_field(&write_case("len_lit", &src("3")), "len_lit", "bn254");
+    assert!(lit.status_success, "{}", lit.stderr);
+    let xbc =
+        |c: &xark_test_harness::Compiled| std::fs::read(c.out_dir.join("circuit.xbc")).unwrap();
+    assert!(
+        xbc(&c) == xbc(&lit),
+        "a constant length changed the circuit"
+    );
+}
+
+/// A generic `#[circuit]` entry is refused with a pointer to what works, not
+/// built with its generics silently dropped.
+#[test]
+fn circuit_entry_cannot_be_generic() {
+    let src = "use xark::prelude::*;\n#[circuit]\n\
+         pub fn sums<const N: usize>(xs: Private<[Field; N]>, out: Public<Field>) {\n\
+         require_eq(xs[0], out);\n}\n";
+    let c = compile_with_field(&write_case("generic_entry", src), "generic_entry", "bn254");
+    assert!(!c.status_success, "a generic #[circuit] entry was accepted");
+    assert!(c.stderr.contains("can't be generic"), "{}", c.stderr);
+}
+
 /// `#[circuit]` rejects arguments rather than ignoring them: an option like
 /// `max_constraints` would otherwise compile and look enforced.
 #[test]

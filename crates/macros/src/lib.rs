@@ -16,6 +16,9 @@
 //! (3) implements `ProveInputs` for it from the same impls; (4) generates
 //! `<Fn>Inputs::schema()`, the circuit's `schema.json`.
 //!
+//! An array parameter's length may be a literal or a `const` (`[Field; DEPTH]`), but
+//! the entry can't be generic: it is built once, with fixed sizes.
+//!
 //! A crate holds one `#[circuit]`: it is the crate's entry, the way `main` is a
 //! binary's. For several circuits, give each its own crate (a workspace member
 //! works) and share code between them as plain functions.
@@ -56,12 +59,13 @@ enum HostArg {
     /// `impl Into<T>`: a `Field` from an integer or string, a gadget type from its
     /// natural form, a `Days` or `Timestamp` from `"YYYY-MM-DD"`.
     Into,
-    /// `[impl Into<Elem>; N]`: an array of such.
-    IntoArray(usize),
+    /// `[impl Into<Elem>; N]`: an array of such (`N` as written: a literal or a
+    /// constant).
+    IntoArray(Expr),
     /// Exactly the type: native integers and byte arrays, so untyped literals infer.
     Exact,
     /// `[u8; N]`, exactly; the circuit body sees it as `[Field; N]`.
-    Bytes(usize),
+    Bytes(Expr),
 }
 
 /// One resolved entry parameter.
@@ -79,6 +83,15 @@ struct CircuitParam {
 /// the circuit build, and emit a typed `<Fn>Inputs` struct whose `ProveInputs`
 /// writes each parameter's leaves for the prover.
 fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
+    // The entry is built once, so every size in it must be fixed.
+    if !func.sig.generics.params.is_empty() || func.sig.generics.where_clause.is_some() {
+        return Err(syn::Error::new_spanned(
+            &func.sig.generics,
+            "a #[circuit] entry can't be generic: it is built once, so its sizes must be \
+             fixed\nhelp: use a `const` (`const DEPTH: usize = 20;`), or call a generic \
+             helper with a fixed `N` from the entry",
+        ));
+    }
     let params = func
         .sig
         .inputs
@@ -112,7 +125,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     // each byte on entry and records the true type in `schema.json`; the body then sees
     // it as `[Field; N]` (what the byte gadgets take). The conversion is free, and a
     // gadget's own `to_bits::<8>` of a byte hits the bit cache the entry check filled.
-    let byte_convs = params.iter().filter_map(|p| match p.host {
+    let byte_convs = params.iter().filter_map(|p| match &p.host {
         HostArg::Bytes(n) => {
             let name = &p.name;
             Some(quote! {
@@ -199,7 +212,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         .collect();
     let host_params = params.iter().map(|p| {
         let (name, ty) = (&p.name, &p.ty);
-        match p.host {
+        match &p.host {
             HostArg::Into => quote! { #name: impl ::core::convert::Into<#ty> },
             HostArg::IntoArray(n) => {
                 let t = format_ident!("__T_{}", name);
@@ -210,7 +223,7 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
     });
     let host_ctor = params.iter().map(|p| {
         let name = &p.name;
-        match p.host {
+        match &p.host {
             HostArg::Into => quote! { #name: #name.into() },
             HostArg::IntoArray(_) => quote! { #name: #name.map(::core::convert::Into::into) },
             HostArg::Exact | HostArg::Bytes(_) => quote! { #name },
@@ -331,7 +344,9 @@ fn host_arg(ty: &Type) -> syn::Result<HostArg> {
     match ty {
         _ if uint_type_bits(ty).is_some() || is_ident(ty, "bool") => Ok(HostArg::Exact),
         Type::Array(arr) => {
-            let n = eval_usize_lit(&arr.len)?;
+            // The length is only spelled into generated code, so a constant works
+            // as well as a literal.
+            let n = arr.len.clone();
             Ok(if is_ident(&arr.elem, "u8") {
                 HostArg::Bytes(n)
             } else if uint_type_bits(&arr.elem).is_some() {
