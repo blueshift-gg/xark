@@ -168,8 +168,8 @@ int main() {
   const G1Affine points[scalar_count] = {make_point(g_x, g_y),
                                          make_point(two_g_x, two_g_y),
                                          make_point(three_g_x, three_g_y)};
-  const std::uint64_t scalar_limbs_soa[4 * scalar_count] = {1, 2, 3, 0, 0, 0,
-                                                            0, 0, 0, 0, 0, 0};
+  const std::uint64_t scalar_limbs_soa[4 * scalar_count] = {
+      1, 2049, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   if (!are_canonical_scalars_soa(scalar_limbs_soa, scalar_count)) {
     std::fprintf(stderr, "noncanonical BN254 Fr fixture scalar\n");
     return 1;
@@ -254,15 +254,15 @@ int main() {
   const G1Affine affine = g1_to_affine(result);
   const Fq actual_x = to_canonical(affine.x);
   const Fq actual_y = to_canonical(affine.y);
-  const std::uint32_t expected_x[8] = {0x4e53cf66u, 0xb5a49bd8u, 0xca57c37fu,
-                                       0x617bffd1u, 0xf46eff9du, 0x5d1cd2b1u,
-                                       0x7880144bu, 0x15bf2bb1u};
-  const std::uint32_t expected_y[8] = {0x93d1355fu, 0x624c1689u, 0x36598dd7u,
-                                       0x2a212ee0u, 0x5e36f2eau, 0x83deb32bu,
-                                       0x9ce0d170u, 0x049c797fu};
+  const std::uint32_t expected_x[8] = {0xfdcd0efeu, 0x266169bfu, 0xb624fef1u,
+                                       0x94ce553cu, 0x8f731c3cu, 0x01024a8cu,
+                                       0xa4ab1f72u, 0x0f37575du};
+  const std::uint32_t expected_y[8] = {0x4d6a5999u, 0x91779ce8u, 0x42f03539u,
+                                       0xa780ba67u, 0x128e31dau, 0xeebd2a3du,
+                                       0xea854328u, 0x2623ad59u};
   if (affine.infinity || !equal(actual_x.limbs, expected_x) ||
       !equal(actual_y.limbs, expected_y)) {
-    std::fprintf(stderr, "windowed CUDA MSM differs from 14G\n");
+    std::fprintf(stderr, "windowed CUDA MSM differs from 4108G\n");
     return 1;
   }
   std::puts("passed end-to-end CUDA BN254 MSM: 3 points, 24 windows");

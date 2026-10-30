@@ -57,6 +57,13 @@ def main():
         make_case([2, 3, 4, 5], [[7, 7, 7, 1]], 8),
         make_case([1], [[1], [1]], 2),
     ]
+    pipeline_digits = [[0, 0, 0] for _ in range(24)]
+    pipeline_digits[0] = [1, 1, 3]
+    pipeline_digits[1] = [0, 1, 0]
+    pipeline_case = make_case([1, 2, 3], pipeline_digits, 1 << 11)
+    if pipeline_case[2] != multiply(GENERATOR, 4108):
+        raise SystemExit("cross-window pipeline fixture does not equal 4108G")
+    cases.append(pipeline_case)
     rng = random.Random(0x5841524B)
     for _ in range(32):
         point_count = rng.randrange(0, 25)
