@@ -62,12 +62,14 @@ windows. The host oracle checks this prepared-CSR-to-MSM path across multiple
 windows. The unit device fixture checks bucket accumulation and two-window
 recomposition; the pipeline test below also connects digit extraction,
 bucket-index construction, accumulation, reduction, and recomposition.
-`msm_pipeline_test.cu` now runs a tiny end-to-end device fixture: scalar window
+`msm_pipeline_test.cu` runs a tiny end-to-end device fixture: scalar window
 extraction, CSR bucket construction, point accumulation, weighted bucket
-reduction, and window recomposition. It compares `1·G + 2·(2G) + 3·(3G)` with
-the independently calculated `14G`. This validates the custom kernel path for
-that fixture only. It is not yet connected to `Accelerator::msm`, does not
-exercise production-sized chunks, and has not been compiled or run on this Mac.
+reduction, and window recomposition. One scalar has a nonzero digit in the
+second window, so the fixture checks cross-window weighting as well as bucket
+construction. It compares `1·G + 2049·(2G) + 3·(3G)` with the independently
+calculated `4108G`. This validates the custom kernel path for that fixture only.
+It is not yet connected to `Accelerator::msm`, does not exercise production-sized
+chunks, and has not been compiled or run on this Mac.
 
 ## BN254 arithmetic foundation
 
