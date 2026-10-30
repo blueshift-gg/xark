@@ -140,7 +140,7 @@ pub fn try_kernel_msm(
             let mut l = [0u64; 4];
             let (words, _) = b.as_chunks::<8>();
             for (i, w) in words.iter().enumerate() {
-                l[i] = u64::from_le_bytes(w.try_into().unwrap());
+                l[i] = u64::from_le_bytes(*w);
             }
             BigInt(l)
         })
