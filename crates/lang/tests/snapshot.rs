@@ -598,6 +598,63 @@ fn merkle_membership_gadget() {
     assert_eq!(nonzeros, 25_330, "depth-4 Poseidon Merkle nonzero count");
 }
 
+/// Number of `a·b = c` rows that are plain linear equalities (`b`, `c` empty).
+fn linear_equalities(r1cs: &xark_ir::R1csProgram) -> usize {
+    r1cs.constraints
+        .iter()
+        .filter(|k| k.b.terms.is_empty() && k.c.terms.is_empty() && k.c.constant.is_zero())
+        .count()
+}
+
+fn nonzeros(r1cs: &xark_ir::R1csProgram) -> usize {
+    r1cs.constraints
+        .iter()
+        .map(|k| k.a.terms.len() + k.b.terms.len() + k.c.terms.len())
+        .sum()
+}
+
+/// `xark_poseidon::pinned::hash2`: the same 240 S-box gates as `poseidon`, plus
+/// `Field::pin` on the two linear lanes of each of the 56 partial rounds (2
+/// linear constraints per pin: 2 × 2 × 56 = 224) and the output binding. The
+/// pins keep every linear combination short: 1,736 nonzeros, where the unpinned
+/// gadget's are large enough that its `r1cs.json` is not snapshotted.
+#[test]
+fn poseidon_pinned_gadget() {
+    let c = compile_with_field(&example("poseidon_pinned"), "poseidon_pinned", "bn254");
+    assert!(c.status_success, "poseidon_pinned failed: {}", c.stderr);
+    let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
+    let r1cs = xark_ir::json::from_json(&json).unwrap();
+    assert_eq!(r1cs.constraints.len(), 465);
+    assert_eq!(
+        linear_equalities(&r1cs),
+        225,
+        "224 pin equalities + the output binding"
+    );
+    assert_eq!(
+        r1cs.constraints.len() - linear_equalities(&r1cs),
+        240,
+        "S-box gates unchanged"
+    );
+    assert_eq!(nonzeros(&r1cs), 1_736, "pinned Poseidon nonzero count");
+}
+
+/// `xark_merkle::pinned`: the depth-4 path of `merkle_membership_gadget` on the
+/// pinned permutation. 4 × (465 − 1 + 1 booleanity + 2 muxes) + 1 = 1,877
+/// constraints, and 3.6× fewer nonzeros than the unpinned 25,330.
+#[test]
+fn merkle_pinned_gadget() {
+    let c = compile_with_field(&example("merkle_pinned"), "merkle_pinned", "bn254");
+    assert!(c.status_success, "merkle_pinned failed: {}", c.stderr);
+    let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
+    let r1cs = xark_ir::json::from_json(&json).unwrap();
+    assert_eq!(r1cs.constraints.len(), 1_877);
+    assert_eq!(
+        nonzeros(&r1cs),
+        7_054,
+        "depth-4 pinned Poseidon Merkle nonzero count"
+    );
+}
+
 /// **R1CS ↔ Lean bridge (Merkle membership).**
 ///
 /// `formal/Formal/Merkle.lean` proves the soundness fact a Merkle fold adds over

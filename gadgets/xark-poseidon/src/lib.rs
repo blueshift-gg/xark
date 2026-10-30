@@ -214,6 +214,75 @@ pub fn hash<const N: usize>(inputs: [Field; N]) -> Field {
     }
     state[0]
 }
+/// The same permutation and hashes, with `state[1]` and `state[2]` pinned
+/// ([`Field::pin`]) after every partial round.
+///
+/// Outputs are identical to [`permute`], [`hash2`] and [`hash`]. Only
+/// `state[0]` passes through the S-box in a partial round, so without pins the
+/// other two lanes stay linear combinations that gain a term per round across
+/// all 56 of them. Pinning keeps each at a few terms: a much smaller
+/// `circuit.xbc` and a much faster witness solve, for 224 extra linear
+/// constraints per permutation (two per pin). Prefer these when a circuit hashes more than a
+/// handful of times (Merkle paths, commitments).
+pub mod pinned {
+    use super::{T, ark, mds, round_constants, sbox};
+    use xark::Field;
+
+    fn full_round(state: [Field; T], rc: [Field; T]) -> [Field; T] {
+        let mut s = ark(state, rc);
+        let mut i = 0usize;
+        while i < 3usize {
+            s[i] = sbox(s[i]);
+            i += 1;
+        }
+        mds(s)
+    }
+
+    fn partial_round(state: [Field; T], rc: [Field; T]) -> [Field; T] {
+        let mut s = ark(state, rc);
+        s[0] = sbox(s[0]);
+        let out = mds(s);
+        [out[0], out[1].pin(), out[2].pin()]
+    }
+
+    /// [`super::permute`], with the partial-round lanes pinned.
+    pub fn permute(state: [Field; T]) -> [Field; T] {
+        let rc = round_constants();
+        let mut s = state;
+        let mut r = 0usize;
+        while r < 64usize {
+            s = if r < 4usize || r >= 60usize {
+                full_round(s, rc[r])
+            } else {
+                partial_round(s, rc[r])
+            };
+            r += 1;
+        }
+        s
+    }
+
+    /// [`super::hash2`], on the pinned permutation.
+    pub fn hash2(a: Field, b: Field) -> Field {
+        let out = permute([Field::from(0u8), a, b]);
+        out[0]
+    }
+
+    /// [`super::hash`], on the pinned permutation.
+    pub fn hash<const N: usize>(inputs: [Field; N]) -> Field {
+        let mut state = [Field::from(N as u64), Field::from(0u8), Field::from(0u8)];
+        let mut i = 0usize;
+        while i < N {
+            state[1] = state[1] + inputs[i];
+            if i + 1 < N {
+                state[2] = state[2] + inputs[i + 1];
+            }
+            state = permute(state);
+            i += 2;
+        }
+        state[0]
+    }
+}
+
 /// Bring the gadget's public API into scope alongside the xark circuit
 /// essentials (`Field`, `Public`/`Private`, `require_eq`, `#[circuit]`), so a
 /// circuit crate needs a single `use xark_poseidon::prelude::*;`.
