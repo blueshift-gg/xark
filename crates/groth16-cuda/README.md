@@ -39,6 +39,25 @@ scalar values. The proof test creates a small real R1CS, generates a setup key,
 requires each G1 proving-key chunk to be accepted by the GPU adapter, and verifies
 the resulting proof with Xark's verifier.
 
+## CUDA host validation
+
+Requirements: Linux, an NVIDIA GPU, CUDA Toolkit, Nsight Systems, and the ICICLE
+CUDA backend matching the pinned v4.0.0 Rust frontend. Run from a clean checkout:
+
+```sh
+crates/groth16-cuda/scripts/run_cuda_validation.sh
+```
+
+The run executes adapter unit tests, builds all adapter tests, requires CUDA for
+the CPU/GPU MSM comparison and verified Groth16 proof, produces benchmark CSV,
+and captures Nsight Systems traces at 65,536 and 524,288 points. It saves the
+source revision, toolchain and GPU details, test logs, CSV, and profiler reports
+under `out/cuda-validation/<commit>/`.
+
+Set `ICICLE_BACKEND_INSTALL_DIR` for a non-default backend path. Workload and
+output settings are available through `XARK_MSM_SIZES`, `XARK_PROFILE_SIZES`,
+`XARK_MSM_REPEATS`, `XARK_MSM_SEED`, and `XARK_CUDA_RESULTS_DIR`.
+
 Xark owns the serialization checks, arkworks-to-ICICLE field conversion, runtime
 selection, output validation, and the small scalar-window CUDA kernel in
 `../groth16/cuda`. ICICLE owns the BN254 curve MSM kernels, including bucket
