@@ -28,7 +28,7 @@
 //! sub-FFTs gain radix-3 layers ([`mixed_fft`]); everything else is unchanged.
 
 use ark_bn254::Fr;
-use ark_ff::{FftField, Field, One, Zero};
+use ark_ff::{FftField, Field, One, PrimeField, Zero};
 use rayon::prelude::*;
 
 /// Tuning knobs for the blocked FFT.
@@ -54,11 +54,13 @@ impl Default for FftConfig {
 
 /// Per-direction precomputation (forward uses ω, inverse ω⁻¹).
 struct Tables {
-    /// `ω_{N1}^j`, `j < N1/2` (column sub-FFT twiddles; `j < N1` when `N1` has a
-    /// factor 3).
+    /// `ω_{N1}^j`, `j < N1`, for [`mixed_fft`]'s radix-3 layers (empty when `N1`
+    /// is a power of two).
     tw_n1: Vec<Fr>,
-    /// `ω_{N2}^j`, `j < N2/2` (row sub-FFT twiddles).
-    tw_n2: Vec<Fr>,
+    /// [`stage_table`] for the radix-2 part of `N1` (the column, or its leaves).
+    st_n1: Vec<Fr>,
+    /// [`stage_table`] for `N2` (rows).
+    st_n2: Vec<Fr>,
     /// `ω_N^c`, `c < N2` — per-column generator of the Bailey twiddle `ω_N^{r·c}`.
     col_step: Vec<Fr>,
 }
@@ -92,85 +94,134 @@ impl Tables {
         let n = (n1 * n2) as u64;
         let root_n1 = root.pow([n / n1 as u64]);
         let root_n2 = root.pow([n / n2 as u64]);
+        let odd = n1 >> n1.trailing_zeros();
         Tables {
-            tw_n1: powers(root_n1, if n1.is_multiple_of(3) { n1 } else { n1 / 2 }),
-            tw_n2: powers(root_n2, n2 / 2),
+            tw_n1: if odd > 1 {
+                powers(root_n1, n1)
+            } else {
+                Vec::new()
+            },
+            st_n1: stage_table(root_n1.pow([odd as u64]), n1 / odd),
+            st_n2: stage_table(root_n2, n2),
             col_step: if n1 > 1 { powers(root, n2) } else { Vec::new() },
         }
     }
 }
 
+/// Radix-2 twiddles of a length-`len` DFT (`root = ω_len`) laid out by stage: the
+/// stage with half-size `m` reads `ω_{2m}^j`, `j < m`, contiguously at `[m−1, 2m−1)`.
+fn stage_table(root: Fr, len: usize) -> Vec<Fr> {
+    let half = powers(root, len / 2);
+    let mut out = Vec::with_capacity(len);
+    let mut m = 1;
+    while m < len {
+        out.extend((0..m).map(|j| half[j * (len / (2 * m))]));
+        m *= 2;
+    }
+    out
+}
+
+/// `i` bit-reversed in `log` bits.
+fn bitrev(i: usize, log: u32) -> usize {
+    i.reverse_bits().checked_shr(usize::BITS - log).unwrap_or(0)
+}
+
 /// In-place bit-reversal permutation.
 fn bitrev_permute(a: &mut [Fr]) {
-    let n = a.len();
-    if n <= 2 {
-        return;
-    }
-    let shift = usize::BITS - n.trailing_zeros();
-    for i in 0..n {
-        let j = i.reverse_bits() >> shift;
+    let log = a.len().trailing_zeros();
+    for i in 0..a.len() {
+        let j = bitrev(i, log);
         if i < j {
             a.swap(i, j);
         }
     }
 }
 
-/// In-place iterative radix-2 DIT FFT, natural order in and out.
-/// `tw[j] = ω_L^j` for `j < L/2`, `L = a.len()`.
-pub fn radix2_fft(a: &mut [Fr], tw: &[Fr]) {
-    radix2_fft_strided(a, tw, 1)
+/// In-place radix-2 DFT, natural order in and out; `st` is the
+/// [`stage_table`] for `a.len()`.
+fn radix2_fft(a: &mut [Fr], st: &[Fr]) {
+    bitrev_permute(a);
+    dit(a, st);
 }
 
-/// [`radix2_fft`] with `ω_L^j = tw[j·s]` (a table for a multiple of `L`).
-fn radix2_fft_strided(a: &mut [Fr], tw: &[Fr], s: usize) {
-    let n = a.len();
-    if n <= 1 {
-        return;
+/// In-place radix-2 DIF DFT, natural order in, **bit-reversed** out (`st`: the
+/// [`stage_table`] for `a.len()`), so [`dit`] or [`bitrev`] reads it unpermuted.
+fn dif(a: &mut [Fr], st: &[Fr]) {
+    let mut m = a.len() / 2;
+    while m >= 1 {
+        let tw = &st[m - 1..2 * m - 1];
+        for block in a.chunks_exact_mut(2 * m) {
+            let (lo, hi) = block.split_at_mut(m);
+            let t = hi[0];
+            hi[0] = lo[0] - t;
+            lo[0] += t;
+            for ((x, y), w) in lo[1..].iter_mut().zip(&mut hi[1..]).zip(&tw[1..]) {
+                let t = *x - *y;
+                *x += *y;
+                *y = t * w;
+            }
+        }
+        m /= 2;
     }
-    debug_assert!(n.is_power_of_two() && tw.len() > (n / 2 - 1) * s);
-    bitrev_permute(a);
+}
+
+/// In-place radix-2 DIT DFT, **bit-reversed** in, natural order out (`st`: the
+/// [`stage_table`] for `a.len()`).
+fn dit(a: &mut [Fr], st: &[Fr]) {
+    let n = a.len();
+    debug_assert!(n.is_power_of_two() && st.len() + 1 >= n);
     let mut m = 1;
     while m < n {
-        let stride = n / (2 * m);
+        let tw = &st[m - 1..2 * m - 1];
         for block in a.chunks_exact_mut(2 * m) {
             let (lo, hi) = block.split_at_mut(m);
             // j = 0: twiddle is 1.
             let t = hi[0];
             hi[0] = lo[0] - t;
             lo[0] += t;
-            for j in 1..m {
-                let t = hi[j] * tw[j * stride * s];
-                hi[j] = lo[j] - t;
-                lo[j] += t;
+            for ((x, y), w) in lo[1..].iter_mut().zip(&mut hi[1..]).zip(&tw[1..]) {
+                let t = *y * w;
+                *y = *x - t;
+                *x += t;
             }
         }
         m *= 2;
     }
 }
 
-/// In-place DFT of length `L = 3^b·2^a`, natural order in and out, with
-/// `ω_L^j = tw[j·s]` for `j < L` and `scratch.len() >= L`.
+/// In-place DFT of length `L = 3^b·2^a`, `b ≥ 1`, natural order in and out, with
+/// `ω_L^j = tw[j·s]` for `j < L`, `leaf` the [`stage_table`] for the radix-2
+/// part of `L`, and `scratch.len() >= L`.
 ///
 /// Radix-3 decimation in time: the three stride-3 subsequences are transformed
 /// (recursively) into `scratch`, then combined — `X[k + i·L/3] = Σ_j ω_3^{ij}·
-/// ω_L^{jk}·F_j[k]` — with 4 multiplications per 3 outputs.
-pub fn mixed_fft(a: &mut [Fr], tw: &[Fr], s: usize, scratch: &mut [Fr]) {
+/// ω_L^{jk}·F_j[k]` — with 4 multiplications per 3 outputs. Radix-2 leaves are
+/// gathered bit-reversed, so they run [`dit`] with no permutation.
+pub fn mixed_fft(a: &mut [Fr], tw: &[Fr], s: usize, leaf_st: &[Fr], scratch: &mut [Fr]) {
     let n = a.len();
-    if !n.is_multiple_of(3) {
-        return radix2_fft_strided(a, tw, s);
-    }
     let m = n / 3;
+    let leaf = !m.is_multiple_of(3);
     let sc = &mut scratch[..n];
     for (j2, x) in a.as_chunks::<3>().0.iter().enumerate() {
-        sc[j2] = x[0];
-        sc[m + j2] = x[1];
-        sc[2 * m + j2] = x[2];
+        let p = if leaf {
+            bitrev(j2, m.trailing_zeros())
+        } else {
+            j2
+        };
+        sc[p] = x[0];
+        sc[m + p] = x[1];
+        sc[2 * m + p] = x[2];
     }
     for blk in sc.chunks_exact_mut(m) {
-        mixed_fft(blk, tw, 3 * s, &mut a[..m]);
+        if leaf {
+            dit(blk, leaf_st);
+        } else {
+            mixed_fft(blk, tw, 3 * s, leaf_st, &mut a[..m]);
+        }
     }
     // ω₃ + ω₃² = −1, so X₁,₂ = x₀ − (x₁+x₂)/2 ± (ω₃−ω₃²)/2·(x₁−x₂).
-    let half = Fr::from(2u64).inverse().unwrap();
+    // 1/2 = (p+1)/2, without an inversion per call.
+    let half = Fr::from(Fr::MODULUS_MINUS_ONE_DIV_TWO) + Fr::one();
     let w3 = tw[m * s];
     let c = (w3 - w3.square()) * half;
     let (f0, rest) = sc.split_at(m);
@@ -318,77 +369,82 @@ impl Domain {
         })
     }
 
-    /// Length-`N1` column DFT (natural order in and out).
-    fn col_fft(&self, col: &mut [Fr], t: &Tables, scratch: &mut Vec<Fr>) {
-        if self.n1.is_multiple_of(3) {
-            scratch.resize(self.n1, Fr::zero());
-            mixed_fft(col, &t.tw_n1, 1, scratch);
-        } else {
-            radix2_fft(col, &t.tw_n1);
-        }
-    }
-
     /// Whether this domain runs the four-step path.
     pub fn is_blocked(&self) -> bool {
         self.n1 > 1
     }
 
-    /// Column-tile kernel on `b` columns starting at `c0`, stored **column-major**
-    /// in `cols` (`b × N1`): Bailey twiddle × `scale` (before the FFTs for
-    /// [`Twiddle::Pre`], after for [`Twiddle::Post`]) plus the length-`N1` FFTs.
-    fn cols_core(&self, cols: &mut [Fr], c0: usize, t: &Tables, tw: Twiddle, scale: Fr) {
+    /// Column FFTs on global columns `c0..c0+b`, the first `b` elements of each
+    /// of `N1` rows at `base` (row stride `stride`): gather them column-major into
+    /// `cols` (one cache-line-friendly run per row), FFT, scatter back. The Bailey twiddle
+    /// `scale·ω_N^{r·c}` is applied while gathering ([`Twiddle::Pre`]) or
+    /// scattering ([`Twiddle::Post`]). Radix-2 columns run [`dif`], so the scatter
+    /// reads them bit-reversed.
+    ///
+    /// # Safety
+    /// `base + r·stride .. + b` is valid for every row `r < N1`, and no one else
+    /// accesses it during the call.
+    unsafe fn col_tile(
+        &self,
+        base: *mut Fr,
+        stride: usize,
+        c0: usize,
+        b: usize,
+        cols: &mut [Fr],
+        (t, tw, scale): (&Tables, Twiddle, Fr),
+    ) {
         let n1 = self.n1;
-        let twiddle = |col: &mut [Fr], step: Fr| {
-            let mut cur = scale;
-            for v in col {
-                *v *= cur;
-                cur *= step;
+        let radix2 = n1.is_power_of_two();
+        let log = n1.trailing_zeros();
+        let step = &t.col_step[c0..c0 + b];
+        let mut cur = vec![scale; b];
+        for r in 0..n1 {
+            // SAFETY: row r's `b` elements, ours alone (caller contract).
+            let row = unsafe { std::slice::from_raw_parts(base.add(r * stride), b) };
+            for j in 0..b {
+                let mut v = row[j];
+                if tw == Twiddle::Pre {
+                    v *= cur[j];
+                    cur[j] *= step[j];
+                }
+                cols[j * n1 + r] = v;
             }
-        };
+        }
         let mut scratch = Vec::new();
-        for (j, col) in cols.chunks_exact_mut(n1).enumerate() {
-            let step = t.col_step[c0 + j];
-            if tw == Twiddle::Pre {
-                twiddle(col, step);
+        for col in cols[..b * n1].chunks_exact_mut(n1) {
+            if radix2 {
+                dif(col, &t.st_n1);
+            } else {
+                scratch.resize(n1, Fr::zero());
+                mixed_fft(col, &t.tw_n1, 1, &t.st_n1, &mut scratch);
             }
-            self.col_fft(col, t, &mut scratch);
-            if tw == Twiddle::Post {
-                twiddle(col, step);
+        }
+        for r in 0..n1 {
+            let p = if radix2 { bitrev(r, log) } else { r };
+            // SAFETY: as above.
+            let row = unsafe { std::slice::from_raw_parts_mut(base.add(r * stride), b) };
+            for j in 0..b {
+                let mut v = cols[j * n1 + p];
+                if tw == Twiddle::Post {
+                    v *= cur[j];
+                    cur[j] *= step[j];
+                }
+                row[j] = v;
             }
         }
     }
 
-    /// Column FFTs, `tile` columns at a time: gather the block into a contiguous
-    /// column-major scratch (one cache-line-friendly run per row), run
-    /// [`cols_core`](Self::cols_core), scatter back.
+    /// Column FFTs, `tile` columns per task ([`col_tile`](Self::col_tile)).
     fn col_pass(&self, buf: &mut [Fr], t: &Tables, tw: Twiddle, scale: Fr) {
         let (n1, n2, tile) = (self.n1, self.n2, self.tile);
         let ptr = SyncPtr(buf.as_mut_ptr());
         (0..n2.div_ceil(tile)).into_par_iter().for_each_init(
             || vec![Fr::zero(); n1 * tile],
-            |scratch, bt| {
-                let c0 = bt * tile;
-                let b = tile.min(n2 - c0);
-                let base = ptr.get();
-                // SAFETY: block `bt` touches only columns c0..c0+b of each row, which
-                // no other task touches; `buf` outlives the parallel loop.
-                unsafe {
-                    for r in 0..n1 {
-                        let row = base.add(r * n2 + c0);
-                        for j in 0..b {
-                            scratch[j * n1 + r] = *row.add(j);
-                        }
-                    }
-                }
-                self.cols_core(&mut scratch[..b * n1], c0, t, tw, scale);
-                unsafe {
-                    for r in 0..n1 {
-                        let row = base.add(r * n2 + c0);
-                        for j in 0..b {
-                            *row.add(j) = scratch[j * n1 + r];
-                        }
-                    }
-                }
+            |cols, bt| {
+                let (c0, b) = (bt * tile, tile.min(n2 - bt * tile));
+                // SAFETY: task `bt` alone touches columns c0..c0+b of each row;
+                // `buf` outlives the parallel loop.
+                unsafe { self.col_tile(ptr.get().add(c0), n2, c0, b, cols, (t, tw, scale)) }
             },
         );
     }
@@ -399,23 +455,53 @@ impl Domain {
     pub fn rows_kernel(&self, rows: &mut [Fr], first_row: usize, stages: &[RowStage]) {
         let n2 = self.n2;
         assert_eq!(rows.len() % n2, 0);
+        // Each FFT flips the row between natural and bit-reversed order (DIF on
+        // natural, DIT on bit-reversed), so a chain permutes at most once, at the
+        // end. A coset stage reads its exponents in the row's current order:
+        // position k2 holds index k1 + N1·k2.
+        let coset_pows: Vec<Vec<Fr>> = (0..stages.len())
+            .map(|i| match stages[i] {
+                RowStage::Coset(g) => {
+                    let mut p = powers(g.pow([self.n1 as u64]), n2);
+                    let ffts = stages[..i]
+                        .iter()
+                        .filter(|s| matches!(s, RowStage::Fft | RowStage::Ifft));
+                    if ffts.count() % 2 == 1 {
+                        bitrev_permute(&mut p);
+                    }
+                    p
+                }
+                _ => Vec::new(),
+            })
+            .collect();
         for (i, row) in rows.chunks_exact_mut(n2).enumerate() {
-            let k1 = (first_row + i) as u64;
-            for st in stages {
+            let mut rev = false;
+            for (st, pows) in stages.iter().zip(&coset_pows) {
                 match *st {
-                    RowStage::Fft => radix2_fft(row, &self.fwd.tw_n2),
-                    RowStage::Ifft => radix2_fft(row, &self.inv.tw_n2),
+                    RowStage::Fft | RowStage::Ifft => {
+                        let t = if matches!(st, RowStage::Fft) {
+                            &self.fwd
+                        } else {
+                            &self.inv
+                        };
+                        if rev {
+                            dit(row, &t.st_n2);
+                        } else {
+                            dif(row, &t.st_n2);
+                        }
+                        rev = !rev;
+                    }
                     RowStage::Scale(k) => row.iter_mut().for_each(|v| *v *= k),
                     RowStage::Coset(g) => {
-                        // Position (k1, k2) holds index k1 + N1·k2.
-                        let step = g.pow([self.n1 as u64]);
-                        let mut cur = g.pow([k1]);
-                        for v in row.iter_mut() {
-                            *v *= cur;
-                            cur *= step;
+                        let c = g.pow([(first_row + i) as u64]);
+                        for (v, p) in row.iter_mut().zip(pows) {
+                            *v *= c * p;
                         }
                     }
                 }
+            }
+            if rev {
+                bitrev_permute(row);
             }
         }
     }
@@ -423,13 +509,10 @@ impl Domain {
     /// Column kernel for a block of `b` columns starting at `c0`, given
     /// **row-major** (`N1 × b`, as a worker receives a gathered tile).
     pub fn cols_kernel(&self, block: &mut [Fr], c0: usize, op: ColOp) {
-        let n1 = self.n1;
-        let b = block.len() / n1;
-        let mut cm = vec![Fr::zero(); block.len()];
-        transpose_map(block, &mut cm, n1, b, self.tile, |x| *x);
-        let (t, tw, scale) = self.col_op(op);
-        self.cols_core(&mut cm, c0, t, tw, scale);
-        transpose_map(&cm, block, b, n1, self.tile, |x| *x);
+        let b = block.len() / self.n1;
+        let mut cols = vec![Fr::zero(); block.len()];
+        // SAFETY: `block` is exclusively borrowed and holds N1 rows of b elements.
+        unsafe { self.col_tile(block.as_mut_ptr(), b, c0, b, &mut cols, self.col_op(op)) }
     }
 
     fn col_op(&self, op: ColOp) -> (&Tables, Twiddle, Fr) {
@@ -490,7 +573,7 @@ impl Domain {
     pub fn fft_to_t(&self, buf: &mut [Fr]) {
         assert_eq!(buf.len(), self.n);
         if !self.is_blocked() {
-            return radix2_fft(buf, &self.fwd.tw_n2);
+            return radix2_fft(buf, &self.fwd.st_n2);
         }
         self.col_pass(buf, &self.fwd, Twiddle::Post, Fr::one());
         self.rows_pass(buf, &[RowStage::Fft]);
@@ -500,7 +583,7 @@ impl Domain {
     pub fn fft_from_t(&self, buf: &mut [Fr]) {
         assert_eq!(buf.len(), self.n);
         if !self.is_blocked() {
-            return radix2_fft(buf, &self.fwd.tw_n2);
+            return radix2_fft(buf, &self.fwd.st_n2);
         }
         self.rows_pass(buf, &[RowStage::Fft]);
         self.col_pass(buf, &self.fwd, Twiddle::Pre, Fr::one());
@@ -510,7 +593,7 @@ impl Domain {
     pub fn ifft_to_t(&self, buf: &mut [Fr]) {
         assert_eq!(buf.len(), self.n);
         if !self.is_blocked() {
-            radix2_fft(buf, &self.inv.tw_n2);
+            radix2_fft(buf, &self.inv.st_n2);
             return self.scale(buf, self.size_inv);
         }
         self.col_pass(buf, &self.inv, Twiddle::Post, self.size_inv);
@@ -521,7 +604,7 @@ impl Domain {
     pub fn ifft_from_t(&self, buf: &mut [Fr]) {
         assert_eq!(buf.len(), self.n);
         if !self.is_blocked() {
-            radix2_fft(buf, &self.inv.tw_n2);
+            radix2_fft(buf, &self.inv.st_n2);
             return self.scale(buf, self.size_inv);
         }
         self.rows_pass(buf, &[RowStage::Ifft]);
