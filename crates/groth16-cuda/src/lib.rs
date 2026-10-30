@@ -178,7 +178,7 @@ mod tests {
     use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 
     #[test]
-    fn cpu_proof_fixture_generates_and_verifies_on_host() {
+    fn adapter_matches_cpu_proof_and_verifies() {
         let program = R1csProgram {
             field: FieldSpec::bn254(),
             variables: vec![
@@ -241,6 +241,25 @@ mod tests {
 
         let public_inputs = &witness[1..source.layout().num_instance()];
         assert!(verify(&vk, public_inputs, &proof).expect("public input count is valid"));
+
+        let adapter_proof = prove_accelerated(
+            &source,
+            &witness,
+            &mut SerializedPk::from_bytes(&key_bytes).expect("serialized key parses"),
+            Fr::from(11u64),
+            Fr::from(13u64),
+            &ProverConfig {
+                msm_chunk: 2,
+                self_check: true,
+                ..ProverConfig::default()
+            },
+            &mut (),
+            &mut super::IcicleMsm,
+        )
+        .expect("adapter proof generation succeeds or falls back to CPU");
+
+        assert_eq!(adapter_proof, proof, "adapter and CPU proofs differ");
+        assert!(verify(&vk, public_inputs, &adapter_proof).expect("public input count is valid"));
     }
 
     #[test]
