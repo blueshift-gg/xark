@@ -640,11 +640,41 @@ pub fn circuit_at(dir: impl AsRef<std::path::Path>) -> Circuit {
 
 /// A Groth16 proof and its public inputs, as the canonical compressed bytes
 /// `xark prove` writes (`proof.bin`, `public_inputs.bin`): what `xark verify`,
-/// xark-wasm's `verify` and `xark export`'s verifier tests consume.
+/// xark-wasm's `verify` and `xark export`'s verifier tests consume. For a Solana
+/// program, [`Self::to_instruction_data`] (or its two halves).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CircuitProof {
     pub proof: Vec<u8>,
     pub public_inputs: Vec<u8>,
+}
+
+impl CircuitProof {
+    /// The proof as an exported Solana verifier reads it: 256 bytes, `-A || B || C`,
+    /// little-endian (`xark export`'s `proof.solana.bin` for this proof).
+    pub fn to_solana_proof(&self) -> Result<Vec<u8>, ProveError> {
+        use ark_serialize::CanonicalDeserialize;
+        let proof = Proof::<Bn254>::deserialize_compressed(&self.proof[..])
+            .map_err(|e| ProveError(format!("reading the proof: {e}")))?;
+        Ok(xark_groth16::solana::assemble_proof_bytes_le(&proof))
+    }
+
+    /// The public inputs as an exported Solana verifier reads them: 32 bytes each,
+    /// little-endian (`public_inputs.solana.bin`).
+    pub fn to_solana_public_inputs(&self) -> Result<Vec<u8>, ProveError> {
+        use ark_serialize::CanonicalDeserialize;
+        let inputs = Vec::<Fr>::deserialize_compressed(&self.public_inputs[..])
+            .map_err(|e| ProveError(format!("reading the public inputs: {e}")))?;
+        Ok(xark_groth16::solana::assemble_public_inputs_bytes_le(
+            &inputs,
+        ))
+    }
+
+    /// The proof, then its public inputs, as a Solana program receives them:
+    /// `verify_instruction_data(...)` of an exported verifier checks these bytes
+    /// (`instruction_data.bin`).
+    pub fn to_instruction_data(&self) -> Result<Vec<u8>, ProveError> {
+        Ok([self.to_solana_proof()?, self.to_solana_public_inputs()?].concat())
+    }
 }
 
 /// The constraint rows a proving key was made for, picked from the key's

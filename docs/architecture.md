@@ -79,7 +79,8 @@ arithmetic, used by the EC gadgets), `xark-curve` (shared curve macros), `xark-h
 ### `xark-prover` — `crates/prover`
 
 Solves the witness from `--inputs` values and proves with `xark-groth16`
-(`circuit("name").prove(inputs)` returns the proof bytes). `xark` re-exports it
+(`circuit("name").prove(inputs)` returns the proof bytes, and their Solana form:
+`to_instruction_data()`). `xark` re-exports it
 as `xark::prover` in host builds, so circuit crates depend on `xark` alone.
 
 ### `xark-groth16` — `crates/groth16`

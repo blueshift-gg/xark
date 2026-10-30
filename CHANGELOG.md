@@ -296,6 +296,11 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Added
 
+- `CircuitProof::to_solana_proof()`, `to_solana_public_inputs()` and
+  `to_instruction_data()`: a proof made in Rust as an exported Solana verifier reads
+  it, the same bytes as `xark export`'s `proof.solana.bin`,
+  `public_inputs.solana.bin` and `instruction_data.bin`. Getting them took
+  `xark-groth16`'s `solana` module and decoding the proof by hand.
 - Untyped integer literals mix with `Field`: `x * 2`, `2 * x`, `1 - x`, `x += 1`,
   `Field::from(2)`, `0.into()`, `x == 0`. They failed to build, because a literal is
   an `i32` and only `u8`..`u128` had impls; `Field::from(2)` built in `cargo test`

@@ -93,7 +93,8 @@ them; `#[input(no_derive)]` for a type with its own), including gadget types:
 `Instance { cw, ce, u, x }` values instead of twenty separate parameters, and
 `to_fields()` hashes one in a single call. The generated `<Fn>Inputs` struct
 holds the same values for `xark::prover::circuit(..).check(..)`, `.prove(..)`
-and friends. A circuit crate needs only the `xark` dependency.
+and friends; a proof's `to_instruction_data()` is the bytes an exported Solana
+verifier reads. A circuit crate needs only the `xark` dependency.
 
 ### Everyday input types
 

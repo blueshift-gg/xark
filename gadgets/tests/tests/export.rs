@@ -27,6 +27,22 @@ fn exported_verifier_passes_its_own_test() {
     );
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s, "--allow-insecure"]);
     assert!(ok, "export failed: {err}");
+    // A `CircuitProof` in Rust gives the same bytes as the sample files.
+    let read = |f: &str| std::fs::read(out.join(f)).unwrap();
+    let proof = xark_prover::CircuitProof {
+        proof: read("proof.bin"),
+        public_inputs: read("public_inputs.bin"),
+    };
+    let sample = |f: &str| std::fs::read(verifier.join(f)).unwrap();
+    assert_eq!(proof.to_solana_proof().unwrap(), sample("proof.solana.bin"));
+    assert_eq!(
+        proof.to_solana_public_inputs().unwrap(),
+        sample("public_inputs.solana.bin")
+    );
+    assert_eq!(
+        proof.to_instruction_data().unwrap(),
+        sample("instruction_data.bin")
+    );
     // Again over its own output is fine (regenerating) …
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s, "--allow-insecure"]);
     assert!(ok, "re-export failed: {err}");
