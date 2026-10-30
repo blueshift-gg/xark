@@ -183,7 +183,7 @@ xark test examples/cube
 # Like every command, it defaults to the current directory: inside the crate,
 # plain `xark client` is enough.
 xark client examples/cube
-# → examples/cube/target/xark/cube/cube.ts, and the cube.schema.ts it imports
+# → examples/cube/target/xark/cube/cube.ts (one file, its schema inlined)
 
 # Generate Groth16 keys. With no .ptau this produces an INSECURE dev key
 # (single-party OsRng); pass --ptau-file (or run `xark ceremony`) for production.
@@ -215,8 +215,8 @@ xark profile examples/zkyc --html
 ### Typed clients
 
 ```sh
-xark client                                  # writes <circuit>.ts and <circuit>.schema.ts
-npm install @blueshift-gg/xark-wasm@0.3      # the runtime they import
+xark client                                  # writes <circuit>.ts
+npm install @blueshift-gg/xark-wasm@0.3      # the runtime it imports
 ```
 
 `xark build` also writes `schema.json`: every input's name, visibility and
@@ -226,9 +226,8 @@ an interface per struct, the inputs, the public inputs as given and as decoded, 
 the circuit, which makes its provers and verifiers. What every client shares
 (`Field`, `Proof`, loading xark-wasm and the build output) is xark-wasm's
 `@blueshift-gg/xark-wasm/client`, so the file holds only the circuit, and an app
-imports only the file. Beside it, `xark client` writes the schema the file imports,
-`zkyc.schema.ts` (the circuit's `schema.json` as a module's default export, so no
-project settings are needed): the two are written together, so they always agree.
+imports only the file. The circuit's `schema.json` is inlined in it, so the file
+has no relative import and needs no project settings (Node runs it as is).
 Each type is the one you'd write by hand:
 
 ```ts
@@ -261,7 +260,8 @@ inputs it requires:
 import { Country, Field, Identity, Policy, Zkyc } from "./zkyc";
 
 // In the app: fetches circuit.xbc, pk.bin, sources.json and client.wasm, and loads
-// xark-wasm (node, web or workerd).
+// xark-wasm (node, web or workerd). Outside a browser, pass the files' bytes instead:
+// Zkyc.prover({ circuit: readFileSync("…/circuit.xbc"), provingKey: …, client: … }).
 const prover = await Zkyc.prover("/circuits/zkyc/");
 const id = { document: "A1938274", born: new Date("1990-01-01"), nationality: Country.US, netWorth: 1_000_000, expires: new Date("2030-01-01"), salt: new Field(saltBytes) };
 const commitment = Identity.commitment(id); // the circuit's own Rust (below)

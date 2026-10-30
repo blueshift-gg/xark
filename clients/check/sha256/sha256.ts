@@ -7,12 +7,64 @@
 // and `xark client` turns them into the types below. Don't edit this file: change
 // the circuit, then rebuild and rerun `xark client`. Values go in their natural
 // forms (dates, strings, variant names, bytes); xark-wasm encodes them against the
-// schema (in `sha256.schema.ts`, written with this file), exactly as `xark prove
+// schema (at the end of the imports), exactly as `xark prove
 // --inputs` does.
 
 import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type Json, type Proof, type Prover, type Verifier } from "@blueshift-gg/xark-wasm/client";
-import schema from "./sha256.schema";
 export { CheckFailed, Field, InputError, fromHex, toHex };
+
+// The circuit's schema.json.
+const schema = {
+  "circuit": "sha256",
+  "inputs": [
+    {
+      "name": "msg",
+      "type": {
+        "array": {
+          "len": 3,
+          "of": {
+            "uint": 8
+          }
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "digest",
+      "type": {
+        "ref": "Hash"
+      },
+      "visibility": "public"
+    }
+  ],
+  "public_inputs": [
+    "digest.hi",
+    "digest.lo"
+  ],
+  "types": {
+    "Hash": {
+      "encoding": {
+        "bytes": 32,
+        "concat": [
+          16,
+          16
+        ]
+      },
+      "struct": [
+        {
+          "name": "hi",
+          "type": "field"
+        },
+        {
+          "name": "lo",
+          "type": "field"
+        }
+      ]
+    }
+  },
+  "version": 2,
+  "xark": "0.3.0"
+};
 
 /** Every input of `sha256`. */
 export interface Sha256Inputs {

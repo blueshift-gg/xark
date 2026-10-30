@@ -227,8 +227,18 @@ const OPTIONAL = new Set(["sources", "client"]);
 /** Fetch `parts` of a build output served at `base`. */
 async function fetchParts(base, parts, options = {}) {
   const page = globalThis.location?.href;
-  if (!page && !URL.canParse(base)) {
-    throw new Error(`${base} is relative, and there's no page to resolve it against; pass an absolute URL`);
+  // Outside a page, a path (`C:\out` parses with the scheme `c:`) or a `file:` URL.
+  // This runtime only fetches (a browser has no `fs`), so the caller reads the bytes.
+  const url = !page && URL.canParse(base) ? new URL(base) : undefined;
+  if (!page && (!url || url.protocol === "file:" || /^[a-z]:$/i.test(url.protocol))) {
+    const dir = (url?.protocol === "file:" ? decodeURIComponent(url.pathname) : String(base)).replace(/\/?$/, "/");
+    const read = (p) => `readFileSync("${dir}${FILES[p]}")`;
+    const named = parts.filter((p) => !OPTIONAL.has(p));
+    const bytes = named.length ? `{ ${named.map((p) => `${p}: ${read(p)}`).join(", ")} }` : read(parts[0]);
+    throw new Error(
+      `${base} is a path, and outside a browser only an http(s) URL is fetched: ` +
+        `pass the bytes, ${bytes}, or a URL serving them`,
+    );
   }
   const root = new URL(base, page);
   if (!root.pathname.endsWith("/")) root.pathname += "/";

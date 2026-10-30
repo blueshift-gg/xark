@@ -299,22 +299,12 @@ fn paren(t: &str) -> String {
     }
 }
 
-/// The generated TypeScript module for `m`.
-/// The circuit's `schema.json` as a module the client imports: the same JSON as its
-/// default export, so the client needs no JSON-import settings.
-pub fn schema_module(circuit: &str, schema: &serde_json::Value) -> Result<String> {
-    Ok(format!(
-        "// {MARKER}: the `{circuit}` circuit's schema.json, which its client imports.\n\
-         const schema = {};\n\
-         export default schema;\n",
-        serde_json::to_string_pretty(schema)?
-    ))
-}
-
-/// The client, importing its schema from `schema_import` (`./zkyc.schema`, the `.ts`).
+/// The generated TypeScript module for `m`, with its circuit's `schema.json`
+/// inlined: one file, no relative import, so every resolver loads it (Node's ESM
+/// needs an extension a bundler may not take, and the reverse).
 /// `artifacts`: the name of the directory under `target/xark/` holding the build
 /// (the package's, which need not be the circuit's).
-pub fn generate(m: &Model, schema_import: &str, artifacts: &str) -> Result<String> {
+pub fn generate(m: &Model, schema: &serde_json::Value, artifacts: &str) -> Result<String> {
     let circuit = m.circuit.as_str();
     let name = pascal(circuit);
     let mut out = String::new();
@@ -339,7 +329,7 @@ pub fn generate(m: &Model, schema_import: &str, artifacts: &str) -> Result<Strin
          // and `xark client` turns them into the types below. Don't edit this file: change\n\
          // the circuit, then rebuild and rerun `xark client`. Values go in their natural\n\
          // forms (dates, strings, variant names, bytes); xark-wasm encodes them against the\n\
-         // schema (in `{schema_import}.ts`, written with this file), exactly as `xark prove\n\
+         // schema (at the end of the imports), exactly as `xark prove\n\
          // --inputs` does.\n",
         sig.join(", "),
     );
@@ -599,10 +589,12 @@ pub fn generate(m: &Model, schema_import: &str, artifacts: &str) -> Result<Strin
     Ok(format!(
         "{head}\
          import {{ {} }} from \"{RUNTIME}\";\n\
-         import schema from \"./{schema_import}\";\n\
          export {{ CheckFailed, Field, InputError, fromHex, toHex }};\n\n\
+         // The circuit's schema.json.\n\
+         const schema = {};\n\n\
          {out}",
-        imports.join(", ")
+        imports.join(", "),
+        serde_json::to_string_pretty(schema)?
     ))
 }
 
@@ -667,7 +659,12 @@ mod tests {
     #[test]
     fn generates_natural_types() {
         let m = Model::new(&serde_json::from_str(SCHEMA).unwrap()).unwrap();
-        let ts = generate(&m, "kyc_check.schema", "kyc_check").unwrap();
+        let ts = generate(
+            &m,
+            &serde_json::json!({"circuit": "kyc_check"}),
+            "kyc_check",
+        )
+        .unwrap();
         for want in [
             "fn kyc_check(id: Private<Identity>, born_before: Public<Days<1900,2100>>, allowed: Public<Bitfield<Country>>, doc: Private<[u8; 4]>, commitment: Public<Field>)",
             "export const Country = {\n  AD: \"AD\", US: \"US\",\n} as const;\nexport type Country = (typeof Country)[keyof typeof Country];",
@@ -683,7 +680,7 @@ mod tests {
             "export interface KycCheckPublicValues {\n  bornBefore: Date;\n  allowed: Country[];\n  commitment: Field;\n}",
             "    bornBefore: new Date(v.bornBefore),",
             "    commitment: new Field(v.commitment),",
-            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nimport schema from \"./kyc_check.schema\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
+            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
             "  name: \"kyc_check\",\n  schema,\n",
             "export interface KycCheckStructs {\n  Identity: Identity;\n}",
             "export const KycCheck = new Circuit<KycCheckInputs, KycCheckPublicInputs, KycCheckPublicValues, KycCheckStructs>({\n  name: \"kyc_check\",",

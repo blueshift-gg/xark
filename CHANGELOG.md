@@ -352,6 +352,15 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- The generated TypeScript client runs in Node's own ESM loader. It imported its
+  schema as `./cube.schema`, with no extension, which only a bundler resolves (Node:
+  `ERR_MODULE_NOT_FOUND`). The schema is now inlined: `xark client` writes one file,
+  `<circuit>.ts`, and no longer a `<circuit>.schema.ts` (an old one can be deleted).
+- Outside a browser, a client's `prover(from)`, `verifier(from)` and `ready(from)`
+  given a path or a `file:` URL say to pass the files' bytes, and show the
+  `readFileSync` calls that do it. A path was refused as "relative, … pass an
+  absolute URL" (even an absolute one), and a `file:` URL failed with "fetch
+  failed". The runtime still only fetches, so it has no Node-only code.
 - The next steps `xark setup` and `xark client` print can be followed as written:
   - setup always writes `inputs.example.json` and says to replace its placeholders,
     instead of a runnable-looking `--inputs '{"x": "<field>"}'` that failed with

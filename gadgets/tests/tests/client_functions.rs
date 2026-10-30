@@ -205,11 +205,7 @@ fn tuple_structs_and_raw_identifiers() {
     let (ok, out) = xark(&dir, &["client", "-o", "client/"]);
     assert!(ok, "client failed:\n{out}");
     let ts = std::fs::read_to_string(dir.join("client/odd.ts")).unwrap();
-    let schema = std::fs::read_to_string(dir.join("client/odd.schema.ts")).unwrap();
-    assert!(
-        !ts.contains("r#") && !schema.contains("r#"),
-        "{ts}\n{schema}"
-    );
+    assert!(!ts.contains("r#"), "{ts}");
     for want in [
         "this[\"0\"] = v[\"0\"];",
         "\"0\": v[\"0\"],",

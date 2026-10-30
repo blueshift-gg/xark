@@ -39,8 +39,8 @@ pub struct ClientArgs {
     /// Client language.
     #[arg(long, value_enum, default_value_t = Lang::Ts)]
     pub lang: Lang,
-    /// Output file, or a directory to write `<circuit>.<ext>` in (its schema module
-    /// goes beside it). Defaults to `target/xark/<name>/<circuit>.<ext>`.
+    /// Output file, or a directory to write `<circuit>.<ext>` in. Defaults to
+    /// `target/xark/<name>/<circuit>.<ext>`.
     #[arg(long, short, value_hint = clap::ValueHint::FilePath)]
     pub out: Option<PathBuf>,
     /// Skip the Rust client functions (`#[input]` on an `impl`, built as
@@ -66,20 +66,11 @@ impl Lang {
             Lang::Ts => "ts",
         }
     }
-    /// The client, importing its schema module (`schema_stem`, a sibling), its docs
-    /// pointing at `target/xark/{artifacts}/`.
-    fn generate(self, m: &model::Model, schema_stem: &str, artifacts: &str) -> Result<String> {
+    /// The client, its schema inlined, its docs pointing at
+    /// `target/xark/{artifacts}/`.
+    fn generate(self, m: &model::Model, schema: &Value, artifacts: &str) -> Result<String> {
         match self {
-            // No extension: a bundler resolves it to the `.ts`, and so does tsc's
-            // "bundler" resolution, with no settings (`.ts` needs one, and Turbopack
-            // doesn't read `.js` as `.ts`).
-            Lang::Ts => ts::generate(m, schema_stem, artifacts),
-        }
-    }
-    /// The schema as a module of the language, and its file's extension.
-    fn schema_module(self, m: &model::Model, schema: &Value) -> Result<(String, &'static str)> {
-        match self {
-            Lang::Ts => Ok((ts::schema_module(&m.circuit, schema)?, "ts")),
+            Lang::Ts => ts::generate(m, schema, artifacts),
         }
     }
 }
@@ -182,15 +173,6 @@ pub fn run(args: ClientArgs) -> Result<()> {
         Some(o) => o,
         None => project.xark_dir.join(file),
     };
-    // The schema beside the client (`zkyc.schema.ts`), which the client imports:
-    // written together, so the two always agree. Both made before either is
-    // written, so a failure leaves neither.
-    let stem = out
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&model.circuit);
-    let schema_stem = format!("{stem}.schema");
-    let (module, ext) = args.lang.schema_module(&model, &schema)?;
     // The build's directory, named after the package (not the circuit).
     let artifacts = project
         .xark_dir
@@ -198,13 +180,10 @@ pub fn run(args: ClientArgs) -> Result<()> {
         .and_then(|n| n.to_str())
         .unwrap_or(&model.circuit)
         .to_string();
-    let client = args.lang.generate(&model, &schema_stem, &artifacts)?;
-    let schema_out = out.with_file_name(format!("{schema_stem}.{ext}"));
+    let client = args.lang.generate(&model, &schema, &artifacts)?;
     if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&schema_out, module)
-        .with_context(|| format!("writing {}", schema_out.display()))?;
     std::fs::write(&out, client).with_context(|| format!("writing {}", out.display()))?;
     println!(
         "{}",

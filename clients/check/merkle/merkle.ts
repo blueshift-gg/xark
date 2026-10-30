@@ -7,12 +7,54 @@
 // and `xark client` turns them into the types below. Don't edit this file: change
 // the circuit, then rebuild and rerun `xark client`. Values go in their natural
 // forms (dates, strings, variant names, bytes); xark-wasm encodes them against the
-// schema (in `merkle.schema.ts`, written with this file), exactly as `xark prove
+// schema (at the end of the imports), exactly as `xark prove
 // --inputs` does.
 
 import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type Json, type Proof, type Prover, type Verifier } from "@blueshift-gg/xark-wasm/client";
-import schema from "./merkle.schema";
 export { CheckFailed, Field, InputError, fromHex, toHex };
+
+// The circuit's schema.json.
+const schema = {
+  "circuit": "merkle",
+  "inputs": [
+    {
+      "name": "leaf",
+      "type": "field",
+      "visibility": "private"
+    },
+    {
+      "name": "siblings",
+      "type": {
+        "array": {
+          "len": 4,
+          "of": "field"
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "index_bits",
+      "type": {
+        "array": {
+          "len": 4,
+          "of": "field"
+        }
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "root",
+      "type": "field",
+      "visibility": "public"
+    }
+  ],
+  "public_inputs": [
+    "root"
+  ],
+  "types": {},
+  "version": 2,
+  "xark": "0.3.0"
+};
 
 /** Every input of `merkle`. */
 export interface MerkleInputs {

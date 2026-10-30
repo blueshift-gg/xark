@@ -271,9 +271,18 @@ export interface CircuitSpec<PublicValues> {
  * another xark release than this runtime's (another minor version before 1.0).
  *
  * Makes them from a URL serving a copy of its
- * build output (`target/xark/<circuit>/`, relative to the page in a browser) or
+ * build output (`target/xark/<package>/`, relative to the page in a browser) or
  * from the bytes. Made from a URL, either also loads `client.wasm` when the
  * circuit has Rust functions; a missing `sources.json` or `client.wasm` is skipped.
+ *
+ * It only fetches, so it runs the same in a browser: outside one (Node, Deno, Bun),
+ * read the files yourself and pass the bytes, with `client` for Rust functions:
+ *
+ * ```ts
+ * const read = (f: string) => readFileSync(`target/xark/cube/${f}`);
+ * const prover = await Cube.prover({ circuit: read("circuit.xbc"), provingKey: read("pk.bin") });
+ * const verifier = await Cube.verifier(read("vk.bin"));
+ * ```
  */
 export class Circuit<Inputs, PublicInputs, PublicValues, Structs = {}> {
   constructor(spec: CircuitSpec<PublicValues>);

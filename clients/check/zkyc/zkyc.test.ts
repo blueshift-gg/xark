@@ -5,7 +5,6 @@ import { createPool } from "@blueshift-gg/xark-wasm/pool";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { artifacts, outDir, serve } from "../artifacts";
-import schema from "./zkyc.schema.js";
 import { CheckFailed, Country, Field, Identity, InputError, Policy, PolicyValue, Zkyc, ZkycProver, ZkycVerifier } from "./zkyc";
 
 // Made from the build output, the prover also loads `client.wasm`: the Rust
@@ -196,7 +195,7 @@ test("a Set goes as a list; a Map is refused", () => {
 
 test("a URL without client.wasm says so when a Rust function is called", async () => {
   // A circuit of its own: the shared `Zkyc` has loaded client.wasm already.
-  const circuit = new Circuit({ name: "zkyc", schema, decodePublic: (v) => v, client: true });
+  const circuit = new Circuit({ name: "zkyc", schema: Zkyc.schema, decodePublic: (v) => v, client: true });
   const server = await serve("zkyc", ["client.wasm"]);
   try {
     await circuit.verifier(server.url);
@@ -207,7 +206,7 @@ test("a URL without client.wasm says so when a Rust function is called", async (
 });
 
 test("a circuit fetches client.wasm once, for all its provers and verifiers", async () => {
-  const circuit = new Circuit({ name: "zkyc", schema, decodePublic: (v) => v, client: true });
+  const circuit = new Circuit({ name: "zkyc", schema: Zkyc.schema, decodePublic: (v) => v, client: true });
   const server = await serve("zkyc");
   try {
     await Promise.all([circuit.prover(server.url), circuit.verifier(server.url)]);

@@ -145,11 +145,8 @@ fn client_builds_a_missing_or_stale_circuit() {
     edit(&dir, "secret", "seed");
     let (ok, err) = xark(&dir, &client);
     assert!(ok && err.contains("changed since it was built"), "{err}");
-    let schema = std::fs::read_to_string(out.with_file_name("cube.schema.ts")).unwrap();
-    assert!(
-        schema.contains("seed") && !schema.contains("secret"),
-        "{schema}"
-    );
+    let ts = std::fs::read_to_string(&out).unwrap();
+    assert!(ts.contains("seed") && !ts.contains("secret"), "{ts}");
 }
 
 #[test]
