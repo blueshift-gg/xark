@@ -8,6 +8,8 @@ G1_HOST_TEST_BIN ?= /tmp/xark-msm-g1-host-probe
 G1_CUDA_TEST_BIN ?= /tmp/xark-msm-g1-test
 ACCUMULATE_HOST_TEST_BIN ?= /tmp/xark-msm-accumulate-host-probe
 PLAN_HOST_TEST_BIN ?= /tmp/xark-msm-plan-host-test
+INPUT_HOST_TEST_BIN ?= /tmp/xark-msm-input-host-probe
+SCALAR_HOST_TEST_BIN ?= /tmp/xark-msm-scalar-host-probe
 ACCUMULATE_CUDA_TEST_BIN ?= /tmp/xark-msm-accumulate-test
 PIPELINE_CUDA_TEST_BIN ?= /tmp/xark-msm-pipeline-test
 CXX ?= c++
@@ -41,9 +43,14 @@ test-host:
 	python3 msm_accumulate_host_test.py $(ACCUMULATE_HOST_TEST_BIN)
 	$(CXX) $(CXX_FLAGS) msm_plan_host_test.cpp -o $(PLAN_HOST_TEST_BIN)
 	$(PLAN_HOST_TEST_BIN)
+	$(CXX) $(CXX_FLAGS) msm_input_host_probe.cpp -o $(INPUT_HOST_TEST_BIN)
+	python3 msm_input_host_test.py $(INPUT_HOST_TEST_BIN)
+	$(CXX) $(CXX_FLAGS) msm_scalar_host_probe.cpp -o $(SCALAR_HOST_TEST_BIN)
+	python3 msm_scalar_host_test.py $(SCALAR_HOST_TEST_BIN)
 
 clean:
 	rm -f $(CUDA_TEST_BIN) $(BUCKET_TEST_BIN) $(G1_CUDA_TEST_BIN) \
 	  $(ACCUMULATE_CUDA_TEST_BIN) $(PIPELINE_CUDA_TEST_BIN) $(HOST_TEST_BIN) \
 	  $(BUCKET_HOST_TEST_BIN) $(FQ_HOST_TEST_BIN) $(G1_HOST_TEST_BIN) \
-	  $(ACCUMULATE_HOST_TEST_BIN) $(PLAN_HOST_TEST_BIN)
+	  $(ACCUMULATE_HOST_TEST_BIN) $(PLAN_HOST_TEST_BIN) \
+	  $(INPUT_HOST_TEST_BIN) $(SCALAR_HOST_TEST_BIN)

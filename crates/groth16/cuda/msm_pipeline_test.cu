@@ -114,7 +114,12 @@ void check(cudaError_t error, const char *operation) {
 }
 
 G1Affine make_point(const std::uint32_t x[8], const std::uint32_t y[8]) {
-  return G1Affine{from_canonical(x), from_canonical(y), false};
+  G1Affine point{};
+  if (!g1_from_canonical_checked(x, y, false, &point)) {
+    std::fprintf(stderr, "invalid canonical G1 point fixture\n");
+    std::exit(1);
+  }
+  return point;
 }
 
 bool equal(const std::uint32_t actual[8], const std::uint32_t expected[8]) {
@@ -165,6 +170,10 @@ int main() {
                                          make_point(three_g_x, three_g_y)};
   const std::uint64_t scalar_limbs_soa[4 * scalar_count] = {1, 2, 3, 0, 0, 0,
                                                             0, 0, 0, 0, 0, 0};
+  if (!are_canonical_scalars_soa(scalar_limbs_soa, scalar_count)) {
+    std::fprintf(stderr, "noncanonical BN254 Fr fixture scalar\n");
+    return 1;
+  }
 
   std::uint64_t *device_scalars = nullptr;
   std::uint16_t *device_digits = nullptr;

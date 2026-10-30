@@ -83,6 +83,39 @@ XARK_G1_HD inline Fq fq_inverse(Fq value) {
   return result;
 }
 
+// Converts canonical affine coordinates to Montgomery form after checking field
+// bounds and the curve equation. Callers must check subgroup membership.
+XARK_G1_HD inline bool g1_from_canonical_checked(const std::uint32_t x[8],
+                                                 const std::uint32_t y[8],
+                                                 bool infinity, G1Affine *out) {
+  if (x == nullptr || y == nullptr || out == nullptr) {
+    return false;
+  }
+  if (infinity) {
+    for (unsigned i = 0; i < 8; ++i) {
+      if (x[i] != 0 || y[i] != 0) {
+        return false;
+      }
+    }
+    *out = G1Affine{fq_zero(), fq_zero(), true};
+    return true;
+  }
+  if (!is_canonical(x) || !is_canonical(y)) {
+    return false;
+  }
+
+  const Fq x_montgomery = from_canonical(x);
+  const Fq y_montgomery = from_canonical(y);
+  const Fq x_cubed = montgomery_multiply(fq_square(x_montgomery), x_montgomery);
+  const Fq curve_rhs = add(x_cubed, fq_triple(fq_one()));
+  if (!equal(fq_square(y_montgomery), curve_rhs)) {
+    return false;
+  }
+
+  *out = G1Affine{x_montgomery, y_montgomery, false};
+  return true;
+}
+
 XARK_G1_HD inline G1Jacobian g1_infinity() {
   return G1Jacobian{fq_zero(), fq_one(), fq_zero()};
 }
