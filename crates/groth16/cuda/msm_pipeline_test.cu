@@ -7,6 +7,7 @@
 #include "msm_accumulate.cuh"
 #include "msm_buckets.cuh"
 #include "msm_digits.cuh"
+#include "msm_plan.hpp"
 
 namespace {
 
@@ -136,9 +137,15 @@ int main() {
   }
 
   constexpr std::size_t scalar_count = 3;
-  constexpr std::size_t total_digits = scalar_count * kWindowCount;
-  constexpr std::size_t bucket_count = kWindowCount * kBucketCount;
-  constexpr std::size_t offset_count = kWindowCount * (kBucketCount + 1);
+  const MsmPlan plan = make_msm_plan(scalar_count, kThreads);
+  if (!plan.valid()) {
+    std::fprintf(stderr, "invalid MSM allocation plan: %u\n",
+                 static_cast<unsigned>(plan.error));
+    return 1;
+  }
+  const std::size_t total_digits = plan.total_digits;
+  const std::size_t bucket_count = plan.bucket_count;
+  const std::size_t offset_count = plan.offset_count;
   const std::uint32_t g_x[8] = {1, 0, 0, 0, 0, 0, 0, 0};
   const std::uint32_t g_y[8] = {2, 0, 0, 0, 0, 0, 0, 0};
   const std::uint32_t two_g_x[8] = {0x6d87cfd3u, 0xd3c208c1u, 0x16871ca8u,
@@ -196,8 +203,7 @@ int main() {
   check(cudaMemset(device_counts, 0, bucket_count * sizeof(unsigned)),
         "clear bucket counts");
 
-  const unsigned digit_blocks =
-      static_cast<unsigned>((total_digits + kThreads - 1) / kThreads);
+  const unsigned digit_blocks = plan.digit_blocks;
   extract_digits<<<digit_blocks, kThreads>>>(device_scalars, device_digits,
                                              scalar_count, total_digits);
   check(cudaGetLastError(), "launch digit extraction");
@@ -211,8 +217,7 @@ int main() {
                                               device_indices, scalar_count,
                                               total_digits);
   check(cudaGetLastError(), "launch bucket scatter");
-  const unsigned bucket_blocks =
-      static_cast<unsigned>((bucket_count + kThreads - 1) / kThreads);
+  const unsigned bucket_blocks = plan.bucket_blocks;
   accumulate_buckets<<<bucket_blocks, kThreads>>>(
       device_points, device_offsets, device_indices, device_bucket_sums,
       scalar_count, bucket_count);
