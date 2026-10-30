@@ -1,0 +1,29 @@
+[workspace]
+
+[package]
+name = "xark-groth16-cuda"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+publish = false
+
+[dependencies]
+xark-groth16 = { path = "../groth16" }
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.6", default-features = false, features = ["std"] }
+ark-ff = { version = "0.6", default-features = false, features = ["std"] }
+ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
+icicle-bn254 = {
+  git = "https://github.com/ingonyama-zk/icicle.git",
+  tag = "v4.0.0",
+  default-features = false,
+  features = ["msm"],
+}
+icicle-core = { git = "https://github.com/ingonyama-zk/icicle.git", tag = "v4.0.0" }
+icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle.git", tag = "v4.0.0" }
+
+[dev-dependencies]
+rand = "0.8"
+rand_chacha = { version = "0.3", default-features = false }
+xark-ir = { path = "../ir" }

@@ -225,3 +225,21 @@ jobs:
       - name: Generated clients (cube, zkyc, sha256, merkle)
         working-directory: clients/check
         run: npm ci && npm test
+
+  groth16-cuda-build:
+    name: optional Groth16 CUDA adapter builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/groth16-cuda -> target
+      - name: Run host-side adapter tests
+        run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --lib
+      - name: Compile the adapter and its tests
+        run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --no-run
