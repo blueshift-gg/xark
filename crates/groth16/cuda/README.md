@@ -28,6 +28,16 @@ Run on a host with the NVIDIA CUDA Toolkit and a visible CUDA device:
 make -C crates/groth16/cuda test
 ```
 
+The same digit routine can be checked against the independent bit-by-bit
+reference on a host without CUDA:
+
+```sh
+make -C crates/groth16/cuda test-host
+```
+
+This host check covers the shared extraction function only. It does not compile
+or run the CUDA kernel.
+
 The kernel currently tests scalar decomposition only. It does not perform bucket
 accumulation, is not connected to `Accelerator::msm`, and makes no proving speed
 claim. The CPU Pippenger remains the prover path until a GPU MSM returns the same
