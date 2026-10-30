@@ -14,7 +14,10 @@
 //! are the pure functions in this module, so both ends share one implementation.
 
 use ark_bn254::{Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::{AffineRepr, CurveGroup};
+use ark_ec::{
+    AffineRepr, CurveGroup,
+    short_weierstrass::{Affine as SwAffine, SWCurveConfig},
+};
 use ark_ff::{BigInt, Field};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress};
 
@@ -169,7 +172,7 @@ pub fn try_kernel_msm(
     Ok(out)
 }
 
-fn valid_group_points<P: AffineRepr>(points: &[P]) -> bool {
+fn valid_group_points<P: SWCurveConfig>(points: &[SwAffine<P>]) -> bool {
     points
         .iter()
         .all(|point| point.is_on_curve() && point.is_in_correct_subgroup_assuming_on_curve())
