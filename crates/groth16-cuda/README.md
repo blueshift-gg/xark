@@ -20,6 +20,12 @@ cargo test --manifest-path crates/groth16-cuda/Cargo.toml --lib
 cargo test --manifest-path crates/groth16-cuda/Cargo.toml --no-run
 ```
 
+The library tests also generate and verify a deterministic Groth16 proof with
+both `Local` and `IcicleMsm`, then compare the proof bytes. Without a CUDA
+backend, `IcicleMsm` declines and the prover exercises its CPU fallback. With a
+working CUDA backend, the adapter path is used. This host test does not require
+CUDA; the required-device integration test below does.
+
 Run the MSM and proof-equivalence checks on a CUDA host:
 
 ```sh
