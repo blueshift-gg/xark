@@ -96,35 +96,6 @@ report input size, host-to-device transfer, kernel, device-to-host transfer, and
 total chunk time separately. See `../../groth16-cuda/README.md` for build and
 runtime instructions.
 
-## Custom-kernel gate
-
-The custom CUDA pipeline is an arithmetic prototype, not a backend candidate
-yet. An independent review found no arithmetic or indexing defect in its tiny
-fixture, but it identified the following gates before a callable API or Rust
-integration is safe:
-
-- Add a host entry point that rejects zero or oversized counts, checks every
-  multiplication used for allocation sizes, and rejects counts that do not fit
-  the current 32-bit CSR offsets and indices.
-- Validate serialized coordinates, curve membership, subgroup membership,
-  canonical scalars, and conversion into the kernel's Montgomery representation
-  before launch. The shared arithmetic helpers assume these conditions.
-- Run device-level MSM comparisons for zero and maximum canonical scalars,
-  top-window digits, infinity, cancellation, and seeded inputs against Xark's
-  CPU Pippenger. Verify a fixed-randomness Groth16 proof after CPU/GPU
-  comparison.
-- Measure the ICICLE adapter first. The current custom bucket accumulation and
-  weighted reduction loops serialize members per bucket and buckets per
-  window; optimize them only if measurements show that curve arithmetic is the
-  limiting stage.
-
-The prepared-CSR host oracle exercises the group formulas but does not replace
-the device scalar-to-proof checks above. The local host suite passed its 37
-prepared-CSR cases. This Mac has no `nvcc` or NVIDIA device, so the CUDA tests
-still need a Linux GPU host. The optional ICICLE CPU/GPU comparison and proof
-tests also remain unrun locally because the pinned dependency and CUDA runtime
-are unavailable.
-
 ## References
 
 - Groth16: [On the Size of Pairing-based Non-interactive Arguments][groth16-paper].
