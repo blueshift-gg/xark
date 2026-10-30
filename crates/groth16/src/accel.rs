@@ -107,7 +107,7 @@ pub fn try_kernel_msm(
     compressed: bool,
     scalars: &[u8],
 ) -> Result<Vec<u8>, String> {
-    if scalars.len() % 32 != 0 {
+    if !scalars.len().is_multiple_of(32) {
         return Err("MSM scalar buffer length is not a multiple of 32".into());
     }
     let c = if compressed {
@@ -133,11 +133,13 @@ pub fn try_kernel_msm(
             points.len()
         ));
     }
-    let sc: Vec<Scalar> = scalars
-        .chunks_exact(32)
+    let (scalar_chunks, _) = scalars.as_chunks::<32>();
+    let sc: Vec<Scalar> = scalar_chunks
+        .iter()
         .map(|b| {
             let mut l = [0u64; 4];
-            for (i, w) in b.chunks_exact(8).enumerate() {
+            let (words, _) = b.as_chunks::<8>();
+            for (i, w) in words.iter().enumerate() {
                 l[i] = u64::from_le_bytes(w.try_into().unwrap());
             }
             BigInt(l)
@@ -195,14 +197,14 @@ pub(crate) fn valid_msm_output(g2: bool, bytes: &[u8]) -> bool {
     if g2 {
         let point_size = G2Affine::default().uncompressed_size();
         !bytes.is_empty()
-            && bytes.len() % point_size == 0
+            && bytes.len().is_multiple_of(point_size)
             && bytes
                 .chunks_exact(point_size)
                 .all(|part| G2Affine::deserialize_uncompressed(part).is_ok())
     } else {
         let point_size = G1Affine::default().uncompressed_size();
         !bytes.is_empty()
-            && bytes.len() % point_size == 0
+            && bytes.len().is_multiple_of(point_size)
             && bytes
                 .chunks_exact(point_size)
                 .all(|part| G1Affine::deserialize_uncompressed(part).is_ok())
