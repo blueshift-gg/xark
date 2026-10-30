@@ -79,7 +79,7 @@ impl XarkProject {
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "ptau") {
+                    if path.extension().is_some_and(|e| e == "ptau") && path.is_file() {
                         return Some(path);
                     }
                 }
@@ -201,4 +201,80 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::XarkProject;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("xark-ptau-discovery-{}-{id}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn xark_dir(&self) -> PathBuf {
+            let path = self.0.join("target/xark/circuit");
+            fs::create_dir_all(&path).unwrap();
+            path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn skips_directory_before_searching_ptau_subdirectory() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        fs::create_dir(xark_dir.join("fake.ptau")).unwrap();
+        let real_file = xark_dir.join("ptau/ceremony.ptau");
+        fs::create_dir_all(real_file.parent().unwrap()).unwrap();
+        fs::write(&real_file, b"transcript").unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
+
+    #[test]
+    fn ignores_directory_when_no_transcript_file_exists() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        fs::create_dir(xark_dir.join("fake.ptau")).unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), None);
+    }
+
+    #[test]
+    fn skips_shared_directory_before_searching_crate_root() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        fs::create_dir(xark_dir.parent().unwrap().join("fake.ptau")).unwrap();
+        let real_file = temp.0.join("ceremony.ptau");
+        fs::write(&real_file, b"transcript").unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
+
+    #[test]
+    fn still_finds_a_ptau_file_in_the_first_search_directory() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        let real_file = xark_dir.join("ceremony.ptau");
+        fs::write(&real_file, b"transcript").unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
 }
