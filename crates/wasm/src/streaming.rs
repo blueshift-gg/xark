@@ -648,8 +648,13 @@ pub fn kernel_cols(block: &mut [u8], n1: u32, n2: u32, c0: u32, op: u8) {
 /// Worker kernel: MSM over serialized points and 32-byte LE scalars; returns the
 /// uncompressed affine sum.
 #[wasm_bindgen]
-pub fn kernel_msm(g2: bool, points: &[u8], compressed: bool, scalars: &[u8]) -> Vec<u8> {
-    accel::kernel_msm(g2, points, compressed, scalars)
+pub fn kernel_msm(
+    g2: bool,
+    points: &[u8],
+    compressed: bool,
+    scalars: &[u8],
+) -> Result<Vec<u8>, JsValue> {
+    accel::try_kernel_msm(g2, points, compressed, scalars).map_err(|e| JsValue::from_str(&e))
 }
 
 // ---- push-driven proving (key from a ReadableStream) -------------------------------
