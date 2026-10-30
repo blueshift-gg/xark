@@ -654,6 +654,24 @@ impl xark_groth16::Accelerator for FakePool {
     }
 }
 
+struct InvalidMsm;
+
+impl xark_groth16::Accelerator for InvalidMsm {
+    fn wants_msm(&self) -> bool {
+        true
+    }
+
+    fn msm(
+        &mut self,
+        _g2: bool,
+        _points: &[u8],
+        _compressed: bool,
+        _scalars: &[xark_groth16::msm::Scalar],
+    ) -> Option<Vec<u8>> {
+        Some(vec![0xff])
+    }
+}
+
 #[test]
 fn worker_decomposition_is_byte_identical() {
     let (prog, assign) = random_program(50, 700);
@@ -700,6 +718,47 @@ fn worker_decomposition_is_byte_identical() {
             pool.calls
         );
     }
+}
+
+#[test]
+fn malformed_worker_sums_fall_back_to_cpu_in_both_provers() {
+    let (prog, assign) = random_program(51, 40);
+    let circ = XarkCircuit::for_proving_preminimized(prog.clone(), assign.clone());
+    let (pk, _) =
+        ArkG16::circuit_specific_setup(circ.clone(), &mut ChaCha20Rng::seed_from_u64(3)).unwrap();
+    let want = ArkG16::prove(&pk, circ, &mut ChaCha20Rng::seed_from_u64(4)).unwrap();
+    let mut rng = ChaCha20Rng::seed_from_u64(4);
+    let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let cfg = ProverConfig {
+        msm_chunk: 11,
+        self_check: false,
+        ..ProverConfig::default()
+    };
+
+    let src = ProgramSource::new(&prog);
+    let z = src.layout().assignment_from_map(&assign);
+    let mut accelerator = InvalidMsm;
+    let got = xark_groth16::prove_accelerated(
+        &src,
+        &z,
+        &mut SerializedPk::from_bytes(&bytes).unwrap(),
+        r,
+        s,
+        &cfg,
+        &mut (),
+        &mut accelerator,
+    )
+    .unwrap();
+    assert_eq!(got, want);
+
+    let src = ProgramSource::new(&prog);
+    let mut accelerator = InvalidMsm;
+    let mut push = xark_groth16::PushProver::new(src, z, r, s, cfg, &mut accelerator).unwrap();
+    for piece in bytes.chunks(97) {
+        push.push(piece, &mut accelerator).unwrap();
+    }
+    assert_eq!(push.finish().unwrap(), want);
 }
 
 #[test]

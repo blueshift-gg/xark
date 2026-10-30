@@ -16,7 +16,7 @@ use ark_ff::{PrimeField, Zero};
 use ark_serialize::Compress;
 use rayon::prelude::*;
 
-use crate::accel::{Accelerator, sum_g1, sum_g2};
+use crate::accel::{Accelerator, sum_g1, sum_g2, valid_msm_output};
 use crate::keystream::{KeyEvent, KeyStream, KeyStreamError};
 use crate::msm::{Scalar, StreamingMsm};
 use crate::pk::KeyVector;
@@ -180,8 +180,10 @@ impl<S: ConstraintSource> Fold<'_, S> {
         };
         let n = bytes.len() / psz;
         let sc = self.scalars(i, off, n);
+        let g2 = i == 2;
         if self.accel.wants_msm()
-            && let Some(p) = self.accel.msm(i == 2, bytes, compressed, &sc)
+            && let Some(p) = self.accel.msm(g2, bytes, compressed, &sc)
+            && valid_msm_output(g2, &p)
         {
             self.parts[i].extend_from_slice(&p);
             return Ok(());
