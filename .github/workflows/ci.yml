@@ -235,11 +235,17 @@ jobs:
         uses: actions/checkout@v5
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Check CUDA crate formatting
+        run: cargo fmt --manifest-path crates/groth16-cuda/Cargo.toml -- --check
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/groth16-cuda -> target
       - name: Run host-side adapter tests
         run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --lib
+      - name: Test the MSM benchmark statistics
+        run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --example msm_bench
       - name: Compile the adapter and its tests
         run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --no-run
+      - name: Check the shared scalar-window reference
+        run: make -C crates/groth16/cuda test-host
