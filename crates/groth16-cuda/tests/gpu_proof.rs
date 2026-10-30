@@ -6,12 +6,12 @@ use ark_serialize::CanonicalSerialize;
 use ark_serialize::Compress;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use xark_groth16::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 use xark_groth16::{
-    Accelerator, DomainKind, Local, ProgramSource, ProverConfig, SerializedPk, prove_accelerated,
-    verify,
+    Accelerator, ConstraintSource, DomainKind, Local, ProgramSource, ProverConfig, SerializedPk,
+    prove_accelerated, verify,
 };
 use xark_groth16_cuda::IcicleMsm;
+use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 use xark_ir::LinearCombination;
 
 struct RequiredCudaMsm {
