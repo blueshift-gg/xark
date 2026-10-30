@@ -156,6 +156,8 @@ impl Accelerator for IcicleMsm {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::{
         IcicleG1Affine, ark_limbs_to_u32, ark_scalar_to_icicle, icicle_base_to_ark,
         icicle_msm_count, prepare_g1_inputs,
@@ -166,6 +168,80 @@ mod tests {
     use ark_serialize::{CanonicalSerialize, Compress};
     use icicle_bn254::curve::{BaseField, ScalarField};
     use icicle_core::affine::Affine as IcicleAffine;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+    use xark_groth16::{
+        ConstraintSource, DomainKind, Local, ProgramSource, ProverConfig, SerializedPk,
+        prove_accelerated, verify,
+    };
+    use xark_ir::LinearCombination;
+    use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
+
+    #[test]
+    fn cpu_proof_fixture_generates_and_verifies_on_host() {
+        let program = R1csProgram {
+            field: FieldSpec::bn254(),
+            variables: vec![
+                Variable {
+                    id: 0,
+                    name: "out".into(),
+                    visibility: Visibility::Public,
+                },
+                Variable {
+                    id: 1,
+                    name: "left".into(),
+                    visibility: Visibility::Private,
+                },
+                Variable {
+                    id: 2,
+                    name: "right".into(),
+                    visibility: Visibility::Private,
+                },
+            ],
+            constraints: vec![R1csConstraint::mul(
+                0,
+                LinearCombination::var(1),
+                LinearCombination::var(2),
+                0,
+                "private factors match public output",
+            )],
+        };
+        let assignment = BTreeMap::from([
+            (0, Fr::from(6u64)),
+            (1, Fr::from(2u64)),
+            (2, Fr::from(3u64)),
+        ]);
+        let source = ProgramSource::new(&program);
+        let witness = source.layout().assignment_from_map(&assignment);
+
+        let mut key_bytes = Vec::new();
+        let vk = xark_groth16::setup::dev_setup(
+            &source,
+            &mut ChaCha20Rng::seed_from_u64(0x5841_524b),
+            &mut key_bytes,
+            Compress::Yes,
+            DomainKind::Radix2,
+        )
+        .expect("test circuit setup succeeds");
+        let proof = prove_accelerated(
+            &source,
+            &witness,
+            &mut SerializedPk::from_bytes(&key_bytes).expect("serialized key parses"),
+            Fr::from(11u64),
+            Fr::from(13u64),
+            &ProverConfig {
+                msm_chunk: 2,
+                self_check: true,
+                ..ProverConfig::default()
+            },
+            &mut (),
+            &mut Local,
+        )
+        .expect("CPU proof generation succeeds");
+
+        let public_inputs = &witness[1..source.layout().num_instance()];
+        assert!(verify(&vk, public_inputs, &proof).expect("public input count is valid"));
+    }
 
     #[test]
     fn scalar_limbs_preserve_little_endian_word_order() {
