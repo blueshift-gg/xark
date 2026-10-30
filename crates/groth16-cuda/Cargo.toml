@@ -16,12 +16,18 @@ ark-ff = { version = "0.6", default-features = false, features = ["std"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
 icicle-bn254 = {
   git = "https://github.com/ingonyama-zk/icicle.git",
-  tag = "v4.0.0",
+  rev = "6c77775961b0e4dc2be359feec1ac11536c18043",
   default-features = false,
   features = ["msm"],
 }
-icicle-core = { git = "https://github.com/ingonyama-zk/icicle.git", tag = "v4.0.0" }
-icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle.git", tag = "v4.0.0" }
+icicle-core = {
+  git = "https://github.com/ingonyama-zk/icicle.git",
+  rev = "6c77775961b0e4dc2be359feec1ac11536c18043",
+}
+icicle-runtime = {
+  git = "https://github.com/ingonyama-zk/icicle.git",
+  rev = "6c77775961b0e4dc2be359feec1ac11536c18043",
+}
 
 [dev-dependencies]
 rand = "0.8"

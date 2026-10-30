@@ -7,8 +7,8 @@ the prover fall back to CPU when CUDA is unavailable or an operation is declined
 G2 MSM currently stays on CPU.
 
 The default Xark workspace and wasm builds do not depend on this crate. ICICLE is
-pinned to v4.0.0 and loads its CUDA backend at runtime. Install a compatible
-ICICLE CUDA backend and set `ICICLE_BACKEND_INSTALL_DIR` before using the adapter.
+pinned to the v4.0.0 commit and loads its CUDA backend at runtime. Install a
+compatible ICICLE CUDA backend and set `ICICLE_BACKEND_INSTALL_DIR` before use.
 The CUDA backend is separate from the Rust frontend; follow ICICLE's [v4 setup
 guide](https://dev.ingonyama.com/setup) and install a backend built for the same
 ICICLE release and a supported NVIDIA GPU.
