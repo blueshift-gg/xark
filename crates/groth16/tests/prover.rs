@@ -291,6 +291,23 @@ fn pk_bytes(pk: &ProvingKey<Bn254>, compress: Compress, header: bool) -> Vec<u8>
 }
 
 #[test]
+fn serialized_pk_rejects_vector_lengths_that_overflow_byte_offsets() {
+    let (prog, assign) = random_program(91, 4);
+    let circ = XarkCircuit::for_proving_preminimized(prog, assign);
+    let (pk, _) =
+        ArkG16::circuit_specific_setup(circ, &mut ChaCha20Rng::seed_from_u64(91)).unwrap();
+    let mut bytes = pk_bytes(&pk, Compress::Yes, true);
+
+    let first_vector_len = 14
+        + pk.vk.serialized_size(Compress::Yes)
+        + pk.beta_g1.serialized_size(Compress::Yes)
+        + pk.delta_g1.serialized_size(Compress::Yes);
+    bytes[first_vector_len..first_vector_len + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+
+    assert!(SerializedPk::from_bytes(&bytes).is_err());
+}
+
+#[test]
 fn proof_is_byte_identical_to_arkworks_and_verifies() {
     for seed in 20..24u64 {
         let (prog, assign) = random_program(seed, 60 + 33 * (seed as usize - 20));

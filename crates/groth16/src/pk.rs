@@ -348,8 +348,15 @@ impl<R: Read + Seek> SerializedPk<R> {
         for (i, sz) in [g1, g1, g2, g1, g1].into_iter().enumerate() {
             let len = u64::deserialize_with_mode(&mut r, compress, v)?;
             offsets[i] = r.stream_position()?;
-            lens[i] = len as usize;
-            r.seek(SeekFrom::Current((len * sz) as i64))?;
+            lens[i] = usize::try_from(len)
+                .map_err(|_| invalid_pk("vector length exceeds address space"))?;
+            let bytes = len
+                .checked_mul(sz)
+                .ok_or_else(|| invalid_pk("vector byte length overflows"))?;
+            let end = offsets[i]
+                .checked_add(bytes)
+                .ok_or_else(|| invalid_pk("vector end offset overflows"))?;
+            r.seek(SeekFrom::Start(end))?;
         }
         Ok(SerializedPk {
             r,
@@ -437,7 +444,10 @@ impl<R: Read + Seek> SerializedPk<R> {
         let mut i = 0;
         while i < len {
             let this = chunk.min(len - i);
-            bytes.resize(this * sz, 0);
+            let byte_len = this
+                .checked_mul(sz)
+                .ok_or_else(|| invalid_pk("streamed chunk byte length overflows"))?;
+            bytes.resize(byte_len, 0);
             self.r.read_exact(&mut bytes)?;
             f(i, &bytes)?;
             i += this;
@@ -491,6 +501,13 @@ impl<R: Read + Seek> SerializedPk<R> {
         self.tee = tee;
         res
     }
+}
+
+fn invalid_pk(message: &'static str) -> PkError {
+    PkError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        message,
+    ))
 }
 
 /// `par_extend` from a fallible iterator, keeping the first error.
