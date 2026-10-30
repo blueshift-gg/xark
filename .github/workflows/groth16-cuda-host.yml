@@ -32,6 +32,9 @@ jobs:
         with:
           workspaces: crates/groth16-cuda -> target
 
+      - name: Rebuild ICICLE native frontend
+        run: cargo clean --manifest-path crates/groth16-cuda/Cargo.toml
+
       - name: Check adapter formatting
         run: cargo fmt --manifest-path crates/groth16-cuda/Cargo.toml -- --check
 
