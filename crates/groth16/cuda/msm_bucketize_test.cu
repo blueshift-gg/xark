@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "msm_buckets.cuh"
+#include "msm_bucket_reference.hpp"
 
 namespace {
 
@@ -137,23 +138,19 @@ int main() {
                    total_digits * sizeof(unsigned), cudaMemcpyDeviceToHost),
         "copy indices");
 
+  const auto expected = xark_cuda_test::bucketize_reference(digits, scalar_count);
+  if (offsets != expected.offsets) {
+    std::fprintf(stderr, "bucket offsets differ from host reference\n");
+    return 1;
+  }
+
   for (unsigned window = 0; window < xark_cuda::kWindowCount; ++window) {
     const std::size_t offset_base = window * (xark_cuda::kBucketCount + 1);
     unsigned expected_offset = 0;
     for (unsigned bucket = 0; bucket < xark_cuda::kBucketCount; ++bucket) {
-      if (offsets[offset_base + bucket] != expected_offset) {
-        std::fprintf(stderr, "bad offset: window=%u bucket=%u\n", window, bucket);
-        return 1;
-      }
       if (offsets[offset_base + bucket + 1] > scalar_count) {
         std::fprintf(stderr, "bucket offset exceeds window capacity\n");
         return 1;
-      }
-      std::vector<unsigned> expected;
-      for (unsigned scalar = 0; scalar < scalar_count; ++scalar) {
-        if (digits[window * scalar_count + scalar] == bucket && bucket != 0) {
-          expected.push_back(scalar);
-        }
       }
       const unsigned end = offsets[offset_base + bucket + 1];
       std::vector<unsigned> actual;
@@ -161,12 +158,22 @@ int main() {
         actual.push_back(indices[window * scalar_count + slot]);
       }
       std::sort(actual.begin(), actual.end());
-      if (actual != expected) {
+      std::vector<unsigned> expected_members;
+      for (unsigned slot = expected.offsets[offset_base + bucket];
+           slot < expected.offsets[offset_base + bucket + 1]; ++slot) {
+        expected_members.push_back(
+            expected.point_indices[window * scalar_count + slot]);
+      }
+      if (actual != expected_members) {
         std::fprintf(stderr, "bucket members differ: window=%u bucket=%u\n",
                      window, bucket);
         return 1;
       }
-      expected_offset += static_cast<unsigned>(expected.size());
+      expected_offset += static_cast<unsigned>(expected_members.size());
+      if (end != expected_offset) {
+        std::fprintf(stderr, "bucket end differs from expected count\n");
+        return 1;
+      }
     }
   }
 

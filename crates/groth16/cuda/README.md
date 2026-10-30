@@ -40,7 +40,9 @@ The shared extraction routine can also be checked without CUDA:
 make -C crates/groth16/cuda test-host
 ```
 
-The host test does not compile or execute the `.cu` kernel.
+This host target checks digit extraction and the independent CSR reference,
+including repeated bucket members, zero digits, maximum bucket IDs, and rejected
+out-of-range digits. It does not compile or execute either `.cu` kernel.
 
 ## Bucket-index stage
 
