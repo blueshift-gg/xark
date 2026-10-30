@@ -34,8 +34,19 @@ pub use xark_prover as __prover;
 /// from the R1CS, so oversizing is free. (Avoids `[Field; BITS + 1]`, which needs
 /// unstable `generic_const_exprs`.)
 const MAX_BITS: usize = 128;
-const MAX_LIMBS: usize = 16;
+/// 32 limbs of 86 bits is 2752 bits: room for RSA-2048 (24 limbs) and
+/// RSA-2560. Widths above 16 limbs get one more bit of carry headroom (see
+/// [`carry_headroom`]); up to 16 the geometry, and so the R1CS, is unchanged.
+const MAX_LIMBS: usize = 32;
 const MAX_COLS: usize = 2 * MAX_LIMBS - 1;
+
+/// Bits of signed-carry headroom above `BITS` for a `LIMBS`-wide schoolbook
+/// column: a column sums up to `LIMBS` products below `2^(2·BITS)`, so its
+/// signed carry is below `LIMBS · 2^BITS`. `4` covers `LIMBS ≤ 16`; `5`
+/// covers `LIMBS ≤ 32`.
+fn carry_headroom<const LIMBS: usize>() -> usize {
+    if LIMBS > 16usize { 5usize } else { 4usize }
+}
 
 /// Width-generic non-native field element: `LIMBS` little-endian `BITS`-bit limbs
 /// (value `Σ limb[i]·2^(BITS·i)`). A zero-cost newtype over `[Field; LIMBS]` whose
@@ -408,14 +419,14 @@ fn range_bits<const BITS: usize>(v: Field) {
     require_eq(acc, v);
 }
 
-/// Range-check a biased column carry `v < 2^(BITS+6)` (the `mulmod_columns`
-/// carries; `+6` covers `log2(LIMBS)` plus signed-carry headroom for the widths
-/// this gadget targets).
-fn range_bits_carry<const BITS: usize>(v: Field) {
+/// Range-check a biased column carry `v < 2^(BITS + headroom + 2)` (the
+/// `mulmod_columns` carries: a signed carry in `[−2^(BITS+headroom),
+/// 2^(BITS+headroom))` biased by `2^(BITS+headroom)`, with a bit to spare).
+fn range_bits_carry<const LIMBS: usize, const BITS: usize>(v: Field) {
     let mut acc = Field::from(0u8);
     let mut pow = Field::from(1u8);
     let mut i = 0usize;
-    while i < BITS + 6 {
+    while i < BITS + carry_headroom::<LIMBS>() + 2usize {
         let bit = Field::hint_bit(v, i);
         bit.require_bool();
         acc = acc + bit * pow;
@@ -657,9 +668,13 @@ fn mulmod_columns<const LIMBS: usize, const BITS: usize>(
     r: [Field; LIMBS],
     m: [Field; LIMBS],
 ) {
+    const {
+        assert!(LIMBS <= MAX_LIMBS, "Bignum<LIMBS,BITS>: at most 32 limbs");
+    }
+    let headroom = carry_headroom::<LIMBS>();
     let two_b = two_pow::<BITS>(); // 2^BITS
-    let bias = Field::from(1u128 << (BITS + 4)); // 2^(BITS+4)
-    let bias_shift = two_b * two_b * Field::from(1u128 << 4); // 2^(2·BITS+4)
+    let bias = Field::from(1u128 << (BITS + headroom)); // 2^(BITS+h)
+    let bias_shift = two_b * two_b * Field::from(1u128 << headroom); // 2^(2·BITS+h)
 
     let mut lhs = [Field::from(0u8); MAX_COLS];
     let mut rhs = [Field::from(0u8); MAX_COLS];
@@ -689,7 +704,7 @@ fn mulmod_columns<const LIMBS: usize, const BITS: usize>(
         let rem = dr[1];
         require_eq(num, two_b * cb + rem);
         require_eq(rem, Field::from(0u8));
-        range_bits_carry::<BITS>(cb);
+        range_bits_carry::<LIMBS, BITS>(cb);
         cb_prev = cb;
         c += 1;
     }

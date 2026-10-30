@@ -183,7 +183,7 @@ fn small_sigma1(x: [Field; 32]) -> [Field; 32] {
 /// Returns the 8 updated hash words. All additions are `mod 2^32` via
 /// `reduce::<N>`. The 64-round loop and the 48-step schedule extension are fully
 /// unrolled at compile time.
-fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
+pub fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
     // --- Round-constant table K[0..64] (FIPS 180-4 §4.2.2), as field
     // constants. Adding K[t] into a `reduce` sum is free (no bit array). ---
     let k: [Field; 64] = [
@@ -384,7 +384,7 @@ fn compress(h_in: [[Field; 32]; 8], w: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
 // ===========================================================================
 
 /// The SHA-256 initial hash value H0 (FIPS 180-4 §5.3.3), as field constants.
-fn h0() -> [Field; 8] {
+pub fn h0() -> [Field; 8] {
     [
         Field::from(1779033703u32), // 0x6a09e667
         Field::from(3144134277u32), // 0xbb67ae85
