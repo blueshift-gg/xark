@@ -241,6 +241,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/groth16-cuda -> target
+      - name: Rebuild ICICLE native frontend
+        run: cargo clean --manifest-path crates/groth16-cuda/Cargo.toml
       - name: Run host-side adapter tests
         run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --lib
       - name: Test the MSM benchmark statistics
