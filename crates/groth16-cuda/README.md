@@ -1,13 +1,23 @@
 # Xark Groth16 CUDA MSM
 
-This crate implements an optional BN254 G1 MSM accelerator for Xark's streaming
-Groth16 prover. ICICLE performs the curve MSM. Xark's adapter decodes and checks
-proving-key points, converts canonical arkworks limbs, validates the returned
-point, and lets the prover fall back to CPU when CUDA is unavailable or an
-operation is declined. G2 MSM currently stays on CPU.
+This crate provides optional BN254 G1 MSM accelerators for Xark's streaming
+Groth16 prover. `IcicleMsm` delegates curve arithmetic to ICICLE.
+`CustomCudaMsm`, enabled by the `custom-cuda` feature, runs Xark's scalar-window,
+bucket-index, point-accumulation, and reduction kernels. Both adapters validate
+proving-key inputs and returned points, then decline unsupported work so the
+prover can use its CPU path. G2 MSM currently stays on CPU.
 
-The default Xark workspace and wasm builds do not depend on this crate. ICICLE is
-pinned to the v4.0.0 commit and loads its CUDA backend at runtime. Install a
+Xark streams proving-key MSM work in chunks, with `ProverConfig::msm_chunk`
+defaulting to 524,288 points. ICICLE's signed `i32` count limit applies to one
+adapter call, not the total circuit size. If a configured chunk exceeds that
+limit, the adapter splits it into `i32`-sized calls and sums their results.
+
+The default Xark workspace and wasm builds do not depend on this crate. The
+ICICLE Rust crates are pinned to commit
+[`6c77775961b0e4dc2be359feec1ac11536c18043`](https://github.com/ingonyama-zk/icicle/releases/tag/v4.0.0),
+the ICICLE v4.0.0 release. Pinning fixes the source revision used to build this
+adapter; it does not represent an independent security audit. ICICLE loads its
+CUDA backend at runtime. Install a
 compatible ICICLE CUDA backend and set `ICICLE_BACKEND_INSTALL_DIR` before use.
 The CUDA backend is separate from the Rust frontend; follow ICICLE's [v4 setup
 guide](https://dev.ingonyama.com/setup) and install a backend built for the same
@@ -20,6 +30,17 @@ cargo test --manifest-path crates/groth16-cuda/Cargo.toml --lib
 cargo test --manifest-path crates/groth16-cuda/Cargo.toml --no-run
 ```
 
+Build the custom CUDA backend on a host with `nvcc`:
+
+```sh
+cargo test --manifest-path crates/groth16-cuda/Cargo.toml \
+  --features custom-cuda --lib
+```
+
+Pass `CustomCudaMsm` to the prover to select the custom backend. It is not
+enabled implicitly and does not fall through to ICICLE. If its CUDA call fails,
+the prover uses CPU MSM.
+
 The library tests also generate and verify a deterministic Groth16 proof with
 both `Local` and `IcicleMsm`, then compare the proof bytes. Without a CUDA
 backend, `IcicleMsm` declines and the prover exercises its CPU fallback. With a
@@ -31,10 +52,12 @@ Run the MSM and proof-equivalence checks on a CUDA host:
 ```sh
 XARK_CUDA_REQUIRED=1 cargo test --manifest-path crates/groth16-cuda/Cargo.toml --test gpu_msm
 XARK_CUDA_REQUIRED=1 cargo test --manifest-path crates/groth16-cuda/Cargo.toml --test gpu_proof
+XARK_CUDA_REQUIRED=1 cargo test --manifest-path crates/groth16-cuda/Cargo.toml \
+  --features custom-cuda --test gpu_custom_cuda
 ```
 
-The first command compiles the adapter and runs host-side checks. The latter two
-require the ICICLE backend at runtime and fail if CUDA is not selected. For a
+The ICICLE tests require the ICICLE backend at runtime. The custom test compiles
+the `.cu` bridge with `nvcc` and requires a CUDA device. For a
 custom backend install directory, prefix those commands with
 `ICICLE_BACKEND_INSTALL_DIR=/path/to/icicle/backend`.
 
@@ -47,45 +70,63 @@ the resulting proof with Xark's verifier.
 
 ## CUDA host validation
 
-Requirements: Linux, an NVIDIA GPU, CUDA Toolkit, Nsight Systems, and the ICICLE
+Requirements: Linux, an NVIDIA GPU, CUDA Toolkit, Nsight Systems, GNU time, and the ICICLE
 CUDA backend matching the pinned v4.0.0 Rust frontend. Run from a clean checkout:
 
 ```sh
 crates/groth16-cuda/scripts/run_cuda_validation.sh
 ```
 
-The run executes adapter unit tests, builds all adapter tests, requires CUDA for
-the CPU/GPU MSM comparison and verified Groth16 proof, produces benchmark CSV,
-and captures Nsight Systems traces at 65,536 and 524,288 points. It saves the
-source revision, toolchain and GPU details, test logs, CSV, and profiler reports
-under `out/cuda-validation/<commit>/`.
+The run executes host checks, builds both adapters, requires CUDA for the ICICLE
+and custom MSM comparisons and verified proofs, writes a benchmark CSV per
+backend, and captures Nsight Systems traces at 65,536 and 524,288 points for
+both. It saves the source revision, toolchain and GPU details, test logs, CSVs,
+and profiler reports under `out/cuda-validation/<commit>/`.
 
 Set `ICICLE_BACKEND_INSTALL_DIR` for a non-default backend path. Workload and
 output settings are available through `XARK_MSM_SIZES`, `XARK_PROFILE_SIZES`,
 `XARK_MSM_REPEATS`, `XARK_MSM_SEED`, and `XARK_CUDA_RESULTS_DIR`.
+Set `XARK_CUDA_SANITIZE=1` to run the custom CUDA integration tests under
+Compute Sanitizer's memory checker with device leak checking enabled. This checks
+CUDA memory accesses and device allocations; it does not measure host RSS.
+Each benchmark log also records peak process RSS through GNU time.
 
-Xark owns the serialization checks, arkworks-to-ICICLE field conversion, runtime
-selection, output validation, and the small scalar-window CUDA kernel in
-`../groth16/cuda`. ICICLE owns the BN254 curve MSM kernels, including bucket
-accumulation. Keeping field and curve arithmetic in that audited implementation
-avoids introducing a second cryptographic arithmetic stack in this adapter.
-The window kernel is an independently tested building block today; it is not a
-custom replacement for ICICLE's scalar decomposition.
+The custom path converts canonical arkworks points and scalars to the native
+input layout, checks curve coordinates and scalar bounds, then runs window
+extraction, CSR bucketization, G1 accumulation, weighted bucket reduction, and
+window recomposition in `../groth16/cuda`. Arkworks checks the result before
+serialization. Each bucket currently accumulates its members serially. This
+backend includes CUDA MSM and proof integration tests, which require an NVIDIA
+host to run. No performance claim is made before those checks and measurements.
 
-The adapter remains opt-in and outside the root Cargo workspace, so CPU and wasm
-builds do not acquire the ICICLE dependency. G2 MSM and quotient FFTs continue on
-the existing CPU path. No performance claim is made until GPU timing is collected
-on documented hardware and compared against Xark's CPU path.
+The adapters remain opt-in and outside the root Cargo workspace, so CPU and wasm
+builds do not compile CUDA code. G2 MSM and quotient FFTs continue on the existing
+CPU path. The benchmark below can select either backend. No
+performance claim is made until both backends are measured on documented
+hardware and compared against Xark's CPU path.
+
+To measure the current CPU G2 MSM baseline against Arkworks at one thread and
+the available Rayon thread count, run:
+
+```sh
+cargo run --release -p xark-groth16 --example bench_kernels -- g2
+```
+
+This seeded benchmark checks each result against Arkworks and reports the input
+size, thread count, and elapsed time. It measures CPU MSM only; it is not a GPU
+result or a full proof benchmark.
 
 ## Reproducible MSM benchmark
 
-`examples/msm_bench.rs` compares the complete adapter call with Xark's CPU
+`examples/msm_bench.rs` compares the selected GPU adapter call with Xark's CPU
 Pippenger on the same deterministic, canonical BN254 scalars and valid G1 points.
-It reports CPU Pippenger alone, CPU decode plus Pippenger, and the complete GPU
-adapter call. It checks output equality before and during timing. Input
+It reports CPU Pippenger alone, parallel CPU point decoding alone, CPU decode
+plus Pippenger, and the complete GPU adapter call. The decode-only number gives
+a host-side baseline; it is not a measured speedup over GPU-side preparation.
+It checks output equality before and during timing. Input
 generation and runtime initialization are outside the timed region. The default
 sweep is 1,024, 65,536, and 524,288 points, with seven timed repetitions per
-path. Each repetition runs CPU MSM, CPU decode plus MSM, and ICICLE in a rotated
+path. Each repetition runs the CPU paths and selected backend in a rotated
 order to reduce ordering bias. Output includes every raw sample and median,
 minimum, and maximum rows. The CSV has separate `repeat` and `stat` columns.
 Compressed points are the default; use `--encoding both` to include uncompressed
@@ -98,19 +139,23 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 nvcc --version
 git rev-parse HEAD
 cargo run --release --manifest-path crates/groth16-cuda/Cargo.toml \
-  --example msm_bench -- --sizes 1024,65536,524288 --repeats 7 \
+  --features custom-cuda --example msm_bench -- --backend icicle \
+  --sizes 1024,65536,524288 --repeats 7 \
+  --seed 24841619657020237 > xark-icicle-msm.csv
+cargo run --release --manifest-path crates/groth16-cuda/Cargo.toml \
+  --features custom-cuda --example msm_bench -- --backend custom \
+  --sizes 1024,65536,524288 --repeats 7 \
   --seed 24841619657020237 > xark-msm.csv
 ```
 
-The GPU wall time covers point decoding, curve and subgroup checks, limb
-conversion, the ICICLE call, and result conversion. The adapter uses the pinned
-ICICLE MSM configuration with canonical, non-Montgomery host inputs and
-`is_async=false`; the call blocks before result conversion. These assumptions are
-checked against the pinned wrapper's config fields and synchronous MSM contract
-in [the pinned source](https://github.com/ingonyama-zk/icicle/blob/6c77775961b0e4dc2be359feec1ac11536c18043/wrappers/rust/icicle-core/src/msm/mod.rs).
-This is not a kernel-only number. The CPU chunk time decodes the same serialized
-input and runs Pippenger;
-the CPU MSM time isolates Pippenger on already-decoded points. To inspect
+The adapters decode and convert point inputs in parallel for chunks of at least
+1,024 points; smaller chunks remain serial to avoid thread-pool overhead. The
+GPU wall time covers point decoding, curve checks, transfers, the
+selected MSM, and result conversion. BN254 G1 has cofactor one, so checking that
+a point is on the curve also establishes subgroup membership. This is not a
+kernel-only number. The CPU decode-only time measures parallel decoding, and
+CPU chunk time decodes the same serialized input and runs Pippenger. CPU MSM
+time isolates Pippenger on already-decoded points. To inspect
 transfers and kernel durations, build the example and capture the same run with
 Nsight Systems:
 

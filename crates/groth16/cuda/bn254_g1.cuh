@@ -84,7 +84,8 @@ XARK_G1_HD inline Fq fq_inverse(Fq value) {
 }
 
 // Converts canonical affine coordinates to Montgomery form after checking field
-// bounds and the curve equation. Callers must check subgroup membership.
+// bounds and the curve equation. BN254 G1 has cofactor one, so every on-curve
+// point is in the prime-order subgroup.
 XARK_G1_HD inline bool g1_from_canonical_checked(const std::uint32_t x[8],
                                                  const std::uint32_t y[8],
                                                  bool infinity, G1Affine *out) {
