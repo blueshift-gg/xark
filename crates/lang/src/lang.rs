@@ -404,6 +404,22 @@ impl Field {
         w
     }
 
+    /// `self` as a fresh witness variable, bound to it by a linear constraint.
+    ///
+    /// Value-wise the identity. Structurally, it cuts a linear combination off:
+    /// later uses refer to one variable instead of carrying every term of
+    /// `self`. Gadgets that chain linear layers without an S-box in between
+    /// (Poseidon's partial rounds) otherwise grow combinations by a term per
+    /// round, which inflates `circuit.xbc` and witness solving quadratically.
+    /// Costs two linear constraints, which R1CS minimization can fold away
+    /// again where that does not densify the system.
+    pub fn pin(self) -> Field {
+        let [copy, rest] = Field::hint_div_rem(self, Field::from(1u8));
+        __xark_require_eq_scalar(copy, self);
+        __xark_require_eq_scalar(rest, Field::from(0u8));
+        copy
+    }
+
     /// Circuit equality-to-zero: a `bool` (a `{0,1}` wire) that is `true` iff
     /// `self == 0`.
     pub fn is_zero(self) -> bool {

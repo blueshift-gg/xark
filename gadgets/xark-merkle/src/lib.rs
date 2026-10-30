@@ -59,6 +59,47 @@ pub fn merkle_verify<const DEPTH: usize>(
     require_eq(merkle_root::<DEPTH>(leaf, siblings, index_bits), root);
 }
 
+/// [`merkle_root`] and [`merkle_verify`] over `xark_poseidon::pinned::hash2`:
+/// the same roots, with a far smaller artifact and witness solve for deep paths.
+pub mod pinned {
+    use xark::prelude::*;
+    use xark_poseidon::pinned::hash2;
+
+    fn select(bit: Field, if_true: Field, if_false: Field) -> Field {
+        if_false + bit * (if_true - if_false)
+    }
+
+    /// [`super::merkle_root`], hashing with the pinned permutation.
+    pub fn merkle_root<const DEPTH: usize>(
+        leaf: Field,
+        siblings: [Field; DEPTH],
+        index_bits: [Field; DEPTH],
+    ) -> Field {
+        let mut node = leaf;
+        let mut i = 0usize;
+        while i < DEPTH {
+            let bit = index_bits[i];
+            bit.require_bool();
+            let sib = siblings[i];
+            let left = select(bit, sib, node);
+            let right = select(bit, node, sib);
+            node = hash2(left, right);
+            i += 1;
+        }
+        node
+    }
+
+    /// [`super::merkle_verify`], hashing with the pinned permutation.
+    pub fn merkle_verify<const DEPTH: usize>(
+        leaf: Field,
+        siblings: [Field; DEPTH],
+        index_bits: [Field; DEPTH],
+        root: Field,
+    ) {
+        require_eq(merkle_root::<DEPTH>(leaf, siblings, index_bits), root);
+    }
+}
+
 /// Gadget API plus the xark circuit essentials, for a single
 /// `use xark_merkle::prelude::*;`.
 pub mod prelude {
