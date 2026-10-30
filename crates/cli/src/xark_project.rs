@@ -196,10 +196,10 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
                 let val = val.trim();
                 let val = if let Some(rest) = val.strip_prefix('"') {
                     rest.split_once('"').map(|(name, _)| name)?
-                } else if let Some(rest) = val.strip_prefix('\'') {
-                    rest.split_once('\'').map(|(name, _)| name)?
                 } else {
-                    return None;
+                    val.strip_prefix('\'')?
+                        .split_once('\'')
+                        .map(|(name, _)| name)?
                 };
                 if !val.is_empty() {
                     return Some(val.to_string());
