@@ -250,60 +250,24 @@ fn prove_streaming(
         ),
         super::KeyFit::Same => {}
     }
-    // Whether the rows came without re-running the minimize (the `cached=` marker).
-    let mut cached = true;
-    let src: Box<dyn ConstraintSource> = match kind {
-        StreamKind::Bytecode => {
-            Box::new(xark_groth16::BytecodeSource::new(&bytes).map_err(|e| anyhow::anyhow!(e))?)
-        }
-        StreamKind::RowFile(path) => {
-            let read = std::fs::read(&path)
-                .map_err(|e| e.to_string())
-                .and_then(|rf| xark_groth16::RowFileSource::new(rf).map_err(|e| e.to_string()))
-                .and_then(|src| {
-                    if xark_ir::function_decode::row_file_fits(
-                        src.file().fingerprint(),
-                        &fingerprint,
-                        &bytes,
-                    ) {
-                        Ok(src)
-                    } else {
-                        Err("written for a different circuit.xbc".into())
-                    }
-                });
-            match read {
-                Ok(src) => Box::new(src),
-                Err(why) => {
-                    // Rebuild the minimized circuit exactly as `xark setup` keyed it;
-                    // `--cache` writes it back for the next proof.
-                    eprintln!(
-                        "note: {} unusable ({why}); rebuilding the minimized circuit",
-                        path.display()
-                    );
-                    cached = false;
-                    let reduced = xark_ir::function_decode::expand_function_blob_reduced(&bytes)
-                        .map_err(|e| anyhow::anyhow!(e))?
-                        .into_r1cs();
-                    let circuit = XarkCircuit::for_setup(reduced);
-                    let digest = super::r1cs_digest(&bytes);
-                    let rows = xark_ir::r1cs_stream::encode(&digest, circuit.prog());
-                    drop(circuit);
-                    if args.cache {
-                        fs::write(&path, &rows)
-                            .with_context(|| format!("writing {}", path.display()))?;
-                        println!("Wrote {}", path.display());
-                    }
-                    Box::new(
-                        xark_groth16::RowFileSource::new(rows).map_err(|e| anyhow::anyhow!(e))?,
-                    )
-                }
-            }
-        }
-    };
-    let vars = xark_ir::function_decode::decode_input_vars(&bytes);
-    let id_inputs = resolve_input_ids(&vars, inputs)?;
-    drop(vars);
-    let assign_fp = stream_soundness(&bytes, sources, &id_inputs)?;
+    // The row source and the witness don't depend on each other: build the source
+    // while another thread solves. Its error, if both fail, is reported first, as
+    // when they ran one after the other.
+    let (built, solved) = std::thread::scope(|s| {
+        let solved = s.spawn(|| {
+            let vars = xark_ir::function_decode::decode_input_vars(&bytes);
+            let id_inputs = resolve_input_ids(&vars, inputs)?;
+            drop(vars);
+            stream_soundness(&bytes, sources, &id_inputs)
+        });
+        let built = row_source(args, &bytes, &fingerprint, kind);
+        let solved = solved
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e));
+        (built, solved)
+    });
+    let (src, cached) = built?;
+    let assign_fp = solved?;
     let t_solve = t.elapsed();
     let z = src.layout().assignment(|id| {
         assign_fp.get(&id).map(|v| {
@@ -370,6 +334,66 @@ fn prove_streaming(
         );
     }
     Ok((proof, public))
+}
+
+/// The rows to prove from, and whether they came without re-running the minimize
+/// (the `cached=` marker).
+fn row_source(
+    args: &ProveArgs,
+    bytes: &[u8],
+    fingerprint: &str,
+    kind: StreamKind,
+) -> Result<(Box<dyn ConstraintSource>, bool)> {
+    let mut cached = true;
+    let src: Box<dyn ConstraintSource> = match kind {
+        StreamKind::Bytecode => {
+            Box::new(xark_groth16::BytecodeSource::new(bytes).map_err(|e| anyhow::anyhow!(e))?)
+        }
+        StreamKind::RowFile(path) => {
+            let read = std::fs::read(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|rf| xark_groth16::RowFileSource::new(rf).map_err(|e| e.to_string()))
+                .and_then(|src| {
+                    if xark_ir::function_decode::row_file_fits(
+                        src.file().fingerprint(),
+                        fingerprint,
+                        bytes,
+                    ) {
+                        Ok(src)
+                    } else {
+                        Err("written for a different circuit.xbc".into())
+                    }
+                });
+            match read {
+                Ok(src) => Box::new(src),
+                Err(why) => {
+                    // Rebuild the minimized circuit exactly as `xark setup` keyed it;
+                    // `--cache` writes it back for the next proof.
+                    eprintln!(
+                        "note: {} unusable ({why}); rebuilding the minimized circuit",
+                        path.display()
+                    );
+                    cached = false;
+                    let reduced = xark_ir::function_decode::expand_function_blob_reduced(bytes)
+                        .map_err(|e| anyhow::anyhow!(e))?
+                        .into_r1cs();
+                    let circuit = XarkCircuit::for_setup(reduced);
+                    let digest = super::r1cs_digest(bytes);
+                    let rows = xark_ir::r1cs_stream::encode(&digest, circuit.prog());
+                    drop(circuit);
+                    if args.cache {
+                        fs::write(&path, &rows)
+                            .with_context(|| format!("writing {}", path.display()))?;
+                        println!("Wrote {}", path.display());
+                    }
+                    Box::new(
+                        xark_groth16::RowFileSource::new(rows).map_err(|e| anyhow::anyhow!(e))?,
+                    )
+                }
+            }
+        }
+    };
+    Ok((src, cached))
 }
 
 /// Write the proof and public inputs, and print a summary.

@@ -2145,12 +2145,11 @@ impl ReducedRowStream {
 /// Numeric template evaluation (see [`ReducedRowStream::eval_items`]).
 mod eval {
     use super::{CItem, GDef, R1csRow};
-    use crate::field::FieldConst;
     use crate::linear_combination::LinearCombination;
     use crate::primitive::{Var, VarRole, WitnessGen};
     use crate::solver::{Fp, SolveError, exec_witness_op};
     use ark_bn254::Fr;
-    use ark_ff::{PrimeField, Zero};
+    use ark_ff::Zero;
     use num_bigint::BigUint;
     use std::collections::BTreeMap;
 
@@ -2191,20 +2190,6 @@ mod eval {
         pub plugs: &'a [Fr],
     }
 
-    fn fr(fc: &FieldConst) -> Fr {
-        if let Some(n) = fc.as_i64() {
-            let m = Fr::from(n.unsigned_abs());
-            return if n < 0 { -m } else { m };
-        }
-        let (sign, bytes) = fc.big().to_bytes_le();
-        let m = Fr::from_le_bytes_mod_order(&bytes);
-        if sign == num_bigint::Sign::Minus {
-            -m
-        } else {
-            m
-        }
-    }
-
     fn resolve(v: u32, def: Option<&GDef>) -> VRef {
         match def {
             None => VRef::Global(v),
@@ -2219,11 +2204,11 @@ mod eval {
 
     fn lc(l: &LinearCombination, def: Option<&GDef>) -> Lc {
         Lc {
-            k: fr(&l.constant),
+            k: l.constant.to_bn254_fr(),
             terms: l
                 .terms
                 .iter()
-                .map(|t| (resolve(t.var, def), fr(&t.coeff)))
+                .map(|t| (resolve(t.var, def), t.coeff.to_bn254_fr()))
                 .collect(),
         }
     }
