@@ -66,13 +66,14 @@ impl Lang {
             Lang::Ts => "ts",
         }
     }
-    /// The client, importing its schema module (`schema_stem`, a sibling).
-    fn generate(self, m: &model::Model, schema_stem: &str) -> Result<String> {
+    /// The client, importing its schema module (`schema_stem`, a sibling), its docs
+    /// pointing at `target/xark/{artifacts}/`.
+    fn generate(self, m: &model::Model, schema_stem: &str, artifacts: &str) -> Result<String> {
         match self {
             // No extension: a bundler resolves it to the `.ts`, and so does tsc's
             // "bundler" resolution, with no settings (`.ts` needs one, and Turbopack
             // doesn't read `.js` as `.ts`).
-            Lang::Ts => ts::generate(m, schema_stem),
+            Lang::Ts => ts::generate(m, schema_stem, artifacts),
         }
     }
     /// The schema as a module of the language, and its file's extension.
@@ -190,7 +191,14 @@ pub fn run(args: ClientArgs) -> Result<()> {
         .unwrap_or(&model.circuit);
     let schema_stem = format!("{stem}.schema");
     let (module, ext) = args.lang.schema_module(&model, &schema)?;
-    let client = args.lang.generate(&model, &schema_stem)?;
+    // The build's directory, named after the package (not the circuit).
+    let artifacts = project
+        .xark_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&model.circuit)
+        .to_string();
+    let client = args.lang.generate(&model, &schema_stem, &artifacts)?;
     let schema_out = out.with_file_name(format!("{schema_stem}.{ext}"));
     if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -218,12 +226,15 @@ pub fn run(args: ClientArgs) -> Result<()> {
             "the runtime the client imports",
         ));
     }
+    // Where the prover's files are: the build's directory, from here.
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let dir = project
+        .xark_dir
+        .strip_prefix(&cwd)
+        .unwrap_or(&project.xark_dir);
     steps.push((
-        format!(
-            "await {name}.prover(\"<url of target/xark/{}/>\")",
-            model.circuit
-        ),
-        "then .prove(inputs); `.verifier(…)` to verify",
+        format!("await {name}.prover(\"<url serving {}/>\")", dir.display()),
+        "after `xark setup`; then .prove(inputs), and `.verifier(…)` to verify",
     ));
     eprintln!("{}", crate::style::next_steps(&steps));
     Ok(())

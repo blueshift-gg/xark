@@ -352,6 +352,16 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- The next steps `xark setup` and `xark client` print can be followed as written:
+  - setup always writes `inputs.example.json` and says to replace its placeholders,
+    instead of a runnable-looking `--inputs '{"x": "<field>"}'` that failed with
+    "is not a decimal or 0x-hex number". A placeholder left in is now named: "still
+    the placeholder "<field>" from `inputs.example.json`".
+  - client's `prover(…)` hint and the generated client's docs point at the build's
+    directory, named after the package, not the circuit (`target/xark/my-cube/`, not
+    `target/xark/cube/`).
+  - setup's dev-key note says `xark export` will refuse the key and how to make a
+    production one, and `--insecure-dev-mode`'s help no longer says it is required.
 - A `#[circuit]` array parameter's length may be a `const`: `Private<[Field; DEPTH]>`
   failed with "array lengths must be integer literals". The circuit is the one the
   literal gives (`examples/merkle` now uses `const DEPTH`, same digest). A generic

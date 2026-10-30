@@ -33,10 +33,10 @@ pub struct SetupArgs {
     /// warning if it isn't empty). Defaults to `target/xark/<name>/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
-    /// Required to run Groth16 setup with locally generated randomness.
-    /// By default, the OS RNG drives the trapdoor sampling — still unsuitable
-    /// for production (no ceremony, no transcript). **Do not use the resulting
-    /// parameters in production.**
+    /// Run Groth16 setup with locally generated randomness (the OS RNG), on
+    /// purpose. It is also what setup falls back to when no `.ptau` is given or
+    /// found. Such a key has no ceremony and no transcript: fine for proving and
+    /// testing, but `xark export` refuses it. **Do not use it in production.**
     #[arg(long, default_value_t = false)]
     pub insecure_dev_mode: bool,
     /// Reproducible-randomness escape hatch for test fixtures **only**.
@@ -572,8 +572,10 @@ pub fn run(args: SetupArgs) -> Result<()> {
             println!(
                 "{}",
                 crate::style::warn(
-                    "note: no .ptau found — generated an insecure single-party OsRng dev key; \
-                     supply --ptau-file for production."
+                    "note: no .ptau found, so this is an insecure single-party dev key: fine \
+                     for `xark prove` and tests, but `xark export` will refuse it. For \
+                     production, download a public .ptau and run `xark setup --ptau-file \
+                     <file>`, or run the multi-party `xark ceremony` (docs/trusted-setup.md)."
                 )
             );
         }
@@ -600,40 +602,40 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, key: Option<&
     let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let p = super::path_arg(path);
     // From `schema.json`: one entry per declared input, in its natural form (a hash's
-    // `0x…` bytes, not its leaves). Short: inline; long: a file to fill in.
-    let hint = match super::load_schema(&project.xark_dir).map(|s| s.summary()) {
+    // `0x…` bytes, not its leaves), written to a file to fill in. Never inline: a
+    // command full of placeholders looks runnable and isn't.
+    let file = project.xark_dir.join("inputs.example.json");
+    let written = match super::load_schema(&project.xark_dir).map(|s| s.summary()) {
         Some(inputs) if !inputs.is_empty() => {
             // In declaration order (a `serde_json::Map` would sort the keys).
             let entries: Vec<String> = inputs
                 .iter()
                 .map(|i| format!("{:?}: {}", i.name, i.template))
                 .collect();
-            let inline = format!("{{{}}}", entries.join(", "));
-            if inline.len() <= 100 {
-                format!("--inputs '{inline}'")
-            } else {
-                let file = project.xark_dir.join("inputs.example.json");
-                let text = format!("{{\n  {}\n}}\n", entries.join(",\n  "));
-                match fs::write(&file, text) {
-                    Ok(()) => {
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let shown = file.strip_prefix(&cwd).unwrap_or(&file);
-                        format!("--inputs {}", shown.display())
-                    }
-                    Err(_) => super::inputs_hint(&name_refs),
-                }
-            }
+            let text = format!("{{\n  {}\n}}\n", entries.join(",\n  "));
+            fs::write(&file, text).is_ok()
         }
-        _ => super::inputs_hint(&name_refs),
+        _ => false,
+    };
+    let (hint, what) = if written {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let shown = file.strip_prefix(&cwd).unwrap_or(&file);
+        (
+            format!("--inputs {}", shown.display()),
+            "replace the placeholders in that file with your values, then this solves \
+             the witness and produces a proof",
+        )
+    } else {
+        (
+            super::inputs_hint(&name_refs),
+            "with your values: solve the witness and produce a proof",
+        )
     };
     let key = key.map_or_else(String::new, |k| {
         format!(" --proving-key {}", super::shown(k))
     });
     println!(
         "\n{}",
-        crate::style::next_steps(&[(
-            format!("xark prove {p}{key} {hint}"),
-            "solve the witness and produce a proof",
-        )])
+        crate::style::next_steps(&[(format!("xark prove {p}{key} {hint}"), what,)])
     );
 }

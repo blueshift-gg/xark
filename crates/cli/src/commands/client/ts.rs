@@ -312,7 +312,9 @@ pub fn schema_module(circuit: &str, schema: &serde_json::Value) -> Result<String
 }
 
 /// The client, importing its schema from `schema_import` (`./zkyc.schema`, the `.ts`).
-pub fn generate(m: &Model, schema_import: &str) -> Result<String> {
+/// `artifacts`: the name of the directory under `target/xark/` holding the build
+/// (the package's, which need not be the circuit's).
+pub fn generate(m: &Model, schema_import: &str, artifacts: &str) -> Result<String> {
     let circuit = m.circuit.as_str();
     let name = pascal(circuit);
     let mut out = String::new();
@@ -333,7 +335,7 @@ pub fn generate(m: &Model, schema_import: &str) -> Result<String> {
          //   #[circuit]\n\
          //   fn {circuit}({})\n\
          //\n\
-         // `xark build` records the circuit's parameter types in target/xark/{circuit}/schema.json\n\
+         // `xark build` records the circuit's parameter types in target/xark/{artifacts}/schema.json\n\
          // and `xark client` turns them into the types below. Don't edit this file: change\n\
          // the circuit, then rebuild and rerun `xark client`. Values go in their natural\n\
          // forms (dates, strings, variant names, bytes); xark-wasm encodes them against the\n\
@@ -518,7 +520,7 @@ pub fn generate(m: &Model, schema_import: &str) -> Result<String> {
         out,
         "/**\n \
          * `{circuit}`: make a prover or verifier from a URL serving a copy of\n \
-         * `target/xark/{circuit}/` (relative to the page in a browser) or from the bytes:\n \
+         * `target/xark/{artifacts}/` (relative to the page in a browser) or from the bytes:\n \
          *\n \
          * ```ts\n \
          * const prover = await {name}.prover(\"/circuits/{circuit}/\");\n \
@@ -665,7 +667,7 @@ mod tests {
     #[test]
     fn generates_natural_types() {
         let m = Model::new(&serde_json::from_str(SCHEMA).unwrap()).unwrap();
-        let ts = generate(&m, "kyc_check.schema").unwrap();
+        let ts = generate(&m, "kyc_check.schema", "kyc_check").unwrap();
         for want in [
             "fn kyc_check(id: Private<Identity>, born_before: Public<Days<1900,2100>>, allowed: Public<Bitfield<Country>>, doc: Private<[u8; 4]>, commitment: Public<Field>)",
             "export const Country = {\n  AD: \"AD\", US: \"US\",\n} as const;\nexport type Country = (typeof Country)[keyof typeof Country];",

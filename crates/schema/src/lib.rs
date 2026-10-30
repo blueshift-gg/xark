@@ -180,6 +180,17 @@ impl Schema {
         keep: impl Fn(&Value) -> bool,
     ) -> Result<Leaves, InputError> {
         let obj = inputs.as_object().ok_or("inputs must be a JSON object")?;
+        for (k, v) in obj {
+            if let Some((path, p)) = placeholder_in(v, k.clone()) {
+                return Err(InputError {
+                    path,
+                    message: format!(
+                        "still the placeholder {p:?} from `inputs.example.json`: \
+                         replace it with a value"
+                    ),
+                });
+            }
+        }
         let wanted: Vec<&Value> = self.inputs().filter(|i| keep(i)).collect();
         let mut out = Leaves::new();
         // Top-level inputs (by declared or camelCase name), then any path keys.
@@ -992,6 +1003,42 @@ fn integer(v: &Value) -> Result<BigUint, String> {
     }
 }
 
+/// The first value in `v` that is still a [`Schema::template`] placeholder
+/// (`"<field>"`, `"0x<32 bytes>"`, `"YYYY-MM-DD"`, …), and its input path.
+fn placeholder_in(v: &Value, path: String) -> Option<(String, String)> {
+    match v {
+        Value::String(s) => is_placeholder(s).then(|| (path, s.clone())),
+        Value::Array(xs) => xs
+            .iter()
+            .enumerate()
+            .find_map(|(i, x)| placeholder_in(x, format!("{path}[{i}]"))),
+        Value::Object(m) => m
+            .iter()
+            .find_map(|(k, x)| placeholder_in(x, format!("{path}.{k}"))),
+        _ => None,
+    }
+}
+
+/// Whether `s` is one of [`Schema::template`]'s placeholders. Exact shapes only, so
+/// a real text value such as `"<b>"` is not taken for one.
+fn is_placeholder(s: &str) -> bool {
+    let width = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_ascii_digit());
+    if s == "YYYY-MM-DD" || s == "YYYY-MM-DDTHH:MM:SSZ" {
+        return true;
+    }
+    if let Some(inner) = s.strip_prefix("0x<").and_then(|t| t.strip_suffix('>')) {
+        return inner == "bytes" || inner.strip_suffix(" bytes").is_some_and(width);
+    }
+    let Some(inner) = s.strip_prefix('<').and_then(|t| t.strip_suffix('>')) else {
+        return false;
+    };
+    matches!(inner, "field" | "text" | "number")
+        || inner.strip_prefix('u').is_some_and(width)
+        || inner.strip_prefix('i').is_some_and(width)
+        || (inner.starts_with("a ") && inner.ends_with(", …"))
+        || inner.contains(" or a list of ")
+}
+
 /// An integer of either sign: a JSON number, or a decimal / `0x`-hex string with an
 /// optional leading `-`.
 fn signed(v: &Value) -> Result<BigInt, String> {
@@ -1632,6 +1679,26 @@ mod tests {
             t[2],
             r#"allowed: Bitfield<Country> = "<AD or a list of Country names>""#
         );
+    }
+
+    /// Every placeholder `inputs.example.json` holds is refused by name, not with a
+    /// parse error that hides it; a real value shaped like one is not.
+    #[test]
+    fn placeholders_left_in_are_named() {
+        let s = schema();
+        for i in s.summary() {
+            let v: Value = serde_json::from_str(&i.template).unwrap();
+            if v == json!(false) {
+                continue;
+            }
+            let e = s
+                .leaves(&json!({ i.name.clone(): v }))
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("still the placeholder"), "{}: {e}", i.name);
+        }
+        assert!(is_placeholder("0x<32 bytes>") && is_placeholder("<u64>"));
+        assert!(!is_placeholder("<b>") && !is_placeholder("<u64") && !is_placeholder("12"));
     }
 
     #[test]

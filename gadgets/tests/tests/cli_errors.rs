@@ -553,3 +553,40 @@ fn inputs_take_natural_encodings() {
     let (ok, out) = run_in(&dir, &["check", "--inputs", &inputs("00")]);
     assert!(!ok && out.contains("a Hash is 32 bytes"), "{out}");
 }
+
+/// The next steps `setup` and `client` print can be followed as written: the
+/// inputs file is to fill in, and the prover's directory is the package's (here
+/// `my-cube`), not the circuit's (`cube`). A placeholder left in is named, and
+/// the dev key's note says `export` will refuse it.
+#[test]
+fn next_steps_can_be_followed() {
+    let tmp = tempdir();
+    let dir = copy_example(tmp.path(), "cube");
+    let manifest = std::fs::read_to_string(dir.join("Cargo.toml"))
+        .unwrap()
+        .replace("name = \"cube\"", "name = \"my-cube\"");
+    std::fs::write(dir.join("Cargo.toml"), manifest).unwrap();
+    let (ok, out) = run_in(&dir, &["build"]);
+    assert!(ok, "{out}");
+    let (ok, out) = run_in(&dir, &["setup"]);
+    assert!(ok, "{out}");
+    let file = "target/xark/my-cube/inputs.example.json";
+    assert!(
+        out.contains(&format!("--inputs {file}")) && out.contains("replace the placeholders"),
+        "{out}"
+    );
+    assert!(out.contains("`xark export` will refuse it"), "{out}");
+    let (ok, out) = run_in(&dir, &["prove", ".", "--inputs", file]);
+    assert!(
+        !ok && out.contains("still the placeholder \"<field>\""),
+        "{out}"
+    );
+    let (ok, out) = run_in(&dir, &["client"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("target/xark/my-cube/") && !out.contains("target/xark/cube/"),
+        "{out}"
+    );
+    let ts = std::fs::read_to_string(dir.join("target/xark/my-cube/cube.ts")).unwrap();
+    assert!(!ts.contains("target/xark/cube/"), "{ts}");
+}
