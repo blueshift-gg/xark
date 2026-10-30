@@ -4,6 +4,8 @@
 //! runs the [`solver`] to produce the witness, lowers the constraints into
 //! Arkworks `gr1cs`, and runs the Groth16/BN254 stack (ark 0.6).
 
+pub mod artifacts;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use ark_bn254::{Bn254, Fr};
