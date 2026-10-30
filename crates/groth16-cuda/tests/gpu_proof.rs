@@ -67,19 +67,6 @@ impl Accelerator for RequiredCudaMsm {
 
 #[test]
 fn cuda_msm_produces_a_verifying_groth16_proof() {
-    let inner = IcicleMsm;
-    if !inner.wants_msm() {
-        if std::env::var_os("XARK_CUDA_REQUIRED").is_some() {
-            panic!("XARK_CUDA_REQUIRED is set, but no CUDA backend is available");
-        }
-        eprintln!("skipping proof-level GPU test because CUDA is unavailable");
-        return;
-    }
-    let mut accelerator = RequiredCudaMsm {
-        inner,
-        nonempty_calls: 0,
-    };
-
     // The public output is 6. The private inputs 2 and 3 satisfy 2 * 3 = 6.
     let program = R1csProgram {
         field: FieldSpec::bn254(),
@@ -143,6 +130,22 @@ fn cuda_msm_produces_a_verifying_groth16_proof() {
         &mut Local,
     )
     .expect("CPU proof generation succeeds");
+
+    let public_inputs = &witness[1..source.layout().num_instance()];
+    assert!(verify(&vk, public_inputs, &cpu_proof).expect("public input count is valid"));
+
+    let inner = IcicleMsm;
+    if !inner.wants_msm() {
+        if std::env::var_os("XARK_CUDA_REQUIRED").is_some() {
+            panic!("XARK_CUDA_REQUIRED is set, but no CUDA backend is available");
+        }
+        eprintln!("CPU proof passed; skipping GPU proof comparison because CUDA is unavailable");
+        return;
+    }
+    let mut accelerator = RequiredCudaMsm {
+        inner,
+        nonempty_calls: 0,
+    };
     let gpu_proof = prove_accelerated(
         &source,
         &witness,
@@ -159,7 +162,6 @@ fn cuda_msm_produces_a_verifying_groth16_proof() {
         gpu_proof, cpu_proof,
         "GPU and CPU proofs differ for fixed randomness"
     );
-    let public_inputs = &witness[1..source.layout().num_instance()];
     assert!(verify(&vk, public_inputs, &gpu_proof).expect("public input count is valid"));
     assert!(
         accelerator.nonempty_calls >= 2,
