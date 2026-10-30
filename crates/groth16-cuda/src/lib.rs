@@ -91,6 +91,9 @@ fn prepare_g1_inputs(
     let mut device_scalars = Vec::with_capacity(scalars.len());
     for (point_bytes, scalar) in points.chunks_exact(point_size).zip(scalars) {
         let point = xark_groth16::decode::point::<G1Affine>(point_bytes, encoding).ok()?;
+        if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+            return None;
+        }
         let scalar_is_zero = scalar.0.iter().all(|limb| *limb == 0);
         let scalar = ark_scalar_to_icicle(scalar)?;
         if point.is_zero() || scalar_is_zero {
@@ -223,6 +226,18 @@ mod tests {
             .unwrap();
         let noncanonical = [ark_ff::BigInt::<4>(Fr::MODULUS.0)];
         assert!(prepare_g1_inputs(&encoded, true, &noncanonical).is_none());
+    }
+
+    #[test]
+    fn input_preparation_rejects_off_curve_uncompressed_points() {
+        let invalid = G1Affine::new_unchecked(Fq::from(1u64), Fq::from(1u64));
+        let mut encoded = Vec::new();
+        invalid
+            .serialize_with_mode(&mut encoded, Compress::No)
+            .unwrap();
+
+        let scalar = [Fr::from(1u64).into_bigint()];
+        assert!(prepare_g1_inputs(&encoded, false, &scalar).is_none());
     }
 
     #[test]

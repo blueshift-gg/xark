@@ -1,10 +1,10 @@
 # Xark Groth16 CUDA MSM
 
 This crate implements an optional BN254 G1 MSM accelerator for Xark's streaming
-Groth16 prover. ICICLE performs the curve MSM. Xark's adapter decodes proving-key
-points, converts canonical arkworks limbs, validates the returned point, and lets
-the prover fall back to CPU when CUDA is unavailable or an operation is declined.
-G2 MSM currently stays on CPU.
+Groth16 prover. ICICLE performs the curve MSM. Xark's adapter decodes and checks
+proving-key points, converts canonical arkworks limbs, validates the returned
+point, and lets the prover fall back to CPU when CUDA is unavailable or an
+operation is declined. G2 MSM currently stays on CPU.
 
 The default Xark workspace and wasm builds do not depend on this crate. ICICLE is
 pinned to the v4.0.0 commit and loads its CUDA backend at runtime. Install a
