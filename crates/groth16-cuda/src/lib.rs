@@ -9,7 +9,7 @@ use std::{cmp::min, ops::Range};
 
 use ark_bn254::{Fq, Fr, G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{BigInt, PrimeField};
+use ark_ff::{BigInt, PrimeField, Zero};
 use ark_serialize::{CanonicalSerialize, Compress};
 use icicle_bn254::curve::{BaseField, G1Projective as IcicleG1, ScalarField};
 use icicle_core::{
@@ -234,8 +234,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        IcicleG1Affine, ark_limbs_to_u32, ark_scalar_to_icicle, icicle_base_to_ark,
-        icicle_msm_config, icicle_msm_count, icicle_point_chunks, prepare_g1_inputs,
+        IcicleG1Affine, PARALLEL_PREPARE_THRESHOLD, ark_limbs_to_u32, ark_scalar_to_icicle,
+        icicle_base_to_ark, icicle_msm_config, icicle_msm_count, icicle_point_chunks,
+        prepare_g1_inputs,
     };
     use ark_bn254::{Fq, Fr, G1Affine};
     use ark_ec::AffineRepr;
