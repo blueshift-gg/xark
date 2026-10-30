@@ -1,6 +1,6 @@
 use ark_bn254::{Fq, Fr, G1Affine};
 use ark_ec::AffineRepr;
-use ark_ff::{BigInt, PrimeField};
+use ark_ff::{BigInt, PrimeField, Zero};
 use ark_serialize::{CanonicalSerialize, Compress};
 use rayon::prelude::*;
 use xark_groth16::{Accelerator, msm::Scalar};
@@ -131,6 +131,9 @@ fn decode_result(words: &[u32; 17]) -> Option<Vec<u8>> {
     } else {
         let x = field_from_words(&words[..8])?;
         let y = field_from_words(&words[8..16])?;
+        if x.is_zero() && y.is_zero() {
+            return None;
+        }
         G1Affine::new_unchecked(x, y)
     };
     if !point.is_on_curve() {
@@ -274,9 +277,9 @@ mod tests {
         let off_curve = G1Affine::new_unchecked(Fq::from(1u64), Fq::from(1u64));
         let mut off_curve_bytes = Vec::new();
         off_curve
-            .serialize_compressed(&mut off_curve_bytes)
+            .serialize_uncompressed(&mut off_curve_bytes)
             .unwrap();
-        assert!(prepare_inputs(&off_curve_bytes, true, &[BigInt([1, 0, 0, 0])]).is_none());
+        assert!(prepare_inputs(&off_curve_bytes, false, &[BigInt([1, 0, 0, 0])]).is_none());
     }
 
     #[test]
