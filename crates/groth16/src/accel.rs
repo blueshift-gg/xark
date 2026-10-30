@@ -146,6 +146,9 @@ pub fn try_kernel_msm(
             .chunks_exact(point_size)
             .map(|b| crate::decode::point::<G2Affine>(b, c).map_err(|e| e.to_string()))
             .collect::<Result<_, _>>()?;
+        if !valid_group_points(&pts) {
+            return Err("MSM input contains an invalid G2 point".into());
+        }
         msm::<G2Projective>(&pts, &sc)
             .into_affine()
             .serialize_uncompressed(&mut out)
@@ -155,12 +158,21 @@ pub fn try_kernel_msm(
             .chunks_exact(point_size)
             .map(|b| crate::decode::point::<G1Affine>(b, c).map_err(|e| e.to_string()))
             .collect::<Result<_, _>>()?;
+        if !valid_group_points(&pts) {
+            return Err("MSM input contains an invalid G1 point".into());
+        }
         msm::<G1Projective>(&pts, &sc)
             .into_affine()
             .serialize_uncompressed(&mut out)
             .map_err(|e| e.to_string())?;
     }
     Ok(out)
+}
+
+fn valid_group_points<P: AffineRepr>(points: &[P]) -> bool {
+    points
+        .iter()
+        .all(|point| point.is_on_curve() && point.is_in_correct_subgroup_assuming_on_curve())
 }
 
 /// Scalars as the 32-byte little-endian limbs [`kernel_msm`] reads.
@@ -225,7 +237,7 @@ pub fn fr_bytes_mut(v: &mut [Fr]) -> &mut [u8] {
 #[cfg(test)]
 mod tests {
     use super::{try_kernel_msm, valid_msm_output};
-    use ark_bn254::{G1Affine, G2Affine};
+    use ark_bn254::{Fq, Fq2, G1Affine, G2Affine};
     use ark_ec::AffineRepr;
     use ark_serialize::CanonicalSerialize;
 
@@ -251,6 +263,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_off_curve_uncompressed_points_in_both_groups() {
+        let g1 = G1Affine::new_unchecked(Fq::from(1u64), Fq::from(1u64));
+        let mut g1_bytes = Vec::new();
+        g1.serialize_uncompressed(&mut g1_bytes).unwrap();
+        assert!(try_kernel_msm(false, &g1_bytes, false, &scalar_one()).is_err());
+
+        let one = Fq::from(1u64);
+        let zero = Fq::from(0u64);
+        let g2 = G2Affine::new_unchecked(Fq2::new(one, zero), Fq2::new(one, zero));
+        let mut g2_bytes = Vec::new();
+        g2.serialize_uncompressed(&mut g2_bytes).unwrap();
+        assert!(try_kernel_msm(true, &g2_bytes, false, &scalar_one()).is_err());
+    }
+
+    #[test]
     fn checked_kernel_returns_the_single_point_product() {
         let mut point = Vec::new();
         G1Affine::generator()
@@ -260,6 +287,21 @@ mod tests {
 
         let mut expected = Vec::new();
         G1Affine::generator()
+            .serialize_uncompressed(&mut expected)
+            .unwrap();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn checked_kernel_accepts_a_valid_g2_generator() {
+        let mut point = Vec::new();
+        G2Affine::generator()
+            .serialize_compressed(&mut point)
+            .unwrap();
+        let got = try_kernel_msm(true, &point, true, &scalar_one()).unwrap();
+
+        let mut expected = Vec::new();
+        G2Affine::generator()
             .serialize_uncompressed(&mut expected)
             .unwrap();
         assert_eq!(got, expected);
