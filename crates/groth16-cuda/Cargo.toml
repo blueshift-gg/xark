@@ -32,4 +32,5 @@ icicle-runtime = {
 [dev-dependencies]
 rand = "0.8"
 rand_chacha = { version = "0.3", default-features = false }
+rayon = "1"
 xark-ir = { path = "../ir" }
