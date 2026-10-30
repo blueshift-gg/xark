@@ -7,6 +7,14 @@ edition = "2024"
 rust-version = "1.89"
 license = "MIT"
 publish = false
+build = "build.rs"
+
+[features]
+default = []
+custom-cuda = []
+
+[build-dependencies]
+cc = "1"
 
 [dependencies]
 xark-groth16 = { path = "../groth16" }
@@ -14,6 +22,7 @@ ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.6", default-features = false, features = ["std"] }
 ark-ff = { version = "0.6", default-features = false, features = ["std"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
+rayon = "1"
 icicle-bn254 = {
   git = "https://github.com/ingonyama-zk/icicle.git",
   rev = "6c77775961b0e4dc2be359feec1ac11536c18043",
@@ -32,5 +41,4 @@ icicle-runtime = {
 [dev-dependencies]
 rand = "0.8"
 rand_chacha = { version = "0.3", default-features = false }
-rayon = "1"
 xark-ir = { path = "../ir" }

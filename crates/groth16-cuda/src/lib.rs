@@ -5,9 +5,10 @@
 //! uncompressed point. G2 remains on the CPU path for now.
 
 use std::sync::OnceLock;
+use std::{cmp::min, ops::Range};
 
-use ark_bn254::{Fq, Fr, G1Affine};
-use ark_ec::AffineRepr;
+use ark_bn254::{Fq, Fr, G1Affine, G1Projective};
+use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{BigInt, PrimeField};
 use ark_serialize::{CanonicalSerialize, Compress};
 use icicle_bn254::curve::{BaseField, G1Projective as IcicleG1, ScalarField};
@@ -17,10 +18,15 @@ use icicle_core::{
     projective::Projective as IcicleProjective,
 };
 use icicle_runtime::{Device, memory::HostSlice, runtime};
+use rayon::prelude::*;
 
 use xark_groth16::{Accelerator, msm::Scalar};
 
+mod custom_cuda;
+pub use custom_cuda::CustomCudaMsm;
+
 type IcicleG1Affine = <IcicleG1 as IcicleProjective>::Affine;
+const PARALLEL_PREPARE_THRESHOLD: usize = 1024;
 
 /// MSM adapter. The runtime is loaded lazily so the default Xark build does not
 /// initialize GPU support.
@@ -63,7 +69,7 @@ fn icicle_base_to_ark(value: BaseField) -> Option<Fq> {
 }
 
 fn checked_uncompressed(point: G1Affine) -> Option<Vec<u8>> {
-    if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+    if !point.is_on_curve() {
         return None;
     }
     let mut bytes = Vec::new();
@@ -76,12 +82,57 @@ fn icicle_msm_count(scalar_count: usize) -> Option<i32> {
     i32::try_from(scalar_count).ok()
 }
 
+fn icicle_point_chunks(
+    scalar_count: usize,
+    point_size: usize,
+    max_scalars: usize,
+) -> Option<Vec<Range<usize>>> {
+    if max_scalars == 0 {
+        return None;
+    }
+    scalar_count.checked_mul(point_size)?;
+    let mut ranges = Vec::new();
+    let mut first_scalar = 0;
+    while first_scalar < scalar_count {
+        let end_scalar = min(first_scalar.checked_add(max_scalars)?, scalar_count);
+        ranges.push(first_scalar.checked_mul(point_size)?..end_scalar.checked_mul(point_size)?);
+        first_scalar = end_scalar;
+    }
+    Some(ranges)
+}
+
 fn icicle_msm_config() -> MSMConfig {
     let mut config = MSMConfig::default();
     config.are_scalars_montgomery_form = false;
     config.are_bases_montgomery_form = false;
     config.is_async = false;
     config
+}
+
+fn icicle_msm_g1(points: &[u8], compressed: bool, scalars: &[Scalar]) -> Option<G1Affine> {
+    icicle_msm_count(scalars.len())?;
+    let (device_points, device_scalars) = prepare_g1_inputs(points, compressed, scalars)?;
+    if device_points.is_empty() {
+        return Some(G1Affine::zero());
+    }
+
+    let mut result = [IcicleG1::zero()];
+    msm::msm(
+        HostSlice::from_slice(&device_scalars),
+        HostSlice::from_slice(&device_points),
+        &icicle_msm_config(),
+        HostSlice::from_mut_slice(&mut result),
+    )
+    .ok()?;
+
+    let affine = result[0].to_affine();
+    if affine == <IcicleG1 as IcicleProjective>::Affine::zero() {
+        return Some(G1Affine::zero());
+    }
+    let x = icicle_base_to_ark(affine.x())?;
+    let y = icicle_base_to_ark(affine.y())?;
+    let point = G1Affine::new_unchecked(x, y);
+    point.is_on_curve().then_some(point)
 }
 
 fn prepare_g1_inputs(
@@ -100,24 +151,44 @@ fn prepare_g1_inputs(
         return None;
     }
 
-    let mut device_points = Vec::with_capacity(scalars.len());
-    let mut device_scalars = Vec::with_capacity(scalars.len());
-    for (point_bytes, scalar) in points.chunks_exact(point_size).zip(scalars) {
+    let prepare_one = |point_bytes: &[u8], scalar: &Scalar| {
         let point = xark_groth16::decode::point::<G1Affine>(point_bytes, encoding).ok()?;
-        if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+        if !point.is_on_curve() {
             return None;
         }
         let scalar_is_zero = scalar.0.iter().all(|limb| *limb == 0);
         let scalar = ark_scalar_to_icicle(scalar)?;
-        if point.is_zero() || scalar_is_zero {
-            continue;
+        Some(if point.is_zero() || scalar_is_zero {
+            None
+        } else {
+            let x_limbs = ark_limbs_to_u32(point.x.into_bigint().0);
+            let y_limbs = ark_limbs_to_u32(point.y.into_bigint().0);
+            Some((IcicleG1Affine::from_limbs(x_limbs, y_limbs), scalar))
+        })
+    };
+    let mut prepared = Vec::with_capacity(scalars.len());
+    if scalars.len() < PARALLEL_PREPARE_THRESHOLD {
+        for (point_bytes, scalar) in points.chunks_exact(point_size).zip(scalars) {
+            if let Some(term) = prepare_one(point_bytes, scalar)? {
+                prepared.push(term);
+            }
         }
-
-        let x_limbs = ark_limbs_to_u32(point.x.into_bigint().0);
-        let y_limbs = ark_limbs_to_u32(point.y.into_bigint().0);
-        device_scalars.push(scalar);
-        device_points.push(IcicleG1Affine::from_limbs(x_limbs, y_limbs));
+    } else {
+        prepared = points
+            .par_chunks_exact(point_size)
+            .zip(scalars.par_iter())
+            .try_fold(Vec::new, |mut output, (point_bytes, scalar)| {
+                if let Some(term) = prepare_one(point_bytes, scalar)? {
+                    output.push(term);
+                }
+                Some(output)
+            })
+            .try_reduce(Vec::new, |mut left, mut right| {
+                left.append(&mut right);
+                Some(left)
+            })?;
     }
+    let (device_points, device_scalars) = prepared.into_iter().unzip();
 
     Some((device_points, device_scalars))
 }
@@ -134,31 +205,27 @@ impl Accelerator for IcicleMsm {
         compressed: bool,
         scalars: &[Scalar],
     ) -> Option<Vec<u8>> {
-        if g2 || icicle_msm_count(scalars.len()).is_none() || !cuda_device_ready() {
+        if g2 || !cuda_device_ready() {
+            return None;
+        }
+        let encoding = if compressed {
+            Compress::Yes
+        } else {
+            Compress::No
+        };
+        let point_size = G1Affine::generator().serialized_size(encoding);
+        if points.len() != scalars.len().checked_mul(point_size)? {
             return None;
         }
 
-        let (device_points, device_scalars) = prepare_g1_inputs(points, compressed, scalars)?;
-
-        let mut result = [IcicleG1::zero()];
-        if !device_points.is_empty() {
-            msm::msm(
-                HostSlice::from_slice(&device_scalars),
-                HostSlice::from_slice(&device_points),
-                &icicle_msm_config(),
-                HostSlice::from_mut_slice(&mut result),
-            )
-            .ok()?;
+        let max_chunk = i32::MAX as usize;
+        let ranges = icicle_point_chunks(scalars.len(), point_size, max_chunk)?;
+        let mut total = G1Projective::zero();
+        for (range, scalar_chunk) in ranges.into_iter().zip(scalars.chunks(max_chunk)) {
+            let chunk = icicle_msm_g1(&points[range], compressed, scalar_chunk)?;
+            total += chunk;
         }
-
-        let affine = result[0].to_affine();
-        if affine == <IcicleG1 as IcicleProjective>::Affine::zero() {
-            return checked_uncompressed(G1Affine::zero());
-        }
-
-        let x = icicle_base_to_ark(affine.x())?;
-        let y = icicle_base_to_ark(affine.y())?;
-        checked_uncompressed(G1Affine::new_unchecked(x, y))
+        checked_uncompressed(total.into_affine())
     }
 }
 
@@ -168,7 +235,7 @@ mod tests {
 
     use super::{
         IcicleG1Affine, ark_limbs_to_u32, ark_scalar_to_icicle, icicle_base_to_ark,
-        icicle_msm_config, icicle_msm_count, prepare_g1_inputs,
+        icicle_msm_config, icicle_msm_count, icicle_point_chunks, prepare_g1_inputs,
     };
     use ark_bn254::{Fq, Fr, G1Affine};
     use ark_ec::AffineRepr;
@@ -292,6 +359,17 @@ mod tests {
     }
 
     #[test]
+    fn oversized_icicle_calls_split_on_point_boundaries() {
+        assert_eq!(
+            icicle_point_chunks(5, 3, 2),
+            Some(vec![0..6, 6..12, 12..15])
+        );
+        assert_eq!(icicle_point_chunks(0, 3, 2), Some(vec![]));
+        assert_eq!(icicle_point_chunks(1, 3, 0), None);
+        assert_eq!(icicle_point_chunks(usize::MAX, 3, 2), None);
+    }
+
+    #[test]
     fn msm_config_uses_canonical_inputs_and_waits_for_the_result() {
         let config = icicle_msm_config();
 
@@ -336,6 +414,43 @@ mod tests {
             let (points, scalars) = prepare_g1_inputs(&encoded, compressed, &scalar).unwrap();
             assert_eq!(points, [expected]);
             assert_eq!(scalars, [ScalarField::from(ark_limbs_to_u32(scalar[0].0))]);
+        }
+    }
+
+    #[test]
+    fn parallel_input_preparation_preserves_point_scalar_pairs() {
+        let generator = G1Affine::generator();
+        let negative_generator = -generator;
+        let scalars: Vec<_> = (0..PARALLEL_PREPARE_THRESHOLD)
+            .map(|index| Fr::from(index as u64 + 1).into_bigint())
+            .collect();
+        let mut encoded = Vec::new();
+        for index in 0..PARALLEL_PREPARE_THRESHOLD {
+            let point = if index % 2 == 0 {
+                generator
+            } else {
+                negative_generator
+            };
+            point.serialize_compressed(&mut encoded).unwrap();
+        }
+
+        let (points, converted_scalars) = prepare_g1_inputs(&encoded, true, &scalars).unwrap();
+        assert_eq!(points.len(), PARALLEL_PREPARE_THRESHOLD);
+        assert_eq!(converted_scalars.len(), PARALLEL_PREPARE_THRESHOLD);
+        for (point, scalar) in points.iter().zip(converted_scalars) {
+            let scalar_limbs: [u32; 8] = scalar.into();
+            let expected = if scalar_limbs[0] % 2 == 1 {
+                IcicleG1Affine::from_limbs(
+                    ark_limbs_to_u32(generator.x.into_bigint().0),
+                    ark_limbs_to_u32(generator.y.into_bigint().0),
+                )
+            } else {
+                IcicleG1Affine::from_limbs(
+                    ark_limbs_to_u32(negative_generator.x.into_bigint().0),
+                    ark_limbs_to_u32(negative_generator.y.into_bigint().0),
+                )
+            };
+            assert_eq!(point, &expected);
         }
     }
 

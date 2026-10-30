@@ -8,13 +8,14 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
 use xark_groth16::{Accelerator, msm::msm};
-use xark_groth16_cuda::IcicleMsm;
+use xark_groth16_cuda::{CustomCudaMsm, IcicleMsm};
 
 struct Options {
     sizes: Vec<usize>,
     repeats: usize,
     seed: u64,
     encodings: Vec<Compress>,
+    backend: String,
 }
 
 fn main() {
@@ -26,12 +27,26 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let options = parse_options()?;
-    let mut accelerator = IcicleMsm;
+    let mut accelerator: Box<dyn Accelerator> = match options.backend.as_str() {
+        "icicle" => Box::new(IcicleMsm),
+        "custom" => {
+            if !cfg!(feature = "custom-cuda") {
+                return Err("custom backend requires --features custom-cuda".into());
+            }
+            Box::new(CustomCudaMsm)
+        }
+        _ => return Err("backend must be icicle or custom".into()),
+    };
     if !accelerator.wants_msm() {
-        return Err("no ICICLE CUDA backend and device are available".into());
+        return Err(format!(
+            "{} CUDA backend and device are unavailable",
+            options.backend
+        ));
     }
 
-    println!("record,n,encoding,seed,repeat,stat,cpu_msm_ms,cpu_chunk_ms,icicle_ms");
+    println!(
+        "record,backend,n,encoding,seed,repeat,stat,cpu_msm_ms,cpu_decode_ms,cpu_chunk_ms,backend_ms"
+    );
     for n in options.sizes {
         let (bases, scalars) = inputs(n, options.seed);
         let cpu_result = msm::<G1Projective>(&bases, &scalars).into_affine();
@@ -68,19 +83,23 @@ fn run() -> Result<(), String> {
             }
             let gpu_warmup = accelerator
                 .msm(false, &encoded_points, compressed, &scalars)
-                .ok_or_else(|| "ICICLE declined a valid G1 MSM".to_string())?;
+                .ok_or_else(|| format!("{} declined a valid G1 MSM", options.backend))?;
             if gpu_warmup != expected {
-                return Err("ICICLE result differs from Xark CPU Pippenger".into());
+                return Err(format!(
+                    "{} result differs from Xark CPU Pippenger",
+                    options.backend
+                ));
             }
 
             let mut cpu_msm_times = Vec::with_capacity(options.repeats);
+            let mut cpu_decode_times = Vec::with_capacity(options.repeats);
             let mut cpu_chunk_times = Vec::with_capacity(options.repeats);
             let mut gpu_times = Vec::with_capacity(options.repeats);
             for repeat in 0..options.repeats {
                 // Rotate the path order so each path gets a turn at each position.
-                let mut sample = [Duration::ZERO; 3];
-                for offset in 0..3 {
-                    match (repeat + offset) % 3 {
+                let mut sample = [Duration::ZERO; 4];
+                for offset in 0..4 {
+                    match (repeat + offset) % 4 {
                         0 => {
                             let start = Instant::now();
                             let result = msm::<G1Projective>(&bases, &scalars).into_affine();
@@ -92,8 +111,17 @@ fn run() -> Result<(), String> {
                         1 => {
                             let start = Instant::now();
                             let decoded = decode_cpu(&encoded_points, point_size, *encoding)?;
-                            let result = msm::<G1Projective>(&decoded, &scalars).into_affine();
                             sample[1] = start.elapsed();
+                            if decoded != bases {
+                                return Err("timed CPU decoder changed a generated G1 point".into());
+                            }
+                            std::hint::black_box(decoded);
+                        }
+                        2 => {
+                            let start = Instant::now();
+                            let decoded = decode_cpu(&encoded_points, point_size, *encoding)?;
+                            let result = msm::<G1Projective>(&decoded, &scalars).into_affine();
+                            sample[2] = start.elapsed();
                             if result != cpu_result {
                                 return Err("timed CPU decoded-input MSM result changed".into());
                             }
@@ -102,39 +130,48 @@ fn run() -> Result<(), String> {
                             let start = Instant::now();
                             let result = accelerator
                                 .msm(false, &encoded_points, compressed, &scalars)
-                                .ok_or_else(|| "ICICLE declined a valid G1 MSM".to_string())?;
-                            sample[2] = start.elapsed();
+                                .ok_or_else(|| {
+                                    format!("{} declined a valid G1 MSM", options.backend)
+                                })?;
+                            sample[3] = start.elapsed();
                             if result != expected {
-                                return Err(
-                                    "timed ICICLE result differs from Xark CPU Pippenger".into()
-                                );
+                                return Err(format!(
+                                    "timed {} result differs from Xark CPU Pippenger",
+                                    options.backend
+                                ));
                             }
                         }
                     }
                 }
                 cpu_msm_times.push(sample[0]);
-                cpu_chunk_times.push(sample[1]);
-                gpu_times.push(sample[2]);
+                cpu_decode_times.push(sample[1]);
+                cpu_chunk_times.push(sample[2]);
+                gpu_times.push(sample[3]);
                 println!(
-                    "sample,{n},{},{},{},,{:.3},{:.3},{:.3}",
+                    "sample,{},{n},{},{},{},,{:.3},{:.3},{:.3},{:.3}",
+                    options.backend,
                     encoding_name(*encoding),
                     options.seed,
                     repeat + 1,
                     millis(sample[0]),
                     millis(sample[1]),
                     millis(sample[2]),
+                    millis(sample[3]),
                 );
             }
 
             let cpu_msm_summary = range_summary(&mut cpu_msm_times);
+            let cpu_decode_summary = range_summary(&mut cpu_decode_times);
             let cpu_chunk_summary = range_summary(&mut cpu_chunk_times);
             let gpu_summary = range_summary(&mut gpu_times);
             for (stat, column) in [("median", 0), ("min", 1), ("max", 2)] {
                 println!(
-                    "summary,{n},{},{},,{stat},{:.3},{:.3},{:.3}",
+                    "summary,{},{n},{},{},,{stat},{:.3},{:.3},{:.3},{:.3}",
+                    options.backend,
                     encoding_name(*encoding),
                     options.seed,
                     summary_ms(cpu_msm_summary)[column],
+                    summary_ms(cpu_decode_summary)[column],
                     summary_ms(cpu_chunk_summary)[column],
                     summary_ms(gpu_summary)[column],
                 );
@@ -168,11 +205,16 @@ fn inputs(n: usize, seed: u64) -> (Vec<G1Affine>, Vec<<Fr as PrimeField>::BigInt
 }
 
 fn parse_options() -> Result<Options, String> {
+    parse_options_from(std::env::args().skip(1))
+}
+
+fn parse_options_from(args: impl Iterator<Item = String>) -> Result<Options, String> {
     let mut sizes = vec![1 << 10, 1 << 16, 1 << 19];
     let mut repeats = 7usize;
     let mut seed = 0x5841_524b_4d53_4d;
     let mut encodings = vec![Compress::Yes];
-    let mut args = std::env::args().skip(1);
+    let mut backend = "icicle".to_owned();
+    let mut args = args;
     while let Some(arg) = args.next() {
         let value = args
             .next()
@@ -216,6 +258,12 @@ fn parse_options() -> Result<Options, String> {
                     _ => return Err("encoding must be compressed, uncompressed, or both".into()),
                 };
             }
+            "--backend" => {
+                backend = value;
+                if backend != "icicle" && backend != "custom" {
+                    return Err("backend must be icicle or custom".into());
+                }
+            }
             _ => return Err(format!("unknown option: {arg}")),
         }
     }
@@ -224,6 +272,7 @@ fn parse_options() -> Result<Options, String> {
         repeats,
         seed,
         encodings,
+        backend,
     })
 }
 
@@ -260,7 +309,7 @@ fn encoding_name(encoding: Compress) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::range_summary;
+    use super::{parse_options_from, range_summary};
     use std::time::Duration;
 
     #[test]
@@ -273,5 +322,17 @@ mod tests {
         ];
 
         assert_eq!(range_summary(&mut samples), (4.0, 1.0, 9.0));
+    }
+
+    #[test]
+    fn benchmark_parser_selects_custom_backend() {
+        let options = parse_options_from(
+            ["--backend", "custom", "--sizes", "16"]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .expect("custom backend options parse");
+        assert_eq!(options.backend, "custom");
+        assert_eq!(options.sizes, [16]);
     }
 }
