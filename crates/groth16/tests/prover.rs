@@ -689,6 +689,38 @@ impl xark_groth16::Accelerator for InvalidMsm {
     }
 }
 
+#[derive(Default)]
+struct FirstG1ThenDecline {
+    accepted_g1: usize,
+    declined_g1: usize,
+}
+
+impl xark_groth16::Accelerator for FirstG1ThenDecline {
+    fn wants_msm(&self) -> bool {
+        true
+    }
+
+    fn msm(
+        &mut self,
+        g2: bool,
+        points: &[u8],
+        compressed: bool,
+        scalars: &[xark_groth16::msm::Scalar],
+    ) -> Option<Vec<u8>> {
+        if !g2 && self.accepted_g1 > 0 {
+            self.declined_g1 += 1;
+            return None;
+        }
+        let encoded_scalars = xark_groth16::accel::scalars_to_bytes(scalars);
+        let result = xark_groth16::accel::try_kernel_msm(g2, points, compressed, &encoded_scalars)
+            .expect("test accelerator receives valid MSM input");
+        if !g2 {
+            self.accepted_g1 += 1;
+        }
+        Some(result)
+    }
+}
+
 #[test]
 fn worker_decomposition_is_byte_identical() {
     let (prog, assign) = random_program(50, 700);
@@ -776,6 +808,52 @@ fn malformed_worker_sums_fall_back_to_cpu_in_both_provers() {
         push.push(piece, &mut accelerator).unwrap();
     }
     assert_eq!(push.finish().unwrap(), want);
+}
+
+#[test]
+fn partial_g1_acceleration_falls_back_to_cpu_in_both_provers() {
+    let (prog, assign) = random_program(52, 40);
+    let circ = XarkCircuit::for_proving_preminimized(prog.clone(), assign.clone());
+    let (pk, _) =
+        ArkG16::circuit_specific_setup(circ.clone(), &mut ChaCha20Rng::seed_from_u64(3)).unwrap();
+    let want = ArkG16::prove(&pk, circ, &mut ChaCha20Rng::seed_from_u64(4)).unwrap();
+    let mut rng = ChaCha20Rng::seed_from_u64(4);
+    let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    assert!(pk.a_query.len() > 1, "A query must span multiple chunks");
+    let cfg = ProverConfig {
+        msm_chunk: 1,
+        self_check: false,
+        ..ProverConfig::default()
+    };
+
+    let src = ProgramSource::new(&prog);
+    let z = src.layout().assignment_from_map(&assign);
+    let mut accelerator = FirstG1ThenDecline::default();
+    let got = xark_groth16::prove_accelerated(
+        &src,
+        &z,
+        &mut SerializedPk::from_bytes(&bytes).unwrap(),
+        r,
+        s,
+        &cfg,
+        &mut (),
+        &mut accelerator,
+    )
+    .unwrap();
+    assert_eq!(got, want);
+    assert!(accelerator.accepted_g1 > 0);
+    assert!(accelerator.declined_g1 > 0);
+
+    let src = ProgramSource::new(&prog);
+    let mut accelerator = FirstG1ThenDecline::default();
+    let mut push = xark_groth16::PushProver::new(src, z, r, s, cfg, &mut accelerator).unwrap();
+    for piece in bytes.chunks(97) {
+        push.push(piece, &mut accelerator).unwrap();
+    }
+    assert_eq!(push.finish().unwrap(), want);
+    assert!(accelerator.accepted_g1 > 0);
+    assert!(accelerator.declined_g1 > 0);
 }
 
 #[test]

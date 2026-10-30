@@ -1,7 +1,8 @@
 # BN254 MSM CUDA work
 
-This directory contains a CUDA scalar-window extraction kernel and its tests. It
-does not implement a curve MSM and is not called by the prover. The optional
+This directory contains CUDA scalar-window extraction and bucket-index kernels
+with tests. They do not implement point accumulation or a complete curve MSM and
+are not called by the prover. The optional
 adapter in `../../groth16-cuda` connects Xark's `Accelerator::msm` hook to
 ICICLE's BN254 G1 MSM; ICICLE performs the curve arithmetic and bucket
 accumulation. Unsupported operations and unavailable CUDA backends fall back to
@@ -40,6 +41,18 @@ make -C crates/groth16/cuda test-host
 ```
 
 The host test does not compile or execute the `.cu` kernel.
+
+## Bucket-index stage
+
+`msm_bucketize_test.cu` builds a CSR-style index list for each nonzero digit in
+each scalar window. A count pass tallies `(window, digit)` pairs, a prefix pass
+creates bucket offsets, and a scatter pass writes scalar indices. Zero digits
+are omitted. The CUDA test checks offsets and compares every bucket's member
+indices with a host-built reference over repeated-digit, zero-digit, and maximum
+bucket inputs. The lists are
+ready for a later point-accumulation stage, but this test does not add or reduce
+curve points. `make test` runs this stage only on a CUDA device; no bucketization
+kernel compile or execution has been verified on this Mac.
 
 ## Adapter validation
 
