@@ -181,10 +181,21 @@ impl RowFile {
         let fingerprint = String::from_utf8(take_bytes(b, &mut p, fl).ok_or_else(bad)?.to_vec())
             .map_err(|_| bad())?;
         let nv = get_usize(b, &mut p).ok_or_else(bad)?;
+        if nv > b.len().saturating_sub(p) / 2 {
+            return Err(bad());
+        }
         let mut vars = Vec::with_capacity(nv.min(b.len()));
+        let mut seen = std::collections::HashSet::with_capacity(nv);
         for _ in 0..nv {
             let id = get_u32(b, &mut p).ok_or_else(bad)?;
-            let public = *take_bytes(b, &mut p, 1).ok_or_else(bad)?.first().unwrap() == 1;
+            if !seen.insert(id) {
+                return Err(bad());
+            }
+            let visibility = *take_bytes(b, &mut p, 1).ok_or_else(bad)?.first().unwrap();
+            if visibility > 1 {
+                return Err(bad());
+            }
+            let public = visibility == 1;
             vars.push((id, public));
         }
         let np = get_usize(b, &mut p).ok_or_else(bad)?;
@@ -303,6 +314,16 @@ impl RowFile {
             }
             lc(k, &terms);
         }
+        let decoded_end = p.checked_sub(self.rows_start).ok_or_else(bad)?;
+        let expected_end = self
+            .offsets
+            .get(w + 1)
+            .map(|&offset| usize::try_from(offset).map_err(|_| bad()))
+            .transpose()?
+            .unwrap_or_else(|| self.bytes.len() - self.rows_start);
+        if decoded_end != expected_end {
+            return Err(bad());
+        }
         Ok(())
     }
 }
@@ -312,6 +333,37 @@ mod tests {
     use super::*;
     use crate::linear_combination::Term;
     use crate::r1cs::{FieldSpec, R1csConstraint, Variable};
+
+    fn empty_file_with_vars(vars: &[(u32, u8)]) -> Vec<u8> {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, vars.len() as u64);
+        for &(id, visibility) in vars {
+            put_uv(&mut bytes, id as u64);
+            bytes.push(visibility);
+        }
+        put_uv(&mut bytes, 0); // pool count
+        put_uv(&mut bytes, 0); // row count
+        put_uv(&mut bytes, 1); // rows per window
+        put_uv(&mut bytes, 0); // window count
+        bytes
+    }
+
+    #[test]
+    fn rejects_duplicate_variable_ids() {
+        assert!(RowFile::parse(empty_file_with_vars(&[(0, 0), (0, 1)])).is_err());
+    }
+
+    #[test]
+    fn accepts_sparse_variable_ids() {
+        let file = RowFile::parse(empty_file_with_vars(&[(0, 0), (2, 1)])).unwrap();
+        assert_eq!(file.vars(), &[(0, false), (2, true)]);
+    }
+
+    #[test]
+    fn rejects_noncanonical_visibility_flags() {
+        assert!(RowFile::parse(empty_file_with_vars(&[(0, 2)])).is_err());
+    }
 
     #[test]
     fn rejects_overflowing_header_lengths() {
@@ -355,6 +407,27 @@ mod tests {
         at_end.extend_from_slice(&6u64.to_le_bytes());
         at_end.extend_from_slice(&[0; 6]);
         assert!(RowFile::parse(at_end).is_err());
+    }
+
+    #[test]
+    fn rejects_window_offsets_that_overlap_encoded_rows() {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, 0); // variable count
+        put_uv(&mut bytes, 1); // pool count
+        put_uv(&mut bytes, 0); // zero coefficient
+        put_uv(&mut bytes, 2); // row count
+        put_uv(&mut bytes, 1); // rows per window
+        put_uv(&mut bytes, 2); // window count
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes()); // inside the first row
+        for _ in 0..6 {
+            put_uv(&mut bytes, 0); // constant index, no terms
+            put_uv(&mut bytes, 0);
+        }
+
+        let file = RowFile::parse(bytes).unwrap();
+        assert!(file.decode_window(0, &mut |_, _| {}).is_err());
     }
 
     #[test]
