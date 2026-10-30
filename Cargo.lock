@@ -4665,6 +4665,7 @@ dependencies = [
 name = "xark-bignum"
 version = "0.2.1"
 dependencies = [
+ "num-bigint 0.4.8",
  "xark",
  "xark-ir",
  "xark-prover",
