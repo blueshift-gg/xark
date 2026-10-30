@@ -183,9 +183,11 @@ pub trait PkSource {
         chunk: usize,
         f: &mut dyn FnMut(usize, &[G2Affine]),
     ) -> Result<(), PkError>;
-    /// Visit vector `v` as raw serialized chunks, `f(offset, bytes, compressed)` —
-    /// for handing undecoded points to an accelerator. Returns `Ok(false)` if this
-    /// source has no serialized form (the caller falls back to decoded chunks).
+    /// Visit vector `v` as raw serialized chunks for an accelerator. A source that
+    /// returns `Ok(true)` must visit the complete vector in order and keep it
+    /// available through `stream_g1` or `stream_g2`, since the prover may need to
+    /// retry the vector on CPU if acceleration is declined. Return `Ok(false)`
+    /// without calling `f` when raw streaming is unavailable.
     fn stream_raw(
         &mut self,
         _v: KeyVector,
