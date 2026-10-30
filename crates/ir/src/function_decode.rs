@@ -1034,11 +1034,11 @@ fn classify_and_check(
     (flags, sat_ok)
 }
 
-/// Streaming pass 2 (rare path): re-stream the constraints, gathering each
-/// *suspect* var's univariate `(a,b,c)` reductions, then run the exact flat
-/// two-valued test on that small set. Suspects are vars that survived pass 1
-/// restricted-but-unpinned — for a well-constrained circuit this set is empty
-/// and pass 2 never runs. Returns the subset that is genuinely two-valued.
+/// Streaming pass 2: re-stream the constraints, gathering each *suspect* var's
+/// univariate `(a,b,c)` reductions, then run the exact flat two-valued test on
+/// them. Suspects are vars that survived pass 1 restricted-but-unpinned (on the
+/// ECDSA and Ed25519 circuits, 190k–340k vars with two rows each). Returns the
+/// subset that is genuinely two-valued.
 fn two_valued_suspects(
     defs: &[GDef],
     top_c: &[CItem],
@@ -1046,75 +1046,87 @@ fn two_valued_suspects(
     modulus: &num_bigint::BigUint,
     suspects: &std::collections::BTreeSet<u32>,
 ) -> std::collections::BTreeSet<u32> {
-    use crate::solver::Fp;
-    // Gather every suspect's referencing rows (small: |suspects| is tiny).
-    let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
-        suspects.iter().map(|&v| (v, Vec::new())).collect();
-    expand_c_visit(defs, top_c, &IDENTITY, &mut |row: R1csRow| {
-        let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
-        if !terms.any(|t| suspects.contains(&t.var)) {
-            return;
-        }
-        for (v, poly) in crate::solver::univariate_r1cs_row(&row, assign, modulus) {
-            if let Some(ps) = polys.get_mut(&v) {
-                ps.push(poly);
-            }
-        }
-    });
+    use rayon::prelude::*;
+    let mut is_suspect = vec![false; assign.len()];
+    for &v in suspects {
+        is_suspect[v as usize] = true;
+    }
+    // Top-level items are independent (absolute var ids), so gather in parallel
+    // as pass 1 does; the verdict does not depend on the order of a var's rows.
+    let mut polys: Vec<_> = top_c
+        .par_iter()
+        .flat_map_iter(|item| {
+            let mut out = Vec::new();
+            expand_c_visit(
+                defs,
+                std::slice::from_ref(item),
+                &IDENTITY,
+                &mut |row: R1csRow| {
+                    let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
+                    if terms.any(|t| is_suspect[t.var as usize]) {
+                        out.extend(
+                            crate::solver::univariate_r1cs_row(&row, assign, modulus)
+                                .into_iter()
+                                .filter(|(v, _)| is_suspect[*v as usize]),
+                        );
+                    }
+                },
+            );
+            out
+        })
+        .collect();
+    polys.par_sort_unstable_by_key(|(v, _)| *v);
     two_valued_from_polys(&polys, assign, modulus)
 }
 
-/// The exact flat two-valued test over already-gathered per-suspect univariate
-/// reductions: a suspect is under-constrained iff some second root `β≠α`
-/// satisfies *all* of its rows. Mirrors `analyze_*_cp`'s candidate loop. Runs in
-/// parallel over the (tiny) suspect set.
+/// The exact flat two-valued test over already-gathered univariate reductions,
+/// sorted by var: a suspect is under-constrained iff some second root `β≠α`
+/// satisfies *all* of its rows. Mirrors `analyze_*_cp`'s candidate loop, but
+/// keeps each candidate `β = −b/a − α` as the fraction `n/d` (`n = −b − α·a`,
+/// `d = a ≠ 0`), so it needs no inverse: `β = α ⟺ n = α·d`, and a row holds at
+/// `β` iff `a'·n² + b'·n·d + c'·d² = 0`. Runs in parallel over the suspects.
 fn two_valued_from_polys(
-    polys: &std::collections::BTreeMap<
+    polys: &[(
         u32,
-        Vec<(crate::solver::Fp, crate::solver::Fp, crate::solver::Fp)>,
-    >,
+        (crate::solver::Fp, crate::solver::Fp, crate::solver::Fp),
+    )],
     assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
 ) -> std::collections::BTreeSet<u32> {
     use crate::solver::Fp;
     use rayon::prelude::*;
     polys
-        .par_iter()
-        .filter_map(|(&v, ps)| {
+        .par_chunk_by(|x, y| x.0 == y.0)
+        .filter_map(|ps| {
+            let v = ps[0].0;
             let alpha = assign
                 .get(v as usize)
                 .cloned()
                 .flatten()
                 .unwrap_or_else(|| Fp::zero(modulus));
-            let mut candidates: Vec<Fp> = Vec::new();
-            for (a, b, _c) in ps {
-                if a.is_zero() {
-                    continue;
-                }
-                let inv_a = a.inverse().expect("a != 0 in quadratic branch");
-                candidates.push(b.neg().mul(&inv_a).sub(&alpha));
-            }
-            for beta in &candidates {
-                if *beta == alpha {
-                    continue;
-                }
-                let satisfies_all = ps
-                    .iter()
-                    .all(|(a, b, c)| a.mul(beta).mul(beta).add(&b.mul(beta)).add(c).is_zero());
-                if satisfies_all {
-                    return Some(v);
-                }
-            }
-            None
+            let holds_at = |n: &Fp, d: &Fp| {
+                ps.iter().all(|(_, (a, b, c))| {
+                    a.mul(n)
+                        .mul(n)
+                        .add(&b.mul(n).mul(d))
+                        .add(&c.mul(d).mul(d))
+                        .is_zero()
+                })
+            };
+            ps.iter()
+                .filter(|(_, (a, _, _))| !a.is_zero())
+                .map(|(_, (a, b, _))| (b.neg().sub(&alpha.mul(a)), a))
+                .any(|(n, d)| n != alpha.mul(d) && holds_at(&n, d))
+                .then_some(v)
         })
         .collect()
 }
 
 /// Core streaming soundness pass shared by [`stream_analyze`] and
 /// [`stream_verify`]: classify (pass 1) + optional satisfiability check, then
-/// resolve the rare suspects (pass 2), and assemble the under-constraint list in
+/// resolve the suspects (pass 2), and assemble the under-constraint list in
 /// var-id order. Peak extra memory over the witness is one flag byte per var (a
-/// few MB) plus the tiny suspect set — never the flat constraint system.
+/// few MB) plus the suspects' row reductions — never the flat constraint system.
 #[allow(clippy::too_many_arguments)]
 fn stream_underconstrained(
     defs: &[GDef],
@@ -2791,15 +2803,12 @@ mod tests {
             apply_row_flags(r, assign, modulus, &flags);
         }
         let suspects = select_suspects(&flags, vars);
-        let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
-            suspects.iter().map(|&v| (v, Vec::new())).collect();
-        for r in rows {
-            for (v, poly) in crate::solver::univariate_r1cs_row(r, assign, modulus) {
-                if let Some(ps) = polys.get_mut(&v) {
-                    ps.push(poly);
-                }
-            }
-        }
+        let mut polys: Vec<_> = rows
+            .iter()
+            .flat_map(|r| crate::solver::univariate_r1cs_row(r, assign, modulus))
+            .filter(|(v, _)| suspects.contains(v))
+            .collect();
+        polys.sort_by_key(|(v, _)| *v);
         let two_valued = two_valued_from_polys(&polys, assign, modulus);
         assemble_underconstrained(&flags, vars, keep_extra, &two_valued)
     }
@@ -2953,6 +2962,102 @@ mod tests {
         assert!(
             !stream.iter().any(|(v, _)| *v == 2),
             "pinned var must be clean"
+        );
+    }
+
+    /// The streaming analyzer's and `analyze_underconstrained_cp`'s verdicts on a
+    /// real circuit, optionally with row `drop` (in expansion order) removed, minus
+    /// the unreferenced vars that only the flat analyzer lists (prove ignores them).
+    fn stream_and_flat(
+        xbc: &[u8],
+        inputs: &[(&str, &str)],
+        drop: Option<usize>,
+    ) -> [Vec<(u32, String)>; 2] {
+        let (field, vars, defs, mut top_c, top_w, keep_extra, _) = decode_compact(xbc);
+        let m = bn254_modulus();
+        let inputs: BTreeMap<u32, String> = inputs
+            .iter()
+            .map(|(n, v)| {
+                (
+                    vars.iter().find(|x| x.name == *n).unwrap().id,
+                    v.to_string(),
+                )
+            })
+            .collect();
+        let assign = solve_streamed(&vars, vars.len(), &defs, &top_w, &m, &inputs).unwrap();
+        // Replace the top-level item holding the row by its expansion minus that row.
+        let mut row = drop.unwrap_or(usize::MAX);
+        for item in top_c.iter_mut() {
+            let mut rows = Vec::new();
+            expand_c_visit(&defs, std::slice::from_ref(item), &IDENTITY, &mut |r| {
+                rows.push(r)
+            });
+            if row < rows.len() {
+                rows.remove(row);
+                *item = CItem::Rolled(rows);
+                break;
+            }
+            row -= rows.len();
+        }
+        let (_, stream) =
+            stream_underconstrained(&defs, &top_c, &vars, &keep_extra, &assign, &m, false);
+        let cp = CircuitProgram {
+            field,
+            vars,
+            constraints: expand_c_top(&defs, &top_c, false),
+            witness_gen: vec![],
+        };
+        let assign: BTreeMap<u32, Fp> = (0..)
+            .zip(assign)
+            .filter_map(|(id, v)| Some((id, v?)))
+            .collect();
+        let flat = crate::solver::analyze_underconstrained_cp(&cp, &assign);
+        [stream, flat].map(|out| {
+            out.into_iter()
+                .filter(|u| !u.reason.starts_with("no constraint"))
+                .map(|u| (u.var, u.reason))
+                .collect()
+        })
+    }
+
+    /// `examples/blake2s("abc")`: none of its 173 suspects is two-valued, but the
+    /// second root of one row fails another row of the same var. A parallel gather
+    /// that split or lost a var's rows would flag this sound circuit. Fixture: its
+    /// `circuit.xbc` (`xark build`); regenerate it after a container-format change.
+    #[test]
+    fn a_sound_circuit_with_many_suspects_stays_clean() {
+        let xbc = include_bytes!("../tests/fixtures/blake2s.xbc");
+        let inputs = [("msg[0]", "97"), ("msg[1]", "98"), ("msg[2]", "99")];
+        let digest = [
+            ("digest.hi", "107067078877057896879579246911506040111"),
+            ("digest.lo", "73468630090803000491059960352218765698"),
+        ];
+        let [stream, flat] = stream_and_flat(xbc, &[&inputs[..], &digest].concat(), None);
+        assert_eq!(stream, flat);
+        assert!(stream.is_empty(), "{stream:?}");
+    }
+
+    /// A circuit missing one constraint must be flagged exactly as the flat
+    /// analyzer flags it: drop each row of `examples/poseidon2_sponge` (the
+    /// `reduced_soundness.rs` fixture) in turn.
+    #[test]
+    fn dropping_any_row_is_flagged_as_the_flat_analyzer_flags_it() {
+        let xbc = include_bytes!("../tests/fixtures/poseidon2_sponge.xbc");
+        let hash = "8828141863764826539393608139805007447022200187560478202710690249571019683634";
+        let inputs = [("a", "1"), ("b", "2"), ("c", "3"), ("d", "4"), ("e", "5")];
+        let inputs = [&inputs[..], &[("out", hash)]].concat();
+        let mut two_valued = 0;
+        for row in 0..stream_count_constraints(xbc) {
+            let [stream, flat] = stream_and_flat(xbc, &inputs, Some(row));
+            assert_eq!(stream, flat, "dropping row {row}");
+            two_valued += stream
+                .iter()
+                .filter(|(_, r)| r.contains("two-valued"))
+                .count();
+        }
+        assert!(
+            two_valued > 0,
+            "some dropped row must leave a var two-valued"
         );
     }
 }
