@@ -75,6 +75,11 @@ exercise production-sized chunks, and has not been compiled or run on this Mac.
 Montgomery multiplication. `bn254_g1.cuh` implements Jacobian G1 doubling,
 mixed affine addition, and affine conversion. The host probes compare those
 operations with independent Python big-integer field and affine-curve formulas.
+`g1_from_canonical_checked` rejects noncanonical coordinates and points outside
+the curve before converting coordinates to Montgomery form. The scalar input
+helper rejects values at or above the BN254 Fr modulus in the SoA buffer before
+window extraction. These helpers do not replace the Rust adapter's subgroup
+check and are not yet connected to `Accelerator::msm`.
 The CUDA tests run doubling, equal-point mixed addition, inverse-point
 cancellation, and a small full device MSM fixture. They do not yet exercise
 production-sized chunks or connect this custom path to `Accelerator::msm`. The
