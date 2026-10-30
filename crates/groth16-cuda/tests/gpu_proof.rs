@@ -11,8 +11,8 @@ use xark_groth16::{
     prove_accelerated, verify,
 };
 use xark_groth16_cuda::IcicleMsm;
-use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 use xark_ir::LinearCombination;
+use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 
 struct RequiredCudaMsm {
     inner: IcicleMsm,
