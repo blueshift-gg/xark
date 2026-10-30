@@ -38,10 +38,12 @@ make -C crates/groth16/cuda test-host
 This host check covers the shared extraction function only. It does not compile
 or run the CUDA kernel.
 
-The kernel currently tests scalar decomposition only. It does not perform bucket
-accumulation, is not connected to `Accelerator::msm`, and makes no proving speed
-claim. The CPU Pippenger remains the prover path until a GPU MSM returns the same
-group element on real key chunks and end-to-end proof verification passes.
+The `.cu` kernel in this directory still tests scalar decomposition only. It does
+not perform bucket accumulation and is not connected to `Accelerator::msm`. The
+separate native adapter in `../../groth16-cuda` calls ICICLE's BN254 G1 MSM through
+the existing hook. It is opt-in and falls back to CPU when CUDA is unavailable or
+the adapter declines a chunk. The adapter has not yet been compiled or run on an
+NVIDIA host, so there is no GPU correctness or performance claim yet.
 
 ## Proof and implementation boundary
 
@@ -53,12 +55,13 @@ to the device representation, check all lengths before launch, synchronize befor
 reading results, and serialize the returned group element in the format expected
 by `sum_g1` / `sum_g2`.
 
-The first implementation target is G1 MSM on the prover's existing streamed
-chunks. Tests must compare the device output against both Xark's CPU `msm` and
-arkworks, including zero scalars, infinity, repeated/cancelling points, empty
-chunks, chunk seams, and canonical scalar boundaries. GPU runs must report input
-size, host-to-device transfer, kernel, device-to-host transfer, and total chunk
-time; end-to-end proving must still verify with Xark's verifier.
+The adapter starts with G1 MSM on the prover's existing streamed chunks. Its
+tests compare GPU output with Xark CPU MSM for zero and maximum canonical
+scalars, infinity, cancelling points, and seeded full-width values. A proof test
+compares fixed-randomness CPU and GPU proofs and verifies the result. These are
+implemented checks; they still need to run on a CUDA host. GPU performance
+measurements must separate input size, host-to-device transfer, kernel,
+device-to-host transfer, and total chunk time.
 
 ## References
 
