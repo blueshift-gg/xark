@@ -71,6 +71,11 @@ fn checked_uncompressed(point: G1Affine) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+// This adapter requests one result, and ICICLE narrows its per-MSM count to i32.
+fn icicle_msm_count(scalar_count: usize) -> Option<i32> {
+    i32::try_from(scalar_count).ok()
+}
+
 fn prepare_g1_inputs(
     points: &[u8],
     compressed: bool,
@@ -121,7 +126,7 @@ impl Accelerator for IcicleMsm {
         compressed: bool,
         scalars: &[Scalar],
     ) -> Option<Vec<u8>> {
-        if g2 || !cuda_device_ready() {
+        if g2 || icicle_msm_count(scalars.len()).is_none() || !cuda_device_ready() {
             return None;
         }
 
@@ -153,7 +158,7 @@ impl Accelerator for IcicleMsm {
 mod tests {
     use super::{
         IcicleG1Affine, ark_limbs_to_u32, ark_scalar_to_icicle, icicle_base_to_ark,
-        prepare_g1_inputs,
+        icicle_msm_count, prepare_g1_inputs,
     };
     use ark_bn254::{Fq, Fr, G1Affine};
     use ark_ec::AffineRepr;
@@ -173,6 +178,14 @@ mod tests {
         let icicle = ScalarField::from(limbs);
         let converted: [u32; 8] = icicle.into();
         assert_eq!(converted, limbs);
+    }
+
+    #[test]
+    fn msm_count_must_fit_icicles_signed_ffi_parameter() {
+        assert_eq!(icicle_msm_count(0), Some(0));
+        assert_eq!(icicle_msm_count(i32::MAX as usize), Some(i32::MAX));
+        let first_unsupported = (i32::MAX as usize) + 1;
+        assert_eq!(icicle_msm_count(first_unsupported), None);
     }
 
     #[test]
