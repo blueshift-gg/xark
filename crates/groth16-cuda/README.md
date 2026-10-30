@@ -104,8 +104,12 @@ cargo run --release --manifest-path crates/groth16-cuda/Cargo.toml \
 
 The GPU wall time covers point decoding, curve and subgroup checks, limb
 conversion, the ICICLE call, and result conversion. The adapter uses the pinned
-ICICLE `MSMConfig::default()`, which sets `is_async=false` and returns results to
-host memory, so the call blocks before result conversion ([pinned source](https://github.com/ingonyama-zk/icicle/blob/6c77775961b0e4dc2be359feec1ac11536c18043/wrappers/rust/icicle-core/src/msm/mod.rs)). It is not a kernel-only number. The CPU chunk time decodes the same serialized input and runs Pippenger;
+ICICLE MSM configuration with canonical, non-Montgomery host inputs and
+`is_async=false`; the call blocks before result conversion. These assumptions are
+checked against the pinned wrapper's config fields and synchronous MSM contract
+in [the pinned source](https://github.com/ingonyama-zk/icicle/blob/6c77775961b0e4dc2be359feec1ac11536c18043/wrappers/rust/icicle-core/src/msm/mod.rs).
+This is not a kernel-only number. The CPU chunk time decodes the same serialized
+input and runs Pippenger;
 the CPU MSM time isolates Pippenger on already-decoded points. To inspect
 transfers and kernel durations, build the example and capture the same run with
 Nsight Systems:

@@ -76,6 +76,14 @@ fn icicle_msm_count(scalar_count: usize) -> Option<i32> {
     i32::try_from(scalar_count).ok()
 }
 
+fn icicle_msm_config() -> MSMConfig {
+    let mut config = MSMConfig::default();
+    config.are_scalars_montgomery_form = false;
+    config.are_bases_montgomery_form = false;
+    config.is_async = false;
+    config
+}
+
 fn prepare_g1_inputs(
     points: &[u8],
     compressed: bool,
@@ -137,7 +145,7 @@ impl Accelerator for IcicleMsm {
             msm::msm(
                 HostSlice::from_slice(&device_scalars),
                 HostSlice::from_slice(&device_points),
-                &MSMConfig::default(),
+                &icicle_msm_config(),
                 HostSlice::from_mut_slice(&mut result),
             )
             .ok()?;
@@ -160,7 +168,7 @@ mod tests {
 
     use super::{
         IcicleG1Affine, ark_limbs_to_u32, ark_scalar_to_icicle, icicle_base_to_ark,
-        icicle_msm_count, prepare_g1_inputs,
+        icicle_msm_config, icicle_msm_count, prepare_g1_inputs,
     };
     use ark_bn254::{Fq, Fr, G1Affine};
     use ark_ec::AffineRepr;
@@ -281,6 +289,15 @@ mod tests {
         assert_eq!(icicle_msm_count(i32::MAX as usize), Some(i32::MAX));
         let first_unsupported = (i32::MAX as usize) + 1;
         assert_eq!(icicle_msm_count(first_unsupported), None);
+    }
+
+    #[test]
+    fn msm_config_uses_canonical_inputs_and_waits_for_the_result() {
+        let config = icicle_msm_config();
+
+        assert!(!config.are_scalars_montgomery_form);
+        assert!(!config.are_bases_montgomery_form);
+        assert!(!config.is_async);
     }
 
     #[test]
