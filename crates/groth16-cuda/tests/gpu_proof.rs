@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use ark_bn254::Fr;
+use ark_bn254::{Fr, G1Affine};
+use ark_ec::AffineRepr;
+use ark_serialize::CanonicalSerialize;
 use ark_serialize::Compress;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -14,7 +16,29 @@ use xark_ir::LinearCombination;
 
 struct RequiredCudaMsm {
     inner: IcicleMsm,
-    calls: usize,
+    nonempty_calls: usize,
+}
+
+fn has_nonempty_g1_msm(
+    points: &[u8],
+    compressed: bool,
+    scalars: &[xark_groth16::msm::Scalar],
+) -> bool {
+    let encoding = if compressed {
+        Compress::Yes
+    } else {
+        Compress::No
+    };
+    let point_size = G1Affine::generator().serialized_size(encoding);
+
+    scalars
+        .iter()
+        .zip(points.chunks_exact(point_size))
+        .any(|(scalar, point_bytes)| {
+            let point = xark_groth16::decode::point::<G1Affine>(point_bytes, encoding)
+                .expect("prover supplies valid G1 points");
+            scalar.0.iter().any(|limb| *limb != 0) && !point.is_zero()
+        })
 }
 
 impl Accelerator for RequiredCudaMsm {
@@ -29,10 +53,13 @@ impl Accelerator for RequiredCudaMsm {
         compressed: bool,
         scalars: &[xark_groth16::msm::Scalar],
     ) -> Option<Vec<u8>> {
+        let has_work = !g2 && has_nonempty_g1_msm(points, compressed, scalars);
         let result = self.inner.msm(g2, points, compressed, scalars);
         if !g2 {
-            self.calls += 1;
             assert!(result.is_some(), "CUDA MSM declined a G1 proving-key chunk");
+            if has_work {
+                self.nonempty_calls += 1;
+            }
         }
         result
     }
@@ -48,7 +75,10 @@ fn cuda_msm_produces_a_verifying_groth16_proof() {
         eprintln!("skipping proof-level GPU test because CUDA is unavailable");
         return;
     }
-    let mut accelerator = RequiredCudaMsm { inner, calls: 0 };
+    let mut accelerator = RequiredCudaMsm {
+        inner,
+        nonempty_calls: 0,
+    };
 
     // The public output is 6. The private inputs 2 and 3 satisfy 2 * 3 = 6.
     let program = R1csProgram {
@@ -132,7 +162,7 @@ fn cuda_msm_produces_a_verifying_groth16_proof() {
     let public_inputs = &witness[1..source.layout().num_instance()];
     assert!(verify(&vk, public_inputs, &gpu_proof).expect("public input count is valid"));
     assert!(
-        accelerator.calls >= 2,
-        "the proof path did not make multiple CUDA G1 MSM chunk calls"
+        accelerator.nonempty_calls >= 2,
+        "the proof path did not make multiple nonempty CUDA G1 MSM calls"
     );
 }
