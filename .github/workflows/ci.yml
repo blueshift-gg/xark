@@ -153,6 +153,11 @@ jobs:
         # the host's (same circuit, same witness — must be byte-identical).
         run: cargo run --release -p xark-cli -- prove target/test-out/cube --inputs '{"secret":"3","result":"27"}'
 
+      - name: Prove cube natively from its artifacts (xark-prover ArtifactProver)
+        # The library path native embedders use: load circuit.xbc + pk.bin,
+        # prove, and verify against the key's vk.
+        run: cargo run --release -p xark-prover --example prove_artifacts -- target/test-out/cube '{"secret":"3","result":"27"}'
+
       - name: Activate stable Rust for wasm steps
         uses: dtolnay/rust-toolchain@stable
         with:
