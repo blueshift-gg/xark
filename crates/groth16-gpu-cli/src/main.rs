@@ -123,6 +123,14 @@ impl TrackedAccelerator {
             );
         }
     }
+
+    fn warn_gpu_security_limits(&self) {
+        if self.backend != Backend::Cpu {
+            eprintln!(
+                "warning: GPU MSM is not verified constant-time and device buffers are not guaranteed to be wiped"
+            );
+        }
+    }
 }
 
 impl Accelerator for TrackedAccelerator {
@@ -158,6 +166,7 @@ fn main() -> Result<()> {
                 args.opencl_device,
                 args.acknowledge_gpu_side_channel_risk,
             )?;
+            accelerator.warn_gpu_security_limits();
             run_with_accelerator(args.args, &mut accelerator)
                 .context("running Xark's streaming prover")?;
             accelerator.report();

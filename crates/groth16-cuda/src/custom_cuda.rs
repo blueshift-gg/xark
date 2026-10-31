@@ -11,6 +11,8 @@ const PARALLEL_PREPARE_THRESHOLD: usize = 1024;
 ///
 /// The native bridge is linked only with the `custom-cuda` feature. Without it,
 /// this adapter declines all work so the prover uses its CPU MSM path.
+/// The kernel has not been audited for constant-time behavior or GPU memory
+/// remanence.
 #[derive(Default)]
 pub struct CustomCudaMsm;
 
