@@ -26,6 +26,8 @@ import Formal.GrumpkinGroup
 
 import Formal.Rewrites
 import Formal.Template
+import Formal.Circuit
+import Formal.Circuits.Secp256k1Ecdsa
 import Formal.Templates.Add32
 import Formal.Add32
 import Formal.Templates.Xor

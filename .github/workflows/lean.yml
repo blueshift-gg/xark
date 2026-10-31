@@ -4,8 +4,9 @@ name: Lean (gadget soundness)
 # `lake build` type-checks every theorem; `formal/AxiomCheck.lean` then fails the job if a harness under
 # `formal/templates/` lacks its soundness theorem or constant-plug obligations, or if
 # any declaration in `Formal` depends on an axiom beyond `propext`, `Classical.choice`
-# and `Quot.sound` (a `sorry` is `sorryAx`, a declared `axiom`, `native_decide`, …) other
-# than the hand-restated lemmas it lists.
+# and `Quot.sound` (a `sorry` is `sorryAx`, a declared `axiom`, `native_decide`, …), and
+# `formal/CircuitHash.lean` fails it unless each exported circuit's Lean composition
+# (`Formal/Circuits/`) has the rows the compiler emitted.
 # `templates` re-exports every proven gadget's R1CS (`cargo xtask lean-export --check`)
 # and fails if the code no longer emits what the proofs were checked against, then
 # checks every example's calls of those gadgets emit that R1CS (`--coverage`).
@@ -66,3 +67,14 @@ jobs:
         run: lake build
       - name: Every harness proven; standard axioms only
         run: lake env lean AxiomCheck.lean
+      - name: Each exported circuit's Lean rows hash to the compiler's
+        # `Formal/Circuits/<Example>.lean` composes an example from its gadget templates;
+        # its rows must hash to the hash `lean-export --example` took of the compiler's.
+        run: lake env lean CircuitHash.lean
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: A mutated circuit is refused
+        working-directory: .
+        run: cargo test -p xtask --release lean::tests -- --ignored

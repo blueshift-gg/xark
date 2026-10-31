@@ -61,10 +61,10 @@ type Group = (String, String, String, String);
 type Vectors = BTreeMap<Vec<(u32, String)>, BTreeSet<String>>;
 
 /// A gadget with a proof: its harness and the template its proof is about.
-struct Proven {
-    harness: String,
+pub(crate) struct Proven {
+    pub(crate) harness: String,
     hash: String,
-    template: GadgetTemplate,
+    pub(crate) template: GadgetTemplate,
     /// Its soundness theorem assumes nothing of the inputs.
     trivial: bool,
     /// The Lean module of its proof (`Formal.BoolOps` for `xor`).
@@ -97,21 +97,32 @@ fn proof_of(module: &str) -> Result<(String, String)> {
 }
 
 /// One recorded call of a proven gadget.
-struct Call {
-    gadget: String,
+pub(crate) struct Call {
+    pub(crate) gadget: String,
     /// The harness whose template it was classified against.
-    harness: String,
-    site: String,
-    class: String,
+    pub(crate) harness: String,
+    pub(crate) site: String,
+    pub(crate) class: String,
     consts: Option<Vec<(u32, String)>>,
     /// The call's inputs and outputs over the circuit's variables, and how many rows
     /// and variables it emitted: what [`in_context`] reads.
-    inputs: Vec<LinearCombination>,
+    pub(crate) inputs: Vec<LinearCombination>,
     outputs: Vec<LinearCombination>,
-    rows: usize,
+    pub(crate) first_row: usize,
+    pub(crate) rows: usize,
     witnesses: u32,
+    /// The first variable it allocated (`wit 0` of its template).
+    pub(crate) first_var: u32,
     /// The innermost enclosing call of a proven gadget, as an index in the circuit's calls.
-    parent: Option<usize>,
+    pub(crate) parent: Option<usize>,
+}
+
+/// A circuit built with the gadget markers: its proven-gadget calls, every flat row
+/// and its public variables.
+pub(crate) struct Recorded {
+    pub(crate) calls: Vec<Call>,
+    pub(crate) rows: Vec<[LinearCombination; 3]>,
+    pub(crate) publics: Vec<u32>,
 }
 
 pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
@@ -147,7 +158,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         let want = examples.then(|| digests.get(name.as_str()).map(|d| d.to_string()));
         match calls(&dir, &name, want, &proven) {
-            Ok(mut calls) => {
+            Ok(Recorded { mut calls, .. }) => {
                 inside_accepted(&mut calls, &name, &allowed);
                 let (mut g, mut v) = (groups.lock().unwrap(), vectors.lock().unwrap());
                 for c in calls {
@@ -250,7 +261,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
 /// Every gadget with a harness: its templates (one per instantiation of a generic
 /// gadget), each of which must be the one its committed Lean file (and so its proof)
 /// is about.
-fn proven() -> Result<BTreeMap<String, Vec<Proven>>> {
+pub(crate) fn proven() -> Result<BTreeMap<String, Vec<Proven>>> {
     let mut out = BTreeMap::new();
     for harness in crate::lean::harnesses()? {
         let template = crate::lean::harness(&harness)?;
@@ -291,16 +302,15 @@ fn proven() -> Result<BTreeMap<String, Vec<Proven>>> {
     Ok(out)
 }
 
-/// Build `dir` with the gadget markers and classify its calls of proven gadgets.
-/// First, the build must be the production circuit: its digest is `want` (an
-/// example's committed digest), or with no `want` the digest of the same crate
-/// built without markers.
-fn calls(
+/// Build `dir` with the gadget markers and classify its calls of proven gadgets. First, the build must be the production circuit:
+/// its digest is `want` (an example's committed digest), or with no `want` the digest
+/// of the same crate built without markers.
+pub(crate) fn calls(
     dir: &Path,
     name: &str,
     want: Option<Option<String>>,
     proven: &BTreeMap<String, Vec<Proven>>,
-) -> Result<Vec<Call>> {
+) -> Result<Recorded> {
     let target = crate::target_dir().join("coverage").join(name);
     let lower = |markers: bool| -> Result<xark_frontend::LowerOutput> {
         let opts = xark_frontend::BuildOptions {
@@ -333,6 +343,32 @@ fn calls(
     if got != want {
         bail!("built with the gadget markers it keys rows {got}, not the production {want}");
     }
+    // The flat rows and public inputs in the recorded calls' numbering: `r1cs` is in
+    // the renumbering `var_map` applied after recording.
+    let mut inv = vec![0u32; out.var_map.len()];
+    for (old, &new) in out.var_map.iter().enumerate() {
+        inv[new as usize] = old as u32;
+    }
+    let back = |l: &LinearCombination| {
+        let mut l = l.clone();
+        for t in &mut l.terms {
+            t.var = inv[t.var as usize];
+        }
+        l
+    };
+    let rows = out
+        .r1cs
+        .constraints
+        .iter()
+        .map(|c| [back(&c.a), back(&c.b), back(&c.c)])
+        .collect();
+    let publics = out
+        .r1cs
+        .variables
+        .iter()
+        .filter(|v| matches!(v.visibility, xark_ir::Visibility::Public))
+        .map(|v| inv[v.id as usize])
+        .collect();
     let root = format!("{}/", crate::root().display());
     // Against each instantiation's template, keeping the closest match.
     let rank = |class: &str| match class {
@@ -367,8 +403,10 @@ fn calls(
             consts,
             inputs: c.inputs,
             outputs: c.outputs,
+            first_row: c.first_row,
             rows: c.rows,
             witnesses: c.witnesses,
+            first_var: c.first_var,
             parent: None,
         });
     }
@@ -392,7 +430,11 @@ fn calls(
             up = parents[a];
         }
     }
-    Ok(calls)
+    Ok(Recorded {
+        calls,
+        rows,
+        publics,
+    })
 }
 
 /// A call nested in an accepted call of a proven gadget is covered: its rows are part of
@@ -915,6 +957,8 @@ mod tests {
             consts: None,
             inputs: vec![var(input)],
             outputs: outputs.iter().map(|&v| var(v)).collect(),
+            first_row: 0,
+            first_var: 0,
             rows,
             witnesses: if rows == 0 { 0 } else { 1 },
             parent: None,

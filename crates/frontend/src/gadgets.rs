@@ -48,12 +48,14 @@ pub struct RecordedCall {
     pub site: String,
     pub template: Result<GadgetTemplate, String>,
     /// The call's inputs and outputs over the circuit's own variables (empty when
-    /// it never returned), and how many rows it emitted.
+    /// it never returned), and the rows it emitted, from `first_row` on.
     pub inputs: Vec<LinearCombination>,
     pub outputs: Vec<LinearCombination>,
+    pub first_row: usize,
     pub rows: usize,
-    /// How many variables it allocated.
+    /// How many variables it allocated, from `first_var` on.
     pub witnesses: u32,
+    pub first_var: VarId,
     /// A bit decomposition the compiler made outside any `#[gadget]` call (an input's
     /// range check, a native bitwise op's bits), recorded as `xark::lang::to_bits`:
     /// its rows are that gadget's at its width.
@@ -552,8 +554,10 @@ pub(crate) fn extract(b: &Builder) -> Vec<RecordedCall> {
             template: template(b, c, &revived),
             inputs: c.inputs.clone(),
             outputs: c.outputs.clone(),
+            first_row: c.c0,
             rows: c.c1.saturating_sub(c.c0),
             witnesses: c.v1.saturating_sub(c.v0),
+            first_var: c.v0,
             decomposition: c.decomposition,
             parent: c.parent,
             stack: c.stack.clone(),
