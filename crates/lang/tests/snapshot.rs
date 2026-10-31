@@ -2453,11 +2453,12 @@ fn blake2s_matches_lean_model() {
     );
 }
 
-/// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 156k constraints.
+/// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 93k constraints.
 /// `formal/Formal/Keccak.lean` proves per-bit soundness of one round
 /// `ι∘χ∘π∘ρ∘θ` (`keccakRoundStep_bit_sound`). The ρ·π
 /// permutation index in the Lean model was corrected to `(X+3Y)%5` to match this
-/// (KAT-verified) gadget exactly across all 25 lanes. This test pins the count.
+/// (KAT-verified) gadget exactly across all 25 lanes. This test pins the count:
+/// θ by `xor3` rows and χ by `chi` rows, 153,664 → 93,248.
 #[test]
 #[ignore]
 fn keccak_matches_lean_model() {
@@ -2469,7 +2470,7 @@ fn keccak_matches_lean_model() {
     assert!(c.status_success, "keccak gadget compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    assert_eq!(mul, 153664, "Keccak mult-gate count; got {mul}");
+    assert_eq!(mul, 93248, "Keccak mult-gate count; got {mul}");
 }
 
 /// **R1CS ↔ Lean bridge (AES-128).** `#[ignore]` — 158k constraints.
