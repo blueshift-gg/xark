@@ -124,7 +124,8 @@ pub(crate) fn harness(gadget: &str) -> Result<GadgetTemplate> {
         ..Default::default()
     };
     let wasm = xark_frontend::build_crate_with(&dir, &target, &opts)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .wasm;
     let out = xark_frontend::lower_recording_gadgets(&wasm, xark_ir::FieldSpec::bn254())
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .output;
