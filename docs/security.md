@@ -398,13 +398,13 @@ Requires a Powers-of-Tau transcript plus a phase-2 contribution. Both **implemen
   Exhaustively cross-checked vs `aes` on all 256 inputs (`sbox_all_inputs_match_table`,
   `gf256_inv_roundtrips`, `sbox_zero_input_special_case`) but the algebraic uniqueness
   argument has **not been independently audited**.
-* **Grumpkin embedded-curve arithmetic.** Shipped `scalar_mul`/`multi_scalar_mul` use an
-  **offset double-and-add** accumulator over incomplete affine `ec_add`/`ec_double`
-  (`gadgets/xark-grumpkin`), sidestepping exceptional cases rather than a complete-add
-  selector. Curve algebra + on-curve membership mechanised in `formal/Formal/Curve.lean`
-  (`enforce_on_curve_grumpkin_sound`), inputs now range-/on-curve-checked
-  (`enforce_on_curve`); the offset construction is tested against reference vectors but
-  not separately proven.
+* **Grumpkin embedded-curve arithmetic.** `scalar_mul`, `wide_scalar_mul` and
+  `multi_scalar_mul` (`gadgets/xark-grumpkin`) use an **offset** accumulator with one
+  fused incomplete double-and-add per bit (signed digits; the MSM adds `±(P₀ ± P₁)` from a
+  shared table), sidestepping exceptional cases with x-guards rather than a complete-add
+  selector. Each is proven sound in Lean over its exact exported rows
+  (`formal/Formal/{ScalarMul,WideScalarMul,MultiScalarMul}.lean`), including the offset
+  corrections and, for `scalar_mul`, the booleanity of its bits.
 * **Trusted-setup ceremony.** Implemented end-to-end (ptau ingest, phase-2 derivation,
   MPC driver), but **not externally audited**; a real
   deployment's security still rests on off-chain conduct (honest participants, transcript
