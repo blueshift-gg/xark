@@ -32,27 +32,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// constraint, inflating nonzeros — e.g. fill=32 blows secp256k1 6.6M→47M nonzeros
 /// (+615%) for a 0.9% constraint drop that doesn't cross an FFT boundary. fill=2
 /// still captures the cheap, strictly-shrinking eliminations (plugs, copies,
-/// dead-var pruning, mul→eq merges). Override via `XARK_MAX_FILL`.
-const MAX_FILL_DEFAULT: usize = 2;
-
-/// Fill-in threshold, overridable via `XARK_MAX_FILL`. Read once.
-fn max_fill() -> usize {
-    use std::sync::OnceLock;
-    static V: OnceLock<usize> = OnceLock::new();
-    *V.get_or_init(|| {
-        #[cfg(feature = "debug")]
-        {
-            std::env::var("XARK_MAX_FILL")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(MAX_FILL_DEFAULT)
-        }
-        #[cfg(not(feature = "debug"))]
-        {
-            MAX_FILL_DEFAULT
-        }
-    })
-}
+/// dead-var pruning, mul→eq merges). Fixed, not tunable: setup keys these rows,
+/// and `tests/stable-digests.txt` pins them as a function of the circuit alone.
+pub const MAX_FILL: usize = 2;
 
 /// A linear combination in reduced form: constant `k` plus `var → coeff`, no zero
 /// coefficients. Coefficients are the solver's Montgomery [`Fp`] (native BN254, no
@@ -150,16 +132,19 @@ impl Lc {
 
 /// Substitute `v → vlc` into one constraint in place: `k += m·vlc.k` and
 /// `lc += m·vlc` for `m = lc[v]`, over each of `a,b,c`. Returns `None` if `v` was
-/// absent, else `Some(new)` where `new` is the vars *first introduced* here — the
+/// absent, else `Some((new, ms))` where `new` is the vars *first introduced* here — the
 /// `occ` entries the caller must add (already-present vars keep their entry, since
-/// `occ` is append-only). Doesn't touch `occ`, so parallel sites stay independent.
-fn subst_site(cj: &mut [Lc; 3], v: VarId, vlc: &Lc) -> Option<Vec<VarId>> {
+/// `occ` is append-only) — and `ms` the multiplier `m` per form, for the [`Trace`].
+/// Doesn't touch `occ`, so parallel sites stay independent.
+fn subst_site(cj: &mut [Lc; 3], v: VarId, vlc: &Lc) -> Option<(Vec<VarId>, [Option<Fp>; 3])> {
     use std::collections::btree_map::Entry;
     let mut changed = false;
     let mut new_vars: Vec<VarId> = Vec::new();
-    for lc in cj.iter_mut() {
+    let mut ms = [None, None, None];
+    for (lc, mult) in cj.iter_mut().zip(&mut ms) {
         let Some(m) = lc.t.remove(&v) else { continue };
         changed = true;
+        *mult = Some(m.clone());
         lc.k = lc.k.add(&m.mul(&vlc.k));
         for (var, co) in &vlc.t {
             match lc.t.entry(*var) {
@@ -180,7 +165,7 @@ fn subst_site(cj: &mut [Lc; 3], v: VarId, vlc: &Lc) -> Option<Vec<VarId>> {
             }
         }
     }
-    changed.then_some(new_vars)
+    changed.then_some((new_vars, ms))
 }
 
 /// A raw pointer into the constraint vector, tagged `Send`/`Sync` so distinct
@@ -216,7 +201,7 @@ fn relation(a: &Lc, b: &Lc, c: &Lc, m: &BigUint) -> Option<Lc> {
 /// modulus is unknown, the program is returned unchanged (elimination needs the
 /// modulus for the coefficient inverse).
 pub fn minimize(prog: &R1csProgram) -> R1csProgram {
-    minimize_with_fill(prog, max_fill())
+    minimize_with_fill(prog, MAX_FILL)
 }
 
 /// As [`minimize`], but with an explicit fill-in threshold. `usize::MAX` disables
@@ -224,12 +209,45 @@ pub fn minimize(prog: &R1csProgram) -> R1csProgram {
 /// (dense eliminations were bounded within template bodies, so the flattened
 /// boundary pass no longer cascades), but catastrophic on a raw circuit.
 pub fn minimize_with_fill(prog: &R1csProgram, fill: usize) -> R1csProgram {
+    run(prog, fill, None)
+}
+
+/// The certificate of one minimization, which the Lean checker `lake exe minimize_check`
+/// (`formal/Formal/Minimize/Check.lean`) accepts or refuses: step `k` eliminated
+/// `steps[k].var := steps[k].lc` using the original row `steps[k].row`, and each
+/// substitution into an original row added `m · (lc − var)` to one of its forms.
+#[derive(Default)]
+pub struct Trace {
+    /// The eliminations, in order.
+    pub steps: Vec<TraceStep>,
+    /// Original rows dropped as identically true.
+    pub dropped: Vec<usize>,
+    /// `(original row, form 0/1/2 for a/b/c, step, m)`, in the order made.
+    pub substitutions: Vec<(usize, u8, u32, FieldConst)>,
+}
+
+/// One elimination: `var := lc`, defined by the original row `row`.
+pub struct TraceStep {
+    pub var: VarId,
+    pub row: usize,
+    pub lc: LinearCombination,
+}
+
+/// As [`minimize_with_fill`], also returning the run's [`Trace`]. The rows are the same.
+pub fn minimize_traced(prog: &R1csProgram, fill: usize) -> (R1csProgram, Trace) {
+    let mut trace = Trace::default();
+    let out = run(prog, fill, Some(&mut trace));
+    (out, trace)
+}
+
+fn run(prog: &R1csProgram, fill: usize, mut trace: Option<&mut Trace>) -> R1csProgram {
     let Some(mod_dec) = &prog.field.modulus_decimal else {
         return prog.clone();
     };
     let Ok(modulus) = mod_dec.parse::<BigUint>() else {
         return prog.clone();
     };
+    let fc = |x: &Fp| FieldConst::from_bigint(x.to_biguint().into());
 
     // Size the var-indexed arrays to cover every id that appears — declared *or*
     // referenced. A malformed program can reference a dangling id before the
@@ -312,6 +330,9 @@ pub fn minimize_with_fill(prog: &R1csProgram, fill: usize) -> R1csProgram {
         if rel.t.is_empty() {
             if rel.k.is_zero() {
                 cons[i] = None;
+                if let Some(t) = trace.as_deref_mut() {
+                    t.dropped.push(i);
+                }
             }
             continue;
         }
@@ -342,6 +363,14 @@ pub fn minimize_with_fill(prog: &R1csProgram, fill: usize) -> R1csProgram {
         // Retire the defining constraint.
         cons[i] = None;
         eliminated.insert(v);
+        let step = trace.as_deref_mut().map(|t| {
+            t.steps.push(TraceStep {
+                var: v,
+                row: i,
+                lc: vlc.to_ir(),
+            });
+            t.steps.len() as u32 - 1
+        });
 
         // Substitute v → vlc everywhere it appears. Dedup `sites`: the append-only
         // index can list a constraint more than once (a repeat is a harmless miss).
@@ -351,7 +380,7 @@ pub fn minimize_with_fill(prog: &R1csProgram, fill: usize) -> R1csProgram {
         // Fan out for dense (many-site) eliminations — sites are distinct indices,
         // so each update is independent. `changed` collects sites that held `v`;
         // `occ` and the worklist are updated serially afterwards.
-        let changed: Vec<(usize, Vec<VarId>)> = if sites.len() >= PAR_SUBST_THRESHOLD {
+        let changed: Vec<_> = if sites.len() >= PAR_SUBST_THRESHOLD {
             let ptr = ConsPtr(cons.as_mut_ptr());
             sites
                 .par_iter()
@@ -376,7 +405,14 @@ pub fn minimize_with_fill(prog: &R1csProgram, fill: usize) -> R1csProgram {
                 })
                 .collect()
         };
-        for (j, new_vars) in &changed {
+        for (j, (new_vars, ms)) in &changed {
+            if let (Some(t), Some(step)) = (trace.as_deref_mut(), step) {
+                for (form, m) in ms.iter().enumerate() {
+                    if let Some(m) = m {
+                        t.substitutions.push((*j, form as u8, step, fc(m)));
+                    }
+                }
+            }
             // Record only the vars newly introduced into `j` (see `subst_site`).
             for var in new_vars {
                 occ[*var as usize].push(*j);

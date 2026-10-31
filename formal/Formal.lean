@@ -29,6 +29,7 @@ import Formal.LazyK1
 import Formal.GF128
 import Formal.Aes256
 import Formal.Rewrites
+import Formal.Minimize.Sound
 import Formal.Template
 import Formal.Templates.Add32
 import Formal.Add32

@@ -24,3 +24,9 @@ rev = "93c9d1ef45be9f687214625d7857889cf2485504"
 
 [[lean_lib]]
 name = "Formal"
+
+# The certified minimizer's checker (`Formal/Minimize/Check.lean`), run on every example
+# by `cargo xtask minimize-check`. It imports only core Lean, so it builds in seconds.
+[[lean_exe]]
+name = "minimize_check"
+root = "MinimizeCheck"

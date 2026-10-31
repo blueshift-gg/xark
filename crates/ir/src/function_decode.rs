@@ -1759,6 +1759,7 @@ fn minimize_items(
     iface: &[(u32, Vec<u32>)],
     name: &str,
     modulus: &str,
+    certs: Option<&mut Vec<Certificate>>,
 ) -> Vec<CItem> {
     let mut rows: Vec<crate::r1cs::R1csConstraint> = Vec::new();
     let mut calls: Vec<CItem> = Vec::new();
@@ -1828,7 +1829,18 @@ fn minimize_items(
         constraints: rows,
     };
     // Per-template bodies are small; skip the fill-in guard and minimize fully.
-    let reduced = crate::minimize::minimize_with_fill(&prog, usize::MAX);
+    let reduced = match certs {
+        Some(certs) => {
+            let (reduced, trace) = crate::minimize::minimize_traced(&prog, usize::MAX);
+            certs.push(Certificate {
+                input: prog,
+                output: reduced.clone(),
+                trace,
+            });
+            reduced
+        }
+        None => crate::minimize::minimize_with_fill(&prog, usize::MAX),
+    };
     let mut out: Vec<CItem> = reduced
         .constraints
         .into_iter()
@@ -1845,14 +1857,41 @@ fn minimize_items(
     out
 }
 
+/// One minimizer run on the keyed path, for the Lean checker: its input and output rows
+/// and its [`Trace`](crate::minimize::Trace).
+pub struct Certificate {
+    pub input: crate::r1cs::R1csProgram,
+    pub output: crate::r1cs::R1csProgram,
+    pub trace: crate::minimize::Trace,
+}
+
 /// Like [`expand_function_blob`] but produces the minimized R1CS directly: minimize
 /// each template body once and expand the reduced templates, instead of expanding the
 /// full flat R1CS and minimizing that. Witness program left empty — this is the
 /// Groth16 (R1CS) view; the solver loads the full circuit separately.
 pub fn expand_function_blob_reduced(b: &[u8]) -> Result<CircuitProgram, String> {
+    expand_reduced(b, None)
+}
+
+/// As [`expand_function_blob_reduced`], also returning a [`Certificate`] of each
+/// template body's and the top stream's minimization.
+pub fn expand_function_blob_reduced_certified(
+    b: &[u8],
+) -> Result<(CircuitProgram, Vec<Certificate>), String> {
+    let mut certs = Vec::new();
+    let prog = expand_reduced(b, Some(&mut certs))?;
+    Ok((prog, certs))
+}
+
+fn expand_reduced(
+    b: &[u8],
+    mut certs: Option<&mut Vec<Certificate>>,
+) -> Result<CircuitProgram, String> {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| expand_reduced_inner(b)));
+    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        expand_reduced_inner(b, certs.as_deref_mut())
+    }));
     std::panic::set_hook(prev);
     let prog =
         out.map_err(|_| "malformed function artifact (XBC reduced decode failed)".to_string())?;
@@ -1881,7 +1920,7 @@ pub fn expand_function_blob_reduced(b: &[u8]) -> Result<CircuitProgram, String> 
     Ok(prog)
 }
 
-fn expand_reduced_inner(b: &[u8]) -> CircuitProgram {
+fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> CircuitProgram {
     let mut p = 6usize;
     let name = get_str(b, &mut p);
     let modulus_decimal = get_str(b, &mut p);
@@ -1907,10 +1946,17 @@ fn expand_reduced_inner(b: &[u8]) -> CircuitProgram {
             .chain(def.outputs.iter())
             .map(|&v| (v, ()))
             .collect();
-        def.c_items = minimize_items(&def.c_items, &base_pins, &iface, &name, &modulus_decimal);
+        def.c_items = minimize_items(
+            &def.c_items,
+            &base_pins,
+            &iface,
+            &name,
+            &modulus_decimal,
+            certs.as_deref_mut(),
+        );
     }
     let input_pins: BTreeMap<u32, ()> = (0..num_inputs as u32).map(|v| (v, ())).collect();
-    let top_reduced = minimize_items(&top_c, &input_pins, &iface, &name, &modulus_decimal);
+    let top_reduced = minimize_items(&top_c, &input_pins, &iface, &name, &modulus_decimal, certs);
 
     let mut constraints = Vec::new();
     expand_c(&defs, &top_reduced, &IDENTITY, &mut constraints);
@@ -2014,6 +2060,7 @@ impl ReducedRowStream {
                 &iface,
                 &field.name,
                 &field.modulus_decimal,
+                None,
             );
         }
         let input_pins: BTreeMap<u32, ()> = (0..num_inputs as u32).map(|v| (v, ())).collect();
@@ -2023,6 +2070,7 @@ impl ReducedRowStream {
             &iface,
             &field.name,
             &field.modulus_decimal,
+            None,
         );
 
         // One streaming pass: rows per item + referenced vars (atomic bitset).
