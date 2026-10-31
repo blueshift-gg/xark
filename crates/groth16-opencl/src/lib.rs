@@ -1,8 +1,10 @@
 //! Optional OpenCL BN254 G1 MSM backend for Xark's Groth16 prover.
 //!
-//! The first kernel version computes each scalar-point product independently,
-//! then reduces the projective terms on device. This is a correctness baseline;
-//! performance needs measurement before moving this backend to windowed buckets.
+//! Small inputs use independent scalar-point products. Inputs of 256 or more
+//! scalars use a 4-bit bucket MSM. The dispatch point is an initial heuristic,
+//! not a measured crossover; run `cargo run --release --example msm_bench
+//! --manifest-path crates/groth16-opencl/Cargo.toml` on the target GPU before
+//! treating it as a performance choice. Both kernels are variable-time.
 
 use std::ops::Range;
 
@@ -26,9 +28,15 @@ const MSM_SOURCE: &str = concat!(
     include_str!("../../groth16/opencl/msm_pointwise.cl"),
     "\n",
     include_str!("../../groth16/opencl/msm_digits.cl"),
+    "\n",
+    include_str!("../../groth16/opencl/msm_bucket.cl"),
 );
 const POINT_WORDS: usize = 17;
 const TERM_WORDS: usize = 24;
+const BUCKET_BITS: usize = 4;
+const BUCKET_WINDOWS: usize = 256 / BUCKET_BITS;
+const BUCKET_COUNT: usize = (1 << BUCKET_BITS) - 1;
+const BUCKET_THRESHOLD: usize = 256;
 
 /// OpenCL backend. Its scalar multiplication is variable-time and may expose
 /// scalar-dependent timing; use it only when the device is trusted. The default
@@ -196,6 +204,9 @@ impl Runtime {
         encoding: Compress,
         scalars: &[Scalar],
     ) -> Option<G1Projective> {
+        if scalars.len() >= BUCKET_THRESHOLD {
+            return self.run_bucket_chunk(point_bytes, encoding, scalars);
+        }
         let (point_words, scalar_limbs) = prepare_inputs(point_bytes, encoding, scalars)?;
         let count = scalars.len();
         let term_word_count = count.checked_mul(TERM_WORDS)?;
@@ -351,6 +362,156 @@ impl Runtime {
         }
         decode_result(&result_words).map(|point| point.into_group())
     }
+
+    fn run_bucket_chunk(
+        &self,
+        point_bytes: &[u8],
+        encoding: Compress,
+        scalars: &[Scalar],
+    ) -> Option<G1Projective> {
+        let (point_words, scalar_limbs) = prepare_inputs(point_bytes, encoding, scalars)?;
+        let count = scalars.len();
+        let bucket_slots = BUCKET_WINDOWS.checked_mul(BUCKET_COUNT)?;
+        let bucket_words = bucket_slots.checked_mul(TERM_WORDS)?;
+        let window_words = BUCKET_WINDOWS.checked_mul(TERM_WORDS)?;
+        let mut result_words = [0u32; POINT_WORDS];
+
+        // SAFETY: every allocation length comes from checked dimensions and all
+        // buffers are owned by this runtime's OpenCL context.
+        let mut point_buffer = unsafe {
+            Buffer::<u32>::create(
+                &self.context,
+                CL_MEM_READ_ONLY,
+                point_words.len(),
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let prepared_buffer = unsafe {
+            Buffer::<u32>::create(
+                &self.context,
+                CL_MEM_READ_WRITE,
+                point_words.len(),
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let mut scalar_buffer = unsafe {
+            Buffer::<u64>::create(
+                &self.context,
+                CL_MEM_READ_ONLY,
+                scalar_limbs.len(),
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let valid_buffer = unsafe {
+            Buffer::<u32>::create(
+                &self.context,
+                CL_MEM_READ_WRITE,
+                count,
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let bucket_buffer = unsafe {
+            Buffer::<u32>::create(
+                &self.context,
+                CL_MEM_READ_WRITE,
+                bucket_words,
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let window_buffer = unsafe {
+            Buffer::<u32>::create(
+                &self.context,
+                CL_MEM_READ_WRITE,
+                window_words,
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let result_buffer = unsafe {
+            Buffer::<u32>::create(
+                &self.context,
+                CL_MEM_WRITE_ONLY,
+                result_words.len(),
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+
+        // SAFETY: host slices cover the full destination buffers. Blocking
+        // writes complete before kernels consume their input.
+        unsafe {
+            self.queue
+                .enqueue_write_buffer(&mut point_buffer, CL_TRUE, 0, &point_words, &[])
+                .ok()?;
+            self.queue
+                .enqueue_write_buffer(&mut scalar_buffer, CL_TRUE, 0, &scalar_limbs, &[])
+                .ok()?;
+        }
+
+        let count_arg = u64::try_from(count).ok()?;
+        let validate = Kernel::create(&self.program, "opencl_msm_validate_bucket_inputs").ok()?;
+        // SAFETY: argument order matches the kernel; global size covers each
+        // scalar exactly once.
+        unsafe {
+            ExecuteKernel::new(&validate)
+                .set_arg(&point_buffer)
+                .set_arg(&scalar_buffer)
+                .set_arg(&count_arg)
+                .set_arg(&prepared_buffer)
+                .set_arg(&valid_buffer)
+                .set_global_work_size(count)
+                .enqueue_nd_range(&self.queue)
+                .ok()?;
+        }
+        let buckets = Kernel::create(&self.program, "opencl_msm_buckets").ok()?;
+        // SAFETY: each work item writes one disjoint 24-word bucket slot.
+        unsafe {
+            ExecuteKernel::new(&buckets)
+                .set_arg(&prepared_buffer)
+                .set_arg(&scalar_buffer)
+                .set_arg(&valid_buffer)
+                .set_arg(&count_arg)
+                .set_arg(&bucket_buffer)
+                .set_global_work_size(bucket_slots)
+                .enqueue_nd_range(&self.queue)
+                .ok()?;
+        }
+        let reduce = Kernel::create(&self.program, "opencl_msm_bucket_windows").ok()?;
+        // SAFETY: each work item reduces one disjoint window into its output.
+        unsafe {
+            ExecuteKernel::new(&reduce)
+                .set_arg(&bucket_buffer)
+                .set_arg(&window_buffer)
+                .set_global_work_size(BUCKET_WINDOWS)
+                .enqueue_nd_range(&self.queue)
+                .ok()?;
+        }
+        let finish = Kernel::create(&self.program, "opencl_msm_bucket_finish").ok()?;
+        // SAFETY: one work item validates all inputs and writes the fixed-size
+        // result; the blocking read waits for all queued kernels.
+        unsafe {
+            ExecuteKernel::new(&finish)
+                .set_arg(&window_buffer)
+                .set_arg(&valid_buffer)
+                .set_arg(&count_arg)
+                .set_arg(&result_buffer)
+                .set_global_work_size(1)
+                .enqueue_nd_range(&self.queue)
+                .ok()?;
+            self.queue
+                .enqueue_read_buffer(&result_buffer, CL_TRUE, 0, &mut result_words, &[])
+                .ok()?;
+        }
+        if result_words[16] > 1 {
+            return None;
+        }
+        decode_result(&result_words).map(|point| point.into_group())
+    }
 }
 
 fn find_device(device_type: cl_device_type) -> Option<Device> {
@@ -455,6 +616,9 @@ mod tests {
         assert!(MSM_SOURCE.contains("opencl_msm_reduce_pairs"));
         assert!(MSM_SOURCE.contains("opencl_msm_finish"));
         assert!(MSM_SOURCE.contains("validate_msm_scalars"));
+        assert!(MSM_SOURCE.contains("opencl_msm_buckets"));
+        assert!(MSM_SOURCE.contains("opencl_msm_bucket_windows"));
+        assert!(MSM_SOURCE.contains("opencl_msm_bucket_finish"));
     }
 
     #[test]
@@ -473,12 +637,12 @@ mod tests {
     }
 
     #[test]
-    fn pointwise_kernel_compiles_as_opencl_12_when_clang_is_available() {
-        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../groth16/opencl/msm_pointwise.cl");
-        let output = std::process::Command::new("clang")
-            .args(["-x", "cl", "-cl-std=CL1.2", "-Werror", "-fsyntax-only"])
-            .arg(source)
+    fn msm_kernels_compile_as_opencl_12_when_clang_is_available() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../groth16/opencl");
+        let output = std::process::Command::new("make")
+            .arg("-C")
+            .arg(directory)
+            .arg("test")
             .output();
         let Ok(output) = output else {
             return;
