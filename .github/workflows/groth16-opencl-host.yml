@@ -6,8 +6,10 @@ on:
     paths:
       - .github/workflows/groth16-opencl-host.yml
       - crates/groth16-opencl/**
+      - crates/groth16-gpu-cli/**
       - crates/groth16/opencl/**
       - crates/groth16/**
+      - crates/cli/**
       - crates/ir/**
       - crates/prover/**
       - crates/backend/**
@@ -48,3 +50,14 @@ jobs:
         env:
           XARK_OPENCL_REQUIRED: "1"
         run: cargo test --manifest-path crates/groth16-opencl/Cargo.toml -- --test-threads=1
+
+      - name: Test GPU CLI backend selection
+        run: cargo test --manifest-path crates/groth16-gpu-cli/Cargo.toml --features opencl-msm --bin xark-gpu
+
+      - name: Prove through the GPU CLI on POCL
+        run: |
+          cargo run -p xark-cli -- setup examples/cube --insecure-dev-mode
+          prove_output=$(cargo run --manifest-path crates/groth16-gpu-cli/Cargo.toml --features opencl-msm -- prove examples/cube --inputs '{"secret":"3","result":"27"}' --accelerator opencl --opencl-device any 2>&1)
+          printf '%s\n' "$prove_output"
+          printf '%s\n' "$prove_output" | grep -E 'MSM backend: Opencl handled [1-9]'
+          cargo run -p xark-cli -- verify examples/cube
