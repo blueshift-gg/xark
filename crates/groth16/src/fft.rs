@@ -190,13 +190,13 @@ fn dit(a: &mut [Fr], st: &[Fr]) {
 }
 
 /// In-place DFT of length `L = 3^b·2^a`, `b ≥ 1`, natural order in and out, with
-/// `ω_L^j = tw[j·s]` for `j < L`, `leaf` the [`stage_table`] for the radix-2
+/// `ω_L^j = tw[j·s]` for `j < L`, `leaf` the `stage_table` for the radix-2
 /// part of `L`, and `scratch.len() >= L`.
 ///
 /// Radix-3 decimation in time: the three stride-3 subsequences are transformed
 /// (recursively) into `scratch`, then combined — `X[k + i·L/3] = Σ_j ω_3^{ij}·
 /// ω_L^{jk}·F_j[k]` — with 4 multiplications per 3 outputs. Radix-2 leaves are
-/// gathered bit-reversed, so they run [`dit`] with no permutation.
+/// gathered bit-reversed, so they run `dit` with no permutation.
 pub fn mixed_fft(a: &mut [Fr], tw: &[Fr], s: usize, leaf_st: &[Fr], scratch: &mut [Fr]) {
     let n = a.len();
     let m = n / 3;
