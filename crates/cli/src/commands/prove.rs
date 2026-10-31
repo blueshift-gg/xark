@@ -34,8 +34,10 @@ pub struct ProveArgs {
     /// file (a JSON object, or `name = value` lines with `#` comments and blank
     /// lines ignored). Provide every public and private input the circuit
     /// declares; array elements use the flat names `xark inspect` prints, e.g.
-    /// `path[0]`. One argument for both — inline for a quick proof, a file for a
-    /// big witness (a 2-in/2-out JoinSplit has ~200 inputs).
+    /// `path[0]`. Names may be as declared (`net_worth`, as `inputs.example.json`
+    /// and Rust's `<Fn>Inputs::to_json()` write them) or camelCase (`netWorth`, as a
+    /// generated client has them). One argument for both — inline for a quick proof,
+    /// a file for a big witness (a 2-in/2-out JoinSplit has ~200 inputs).
     #[arg(long = "inputs", value_name = "JSON|FILE")]
     pub inputs: Option<String>,
 

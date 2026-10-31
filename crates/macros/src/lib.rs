@@ -14,7 +14,8 @@
 //! the compiler, and the body sees `[Field; N]`), emitting the body verbatim; (2)
 //! generates a typed `<Fn>Inputs` struct, named so parameters can't be transposed;
 //! (3) implements `ProveInputs` for it from the same impls; (4) generates
-//! `<Fn>Inputs::schema()`, the circuit's `schema.json`.
+//! `<Fn>Inputs::schema()`, the circuit's `schema.json`, and `<Fn>Inputs::to_json()`,
+//! the values as `xark prove --inputs` takes them.
 //!
 //! An array parameter's length may be a literal or a `const` (`[Field; DEPTH]`), but
 //! the entry can't be generic: it is built once, with fixed sizes.
@@ -198,6 +199,11 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         let lit = LitStr::new(&name.unraw().to_string(), name.span());
         quote! { out.extend(::xark::input::leaves(&self.#name, #lit)); }
     });
+    let json_fields = params.iter().map(|p| {
+        let name = &p.name;
+        let lit = LitStr::new(&name.unraw().to_string(), name.span());
+        quote! { (#lit, ::xark::client::declared_json(&self.#name)?) }
+    });
 
     // The native-typed validator replacing the entry `fn` in test/host builds: same
     // name, the entry's parameter types in order, returning the check result.
@@ -279,6 +285,14 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
             /// leaves in proof order. See `xark::input::schema_json`.
             pub fn schema() -> ::std::string::String {
                 ::xark::input::schema_json(#fn_name_lit, &[#(#schema_params),*])
+            }
+
+            /// These inputs as the JSON `xark prove --inputs` takes (a file, or inline):
+            /// each value in its natural form, every name as declared (`snake_case`),
+            /// as in `inputs.example.json`. `--inputs` also takes the `camelCase` names
+            /// a generated client uses.
+            pub fn to_json(&self) -> ::core::result::Result<::std::string::String, ::std::string::String> {
+                ::core::result::Result::Ok(::xark::client::inputs_json(::std::vec![#(#json_fields),*]))
             }
         }
     })

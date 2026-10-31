@@ -94,7 +94,9 @@ them; `#[input(no_derive)]` for a type with its own), including gadget types:
 `to_fields()` hashes one in a single call. The generated `<Fn>Inputs` struct
 holds the same values for `xark::prover::circuit(..).check(..)`, `.prove(..)`
 and friends; a proof's `to_instruction_data()` is the bytes an exported Solana
-verifier reads. A circuit crate needs only the `xark` dependency.
+verifier reads. Its `to_json()` is the values as `xark prove --inputs` takes them,
+named as declared (`net_worth`) like `inputs.example.json`; `--inputs` also takes
+the camelCase names a TypeScript client uses (`netWorth`). A circuit crate needs only the `xark` dependency.
 
 ### Everyday input types
 

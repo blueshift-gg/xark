@@ -61,13 +61,35 @@ pub fn from_json<T: Input>(value: &Value) -> Result<T, InputError> {
 /// `value` in its natural JSON form, as a client reads it back (struct fields
 /// `camelCase`, as generated clients name them; [`from_json`] takes either case).
 pub fn to_json<T: Input>(value: &T) -> Result<Value, String> {
+    natural(value, true)
+}
+
+/// `value` in its natural JSON form, its struct fields `camelCase` when `camel`.
+fn natural<T: Input>(value: &T, camel: bool) -> Result<Value, String> {
     let mut fields = alloc::vec![Field::zero(); T::LEN];
     write_fields(value, &mut fields);
     let frs: Vec<ark_bn254::Fr> = fields.into_iter().map(Into::into).collect();
     let mut out = schema(T::TYPE)
         .map_err(|e| e.to_string())?
-        .decode_public(&frs, true)?;
+        .decode_public(&frs, camel)?;
     Ok(out["v"].take())
+}
+
+/// One input of `<Fn>Inputs::to_json`: its natural JSON form, struct fields named
+/// as declared (`snake_case`), as `inputs.example.json` names them.
+#[doc(hidden)]
+pub fn declared_json<T: Input>(value: &T) -> Result<Value, String> {
+    natural(value, false)
+}
+
+/// `<Fn>Inputs::to_json`'s text: the inputs as an object, by name.
+#[doc(hidden)]
+pub fn inputs_json(inputs: Vec<(&str, Value)>) -> String {
+    let object = inputs
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    serde_json::to_string_pretty(&Value::Object(object)).expect("JSON values print")
 }
 
 /// Argument `i` of an exported call, named `name` (as the client names it), as a
