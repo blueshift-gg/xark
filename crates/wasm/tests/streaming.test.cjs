@@ -4,8 +4,8 @@
 // blocked FFT and its worker passes run). Prerequisites:
 //
 //   xark build examples/sha256
-//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7
-//        # auto picks `minimized` for sha256 (−4.9%) and writes r1cs.stream
+//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form minimized
+//        # the minimized form writes r1cs.stream (`auto` may pick `reduced`)
 //   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 \
 //        --r1cs-form reduced --out examples/sha256/target/xark/sha256-streamable
 //   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 \

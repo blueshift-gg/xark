@@ -215,7 +215,7 @@ pub fn chi(a: Field, b: Field, c: Field) -> Field {
 
 /// SHA-256's choice bit `e ? f : g` as `g + e·(f − g)`: one product, the output a
 /// linear form (zkGolf T3; bellman `Boolean::sha256_ch`, "a(b−c) = ch−c",
-/// https://github.com/zkcrypto/bellman/blob/b726862a4ece8a627e7fea486d77b502a6edbb0b/src/gadgets/boolean.rs#L511-L615).
+/// <https://github.com/zkcrypto/bellman/blob/b726862a4ece8a627e7fea486d77b502a6edbb0b/src/gadgets/boolean.rs#L511-L615>).
 #[gadget]
 pub fn ch(e: Field, f: Field, g: Field) -> Field {
     g + e * (f - g)

@@ -165,7 +165,7 @@ export const Zkyc = new Circuit<ZkycInputs, ZkycPublicInputs, ZkycPublicValues, 
   schema,
   decodePublic,
   client: true,
-  digest: "5b3bf8056f58b33ce69bdd948a44270a",
+  digest: "514f076abbecd83e76da821618a6d19e",
 });
 
 export type ZkycProver = Prover<ZkycInputs, ZkycPublicInputs, ZkycPublicValues, ZkycStructs>;
