@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::time::{Duration, Instant};
 use xark_cli::commands::prove::{ProveArgs, run_with_accelerator};
 use xark_groth16::{Accelerator, Local};
 
@@ -56,8 +57,31 @@ struct TrackedAccelerator {
     inner: Box<dyn Accelerator>,
     backend: Backend,
     available: bool,
+    stats: G1MsmStats,
+}
+
+#[derive(Default)]
+struct G1MsmStats {
     used_g1_chunks: usize,
     cpu_fallback_g1_chunks: usize,
+    used_g1_points: usize,
+    cpu_fallback_g1_points: usize,
+    accelerator_call_wall_time: Duration,
+    declined_call_wall_time: Duration,
+}
+
+impl G1MsmStats {
+    fn record(&mut self, point_count: usize, elapsed: Duration, accepted: bool) {
+        self.accelerator_call_wall_time += elapsed;
+        if accepted {
+            self.used_g1_chunks += 1;
+            self.used_g1_points += point_count;
+        } else {
+            self.cpu_fallback_g1_chunks += 1;
+            self.cpu_fallback_g1_points += point_count;
+            self.declined_call_wall_time += elapsed;
+        }
+    }
 }
 
 impl TrackedAccelerator {
@@ -103,23 +127,34 @@ impl TrackedAccelerator {
             inner,
             backend,
             available,
-            used_g1_chunks: 0,
-            cpu_fallback_g1_chunks: 0,
+            stats: G1MsmStats::default(),
         })
     }
 
     fn report(&self) {
         if self.backend == Backend::Cpu {
             eprintln!("MSM backend: CPU Pippenger");
-        } else if !self.available || self.used_g1_chunks == 0 {
-            eprintln!(
-                "requested {:?} backend handled no G1 chunks; CPU Pippenger handled the MSMs",
-                self.backend
-            );
         } else {
+            let status = if !self.available {
+                "unavailable"
+            } else if self.stats.used_g1_chunks == 0 && self.stats.cpu_fallback_g1_chunks > 0 {
+                "declined all G1 chunks"
+            } else if self.stats.cpu_fallback_g1_chunks > 0 {
+                "partially used; some chunks fell back"
+            } else if self.stats.used_g1_chunks > 0 {
+                "used for all G1 chunks"
+            } else {
+                "selected; no G1 chunks requested"
+            };
             eprintln!(
-                "MSM backend: {:?} handled {} G1 chunks; {} G1 chunks used CPU fallback",
-                self.backend, self.used_g1_chunks, self.cpu_fallback_g1_chunks
+                "MSM backend: {:?}; status={status}; GPU G1 chunks={} points={}; accelerator_call_wall_ms={:.3}; CPU fallback chunks={} points={}; declined_call_wall_ms={:.3}",
+                self.backend,
+                self.stats.used_g1_chunks,
+                self.stats.used_g1_points,
+                self.stats.accelerator_call_wall_time.as_secs_f64() * 1_000.0,
+                self.stats.cpu_fallback_g1_chunks,
+                self.stats.cpu_fallback_g1_points,
+                self.stats.declined_call_wall_time.as_secs_f64() * 1_000.0
             );
         }
     }
@@ -145,13 +180,11 @@ impl Accelerator for TrackedAccelerator {
         compressed: bool,
         scalars: &[xark_groth16::msm::Scalar],
     ) -> Option<Vec<u8>> {
+        let start = Instant::now();
         let result = self.inner.msm(g2, points, compressed, scalars);
-        if !g2 {
-            if result.is_some() {
-                self.used_g1_chunks += 1;
-            } else {
-                self.cpu_fallback_g1_chunks += 1;
-            }
+        let elapsed = start.elapsed();
+        if !g2 && self.backend != Backend::Cpu {
+            self.stats.record(scalars.len(), elapsed, result.is_some());
         }
         result
     }
@@ -178,9 +211,24 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use std::time::Duration;
 
-    use super::{Backend, Cli, Command, OpenclDevice, TrackedAccelerator};
+    use super::{Backend, Cli, Command, G1MsmStats, OpenclDevice, TrackedAccelerator};
     use xark_groth16::Accelerator;
+
+    #[test]
+    fn records_gpu_success_and_decline_totals_without_input_data() {
+        let mut stats = G1MsmStats::default();
+        stats.record(12, Duration::from_millis(5), true);
+        stats.record(7, Duration::from_millis(3), false);
+
+        assert_eq!(stats.used_g1_chunks, 1);
+        assert_eq!(stats.used_g1_points, 12);
+        assert_eq!(stats.cpu_fallback_g1_chunks, 1);
+        assert_eq!(stats.cpu_fallback_g1_points, 7);
+        assert_eq!(stats.accelerator_call_wall_time, Duration::from_millis(8));
+        assert_eq!(stats.declined_call_wall_time, Duration::from_millis(3));
+    }
 
     #[test]
     fn parses_each_msm_backend() {
