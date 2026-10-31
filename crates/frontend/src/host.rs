@@ -47,6 +47,9 @@ enum Intr {
     RequireEq,
     WitnessBegin,
     WitnessEnd,
+    GadgetRecording,
+    GadgetBegin,
+    GadgetEnd,
     ToBitsLookup,
     ToBitsRecord,
     InputField,
@@ -84,6 +87,9 @@ fn intrinsic(name: &str) -> Option<Intr> {
         "require_eq" => Intr::RequireEq,
         "witness_begin" => Intr::WitnessBegin,
         "witness_end" => Intr::WitnessEnd,
+        "gadget_recording" => Intr::GadgetRecording,
+        "gadget_begin" => Intr::GadgetBegin,
+        "gadget_end" => Intr::GadgetEnd,
         "to_bits_lookup" => Intr::ToBitsLookup,
         "to_bits_record" => Intr::ToBitsRecord,
         "input_field" => Intr::InputField,
@@ -180,6 +186,31 @@ impl std::hash::Hasher for StackHasher {
 }
 
 impl Host {
+    /// Record `#[gadget]` calls ([`crate::lower_recording_gadgets`]).
+    pub(crate) fn record_gadgets(&mut self, on: bool) {
+        self.b.record_gadgets = on;
+    }
+
+    /// Why a `#[gadget]` call recorded here can't be its exact template, if it
+    /// can't: passing `what` emitted something a build that doesn't record wouldn't
+    /// have (a packed input's range check, a select's mux), or the call is in a
+    /// witness branch or a `witness_begin` region, where its rows are guarded or not
+    /// emitted. An emission also refuses every other call in the circuit
+    /// ([`Builder::gadget_tainted`]).
+    fn marker_refusal(&mut self, what: &str) -> Option<String> {
+        if self.b.gadget_marked_changed() {
+            let why = format!("passing {what} to the recorder emitted constraints");
+            self.b.gadget_tainted.get_or_insert_with(|| why.clone());
+            Some(why)
+        } else if !self.guards.is_empty() {
+            Some("it runs in a witness branch".into())
+        } else if self.b.witness_only {
+            Some("it runs in a `witness_begin` region".into())
+        } else {
+            None
+        }
+    }
+
     pub fn new(profile: bool, notes: bool, modulus: Option<&str>) -> Self {
         let mut b = Builder::new(profile);
         b.notes = notes;
@@ -1641,6 +1672,9 @@ impl crate::interp::Host for Host {
                 | Intr::HintBit
                 | Intr::WitnessBegin
                 | Intr::WitnessEnd
+                | Intr::GadgetRecording
+                | Intr::GadgetBegin
+                | Intr::GadgetEnd
                 | Intr::Bind
                 | Intr::Panic
                 | Intr::RequireEq
@@ -1921,6 +1955,29 @@ impl crate::interp::Host for Host {
             }
             Intr::WitnessBegin => self.b.witness_only = true,
             Intr::WitnessEnd => self.b.witness_only = false,
+            // A `#[gadget]` call's boundary: `gadget_recording` → bool, then (only when
+            // recording) `gadget_begin(name, len, inputs, n)` / `gadget_end(outputs, n)`.
+            Intr::GadgetRecording => {
+                self.b.gadget_mark();
+                return Ok(Some(V::i32(self.b.record_gadgets as u32)));
+            }
+            Intr::GadgetBegin | Intr::GadgetEnd if !self.b.record_gadgets => {}
+            Intr::GadgetBegin => {
+                let name = m.read_bytes(ptr_of(a[0])?, int_of(a[1], "len")? as u32)?;
+                let name = String::from_utf8_lossy(&name).into_owned();
+                let inputs = self.get_fields(m, a[2], int_of(a[3], "len")? as usize)?;
+                let refused = self.marker_refusal("its inputs");
+                let mut stack = Vec::new();
+                m.call_stack_into(&mut stack);
+                self.b.gadget_begin(name, inputs, refused, stack);
+            }
+            Intr::GadgetEnd => {
+                let outputs = self.get_fields(m, a[0], int_of(a[1], "len")? as usize)?;
+                let refused = self.marker_refusal("its result");
+                self.b
+                    .gadget_end(outputs, refused)
+                    .map_err(CompileError::new)?;
+            }
             Intr::ToBitsLookup => {
                 // (x, n, out) → 1 if `out` was filled (constant / shortcut / cache hit).
                 let x = self.get_field(m, a[0])?;

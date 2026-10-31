@@ -13,12 +13,14 @@
 mod builder;
 mod debuginfo;
 mod error;
+mod gadgets;
 mod host;
 mod interp;
 mod output;
 mod templates;
 
 pub use error::{CompileError, CompileResult, ErrorSite};
+pub use gadgets::{GadgetTemplate, RecordedCall};
 pub use output::LowerOutput;
 
 /// A lowered circuit and the name of its `#[circuit]` fn.
@@ -41,11 +43,29 @@ pub fn lower_module(
     profile: bool,
     notes: bool,
 ) -> CompileResult<Lowered> {
+    lower(wasm, field, profile, notes, false)
+}
+
+/// [`lower_module`], also recording every `#[gadget]` call as a template
+/// ([`LowerOutput::gadgets`]) in a module built with
+/// [`BuildOptions::gadget_markers`].
+pub fn lower_recording_gadgets(wasm: &[u8], field: xark_ir::FieldSpec) -> CompileResult<Lowered> {
+    lower(wasm, field, false, false, true)
+}
+
+fn lower(
+    wasm: &[u8],
+    field: xark_ir::FieldSpec,
+    profile: bool,
+    notes: bool,
+    record_gadgets: bool,
+) -> CompileResult<Lowered> {
     let timing = std::env::var_os("XARK_FRONTEND_TIME").is_some();
     let t = std::time::Instant::now();
     // Sites are always recorded (an interned id per constraint): every build
     // writes `sources.json`. `profile` adds the full per-constraint attribution.
     let mut host = host::Host::new(true, notes, field.modulus_decimal.as_deref());
+    host.record_gadgets(record_gadgets);
     let module = interp::Module::parse(wasm)?;
     let mut machine = interp::Machine::new(&module)?;
     machine
@@ -69,6 +89,7 @@ pub fn lower_module(
     let t = std::time::Instant::now();
     let mut output = host.finish(field).map_err(|e| locate(&module, e))?;
     let mut r = debuginfo::Resolver::new(&module);
+    gadgets::locate(&mut output.gadgets, &mut r);
     let resolved: Vec<debuginfo::Attribution> = sites.iter().map(|s| r.attribute(s)).collect();
     let sources = source_map(&output.profile, &resolved);
     if profile {
@@ -313,6 +334,9 @@ pub struct BuildOptions {
     /// text), left out of the output — e.g. those a host `cargo check` of the
     /// same crate just printed.
     pub skip_rendered: std::collections::HashSet<String>,
+    /// Build with `--cfg xark_gadgets`: `#[gadget]` calls pass their boundaries to
+    /// the compiler, for [`lower_recording_gadgets`]. The circuit is the same.
+    pub gadget_markers: bool,
 }
 
 impl Default for BuildOptions {
@@ -321,6 +345,7 @@ impl Default for BuildOptions {
             line_tables: true,
             json_diagnostics: false,
             skip_rendered: Default::default(),
+            gadget_markers: false,
         }
     }
 }
@@ -447,8 +472,13 @@ pub fn build_crate_with(
     ensure_wasm_target(crate_dir)?;
     let _lock = lock_build(target_dir)?;
     let mut cmd = std::process::Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+    let rustflags = if opts.gadget_markers {
+        "--cfg xark --cfg xark_gadgets"
+    } else {
+        "--cfg xark"
+    };
     cmd.current_dir(crate_dir)
-        .env("RUSTFLAGS", "--cfg xark")
+        .env("RUSTFLAGS", rustflags)
         .env("CARGO_TARGET_DIR", target_dir)
         .args([
             "rustc",

@@ -101,7 +101,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Compare circuit digests
-        run: cargo xtask digests --check --toolchain ${{ matrix.toolchain }}
+        # One circuit at a time: the keyed digest reduces and minimizes each circuit,
+        # and four at once exceed the runner's memory.
+        run: cargo xtask digests --check --toolchain ${{ matrix.toolchain }} --jobs 1
 
   msrv:
     # The minimum Rust (`rust-version`, 1.89) builds the CLI and every crate, not

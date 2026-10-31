@@ -2,11 +2,14 @@
 //!
 //! * `digests`: every example circuit's R1CS digest, against `tests/stable-digests.txt`;
 //! * `difftest`: every example on its own test inputs, adversarially;
+//! * `lean-export`: a `#[gadget]`'s exact R1CS as Lean, for `formal/`'s proofs;
 //! * `publish`: the crates in dependency order: checked, rehearsed, or uploaded;
 //! * `wasm`: xark-wasm's JavaScript packages, into `crates/wasm/dist/`.
 
+mod coverage;
 mod difftest;
 mod digests;
+mod lean;
 mod publish;
 mod wasm;
 
@@ -30,6 +33,9 @@ enum Task {
     Digests(digests::Args),
     /// Every example on its own test inputs, decided by exhaustive witness search.
     Difftest(difftest::Args),
+    /// A `#[gadget]`'s exact R1CS as Lean (formal/Formal/Templates/), or with
+    /// --check, every proven gadget's against its committed template.
+    LeanExport(lean::Args),
     /// The crates in dependency order: checked (--plan), rehearsed (--dry-run) or
     /// uploaded (--execute).
     Publish(publish::Args),
@@ -42,6 +48,7 @@ fn main() -> Result<()> {
     match Cli::parse().task {
         Task::Digests(a) => digests::run(a),
         Task::Difftest(a) => difftest::run(a),
+        Task::LeanExport(a) => lean::run(a),
         Task::Publish(a) => publish::run(a),
         Task::Wasm(a) => wasm::run(a),
     }
@@ -115,6 +122,11 @@ pub fn parallel<T: Send>(items: Vec<T>, jobs: usize, f: impl Fn(T) + Sync) {
 
 /// Half the cores, at most 4: what a machine running heavy builds can take.
 pub fn default_jobs() -> usize {
+    // `XARK_JOBS` caps it: CI's 16 GB runner holds one marked build of the largest
+    // example, not two.
+    if let Some(n) = std::env::var("XARK_JOBS").ok().and_then(|s| s.parse().ok()) {
+        return n;
+    }
     let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
     (cores / 2).clamp(1, 4)
 }

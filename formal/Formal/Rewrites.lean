@@ -75,9 +75,11 @@ def subst (l : LC F V) (v : V) (e : LC F V) : LC F V :=
 def Indep (l : LC F V) (v : V) : Prop :=
   ∀ σ x, l.eval (Function.update σ v x) = l.eval σ
 
+omit [DecidableEq V] in
 @[simp] theorem eval_var (x : V) (σ : V → F) : (var x : LC F V).eval σ = σ x := by
   simp [eval, var]
 
+omit [DecidableEq V] in
 @[simp] theorem eval_cst (c : F) (σ : V → F) : (cst c : LC F V).eval σ = c := by
   simp [eval, cst]
 
@@ -109,6 +111,7 @@ private theorem sum_filter_update (ts : List (F × V)) (v : V) (σ : V → F) (x
   have : t.2 ≠ v := by simpa using (List.mem_filter.mp ht).2
   rw [Function.update_of_ne this]
 
+omit [DecidableEq V] in
 private theorem sum_scaled (ts : List (F × V)) (k : F) (σ : V → F) :
     ((ts.map fun t => (k * t.1, t.2)).map fun t => t.1 * σ t.2).sum =
       k * (ts.map fun t => t.1 * σ t.2).sum := by
@@ -178,6 +181,7 @@ theorem elim_sound (S : List (Row F V)) (v : V) (e : LC F V) (he : e.Indep v)
     rw [Function.update_self, he] at hv
     rwa [← hv]
 
+omit [DecidableEq V] in
 /-- Dropping a row that the rest already implies changes nothing. -/
 theorem sat_drop (S : List (Row F V)) (r : Row F V) (h : ∀ σ, Sat S σ → r.Sat σ)
     (σ : V → F) : Sat (r :: S) σ ↔ Sat S σ := by
@@ -278,6 +282,7 @@ the requirement exactly where the arm is taken, and nothing where it isn't
 arm's hints are pinned to `0` (`pin_dead`); and an untaken arm's values never
 matter (`select_taken`). -/
 
+omit [DecidableEq V] in
 /-- A guarded row `G · D = 0` holds iff `D = 0` wherever `G = 1`. -/
 theorem gated_sat (G D : LC F V) (σ : V → F) (hG : G.eval σ = 0 ∨ G.eval σ = 1) :
     (⟨G, D, LC.cst 0⟩ : Row F V).Sat σ ↔ (G.eval σ = 1 → D.eval σ = 0) := by

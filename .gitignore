@@ -9,6 +9,7 @@ Cargo.lock.bak
 /*.rlib
 /target/test-out/
 examples/*/Cargo.lock
+formal/templates/*/Cargo.lock
 
 # xark-wasm packages
 crates/wasm/dist/

@@ -1,0 +1,6 @@
+# Calls of proven #[gadget]s the check doesn't cover (refused, different rows, or LC
+# plugs whose Assumptions the caller must enforce: name those caller rows), accepted
+# with a reason (`cargo xtask lean-export --coverage`; see formal/README.md). One per line:
+#   gadget | circuit | call site | classification | reason
+# copied from the check's output. A later ticket proves the variant (and removes the
+# entry) or the reason says why the rows are sound without a proof.

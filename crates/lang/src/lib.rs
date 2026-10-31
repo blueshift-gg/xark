@@ -149,6 +149,46 @@ pub use xark_prover as prover;
 pub mod host;
 #[doc(hidden)]
 pub use crate::lang::bytes_to_fields;
+
+/// The boundary `#[gadget]` puts around a gadget's body: its name and its inputs'
+/// and outputs' field elements, as `xark.*` imports. Only a build with
+/// `--cfg xark_gadgets` (`cargo xtask lean-export`'s harness builds) has them, and
+/// even there the values are passed only while the compiler records gadget calls.
+/// Every other build compiles them to nothing: no imports, no writes.
+#[doc(hidden)]
+pub mod __gadget {
+    use crate::input::{Input, Writer};
+
+    /// How many field elements `value` writes.
+    pub fn len<T: Input>(_value: &T) -> usize {
+        T::LEN
+    }
+
+    pub fn begin(name: &str, len: usize, write: impl FnOnce(&mut Writer<'_>)) {
+        #[cfg(all(xark, xark_gadgets, target_arch = "wasm32"))]
+        if crate::wasm::gadget_recording() {
+            crate::wasm::gadget_begin(name, &fields(len, write));
+        }
+        #[cfg(not(all(xark, xark_gadgets, target_arch = "wasm32")))]
+        let _ = (name, len, write);
+    }
+
+    pub fn end(len: usize, write: impl FnOnce(&mut Writer<'_>)) {
+        #[cfg(all(xark, xark_gadgets, target_arch = "wasm32"))]
+        if crate::wasm::gadget_recording() {
+            crate::wasm::gadget_end(&fields(len, write));
+        }
+        #[cfg(not(all(xark, xark_gadgets, target_arch = "wasm32")))]
+        let _ = (len, write);
+    }
+
+    #[cfg(all(xark, xark_gadgets, target_arch = "wasm32"))]
+    fn fields(len: usize, write: impl FnOnce(&mut Writer<'_>)) -> alloc::vec::Vec<crate::Field> {
+        let mut out = alloc::vec![crate::Field::zero(); len];
+        write(&mut Writer::new(&mut out));
+        out
+    }
+}
 // The recognized scalar-equality intrinsic every `RequireEqCircuit` impl bottoms
 // out at — re-exported (doc-hidden) so the compiler's intrinsic scan finds it by
 // name. Authors never touch it; they write `require_eq`.
@@ -158,5 +198,5 @@ pub use crate::lang::__xark_require_eq_scalar;
 // `#[input(number(bits = B))]` or `#[input(bytes)]` a standard encoding and its host
 // conversions), `xark::Enum` for a fieldless enum, client functions for an `impl`.
 // (The attribute shares its name with the `input` module: macros have their own
-// namespace.)
-pub use xark_macros::{circuit, input};
+// namespace.) `#[gadget]` marks a gadget function as a named template (`__gadget`).
+pub use xark_macros::{circuit, gadget, input};

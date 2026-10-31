@@ -2157,7 +2157,7 @@ theorem aes128_ciphertext_bits_sound [Fact (Nat.Prime r)]
   have h_step' :
       h.rounds ⟨10, by decide⟩ =
         aesRoundStep (h.rounds ⟨9, by decide⟩) (h.rk ⟨10, by decide⟩) true := by
-    convert h_step using 2
+    convert h_step using 2 <;> simp
   rw [h.hout, h_step']
   exact hOut i j
 
