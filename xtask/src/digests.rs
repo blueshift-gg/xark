@@ -151,7 +151,7 @@ fn digest(dir: &std::path::Path, target: &std::path::Path) -> Result<(String, St
 
 /// The `circuit.xbc` the circuit crate at `dir` builds to, checked against the flat
 /// lowering.
-fn build(dir: &std::path::Path, target: &std::path::Path) -> Result<Vec<u8>> {
+pub(crate) fn build(dir: &std::path::Path, target: &std::path::Path) -> Result<Vec<u8>> {
     let wasm = xark_frontend::build_crate(dir, target).map_err(|e| anyhow::anyhow!("{e}"))?;
     let out = xark_frontend::lower_module(&wasm, xark_ir::FieldSpec::named("bn254"), false, false)
         .map_err(|e| anyhow::anyhow!("{e}"))?
@@ -172,7 +172,7 @@ pub fn keyed_digest(xbc: &[u8]) -> Result<String> {
 }
 
 /// The digest of a circuit whose keys hold `reduced` or `minimized`.
-fn forms_digest(reduced: &R1csProgram, minimized: &R1csProgram) -> Result<String> {
+pub(crate) fn forms_digest(reduced: &R1csProgram, minimized: &R1csProgram) -> Result<String> {
     let decimal = reduced
         .field
         .modulus_decimal

@@ -3,6 +3,7 @@
 //! * `digests`: every example circuit's R1CS digest, against `tests/stable-digests.txt`;
 //! * `difftest`: every example on its own test inputs, adversarially;
 //! * `lean-export`: a `#[gadget]`'s exact R1CS as Lean, for `formal/`'s proofs;
+//! * `minimize-check`: every example's minimizer runs, certified by the Lean checker;
 //! * `publish`: the crates in dependency order: checked, rehearsed, or uploaded;
 //! * `wasm`: xark-wasm's JavaScript packages, into `crates/wasm/dist/`.
 
@@ -10,6 +11,7 @@ mod coverage;
 mod difftest;
 mod digests;
 mod lean;
+mod minimize_check;
 mod publish;
 mod wasm;
 
@@ -36,6 +38,9 @@ enum Task {
     /// A `#[gadget]`'s exact R1CS as Lean (formal/Formal/Templates/), or with
     /// --check, every proven gadget's against its committed template.
     LeanExport(lean::Args),
+    /// Every minimizer run on every example's keyed path, certified by the Lean
+    /// checker (formal/MinimizeCheck.lean).
+    MinimizeCheck(minimize_check::Args),
     /// The crates in dependency order: checked (--plan), rehearsed (--dry-run) or
     /// uploaded (--execute).
     Publish(publish::Args),
@@ -49,6 +54,7 @@ fn main() -> Result<()> {
         Task::Digests(a) => digests::run(a),
         Task::Difftest(a) => difftest::run(a),
         Task::LeanExport(a) => lean::run(a),
+        Task::MinimizeCheck(a) => minimize_check::run(a),
         Task::Publish(a) => publish::run(a),
         Task::Wasm(a) => wasm::run(a),
     }

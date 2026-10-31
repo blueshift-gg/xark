@@ -237,6 +237,29 @@ Reducing constants modulo `p` needs no theorem: the rows are over `ZMod p`, wher
 behind each difference (SHA-256 `Maj` reusing the previous round's `a ∧ b`, a
 3-limb square's repeated cross products, Poseidon's constant capacity-lane S-box).
 
+[`Formal/Minimize/`](Formal/Minimize/) — **the keyed rows are certified against the
+minimizer's input.** Every minimizer run on the keyed path (each template body and
+the top stream in `expand_function_blob_reduced`, then the global `xark_ir::minimize`)
+writes a certificate: its steps (variable, defining row, substituted form) and, for each
+original row, its fate and the multipliers of the substitutions made in it. The checker
+[`Check.lean`](Formal/Minimize/Check.lean), compiled as `lake exe minimize_check` (it
+imports only core Lean), accepts or refuses it, and
+[`Sound.lean`](Formal/Minimize/Sound.lean) proves what acceptance means over `ZMod r`,
+in `Rewrites.lean`'s `Sat`:
+
+| Theorem | Statement |
+|---------|-----------|
+| `check_sound` | every solution `τ` of the minimized rows extends to the original rows: `Sat (orig P) (recompute P τ)`, where `recompute` sets only the eliminated variables, each to its form (`elim_sound`'s substitution, from the last step back) |
+| `check_complete` | every solution `σ` of the original rows solves the minimized rows, and `recompute P σ = σ` (the checker refuses no honest certificate) |
+| `check_internal` | every eliminated variable is listed `Internal`: no public or private input |
+| `check_inputs` | the output lists every non-internal input variable with its visibility |
+
+`cargo xtask minimize-check` runs the checker on every example and requires the
+certified rows to hash to the example's line in `tests/stable-digests.txt`, so the
+certified rows are the keyed rows. Trusted: the certificate encoding (Rust writer,
+`MinimizeCheck.lean` reader) and that the writer gives the minimizer's real input and
+output rows.
+
 ## Proofs over the exact R1CS: gadget templates
 
 The theorems above restate a gadget's rows by hand. A **template** proof is about

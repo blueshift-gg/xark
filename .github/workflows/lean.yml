@@ -10,6 +10,8 @@ name: Lean (gadget soundness)
 # `templates` re-exports every proven gadget's R1CS (`cargo xtask lean-export --check`)
 # and fails if the code no longer emits what the proofs were checked against, then
 # checks every example's calls of those gadgets emit that R1CS (`--coverage`).
+# `minimize` runs the certified minimizer's Lean checker (`formal/MinimizeCheck.lean`) on
+# every minimizer run of every example's keyed rows, and its mutation test.
 
 on:
   push:
@@ -48,6 +50,32 @@ jobs:
         run: cargo xtask lean-export --coverage
         env:
           XARK_JOBS: 1
+
+  minimize:
+    name: keyed rows certified (minimizer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install elan (Lean toolchain manager)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Every minimizer run of every example's keyed rows passes the Lean checker
+        # Builds every example; each template body's, the top stream's and the global
+        # pass's minimization must be accepted by `lake exe minimize_check`, and the
+        # certified rows must hash to tests/stable-digests.txt.
+        run: cargo xtask minimize-check
+      - name: A mutated minimizer is refused
+        run: cargo test -p xtask --release minimize_check -- --ignored
 
   lean:
     name: prove (gadget soundness)
