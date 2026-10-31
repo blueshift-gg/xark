@@ -114,7 +114,11 @@ fn certify(checker: &Path, name: &str, target: &Path) -> Result<Timing> {
     let minimize = t.elapsed();
     let digest = crate::digests::forms_digest(&reduced, &minimized)?;
     let pinned = std::fs::read_to_string(crate::root().join("tests/stable-digests.txt"))?;
-    if !pinned.lines().any(|l| l == format!("{name} {digest}")) {
+    // `<example> <keyed> <flat>`: the keyed digest.
+    if !pinned
+        .lines()
+        .any(|l| l.starts_with(&format!("{name} {digest} ")))
+    {
         bail!("the certified rows aren't the pinned keyed rows (digest {digest})");
     }
     certs.push(Certificate {
