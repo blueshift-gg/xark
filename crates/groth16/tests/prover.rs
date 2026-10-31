@@ -26,7 +26,7 @@ use rand_chacha::ChaCha20Rng;
 use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{
     BytecodeSource, ConstraintSource, DomainKind, FftConfig, InMemoryPk, ProgramSource, ProveError,
-    ProverConfig, SerializedPk, prove, qap,
+    ProverConfig, SerializedPk, prove, prove_accelerated_with_rng, qap,
 };
 use xark_groth16::{Proof, ProvingKey, VerifyingKey};
 use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
@@ -766,6 +766,26 @@ fn worker_decomposition_is_byte_identical() {
             "accelerator was not exercised ({} calls)",
             pool.calls
         );
+
+        let mut rng_accel = FakePool {
+            tile: 6,
+            rows_per_job: 3,
+            parts: 4,
+            calls: 0,
+            ffts: 0,
+        };
+        let accelerated = prove_accelerated_with_rng(
+            &src,
+            &z,
+            &mut SerializedPk::from_bytes(&bytes).unwrap(),
+            &mut ChaCha20Rng::seed_from_u64(4),
+            &cfg,
+            &mut (),
+            &mut rng_accel,
+        )
+        .unwrap();
+        assert_eq!(accelerated, want);
+        assert!(rng_accel.calls > 10);
     }
 }
 

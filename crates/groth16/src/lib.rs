@@ -34,7 +34,8 @@ pub use accel::{Accelerator, Local};
 pub use fft::{Domain, DomainKind, FftConfig};
 pub use pk::{InMemoryPk, PkSource, SerializedPk};
 pub use prover::{
-    Probe, ProveError, ProverConfig, prove, prove_accelerated, prove_with_randomness,
+    Probe, ProveError, ProverConfig, prove, prove_accelerated, prove_accelerated_with_rng,
+    prove_with_randomness,
 };
 pub use push::PushProver;
 pub use r1cs::{

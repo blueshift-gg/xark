@@ -1,0 +1,27 @@
+[workspace]
+
+[package]
+name = "xark-gpu-cli"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "xark-gpu"
+path = "src/main.rs"
+
+[features]
+default = []
+cuda-msm = ["dep:xark-groth16-cuda"]
+custom-cuda-msm = ["cuda-msm", "xark-groth16-cuda/custom-cuda"]
+opencl-msm = ["dep:xark-groth16-opencl"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+xark-cli = { path = "../cli" }
+xark-groth16 = { path = "../groth16" }
+xark-groth16-cuda = { path = "../groth16-cuda", optional = true }
+xark-groth16-opencl = { path = "../groth16-opencl", optional = true }

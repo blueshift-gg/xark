@@ -379,3 +379,24 @@ where
     let s = Fr::rand(rng);
     prove_with_randomness(src, z, pk, r, s, cfg, &mut ())
 }
+
+/// Prove with randomness drawn from `rng`, routing MSM chunks through `accel`.
+/// The RNG is sampled in the same `r`, then `s` order as [`prove`].
+pub fn prove_accelerated_with_rng<S, P, R>(
+    src: &S,
+    z: &[Fr],
+    pk: &mut P,
+    rng: &mut R,
+    cfg: &ProverConfig,
+    probe: &mut dyn Probe,
+    accel: &mut dyn Accelerator,
+) -> Result<Proof<Bn254>, ProveError>
+where
+    S: ConstraintSource + ?Sized,
+    P: PkSource + ?Sized,
+    R: RngCore,
+{
+    let r = Fr::rand(rng);
+    let s = Fr::rand(rng);
+    prove_accelerated(src, z, pk, r, s, cfg, probe, accel)
+}

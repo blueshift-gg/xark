@@ -17,7 +17,7 @@ use rand_chacha::ChaCha20Rng;
 
 use xark_backend::proof::ProofBundle;
 use xark_backend::serialization::write_public_inputs;
-use xark_groth16::{ConstraintSource, PkSource};
+use xark_groth16::{Accelerator, ConstraintSource, Local, PkSource};
 use xark_prover::{XarkCircuit, fr_from_decimal};
 
 use super::{resolve_input_ids, setup, stream_soundness};
@@ -108,6 +108,11 @@ impl RngCore for ProveRng {
 impl CryptoRng for ProveRng {}
 
 pub fn run(args: ProveArgs) -> Result<()> {
+    run_with_accelerator(args, &mut Local)
+}
+
+/// Run the normal streaming CLI prove path with a caller-selected accelerator.
+pub fn run_with_accelerator(args: ProveArgs, accelerator: &mut dyn Accelerator) -> Result<()> {
     let project = XarkProject::resolve(args.path.clone())?;
     let pk_path = args
         .proving_key
@@ -169,6 +174,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         &inputs,
         sources.as_ref(),
         timing,
+        accelerator,
     )?;
     write_outputs(&args, &proof_out, &out_dir, proof, public)
 }
@@ -230,6 +236,7 @@ fn prove_streaming(
     inputs: &BTreeMap<String, String>,
     sources: Option<&xark_ir::SourceMap>,
     timing: bool,
+    accelerator: &mut dyn Accelerator,
 ) -> Result<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
     let t = std::time::Instant::now();
     let bytes = std::fs::read(xbc).with_context(|| format!("reading {}", xbc.display()))?;
@@ -352,8 +359,16 @@ fn prove_streaming(
         }),
         ..xark_groth16::ProverConfig::default()
     };
-    let proof = xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg)
-        .map_err(|e| anyhow::anyhow!("streaming prove: {e}"))?;
+    let proof = xark_groth16::prove_accelerated_with_rng(
+        &*src,
+        &z,
+        &mut pk,
+        &mut rng,
+        &cfg,
+        &mut (),
+        accelerator,
+    )
+    .map_err(|e| anyhow::anyhow!("streaming prove: {e}"))?;
     if let Some(tmp) = tee_tmp {
         if pk.finish_tee()? {
             fs::rename(&tmp, &decoded).with_context(|| format!("writing {}", decoded.display()))?;

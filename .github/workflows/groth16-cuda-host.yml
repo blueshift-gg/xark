@@ -6,7 +6,9 @@ on:
     paths:
       - .github/workflows/groth16-cuda-host.yml
       - crates/groth16-cuda/**
+      - crates/groth16-gpu-cli/**
       - crates/groth16/**
+      - crates/cli/**
       - crates/ir/**
       - crates/prover/**
       - crates/backend/**
@@ -46,6 +48,12 @@ jobs:
 
       - name: Compile adapter tests
         run: cargo test --manifest-path crates/groth16-cuda/Cargo.toml --no-run
+
+      - name: Compile CUDA CLI adapter
+        run: cargo check --manifest-path crates/groth16-gpu-cli/Cargo.toml --features cuda-msm
+
+      - name: Test GPU CLI backend selection
+        run: cargo test --manifest-path crates/groth16-gpu-cli/Cargo.toml --features cuda-msm --bin xark-gpu
 
       - name: Check host-side CUDA references
         run: make -C crates/groth16/cuda test-host
