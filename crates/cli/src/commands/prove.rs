@@ -171,10 +171,12 @@ pub fn run_with_accelerator(args: ProveArgs, accelerator: &mut dyn Accelerator) 
         &xbc,
         &pk_path,
         kind,
-        &inputs,
-        sources.as_ref(),
-        timing,
-        accelerator,
+        StreamingContext {
+            inputs: &inputs,
+            sources: sources.as_ref(),
+            timing,
+            accelerator,
+        },
     )?;
     write_outputs(&args, &proof_out, &out_dir, proof, public)
 }
@@ -224,6 +226,13 @@ enum StreamKind {
     RowFile(PathBuf),
 }
 
+struct StreamingContext<'a> {
+    inputs: &'a BTreeMap<String, String>,
+    sources: Option<&'a xark_ir::SourceMap>,
+    timing: bool,
+    accelerator: &'a mut dyn Accelerator,
+}
+
 /// The streaming path: solve by streaming the hint
 /// program, then prove with `xark-groth16` — rows expanded window-by-window from
 /// the bytecode and the key read chunk-by-chunk, so neither the R1CS nor the key
@@ -233,11 +242,14 @@ fn prove_streaming(
     xbc: &std::path::Path,
     pk_path: &std::path::Path,
     kind: StreamKind,
-    inputs: &BTreeMap<String, String>,
-    sources: Option<&xark_ir::SourceMap>,
-    timing: bool,
-    accelerator: &mut dyn Accelerator,
+    context: StreamingContext<'_>,
 ) -> Result<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
+    let StreamingContext {
+        inputs,
+        sources,
+        timing,
+        accelerator,
+    } = context;
     let t = std::time::Instant::now();
     let bytes = std::fs::read(xbc).with_context(|| format!("reading {}", xbc.display()))?;
     let fingerprint = super::sha256_hex(&bytes);

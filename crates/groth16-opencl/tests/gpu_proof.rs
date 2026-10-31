@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
-use ark_bn254::{Fr, G1Affine};
-use ark_ec::AffineRepr;
-use ark_serialize::{CanonicalSerialize, Compress};
+use ark_bn254::Fr;
+use ark_serialize::Compress;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use xark_groth16::{
