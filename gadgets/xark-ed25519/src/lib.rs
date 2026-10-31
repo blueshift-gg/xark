@@ -76,25 +76,28 @@ fn assert_scalar_below_order(bits: [Field; 256]) {
 }
 
 // ===========================================================================
-// SOUND LAZY extended-coordinate path (3×85 pseudo-Mersenne, boundary-only
-// reduction). Alongside the affine macro gadget above. Point = [X,Y,Z,T].
+// EdDSA verification by division certificates and fake GLV (8 × 32-bit limbs).
 // ===========================================================================
-use xark_bignum::{
-    D_25519, P_25519_L as PL, ext_add_25519 as eadd, ext_double_25519 as edbl,
-    finalize_25519 as fin, modulus_limbs, mul_lazy_25519 as mul, range_check_limbs,
-    weak_reduce_25519 as wr,
-};
+mod cert;
+mod curve;
+#[doc(hidden)]
+pub use cert::{Fe, mul_cert_25519};
+#[doc(hidden)]
+pub use curve::{ed_add_check, ed_double_check, ed_f_check, ed_on_curve_check, ed_torsion_check};
+
+use curve::{Pt, TPt, add, double, neg, on_curve, torsion, with_f};
+use xark::{witness_begin, witness_end};
+use xark_bignum::{modulus_limbs, one_hot8, require_lt};
 
 type L3 = [Field; 3];
-type Ext = [L3; 4];
+type L4 = [Field; 4];
 
-// A base-field element in the lazy path's 3×85-bit limb layout (distinct from the
+// A base-field element in the public input's 3×85-bit limb layout (distinct from the
 // affine gadget's `Fp` at 3×86). Only the input-flatten wrapper, so the
 // `ed25519_verify` example can take aggregate `Point` coordinates: storage only, no
-// `fp!` operators (`2²⁵⁵ − 19` leaves 3×85 limbs no headroom for them; the lazy path
-// reduces with its own carries).
+// `fp!` operators; the verifier re-limbs it to 8 × 32 bits.
 xark_bignum::fp!(storage pub FpL, 3, 85);
-/// An Ed25519 affine point with 3×85-bit coordinates — the lazy path's public
+/// An Ed25519 affine point with 3×85-bit coordinates — the verifier's public
 /// input type (`x`/`y` each flatten to `<name>.x.limbs[0..2]` / `<name>.y.limbs`).
 #[derive(Clone, Copy, Debug)]
 pub struct PointL {
@@ -130,171 +133,293 @@ impl xark::Input for PointL {
     }
 }
 
-const BX85: L3 = modulus_limbs::<3, 85>(
-    "15112221349535400772501151409588531511454012693041857206046113283949847762202",
+/// The group order `L` (4 × 64-bit limbs).
+const LL: L4 = modulus_limbs::<4, 64>(
+    "7237005577332262213973186563042994240857116359379907606001950938285454250989",
 );
-const BY85: L3 = modulus_limbs::<3, 85>(
-    "46316835694926478169428394003475163141307993866256225615783033603165251855960",
+/// `L⁻¹ mod r` (BN254's scalar field): the witness region's exact quotients.
+const LINV: Field = Field::constant(
+    "13190247080771224628580549526763007273965312965423810974879048037356625225145",
 );
+/// `2¹²⁹ mod L`.
+const TWO129: L4 = modulus_limbs::<4, 64>("680564733841876926926749214863536422912");
+/// Windows of two digit bits per coefficient: `cₘ = kₘ + 2¹²⁹ < 2¹³⁰`.
+const WINDOWS: usize = 65;
+
+// `COMB`: the fixed-base comb tables (`build.rs`).
+include!(concat!(env!("OUT_DIR"), "/comb.rs"));
 
 fn f0() -> Field {
     Field::from(0u8)
 }
-fn one3() -> L3 {
-    [Field::from(1u8), f0(), f0()]
-}
-fn id_e() -> Ext {
-    [[f0(); 3], one3(), one3(), [f0(); 3]]
+fn pow2(e: u32) -> Field {
+    cert::pow2(e)
 }
 
-fn to_ext(x: L3, y: L3) -> Ext {
-    [x, y, one3(), mul(x, y)]
-}
-fn dbl_e(p: Ext) -> Ext {
-    let (a, b, c, d) = edbl(p[0], p[1], p[2]);
-    [a, b, c, d]
-}
-fn add_e(p: Ext, q: Ext) -> Ext {
-    let (a, b, c, d) = eadd(p[0], p[1], p[2], p[3], q[0], q[1], q[2], q[3]);
-    [a, b, c, d]
+/// `Σᵢ 2ⁱ·bits[o + i]` for `i < n`.
+fn recompose(bits: &[Field], o: usize, n: usize) -> Field {
+    let mut acc = f0();
+    let mut i = n;
+    while i > 0 {
+        i -= 1;
+        acc = acc + acc + bits[o + i];
+    }
+    acc
 }
 
-fn mux3(s: Field, a: L3, b: L3) -> L3 {
+/// A coordinate's 3 × 85-bit public limbs as 8 × 32-bit limbs, by the bits of each
+/// limb (`to_bits::<85>`, which also bounds the limbs below `2⁸⁵`).
+fn limbs32(x: L3) -> Fe {
+    let mut bits = [f0(); 256];
+    let mut l = 0;
+    while l < 3 {
+        let b = x[l].to_bits::<85>();
+        let mut i = 0;
+        while i < 85 {
+            bits[85 * l + i] = b[i];
+            i += 1;
+        }
+        l += 1;
+    }
+    let mut out = [f0(); 8];
+    let mut j = 0;
+    while j < 8 {
+        out[j] = recompose(&bits, 32 * j, 32);
+        j += 1;
+    }
+    out
+}
+
+/// A public point: limbs below `2⁸⁵`, canonical coordinates (`< p`, so each point has
+/// one accepted encoding) and on the curve.
+fn point_in(x: L3, y: L3) -> Pt {
+    let p = [limbs32(x), limbs32(y)];
+    require_lt::<3, 85>(x, xark_bignum::P1_25519_L);
+    require_lt::<3, 85>(y, xark_bignum::P1_25519_L);
+    on_curve(p[0], p[1]);
+    p
+}
+
+/// 256 bits as 4 × 64-bit limbs.
+fn limbs64(bits: [Field; 256]) -> L4 {
     [
-        b[0] + s * (a[0] - b[0]),
-        b[1] + s * (a[1] - b[1]),
-        b[2] + s * (a[2] - b[2]),
+        recompose(&bits, 0, 64),
+        recompose(&bits, 64, 64),
+        recompose(&bits, 128, 64),
+        recompose(&bits, 192, 64),
     ]
 }
-fn mux_e(s: Field, a: Ext, b: Ext) -> Ext {
-    [
-        mux3(s, a[0], b[0]),
-        mux3(s, a[1], b[1]),
-        mux3(s, a[2], b[2]),
-        mux3(s, a[3], b[3]),
-    ]
-}
-fn select16_e(t: [Ext; 16], b3: Field, b2: Field, b1: Field, b0: Field) -> Ext {
-    let mut l1 = [id_e(); 8];
-    let mut j = 0usize;
-    while j < 8usize {
-        l1[j] = mux_e(b0, t[2 * j + 1], t[2 * j]);
-        j += 1;
-    }
-    let mut l2 = [id_e(); 4];
-    let mut j = 0usize;
-    while j < 4usize {
-        l2[j] = mux_e(b1, l1[2 * j + 1], l1[2 * j]);
-        j += 1;
-    }
-    let mut l3 = [id_e(); 2];
-    let mut j = 0usize;
-    while j < 2usize {
-        l3[j] = mux_e(b2, l2[2 * j + 1], l2[2 * j]);
-        j += 1;
-    }
-    mux_e(b3, l3[1], l3[0])
-}
 
-/// Sound on-curve check for an affine (x,y): canonical coordinates (`< p`, so each
-/// point has one accepted encoding), then −x²+y² == 1 + d·x²·y² (mod p), compared
-/// canonically.
-fn on_curve_l(x: L3, y: L3) {
-    range_check_limbs::<3, 85>(x);
-    range_check_limbs::<3, 85>(y);
-    xark_bignum::require_lt::<3, 85>(x, xark_bignum::P1_25519_L);
-    xark_bignum::require_lt::<3, 85>(y, xark_bignum::P1_25519_L);
-    let x2 = mul(x, x);
-    let y2 = mul(y, y);
-    let b8 = [
-        Field::from(8u8) * PL[0],
-        Field::from(8u8) * PL[1],
-        Field::from(8u8) * PL[2],
-    ];
-    let lhs = wr([
-        b8[0] + y2[0] - x2[0],
-        b8[1] + y2[1] - x2[1],
-        b8[2] + y2[2] - x2[2],
-    ]);
-    let x2y2 = mul(x2, y2);
-    let dxy = mul(D_25519, x2y2);
-    let rhs = [one3()[0] + dxy[0], dxy[1], dxy[2]];
-    let lf = fin(lhs);
-    let rf = fin(rhs);
-    require_eq(lf, rf);
-}
-
-fn eq_mod_p(u: L3, v: L3) {
-    let a = fin(u);
-    let b = fin(v);
-    require_eq(a, b);
-}
-
-/// Windowed Strauss–Shamir `[k1]P1 + [k2]P2` in extended coords (2+2-bit windows).
-fn dsm_l(bits1: [Field; 256], p1: Ext, bits2: [Field; 256], p2: Ext) -> Ext {
-    let d1 = dbl_e(p1);
-    let jp1 = [p1, d1, add_e(d1, p1)];
-    let d2 = dbl_e(p2);
-    let jp2 = [p2, d2, add_e(d2, p2)];
-    let mut table = [id_e(); 16];
-    let mut i = 0usize;
-    while i < 4usize {
-        let mut j = 0usize;
-        while j < 4usize {
-            table[i * 4 + j] = if i == 0 {
-                if j == 0 { id_e() } else { jp2[j - 1] }
-            } else if j == 0 {
-                jp1[i - 1]
-            } else {
-                add_e(jp1[i - 1], jp2[j - 1])
-            };
+// ---- the scalar relation -----------------------------------------------------------
+/// The base-`2⁶⁴` columns of `a + k·b − q·L` (`a` up to four limbs, `b` and `q` three,
+/// signed): six columns.
+fn rel_cols(a: L4, k: L4, b: L3, q: L3) -> [Field; 6] {
+    let mut out = [f0(); 6];
+    let mut m = 0;
+    while m < 4 {
+        out[m] = a[m];
+        m += 1;
+    }
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 3 {
+            out[i + j] = out[i + j] + k[i] * b[j] - q[j] * LL[i];
             j += 1;
         }
         i += 1;
     }
-    let mut acc = id_e();
-    let mut win = 0usize;
-    while win < 128usize {
-        acc = dbl_e(dbl_e(acc));
-        let top = 255 - win * 2;
-        let sel = select16_e(
-            table,
-            bits1[top],
-            bits1[top - 1],
-            bits2[top],
-            bits2[top - 1],
-        );
-        acc = add_e(acc, sel);
-        win += 1;
+    out
+}
+
+/// The biased carries `c_m + 2⁶⁷` of `Σ cols[m]·2^(64m) = 0` (witness region).
+fn wcarries(cols: [Field; 6]) -> [Field; 5] {
+    let mut out = [f0(); 5];
+    let mut carry = f0();
+    let mut m = 0;
+    while m < 5 {
+        out[m] = Field::hint_div_rem(cols[m] + carry + pow2(131), pow2(64))[0];
+        carry = out[m] - pow2(67);
+        m += 1;
+    }
+    out
+}
+
+/// Assert `Σ cols[m]·2^(64m) = 0` over the integers: the carries `c_m = h_m − 2⁶⁷`,
+/// `h_m < 2⁶⁸`, satisfy `cols[m] + c_{m−1} = 2⁶⁴·c_m`, and the last column closes.
+fn zero_chain(cols: [Field; 6], h: [Field; 5]) {
+    let mut carry = f0();
+    let mut m = 0;
+    while m < 6 {
+        let v = cols[m] + carry;
+        if m < 5 {
+            let _ = h[m].to_bits::<68>();
+            carry = h[m] - pow2(67);
+            require_eq(v, pow2(64) * carry);
+        } else {
+            require_eq(v, f0());
+        }
+        m += 1;
+    }
+}
+
+/// A coefficient's limbs `[c₀, c₁, c₂ − 2]` (`c − 2¹²⁹`) from its 130 bits.
+fn signed3(bits: &[Field; 130]) -> L3 {
+    [
+        recompose(bits, 0, 64),
+        recompose(bits, 64, 64),
+        recompose(bits, 128, 2) - Field::from(2u8),
+    ]
+}
+
+/// The fake-GLV scalar checks of `eddsa_verify` (ePrint 2025/933, two-dimensional:
+/// Ed25519 has no cheap endomorphism). Inputs: `k` and `S` (4 × 64-bit limbs, below
+/// `2⁶⁴` by the caller's bits), the hinted `c_A = A + 2¹²⁹`, `c_B = B + 2¹²⁹`, `W`, the
+/// quotients `q₁ + 2¹³³`, `q₂ + 2¹³³` (limbs) and the biased carries of the two chains.
+/// Rows: `c_A`, `c_B < 2¹³⁰` (`to_bits`, whose bits it returns as the loop's digits), `W`'s
+/// limbs `< 2⁶⁴` (its 256 bits, the comb's), the quotient limbs `< 2⁶⁴, 2⁶⁴, 2⁶`,
+/// `B ≠ 0` (`B·w = 1`), and the integer identities `A + k·B = q₁·L`,
+/// `W + S·B = q₂·L` (columns in base `2⁶⁴`, carries `< 2⁶⁸` biased by `2⁶⁷`). Proven in
+/// `formal/Formal/FakeGlv25519.lean`: every satisfying assignment has
+/// `A + k·B ≡ W + S·B ≡ 0 (mod L)` with `0 < |B| < 2¹²⁹`, and returns those bits.
+#[xark::gadget]
+#[allow(clippy::too_many_arguments)]
+pub fn fake_glv_check_25519(
+    k: L4,
+    s: L4,
+    ca: Field,
+    cb: Field,
+    w: L4,
+    q1: L3,
+    q2: L3,
+    h1: [Field; 5],
+    h2: [Field; 5],
+) -> ([Field; 130], [Field; 130], [Field; 256]) {
+    let da = ca.to_bits::<130>();
+    let db = cb.to_bits::<130>();
+    let mut wb = [f0(); 256];
+    let mut i = 0;
+    while i < 4 {
+        let b = w[i].to_bits::<64>();
+        let mut j = 0;
+        while j < 64 {
+            wb[64 * i + j] = b[j];
+            j += 1;
+        }
+        i += 1;
+    }
+    let qs = [q1, q2];
+    let mut i = 0;
+    while i < 2 {
+        let _ = qs[i][0].to_bits::<64>();
+        let _ = qs[i][1].to_bits::<64>();
+        let _ = qs[i][2].to_bits::<6>();
+        i += 1;
+    }
+    let _ = (cb - pow2(129)).inv();
+    let a = signed3(&da);
+    let b = signed3(&db);
+    let off = |q: L3| [q[0], q[1], q[2] - Field::from(32u8)];
+    zero_chain(rel_cols([a[0], a[1], a[2], f0()], k, b, off(q1)), h1);
+    zero_chain(rel_cols(w, s, b, off(q2)), h2);
+    (da, db, wb)
+}
+
+// ---- the group side ------------------------------------------------------------------
+fn xor(a: Field, b: Field) -> Field {
+    a + b - Field::from(2u8) * a * b
+}
+
+#[xark::gadget]
+#[doc(hidden)]
+pub fn mux(s: Field, a: TPt, b: TPt) -> TPt {
+    let mut out = b;
+    let mut c = 0;
+    while c < 3 {
+        let mut l = 0;
+        while l < 8 {
+            out[c][l] = b[c][l] + s * (a[c][l] - b[c][l]);
+            l += 1;
+        }
+        c += 1;
+    }
+    out
+}
+
+/// `t[i₀ + 2i₁ + 4i₂]` by a mux tree over the three index bits.
+fn select8(t: [TPt; 8], i0: Field, i1: Field, i2: Field) -> TPt {
+    let a = [
+        mux(i0, t[1], t[0]),
+        mux(i0, t[3], t[2]),
+        mux(i0, t[5], t[4]),
+        mux(i0, t[7], t[6]),
+    ];
+    mux(i2, mux(i1, a[3], a[2]), mux(i1, a[1], a[0]))
+}
+
+/// `P` if `s = 1`, `−P` if `s = 0` (`x`, `f` ↦ `4p − x`, `4p − f`).
+fn signed(s: Field, p: TPt) -> TPt {
+    let n = neg(p);
+    let mut out = p;
+    let mut c = 0;
+    while c < 3 {
+        let mut l = 0;
+        while l < 8 {
+            out[c][l] = n[c][l] + s * (p[c][l] - n[c][l]);
+            l += 1;
+        }
+        c += 1;
+    }
+    out
+}
+
+/// `C'' = [2W·4⁻⁶⁵]·G` by the comb: window `j` adds `COMB[j][byte j of W]`
+/// (`one_hot8` over the constant table; Lim–Lee, CRYPTO 1994), 31 additions.
+fn comb(wb: [Field; 256]) -> Pt {
+    let mut acc: Pt = [[f0(); 8]; 2];
+    let mut j = 0;
+    while j < 32 {
+        let mut bits = [f0(); 8];
+        let mut l = 0;
+        while l < 8 {
+            bits[l] = wb[8 * j + l];
+            l += 1;
+        }
+        let hot = one_hot8(bits);
+        let mut sel: TPt = [[f0(); 8]; 3];
+        let mut v = 0;
+        while v < 256 {
+            let c = &COMB[j][v];
+            let mut l = 0;
+            while l < 24 {
+                sel[l / 8][l % 8] = sel[l / 8][l % 8] + hot[v] * Field::from(c[l]);
+                l += 1;
+            }
+            v += 1;
+        }
+        acc = if j == 0 {
+            [sel[0], sel[1]]
+        } else {
+            add(acc, sel)
+        };
+        j += 1;
     }
     acc
 }
 
 /// The building blocks of `eddsa_verify`, wrapped for the block-level soundness
-/// test (`signature_blocks_are_sound` in `crates/lang/tests/snapshot.rs`), which
-/// searches each one exhaustively at full size. Not API.
+/// test (`signature_blocks_are_sound` in `crates/lang/tests/snapshot.rs`). Not API.
 #[doc(hidden)]
 pub mod blocks {
-    use super::{Ext, Field, L3};
-    pub fn on_curve(x: L3, y: L3) {
-        super::on_curve_l(x, y)
-    }
-    pub fn eq_mod_p(u: L3, v: L3) {
-        super::eq_mod_p(u, v)
-    }
-    pub fn select16(t: [Ext; 16], b3: Field, b2: Field, b1: Field, b0: Field) -> Ext {
-        super::select16_e(t, b3, b2, b1, b0)
+    use super::{Field, L3};
+    pub fn point_in(x: L3, y: L3) {
+        let _ = super::point_in(x, y);
     }
     pub fn scalar_below_order(bits: [Field; 256]) {
         super::assert_scalar_below_order(bits)
     }
 }
 
-/// Ed25519 signature verification `[S]·B == R + [k]·A` — the sound lazy
-/// extended-coordinate gadget (3×85 limbs, ~2.40M constraints), ed25519's single
-/// `eddsa_verify` (the affine variant was ~4.55M). Point coords are raw 3×85
-/// limbs; scalars are 256 caller-decomposed bits.
-#[allow(clippy::too_many_arguments)]
 /// An Ed25519 signature `(R, S)` — a curve point `R` (compressed `[u8; 32]` on the
 /// host) and a scalar `S`. Its `#[input]` with `#[input(bytes)]` takes
 /// `R`'s (decompressing) bytes then `S`'s, so on the host it comes from a `[u8; 64]`:
@@ -337,30 +462,98 @@ impl PointL {
     }
 }
 
-/// Ed25519 signature verification core: the EdDSA equation `[S]·B == R + [k]·A`
-/// (sound lazy extended-coordinate path, 3×85 limbs). Wrapped by [`PointL::verify`],
-/// the public entry: it takes the transparent [`Signature`] and decomposes the
-/// scalars to pinned bits — `s_bits`/`k_bits` here are assumed boolean.
+/// Ed25519 signature verification core: the cofactored EdDSA equation
+/// `[8]·([S]·B − [k]·A − R) = O`, with `A`, `R` canonical and on the curve and `S < L`.
+/// Wrapped by [`PointL::verify`], the public entry: it takes the transparent
+/// [`Signature`] and decomposes the scalars to pinned bits — `s_bits`/`k_bits` here are
+/// assumed boolean.
+///
+/// By fake GLV (Eagen–El Housni–Masson–Piellard, ePrint 2025/933): the prover hints a
+/// short `(A, B)` with `A + k·B ≡ 0 (mod L)`, `0 < |B| < 2¹²⁸` (the lattice hint with
+/// `λ = 2⁶⁴`, so `A = a₀ + 2⁶⁴a₁`) and `W ≡ −B·S`; [`fake_glv_check_25519`] pins them.
+/// Then `B·([S]B − [k]A − R) = −[W]G + [A]·A − [B]·R` (here `G` is the base point), and
+/// since `B ≢ 0 (mod L)` and `[8]·(…)` lies in the order-`L` subgroup, the circuit checks
+/// `[8]·X = O` for `−2X = [2W]G + M − (P_A + P_B)`, `P_A = −A`, `P_B = R`, where
+/// `M = Σ_w 4^w·(d_A,w·P_A + d_B,w·P_B) + 4⁶⁵·C''` is 65 steps (two doublings and an
+/// add) over the odd digits `d = 2·(2b₁ + b₀) − 3 ∈ {±1, ±3}` of `c_A`, `c_B` (so the
+/// digit sums are `2A + 1`, `2B + 1`), each reading an 8-entry table `{1,3}·P_A ±
+/// {1,3}·P_B` (negated for a negative `d_A`), seeded with the comb's
+/// `C'' = [2W·4⁻⁶⁵]G`. Twisted-Edwards addition is complete, so no input is refused:
+/// every valid signature verifies.
 fn eddsa_verify(ax: L3, ay: L3, rx: L3, ry: L3, s_bits: [Field; 256], k_bits: [Field; 256]) {
     // canonical scalar S < L (else S, S+L, … all verify — EdDSA malleability)
     assert_scalar_below_order(s_bits);
-    on_curve_l(ax, ay);
-    on_curve_l(rx, ry);
-    // −A = (−x, y); base B and −A to extended.
-    let neg_ax = wr([
-        Field::from(8u8) * PL[0] - ax[0],
-        Field::from(8u8) * PL[1] - ax[1],
-        Field::from(8u8) * PL[2] - ax[2],
-    ]);
-    let base_e = to_ext(BX85, BY85);
-    let nega_e = to_ext(neg_ax, ay);
-    let t = dsm_l(s_bits, base_e, k_bits, nega_e);
-    let r_e = to_ext(rx, ry);
-    // cofactored: [8]t == [8]R, compared projectively (no inverse).
-    let t8 = dbl_e(dbl_e(dbl_e(t)));
-    let r8 = dbl_e(dbl_e(dbl_e(r_e)));
-    eq_mod_p(mul(t8[0], r8[2]), mul(r8[0], t8[2]));
-    eq_mod_p(mul(t8[1], r8[2]), mul(r8[1], t8[2]));
+    let a = point_in(ax, ay);
+    let r = point_in(rx, ry);
+    let k = limbs64(k_bits);
+    let s = limbs64(s_bits);
+    let z4 = [f0(); 4];
+    // The whole fake-GLV witness costs no rows; `fake_glv_check_25519` pins it.
+    witness_begin();
+    let one = [Field::from(1u8), f0(), f0(), f0()];
+    let kr = Field::hint_mulmod_divmod::<4>(k, one, LL, 64).1;
+    let u = Field::hint_sub2::<4>(z4, kr, z4, LL, 64).1;
+    let v = Field::hint_fake_glv::<4>(u, LL, [f0(), Field::from(1u8), f0(), f0()], 64);
+    let ca = v[0] + pow2(64) * v[1] + pow2(129);
+    let cb = v[2] + pow2(64) * v[3] + pow2(129);
+    // W = −B·S mod L, from c_B's limbs.
+    let lo = Field::hint_div_rem(cb, pow2(64));
+    let hi = Field::hint_div_rem(lo[0], pow2(64));
+    let bm = Field::hint_sub2::<4>([lo[1], hi[1], hi[0], f0()], TWO129, z4, LL, 64).1;
+    let bs = Field::hint_mulmod_divmod::<4>(bm, s, LL, 64).1;
+    let w = Field::hint_sub2::<4>(z4, bs, z4, LL, 64).1;
+    // Exact quotients in Fr (|q| < 2¹³³ ≪ r), shifted by 2¹³³, as 64-bit limbs.
+    let fe = |x: L4| x[0] + pow2(64) * x[1] + pow2(128) * x[2] + pow2(192) * x[3];
+    let bf = cb - pow2(129);
+    let split = |q: Field| {
+        let a = Field::hint_div_rem(q, pow2(64));
+        let b = Field::hint_div_rem(a[0], pow2(64));
+        [a[1], b[1], b[0]]
+    };
+    let q1 = split((ca - pow2(129) + fe(k) * bf) * LINV + pow2(133));
+    let q2 = split((fe(w) + fe(s) * bf) * LINV + pow2(133));
+    let limbs = |c: Field| {
+        let q = split(c);
+        [q[0], q[1], q[2] - Field::from(2u8)]
+    };
+    let off = |q: L3| [q[0], q[1], q[2] - Field::from(32u8)];
+    let al = limbs(ca);
+    let h1 = wcarries(rel_cols([al[0], al[1], al[2], f0()], k, limbs(cb), off(q1)));
+    let h2 = wcarries(rel_cols(w, s, limbs(cb), off(q2)));
+    witness_end();
+    let (da, db, wb) = fake_glv_check_25519(k, s, ca, cb, w, q1, q2, h1, h2);
+
+    // The table over P_A = −A, P_B = R: entry i₀ + 2β' is (1 + 2i₀)·P_A + (2β' − 3)·P_B.
+    let pa = neg(with_f(a));
+    let pb = with_f(r);
+    let p3a = add(double([pa[0], pa[1]]), pa);
+    let p3b = with_f(add(double(r), pb));
+    let ma = [[pa[0], pa[1]], p3a];
+    let mb = [neg(p3b), neg(pb), pb, p3b];
+    let mut t: [TPt; 8] = [[[f0(); 8]; 3]; 8];
+    let mut i = 0;
+    while i < 8 {
+        t[i] = with_f(add(ma[i & 1], mb[i >> 1]));
+        i += 1;
+    }
+    // Window w adds d_A·P_A + d_B·P_B = σ·t[i₀ + 2β'], σ the sign of d_A.
+    let mut acc = comb(wb);
+    let mut w = WINDOWS;
+    while w > 0 {
+        w -= 1;
+        acc = double(double(acc));
+        let (a0, a1) = (da[2 * w], da[2 * w + 1]);
+        let one = Field::from(1u8);
+        let sel = select8(
+            t,
+            one - xor(a0, a1),
+            one - xor(db[2 * w], a1),
+            one - xor(db[2 * w + 1], a1),
+        );
+        acc = add(acc, signed(a1, sel));
+    }
+    // −2X = M − (P_A + P_B), P_A + P_B = t[4]; X must have order dividing 8.
+    torsion(add(acc, neg(t[4])));
 }
 
 /// Host-side conversions + EdDSA helpers, behind the `host` feature. Ed25519

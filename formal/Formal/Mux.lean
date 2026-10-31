@@ -5,6 +5,7 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.MuxpK1
 import Formal.Templates.MuxpR1
+import Formal.Templates.Mux
 import Formal.Template
 import Formal.Add32
 
@@ -105,3 +106,19 @@ theorem soundness (σ : TVar → F) (h : template.Sat σ) :
   soundness_of template 16 inputs_eq outputs_eq rows_eq σ h
 
 end Xark.Templates.MuxpR1
+
+namespace Xark.Templates.Mux
+open Xark.Template Xark.Templates.MuxModel
+
+abbrev Spec (ins outs : List F) : Prop := SpecAt 24 ins outs
+
+theorem inputs_eq : template.inputs = modelInputs 24 := by decide +kernel
+theorem outputs_eq : template.outputs = modelOutputs 24 := by decide +kernel
+theorem rows_eq : template.rows = modelRows 24 := by decide +kernel
+
+/-- **Soundness.** With no input assumption the outputs are `bⱼ + s·(aⱼ − bⱼ)`. -/
+theorem soundness (σ : TVar → F) (h : template.Sat σ) :
+    Spec (template.ins σ) (template.outs σ) :=
+  soundness_of template 24 inputs_eq outputs_eq rows_eq σ h
+
+end Xark.Templates.Mux

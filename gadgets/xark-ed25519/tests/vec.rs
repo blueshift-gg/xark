@@ -9,6 +9,8 @@
 //! the `x` behind a compressed point, is recovered by the small [`decompress`]
 //! below (`y` is just the compressed bytes; only `x` needs a square root).
 
+use curve25519_dalek::constants::{ED25519_BASEPOINT_POINT, EIGHT_TORSION};
+use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use ed25519_dalek::{Signer, SigningKey};
 use num_bigint::BigUint;
 use sha2::{Digest, Sha512};
@@ -97,12 +99,12 @@ fn eddsa_verify_matches_dalek() {
 
     // Circuit regression pin — a streaming 128-bit digest of the expanded R1CS
     // (O(1) memory, ~1 s), NOT expand + minimize (which peaked ~15 GB). The proven
-    // (minimized) circuit is ~2_355_986 constraints on the lazy extended-coordinate
-    // path (was 4_554_355 affine); any change to the circuit flips the digest
+    // (minimized) circuit is 396_912 constraints (8 × 32-bit certificates and fake GLV;
+    // was 2_355_986 on the lazy extended-coordinate path); any change flips the digest
     // (also pinned, per toolchain, in `tests/stable-digests.txt`).
     assert_eq!(
         c.circuit_digest(),
-        0x61e01f96246f739084d1824d0aa08d5c,
+        0x86fdd75b3a1912aa569edaf1939ea667,
         "ed25519 eddsa_verify circuit changed (re-derive the digest if intentional)"
     );
 
@@ -124,4 +126,39 @@ fn eddsa_verify_matches_dalek() {
             .is_err(),
         "a tampered signature must be rejected"
     );
+
+    // Torsion (gnark #1765/#1862, ePrint 2026/1776): the check is cofactored, so `R` or `A`
+    // off by an order-8 point still verifies (`[8]·T = O`), as before; off by a
+    // large-order point it does not; an off-curve `R` is refused.
+    let shift = |bytes: &[u8; 32], t: EdwardsPoint| {
+        let q = CompressedEdwardsY(*bytes).decompress().unwrap() + t;
+        decompress(&q.compress().to_bytes())
+    };
+    let t8 = EIGHT_TORSION[1];
+    let base = ED25519_BASEPOINT_POINT;
+    for (pk, rr, ok) in [
+        (a.clone(), shift(&r_bytes, t8), true),
+        (shift(&a_bytes, t8), r.clone(), true),
+        (a.clone(), shift(&r_bytes, base), false),
+        (a.clone(), shift(&r_bytes, t8 + base), false),
+        (
+            a.clone(),
+            Point85 {
+                x: Scalar::from(r.x.as_biguint() + 1u8),
+                y: r.y.clone(),
+            },
+            false,
+        ),
+    ] {
+        let sig = EddsaSig {
+            r: rr,
+            s: s.clone(),
+        };
+        let res = c.check(&[("pubkey", &pk), ("sig", &sig), ("digest", &k)]);
+        assert_eq!(
+            res.is_ok(),
+            ok,
+            "torsion/large-order/off-curve case: {res:?}"
+        );
+    }
 }

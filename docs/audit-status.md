@@ -88,13 +88,6 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   `_secp256r1_sound`: the flag-free 3-limb chord addition lands on the curve with a unique
   slope (no prover freedom), from the generic `Curve` algebra at `(a,b) = (0,7)` and
   `a = −3` (`Formal.Secp256k1 / Secp256r1`).
-* **Lazy non-native reduction** — `mul_lazy_25519_value_correct`
-  and `weak_reduce_25519_value_correct`: the quotient-free pseudo-Mersenne multiply/normalise
-  the ed25519 incomplete-add path uses compute `a·b mod p` correctly, via the
-  Mersenne relations (`2²⁵⁵ ≡ 19`); `lazy_t_no_wrap` bounds every
-  intermediate `< 2²⁵³ < r` so the `Fr` arithmetic lifts faithfully to ℕ
-  (`Formal.Lazy25519`). Discharges the "non-native limb bridge" trust boundary
-  `Formal.Edwards` names for the lazy path.
 * **Merkle membership** — `Xark.Templates.CondSwap.soundness`, over `cond_swap`'s exported
   rows: the template forces its position bit boolean and its output to be the input pair in
   one of its two orders; `root_binds` composes the levels into the Merkle root, assuming
