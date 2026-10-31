@@ -1,9 +1,9 @@
 //! The clap-driven `xark` CLI.
 //!
 //! Frontend subcommands (`init`/`build`/`check`) drive `cargo` (for wasm32) and
-//! the frontend; their implementations live in [`crate::cli`]. Backend subcommands
-//! (`setup`/`prove`/`verify`/`export`/`ceremony`/`inspect`) read the xark-IR
-//! produced by `xark build` and run the shared Groth16 backend.
+//! the frontend. Backend subcommands (`setup`/`prove`/`verify`/`export`/`ceremony`/
+//! `inspect`) read the xark-IR produced by `xark build` and run the shared Groth16
+//! backend.
 
 use std::collections::BTreeMap;
 

@@ -38,6 +38,7 @@ members = [
 # `cargo-build-sbf` (with its own pinned `Cargo.lock`) as the
 # reproducible-build target. See `docs/reproducible-build.md`.
 exclude = [
+    "crates/groth16-gpu-cli",
     "crates/lang",
     "examples",
     "crates/verifier/reference-program",

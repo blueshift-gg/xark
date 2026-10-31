@@ -45,6 +45,9 @@ fn get_uv(b: &[u8], p: &mut usize) -> Option<u64> {
     let mut shift = 0;
     loop {
         let byte = *b.get(*p)?;
+        if shift == 63 && (byte & 0x7e != 0 || byte & 0x80 != 0) {
+            return None;
+        }
         *p += 1;
         v |= ((byte & 0x7f) as u64) << shift;
         if byte & 0x80 == 0 {
@@ -55,6 +58,21 @@ fn get_uv(b: &[u8], p: &mut usize) -> Option<u64> {
             return None;
         }
     }
+}
+
+fn get_usize(b: &[u8], p: &mut usize) -> Option<usize> {
+    usize::try_from(get_uv(b, p)?).ok()
+}
+
+fn get_u32(b: &[u8], p: &mut usize) -> Option<u32> {
+    u32::try_from(get_uv(b, p)?).ok()
+}
+
+fn take_bytes<'a>(b: &'a [u8], p: &mut usize, len: usize) -> Option<&'a [u8]> {
+    let end = (*p).checked_add(len)?;
+    let bytes = b.get(*p..end)?;
+    *p = end;
+    Some(bytes)
 }
 
 struct Pool {
@@ -159,41 +177,70 @@ impl RowFile {
         }
         let mut p = 4;
         let b = &bytes;
-        let fl = get_uv(b, &mut p).ok_or_else(bad)? as usize;
-        let fingerprint =
-            String::from_utf8(b.get(p..p + fl).ok_or_else(bad)?.to_vec()).map_err(|_| bad())?;
-        p += fl;
-        let nv = get_uv(b, &mut p).ok_or_else(bad)? as usize;
+        let fl = get_usize(b, &mut p).ok_or_else(bad)?;
+        let fingerprint = String::from_utf8(take_bytes(b, &mut p, fl).ok_or_else(bad)?.to_vec())
+            .map_err(|_| bad())?;
+        let nv = get_usize(b, &mut p).ok_or_else(bad)?;
+        if nv > b.len().saturating_sub(p) / 2 {
+            return Err(bad());
+        }
         let mut vars = Vec::with_capacity(nv.min(b.len()));
+        let mut seen = std::collections::HashSet::with_capacity(nv);
         for _ in 0..nv {
-            let id = get_uv(b, &mut p).ok_or_else(bad)? as u32;
-            let public = *b.get(p).ok_or_else(bad)? == 1;
-            p += 1;
+            let id = get_u32(b, &mut p).ok_or_else(bad)?;
+            if !seen.insert(id) {
+                return Err(bad());
+            }
+            let visibility = *take_bytes(b, &mut p, 1).ok_or_else(bad)?.first().unwrap();
+            if visibility > 1 {
+                return Err(bad());
+            }
+            let public = visibility == 1;
             vars.push((id, public));
         }
-        let np = get_uv(b, &mut p).ok_or_else(bad)? as usize;
+        let np = get_usize(b, &mut p).ok_or_else(bad)?;
         let mut pool = Vec::with_capacity(np.min(b.len()));
         for _ in 0..np {
-            let l = get_uv(b, &mut p).ok_or_else(bad)? as usize;
-            let raw = b.get(p..p + l).ok_or_else(bad)?;
-            p += l;
+            let l = get_usize(b, &mut p).ok_or_else(bad)?;
+            let raw = take_bytes(b, &mut p, l).ok_or_else(bad)?;
             pool.push(if l == 0 {
                 FieldConst::zero()
             } else {
                 FieldConst::from_bigint(BigInt::from_signed_bytes_le(raw))
             });
         }
-        let num_rows = get_uv(b, &mut p).ok_or_else(bad)? as usize;
-        let window = get_uv(b, &mut p).ok_or_else(bad)? as usize;
-        let nw = get_uv(b, &mut p).ok_or_else(bad)? as usize;
+        let num_rows = get_usize(b, &mut p).ok_or_else(bad)?;
+        let window = get_usize(b, &mut p).ok_or_else(bad)?;
+        let nw = get_usize(b, &mut p).ok_or_else(bad)?;
         if window == 0 || nw != num_rows.div_ceil(window) {
+            return Err(bad());
+        }
+        let offsets_bytes = nw.checked_mul(8).ok_or_else(bad)?;
+        if offsets_bytes > b.len().saturating_sub(p) {
             return Err(bad());
         }
         let mut offsets = Vec::with_capacity(nw);
         for _ in 0..nw {
-            let o = b.get(p..p + 8).ok_or_else(bad)?;
+            let o = take_bytes(b, &mut p, 8).ok_or_else(bad)?;
             offsets.push(u64::from_le_bytes(o.try_into().unwrap()));
-            p += 8;
+        }
+        let rows_len = b.len().checked_sub(p).ok_or_else(bad)?;
+        if num_rows
+            .checked_mul(6)
+            .is_none_or(|min_len| min_len > rows_len)
+        {
+            return Err(bad());
+        }
+        let mut previous = None;
+        for &offset in &offsets {
+            let offset = usize::try_from(offset).map_err(|_| bad())?;
+            if offset >= rows_len || previous.is_some_and(|prev| offset <= prev) {
+                return Err(bad());
+            }
+            previous = Some(offset);
+        }
+        if offsets.first().is_some_and(|&offset| offset != 0) {
+            return Err(bad());
         }
         Ok(RowFile {
             fingerprint,
@@ -239,19 +286,24 @@ impl RowFile {
         w: usize,
         lc: &mut dyn FnMut(u32, &[(u32, u32)]),
     ) -> Result<(), String> {
+        if w >= self.offsets.len() {
+            return Err(format!("r1cs.stream window {w} is out of range"));
+        }
         let bad = || "malformed r1cs.stream row".to_string();
         let b = &self.bytes;
-        let mut p = self.rows_start + self.offsets[w] as usize;
+        let offset = usize::try_from(self.offsets[w]).map_err(|_| bad())?;
+        let mut p = self.rows_start.checked_add(offset).ok_or_else(bad)?;
         let rows = self.window.min(self.num_rows - w * self.window);
         let mut terms: Vec<(u32, u32)> = Vec::new();
         for _ in 0..rows * 3 {
-            let k = get_uv(b, &mut p).ok_or_else(bad)? as u32;
-            let n = get_uv(b, &mut p).ok_or_else(bad)? as usize;
+            let k = get_u32(b, &mut p).ok_or_else(bad)?;
+            let n = get_usize(b, &mut p).ok_or_else(bad)?;
             terms.clear();
             let mut var = 0u32;
             for _ in 0..n {
-                var += get_uv(b, &mut p).ok_or_else(bad)? as u32;
-                let c = get_uv(b, &mut p).ok_or_else(bad)? as u32;
+                let delta = get_u32(b, &mut p).ok_or_else(bad)?;
+                var = var.checked_add(delta).ok_or_else(bad)?;
+                let c = get_u32(b, &mut p).ok_or_else(bad)?;
                 if c as usize >= self.pool.len() {
                     return Err(bad());
                 }
@@ -262,6 +314,16 @@ impl RowFile {
             }
             lc(k, &terms);
         }
+        let decoded_end = p.checked_sub(self.rows_start).ok_or_else(bad)?;
+        let expected_end = self
+            .offsets
+            .get(w + 1)
+            .map(|&offset| usize::try_from(offset).map_err(|_| bad()))
+            .transpose()?
+            .unwrap_or_else(|| self.bytes.len() - self.rows_start);
+        if decoded_end != expected_end {
+            return Err(bad());
+        }
         Ok(())
     }
 }
@@ -271,6 +333,151 @@ mod tests {
     use super::*;
     use crate::linear_combination::Term;
     use crate::r1cs::{FieldSpec, R1csConstraint, Variable};
+
+    fn empty_file_with_vars(vars: &[(u32, u8)]) -> Vec<u8> {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, vars.len() as u64);
+        for &(id, visibility) in vars {
+            put_uv(&mut bytes, id as u64);
+            bytes.push(visibility);
+        }
+        put_uv(&mut bytes, 0); // pool count
+        put_uv(&mut bytes, 0); // row count
+        put_uv(&mut bytes, 1); // rows per window
+        put_uv(&mut bytes, 0); // window count
+        bytes
+    }
+
+    #[test]
+    fn rejects_duplicate_variable_ids() {
+        assert!(RowFile::parse(empty_file_with_vars(&[(0, 0), (0, 1)])).is_err());
+    }
+
+    #[test]
+    fn accepts_sparse_variable_ids() {
+        let file = RowFile::parse(empty_file_with_vars(&[(0, 0), (2, 1)])).unwrap();
+        assert_eq!(file.vars(), &[(0, false), (2, true)]);
+    }
+
+    #[test]
+    fn rejects_noncanonical_visibility_flags() {
+        assert!(RowFile::parse(empty_file_with_vars(&[(0, 2)])).is_err());
+    }
+
+    #[test]
+    fn rejects_overflowing_header_lengths() {
+        let mut fingerprint_len = MAGIC.to_vec();
+        put_uv(&mut fingerprint_len, u64::MAX);
+        assert!(RowFile::parse(fingerprint_len).is_err());
+
+        let mut pool_entry_len = MAGIC.to_vec();
+        put_uv(&mut pool_entry_len, 0); // fingerprint length
+        put_uv(&mut pool_entry_len, 0); // variable count
+        put_uv(&mut pool_entry_len, 1); // pool count
+        put_uv(&mut pool_entry_len, u64::MAX);
+        assert!(RowFile::parse(pool_entry_len).is_err());
+
+        let mut overflowing_varint = MAGIC.to_vec();
+        overflowing_varint.extend_from_slice(&[0xff; 9]);
+        overflowing_varint.push(0x02);
+        assert!(RowFile::parse(overflowing_varint).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_window_offsets() {
+        let mut out_of_range = MAGIC.to_vec();
+        put_uv(&mut out_of_range, 0); // fingerprint length
+        put_uv(&mut out_of_range, 0); // variable count
+        put_uv(&mut out_of_range, 0); // pool count
+        put_uv(&mut out_of_range, 1); // row count
+        put_uv(&mut out_of_range, 1); // rows per window
+        put_uv(&mut out_of_range, 1); // window count
+        out_of_range.extend_from_slice(&u64::MAX.to_le_bytes());
+        out_of_range.extend_from_slice(&[0; 6]);
+        assert!(RowFile::parse(out_of_range).is_err());
+
+        let mut at_end = MAGIC.to_vec();
+        put_uv(&mut at_end, 0);
+        put_uv(&mut at_end, 0);
+        put_uv(&mut at_end, 0);
+        put_uv(&mut at_end, 1);
+        put_uv(&mut at_end, 1);
+        put_uv(&mut at_end, 1);
+        at_end.extend_from_slice(&6u64.to_le_bytes());
+        at_end.extend_from_slice(&[0; 6]);
+        assert!(RowFile::parse(at_end).is_err());
+    }
+
+    #[test]
+    fn rejects_window_offsets_that_overlap_encoded_rows() {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, 0); // variable count
+        put_uv(&mut bytes, 1); // pool count
+        put_uv(&mut bytes, 0); // zero coefficient
+        put_uv(&mut bytes, 2); // row count
+        put_uv(&mut bytes, 1); // rows per window
+        put_uv(&mut bytes, 2); // window count
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes()); // inside the first row
+        for _ in 0..6 {
+            put_uv(&mut bytes, 0); // constant index, no terms
+            put_uv(&mut bytes, 0);
+        }
+
+        let file = RowFile::parse(bytes).unwrap();
+        assert!(file.decode_window(0, &mut |_, _| {}).is_err());
+    }
+
+    #[test]
+    fn rejects_window_counts_that_do_not_fit_in_the_file() {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, 0); // variable count
+        put_uv(&mut bytes, 0); // pool count
+        put_uv(&mut bytes, u64::MAX); // row count
+        put_uv(&mut bytes, 1); // rows per window
+        put_uv(&mut bytes, u64::MAX); // window count
+        assert!(RowFile::parse(bytes).is_err());
+    }
+
+    #[test]
+    fn rejects_row_counts_larger_than_the_encoded_rows() {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, 0); // variable count
+        put_uv(&mut bytes, 0); // pool count
+        put_uv(&mut bytes, u64::MAX); // row count
+        put_uv(&mut bytes, u64::MAX); // rows per window
+        put_uv(&mut bytes, 1); // window count
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        assert!(RowFile::parse(bytes).is_err());
+    }
+
+    #[test]
+    fn rejects_variable_delta_overflow() {
+        let mut bytes = MAGIC.to_vec();
+        put_uv(&mut bytes, 0); // fingerprint length
+        put_uv(&mut bytes, 0); // variable count
+        put_uv(&mut bytes, 1); // pool count
+        put_uv(&mut bytes, 0); // zero coefficient bytes
+        put_uv(&mut bytes, 1); // row count
+        put_uv(&mut bytes, 1); // rows per window
+        put_uv(&mut bytes, 1); // window count
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        for _ in 0..3 {
+            put_uv(&mut bytes, 0); // constant index
+            put_uv(&mut bytes, 2); // term count
+            put_uv(&mut bytes, u32::MAX as u64);
+            put_uv(&mut bytes, 0);
+            put_uv(&mut bytes, 1); // overflows the previous variable id
+            put_uv(&mut bytes, 0);
+        }
+
+        let rf = RowFile::parse(bytes).unwrap();
+        assert!(rf.decode_window(0, &mut |_, _| {}).is_err());
+    }
 
     #[test]
     fn round_trips_rows_vars_and_coefficients() {
@@ -349,6 +556,7 @@ mod tests {
             .unwrap();
         }
         assert_eq!(row, prog.constraints.len());
+        assert!(rf.decode_window(rf.num_windows(), &mut |_, _| {}).is_err());
         // Truncation is an error, never a panic.
         let bytes = encode("fp", &prog);
         for cut in [3, 10, bytes.len() / 2] {
