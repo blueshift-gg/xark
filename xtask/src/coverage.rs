@@ -75,7 +75,12 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         full.collect::<Result<_>>()?
     };
     let digests = std::fs::read_to_string(crate::root().join("tests/stable-digests.txt"))?;
-    let digests: BTreeMap<&str, &str> = digests.lines().filter_map(|l| l.split_once(' ')).collect();
+    // `<example> <keyed> <flat>`: the keyed digest.
+    let digests: BTreeMap<&str, &str> = digests
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(n, d)| (n, d.split(' ').next().unwrap_or(d)))
+        .collect();
 
     let groups = Mutex::new(BTreeMap::<Group, usize>::new());
     let vectors = Mutex::new(BTreeMap::<String, Vectors>::new());

@@ -1,12 +1,18 @@
-//! `cargo xtask digests`: every example circuit, built by the stable frontend, and
-//! the digest of the rows its Groth16 keys are made for ([`keyed_digest`]), one
-//! `<example> <digest>` line each.
+//! `cargo xtask digests`: every example circuit, built by the stable frontend, one
+//! `<example> <keyed> <flat>` line each: the digest of the rows its Groth16 keys are
+//! made for ([`keyed_digest`]) and of the flat R1CS its artifact expands to
+//! (`stream_digest`).
 //!
-//! The digest is the same on every supported rustc (1.89+): the stable frontend's
-//! reproducibility guarantee. An example with Rust client functions (`#[input]` on
-//! an `impl`) also builds its `client.wasm`, which must build on that rustc too. A difference means a toolchain changed a circuit (a
-//! bug to report) or the lowering or a minimizer changed on purpose (`--update`, and
-//! review).
+//! The flat rows are the same on every supported rustc (1.89+): the stable
+//! frontend's reproducibility guarantee, which `--check --toolchain <rustc>` compares.
+//! The keyed rows are those after the template-body and global minimizer passes, and
+//! which rows a template body holds follows the compiled wasm's function structure
+//! (inlining), so for the largest circuits they change with the rustc that compiled
+//! the circuit; they are pinned under the workspace toolchain, the one CI keys with.
+//! An example with Rust client functions (`#[input]` on an `impl`) also builds its
+//! `client.wasm`, which must build on that rustc too. A difference means a toolchain
+//! changed a circuit (a bug to report) or the lowering or a minimizer changed on
+//! purpose (`--update`, and review).
 //!
 //! # Keyed-rows digest, version 1
 //!
@@ -72,7 +78,7 @@ pub fn run(args: Args) -> Result<()> {
         let dir = crate::root().join("examples").join(&name);
         let digest = digest(&dir, &target.join(&name)).unwrap_or_else(|e| {
             eprintln!("{name}: {e}");
-            "BUILD-FAILED".into()
+            ("BUILD-FAILED".into(), "BUILD-FAILED".into())
         });
         if has_client_functions(&dir) {
             let built = xark_frontend::build_client(&dir, &target.join(&name).join("client"));
@@ -84,7 +90,7 @@ pub fn run(args: Args) -> Result<()> {
         .into_inner()
         .unwrap()
         .into_iter()
-        .map(|(n, d)| format!("{n} {d}\n"))
+        .map(|(n, (k, f))| format!("{n} {k} {f}\n"))
         .collect();
     let want = crate::root().join("tests/stable-digests.txt");
     let count = text.lines().count();
@@ -94,7 +100,7 @@ pub fn run(args: Args) -> Result<()> {
     } else if args.check {
         let old = std::fs::read_to_string(&want)
             .with_context(|| format!("reading {}", want.display()))?;
-        let differ: Vec<String> = diff(&old, &text);
+        let differ: Vec<String> = diff(&old, &text, args.toolchain.is_some());
         if !differ.is_empty() {
             bail!(
                 "circuit digests differ under {version}:\n{}",
@@ -131,10 +137,14 @@ fn has_client_functions(dir: &std::path::Path) -> bool {
     })
 }
 
-/// Build the circuit crate at `dir` and digest its keyed rows, after checking the
-/// compact artifact expands to exactly the flat lowering.
-fn digest(dir: &std::path::Path, target: &std::path::Path) -> Result<String> {
-    keyed_digest(&build(dir, target)?)
+/// Build the circuit crate at `dir` and digest its keyed rows and its flat rows, after
+/// checking the compact artifact expands to exactly the flat lowering.
+fn digest(dir: &std::path::Path, target: &std::path::Path) -> Result<(String, String)> {
+    let xbc = build(dir, target)?;
+    Ok((
+        keyed_digest(&xbc)?,
+        xark_ir::function_decode::stream_digest_hex(&xbc),
+    ))
 }
 
 /// The `circuit.xbc` the circuit crate at `dir` builds to, checked against the flat
@@ -250,13 +260,16 @@ fn use_toolchain(t: &str) -> Result<String> {
 }
 
 /// The lines of `want` and `got` that differ, as `-` / `+` lines.
-fn diff(want: &str, got: &str) -> Vec<String> {
+/// The lines of `want` and `got` that differ; with `flat_only`, by their flat digest
+/// (the last field) alone.
+fn diff(want: &str, got: &str, flat_only: bool) -> Vec<String> {
     let parse = |s: &str| -> BTreeMap<String, String> {
         s.lines()
             .filter_map(|l| l.split_once(' '))
             .map(|(n, d)| (n.to_string(), d.to_string()))
             .collect()
     };
+    let flat = |d: &str| d.rsplit(' ').next().unwrap_or(d).to_string();
     let (want, got) = (parse(want), parse(got));
     let mut out = Vec::new();
     for name in want
@@ -264,7 +277,7 @@ fn diff(want: &str, got: &str) -> Vec<String> {
         .chain(got.keys().filter(|n| !want.contains_key(*n)))
     {
         match (want.get(name), got.get(name)) {
-            (Some(a), Some(b)) if a == b => {}
+            (Some(a), Some(b)) if a == b || (flat_only && flat(a) == flat(b)) => {}
             (a, b) => {
                 if let Some(a) = a {
                     out.push(format!("- {name} {a}"));
@@ -297,13 +310,20 @@ mod tests {
         .unwrap();
         let committed =
             std::fs::read_to_string(crate::root().join("tests/stable-digests.txt")).unwrap();
-        let line = |d: &str| format!("{name} {d}");
         let old = committed
             .lines()
             .find_map(|l| l.strip_prefix(&format!("{name} ")))
             .unwrap()
             .to_string();
-        let check = |d: &str| diff(&committed, &committed.replace(&line(&old), &line(d)));
+        let flat = old.rsplit(' ').next().unwrap().to_string();
+        let line = |d: &str| format!("{name} {d} {flat}");
+        let check = |d: &str| {
+            diff(
+                &committed,
+                &committed.replace(&format!("{name} {old}"), &line(d)),
+                false,
+            )
+        };
 
         let reduced = xark_ir::function_decode::expand_function_blob_reduced(&xbc)
             .unwrap()
@@ -333,7 +353,7 @@ mod tests {
         for got in [pass1_drops, pass2_drops, pass2_merges, input_private] {
             assert_eq!(
                 check(&got),
-                [format!("- {name} {old}"), format!("+ {name} {got}")]
+                [format!("- {name} {old}"), format!("+ {name} {got} {flat}")]
             );
         }
     }
