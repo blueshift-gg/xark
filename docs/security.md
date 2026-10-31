@@ -248,16 +248,18 @@ add via `conditional_select_point`. **KAT:** `ec_add_native_matches_arkworks`,
 
 `gadgets/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression
 (`xark-poseidon`) up an authentication path. **Relation:** `node₀ = leaf`,
-`nodeᵢ₊₁ = hash2(select bᵢ sᵢ nodeᵢ, select bᵢ nodeᵢ sᵢ)`, `merkle_verify` asserts
-`node_DEPTH == root`. **Argument:** each `bᵢ` is boolean-constrained (`bᵢ·bᵢ == bᵢ`)
-before gating the mux `select b t f = f + b·(t − f)`; a boolean bit makes this a genuine
-conditional swap (no third value reachable), so the only prover freedom is the position
-bit — the intended membership freedom. Compression determinacy is Poseidon's
-(field-native); the fold allocates no advice. **FV:** `formal/Formal/Merkle.lean`
-(`merkle_level_swap_sound`, `merkle_select_pair_preserved`) composed with
-`poseidon_permutation_determined`; bridge `merkle_matches_lean_model`. **KAT:**
+`nodeᵢ₊₁ = hash2(cond_swap(bᵢ, nodeᵢ, sᵢ))`, `merkle_verify` asserts
+`node_DEPTH == root`, with `DEPTH` a const generic. **Argument:** `cond_swap` (halo2's
+one-product swap) constrains `bᵢ·bᵢ == bᵢ` itself and outputs `a' = a + b·(s − a)`,
+`s' = s − b·(s − a)`; a boolean bit makes this a genuine conditional swap (no third
+value reachable), so the only prover freedom is the position bit — the intended
+membership freedom. Compression determinacy is Poseidon's (field-native). **FV:**
+`formal/Formal/CondSwap.lean`, over `cond_swap`'s exported rows: `soundness` (no input
+assumption), `completeness` (a bit selector), and `root_binds` (the levels compute
+`merkleRoot H leaf path`, assuming, not proving over `hash2`'s rows, that they compute a
+function `H`, and that each level emits the template's rows); bridge `merkle_matches_lean_model`. **KAT:**
 `xark-merkle`'s `tests/vec.rs` (honest path accepted; wrong root, tampered sibling,
-non-boolean bit each rejected).
+non-boolean bit, and each tampered witness value rejected).
 
 ### 2.14 xark-IR arithmetic → R1CS lowering
 

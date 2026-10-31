@@ -219,8 +219,26 @@ the rows the frontend really emits, and CI fails when the code drifts from them.
 | Theorem | Template | Statement |
 |---------|----------|-----------|
 | `Xark.Templates.Add32.soundness` | `xark_bits::add32` (33 booleanity rows + the recomposition) | on input words of bits, every assignment satisfying the rows outputs exactly the bits of `(a + b) mod 2³²` |
-| `Xark.Template.Template.soundness_inst` | any template with plugs replaced by linear combinations (`Template.inst`) | a template's soundness carries over to the substituted rows on inputs meeting its assumptions |
-| `Xark.Templates.Add32.soundness_consts` / `assumptions_consts` | `add32` with constant plugs | the above for `add32`; the assumptions hold when the constants are bits (`Templates/Consts/Add32.lean`) and the other inputs are |
+| `Xark.Templates.Xor.sat_iff` / `Or.sat_iff` | `Field::xor` / `Field::or` (one row each) | for any inputs, the row holds iff the output is `a + b − 2ab` / `a + b − ab` |
+| `Xark.Templates.Xor.soundness` / `Or.soundness` | same | on input bits, every satisfying assignment outputs the bit `a ⊕ b` / `a ∨ b` |
+| `Xark.Templates.{Xor3,Maj3,Chi}.soundness` | `xark_bits::xor3` / `maj3` / `chi` (one row each, `z` hinted: Verified-zkEVM/clean PR #395, zkGolf T1/T2), in `Formal/HashOps.lean` | on input bits, every satisfying assignment outputs `a ⊕ b ⊕ c` / `maj(a, b, c)` / `a ⊕ (¬b ∧ c)`: each row is linear in `z` with a multiplier in `±1…±4` on `{0,1}³`, so the hinted bit is unique |
+| `Xark.Templates.Ch.sat_iff` / `soundness` | `xark_bits::ch` (`e · (f − g) = w`, output `g + w`; bellman `sha256_ch`) | for any inputs the output is `g + e·(f − g)`; on bits, `e ? f : g` |
+| `Xark.Templates.{Xor3,Maj3,Chi,Ch}.outs_isBit` | `--coverage`'s bit producers | on input bits, the output is a bit |
+| `Xark.Reduce.model_sound` | `xark_bits::reduce::<N>` (`N − 1` hinted bits pinned boolean, top carry `t = sum − Σ 2ⁱ·bᵢ` pinned by `t·(t − 2^(N−1)) = 0`; zkGolf 650c4497), for any `33 ≤ N ≤ 253` | with no input assumption, every satisfying assignment has `sum < 2ᴺ` and outputs its low 32 bits |
+| `Xark.Templates.Reduce{33,34,35,36}.soundness` | `reduce::<N>` at each production width (harness `formal/templates/reduce__<N>`) | the two above at `N`; `rows_eq` etc. show by `decide +kernel` that the export is the model |
+| `Xark.Templates.ToBits.model_sound` | every bit decomposition (`builder.rs::decompose_bits_gated`, which `Field::to_bits`, `uN` inputs, comparisons and native bitwise ops use): bits `1..n` hinted, `b₀ = x − Σ 2ⁱ·bᵢ`, row `b₀(b₀ − 1) = 0` (zkGolf T9), at any width `n ≤ 253` | every satisfying assignment has `x < 2ⁿ` and outputs exactly `x`'s `n` bits |
+| `Xark.Templates.ToBits.soundness` | `Field::to_bits::<8>` (the exported template is the model at `n = 8`) | the above at `n = 8` |
+| `Xark.Templates.ToBits.soundness_of` | a template equal to the model at `m + 1 ≤ 253` | the above for it, at width `m + 1` (`SpecAt (m + 1)`) |
+| `Xark.Templates.ToBits{17,32,64,75,98,106,127,249}.soundness` | `Field::to_bits::<n>` at every other width production uses (harness `formal/templates/to_bits__<n>`) | `soundness_of` at `m = n − 1`; `rows_eq` etc. show by `decide +kernel` that the export is the model |
+| `Xark.Templates.ToBitsCanonical.soundness` | `Field::to_bits_canonical` (bits `1..253` hinted, bit `0` = `x − Σ 2ⁱ·bᵢ`, then MSB-first against `r − 1`: `b·b = b` and `all := all·b` at its one-bits, `(1 − all − b)·b = 0` at its zero-bits; bellman `into_bits_le_strict`, ACL2 `bits-lt-prime` @ 95d4195; 353 rows) | with no input assumption, every satisfying assignment outputs exactly the 254 bits of `x.val`, `x`'s representative in `[0, r)` (bug checklist 3: no `x + r`) |
+| `Xark.Templates.ToBits.spec_isBit`, `ToBitsCanonical.spec_isBit`, `Xor.outs_isBit`, `Or.outs_isBit`, `Add32.outs_isBit` | `--coverage`'s bit producers | on inputs meeting `Assumptions`, every output is a bit |
+| `Xark.Templates.ToBits.spec_of_bits` | a `to_bits` the frontend answers without rows because its input is `Σ 2ⁱ·bᵢ` of proven bits (`bit_sum_shortcut`) | that input is below `2ⁿ` and the `bᵢ` are its bits |
+| `Xark.Templates.Add32.isBit_one_sub` / `isBit_mul`, `isBit_of_mul_self`, `ToBits.isBit_of_mul_sub_one` | `--coverage`'s proven bits | `1 − b` and `a·b` of bits are bits; rows `x·x = x` and `x·(x − 1) = 0` pin `x` to a bit |
+| `Xark.Templates.Xor.fold_lhs`, `fold_rhs` / `Or.fold_lhs`, `fold_rhs` | `host.rs` `Intr::Xor`/`Or` with a constant operand `k` | the template with `k` substituted holds iff the output is `k + (1 − 2k)·x` / `k + (1 − k)·x`, the linear form the frontend emits in place of the row (exact by `elim_sound`) |
+| `Xark.Templates.Add32.soundness_consts` / `assumptions_consts` | `add32` with constant plugs | the two above for `add32`; the assumptions hold when the constants are bits (`Templates/Consts/Add32.lean`) and the other inputs are |
+| `Xark.Templates.CondSwap.soundness` | `xark_merkle::cond_swap` (booleanity `s·s = s` + the product `s·(b − a)`) | every satisfying assignment has `s ∈ {0,1}` and outputs `s ? (b, a) : (a, b)`; no input assumption |
+| `Xark.Templates.CondSwap.root_binds` | `xark_merkle::merkle_root`'s levels | satisfied, wired levels have bit indices and compute `merkleRoot H leaf path`, assuming (unproven) that `hash2`'s rows compute a function `H` and each level emits the template's rows |
+| `Xark.Templates.ScalarToBits.soundness` | `xark_bignum::scalar_to_bits` (86 + 86 + 84 hinted bits of a 3 × 86-bit scalar) | with no input assumption, the limbs are below `2⁸⁶`, `2⁸⁶`, `2⁸⁴` and the outputs are their bits |
 
 ### Adding a proven gadget
 
@@ -282,10 +300,46 @@ its rows, a witness branch guards it. `cargo xtask lean-export --coverage` (the
     `Formal/Templates/Consts/<Gadget>.lean` (`cargo xtask lean-export --coverage
     --update` writes it; `--coverage` fails when it is missing, stale or not
     imported from `Formal.lean`, and `lake build` fails when a constant doesn't
-    meet them).
+    meet them). 
+  * **covered with folded constants**: after substituting the constant plugs, it
+    replays the frontend's folds on the proven template, in hint order: a hint whose
+    value is now a constant or affine in the call's wires (`hint_bit` of a constant,
+    XOR/OR/product with a constant operand) is dropped and its witness replaced by
+    that value everywhere, and each row this leaves holding at every assignment
+    (closed and true mod `r`, or an identity) is dropped; a closed row that is false
+    fails the check. Witnesses nothing reads or writes any more are dropped, the
+    rest renumbered in order, and the result must equal the call. One fold is
+    `Template.foldAt`; `soundness_foldAt` and `sat_foldAt_of_sat` carry the proof
+    over, and the constants' `Assumptions` are the same per-vector obligations as
+    above (for a gadget with none, the `soundness_free` obligation). This covers
+    `add32`'s all-constant calls (no rows left) and `xor` with a constant operand.
+  * **covered: reuses a covered decomposition**: a `to_bits` that emits nothing
+    because the frontend's memo (keyed by input and width) returned earlier bits;
+    the tool checks its outputs are exactly those of a covered `to_bits` call on the
+    same input linear combination at the same width. (A wider decomposition's low
+    bits would not prove the narrower range, so only equal widths count.)
+  * **covered: bits of producer bits**: a `to_bits` that emits nothing because its
+    input is `Σ 2ⁱ·bᵢ` of proven bits (below); the tool checks that sum and that
+    each `bᵢ` is a proven bit (`ToBits.spec_of_bits`).
+  * **covered with LC plugs (assumptions discharged by producers[ and booleanity
+    rows])**: LC plugs to a gadget whose `Assumptions` are that its inputs are bits
+    (`xor`, `or`, `add32`, `xor3`, `maj3`, `chi`, `ch`), where each such input is a proven
+    bit: a 0/1 constant, an output of a covered `to_bits`, `to_bits_canonical` or
+    `reduce` call, or of a covered `xor`, `or`, `add32`, `xor3`, `maj3`, `chi` or `ch`
+    call whose own inputs are proven bits (`*.outs_isBit`, `ToBits.spec_isBit`,
+    `ToBitsCanonical.spec_isBit`, `Reduce.spec_isBit`), one minus a proven bit, or a
+    wire a row of the circuit pins: `x · x = x`, `x · (x − 1) = 0`, or `a · b = v`
+    with `a` and `b` proven bits (`LowerOutput::gadget_rows`; rows are never dropped
+    after recording, so each is in the circuit).
   * **covered with LC plugs (no assumptions)**: the proven template with plugs
     replaced by any linear combinations (a sum of earlier wires, a repeated
     variable), for a gadget whose `soundness` assumes nothing of its inputs.
+  * **covered: inside a covered / an allowlisted `G` call**: a call nested in a
+    call of proven gadget `G` (the recorder's gadget stack) whose class is covered,
+    or LC plugs with an allowlist entry: its rows are part of that call's, which
+    `G`'s proof is about (`Template.soundness_inst` carries it over at LC plugs on
+    inputs meeting `G`'s `Assumptions`, whose enforcers the entry names). The same
+    call outside such a parent is classified on its own.
   * **LC plugs: the caller must enforce Assumptions**: the same substitution for a
     gadget whose proof has input assumptions. This is merge-gate item 6: it fails
     unless an allowlist entry names the caller rows that enforce them.
@@ -295,17 +349,37 @@ its rows, a witness branch guards it. `cargo xtask lean-export --coverage` (the
   * **different rows**: none of the above.
 * Any class but the covered ones fails the check unless
   [`coverage-allowlist.txt`](coverage-allowlist.txt) lists it with a reason
-  (a refused entry also pins its call count: its rows are unknown). Over the
+  (a refused or LC-plugs entry also pins its call count: a refused call's rows are
+  unknown, and an LC-plugs entry's reason names the producers of the calls it lists,
+  while its site is often a one-line wrapper that a new caller goes through). Over the
   examples, an entry that matches no call fails too. A later ticket proves the
   variant (a second template, or a lemma that reduces it to the proven one) and
   deletes the entry, or the reason says why the rows are sound without one.
+
+* It counts, per example, the keyed rows (the globally minimized form) whose flat row
+  lies inside a call of a covered class (one nested in an allowlisted LC-plug call
+  included; that call's own rows are not), out of all keyed rows (each keyed row is one
+  flat row with eliminated variables substituted; `expand_function_blob_reduced_origins`
+  and the minimizer's trace name it), and prints `row coverage: <example>: k of n`.
+  Rows outside every covered call are glue or user code, or calls the allowlist
+  accepts.
 
 Covered means the call emits the proven rows. Plain variable plugs still need the
 proof's `Assumptions` (for `add32`, input words of bits): each assumption's
 enforcer is the gadget's own rows or named caller rows, reviewed with the proof.
 
+Every bit decomposition the frontend makes outside a `#[gadget]` call (an input's
+range check, a native bitwise op's bits, `Field::to_bits`) is recorded as an
+`xark::lang::to_bits` call, so each is checked against the `to_bits` template at its
+width. The obligations file of a template is generated next to it, importing the
+proof file that imports the template (`Formal.BoolOps` for `xor` and `or`).
+
 `--circuit <dir>` checks other circuit crates instead (their digest is compared
 with the same crate built without markers).
+
+A constant XOR/OR operand folds to a linear form with no row: `Xor.fold_lhs`/`fold_rhs`
+and `Or.fold_lhs`/`fold_rhs` prove that form is exactly what the template with the
+constant substituted allows, and `const_hint_sound` covers a `hint_bit` of a constant.
 
 ## Building
 

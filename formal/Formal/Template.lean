@@ -93,8 +93,7 @@ that combination `e` (`Rewrites.lean`'s `LC.subst`), which `cargo xtask lean-exp
 plugs one after another, so it is those rows when no combination reads a plug
 substituted after it: always for constants (`consts`), which is the case proven per
 gadget here. The template's soundness carries over to `inst`'s rows whenever the
-substituted inputs meet its assumptions.
-combination reads a witness. -/
+substituted inputs meet its assumptions. -/
 
 open Xark.R1cs
 
@@ -115,13 +114,6 @@ theorem eval_instLC (k : List (ℕ × LC)) (l : LC) (σ : TVar → F) :
   | nil => rfl
   | cons p k ih =>
     rw [instLC, List.foldl_cons, ← instLC, ih, LC.eval_subst, env_cons]
-
-theorem env_wit (k : List (ℕ × LC)) (σ : TVar → F) (j : ℕ) :
-    env k σ (.wit j) = σ (.wit j) := by
-  induction k with
-  | nil => rfl
-  | cons p k ih =>
-    rw [env_cons, Function.update_of_ne (by simp)]; exact ih
 
 /-- A hint with the combinations `k` substituted. -/
 def _root_.Xark.Template.Hint.inst (k : List (ℕ × LC)) : Hint → Hint
@@ -167,6 +159,65 @@ theorem soundness_inst {A : List F → Prop} {S : List F → List F → Prop} (t
 
 /-- Constant plugs `c`: the combinations `LC.cst`. -/
 def consts (c : List (ℕ × F)) : List (ℕ × LC) := c.map fun p => (p.1, LC.cst p.2)
+
+/-! ### Folding a witness
+
+The frontend folds a call whose inputs are partly constant further than `inst`: a
+hint whose inputs are all constant (`hint_bit` of a constant) is replaced by its
+value, and one that is affine in the call's other wires (XOR with a constant
+operand: `k + (1 − 2k)·x`) by that form, and the rows this closes are dropped.
+`cargo xtask lean-export --coverage` replays that on the proven template: after
+`inst`, it folds one witness `o` at a time into the combination `e` its hint
+computes and drops each row the substitution leaves holding at every assignment
+(closed and true, or an identity like `2k · x = 2k·x`); the call is covered when
+what is left hashes to the call's template. `foldAt` is one such step. -/
+
+/-- `t` with witness `o` folded into `e`: inputs and outputs read `e` for `o`, and
+`keep` and `hs` are the rows and hints left. -/
+def foldAt (t : Template) (o : ℕ) (e : LC) (keep : List Row) (hs : List Hint) : Template :=
+  { t with
+    inputs := t.inputs.map (·.subst (.wit o) e)
+    outputs := t.outputs.map (·.subst (.wit o) e)
+    hints := hs
+    rows := keep }
+
+/-- Each row of `t` with `e` for `o` is kept, or holds at every assignment. -/
+def Folds (t : Template) (o : ℕ) (e : LC) (keep : List Row) : Prop :=
+  ∀ r ∈ t.rows, r.subst (.wit o) e ∈ keep ∨ ∀ σ, (r.subst (.wit o) e).Sat σ
+
+theorem ins_foldAt (t : Template) (o : ℕ) (e : LC) (keep : List Row) (hs : List Hint)
+    (σ : TVar → F) :
+    (t.foldAt o e keep hs).ins σ = t.ins (Function.update σ (.wit o) (e.eval σ)) := by
+  simp [ins, foldAt, LC.eval_subst]
+
+theorem outs_foldAt (t : Template) (o : ℕ) (e : LC) (keep : List Row) (hs : List Hint)
+    (σ : TVar → F) :
+    (t.foldAt o e keep hs).outs σ = t.outs (Function.update σ (.wit o) (e.eval σ)) := by
+  simp [outs, foldAt, LC.eval_subst]
+
+/-- **A fold adds no solution.** An assignment of the folded rows, with `o` set to
+`e`'s value, satisfies the original ones. (No condition on `e`: the hint it came
+from doesn't matter.) -/
+theorem sat_of_foldAt (t : Template) (o : ℕ) (e : LC) (keep : List Row) (hs : List Hint)
+    (hf : t.Folds o e keep) (σ : TVar → F) (h : (t.foldAt o e keep hs).Sat σ) :
+    t.Sat (Function.update σ (.wit o) (e.eval σ)) := by
+  intro r hr
+  rw [← Row.sat_subst]
+  rcases hf r hr with hk | hv
+  · exact h _ hk
+  · exact hv σ
+
+/-- **Soundness carries over** to a fold: what the folded rows accept, the
+original rows accept with `o := e`, and the inputs and outputs are the same
+values there. -/
+theorem soundness_foldAt {A : List F → Prop} {S : List F → List F → Prop} (t : Template)
+    (sound : ∀ σ, A (t.ins σ) → t.Sat σ → S (t.ins σ) (t.outs σ)) (o : ℕ) (e : LC)
+    (keep : List Row) (hs : List Hint) (hf : t.Folds o e keep) (σ : TVar → F)
+    (ha : A ((t.foldAt o e keep hs).ins σ)) (h : (t.foldAt o e keep hs).Sat σ) :
+    S ((t.foldAt o e keep hs).ins σ) ((t.foldAt o e keep hs).outs σ) := by
+  rw [ins_foldAt] at ha ⊢
+  rw [outs_foldAt]
+  exact sound _ ha (sat_of_foldAt t o e keep hs hf σ h)
 
 end Template
 

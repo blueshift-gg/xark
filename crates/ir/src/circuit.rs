@@ -88,6 +88,14 @@ impl CircuitProgram {
                 });
                 let tv = LinearCombination::var(t);
                 extra.push(expr_from_r1cs(big, &LinearCombination::one(), &tv, None));
+                // Sides that differ only by a constant (`L·(L − 1)`, a computed bit's
+                // booleanity) become `t·(t + δ)`: still a square in `t`, which the
+                // witness search solves, and two products instead of `|L|`.
+                if small.terms == big.terms {
+                    let mut shifted = tv.clone();
+                    shifted.constant = small.constant.add(&big.constant.neg());
+                    return expr_from_r1cs(&tv, &shifted, &r.c, r.note.clone());
+                }
                 expr_from_r1cs(&tv, small, &r.c, r.note.clone())
             })
             .collect();

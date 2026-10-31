@@ -4596,7 +4596,14 @@ dependencies = [
 name = "xark-bits"
 version = "0.3.0"
 dependencies = [
+ "blake2",
+ "blake3",
+ "num-bigint 0.4.8",
+ "sha2 0.11.0",
+ "sha3",
  "xark",
+ "xark-ir",
+ "xark-test-harness",
 ]
 
 [[package]]

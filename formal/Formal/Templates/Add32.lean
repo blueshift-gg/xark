@@ -9,8 +9,10 @@ set_option linter.style.longLine false
 namespace Xark.Templates.Add32
 open Xark.Template
 
--- A long list literal nests deeply (and so does its compiled code).
+-- A long list literal nests deeply (and so does its compiled code), and a
+-- template of a few thousand rows takes more than the default heartbeats.
 set_option maxRecDepth 100000 in
+set_option maxHeartbeats 0 in
 /-- `xark_bits::add32`'s rows, hints and variables, as the frontend emits them. -/
 def template : Template where
   hash := "sha256:393f6de39a059e1908ea0cb325f1738bf62b106911fc1a790f109e930b4ed458"

@@ -712,3 +712,74 @@ fn window_alignment_negative_and_straddling_windows() {
     }
     eprintln!("alignment tally: {tally:?}");
 }
+
+/// `x` and 39 hinted bits `b₁…b₃₉` pinned only by booleanity; `b₀` is the linear
+/// form `L = x − Σ 2ⁱ·bᵢ`, held to `L·(L − gap) = 0`. With `gap = 1` this is a
+/// 40-bit decomposition: splitting the bits would take 2³⁹ nodes, so a verdict
+/// within the budget means the search solved the row as `L ∈ {0, 1}`.
+fn computed_low_bit(gap: i64) -> PrimitiveProgram {
+    use xark_ir::circuit::expr_from_r1cs;
+    use xark_ir::linear_combination::{LinearCombination, Term};
+    let n = 40u32;
+    let mut vars = vec![var(0, "x", VarRole::PrivateInput)];
+    let mut cons = Vec::new();
+    let mut l = LinearCombination::var(0);
+    for i in 1..n {
+        vars.push(var(i, &format!("b{i}"), VarRole::Derived));
+        cons.push(boolean(i));
+        l.terms.push(Term {
+            coeff: FieldConst::from_bigint(-(BigInt::one() << i as usize)),
+            var: i,
+        });
+    }
+    let mut shifted = l.clone();
+    shifted.constant = FieldConst::from_i64(-gap);
+    cons.push(expr_from_r1cs(
+        &l,
+        &shifted,
+        &LinearCombination::zero(),
+        None,
+    ));
+    prog(vars, cons)
+}
+
+#[test]
+fn a_bit_computed_as_a_linear_form_decomposes_exactly() {
+    let p = computed_low_bit(1);
+    let top = ((1u64 << 40) - 1).to_string();
+    for x in ["0", "1", "1099511627774", "12345678901", top.as_str()] {
+        let ins = inputs(&[(0, x)]);
+        match search_witnesses(&p, &ins, 64).unwrap() {
+            WitnessSearch::Unique(w) => {
+                assert_unique_valid(&p, &ins, &w);
+                let x: u64 = x.parse().unwrap();
+                for i in 1..40u32 {
+                    let want = (x >> i) & 1;
+                    assert_eq!(
+                        w[&i],
+                        fp_from_decimal(&want.to_string(), &p),
+                        "x = {x}, b{i}"
+                    );
+                }
+            }
+            r => panic!("x = {x}: {r:?}"),
+        }
+    }
+    // Past the width, and the field's top end (`x = −1`): no decomposition.
+    let minus_one = (p_bn254() - BigInt::one()).to_string();
+    for x in ["1099511627776", minus_one.as_str()] {
+        let r = search_witnesses(&p, &inputs(&[(0, x)]), 64).unwrap();
+        assert!(matches!(r, WitnessSearch::None), "x = {x}: {r:?}");
+    }
+}
+
+#[test]
+fn a_square_with_roots_two_apart_is_two_valued() {
+    // `L ∈ {0, 2}`: `x = 2` is `b₁ = 1, L = 0` or every bit 0 and `L = 2`.
+    let p = computed_low_bit(2);
+    let r = search_witnesses(&p, &inputs(&[(0, "2")]), 64).unwrap();
+    assert!(matches!(r, WitnessSearch::Multiple { .. }), "{r:?}");
+    // An odd `x` leaves `L` odd: neither root.
+    let r = search_witnesses(&p, &inputs(&[(0, "5")]), 64).unwrap();
+    assert!(matches!(r, WitnessSearch::None), "{r:?}");
+}

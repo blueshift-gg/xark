@@ -1,0 +1,17 @@
+# The `xor` template's harness: one call on fresh inputs, which
+# `cargo xtask lean-export xor` records and writes to formal/Formal/Templates/.
+[package]
+name = "xor-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

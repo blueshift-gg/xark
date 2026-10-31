@@ -50,8 +50,7 @@ enum Intr {
     GadgetRecording,
     GadgetBegin,
     GadgetEnd,
-    ToBitsLookup,
-    ToBitsRecord,
+    ToBits,
     InputField,
     InputUint,
     InputBool,
@@ -90,8 +89,7 @@ fn intrinsic(name: &str) -> Option<Intr> {
         "gadget_recording" => Intr::GadgetRecording,
         "gadget_begin" => Intr::GadgetBegin,
         "gadget_end" => Intr::GadgetEnd,
-        "to_bits_lookup" => Intr::ToBitsLookup,
-        "to_bits_record" => Intr::ToBitsRecord,
+        "to_bits" => Intr::ToBits,
         "input_field" => Intr::InputField,
         "input_uint" => Intr::InputUint,
         "input_bool" => Intr::InputBool,
@@ -383,6 +381,9 @@ impl Host {
     /// interned site id, carried in the profile's `line` until it's resolved).
     #[inline]
     fn mark_site(&mut self, m: &Machine) {
+        if self.b.record_gadgets {
+            m.call_stack_into(&mut self.b.site_stack);
+        }
         if !self.b.profile_enabled {
             return;
         }
@@ -858,6 +859,9 @@ impl Host {
     /// An upper bound on the integer `lc` (non-negative coefficients and constant;
     /// each variable bounded by its proven width, booleanity or a learned bound).
     fn lc_max(&self, lc: &LinearCombination) -> Option<u128> {
+        if let Some((c, rest)) = self.b.split_computed_bit0(lc) {
+            return self.lc_max(&rest)?.checked_add(c as u128);
+        }
         let mut max = u128::try_from(lc.constant.as_i64()?).ok()?;
         for t in &lc.terms {
             let c = u128::try_from(t.coeff.as_i64()?).ok()?;
@@ -894,7 +898,14 @@ impl Host {
         lc: &LinearCombination,
         k: u32,
     ) -> Option<(LinearCombination, LinearCombination)> {
-        if k >= 63 {
+        // Non-negative coefficients: `lc_max` also bounds a computed bit 0's form
+        // `x − Σ 2ⁱ·bᵢ`, whose value mod 2^k isn't read off its terms.
+        if k >= 63
+            || lc
+                .terms
+                .iter()
+                .any(|t| t.coeff.as_i64().is_none_or(|c| c < 0))
+        {
             return None;
         }
         self.lc_max(lc)?;
@@ -1077,20 +1088,20 @@ impl Host {
                 })
                 .collect());
         }
-        if let Some(vars) = self.b.bit_sum_shortcut(x, n) {
-            return Ok(vars.into_iter().map(LinearCombination::var).collect());
+        if let Some(bits) = self.b.bit_sum_shortcut(x, n) {
+            return Ok(bits);
         }
         let key = (canonical_lc_key(x), n);
-        if let Some(vars) = self.b.bit_cache.get(&key) {
-            return Ok(vars.iter().map(|&v| LinearCombination::var(v)).collect());
+        if let Some(bits) = self.b.bit_cache.get(&key) {
+            return Ok(bits.clone());
         }
         self.b.kind_stack.push(ConstraintKind::RangeCheck);
-        let vars = self.b.decompose_bits(x.clone(), n);
+        let bits = self.b.decompose_bits(x.clone(), n);
         self.b.kind_stack.pop();
         if !self.b.witness_only {
-            self.b.bit_cache.insert(key, vars.clone());
+            self.b.bit_cache.insert(key, bits.clone());
         }
-        Ok(vars.into_iter().map(LinearCombination::var).collect())
+        Ok(bits)
     }
 
     /// `x`'s `n` bits when they're already proven (a constant, a sum of proven bits, or
@@ -1099,11 +1110,10 @@ impl Host {
         if x.is_constant() {
             return None;
         }
-        if let Some(vars) = self.b.bit_sum_shortcut(x, n) {
-            return Some(vars.into_iter().map(LinearCombination::var).collect());
+        if let Some(bits) = self.b.bit_sum_shortcut(x, n) {
+            return Some(bits);
         }
-        let vars = self.b.bit_cache.get(&(canonical_lc_key(x), n))?;
-        Some(vars.iter().map(|&v| LinearCombination::var(v)).collect())
+        self.b.bit_cache.get(&(canonical_lc_key(x), n)).cloned()
     }
 
     fn recompose(bits: &[LinearCombination]) -> LinearCombination {
@@ -1456,6 +1466,13 @@ impl crate::interp::Host for Host {
             return None;
         }
         let lc = self.int_lc(m, p).ok()?;
+        // A decomposition's bit 0 is a linear form (`x & 7` is `x − 8·b₃ − …`): take
+        // each out as one boolean term `c·b₀`, and range the remaining terms.
+        let (mut terms, mut bit0s) = (lc.clone(), Vec::new());
+        while let Some((c, rest)) = self.b.split_computed_bit0(&terms) {
+            bit0s.push(c as i128);
+            terms = rest;
+        }
         const MAX: i128 = 1 << 10;
         // Each term's range: a pinned-boolean variable is 0..=1, one of known width
         // `w` is 0..2^w. The sum then lies in `lo..=hi`, on a grid of step `g` (the
@@ -1463,8 +1480,13 @@ impl crate::interp::Host for Host {
         // boolean (`x & 7`, `!x & 7` = `7 − Σ bits`), else that grid. A superset of
         // the possible values is fine: an impossible one is never selected.
         let (mut lo, mut hi, mut g, mut all_bool) = (0i128, 0i128, 0i128, true);
-        let mut coeffs = Vec::with_capacity(lc.terms.len());
-        for t in &lc.terms {
+        let mut coeffs = Vec::with_capacity(terms.terms.len() + bit0s.len());
+        for &c in &bit0s {
+            hi += c;
+            g = gcd(g, c);
+            coeffs.push(c);
+        }
+        for t in &terms.terms {
             let c = t.coeff.as_i64()? as i128;
             let vhi = if self.b.boolean_vars.contains(&t.var) {
                 1
@@ -1520,14 +1542,16 @@ impl crate::interp::Host for Host {
         if offsets.len() as i128 > MAX {
             return None;
         }
-        let base = lc.constant.as_i64()? as i128 + lo;
+        let base = terms.constant.as_i64()? as i128 + lo;
         if !(0..1i128 << 32).contains(&base) {
             return None;
         }
-        let rest = LinearCombination {
-            constant: FieldConst::from_i64(-(lo as i64)),
-            terms: lc.terms.clone(),
-        };
+        // `lc − base`: the offset from `base`, in `0..=max`.
+        let rest = lc
+            - LinearCombination {
+                constant: FieldConst::from_i64(base as i64),
+                terms: Vec::new(),
+            };
         let max = *offsets.last()?;
         let idx = self.new_wire(m, rest, 64 - max.leading_zeros());
         let base = base as u64;
@@ -1678,13 +1702,12 @@ impl crate::interp::Host for Host {
                 | Intr::Bind
                 | Intr::Panic
                 | Intr::RequireEq
-                | Intr::ToBitsLookup
                 | Intr::InputSchema
         ) && !(matches!(
             intr,
             Intr::Ult
                 | Intr::HintInverse
-                | Intr::ToBitsRecord
+                | Intr::ToBits
                 | Intr::HintDivRem
                 | Intr::HintMulModDivMod
                 | Intr::HintModInverse
@@ -1757,10 +1780,31 @@ impl crate::interp::Host for Host {
             Intr::Xor | Intr::Or => {
                 let x = self.get_field(m, a[1])?;
                 let y = self.get_field(m, a[2])?;
-                let out = if intr == Intr::Xor {
-                    self.b.emit_xor(x, y)
+                // With a constant operand `k` the row's one solution is linear:
+                // `x ⊕ k = k + (1 − 2k)·x`, `x ∨ k = k + (1 − k)·x`. Use it in place
+                // of the row (zkGolf T0, audit #39; proven exact in
+                // formal/Formal/BoolOps.lean, `Xor.fold_lhs`/`fold_rhs`, `Or.fold_lhs`/`fold_rhs`).
+                let fold = if y.is_constant() {
+                    Some((&x, &y.constant))
+                } else if x.is_constant() {
+                    Some((&y, &x.constant))
                 } else {
-                    self.b.emit_or(x, y)
+                    None
+                };
+                let out = match fold {
+                    Some((v, k)) => {
+                        self.b.consume_pending(v);
+                        let slope = if intr == Intr::Xor {
+                            FieldConst::one().add(&k.mul(&FieldConst::from_i64(-2)))
+                        } else {
+                            FieldConst::one().add(&k.neg())
+                        };
+                        let mut out = v.clone().scale(&slope);
+                        out.constant = out.constant.add(k);
+                        out
+                    }
+                    None if intr == Intr::Xor => self.b.emit_xor(x, y),
+                    None => self.b.emit_or(x, y),
                 };
                 self.put_field(m, a[0], out)?;
             }
@@ -1812,6 +1856,19 @@ impl crate::interp::Host for Host {
             Intr::HintBit => {
                 let x = self.get_field(m, a[1])?;
                 let index = int_of(a[2], "the bit index of `hint_bit`")? as u32;
+                // A constant's bit is a constant: no variable for the caller's rows to
+                // pin (zkGolf T0). Needs the modulus, for a negative constant's
+                // canonical value.
+                if let (true, Some((p, _))) = (x.is_constant(), &self.reduce) {
+                    let mut v = x.constant.big() % p;
+                    if v < BigInt::from(0) {
+                        v += p;
+                    }
+                    let bit = (v >> index) & BigInt::from(1u8);
+                    let lc = LinearCombination::constant(bit.to_string());
+                    self.put_field(m, a[0], lc)?;
+                    return Ok(None);
+                }
                 let g = self.guard();
                 let x = self.b.gate_input(g.as_ref(), x);
                 let v = self.b.alloc_advice();
@@ -1943,6 +2000,21 @@ impl crate::interp::Host for Host {
             Intr::RequireEq => {
                 let x = self.get_field(m, a[0])?;
                 let y = self.get_field(m, a[1])?;
+                // Two constants (folded hints and XORs make these): equal needs no
+                // row, unequal can never hold.
+                if x.is_constant()
+                    && y.is_constant()
+                    && self.guards.is_empty()
+                    && !self.b.witness_only
+                    && !self.reduce_lc(x.clone() - y.clone()).constant.is_zero()
+                {
+                    return Err(CompileError::new(format!(
+                        "`require_eq` of two different constants ({} and {}) can never hold",
+                        x.constant.decimal(),
+                        y.constant.decimal()
+                    ))
+                    .diverging());
+                }
                 self.require_gated(x, y);
             }
             Intr::Bind => {
@@ -1978,12 +2050,19 @@ impl crate::interp::Host for Host {
                     .gadget_end(outputs, refused)
                     .map_err(CompileError::new)?;
             }
-            Intr::ToBitsLookup => {
-                // (x, n, out) → 1 if `out` was filled (constant / shortcut / cache hit).
+            Intr::ToBits => {
+                // (x, n, out): `x`'s `n` little-endian bits, proving `x < 2^n`: a
+                // constant's bits, a sum of proven bits, an earlier decomposition, or
+                // a new one (`Builder::decompose_bits_gated`).
                 let x = self.get_field(m, a[0])?;
                 let n = int_of(a[1], "the width of `to_bits`")? as usize;
                 let out = ptr_of(a[2])?;
-                let bits: Option<Vec<LinearCombination>> = if x.is_constant() {
+                if n > 253 {
+                    return Err(CompileError::new(format!(
+                        "`to_bits` of {n} bits: at most 253 fit below the field's modulus"
+                    )));
+                }
+                let bits = if x.is_constant() {
                     let bits = x.constant.to_bits_le(n).ok_or_else(|| {
                         CompileError::new(format!(
                             "constant `{}` does not fit in {n} bits",
@@ -1996,55 +2075,33 @@ impl crate::interp::Host for Host {
                         // arm can't be taken (like a panic there).
                         .diverging()
                     })?;
-                    Some(
-                        bits.into_iter()
-                            .map(|b| {
-                                if b {
-                                    LinearCombination::one()
-                                } else {
-                                    LinearCombination::zero()
-                                }
-                            })
-                            .collect(),
-                    )
-                } else if let Some(vars) = self.b.bit_sum_shortcut(&x, n) {
-                    Some(vars.into_iter().map(LinearCombination::var).collect())
+                    bits.into_iter()
+                        .map(|b| {
+                            if b {
+                                LinearCombination::one()
+                            } else {
+                                LinearCombination::zero()
+                            }
+                        })
+                        .collect()
+                } else if let Some(bits) = self.known_bits(&x, n) {
+                    bits
                 } else {
-                    self.b
-                        .bit_cache
-                        .get(&(canonical_lc_key(&x), n))
-                        .cloned()
-                        .map(|vars| vars.into_iter().map(LinearCombination::var).collect())
-                };
-                return Ok(Some(match bits {
-                    Some(bits) => {
-                        for (i, lc) in bits.into_iter().enumerate() {
-                            self.put_field(m, V::i32(out + 32 * i as u32), lc)?;
-                        }
-                        V::i32(1)
+                    // In an arm the bits decompose `g·x`: `x`'s only where it's taken,
+                    // so they aren't remembered as `x`'s.
+                    let g = self.guard();
+                    self.b.kind_stack.push(ConstraintKind::RangeCheck);
+                    let bits = self.b.decompose_bits_gated(x.clone(), n, g);
+                    self.b.kind_stack.pop();
+                    if self.guards.is_empty() && !self.b.witness_only {
+                        self.b
+                            .bit_cache
+                            .insert((canonical_lc_key(&x), n), bits.clone());
                     }
-                    None => V::i32(0),
-                }));
-            }
-            Intr::ToBitsRecord => {
-                // (x, n, bits): remember the decomposition just emitted.
-                let x = self.get_field(m, a[0])?;
-                let n = int_of(a[1], "the width of `to_bits`")? as usize;
-                let bits = self.get_fields(m, a[2], n)?;
-                let vars: Option<Vec<u32>> = bits
-                    .iter()
-                    .map(|lc| {
-                        (lc.constant.is_zero() && lc.terms.len() == 1 && lc.terms[0].coeff.is_one())
-                            .then(|| lc.terms[0].var)
-                    })
-                    .collect();
-                // Not in an arm: there the recomposition is guarded, so the bits
-                // are `x`'s only where the arm is taken.
-                if let Some(vars) = vars
-                    && self.guards.is_empty()
-                    && !self.b.witness_only
-                {
-                    self.b.bit_cache.insert((canonical_lc_key(&x), n), vars);
+                    bits
+                };
+                for (i, lc) in bits.into_iter().enumerate() {
+                    self.put_field(m, V::i32(out + 32 * i as u32), lc)?;
                 }
             }
             Intr::InputField | Intr::InputUint | Intr::InputBool => {
@@ -2086,12 +2143,7 @@ impl crate::interp::Host for Host {
                         // hand out its halves, recomposed from the check's bits.
                         let x = LinearCombination::var(id);
                         self.b.kind_stack.push(ConstraintKind::RangeCheck);
-                        let bits: Vec<LinearCombination> = self
-                            .b
-                            .decompose_bits(x.clone(), width as usize)
-                            .into_iter()
-                            .map(LinearCombination::var)
-                            .collect();
+                        let bits = self.b.decompose_bits(x.clone(), width as usize);
                         self.b.kind_stack.pop();
                         let lo = Self::recompose(&bits[..64]);
                         self.pending_hi = Some(Self::recompose(&bits[64..]));

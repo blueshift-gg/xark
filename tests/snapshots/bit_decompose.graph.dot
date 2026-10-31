@@ -11,19 +11,17 @@ digraph R1CS {
   v7 [label="w4\nPrivate"];
   v8 [label="w5\nPrivate"];
   v9 [label="w6\nPrivate"];
-  v10 [label="w7\nPrivate"];
 
-  constraint0 [shape=box, label="C0: w0 * w0 = w0"];
-  constraint1 [shape=box, label="C1: w1 * w1 = w1"];
-  constraint2 [shape=box, label="C2: w2 * w2 = w2"];
-  constraint3 [shape=box, label="C3: w3 * w3 = w3"];
-  constraint4 [shape=box, label="C4: w4 * w4 = w4"];
-  constraint5 [shape=box, label="C5: w5 * w5 = w5"];
-  constraint6 [shape=box, label="C6: w6 * w6 = w6"];
-  constraint7 [shape=box, label="C7: w7 * w7 = w7"];
-  constraint8 [shape=box, label="C8: (-x + w0 + 2*w1 + 4*w2 + 8*w3 + 16*w4 + 32*w5 + 64*w6 + 128*w7) * 1 = 0"];
-  constraint9 [shape=box, label="C9: (-bit0 + w0) * 1 = 0"];
-  constraint10 [shape=box, label="C10: (-bit7 + w7) * 1 = 0"];
+  constraint0 [shape=box, label="C0: w0 in {0,1}"];
+  constraint1 [shape=box, label="C1: w1 in {0,1}"];
+  constraint2 [shape=box, label="C2: w2 in {0,1}"];
+  constraint3 [shape=box, label="C3: w3 in {0,1}"];
+  constraint4 [shape=box, label="C4: w4 in {0,1}"];
+  constraint5 [shape=box, label="C5: w5 in {0,1}"];
+  constraint6 [shape=box, label="C6: w6 in {0,1}"];
+  constraint7 [shape=box, label="C7: 8-bit range: bit 0 = value − Σ 2ⁱ·bᵢ ∈ {0,1}"];
+  constraint8 [shape=box, label="C8: (x - bit0 - 2*w0 - 4*w1 - 8*w2 - 16*w3 - 32*w4 - 64*w5 - 128*w6) * 1 = 0"];
+  constraint9 [shape=box, label="C9: (-bit7 + w6) * 1 = 0"];
 
   v3 -> constraint0;
   constraint0 -> v3;
@@ -39,9 +37,16 @@ digraph R1CS {
   constraint5 -> v8;
   v9 -> constraint6;
   constraint6 -> v9;
-  v10 -> constraint7;
-  constraint7 -> v10;
+  v0 -> constraint7;
+  v3 -> constraint7;
+  v4 -> constraint7;
+  v5 -> constraint7;
+  v6 -> constraint7;
+  v7 -> constraint7;
+  v8 -> constraint7;
+  v9 -> constraint7;
   v0 -> constraint8;
+  v1 -> constraint8;
   v3 -> constraint8;
   v4 -> constraint8;
   v5 -> constraint8;
@@ -49,9 +54,6 @@ digraph R1CS {
   v7 -> constraint8;
   v8 -> constraint8;
   v9 -> constraint8;
-  v10 -> constraint8;
-  v1 -> constraint9;
-  v3 -> constraint9;
-  v2 -> constraint10;
-  v10 -> constraint10;
+  v2 -> constraint9;
+  v9 -> constraint9;
 }
