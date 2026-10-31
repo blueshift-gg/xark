@@ -1053,7 +1053,7 @@ fn merkle_membership_gadget() {
 /// Poseidon's own determinacy is `poseidon_permutation_determined` (`Formal/Poseidon.lean`).
 ///
 /// This pins the per-level multiplication shape: one Poseidon `hash2` (240 S-box muls)
-/// + `cond_swap`'s booleanity and product — across the depth-4 path:
+/// plus `cond_swap`'s booleanity and product — across the depth-4 path:
 /// 4 × (240 + 1 + 1) = 968. Any drift in the fold or the compression fails here.
 #[test]
 fn merkle_matches_lean_model() {
@@ -2492,14 +2492,10 @@ fn aes_matches_lean_model() {
     assert_eq!(mul, 145944, "AES-128 mult-gate count; got {mul}");
 }
 
-/// **R1CS ↔ Lean bridge (AES-256).** The AES-256 block reuses the exact round-step
-/// (`SubBytes → ShiftRows → MixColumns → AddRoundKey`) proven bit-sound in
-/// `formal/Formal/Aes.lean` (`aesRoundStep_bit_sound`, key-size-independent) — just
-/// 14 rounds instead of 10. The 256-bit key schedule (`Nk = 8`, 60 words, with the
-/// extra `SubWord` at `i % 8 == 4`) is proven sound in `formal/Formal/Aes256.lean`:
-/// `aes256KeyExpansion_from_witness` shows a byte trace satisfying the FIPS-197
-/// recurrence equals the expanded key (via strong-induction `wordBytes_eq`), reusing
-/// the AES-128 S-box/`xor8` primitives. This pins the Rust gadget's mult-gate count.
+/// **AES-256 mult-gate count.** The AES-256 block runs the AES-128 round-step 14 times
+/// with the 256-bit key schedule (`Nk = 8`, 60 words, the extra `SubWord` at
+/// `i % 8 == 4`). The hand-restated Lean AES proofs are deleted; this test pins the Rust
+/// gadget's mult-gate count.
 /// `#[ignore]` — ~200k.
 #[test]
 #[ignore]
@@ -2552,8 +2548,8 @@ fn gf128_mul_matches_lean_model() {
 }
 
 /// **R1CS ↔ Lean bridge (AES-128-GCM composition).** The full AEAD composes the
-/// proven pieces: the hash subkey `H = AES_enc(key, 0¹²⁸)` and `E(J0)` reuse the
-/// `Aes.lean` block soundness; confidentiality is CTR (AES rounds + XOR); the tag is
+/// pieces: the hash subkey `H = AES_enc(key, 0¹²⁸)` and `E(J0)` are AES blocks;
+/// confidentiality is CTR (AES rounds + XOR); the tag is
 /// `GHASH_H(A ‖ C ‖ [len]) ⊕ E(J0)` where each GHASH step is a `GF128.lean`
 /// `gf128_mul` (well-defined by `gf128_mul_lt_two128`). This pins the whole-mode
 /// mult-gate count of `examples/aes_gcm` (13-byte AAD + 20-byte message).
@@ -2585,8 +2581,10 @@ fn fp_mul_matches_lean_model() {
     assert!(c.status_success, "fp_mul compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
+    // 164 fewer since the remainder's `require_lt` compares chunk-wise
+    // (`formal/Formal/RequireLt.lean`); the column identity is unchanged.
     assert_eq!(
-        mul, 1154,
+        mul, 990,
         "fp_mul mult-gate count pins mul_mod_via_Fr_limbwise_constraints_3; got {mul}"
     );
 }
@@ -2605,12 +2603,13 @@ fn ec_incomplete_matches_lean_model() {
     assert!(c.status_success, "ec_incomplete compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    // 15369 − 9. Squaring a 3-limb element (`y²`, `λ²`, the
+    // 13893 − 9 (since `require_lt`'s chunked compare, `4·3 + 86` rows per `r < p`
+    // check). Squaring a 3-limb element (`y²`, `λ²`, the
     // on-curve check) forms each cross product `xᵢ·xⱼ` twice in the schoolbook
     // column sums; the second reuses the first's row (`Xark.R1cs.cse_sound`), so
     // every column sum — what `mul_mod_via_limbwise_constraints` is stated over —
     // has the same value.
-    let want = 15360;
+    let want = 13884;
     assert_eq!(
         mul, want,
         "ec_incomplete mult-gate count pins ec_add_incomplete_secp256k1_sound; got {mul}"
@@ -2629,9 +2628,9 @@ fn ec_incomplete_r1_matches_lean_model() {
     assert!(c.status_success, "ec_incomplete_r1 compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    // 15891 − 9 (the 3-limb square's repeated cross products; see
+    // 14415 − 9 (the 3-limb square's repeated cross products; see
     // `ec_incomplete_matches_lean_model`).
-    let want = 15882;
+    let want = 14406;
     assert_eq!(
         mul, want,
         "ec_incomplete_r1 mult-gate count pins ec_add_incomplete_secp256r1_sound; got {mul}"
@@ -2759,7 +2758,8 @@ fn bignum_wrapper_lowers() {
     )
     .expect("parse r1cs.json");
     // Same as the free-fn `mod_mul::<3,86>` (a·b mod m, 3×86-bit) under bn254.
-    assert_eq!(r1cs.constraints.len(), 1189, "Bignum::mul is zero-cost");
+    // 167 fewer since `require_lt` compares chunk-wise (`formal/Formal/RequireLt.lean`).
+    assert_eq!(r1cs.constraints.len(), 1022, "Bignum::mul is zero-cost");
 }
 
 /// **`fp!` operator layer.** `xark_bignum::fp!` defines a non-native field-element
@@ -4011,7 +4011,7 @@ struct BignumCase {
 ///
 /// Blind spot: at 3 × 2 bits every recomposition is far below Fr, so a check that is
 /// only wrong when a full-width value wraps the field can't show up here — that class
-/// is tested at full width (`mod_neg_full_width`, `lazy_field_gadgets_are_sound`).
+/// is tested at full width (`mod_neg_full_width`).
 #[test]
 fn small_field_bignum_gadgets_are_sound() {
     use xark_ir::witness_search::{Projection, search_projection};
@@ -4204,114 +4204,1153 @@ fn small_field_bignum_gadgets_are_sound() {
     }
 }
 
-/// **The fixed-width lazy gadgets, at full size.** `mul_lazy_k1`, `weak_reduce_k1`,
-/// `finalize_k1` and their ed25519 counterparts hint no quotient (every carry is
-/// determined), so exhaustive witness search decides them directly. On random,
-/// all-zero and all-max limbs at their documented input bound — and one bit past
-/// it — every output is `≡` the reference mod `p` and unique, or there is no
-/// witness; within the bound the multiply and weak reduce always succeed.
+/// **secp256k1 certificate gadgets** (`mul_cert_k1`, `ec_add_k1`; tickets 03, 26:
+/// 8 × 32-bit limbs, `formal/Formal/MulCertK1.lean`, `EcK1Check.lean`), at full width
+/// against a num-bigint reference with release-mode hints (bug checklist 14).
+/// `mul_cert_k1` alone pins every wire given its operands, so exhaustive witness
+/// search decides it (8): an honest certificate, unreduced limbs at the `2^34` bound
+/// included, has exactly one witness; `t` off by one or by `p` (a non-canonical
+/// encoding of the same residue is accepted, by design) is decided too. The chord
+/// guard (1): `w·Δ ≡ 1` with `Δ = 2p + x_Q − x_P` for `x_Q ∈ {x_P, x_P + p}` has no
+/// witness for any tried `w`. The point ops (search cannot branch over their 64-bit
+/// hints): honest sums solve, every derived wire tampered by one is
+/// rejected (7), and a wrong claimed result or `x_Q ≡ x_P` does not solve. The fused
+/// `ec_double_add_k1` (ticket 04) likewise, with `y_S` in the signed `2p − y` form, and
+/// adversarial `S ∈ {A, −A, −2A}` refused (1, 2).
 #[test]
-fn lazy_field_gadgets_are_sound() {
+fn secp256k1_certificate_gadgets_are_sound() {
     use num_bigint::BigInt;
-    use xark_ir::witness_search::{Projection, search_projection};
-    let pk1 = BigInt::parse_bytes(
+    let p = BigInt::parse_bytes(
         b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F",
         16,
     )
     .unwrap();
-    let p25: BigInt = (BigInt::from(1) << 255) - 19;
-    // (gadget call, limbs, limb width, documented input bound in bits, modulus, binary,
-    //  always succeeds within the bound)
-    let cases: [(&str, usize, u32, u32, &BigInt, bool, bool); 6] = [
-        ("mul_lazy_k1(a, b)", 4, 64, 70, &pk1, true, true),
-        ("weak_reduce_k1(a)", 4, 64, 72, &pk1, false, true),
-        ("finalize_k1(a)", 4, 64, 64, &pk1, false, false),
-        ("mul_lazy_25519(a, b)", 3, 85, 88, &p25, true, true),
-        ("weak_reduce_25519(a)", 3, 85, 88, &p25, false, true),
-        ("finalize_25519(a)", 3, 85, 85, &p25, false, false),
-    ];
-    let value = |ls: &[BigInt], w: u32| {
-        ls.iter().enumerate().fold(BigInt::from(0), |acc, (i, l)| {
-            acc + (l.clone() << (w * i as u32))
-        })
+    let md = |x: &BigInt| ((x % &p) + &p) % &p;
+    let inv = |x: &BigInt| x.modpow(&(&p - 2), &p);
+    let g = (
+        BigInt::parse_bytes(
+            b"79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798",
+            16,
+        )
+        .unwrap(),
+        BigInt::parse_bytes(
+            b"483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8",
+            16,
+        )
+        .unwrap(),
+    );
+    let add = |a: &(BigInt, BigInt), b: &(BigInt, BigInt)| {
+        let l = md(&((&b.1 - &a.1) * inv(&md(&(&b.0 - &a.0)))));
+        let x = md(&(&l * &l - &a.0 - &b.0));
+        (x.clone(), md(&(l * (&a.0 - x) - &a.1)))
     };
-    for (k, &(call, n, w, bound, p, binary, total)) in cases.iter().enumerate() {
-        let src = format!(
-            "#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\n#[circuit]\n\
-             pub fn circuit(a: Private<[Field; {n}]>, b: Private<[Field; {n}]>, s: Public<[Field; {n}]>) {{\n\
-             \x20   let _ = b;\n\x20   let r = {call};\n\
-             \x20   let mut i = 0;\n\x20   while i < {n} {{ require_eq(r[i], s[i]); i += 1; }}\n}}\n"
-        );
-        let name = format!("lazy_gadget_{k}");
-        let c = compile_with_field(&write_case(&name, &src), &name, "bn254");
-        assert!(c.status_success, "{call}: {}", c.stderr);
-        let prog = c.program();
-        let id = |nm: &str| prog.vars.iter().find(|v| v.name == nm).map(|v| v.id);
-        let out: Vec<_> = (0..n).filter_map(|i| id(&format!("s[{i}]"))).collect();
-        let mut seed = 0x9e37_79b9_7f4a_7c15u64 ^ k as u64;
-        let mut next = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            seed
-        };
-        let (mut decided, mut beyond) = (0usize, 0usize);
-        for t in 0..48usize {
-            let mut limb = |j: usize| -> BigInt {
-                let max: BigInt = (BigInt::from(1) << bound) - 1;
-                match (t + j) % 6 {
-                    0 => BigInt::from(0),
-                    1 => max,
-                    r => {
-                        let x = (BigInt::from(next()) | (BigInt::from(next()) << 64)) & max;
-                        // one bit past the bound: always set, so it really exceeds it
-                        if r == 5 {
-                            x | (BigInt::from(1) << bound)
-                        } else {
-                            x
-                        }
-                    }
-                }
-            };
-            let a: Vec<BigInt> = (0..n).map(&mut limb).collect();
-            let b: Vec<BigInt> = (0..n).map(|j| limb(j + 3)).collect();
-            let within = a
-                .iter()
-                .chain(if binary { &b[..] } else { &[] })
-                .all(|l| l.bits() <= bound as u64);
-            let mut fixed = std::collections::BTreeMap::new();
-            for i in 0..n {
-                fixed.insert(id(&format!("a[{i}]")).unwrap(), a[i].to_string());
-                if let Some(v) = id(&format!("b[{i}]")) {
-                    fixed.insert(v, b[i].to_string());
-                }
-            }
-            let want = if binary {
-                value(&a, w) * value(&b, w)
-            } else {
-                value(&a, w)
-            } % p;
-            match search_projection(&prog, &fixed, &out, 1 << 12, None).unwrap() {
-                Projection::One(v) => {
-                    let ls: Vec<BigInt> =
-                        v.iter().map(|x| x.to_decimal().parse().unwrap()).collect();
-                    assert_eq!(value(&ls, w) % p, want, "{call} {a:?} {b:?}: wrong value");
-                    decided += 1;
-                    beyond += !within as usize;
-                }
-                Projection::None => assert!(
-                    !(within && total),
-                    "{call} {a:?} {b:?}: rejected within its bound"
-                ),
-                other => panic!("{call} {a:?} {b:?}: {other:?}"),
+    let dbl = |a: &(BigInt, BigInt)| {
+        let l = md(&(3 * &a.0 * &a.0 * inv(&md(&(2 * &a.1)))));
+        let x = md(&(&l * &l - 2 * &a.0));
+        (x.clone(), md(&(l * (&a.0 - x) - &a.1)))
+    };
+    let limbs = |x: &BigInt| -> Vec<BigInt> {
+        let m: BigInt = (BigInt::from(1) << 32) - 1;
+        (0..8).map(|i| (x >> (32 * i)) & &m).collect()
+    };
+    let value = |ls: &[BigInt]| {
+        ls.iter()
+            .enumerate()
+            .fold(BigInt::from(0), |acc, (i, l)| acc + (l.clone() << (32 * i)))
+    };
+    let named = |pts: &[(&str, &[BigInt])]| -> Vec<(String, String)> {
+        let mut v = Vec::new();
+        for (n, ls) in pts {
+            for (i, l) in ls.iter().enumerate() {
+                v.push((format!("{n}[{i}]"), l.to_string()));
             }
         }
-        // Not vacuous: most samples are computed, not just rejected.
-        assert!(
-            decided >= 24,
-            "{call}: only {decided}/48 samples gave a value"
+        v
+    };
+    fn refs(v: &[(String, String)]) -> Vec<(&str, String)> {
+        v.iter().map(|(n, x)| (n.as_str(), x.clone())).collect()
+    }
+    let solves = |c: &Compiled, ins: &[(String, String)]| {
+        let program = c.program();
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &refs(ins))).is_ok()
+    };
+    let circuit = |name: &str, params: &str, body: &str| {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\n#[circuit]\n\
+             pub fn circuit({params}) {{\n{body}}}\n"
         );
-        println!("{call}: {decided}/48 exact ({beyond} past the bound)");
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let f4 = |n: &str| format!("{n}: Private<[Field; 8]>");
+
+    // ---- mul_cert_k1 alone: exhaustive ----
+    let cert = circuit(
+        "k1_cert",
+        &[f4("a"), f4("b"), f4("t")].join(", "),
+        "    mul_cert_k1(a, b, t);\n",
+    );
+    let max34: BigInt = (BigInt::from(1) << 34) - 1;
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        BigInt::from(seed >> 30)
+    };
+    let mut ops: Vec<(Vec<BigInt>, Vec<BigInt>)> = vec![
+        (vec![max34.clone(); 8], vec![max34.clone(); 8]),
+        (vec![BigInt::from(0); 8], vec![max34.clone(); 8]),
+        (limbs(&g.0), limbs(&g.1)),
+    ];
+    for _ in 0..3 {
+        ops.push((
+            (0..8).map(|_| next()).collect(),
+            (0..8).map(|_| next()).collect(),
+        ));
+    }
+    for (a, b) in &ops {
+        let t = md(&(value(a) * value(b)));
+        let ins = |t: &BigInt| named(&[("a", a), ("b", b), ("t", &limbs(t))]);
+        assert!(
+            unique_or_none(&cert, &refs(&ins(&t))),
+            "honest certificate rejected"
+        );
+        assert!(
+            !unique_or_none(&cert, &refs(&ins(&(&t + 1)))),
+            "t + 1 accepted"
+        );
+        // Below `2^256 − p` the residue has a second 8×32 encoding, `t + p`.
+        if &t + &p < BigInt::from(1) << 256 {
+            assert!(unique_or_none(&cert, &refs(&ins(&(&t + &p)))));
+        }
+    }
+    rejects_each_tampered_witness(
+        &cert,
+        &refs(&named(&[
+            ("a", &ops[0].0),
+            ("b", &ops[0].1),
+            ("t", &limbs(&md(&(value(&ops[0].0) * value(&ops[0].1))))),
+        ])),
+    );
+    // The guard instance with `x_Q ≡ x_P`: `Δ = 2p + x_Q − x_P` limb-wise.
+    let pl = limbs(&p);
+    let one = limbs(&BigInt::from(1));
+    for shift in [0u8, 1] {
+        let delta: Vec<BigInt> = pl.iter().map(|l| (2 + shift) * l).collect();
+        for w in [
+            one.clone(),
+            limbs(&inv(&BigInt::from(2))),
+            (0..8).map(|_| next()).collect(),
+        ] {
+            let ins = named(&[("a", &w), ("b", &delta), ("t", &one)]);
+            assert!(
+                !unique_or_none(&cert, &refs(&ins)),
+                "w·Δ ≡ 1 with Δ ≡ 0 accepted"
+            );
+        }
+    }
+
+    // ---- ec_add_k1 ----
+    let out = "    let mut i = 0;\n\
+               \x20   while i < 8 { require_eq(x[i], rx[i]); require_eq(y[i], ry[i]); i += 1; }\n";
+    let pub4 = "rx: Public<[Field; 8]>, ry: Public<[Field; 8]>";
+    let add_c = circuit(
+        "k1_cert_add",
+        &[f4("px"), f4("py"), f4("qx"), f4("qy"), pub4.into()].join(", "),
+        &format!("    let (x, y) = ec_add_k1(px, py, qx, qy);\n{out}"),
+    );
+    let neg = |a: &(BigInt, BigInt)| (a.0.clone(), md(&-&a.1));
+    let g2 = dbl(&g);
+    let g3 = add(&g, &g2);
+    let g5 = add(&g2, &g3);
+    let add_ins = |a: &(BigInt, BigInt), qx: &[BigInt], qy: &[BigInt], r: &(BigInt, BigInt)| {
+        named(&[
+            ("px", &limbs(&a.0)),
+            ("py", &limbs(&a.1)),
+            ("qx", qx),
+            ("qy", qy),
+            ("rx", &limbs(&r.0)),
+            ("ry", &limbs(&r.1)),
+        ])
+    };
+    for (a, b) in [(&g, &g2), (&g3, &g5), (&g5, &neg(&g2))] {
+        let r = add(a, b);
+        let ins = add_ins(a, &limbs(&b.0), &limbs(&b.1), &r);
+        assert!(solves(&add_c, &ins), "honest add rejected");
+        rejects_each_tampered_witness(&add_c, &refs(&ins));
+        let wrong = add_ins(
+            a,
+            &limbs(&b.0),
+            &limbs(&b.1),
+            &(r.0.clone(), md(&(&r.1 + 1))),
+        );
+        assert!(!solves(&add_c, &wrong), "wrong sum accepted");
+    }
+    let shifted: Vec<BigInt> = limbs(&g3.0).iter().zip(&pl).map(|(a, b)| a + b).collect();
+    let d3 = dbl(&g3);
+    for (qx, qy) in [
+        (limbs(&g3.0), limbs(&g3.1)),
+        (limbs(&g3.0), limbs(&md(&-&g3.1))),
+        (shifted, limbs(&g3.1)),
+    ] {
+        assert!(
+            !solves(&add_c, &add_ins(&g3, &qx, &qy, &d3)),
+            "x_Q ≡ x_P solved"
+        );
+    }
+
+    // ---- ec_double_add_k1 (ticket 04): (A + S) + A, y_S possibly as 2p − y ----
+    let dadd_c = circuit(
+        "k1_cert_dadd",
+        &[f4("px"), f4("py"), f4("qx"), f4("qy"), pub4.into()].join(", "),
+        &format!("    let (x, y) = ec_double_add_k1(px, py, qx, qy);\n{out}"),
+    );
+    let signed =
+        |y: &BigInt| -> Vec<BigInt> { limbs(y).iter().zip(&pl).map(|(l, m)| 2 * m - l).collect() };
+    for (a, b, sy) in [
+        (&g3, &g5, limbs(&g5.1)),
+        (&g5, &neg(&g2), limbs(&md(&-&g2.1))),
+        // −G2 with y_S = 2p − y(G2) limb-wise: the digit-sign form.
+        (&g5, &neg(&g2), signed(&g2.1)),
+    ] {
+        let r = add(&add(a, b), a);
+        let ins = add_ins(a, &limbs(&b.0), &sy, &r);
+        assert!(solves(&dadd_c, &ins), "honest double-and-add rejected");
+        rejects_each_tampered_witness(&dadd_c, &refs(&ins));
+        let wrong = add_ins(a, &limbs(&b.0), &sy, &(r.0.clone(), md(&(&r.1 + 1))));
+        assert!(!solves(&dadd_c, &wrong), "wrong 2A + S accepted");
+        let dbl_only = add_ins(a, &limbs(&b.0), &sy, &dbl(a));
+        assert!(!solves(&dadd_c, &dbl_only), "2A accepted for 2A + S");
+    }
+    // Adversarial S = ±A (bug checklist 1, 2): the guard refuses x_S ≡ x_A, also as
+    // x_A + p; S = −2A makes A + S = −A, where the third certificate has no solution.
+    let shifted: Vec<BigInt> = limbs(&g3.0).iter().zip(&pl).map(|(a, b)| a + b).collect();
+    let n2 = neg(&dbl(&g3));
+    for (sx, sy, claim) in [
+        (limbs(&g3.0), limbs(&g3.1), dbl(&g3)),
+        (limbs(&g3.0), signed(&g3.1), g3.clone()),
+        (shifted, limbs(&g3.1), dbl(&g3)),
+        (limbs(&n2.0), limbs(&n2.1), g3.clone()),
+        (limbs(&n2.0), limbs(&n2.1), neg(&g3)),
+    ] {
+        assert!(
+            !solves(&dadd_c, &add_ins(&g3, &sx, &sy, &claim)),
+            "exceptional double-and-add solved"
+        );
+    }
+}
+
+/// **secp256r1 certificate gadgets** (`mul_cert_r1`, `ec_add_r1`, `ec_double_add_r1`,
+/// `on_curve_r1`; ticket 06a, `formal/Formal/MulCertR1.lean`, `EcR1Check.lean`), at full
+/// width against num-bigint with release-mode hints (bug checklist 14). `mul_cert_r1`
+/// alone pins every wire given its operands, so exhaustive witness search decides it (8):
+/// an honest certificate, unreduced limbs at the `2^35` bound included, has exactly one
+/// witness; `t + 1` has none; `t + p` (the same residue) has one. The chord guard (1):
+/// `w·Δ ≡ 1` with `Δ ≡ 0` has no witness. The point ops: honest results solve, every
+/// derived wire tampered is rejected (7), and wrong results, `x_Q ≡ x_P` and `S = −2A`
+/// do not solve (1, 2). The hinted point check: off the curve, `x + p` and `y + p` refused.
+#[test]
+fn secp256r1_certificate_gadgets_are_sound() {
+    use num_bigint::BigInt;
+    let hex = |h: &[u8]| BigInt::parse_bytes(h, 16).unwrap();
+    let p = hex(b"FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF");
+    let b = hex(b"5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B");
+    let md = |x: &BigInt| ((x % &p) + &p) % &p;
+    let inv = |x: &BigInt| x.modpow(&(&p - 2), &p);
+    let g = (
+        hex(b"6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296"),
+        hex(b"4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5"),
+    );
+    let add = |a: &(BigInt, BigInt), c: &(BigInt, BigInt)| {
+        let l = md(&((&c.1 - &a.1) * inv(&md(&(&c.0 - &a.0)))));
+        let x = md(&(&l * &l - &a.0 - &c.0));
+        (x.clone(), md(&(l * (&a.0 - x) - &a.1)))
+    };
+    let dbl = |a: &(BigInt, BigInt)| {
+        let l = md(&((3 * &a.0 * &a.0 - 3) * inv(&md(&(2 * &a.1)))));
+        let x = md(&(&l * &l - 2 * &a.0));
+        (x.clone(), md(&(l * (&a.0 - x) - &a.1)))
+    };
+    let neg = |a: &(BigInt, BigInt)| (a.0.clone(), md(&-&a.1));
+    let limbs = |x: &BigInt| -> Vec<BigInt> {
+        let m: BigInt = (BigInt::from(1) << 32) - 1;
+        (0..8).map(|i| (x >> (32 * i)) & &m).collect()
+    };
+    let value = |ls: &[BigInt]| {
+        ls.iter()
+            .enumerate()
+            .fold(BigInt::from(0), |acc, (i, l)| acc + (l.clone() << (32 * i)))
+    };
+    let named = |pts: &[(&str, &[BigInt])]| -> Vec<(String, String)> {
+        let mut v = Vec::new();
+        for (n, ls) in pts {
+            for (i, l) in ls.iter().enumerate() {
+                v.push((format!("{n}[{i}]"), l.to_string()));
+            }
+        }
+        v
+    };
+    fn refs(v: &[(String, String)]) -> Vec<(&str, String)> {
+        v.iter().map(|(n, x)| (n.as_str(), x.clone())).collect()
+    }
+    let solves = |c: &Compiled, ins: &[(String, String)]| {
+        let program = c.program();
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &refs(ins))).is_ok()
+    };
+    let circuit = |name: &str, params: &str, body: &str| {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\n#[circuit]\n\
+             pub fn circuit({params}) {{\n{body}}}\n"
+        );
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let f8 = |n: &str| format!("{n}: Private<[Field; 8]>");
+
+    // ---- mul_cert_r1 alone: exhaustive ----
+    let cert = circuit(
+        "r1_cert",
+        &[f8("a"), f8("b"), f8("t")].join(", "),
+        "    mul_cert_r1(a, b, t);\n",
+    );
+    let max35: BigInt = (BigInt::from(1) << 35) - 1;
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        BigInt::from(seed >> 29)
+    };
+    let mut ops: Vec<(Vec<BigInt>, Vec<BigInt>)> = vec![
+        (vec![max35.clone(); 8], vec![max35.clone(); 8]),
+        (vec![BigInt::from(0); 8], vec![max35.clone(); 8]),
+        (limbs(&g.0), limbs(&g.1)),
+    ];
+    for _ in 0..3 {
+        ops.push((
+            (0..8).map(|_| next()).collect(),
+            (0..8).map(|_| next()).collect(),
+        ));
+    }
+    for (a, c) in &ops {
+        let t = md(&(value(a) * value(c)));
+        let ins = |t: &BigInt| named(&[("a", a), ("b", c), ("t", &limbs(t))]);
+        assert!(
+            unique_or_none(&cert, &refs(&ins(&t))),
+            "honest certificate rejected"
+        );
+        assert!(
+            !unique_or_none(&cert, &refs(&ins(&(&t + 1)))),
+            "t + 1 accepted"
+        );
+        if &t + &p < BigInt::from(1) << 256 {
+            assert!(unique_or_none(&cert, &refs(&ins(&(&t + &p)))));
+        }
+    }
+    rejects_each_tampered_witness(
+        &cert,
+        &refs(&named(&[
+            ("a", &ops[0].0),
+            ("b", &ops[0].1),
+            ("t", &limbs(&md(&(value(&ops[0].0) * value(&ops[0].1))))),
+        ])),
+    );
+    // The guard instance with `Δ ≡ 0`: `Δ = 2p` limb-wise (as `ec_add_r1` biases it).
+    let two_p: Vec<BigInt> = [
+        12884901886u64,
+        12884901885,
+        12884901885,
+        12884901887,
+        12884901885,
+        12884901885,
+        12884901887,
+        8589934587,
+    ]
+    .iter()
+    .map(|&x| BigInt::from(x))
+    .collect();
+    assert_eq!(value(&two_p), 2 * &p);
+    let one = limbs(&BigInt::from(1));
+    for w in [
+        one.clone(),
+        limbs(&inv(&BigInt::from(2))),
+        (0..8).map(|_| next()).collect(),
+    ] {
+        let ins = named(&[("a", &w), ("b", &two_p), ("t", &one)]);
+        assert!(
+            !unique_or_none(&cert, &refs(&ins)),
+            "w·Δ ≡ 1 with Δ ≡ 0 accepted"
+        );
+    }
+
+    // ---- ec_add_r1, ec_double_add_r1 ----
+    let out = "    let mut i = 0;\n\
+               \x20   while i < 8 { require_eq(x[i], rx[i]); require_eq(y[i], ry[i]); i += 1; }\n";
+    let pub8 = "rx: Public<[Field; 8]>, ry: Public<[Field; 8]>";
+    let params = [f8("px"), f8("py"), f8("qx"), f8("qy"), pub8.into()].join(", ");
+    let add_c = circuit(
+        "r1_cert_add",
+        &params,
+        &format!("    let (x, y) = ec_add_r1(px, py, qx, qy);\n{out}"),
+    );
+    let dadd_c = circuit(
+        "r1_cert_dadd",
+        &params,
+        &format!("    let (x, y) = ec_double_add_r1(px, py, qx, qy);\n{out}"),
+    );
+    let ins = |a: &(BigInt, BigInt), qx: &[BigInt], qy: &[BigInt], r: &(BigInt, BigInt)| {
+        named(&[
+            ("px", &limbs(&a.0)),
+            ("py", &limbs(&a.1)),
+            ("qx", qx),
+            ("qy", qy),
+            ("rx", &limbs(&r.0)),
+            ("ry", &limbs(&r.1)),
+        ])
+    };
+    let signed =
+        |y: &BigInt| -> Vec<BigInt> { limbs(y).iter().zip(&two_p).map(|(l, m)| m - l).collect() };
+    let g2 = dbl(&g);
+    let g3 = add(&g, &g2);
+    let g5 = add(&g2, &g3);
+    for (a, c, sy) in [
+        (&g, &g2, limbs(&g2.1)),
+        (&g3, &g5, limbs(&g5.1)),
+        // −G2 with y = 2p − y(G2) limb-wise: the digit-sign form.
+        (&g5, &neg(&g2), signed(&g2.1)),
+    ] {
+        for (circ, r) in [(&add_c, add(a, c)), (&dadd_c, add(&add(a, c), a))] {
+            let honest = ins(a, &limbs(&c.0), &sy, &r);
+            assert!(solves(circ, &honest), "honest point op rejected");
+            rejects_each_tampered_witness(circ, &refs(&honest));
+            let wrong = ins(a, &limbs(&c.0), &sy, &(r.0.clone(), md(&(&r.1 + 1))));
+            assert!(!solves(circ, &wrong), "wrong point op result accepted");
+        }
+    }
+    let n2 = neg(&dbl(&g3));
+    for (circ, sx, sy, claim) in [
+        (&add_c, limbs(&g3.0), limbs(&g3.1), dbl(&g3)),
+        (&add_c, limbs(&g3.0), signed(&g3.1), dbl(&g3)),
+        (&dadd_c, limbs(&g3.0), limbs(&g3.1), dbl(&dbl(&g3))),
+        (&dadd_c, limbs(&n2.0), limbs(&n2.1), g3.clone()),
+        (&dadd_c, limbs(&n2.0), limbs(&n2.1), neg(&g3)),
+    ] {
+        assert!(
+            !solves(circ, &ins(&g3, &sx, &sy, &claim)),
+            "exceptional point op solved"
+        );
+    }
+
+    // ---- the hinted point: range checks + on_curve_r1 ----
+    let on = circuit(
+        "r1_hinted_point",
+        "x: Private<[Field; 8]>, y: Private<[Field; 8]>",
+        "    range_check_limbs::<8, 32>(x);\n    range_check_limbs::<8, 32>(y);\n\
+         \x20   on_curve_r1(x, y);\n",
+    );
+    let on_curve = |x: &BigInt, y: &BigInt| md(&(y * y)) == md(&(x * x * x - 3 * x + &b));
+    // Small coordinates, so `x + p` / `y + p` fit in 8 limbs: search x for a square rhs.
+    let small = (1u32..)
+        .map(BigInt::from)
+        .find_map(|x| {
+            let rhs = md(&(&x * &x * &x - 3 * &x + &b));
+            let y = rhs.modpow(&((&p + 1) / 4), &p);
+            (md(&(&y * &y)) == rhs).then_some((x, y))
+        })
+        .unwrap();
+    // `x_S = x_A + p` (the same residue): the guard refuses it too.
+    let sm = (small.0.clone(), small.1.clone());
+    for circ in [&add_c, &dadd_c] {
+        let shifted = ins(&sm, &limbs(&(&sm.0 + &p)), &limbs(&sm.1), &dbl(&sm));
+        assert!(!solves(circ, &shifted), "x_S = x_A + p solved");
+    }
+    let pt = |x: &BigInt, y: &BigInt| named(&[("x", &limbs(x)), ("y", &limbs(y))]);
+    for (x, y) in [
+        (&g.0, &g.1),
+        (&small.0, &small.1),
+        (&small.0, &md(&-&small.1)),
+    ] {
+        assert!(on_curve(x, y));
+        assert!(solves(&on, &pt(x, y)), "an on-curve R rejected");
+    }
+    rejects_each_tampered_witness(&on, &refs(&pt(&g.0, &g.1)));
+    // `(x₅, 5)`: a point with `y` small enough that `y + p` fits in 256 bits.
+    let x5 = BigInt::parse_bytes(
+        b"d7325d7646cd60d80a92738ceb345f844cffaf35841022cab176f692de8de1d7",
+        16,
+    )
+    .unwrap();
+    let y5 = BigInt::from(5);
+    assert!(on_curve(&x5, &y5));
+    assert!(solves(&on, &pt(&x5, &y5)), "an on-curve R rejected");
+    for (x, y) in [
+        (g.0.clone(), &g.1 + 1),
+        (&small.0 + 1, small.1.clone()),
+        // `x + p`, `y + p`: the same residues, non-canonical.
+        (&small.0 + &p, small.1.clone()),
+        (x5.clone(), &y5 + &p),
+    ] {
+        assert!(x < BigInt::from(1) << 256 && y < BigInt::from(1) << 256);
+        assert!(
+            !solves(&on, &pt(&x, &y)),
+            "off-curve or non-canonical R accepted"
+        );
+    }
+}
+
+/// **P-256 fake-GLV rows** (ticket 06a; `formal/Formal/FakeGlvR1.lean`): the lattice hint a
+/// prover controls in `xark_secp256r1::ecdsa_verify`. `fake_glv_check_r1` on an honest hint
+/// (`hint_fake_glv` at `λ = 2^64`, so `A = k₀ + 2^64·k₁`, `B = k₂ + 2^64·k₃`, plugged as
+/// `a = A + 2^129`, `b = B + 2^129`) solves for `x_R = r` and `x_R = r + n`, every wire tampered
+/// is rejected, and these do not solve: `x_R = r + 2n`, `x_R ≢ r` (also with non-boolean field
+/// `t`, `u`), `a`, `b` or `C` off by one, and `B = 0` (`A = B = C = 0` satisfies both
+/// relations). The hinted point's off-curve and non-canonical cases are in
+/// `secp256r1_certificate_gadgets_are_sound`. The `x_R ≡ r` boundary (ticket 60): with `R`'s
+/// `x` encoded as `x + p`, `x_R = r + n` holds for `r = x + p − n`, which `fake_glv_check_r1`
+/// alone accepts; `on_curve_r1`'s `require_lt` refuses it (`OnCurveR1Check.x_lt_p`).
+#[test]
+fn fake_glv_r1_lattice_hint_is_checked() {
+    use num_bigint::BigInt;
+    let hex = |h: &[u8]| BigInt::parse_bytes(h, 16).unwrap();
+    let n = hex(b"FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
+    let fr = BigInt::parse_bytes(
+        b"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+        10,
+    )
+    .unwrap();
+    let md = |x: &BigInt, m: &BigInt| ((x % m) + m) % m;
+    let limbs = |x: &BigInt, k: usize| -> Vec<BigInt> {
+        let m: BigInt = (BigInt::from(1) << 64) - 1;
+        (0..k).map(|i| (x >> (64 * i)) & &m).collect()
+    };
+    let named = |pts: &[(&str, Vec<BigInt>)]| -> Vec<(String, String)> {
+        let mut v = Vec::new();
+        for (nm, ls) in pts {
+            for (i, l) in ls.iter().enumerate() {
+                v.push((format!("{nm}[{i}]"), md(l, &fr).to_string()));
+            }
+        }
+        v
+    };
+    fn refs(v: &[(String, String)]) -> Vec<(&str, String)> {
+        v.iter().map(|(n, x)| (n.as_str(), x.clone())).collect()
+    }
+    let src = "#![no_std]\nuse xark::prelude::*;\nuse xark_secp256r1::*;\n#[circuit]\n\
+        pub fn circuit(r: Private<[Field; 4]>, s: Private<[Field; 4]>, e: Private<[Field; 4]>, \
+        xr: Private<[Field; 4]>, ab: Private<[Field; 2]>, g: Private<[Field; 4]>, \
+        q1: Private<[Field; 1]>, q2: Private<[Field; 5]>, h1: Private<[Field; 3]>, \
+        h2: Private<[Field; 7]>, tu: Private<[Field; 2]>) {\n\
+        \x20   let _ = fake_glv_check_r1(r, s, e, xr, ab, g, q1[0], q2, h1, h2, tu);\n}\n";
+    let fg = compile_with_field(&write_case("r1_fake_glv", src), "r1_fake_glv", "bn254");
+    assert!(fg.status_success, "{}", fg.stderr);
+    let solves = |ins: &[(String, String)]| {
+        let program = fg.program();
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &refs(ins))).is_ok()
+    };
+    let p2 = |e: usize| BigInt::from(1) << e;
+    let zero = BigInt::from(0);
+    let nn = limbs(&n, 4);
+    // `wcarries`: the biased carries `c_m + 2^134` of `Σ cols[m]·2^{64m}` (floor division).
+    let carries = |cols: Vec<BigInt>| -> Vec<BigInt> {
+        let mut c = zero.clone();
+        cols[..cols.len() - 1]
+            .iter()
+            .map(|col| {
+                let h = (col + &c + p2(198)) >> 64;
+                c = &h - p2(134);
+                h
+            })
+            .collect()
+    };
+    // Every plug, given `(a, b, C, q₁, q₂, t, u)`; the columns are `rel1`'s and `rel2`'s.
+    #[allow(clippy::too_many_arguments)]
+    let build = |r: &BigInt,
+                 s: &BigInt,
+                 e: &BigInt,
+                 xr: &BigInt,
+                 a: &BigInt,
+                 b: &BigInt,
+                 c: &BigInt,
+                 q1: &BigInt,
+                 q2: &BigInt,
+                 tu: (BigInt, BigInt)| {
+        let (rl, sl, el) = (limbs(r, 4), limbs(s, 4), limbs(e, 4));
+        let (gl, q2l) = (limbs(c, 4), limbs(q2, 5));
+        let c1: Vec<BigInt> = (0..4)
+            .map(|m| {
+                a * &sl[m] + b * &rl[m] - p2(129) * (&sl[m] + &rl[m]) + p2(131) * &nn[m]
+                    - q1 * &nn[m]
+            })
+            .collect();
+        let c2: Vec<BigInt> = (0..8)
+            .map(|m| {
+                let mut x = zero.clone();
+                for i in 0..4 {
+                    if m >= i && m - i < 4 {
+                        x += &gl[i] * &sl[m - i];
+                    }
+                    if m >= i && m - i < 5 {
+                        x -= &nn[i] * &q2l[m - i];
+                    }
+                }
+                if m < 4 {
+                    x += b * &el[m] - p2(129) * &el[m] + p2(131) * &nn[m];
+                }
+                x
+            })
+            .collect();
+        named(&[
+            ("r", rl),
+            ("s", sl),
+            ("e", el.clone()),
+            ("xr", limbs(xr, 4)),
+            ("ab", vec![a.clone(), b.clone()]),
+            ("g", gl),
+            ("q1", vec![q1.clone()]),
+            ("q2", q2l),
+            ("h1", carries(c1)),
+            ("h2", carries(c2)),
+            ("tu", vec![tu.0, tu.1]),
+        ])
+    };
+    // The exact quotients (`None`: not integral) and the honest `t`, `u`.
+    let ins =
+        |r: &BigInt, s: &BigInt, e: &BigInt, xr: &BigInt, a: &BigInt, b: &BigInt, c: &BigInt| {
+            let (aa, bb) = (a - p2(129), b - p2(129));
+            let q = |z: BigInt| md(&z, &n).eq(&zero).then(|| &z / &n + p2(131));
+            let q1 = q(&aa * s + &bb * r)?;
+            let q2 = q(c * s + &bb * e)?;
+            let t = BigInt::from(u8::from(xr != r));
+            let lo = |x: &BigInt| x % p2(128);
+            let u = BigInt::from(u8::from(lo(r) + &t * lo(&n) >= p2(128)));
+            Some(build(r, s, e, xr, a, b, c, &q1, &q2, (t, u)))
+        };
+    let with_tu = |v: &[(String, String)], t: &BigInt, u: &BigInt| -> Vec<(String, String)> {
+        v.iter()
+            .map(|(nm, x)| match nm.as_str() {
+                "tu[0]" => (nm.clone(), md(t, &fr).to_string()),
+                "tu[1]" => (nm.clone(), md(u, &fr).to_string()),
+                _ => (nm.clone(), x.clone()),
+            })
+            .collect()
+    };
+    let any_tu = |v: &[(String, String)]| {
+        [(0u8, 0u8), (0, 1), (1, 0), (1, 1)]
+            .iter()
+            .any(|&(t, u)| solves(&with_tu(v, &BigInt::from(t), &BigInt::from(u))))
+    };
+    let inv = |x: &BigInt| x.modpow(&(&n - 2), &n);
+    let s = hex(b"6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296");
+    let e = hex(b"C7F1A3D5E2B4968A7C3E5F1D2B4A69788E1C3D5F7A9B2C4D6E8F0A1B3C5D7E9F");
+    for r in [
+        hex(b"9A8B7C6D5E4F30211203F4E5D6C7B8A99A8B7C6D5E4F30211203F4E5D6C7B8A9"),
+        hex(b"0123456789ABCDEF0123456789ABCDEF"),
+    ] {
+        let u2 = md(&(&r * inv(&s)), &n);
+        let u1 = md(&(&e * inv(&s)), &n);
+        let k = xark_ir::solver::fake_glv(
+            &md(&-&u2, &n).to_biguint().unwrap(),
+            &n.to_biguint().unwrap(),
+            &p2(64).to_biguint().unwrap(),
+        )
+        .expect("a short lattice vector");
+        let aa = &k[0] + p2(64) * &k[1];
+        let bb = &k[2] + p2(64) * &k[3];
+        assert!(aa.magnitude().bits() <= 128 && bb.magnitude().bits() <= 128);
+        let (a, b) = (&aa + p2(129), &bb + p2(129));
+        let c = md(&-(&bb * &u1), &n);
+        let honest = ins(&r, &s, &e, &r, &a, &b, &c).unwrap();
+        assert!(solves(&honest), "an honest fake-GLV hint rejected");
+        rejects_each_tampered_witness(&fg, &refs(&honest));
+        if &r + &n < p2(256) {
+            let wrap = ins(&r, &s, &e, &(&r + &n), &a, &b, &c).unwrap();
+            assert!(solves(&wrap), "x_R = r + n rejected");
+            let twice = ins(&r, &s, &e, &(&r + 2 * &n), &a, &b, &c).unwrap();
+            assert!(!any_tu(&twice), "x_R = r + 2n accepted");
+        }
+        let off = ins(&r, &s, &e, &(&r + 1), &a, &b, &c).unwrap();
+        assert!(!any_tu(&off), "x_R ≢ r accepted");
+        // Non-boolean field `t = 1/n` and the `u` it forces satisfy both half equations.
+        let finv = |x: &BigInt| md(x, &fr).modpow(&(&fr - 2), &fr);
+        let lo = |x: &BigInt| x % p2(128);
+        let tf = finv(&n);
+        let uf = md(
+            &((lo(&r) + &tf * lo(&n) - lo(&(&r + 1))) * finv(&p2(128))),
+            &fr,
+        );
+        assert!(
+            !solves(&with_tu(&off, &tf, &uf)),
+            "non-boolean t, u accepted"
+        );
+        // `a`, `b` or `C` off by one: the relation is off by `s`, `r` or `e` (not `≡ 0`).
+        let q1h = ((&aa * &s + &bb * &r) / &n) + p2(131);
+        let q2h = ((&c * &s + &bb * &e) / &n) + p2(131);
+        for i in 0..3 {
+            let (mut a2, mut b2, mut c2) = (a.clone(), b.clone(), c.clone());
+            match i {
+                0 => a2 += 1,
+                1 => b2 += 1,
+                _ => c2 += 1,
+            }
+            for d in [-1i8, 0, 1] {
+                let f = build(
+                    &r,
+                    &s,
+                    &e,
+                    &r,
+                    &a2,
+                    &b2,
+                    &c2,
+                    &(&q1h + d),
+                    &(&q2h + d),
+                    (zero.clone(), zero.clone()),
+                );
+                assert!(!any_tu(&f), "coefficient {i} off by one accepted");
+            }
+        }
+        // B = 0: `A = B = C = 0` satisfies both relations; `(b − 2^129)·w = 1` refuses it.
+        let bz = ins(&r, &s, &e, &r, &p2(129), &p2(129), &zero).unwrap();
+        assert!(!solves(&bz), "B = 0 accepted");
+    }
+
+    // ---- the x_R ≡ r boundary: R's x is canonical, so x_R + p never stands in for x_R ----
+    let src = "#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\nuse xark_secp256r1::*;\n\
+        #[circuit]\npub fn circuit(x: Private<[Field; 8]>, y: Private<[Field; 8]>, \
+        r: Private<[Field; 4]>, s: Private<[Field; 4]>, e: Private<[Field; 4]>, \
+        ab: Private<[Field; 2]>, g: Private<[Field; 4]>, q1: Private<[Field; 1]>, \
+        q2: Private<[Field; 5]>, h1: Private<[Field; 3]>, h2: Private<[Field; 7]>, \
+        tu: Private<[Field; 2]>) {\n\
+        \x20   range_check_limbs::<8, 32>(x);\n    range_check_limbs::<8, 32>(y);\n\
+        \x20   on_curve_r1(x, y);\n    let t = Field::from(1u64 << 32);\n\
+        \x20   let xr = [x[0] + t * x[1], x[2] + t * x[3], x[4] + t * x[5], x[6] + t * x[7]];\n\
+        \x20   let _ = fake_glv_check_r1(r, s, e, xr, ab, g, q1[0], q2, h1, h2, tu);\n}\n";
+    let xb = compile_with_field(
+        &write_case("r1_xr_boundary", src),
+        "r1_xr_boundary",
+        "bn254",
+    );
+    assert!(xb.status_success, "{}", xb.stderr);
+    let p = hex(b"FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF");
+    // (5, y₅) is on P-256: small, so `5 + p` fits in 8 limbs.
+    let (x5, y5) = (
+        BigInt::from(5),
+        hex(b"459243B9AA581806FE913BCE99817ADE11CA503C64D9A3C533415C083248FBCC"),
+    );
+    // An honest lattice hint for `r`, with `x_R` plugged as `xr`.
+    let glv = |r: &BigInt, xr: &BigInt| {
+        let u2 = md(&(r * inv(&s)), &n);
+        let u1 = md(&(&e * inv(&s)), &n);
+        let k = xark_ir::solver::fake_glv(
+            &md(&-&u2, &n).to_biguint().unwrap(),
+            &n.to_biguint().unwrap(),
+            &p2(64).to_biguint().unwrap(),
+        )
+        .expect("a short lattice vector");
+        let bb = &k[2] + p2(64) * &k[3];
+        let c = md(&-(&bb * &u1), &n);
+        let (a, b) = (&k[0] + p2(64) * &k[1] + p2(129), &bb + p2(129));
+        ins(r, &s, &e, xr, &a, &b, &c).unwrap()
+    };
+    let with_point = |w: Vec<(String, String)>, x: &BigInt| {
+        let l32 =
+            |v: &BigInt| -> Vec<BigInt> { (0..8).map(|i| (v >> (32 * i)) % p2(32)).collect() };
+        let mut v: Vec<_> = w
+            .into_iter()
+            .filter(|(nm, _)| !nm.starts_with("xr"))
+            .collect();
+        v.extend(named(&[("x", l32(x)), ("y", l32(&y5))]));
+        let program = xb.program();
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &refs(&v))).is_ok()
+    };
+    assert!(with_point(glv(&x5, &x5), &x5), "honest x_R = r rejected");
+    // x_R + p = r + n for r = 5 + p − n: the scalar rows alone accept it (t = 1) …
+    let rf = &x5 + &p - &n;
+    let forged = glv(&rf, &(&x5 + &p));
+    assert!(solves(&forged), "control: x_R = r + n with x_R = 5 + p");
+    // … and the hinted point's canonicity (OnCurveR1Check.x_lt_p) refuses it.
+    assert!(
+        !with_point(forged, &(&x5 + &p)),
+        "x_R + p accepted for r = x_R + p − n"
+    );
+}
+
+/// **Fake-GLV rows** (ticket 05; `formal/Formal/EcK1Check.lean`,
+/// `FakeGlvK1.lean`, `OneHot8.lean`), the forged hints a prover controls in
+/// `ecdsa_verify_packed`. The hinted point `R`, through the caller's limb range checks and
+/// `on_curve_k1` (gnark GHSA-7fx8): an on-curve point solves, with every derived wire
+/// tampered rejected (bug checklist 7); off the curve, `x + p` or `y + p` (the same residue,
+/// non-canonical) does not. `fake_glv_check_k1` on an honest lattice hint solves (both
+/// `x_R = r` and `x_R = r + n`), every wire tampered is rejected, and these do not solve:
+/// `x_R ≢ r` (also with non-boolean field `t`, `u`), `x_R = r + 2n`, a coefficient or `C`
+/// off by one, `B = 0` (all `k = 0`, which satisfies both relations), and `B ≡ 0 (mod n)`
+/// by a GLV kernel vector (`k₂ + λk₃ = n·m`, `|k| ≈ 2^127`, outside the 65-bit digits).
+/// The `x_R ≡ r` boundary (ticket 26): with `R`'s `x` encoded as `x + p`, `x_R = r + n`
+/// holds for `r = x + p − n`, which `fake_glv_check_k1` alone accepts; the hinted point's
+/// canonicity check (`on_curve_k1`'s `require_lt`) refuses it.
+/// `one_hot8`, exhaustively (8): the one-hot of `Σ 2ⁱbᵢ` is the only output, not its bit
+/// reversal.
+#[test]
+fn fake_glv_hinted_point_and_lattice_hint_are_checked() {
+    use num_bigint::BigInt;
+    let hex = |h: &[u8]| BigInt::parse_bytes(h, 16).unwrap();
+    let p = hex(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+    let n = hex(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+    let lam = hex(b"5363AD4CC05C30E0A5261C028812645A122E22EA20816678DF02967C1B23BD72");
+    let fr = BigInt::parse_bytes(
+        b"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+        10,
+    )
+    .unwrap();
+    let md = |x: &BigInt, m: &BigInt| ((x % m) + m) % m;
+    let limbs = |x: &BigInt, k: usize| -> Vec<BigInt> {
+        let m: BigInt = (BigInt::from(1) << 64) - 1;
+        (0..k).map(|i| (x >> (64 * i)) & &m).collect()
+    };
+    let limbs32 = |x: &BigInt| -> Vec<BigInt> {
+        let m: BigInt = (BigInt::from(1) << 32) - 1;
+        (0..8).map(|i| (x >> (32 * i)) & &m).collect()
+    };
+    let named = |pts: &[(&str, Vec<BigInt>)]| -> Vec<(String, String)> {
+        let mut v = Vec::new();
+        for (nm, ls) in pts {
+            for (i, l) in ls.iter().enumerate() {
+                v.push((format!("{nm}[{i}]"), md(l, &fr).to_string()));
+            }
+        }
+        v
+    };
+    fn refs(v: &[(String, String)]) -> Vec<(&str, String)> {
+        v.iter().map(|(n, x)| (n.as_str(), x.clone())).collect()
+    }
+    let solves = |c: &Compiled, ins: &[(String, String)]| {
+        let program = c.program();
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &refs(ins))).is_ok()
+    };
+    let circuit = |name: &str, params: &str, body: &str| {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\nuse xark_secp256k1::*;\n\
+             #[circuit]\npub fn circuit({params}) {{\n{body}}}\n"
+        );
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+
+    // ---- the hinted point R: range checks + on_curve_k1 ----
+    let on = circuit(
+        "k1_hinted_point",
+        "x: Private<[Field; 8]>, y: Private<[Field; 8]>",
+        "    range_check_limbs::<8, 32>(x);\n    range_check_limbs::<8, 32>(y);\n\
+         \x20   on_curve_k1(x, y);\n",
+    );
+    // (1, y₁) and (x₁, 1): small coordinates, so `x + p` and `y + p` fit in 8 limbs.
+    let y1 = hex(b"4218F20AE6C646B363DB68605822FB14264CA8D2587FDD6FBC750D587E76A7EE");
+    let x1 = hex(b"1FE1E5EF3FCEB5C135AB7741333CE5A6E80D68167653F6B2B24BCBCFAAAFF507");
+    let one = BigInt::from(1);
+    for (x, y) in [(&one, &y1), (&x1, &one)] {
+        assert_eq!(
+            md(&(y * y), &p),
+            md(&(x * x * x + 7), &p),
+            "test point off the curve"
+        );
+    }
+    let pt = |x: &BigInt, y: &BigInt| named(&[("x", limbs32(x)), ("y", limbs32(y))]);
+    for (x, y) in [(&one, &y1), (&x1, &one), (&one, &(&p - &y1))] {
+        assert!(solves(&on, &pt(x, y)), "an on-curve R rejected");
+    }
+    rejects_each_tampered_witness(&on, &refs(&pt(&x1, &one)));
+    for (x, y) in [
+        (one.clone(), &y1 + 1),
+        (BigInt::from(2), y1.clone()),
+        (&one + &p, y1.clone()),
+        (x1.clone(), &one + &p),
+    ] {
+        assert!(x < BigInt::from(1) << 256 && y < BigInt::from(1) << 256);
+        assert!(
+            !solves(&on, &pt(&x, &y)),
+            "off-curve or non-canonical R accepted"
+        );
+    }
+
+    // ---- fake_glv_check_k1 ----
+    let fg = circuit(
+        "k1_fake_glv",
+        "r: Private<[Field; 4]>, s: Private<[Field; 4]>, e: Private<[Field; 4]>, \
+         xr: Private<[Field; 4]>, c: Private<[Field; 4]>, g: Private<[Field; 4]>, \
+         q1: Private<[Field; 6]>, q2: Private<[Field; 6]>, h1: Private<[Field; 8]>, \
+         h2: Private<[Field; 8]>, tu: Private<[Field; 2]>",
+        "    let _ = fake_glv_check_k1(r, s, e, xr, c, g, q1, q2, h1, h2, tu);\n",
+    );
+    let inv = |x: &BigInt| x.modpow(&(&n - 2), &n);
+    let t64 = BigInt::from(1) << 64;
+    let t322 = BigInt::from(1) << 322;
+    let zero = BigInt::from(0);
+    let (nn, ll) = (limbs(&n, 4), limbs(&lam, 4));
+    // The circuit's base-2^64 columns of `x·v` for `x = k_lo + λ·k_hi`, of `g·s`, and the
+    // biased carries `wcarries` hints for `z + 2^322·n − q·n` (floor division: a forged
+    // relation has no integral carries, and these are as good as any).
+    let lam_cols = |lo: &BigInt, hi: &BigInt, v: &[BigInt]| -> Vec<BigInt> {
+        (0..7)
+            .map(|m| {
+                let l: BigInt = (0..4)
+                    .filter(|&j| j <= m && m - j < 4)
+                    .map(|j| &ll[j] * &v[m - j])
+                    .sum();
+                hi * l + if m < 4 { lo * &v[m] } else { zero.clone() }
+            })
+            .collect()
+    };
+    let mul_cols = |g: &[BigInt], v: &[BigInt]| -> Vec<BigInt> {
+        (0..7)
+            .map(|m| {
+                (0..4)
+                    .filter(|&i| i <= m && m - i < 4)
+                    .map(|i| &g[i] * &v[m - i])
+                    .sum()
+            })
+            .collect()
+    };
+    let carries = |z: Vec<BigInt>, q: &[BigInt]| -> Vec<BigInt> {
+        let mut c = zero.clone();
+        (0..8)
+            .map(|m| {
+                let mut col = if m < 7 { z[m].clone() } else { zero.clone() };
+                if m >= 5 {
+                    col += 4 * &nn[m - 5];
+                }
+                for j in (0..4).filter(|&j| j <= m && m - j < 6) {
+                    col -= &nn[j] * &q[m - j];
+                }
+                let h = (col + &c + (BigInt::from(1) << 197)) >> 64;
+                c = &h - (BigInt::from(1) << 133);
+                h
+            })
+            .collect()
+    };
+    let add = |a: Vec<BigInt>, b: Vec<BigInt>| -> Vec<BigInt> {
+        a.iter().zip(&b).map(|(x, y)| x + y).collect()
+    };
+    // Every plug, given `(k, C, q₁, q₂, t, u)`.
+    #[allow(clippy::too_many_arguments)]
+    let build = |r: &BigInt,
+                 s: &BigInt,
+                 e: &BigInt,
+                 xr: &BigInt,
+                 k: &[BigInt; 4],
+                 c: &BigInt,
+                 q1: &BigInt,
+                 q2: &BigInt,
+                 tu: (u8, u8)| {
+        let (rl, sl, el, gl) = (limbs(r, 4), limbs(s, 4), limbs(e, 4), limbs(c, 4));
+        let (q1l, q2l) = (limbs(q1, 6), limbs(q2, 6));
+        let z1 = add(lam_cols(&k[0], &k[1], &sl), lam_cols(&k[2], &k[3], &rl));
+        let z2 = add(mul_cols(&gl, &sl), lam_cols(&k[2], &k[3], &el));
+        named(&[
+            ("r", rl),
+            ("s", sl),
+            ("e", el.clone()),
+            ("xr", limbs(xr, 4)),
+            ("c", k.iter().map(|x| x + &t64).collect()),
+            ("g", gl),
+            ("h1", carries(z1, &q1l)),
+            ("h2", carries(z2, &q2l)),
+            ("q1", q1l),
+            ("q2", q2l),
+            ("tu", vec![BigInt::from(tu.0), BigInt::from(tu.1)]),
+        ])
+    };
+    // The exact quotients (`None`: not integral) and the honest `t`, `u` for `x_R = r + t·n`.
+    let ins = |r: &BigInt, s: &BigInt, e: &BigInt, xr: &BigInt, k: &[BigInt; 4], c: &BigInt| {
+        let a = &k[0] + &lam * &k[1];
+        let b = &k[2] + &lam * &k[3];
+        let q = |z: BigInt| md(&z, &n).eq(&zero).then(|| &z / &n + &t322);
+        let q1 = q(&a * s + &b * r)?;
+        let q2 = q(c * s + &b * e)?;
+        let t = u8::from(xr != r);
+        let lo = |x: &BigInt| x % (BigInt::from(1) << 128);
+        let u = u8::from(lo(r) + t * lo(&n) >= BigInt::from(1) << 128);
+        Some(build(r, s, e, xr, k, c, &q1, &q2, (t, u)))
+    };
+    let any_tu = |v: &[(String, String)]| {
+        [(0u8, 0u8), (0, 1), (1, 0), (1, 1)].iter().any(|&(t, u)| {
+            let w: Vec<_> = v
+                .iter()
+                .map(|(nm, x)| match nm.as_str() {
+                    "tu[0]" => (nm.clone(), t.to_string()),
+                    "tu[1]" => (nm.clone(), u.to_string()),
+                    _ => (nm.clone(), x.clone()),
+                })
+                .collect();
+            solves(&fg, &w)
+        })
+    };
+    let s = hex(b"6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296");
+    let e = hex(b"C7F1A3D5E2B4968A7C3E5F1D2B4A69788E1C3D5F7A9B2C4D6E8F0A1B3C5D7E9F");
+    for r in [
+        hex(b"9A8B7C6D5E4F30211203F4E5D6C7B8A99A8B7C6D5E4F30211203F4E5D6C7B8A9"),
+        hex(b"0123456789ABCDEF0123456789ABCDEF"),
+    ] {
+        let u2 = md(&(&r * inv(&s)), &n);
+        let u1 = md(&(&e * inv(&s)), &n);
+        let k = xark_ir::solver::fake_glv(
+            &md(&-&u2, &n).to_biguint().unwrap(),
+            &n.to_biguint().unwrap(),
+            &lam.to_biguint().unwrap(),
+        )
+        .expect("a short lattice vector");
+        let c = md(&-((&k[2] + &lam * &k[3]) * &u1), &n);
+        let honest = ins(&r, &s, &e, &r, &k, &c).unwrap();
+        assert!(solves(&fg, &honest), "an honest fake-GLV hint rejected");
+        rejects_each_tampered_witness(&fg, &refs(&honest));
+        if &r + &n < BigInt::from(1) << 256 {
+            let wrap = ins(&r, &s, &e, &(&r + &n), &k, &c).unwrap();
+            assert!(solves(&fg, &wrap), "x_R = r + n rejected");
+            let twice = ins(&r, &s, &e, &(&r + 2 * &n), &k, &c).unwrap();
+            assert!(!any_tu(&twice), "x_R = r + 2n accepted");
+        }
+        let off = ins(&r, &s, &e, &(&r + 1), &k, &c).unwrap();
+        assert!(!any_tu(&off), "x_R ≢ r accepted");
+        // Non-boolean `t`, `u`: over the field, `t = (x_R − r)/n` and the `u` it forces
+        // satisfy both half equations for any `x_R`; only `t·(1 − t) = 0` and
+        // `u·(1 − u) = 0` refuse them.
+        let finv = |x: &BigInt| md(x, &fr).modpow(&(&fr - 2), &fr);
+        let lo = |x: &BigInt| x % (BigInt::from(1) << 128);
+        let tf = finv(&n);
+        let uf = md(
+            &((lo(&r) + &tf * lo(&n) - lo(&(&r + 1))) * finv(&(BigInt::from(1) << 128))),
+            &fr,
+        );
+        let field_tu: Vec<_> = off
+            .iter()
+            .map(|(nm, x)| match nm.as_str() {
+                "tu[0]" => (nm.clone(), tf.to_string()),
+                "tu[1]" => (nm.clone(), uf.to_string()),
+                _ => (nm.clone(), x.clone()),
+            })
+            .collect();
+        assert!(!solves(&fg, &field_tu), "non-boolean t, u accepted");
+        // A coefficient or C off by one: the relation is now off by `±(1, λ)·(s, r, e)`
+        // (not `≡ 0`), so no quotient and carries close it.
+        let (q1h, q2h): (BigInt, BigInt) = {
+            let a = &k[0] + &lam * &k[1];
+            let b = &k[2] + &lam * &k[3];
+            (
+                (&a * &s + &b * &r) / &n + &t322,
+                (&c * &s + &b * &e) / &n + &t322,
+            )
+        };
+        for i in 0..5 {
+            let (mut kk, mut cc) = (k.clone(), c.clone());
+            if i < 4 {
+                kk[i] += 1;
+            } else {
+                cc += 1;
+            }
+            for d in [-1i8, 0, 1] {
+                let forged = build(&r, &s, &e, &r, &kk, &cc, &(&q1h + d), &(&q2h + d), (0, 0));
+                assert!(!any_tu(&forged), "coefficient {i} off by one accepted");
+            }
+        }
+        // B = 0: every k = 0 and C = 0 satisfy both relations; `(k₂, k₃) ≠ 0` refuses it.
+        let zk = [zero.clone(), zero.clone(), zero.clone(), zero.clone()];
+        assert!(
+            !solves(&fg, &ins(&r, &s, &e, &r, &zk, &zero).unwrap()),
+            "B = 0 accepted"
+        );
+        // B ≡ 0 (mod n) by the GLV kernel (k₂, k₃) = (a₁, b₁), A = C = 0.
+        let a1 = hex(b"3086D221A7D46BCDE86C90E49284EB15");
+        let b1 = -hex(b"E4437ED6010E88286F547FA90ABFE4C3");
+        assert_eq!(md(&(&a1 + &lam * &b1), &n), zero, "not a kernel vector");
+        let kk = [zero.clone(), zero.clone(), a1, b1];
+        let ker = ins(&r, &s, &e, &r, &kk, &zero).expect("the kernel satisfies both relations");
+        assert!(
+            !solves(&fg, &ker),
+            "B ≡ 0 (mod n) by a kernel vector accepted"
+        );
+    }
+
+    // ---- the x_R ≡ r boundary: R's x is canonical, so x_R + p never stands in for x_R ----
+    let xb = circuit(
+        "k1_xr_boundary",
+        "x: Private<[Field; 8]>, y: Private<[Field; 8]>, r: Private<[Field; 4]>, \
+         s: Private<[Field; 4]>, e: Private<[Field; 4]>, c: Private<[Field; 4]>, \
+         g: Private<[Field; 4]>, q1: Private<[Field; 6]>, q2: Private<[Field; 6]>, \
+         h1: Private<[Field; 8]>, h2: Private<[Field; 8]>, tu: Private<[Field; 2]>",
+        "    range_check_limbs::<8, 32>(x);\n    range_check_limbs::<8, 32>(y);\n\
+         \x20   on_curve_k1(x, y);\n    let t = Field::from(1u64 << 32);\n\
+         \x20   let xr = [x[0] + t * x[1], x[2] + t * x[3], x[4] + t * x[5], x[6] + t * x[7]];\n\
+         \x20   let _ = fake_glv_check_k1(r, s, e, xr, c, g, q1, q2, h1, h2, tu);\n",
+    );
+    // An honest lattice hint for `r`, with `x_R` plugged as `xr`.
+    let glv = |r: &BigInt, xr: &BigInt| {
+        let u2 = md(&(r * inv(&s)), &n);
+        let u1 = md(&(&e * inv(&s)), &n);
+        let k = xark_ir::solver::fake_glv(
+            &md(&-&u2, &n).to_biguint().unwrap(),
+            &n.to_biguint().unwrap(),
+            &lam.to_biguint().unwrap(),
+        )
+        .expect("a short lattice vector");
+        let c = md(&-((&k[2] + &lam * &k[3]) * &u1), &n);
+        ins(r, &s, &e, xr, &k, &c).unwrap()
+    };
+    let with_point = |w: Vec<(String, String)>, x: &BigInt| {
+        let mut v: Vec<_> = w
+            .into_iter()
+            .filter(|(nm, _)| !nm.starts_with("xr"))
+            .collect();
+        v.extend(named(&[("x", limbs32(x)), ("y", limbs32(&y1))]));
+        v
+    };
+    // R = (1, y₁): honest with r = 1.
+    assert!(
+        solves(&xb, &with_point(glv(&one, &one), &one)),
+        "honest x_R = r rejected"
+    );
+    // x_R + p = r + n for r = 1 + p − n: the scalar rows alone accept it (t = 1) …
+    let rf = &one + &p - &n;
+    let forged = glv(&rf, &(&one + &p));
+    assert!(
+        solves(&fg, &forged),
+        "control: x_R = r + n with x_R = 1 + p"
+    );
+    // … and the hinted point's canonicity refuses it.
+    assert!(
+        !solves(&xb, &with_point(forged, &(&one + &p))),
+        "x_R + p accepted for r = x_R + p − n"
+    );
+
+    // ---- one_hot8, exhaustively ----
+    let oh = circuit(
+        "one_hot8",
+        "b: Private<[Field; 8]>, out: Public<[Field; 256]>",
+        "    let h = one_hot8(b);\n    let mut i = 0;\n\
+         \x20   while i < 256 { require_eq(h[i], out[i]); i += 1; }\n",
+    );
+    for v in [0usize, 1, 0x0b, 0x80, 0xff] {
+        let hot = |at: usize| -> Vec<BigInt> {
+            (0..256).map(|i| BigInt::from((i == at) as u8)).collect()
+        };
+        let bits: Vec<BigInt> = (0..8).map(|i| BigInt::from((v >> i) & 1)).collect();
+        let case = |o: Vec<BigInt>| named(&[("b", bits.clone()), ("out", o)]);
+        assert!(
+            unique_or_none(&oh, &refs(&case(hot(v)))),
+            "one_hot8({v:#x}) rejected"
+        );
+        let rev = (v as u8).reverse_bits() as usize;
+        if rev != v {
+            assert!(
+                !unique_or_none(&oh, &refs(&case(hot(rev)))),
+                "bit-reversed one-hot accepted"
+            );
+        }
+        assert!(
+            !unique_or_none(&oh, &refs(&case(hot(v ^ 2)))),
+            "wrong one-hot accepted"
+        );
     }
 }
 
@@ -4401,7 +5440,7 @@ fn narrowed_index_and_nested_pointer_store() {
 
 /// **The small-field checks are about the real circuit.** The EC add + double circuit
 /// from [`small_field_curve_gadgets_are_sound`], compiled at limb widths 2–6 and 86:
-/// its multiplication-gate count is exactly affine in the width (`396 + 174·bits`), so
+/// its multiplication-gate count is exactly affine in the width (`468 + 156·bits`), so
 /// no lowering path depends on the width, and the 86-bit instance (secp256k1's
 /// modulus) is the shipped `xark_secp256k1::affine` gadget — the same circuit digest.
 #[test]
@@ -4438,7 +5477,7 @@ fn scaled_curve_gadget_rows_match_secp256k1() {
         (86, secp),
     ] {
         let mul = build(&format!("scaled_ec_{bits}"), toy(bits, p)).mul_gate_count();
-        assert_eq!(mul, 396 + 174 * bits as usize, "{bits}-bit limbs");
+        assert_eq!(mul, 468 + 156 * bits as usize, "{bits}-bit limbs");
     }
     let toy86 = build("scaled_ec_86", toy(86, secp)).circuit_digest();
     let real = build(
@@ -6396,157 +7435,7 @@ fn signature_blocks_are_sound() {
         }
     };
 
-    // ---- ed25519: 3 × 85-bit limbs mod p = 2²⁵⁵ − 19 ----
-    let p = (BigInt::from(1) << 255) - 19;
-    let md = |x: BigInt| ((x % &p) + &p) % &p;
-    let inv = |x: &BigInt| x.modpow(&(&p - 2), &p);
-    let d = md(big("-121665") * inv(&big("121666")));
-    let ed_add = |a: &(BigInt, BigInt), b: &(BigInt, BigInt)| {
-        let t = md(&d * &a.0 * &b.0 * &a.1 * &b.1);
-        (
-            md((&a.0 * &b.1 + &a.1 * &b.0) * inv(&md(&one + &t))),
-            md((&a.1 * &b.1 + &a.0 * &b.0) * inv(&md(&one - &t))),
-        )
-    };
-    let base = (
-        big("15112221349535400772501151409588531511454012693041857206046113283949847762202"),
-        big("46316835694926478169428394003475163141307993866256225615783033603165251855960"),
-    );
-    let mut pts = vec![(BigInt::from(0), one.clone()), base.clone()];
-    for _ in 0..3 {
-        let next = ed_add(pts.last().unwrap(), &base);
-        pts.push(next);
-    }
-    let on_curve = |x: &BigInt, y: &BigInt| {
-        x < &p && y < &p && md(y * y - x * x) == md(&one + &d * x * x * y * y)
-    };
-
-    // Extended add and double: the 12 output limbs are determined by the inputs.
-    let ext = |pt: &(BigInt, BigInt)| -> Vec<BigInt> {
-        let t = md(&pt.0 * &pt.1);
-        [&pt.0, &pt.1, &one, &t]
-            .iter()
-            .flat_map(|v| limbs(v, 3, 85))
-            .collect()
-    };
-    for (k, call) in [
-        "ext_add_25519(a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3])",
-        "ext_double_25519(a[0], a[1], a[2])",
-    ]
-    .iter()
-    .enumerate()
-    {
-        let prog = build(
-            &format!("ext_{k}"),
-            "pf: Private<[Field; 12]>, qf: Private<[Field; 12]>, s: Public<[Field; 12]>",
-            &format!(
-                "    let a = [[pf[0], pf[1], pf[2]], [pf[3], pf[4], pf[5]], [pf[6], pf[7], pf[8]], [pf[9], pf[10], pf[11]]];\n\
-                 \x20   let b = [[qf[0], qf[1], qf[2]], [qf[3], qf[4], qf[5]], [qf[6], qf[7], qf[8]], [qf[9], qf[10], qf[11]]];\n\
-                 \x20   let _ = b;\n\
-                 \x20   let (r0, r1, r2, r3) = {call};\n\
-                 \x20   let r = [r0, r1, r2, r3];\n\
-                 \x20   let mut i = 0;\n\
-                 \x20   while i < 12 {{ require_eq(r[i / 3][i % 3], s[i]); i += 1; }}"
-            ),
-        );
-        let (pa, qa, out) = (
-            ids(&prog, "pf", 12),
-            ids(&prog, "qf", 12),
-            ids(&prog, "s", 12),
-        );
-        for t in 0..6 {
-            let (a, b): (Vec<BigInt>, Vec<BigInt>) = if t < 3 {
-                (ext(&pts[t + 1]), ext(&pts[t + 2]))
-            } else {
-                (
-                    (0..12).map(|_| rand_bits(85)).collect(),
-                    (0..12).map(|_| rand_bits(85)).collect(),
-                )
-            };
-            let mut m = Default::default();
-            fix(&mut m, &pa, &a);
-            fix(&mut m, &qa, &b);
-            assert!(
-                project(&prog, &m, &out).is_some(),
-                "{call}: no output for {a:?} {b:?}"
-            );
-        }
-    }
-
-    // on_curve: accepts exactly the canonical points on the curve.
-    let prog = build(
-        "ed_on_curve",
-        "x: Private<[Field; 3]>, y: Private<[Field; 3]>",
-        "    xark_ed25519::blocks::on_curve(x, y);",
-    );
-    let (xs, ys) = (ids(&prog, "x", 3), ids(&prog, "y", 3));
-    let mut samples: Vec<(BigInt, BigInt)> = pts.clone();
-    samples.push((p.clone(), one.clone())); // (0, 1) with x encoded as p
-    samples.push((BigInt::from(0), &one + &p)); // … and y as 1 + p
-    samples.push((base.0.clone(), &base.1 + 1)); // off the curve
-    samples.push((rand_bits(255), rand_bits(255)));
-    for (x, y) in &samples {
-        let mut m = Default::default();
-        fix(&mut m, &xs, &limbs(x, 3, 85));
-        fix(&mut m, &ys, &limbs(y, 3, 85));
-        assert_eq!(accepts(&prog, &m), on_curve(x, y), "on_curve({x}, {y})");
-    }
-
-    // eq_mod_p: accepts exactly u ≡ v (mod p).
-    let prog = build(
-        "ed_eq_mod_p",
-        "u: Private<[Field; 3]>, v: Private<[Field; 3]>",
-        "    xark_ed25519::blocks::eq_mod_p(u, v);",
-    );
-    let (us, vs) = (ids(&prog, "u", 3), ids(&prog, "v", 3));
-    let r = rand_bits(254);
-    for (u, v) in [
-        (r.clone(), r.clone()),
-        (BigInt::from(5), BigInt::from(5) + &p),
-        (r.clone(), &r + 1),
-        (BigInt::from(0), p.clone()),
-        (rand_bits(255), rand_bits(255)),
-    ] {
-        let mut m = Default::default();
-        fix(&mut m, &us, &limbs(&u, 3, 85));
-        fix(&mut m, &vs, &limbs(&v, 3, 85));
-        assert_eq!(
-            accepts(&prog, &m),
-            md(&u - &v) == BigInt::from(0),
-            "eq_mod_p({u}, {v})"
-        );
-    }
-
-    // The 16-way extended-point mux picks entry `b3 b2 b1 b0`.
-    let prog = build(
-        "ed_select16",
-        "t: Private<[Field; 192]>, b: Private<[Field; 4]>, s: Public<[Field; 12]>",
-        "    let mut tab = [[[Field::from(0u8); 3]; 4]; 16];\n\
-         \x20   let mut i = 0;\n\
-         \x20   while i < 192 { tab[i / 12][(i % 12) / 3][i % 3] = t[i]; i += 1; }\n\
-         \x20   let r = xark_ed25519::blocks::select16(tab, b[3], b[2], b[1], b[0]);\n\
-         \x20   let mut i = 0;\n\
-         \x20   while i < 12 { require_eq(r[i / 3][i % 3], s[i]); i += 1; }",
-    );
-    let (ts, bs, out) = (
-        ids(&prog, "t", 192),
-        ids(&prog, "b", 4),
-        ids(&prog, "s", 12),
-    );
-    let table: Vec<BigInt> = (0..192).map(|_| rand_bits(85)).collect();
-    for idx in [0usize, 5, 10, 15] {
-        let mut m = Default::default();
-        fix(&mut m, &ts, &table);
-        let bits: Vec<BigInt> = (0..4).map(|k| BigInt::from((idx >> k) & 1)).collect();
-        fix(&mut m, &bs, &bits);
-        let got = project(&prog, &m, &out).expect("select16 has an output");
-        assert_eq!(
-            got,
-            table[12 * idx..12 * idx + 12].to_vec(),
-            "select16 entry {idx}"
-        );
-    }
-
+    // ---- ed25519 (point_in and the curve checks: `ed25519_certificate_hints_are_checked`) ----
     // The EdDSA scalar check: accepts exactly S < L.
     let l: BigInt = (BigInt::from(1) << 252) + big("27742317777372353535851937790883648493");
     let prog = build(
@@ -6853,4 +7742,423 @@ fn circuit_attribute_rejects_arguments() {
     let c = compile_with_field(&write_case("circuit_args", src), "circuit_args", "bn254");
     assert!(!c.status_success, "arguments to #[circuit] were accepted");
     assert!(c.stderr.contains("takes no arguments"), "{}", c.stderr);
+}
+
+/// **Ed25519 certificate gadgets and hinted points** (ticket 06b;
+/// `formal/Formal/MulCert25519.lean`, `EdCurveCheck.lean`, `FakeGlv25519.lean`), the
+/// forged hints a prover controls in `eddsa_verify`. `mul_cert_25519` solves on honest
+/// and all-max (`2³⁶ − 1`) limbs, rejects `t` off by one and every tampered wire, and
+/// accepts `t + p` (the same residue: the checks are mod `p`). A public point
+/// (`blocks::point_in`) is accepted exactly when canonical and on the curve, small-order
+/// points included (cofactored semantics); `x + p`, `y + p` and off-curve are refused.
+/// Each curve check refuses every tampered wire and, gnark #1765/#1862-style (ePrint
+/// 2026/1776), a hinted result off by a torsion point of order 2, 4 or 8, or off the
+/// curve. `ed_torsion_check` accepts exactly the eight points of order dividing 8.
+/// `fake_glv_check_25519` solves on a reduced lattice vector and refuses every tampered
+/// wire, `B = 0`, a coefficient or `W` off by one.
+#[test]
+fn ed25519_certificate_hints_are_checked() {
+    use num_bigint::BigInt;
+    let big = |s: &str| BigInt::parse_bytes(s.as_bytes(), 10).unwrap();
+    let one = BigInt::from(1);
+    let zero = BigInt::from(0);
+    let p: BigInt = (BigInt::from(1) << 255) - 19;
+    let l: BigInt = (BigInt::from(1) << 252) + big("27742317777372353535851937790883648493");
+    let fr = big("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+    let md = |x: &BigInt, m: &BigInt| ((x % m) + m) % m;
+    let fp = |x: BigInt| md(&x, &p);
+    let inv = |x: &BigInt| md(x, &p).modpow(&(&p - 2), &p);
+    let d = fp(big("-121665") * inv(&big("121666")));
+    let sqrt_m1 = BigInt::from(2).modpow(&((&p - 1) / 4), &p);
+    let sqrt = |a: &BigInt| -> Option<BigInt> {
+        let a = md(a, &p);
+        let mut x = a.modpow(&((&p + 3) / 8), &p);
+        if md(&(&x * &x), &p) != a {
+            x = md(&(&x * &sqrt_m1), &p);
+        }
+        (md(&(&x * &x), &p) == a).then_some(x)
+    };
+    type Pt = (BigInt, BigInt);
+    let on_curve =
+        |q: &Pt| fp(&q.1 * &q.1 - &q.0 * &q.0) == fp(&one + &d * &q.0 * &q.0 * &q.1 * &q.1);
+    let add = |a: &Pt, b: &Pt| -> Pt {
+        let t = fp(&d * &a.0 * &b.0 * &a.1 * &b.1);
+        (
+            fp((&a.0 * &b.1 + &a.1 * &b.0) * inv(&(&one + &t))),
+            fp((&a.1 * &b.1 + &a.0 * &b.0) * inv(&(&one - &t))),
+        )
+    };
+    let base: Pt = (
+        big("15112221349535400772501151409588531511454012693041857206046113283949847762202"),
+        big("46316835694926478169428394003475163141307993866256225615783033603165251855960"),
+    );
+    // The torsion points: (0, −1) of order 2, (±√−1, 0) of order 4, and the four of
+    // order 8 (y² = −x², d·x⁴ − 2x² − 1 = 0).
+    let t2: Pt = (zero.clone(), &p - 1);
+    let t4: Pt = (sqrt_m1.clone(), zero.clone());
+    let x2 = [1i8, -1]
+        .iter()
+        .find_map(|&s| {
+            let r = sqrt(&(&one + &d))?;
+            let x2 = fp((&one + s * &r) * inv(&d));
+            sqrt(&x2)
+                .filter(|_| sqrt(&fp(-x2.clone())).is_some())
+                .map(|_| x2)
+        })
+        .expect("an order-8 x²");
+    let t8: Pt = (sqrt(&x2).unwrap(), sqrt(&fp(-x2)).unwrap());
+    let mut torsion = vec![(zero.clone(), one.clone())];
+    for _ in 0..7 {
+        torsion.push(add(torsion.last().unwrap(), &t8));
+    }
+    assert!(torsion.iter().all(on_curve) && add(&torsion[7], &t8) == torsion[0]);
+    assert!(torsion.contains(&t2) && torsion.contains(&t4));
+    let mut pts = vec![base.clone()];
+    for _ in 0..3 {
+        pts.push(add(pts.last().unwrap(), &base));
+    }
+
+    let limbs = |x: &BigInt, n: usize, w: u32| -> Vec<BigInt> {
+        let m: BigInt = (BigInt::from(1) << w) - 1;
+        (0..n).map(|i| (x >> (w * i as u32)) & &m).collect()
+    };
+    let named = |pts: &[(&str, Vec<BigInt>)]| -> Vec<(String, String)> {
+        let mut v = Vec::new();
+        for (nm, ls) in pts {
+            for (i, l) in ls.iter().enumerate() {
+                v.push((format!("{nm}[{i}]"), md(l, &fr).to_string()));
+            }
+        }
+        v
+    };
+    fn refs(v: &[(String, String)]) -> Vec<(&str, String)> {
+        v.iter().map(|(n, x)| (n.as_str(), x.clone())).collect()
+    }
+    let solves = |c: &Compiled, ins: &[(String, String)]| {
+        let program = c.program();
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &refs(ins))).is_ok()
+    };
+    let circuit = |name: &str, params: &str, body: &str| {
+        let src = format!(
+            "#![no_std]\nuse xark::prelude::*;\nuse xark_ed25519::*;\n\
+             #[circuit]\n#[allow(clippy::too_many_arguments)]\npub fn circuit({params}) {{\n{body}}}\n"
+        );
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let fe = |names: &[&str]| -> String {
+        names
+            .iter()
+            .map(|n| format!("{n}: Private<[Field; 8]>"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let l8 = |x: &BigInt| limbs(x, 8, 32);
+
+    // ---- mul_cert_25519 ----
+    let mc = circuit(
+        "ed_mul_cert",
+        &fe(&["a1", "b1", "a2", "b2", "a3", "b3", "t"]),
+        "    mul_cert_25519(a1, b1, a2, b2, a3, b3, t);\n",
+    );
+    let val = |ls: &[BigInt]| {
+        ls.iter()
+            .enumerate()
+            .fold(zero.clone(), |a, (i, x)| a + (x << (32 * i as u32)))
+    };
+    let max36 = val(&vec![(BigInt::from(1) << 36) - 1; 8]);
+    let cert = |ops: [&BigInt; 6], t: &BigInt| -> Vec<(String, String)> {
+        let lm = |x: &BigInt| -> Vec<BigInt> {
+            if x == &max36 {
+                vec![(BigInt::from(1) << 36) - 1; 8]
+            } else {
+                l8(x)
+            }
+        };
+        named(&[
+            ("a1", lm(ops[0])),
+            ("b1", lm(ops[1])),
+            ("a2", lm(ops[2])),
+            ("b2", lm(ops[3])),
+            ("a3", lm(ops[4])),
+            ("b3", lm(ops[5])),
+            ("t", lm(t)),
+        ])
+    };
+    let (a, b, c2, e2) = (&base.0, &base.1, &pts[1].0, &pts[2].1);
+    let honest_t = fp(a * b - c2 * e2 - &pts[3].0 * &pts[3].1);
+    let ops = [a, b, c2, e2, &pts[3].0, &pts[3].1];
+    assert!(
+        solves(&mc, &cert(ops, &honest_t)),
+        "an honest certificate rejected"
+    );
+    rejects_each_tampered_witness(&mc, &refs(&cert(ops, &honest_t)));
+    assert!(
+        !solves(&mc, &cert(ops, &(&honest_t + 1))),
+        "t off by one accepted"
+    );
+    assert!(
+        solves(&mc, &cert(ops, &(&honest_t + &p))),
+        "t + p (same residue) rejected"
+    );
+    let mx = [&max36, &max36, &max36, &max36, &max36, &max36];
+    let tmax = fp(&max36 * &max36 - &max36 * &max36 - &max36 * &max36);
+    assert!(
+        solves(&mc, &cert(mx, &tmax)),
+        "all-max limbs rejected (no-wrap bound)"
+    );
+    assert!(
+        !solves(&mc, &cert(mx, &(&tmax + 1))),
+        "all-max limbs, t + 1 accepted"
+    );
+
+    // ---- a public point: blocks::point_in (3 × 85-bit limbs) ----
+    let pin = circuit(
+        "ed_point_in",
+        "x: Private<[Field; 3]>, y: Private<[Field; 3]>",
+        "    xark_ed25519::blocks::point_in(x, y);\n",
+    );
+    let pt85 = |x: &BigInt, y: &BigInt| named(&[("x", limbs(x, 3, 85)), ("y", limbs(y, 3, 85))]);
+    for q in pts.iter().chain(&torsion) {
+        assert!(
+            solves(&pin, &pt85(&q.0, &q.1)),
+            "on-curve point rejected: {q:?}"
+        );
+    }
+    rejects_each_tampered_witness(&pin, &refs(&pt85(&base.0, &base.1)));
+    for (x, y) in [
+        (base.0.clone(), &base.1 + 1),
+        (&p + 0, &p - 1),           // (0, −1) with x as p
+        (zero.clone(), &one + &p),  // (0, 1) with y as 1 + p
+        (&t4.0 + &p, zero.clone()), // order 4 with x + p (fits 255 bits?)
+    ] {
+        if x >= BigInt::from(1) << 255 || y >= BigInt::from(1) << 255 {
+            continue;
+        }
+        assert!(
+            !solves(&pin, &pt85(&x, &y)),
+            "off-curve or non-canonical point accepted"
+        );
+    }
+
+    // ---- the curve checks: honest, tampered, and results off by a torsion point ----
+    let dbl = |q: &Pt| add(q, q);
+    let dc = circuit(
+        "ed_double_check",
+        &fe(&["x", "y", "s", "u", "x2", "y2"]),
+        "    ed_double_check(x, y, s, u, x2, y2);\n",
+    );
+    let dins = |q: &Pt, r: &Pt| {
+        named(&[
+            ("x", l8(&q.0)),
+            ("y", l8(&q.1)),
+            ("s", l8(&fp(&q.0 * &q.0))),
+            ("u", l8(&fp(&q.1 * &q.1))),
+            ("x2", l8(&r.0)),
+            ("y2", l8(&r.1)),
+        ])
+    };
+    let ac = circuit(
+        "ed_add_check",
+        &fe(&["x1", "y1", "x2", "y2", "f2", "t", "e", "x3", "y3"]),
+        "    ed_add_check(x1, y1, x2, y2, f2, t, e, x3, y3);\n",
+    );
+    let ains = |q1: &Pt, q2: &Pt, r: &Pt| {
+        let f2 = fp(&d * &q2.0 * &q2.1);
+        let t = fp(&q1.0 * &q1.1);
+        named(&[
+            ("x1", l8(&q1.0)),
+            ("y1", l8(&q1.1)),
+            ("x2", l8(&q2.0)),
+            ("y2", l8(&q2.1)),
+            ("f2", l8(&f2)),
+            ("t", l8(&t)),
+            ("e", l8(&fp(&t * &f2))),
+            ("x3", l8(&r.0)),
+            ("y3", l8(&r.1)),
+        ])
+    };
+    for (i, q) in pts.iter().chain(&torsion[1..2]).enumerate() {
+        let q2 = &pts[(i + 1) % pts.len()];
+        assert!(solves(&dc, &dins(q, &dbl(q))), "honest double rejected");
+        assert!(
+            solves(&ac, &ains(q, q2, &add(q, q2))),
+            "honest add rejected"
+        );
+        if i == 0 {
+            rejects_each_tampered_witness(&dc, &refs(&dins(q, &dbl(q))));
+            rejects_each_tampered_witness(&ac, &refs(&ains(q, q2, &add(q, q2))));
+        }
+        for t in [&t2, &t4, &t8] {
+            assert!(
+                !solves(&dc, &dins(q, &add(&dbl(q), t))),
+                "a doubling off by torsion {t:?} accepted"
+            );
+            assert!(
+                !solves(&ac, &ains(q, q2, &add(&add(q, q2), t))),
+                "an addition off by torsion {t:?} accepted"
+            );
+        }
+        let r = add(q, q2);
+        assert!(
+            !solves(&ac, &ains(q, q2, &(r.0.clone(), fp(&r.1 + 1)))),
+            "off-curve sum accepted"
+        );
+        // The same residue in a non-canonical encoding is the same point: accepted.
+        assert!(
+            solves(&ac, &ains(q, q2, &(&r.0 + &p, r.1.clone()))),
+            "x₃ + p rejected"
+        );
+    }
+
+    // ---- the torsion test: exactly the eight points of order dividing 8 ----
+    let tc = circuit(
+        "ed_torsion_check",
+        &fe(&["x", "y", "s", "u", "m"]),
+        "    ed_torsion_check(x, y, s, u, m);\n",
+    );
+    let tins = |q: &Pt| {
+        named(&[
+            ("x", l8(&q.0)),
+            ("y", l8(&q.1)),
+            ("s", l8(&fp(&q.0 * &q.0))),
+            ("u", l8(&fp(&q.1 * &q.1))),
+            ("m", l8(&fp(&q.0 * &q.1))),
+        ])
+    };
+    for q in &torsion {
+        assert!(solves(&tc, &tins(q)), "a small-order point refused: {q:?}");
+    }
+    rejects_each_tampered_witness(&tc, &refs(&tins(&torsion[3])));
+    for q in pts.iter().chain([&add(&base, &t8), &add(&base, &t2)]) {
+        assert!(
+            !solves(&tc, &tins(q)),
+            "a point of large order accepted: {q:?}"
+        );
+    }
+
+    // ---- fake_glv_check_25519 ----
+    let fg = circuit(
+        "ed_fake_glv",
+        "k: Private<[Field; 4]>, s: Private<[Field; 4]>, ca: Private<[Field; 1]>, \
+         cb: Private<[Field; 1]>, w: Private<[Field; 4]>, q1: Private<[Field; 3]>, \
+         q2: Private<[Field; 3]>, h1: Private<[Field; 5]>, h2: Private<[Field; 5]>",
+        "    let _ = fake_glv_check_25519(k, s, ca[0], cb[0], w, q1, q2, h1, h2);\n",
+    );
+    let t64 = BigInt::from(1) << 64;
+    let t129 = BigInt::from(1) << 129;
+    let t133 = BigInt::from(1) << 133;
+    let ll = limbs(&l, 4, 64);
+    let split3 = |c: &BigInt| vec![c % &t64, (c >> 64) % &t64, c >> 128];
+    // The chain's columns `a + x·b − q'·L` and its biased carries (as `wcarries`).
+    let carries = |a: &[BigInt], x: &[BigInt], b: &[BigInt], q: &[BigInt]| -> Vec<BigInt> {
+        let mut cols = vec![zero.clone(); 6];
+        for (m, v) in a.iter().enumerate() {
+            cols[m] += v;
+        }
+        for i in 0..4 {
+            for j in 0..3 {
+                cols[i + j] += &x[i] * &b[j] - &q[j] * &ll[i];
+            }
+        }
+        let mut c = zero.clone();
+        (0..5)
+            .map(|m| {
+                let h = (&cols[m] + &c + (BigInt::from(1) << 131)) >> 64;
+                c = &h - (BigInt::from(1) << 67);
+                h
+            })
+            .collect()
+    };
+    // Every plug for `(k, S, A, B, W)` and the quotients `q₁`, `q₂` (unbiased).
+    let build =
+        |k: &BigInt, s: &BigInt, a: &BigInt, b: &BigInt, w: &BigInt, q1: &BigInt, q2: &BigInt| {
+            let (ca, cb) = (a + &t129, b + &t129);
+            let signed = |c: &BigInt| {
+                let mut v = split3(c);
+                v[2] -= 2;
+                v
+            };
+            let off = |q: &BigInt| {
+                let mut v = split3(&(q + &t133));
+                v[2] -= 32;
+                v
+            };
+            let (kl, sl, wl) = (limbs(k, 4, 64), limbs(s, 4, 64), limbs(w, 4, 64));
+            let h1 = carries(&signed(&ca), &kl, &signed(&cb), &off(q1));
+            let h2 = carries(&wl, &sl, &signed(&cb), &off(q2));
+            named(&[
+                ("k", kl),
+                ("s", sl),
+                ("ca", vec![ca]),
+                ("cb", vec![cb]),
+                ("w", wl),
+                ("q1", split3(&(q1 + &t133))),
+                ("q2", split3(&(q2 + &t133))),
+                ("h1", h1),
+                ("h2", h2),
+            ])
+        };
+    let fins = |k: &BigInt, s: &BigInt, a: &BigInt, b: &BigInt, w: &BigInt| {
+        build(k, s, a, b, w, &((a + k * b) / &l), &((w + s * b) / &l))
+    };
+    // A short (A, B) with A + k·B ≡ 0 (mod L): Lagrange–Gauss on (L, 0), (−k, 1).
+    let short = |k: &BigInt| -> (BigInt, BigInt) {
+        let (mut u, mut v) = ((l.clone(), zero.clone()), (-k.clone(), one.clone()));
+        let n2 = |x: &(BigInt, BigInt)| &x.0 * &x.0 + &x.1 * &x.1;
+        loop {
+            if n2(&u) < n2(&v) {
+                std::mem::swap(&mut u, &mut v);
+            }
+            let dot = &u.0 * &v.0 + &u.1 * &v.1;
+            let nv = n2(&v);
+            // mu = round(dot / nv), as floor((2·dot + nv) / (2·nv)).
+            let (num, den) = (2 * &dot + &nv, 2 * &nv);
+            let mut mu = &num / &den;
+            if num < zero && &mu * &den != num {
+                mu -= 1;
+            }
+            if mu == zero {
+                break;
+            }
+            u = (&u.0 - &mu * &v.0, &u.1 - &mu * &v.1);
+        }
+        if v.1 != zero { v } else { u }
+    };
+    let ks = [
+        big("1234567890123456789012345678901234567890123456789012345678901234567"),
+        &l - 1,
+        BigInt::from(7),
+    ];
+    let s = big("987654321098765432109876543210987654321098765432109876543210987654");
+    for k in &ks {
+        let (a, b) = short(k);
+        assert!(md(&(&a + k * &b), &l) == zero && b != zero);
+        assert!(
+            a.magnitude().bits() <= 128 && b.magnitude().bits() <= 128,
+            "{a} {b}"
+        );
+        let w = md(&-(&b * &s), &l);
+        let honest = fins(k, &s, &a, &b, &w);
+        assert!(solves(&fg, &honest), "an honest fake-GLV hint rejected");
+        rejects_each_tampered_witness(&fg, &refs(&honest));
+        // Off by one: A, B or W; the quotients near the honest ones.
+        let (q1h, q2h) = ((&a + k * &b) / &l, (&w + &s * &b) / &l);
+        for (aa, bb, ww) in [
+            (&a + 1, b.clone(), w.clone()),
+            (a.clone(), &b + 1, w.clone()),
+            (a.clone(), b.clone(), &w + 1),
+        ] {
+            for dq in [-1i8, 0, 1] {
+                let forged = build(k, &s, &aa, &bb, &ww, &(&q1h + dq), &(&q2h + dq));
+                assert!(!solves(&fg, &forged), "a coefficient off by one accepted");
+            }
+        }
+    }
+    // B = 0 (with A = 0, W = 0): both relations hold; `B·w = 1` refuses it.
+    assert!(
+        !solves(&fg, &fins(&ks[0], &s, &zero, &zero, &zero)),
+        "B = 0 accepted"
+    );
 }

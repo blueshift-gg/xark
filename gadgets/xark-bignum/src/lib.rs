@@ -583,7 +583,8 @@ fn range_lt_8(v: Field) {
     require_eq(b0 + b1 + b1 + b2 + b2 + b2 + b2, v);
 }
 
-/// Range-check each of the `LIMBS` limbs of `x` to `[0, 2^BITS)`.
+/// Range-check each limb of `x` to `[0, 2^BITS)` (proven: `formal/Formal/RangeCheckLimbs.lean`).
+#[xark::gadget]
 pub fn range_check_limbs<const LIMBS: usize, const BITS: usize>(x: [Field; LIMBS]) {
     let mut i = 0usize;
     while i < LIMBS {
@@ -765,32 +766,90 @@ pub fn reduce_once<const LIMBS: usize, const BITS: usize>(
     out
 }
 
-/// Enforce `x < m` (`(m-1) - x` produces no final borrow). `x`'s limbs must be
-/// range-checked first.
+/// Enforce `x < m`, i.e. `x ≤ m − 1` (`m_minus_1`), compared lexicographically from
+/// the top limb. `x`'s limbs must be `< 2^BITS`, range-checked by the caller; `m − 1`'s
+/// limbs `< 2^BITS` too for an honest `x` to be accepted (completeness only).
+///
+/// A chunked comparison (zkGolf RSA record 31516100, "chunked lexicographic
+/// `sig < n`"): instead of a full borrow chain (`LIMBS·(BITS+1)` bits), the prover
+/// names the top limb `k` where `x` and `m − 1` differ; the rows check that every
+/// limb above `k` is equal and that `m₋₁[k] − 1 − x[k]` is a `BITS`-bit number. The
+/// hint `n[j]` is `1` iff they differ at limb `j` or above; `f[k] = n[k] − n[k+1]`
+/// is the one-hot "first difference at `k`" (`n[0] = 0`: they are equal). Cost
+/// `4·LIMBS + BITS` rows. Proven sound and complete over its exact rows at the widths
+/// production uses, 3 × 86, 3 × 85 and 4 × 64 (`formal/Formal/RequireLt*.lean`); a
+/// constant `m − 1` is that template with constant plugs (`cargo xtask lean-export
+/// --coverage`). Other widths are not exported.
+#[xark::gadget]
 pub fn require_lt<const LIMBS: usize, const BITS: usize>(
     x: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
 ) {
-    let two_b = two_pow::<BITS>();
-    let mut borrow = Field::from(0u8);
+    // The hint operand below is `< 2^(BITS+3)`, and the selected difference must not
+    // wrap the field from below (`−2^BITS − 1 + r ≥ 2^BITS`).
+    const { assert!(BITS + 3 < 253, "require_lt: limbs too wide for BN254 Fr") };
+    let one = Field::from(1u8);
+    let zero = Field::from(0u8);
+    // n[j] = bit BITS+2 of `d_j − 1 + 2^(BITS+1)·n[j+1] + 2^(BITS+2)`, `d_j = m₋₁[j] − x[j]`:
+    // with the limbs above equal (`n[j+1] = 0`, so `d_j ≥ 0` for an honest `x`) it is
+    // `[d_j > 0]`; once they differ it stays `1`.
+    let mut n = [zero; LIMBS];
+    let mut above = zero;
+    let mut j = LIMBS;
+    while j > 0 {
+        j -= 1;
+        let t = m_minus_1[j] - x[j] - one + above * two_pow_big(BITS + 1) + two_pow_big(BITS + 2);
+        n[j] = Field::hint_bit(t, BITS + 2);
+        above = n[j];
+    }
+    // Every n[j] is a bit, and f[k] = n[k] − n[k+1] is a bit: going up, the flags fall
+    // from 1 to 0 at most once, so at most one f[k] is 1. (Each flag gets its own
+    // booleanity row, so the witness search sees its domain.)
+    let mut j = 0usize;
+    while j < LIMBS {
+        n[j].require_bool();
+        j += 1;
+    }
+    let mut k = 0usize;
+    while k + 1 < LIMBS {
+        (n[k] - n[k + 1]).require_bool();
+        k += 1;
+    }
+    // Where n[j] = 0 (no difference at j or above), the limbs are equal.
+    let mut j = 0usize;
+    while j < LIMBS {
+        require_eq((one - n[j]) * (x[j] - m_minus_1[j]), zero);
+        j += 1;
+    }
+    // At the first difference k: m₋₁[k] − 1 − x[k] ∈ [0, 2^BITS), i.e. x[k] < m₋₁[k].
+    let mut d = zero;
+    let mut k = 0usize;
+    while k < LIMBS {
+        let up = if k + 1 < LIMBS { n[k + 1] } else { zero };
+        d = d + (n[k] - up) * (m_minus_1[k] - one - x[k]);
+        k += 1;
+    }
+    range_bits::<BITS>(d);
+}
+
+/// `2^e` as a field constant, for `e < 253`.
+fn two_pow_big(e: usize) -> Field {
+    let mut p = Field::from(1u8);
     let mut i = 0usize;
-    while i < LIMBS {
-        let d_i = m_minus_1[i] - x[i] - borrow + two_b;
-        let bits = decompose_top::<BITS, 1>(d_i);
-        let no_borrow = bits[BITS];
-        borrow = Field::from(1u8) - no_borrow;
+    while i < e {
+        p = p + p;
         i += 1;
     }
-    require_eq(borrow, Field::from(0u8));
+    p
 }
 
 /// Pinned boolean `lt ∈ {0,1}`, `1` iff `a < b`, over two canonical limb vectors
 /// (each limb `< 2^BITS`).
 ///
-/// Same sound subtract-with-borrow as [`require_lt`]: each
+/// A subtract-with-borrow: each
 /// `d_i = a[i] − b[i] − borrow + 2^BITS ∈ [0, 2^(BITS+1))` is bit-decomposed, so
 /// every term stays `< 2^(BITS+1)` (nothing wraps the field) and the final borrow
-/// is exactly the `a < b` bit. Unlike `require_lt` (which asserts borrow `== 0`),
+/// is exactly the `a < b` bit. Unlike [`require_lt`], which only asserts the order,
 /// this returns it, so a caller can mux/derive advice (rounding carries, GLV signs)
 /// in-circuit rather than take it as a witness input.
 pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field; LIMBS]) -> Field {
@@ -805,11 +864,6 @@ pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field
         i += 1;
     }
     borrow
-}
-
-/// Pinned `a ≥ b` bit (`1 − is_lt`). Canonical limb-vector precondition as [`is_lt`].
-pub fn is_ge<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field; LIMBS]) -> Field {
-    Field::from(1u8) - is_lt::<LIMBS, BITS>(a, b)
 }
 
 /// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
@@ -942,257 +996,727 @@ pub fn mul_lazy_25519(a: [Field; 3], b: [Field; 3]) -> [Field; 3] {
 /// SOUND weak reduce: carry-normalize a positive limb array (limbs < 2^89) to a
 /// loosely-reduced 3x85 value (limbs < 2^86, ≡ input mod p). Carries range-checked
 /// (deterministic). NO canonical reduce. Used after biased subtractions.
-pub const M_K1: [Field; 4] =
-    modulus_limbs::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+/// secp256k1's `p = 2²⁵⁶ − 2³² − 977`.
+const P_K1: &str = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F";
+/// secp256k1's `p` as 8 × 32-bit limbs.
+pub const M_K1: [Field; 8] = modulus_limbs::<8, 32>(P_K1);
 /// secp256k1 `p − 1` (the canonical-coordinate bound).
-pub const M1_K1: [Field; 4] =
-    modulus_minus_1::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+pub const M1_K1: [Field; 8] = modulus_minus_1::<8, 32>(P_K1);
 
-/// Sound 4×64 lazy multiply mod secp256k1 p (fold ×c, c=2^32+977). Inputs <2^70;
-/// carries range-checked (sound); output ≡ a·b (mod p), limbs <2^65.
-pub fn mul_lazy_k1(a: [Field; 4], b: [Field; 4]) -> [Field; 4] {
-    let two64 = Field::from(1u128 << 64);
-    let c = Field::from(4294968273u128);
-    let mut cols = [Field::from(0u8); 7];
+/// `L` and `H` read off `mul_cert_k1`'s 15 products (the points of `mul_cert_r1`):
+/// `CERT_K1_LO[i] = Σₘ ℓₘ·V[m][i]`, `CERT_K1_HI[i] = Σₘ hₘ·V[m][i]`, where
+/// `ℓₘ + 2¹⁹²·hₘ ≡ 2³²ᵐ (mod p)` is `Y^m mod (Y⁸ − Y − 977)` at `Y = 2³²` split after its
+/// sixth word. `formal/Formal/MulCertK1.lean` checks both against `ℓₘ`, `hₘ`.
+const CERT_K1_LO: [Field; 15] = [
+    Field::constant("1185733791817175022924712974372438372930331471981874800876400346553703665820"),
+    Field::constant("7532377983992352815137279022198273432546786243903279580690534117658497852353"),
+    Field::constant(
+        "10237718478628148948426570229423619173256326742102272297913238835664122004457",
+    ),
+    Field::constant(
+        "10850163885430594293735379828443965351958623545011669517140021837554759680171",
+    ),
+    Field::constant(
+        "10691117041282485274483783370715796550464560397292781489540265443495529268402",
+    ),
+    Field::constant(
+        "10860315677969016130201661141405999631129693614428688990903574755512392632291",
+    ),
+    Field::constant(
+        "16845418279115332233300572511199137856384274120405836469367313639984371187519",
+    ),
+    Field::constant("7928773172434777067688383830053622879226049343510124887642735433025465636762"),
+    Field::constant(
+        "16522777449214461328590402147427895175322553478147089556486169886447861666155",
+    ),
+    Field::constant(
+        "19933809010125723664382691202677368595697780682608913001042218029890503837260",
+    ),
+    Field::constant("877666827331549468968552482651778577334417800136540938553767841025196345246"),
+    Field::constant("6186660721010143203533947949968427630060060682098791620460582437277471902486"),
+    Field::constant("6903521529107129656182174853046909266036249220349851901115147460033591939641"),
+    Field::constant(
+        "21684874967306821419958251029878516373870424578988495502089209256327725947614",
+    ),
+    Field::constant("4976771288109216028210477643337176753620418881946029852066249985579465903143"),
+];
+const CERT_K1_HI: [Field; 15] = [
+    Field::constant(
+        "13664932669112099558665935279408846895990012125573381725638317743123828173913",
+    ),
+    Field::constant(
+        "21017012331653453178142334382536636896629931490715088662321988677576698930358",
+    ),
+    Field::constant(
+        "21223929151411029362292121161716184372091884541167847631164253095832745299952",
+    ),
+    Field::constant("987216774258473263016157449014370990855809970460967348519945688807136144636"),
+    Field::constant("2202970899181122291888048653488803474052057403070825878671174453476841147902"),
+    Field::constant(
+        "13736900096536105253864899174170296302103524093497413289595852738235375547592",
+    ),
+    Field::constant("259611743084534558328784880018628833317462659541925602081610242809938929632"),
+    Field::constant(
+        "19603223048775668526003641225862530649311861795096711982004773914503699124534",
+    ),
+    Field::constant(
+        "20387273191593784122466225645866680361756505342368749425139765072786670327490",
+    ),
+    Field::constant("6356916758059472108445955439562923497540805376917122688284337237921240484164"),
+    Field::constant("1126245767620976072817494277447469608899171266077625386795617102904432169773"),
+    Field::constant(
+        "14938918974887429192259175206759202241312708206213877778090414796067169259856",
+    ),
+    Field::constant(
+        "18975171280271419092692614814171024569928375879885914690398587556454867393181",
+    ),
+    Field::constant("1445234999368244946873091531628341940124632218446465639779110317152194271662"),
+    Field::constant(
+        "19180385288900390250214766840406260074472172834294357021099884854953630760291",
+    ),
+];
+/// Limb bound `mul_cert_k1` assumes of `a`, `b` and `t` (`< 2^CERT_K1_IN`, caller-enforced).
+const CERT_K1_IN: usize = 34;
+/// Widths of the range-checked `K + 8` and `T + 8`.
+const CERT_K1_K: usize = 40;
+const CERT_K1_T: usize = 47;
+
+/// Assert `a·b ≡ t (mod p)` for secp256k1's `p = 2²⁵⁶ − c`, `c = 2³² + 977`, over 8 × 32-bit
+/// limbs that may be unreduced (each limb of `a`, `b`, `t` in `[0, 2^34)`, which the caller
+/// enforces). The limb products come from the 15 rows of [`mul_cert_r1`] (interpolation at
+/// small points, linear; Winograd/Toom); folding each column `2³²ᵐ` mod `Y⁸ − Y − 977`
+/// (`= p` at `Y = 2³²`, coefficients in `[0, 977²]`) splits `E ≡ a·b − t` as `L + 2¹⁹²·H`,
+/// `L < 2²³⁹`, `|H| < 2¹⁰⁴`. Since `p = 2²⁵⁶ − c`, `E = K·p` iff `L + c·K = 2¹⁹²·(2⁶⁴·K − H)`:
+/// one row, with `K + 8` and `T + 8` (`T = 2⁶⁴·K − H`) range-checked in 40 and 47 bits. The
+/// honest `K = ⌊(H + 2⁶³)/2⁶⁴⌋` comes from one `div_rem`. `15 + 40 + 47 + 1` rows. Proven
+/// sound and complete over its exported rows (`formal/Formal/MulCertK1.lean`).
+#[xark::gadget]
+pub fn mul_cert_k1(a: [Field; 8], b: [Field; 8], t: [Field; 8]) {
+    // No-wrap budget (bug checklist 5), proven exactly in MulCertK1.lean: a column is
+    // `< 8·2^(2·CERT_K1_IN)` and `Σ ℓₘ·cntₘ < 2^171`, so `0 ≤ L + 2^198 < 2^240`,
+    // `|H| < 2^104`, `c·|K|`, `2^192·|T|` stay far below `r/2`; the honest `K + 8`, `T + 8`
+    // lie in `[0, 2^40)`, `[0, 2^47)` (MulCertK1.int_complete).
+    const {
+        assert!(2 * CERT_K1_IN + 3 + 171 < 252 && 192 + CERT_K1_T < 252);
+        assert!(64 + CERT_K1_K < 252 && 33 + CERT_K1_K < 252);
+    };
+    let (mut lo, mut hi) = cert_products(a, b, CERT_K1_LO, CERT_K1_HI);
+    let two32 = Field::from(1u64 << 32);
+    let mut w = Field::from(1u8);
+    let mut k = 0usize;
+    while k < 6 {
+        lo -= w * t[k];
+        w *= two32;
+        k += 1;
+    }
+    hi = hi - t[6] - two32 * t[7];
+    // `K + 8 = ⌊(H + 2⁶³ + 2⁶⁷)/2⁶⁴⌋`; the `div_rem` remainder is scratch.
+    xark::witness_begin();
+    let q = Field::hint_div_rem(hi + two_pow_big(63) + two_pow_big(67), two_pow_big(64))[0];
+    xark::witness_end();
+    let kk = q - Field::from(8u8);
+    let tt = kk * two_pow_big(64) - hi;
+    let _ = (kk + Field::from(8u8)).to_bits::<CERT_K1_K>();
+    let _ = (tt + Field::from(8u8)).to_bits::<CERT_K1_T>();
+    require_eq(lo + Field::from(4294968273u64) * kk, two_pow_big(192) * tt);
+}
+
+/// `(a·b) mod p` and `(a − b − c) mod p` as hints (no rows); the caller pins them.
+fn hint_mul_k1(a: [Field; 8], b: [Field; 8]) -> [Field; 8] {
+    Field::hint_mulmod_divmod::<8>(a, b, M_K1, 32).1
+}
+fn hint_sub2_k1(a: [Field; 8], b: [Field; 8], c: [Field; 8]) -> [Field; 8] {
+    Field::hint_sub2::<8>(a, b, c, M_K1, 32).1
+}
+/// `2p` limb-wise (each limb in `[2³³ − 1954, 2³³)`): a bias keeping `2p + u − v` limbs in
+/// `[0, 2^34)` for `u` limbs `< 2^33` and `v` limbs `< 2^32`. A caller may pass `2p − y` for
+/// `−y`.
+pub fn b2_k1() -> [Field; 8] {
+    let two = Field::from(2u8);
+    let mut out = M_K1;
     let mut i = 0usize;
-    while i < 4usize {
-        let mut j = 0usize;
-        while j < 4usize {
-            cols[i + j] = cols[i + j] + a[i] * b[j];
-            j += 1;
-        }
+    while i < 8 {
+        out[i] = two * M_K1[i];
         i += 1;
     }
-    let t0 = cols[0] + c * cols[4];
-    let t1 = cols[1] + c * cols[5];
-    let t2 = cols[2] + c * cols[6];
-    let t3 = cols[3];
-    let d0 = Field::hint_div_rem(t0, two64);
-    let c0 = d0[0];
-    let r0 = d0[1];
-    require_eq(t0, two64 * c0 + r0);
-    range_bits::<64>(r0);
-    range_bits::<112>(c0);
-    let x1 = t1 + c0;
-    let d1 = Field::hint_div_rem(x1, two64);
-    let c1 = d1[0];
-    let r1 = d1[1];
-    require_eq(x1, two64 * c1 + r1);
-    range_bits::<64>(r1);
-    range_bits::<112>(c1);
-    let x2 = t2 + c1;
-    let d2 = Field::hint_div_rem(x2, two64);
-    let c2 = d2[0];
-    let r2 = d2[1];
-    require_eq(x2, two64 * c2 + r2);
-    range_bits::<64>(r2);
-    range_bits::<112>(c2);
-    let x3 = t3 + c2;
-    let d3 = Field::hint_div_rem(x3, two64);
-    let c3 = d3[0];
-    let r3 = d3[1];
-    require_eq(x3, two64 * c3 + r3);
-    range_bits::<64>(r3);
-    range_bits::<82>(c3);
-    let u0 = r0 + c * c3;
-    let e0 = Field::hint_div_rem(u0, two64);
-    let k0 = e0[0];
-    let s0 = e0[1];
-    require_eq(u0, two64 * k0 + s0);
-    range_bits::<64>(s0);
-    range_bits::<52>(k0);
-    let s1 = r1 + k0;
-    [s0, s1, r2, r3]
+    out
 }
 
-/// Sound weak reduce for secp256k1: positive limbs < 2^72 → loosely-reduced <2^65.
-pub fn weak_reduce_k1(v: [Field; 4]) -> [Field; 4] {
-    let two64 = Field::from(1u128 << 64);
-    let c = Field::from(4294968273u128);
-    let d0 = Field::hint_div_rem(v[0], two64);
-    let c0 = d0[0];
-    let r0 = d0[1];
-    require_eq(v[0], two64 * c0 + r0);
-    range_bits::<64>(r0);
-    range_bits::<10>(c0);
-    let x1 = v[1] + c0;
-    let d1 = Field::hint_div_rem(x1, two64);
-    let c1 = d1[0];
-    let r1 = d1[1];
-    require_eq(x1, two64 * c1 + r1);
-    range_bits::<64>(r1);
-    range_bits::<10>(c1);
-    let x2 = v[2] + c1;
-    let d2 = Field::hint_div_rem(x2, two64);
-    let c2 = d2[0];
-    let r2 = d2[1];
-    require_eq(x2, two64 * c2 + r2);
-    range_bits::<64>(r2);
-    range_bits::<10>(c2);
-    let x3 = v[3] + c2;
-    let d3 = Field::hint_div_rem(x3, two64);
-    let c3 = d3[0];
-    let r3 = d3[1];
-    require_eq(x3, two64 * c3 + r3);
-    range_bits::<64>(r3);
-    range_bits::<10>(c3);
-    let u0 = r0 + c * c3;
-    let e0 = Field::hint_div_rem(u0, two64);
-    let k0 = e0[0];
-    let s0 = e0[1];
-    require_eq(u0, two64 * k0 + s0);
-    range_bits::<64>(s0);
-    range_bits::<40>(k0);
-    let s1 = r1 + k0;
-    [s0, s1, r2, r3]
-}
-
-/// Canonical (< p) reduction of a loosely-reduced secp256k1 value. Exact when every
-/// limb is `< 2^64` and the value `< 2p` (what `mul_lazy_k1` and `weak_reduce_k1`
-/// produce, bar a `2^-24`-rare carry into limb 1); otherwise the input is rejected or
-/// passed through un-normalized — `≡` the input, never a different value.
-pub fn finalize_k1(v: [Field; 4]) -> [Field; 4] {
-    reduce_once::<4, 64>(v, M_K1)
-}
-
-/// Sound lazy modular inverse mod secp256k1 p: hint w, range-check canonical,
-/// require a·w ≡ 1 (mod p) via lazy multiply. `a` may be loosely-reduced (≠ 0).
-pub fn inv_lazy_k1(a: [Field; 4]) -> [Field; 4] {
-    let w = Field::hint_mod_inverse::<4>(a, M_K1, 64);
-    range_check_limbs::<4, 64>(w);
-    let prod = finalize_k1(mul_lazy_k1(a, w));
-    require_eq(prod[0], Field::from(1u8));
-    require_eq(prod[1], Field::from(0u8));
-    require_eq(prod[2], Field::from(0u8));
-    require_eq(prod[3], Field::from(0u8));
-    w
-}
-
-/// Sound lazy incomplete affine doubling on secp256k1 (a=0). Loosely-reduced in/out.
-pub fn ec_double_k1(x: [Field; 4], y: [Field; 4]) -> ([Field; 4], [Field; 4]) {
-    let two = Field::from(2u8);
-    let three = Field::from(3u8);
-    let b8 = [
-        Field::from(8u8) * M_K1[0],
-        Field::from(8u8) * M_K1[1],
-        Field::from(8u8) * M_K1[2],
-        Field::from(8u8) * M_K1[3],
-    ];
-    let x2 = mul_lazy_k1(x, x);
-    let num = [three * x2[0], three * x2[1], three * x2[2], three * x2[3]];
-    let two_y = [two * y[0], two * y[1], two * y[2], two * y[3]];
-    let inv = inv_lazy_k1(two_y);
-    let lam = mul_lazy_k1(num, inv);
-    let lam2 = mul_lazy_k1(lam, lam);
-    let x3 = weak_reduce_k1([
-        b8[0] + lam2[0] - two * x[0],
-        b8[1] + lam2[1] - two * x[1],
-        b8[2] + lam2[2] - two * x[2],
-        b8[3] + lam2[3] - two * x[3],
-    ]);
-    let xmx3 = weak_reduce_k1([
-        b8[0] + x[0] - x3[0],
-        b8[1] + x[1] - x3[1],
-        b8[2] + x[2] - x3[2],
-        b8[3] + x[3] - x3[3],
-    ]);
-    let lt = mul_lazy_k1(lam, xmx3);
-    let y3 = weak_reduce_k1([
-        b8[0] + lt[0] - y[0],
-        b8[1] + lt[1] - y[1],
-        b8[2] + lt[2] - y[2],
-        b8[3] + lt[3] - y[3],
-    ]);
-    (x3, y3)
-}
-
-/// Sound lazy incomplete affine addition on secp256k1 (px ≠ qx). Loosely-reduced.
+/// Incomplete affine addition on secp256k1: the honest `w = (x_Q − x_P)⁻¹`, `λ`, `x₃`, `y₃`
+/// as hints in a witness region, pinned by [`ec_add_k1_check`]. Inputs: `P`'s and `x_Q`'s
+/// limbs `< 2^32`, `y_Q`'s `< 2^33` (so a caller can pass `2p − y` for `−Q`); outputs: limbs
+/// `< 2^32`, canonical for an honest prover.
 pub fn ec_add_k1(
-    px: [Field; 4],
-    py: [Field; 4],
-    qx: [Field; 4],
-    qy: [Field; 4],
-) -> ([Field; 4], [Field; 4]) {
-    let b8 = [
-        Field::from(8u8) * M_K1[0],
-        Field::from(8u8) * M_K1[1],
-        Field::from(8u8) * M_K1[2],
-        Field::from(8u8) * M_K1[3],
-    ];
-    let dx = weak_reduce_k1([
-        b8[0] + qx[0] - px[0],
-        b8[1] + qx[1] - px[1],
-        b8[2] + qx[2] - px[2],
-        b8[3] + qx[3] - px[3],
-    ]);
-    let dy = weak_reduce_k1([
-        b8[0] + qy[0] - py[0],
-        b8[1] + qy[1] - py[1],
-        b8[2] + qy[2] - py[2],
-        b8[3] + qy[3] - py[3],
-    ]);
-    let inv = inv_lazy_k1(dx);
-    let lam = mul_lazy_k1(dy, inv);
-    let lam2 = mul_lazy_k1(lam, lam);
-    let x3 = weak_reduce_k1([
-        b8[0] + lam2[0] - px[0] - qx[0],
-        b8[1] + lam2[1] - px[1] - qx[1],
-        b8[2] + lam2[2] - px[2] - qx[2],
-        b8[3] + lam2[3] - px[3] - qx[3],
-    ]);
-    let xmx3 = weak_reduce_k1([
-        b8[0] + px[0] - x3[0],
-        b8[1] + px[1] - x3[1],
-        b8[2] + px[2] - x3[2],
-        b8[3] + px[3] - x3[3],
-    ]);
-    let lt = mul_lazy_k1(lam, xmx3);
-    let y3 = weak_reduce_k1([
-        b8[0] + lt[0] - py[0],
-        b8[1] + lt[1] - py[1],
-        b8[2] + lt[2] - py[2],
-        b8[3] + lt[3] - py[3],
-    ]);
+    px: [Field; 8],
+    py: [Field; 8],
+    qx: [Field; 8],
+    qy: [Field; 8],
+) -> ([Field; 8], [Field; 8]) {
+    let (one, m1) = (Field::from(1u8), Field::from(0u8) - Field::from(1u8));
+    let b2 = b2_k1();
+    let zero8 = [Field::from(0u8); 8];
+    xark::witness_begin();
+    let w = Field::hint_mod_inverse::<8>(lin8(b2, qx, one, px, m1), M_K1, 32);
+    let lam = hint_mul_k1(lin8(b2, qy, one, py, m1), w);
+    let x3 = hint_sub2_k1(hint_mul_k1(lam, lam), px, qx);
+    let y3 = hint_sub2_k1(hint_mul_k1(lam, hint_sub2_k1(px, x3, zero8)), py, zero8);
+    xark::witness_end();
+    ec_add_k1_check(px, py, qx, qy, w, lam, x3, y3);
     (x3, y3)
 }
 
-/// Sound on-curve check for secp256k1 (y² = x³ + 7). The coordinates must be
-/// canonical (`< p`), so each point has exactly one accepted encoding — as for
-/// secp256r1 and the Edwards curves.
-pub fn on_curve_k1(x: [Field; 4], y: [Field; 4]) {
-    range_check_limbs::<4, 64>(x);
-    range_check_limbs::<4, 64>(y);
-    require_lt::<4, 64>(x, M1_K1);
-    require_lt::<4, 64>(y, M1_K1);
-    let y2 = mul_lazy_k1(y, y);
-    let x2 = mul_lazy_k1(x, x);
-    let x3 = mul_lazy_k1(x2, x);
-    let rhs = [x3[0] + Field::from(7u8), x3[1], x3[2], x3[3]];
-    let lf = finalize_k1(y2);
-    let rf = finalize_k1(rhs);
-    require_eq(lf, rf);
+/// The rows of [`ec_add_k1`]: `w`, `λ`, `x₃`, `y₃` range-checked below `2^32` and the
+/// certificates `w·Δx ≡ 1` (the chord guard: it rules out `x_P ≡ x_Q`, where the slope
+/// certificate would leave `λ` free, bug checklist 1), `λ·Δx ≡ Δy`, `λ² ≡ x₃ + x_P + x_Q`,
+/// `λ·(2p + x_P − x₃) ≡ y₃ + y_P`, with `Δ = 2p + Q − P` limb-wise (the bias keeps every
+/// operand limb non-negative). Proven in `formal/Formal/EcK1Check.lean`: on `P`, `x_Q` limbs
+/// `< 2^32` and `y_Q` limbs `< 2^33`, every satisfying assignment has `x_P ≢ x_Q` and
+/// `(x₃, y₃) = P + Q` for affine `P`, `Q`, with limbs `< 2^32`.
+#[xark::gadget]
+#[allow(clippy::too_many_arguments)]
+pub fn ec_add_k1_check(
+    px: [Field; 8],
+    py: [Field; 8],
+    qx: [Field; 8],
+    qy: [Field; 8],
+    w: [Field; 8],
+    lam: [Field; 8],
+    x3: [Field; 8],
+    y3: [Field; 8],
+) {
+    let (z, one, m1) = (
+        Field::from(0u8),
+        Field::from(1u8),
+        Field::from(0u8) - Field::from(1u8),
+    );
+    let b2 = b2_k1();
+    let zero8 = [z; 8];
+    range32(w);
+    range32(lam);
+    range32(x3);
+    range32(y3);
+    let dx = lin8(b2, qx, one, px, m1);
+    let mut unit = zero8;
+    unit[0] = one;
+    mul_cert_k1(w, dx, unit);
+    mul_cert_k1(lam, dx, lin8(b2, qy, one, py, m1));
+    mul_cert_k1(lam, lam, lin8(x3, px, one, qx, one));
+    mul_cert_k1(lam, lin8(b2, px, one, x3, m1), lin8(y3, py, one, zero8, z));
 }
 
-/// Decompose a 4×64-bit value into 256 little-endian pinned bits (`< 2^256`).
-pub fn scalar_to_bits_256(u: [Field; 4]) -> [Field; 256] {
-    let mut bits = [Field::from(0u8); 256];
-    let mut l = 0usize;
-    while l < 4usize {
-        let mut acc = Field::from(0u8);
-        let mut pow = Field::from(1u8);
+/// The fused incomplete step `(A + S) + A = 2A + S` on secp256k1, without `A + S`'s `y`
+/// (Eisenträger–Lauter–Montgomery, arXiv math/0208038; gnark `doubleAndAdd`; zkGolf
+/// 9489f82f): `w = (x_S − x_A)⁻¹`, the slopes `λ₁`, `λ₂`, `x_R` and the result as hints in a
+/// witness region, pinned by [`ec_double_add_k1_check`]. `A`'s and `x_S`'s limbs are below
+/// `2^32`; `y_S`'s may be up to `2^33`, so a caller can pass `2p − y` for `−S`.
+pub fn ec_double_add_k1(
+    ax: [Field; 8],
+    ay: [Field; 8],
+    sx: [Field; 8],
+    sy: [Field; 8],
+) -> ([Field; 8], [Field; 8]) {
+    let (z, one, m1) = (
+        Field::from(0u8),
+        Field::from(1u8),
+        Field::from(0u8) - Field::from(1u8),
+    );
+    let b2 = b2_k1();
+    let zero8 = [z; 8];
+    xark::witness_begin();
+    let w = Field::hint_mod_inverse::<8>(lin8(b2, sx, one, ax, m1), M_K1, 32);
+    let l1 = hint_mul_k1(lin8(b2, sy, one, ay, m1), w);
+    let xr = hint_sub2_k1(hint_mul_k1(l1, l1), ax, sx);
+    let ar = hint_sub2_k1(ax, xr, zero8);
+    let two_ay = lin8(zero8, ay, Field::from(2u8), zero8, z);
+    let l2 = hint_sub2_k1(
+        hint_mul_k1(two_ay, Field::hint_mod_inverse::<8>(ar, M_K1, 32)),
+        l1,
+        zero8,
+    );
+    let x3 = hint_sub2_k1(hint_mul_k1(l2, l2), xr, ax);
+    let y3 = hint_sub2_k1(hint_mul_k1(l2, hint_sub2_k1(ax, x3, zero8)), ay, zero8);
+    xark::witness_end();
+    ec_double_add_k1_check(ax, ay, sx, sy, w, l1, xr, l2, x3, y3);
+    (x3, y3)
+}
+
+/// The rows of [`ec_double_add_k1`]: `w`, `λ₁`, `x_R`, `λ₂`, `x₃`, `y₃` range-checked below
+/// `2^32` and the certificates `w·(x_S − x_A) ≡ 1` (the guard, bug checklist 1),
+/// `λ₁·(x_S − x_A) ≡ y_S − y_A`, `λ₁² ≡ x_R + x_A + x_S`, `(λ₁ + λ₂)·(x_A − x_R) ≡ 2y_A`,
+/// `λ₂² ≡ x₃ + x_R + x_A`, `λ₂·(x_A − x₃) ≡ y₃ + y_A`, differences biased by `2p`. The
+/// fourth needs no guard: at `x_A ≡ x_R` it would say `2y_A ≡ 0`, and secp256k1 has no
+/// 2-torsion. Proven in `formal/Formal/EcK1Check.lean`: on `A`, `x_S` limbs `< 2^32` and
+/// `y_S` limbs `< 2^33`, every satisfying assignment has `x_A ≢ x_S` and
+/// `(x₃, y₃) = (A + S) + A` for affine `A`, `S`, with limbs `< 2^32`.
+#[xark::gadget]
+#[allow(clippy::too_many_arguments)]
+pub fn ec_double_add_k1_check(
+    ax: [Field; 8],
+    ay: [Field; 8],
+    sx: [Field; 8],
+    sy: [Field; 8],
+    w: [Field; 8],
+    l1: [Field; 8],
+    xr: [Field; 8],
+    l2: [Field; 8],
+    x3: [Field; 8],
+    y3: [Field; 8],
+) {
+    let (z, one, m1) = (
+        Field::from(0u8),
+        Field::from(1u8),
+        Field::from(0u8) - Field::from(1u8),
+    );
+    let b2 = b2_k1();
+    let zero8 = [z; 8];
+    range32(w);
+    range32(l1);
+    range32(xr);
+    range32(l2);
+    range32(x3);
+    range32(y3);
+    let dx = lin8(b2, sx, one, ax, m1);
+    let mut unit = zero8;
+    unit[0] = one;
+    mul_cert_k1(w, dx, unit);
+    mul_cert_k1(l1, dx, lin8(b2, sy, one, ay, m1));
+    mul_cert_k1(l1, l1, lin8(xr, ax, one, sx, one));
+    mul_cert_k1(
+        lin8(l1, l2, one, zero8, z),
+        lin8(b2, ax, one, xr, m1),
+        lin8(zero8, ay, Field::from(2u8), zero8, z),
+    );
+    mul_cert_k1(l2, l2, lin8(x3, xr, one, ax, one));
+    mul_cert_k1(l2, lin8(b2, ax, one, x3, m1), lin8(y3, ay, one, zero8, z));
+}
+
+/// On-curve check for secp256k1 (`y² = x³ + 7`), sound only on range-checked limbs: every
+/// limb of `x` and `y` must already be range-checked below `2^32` by the caller, which owns
+/// that check (bug checklist 6: one validating owner per coordinate; for ECDSA,
+/// `xark_secp256k1`'s `unpack8`). The coordinates must be canonical (`< p`), so each point
+/// has exactly one accepted encoding, as for secp256r1 and Edwards curves.
+pub fn on_curve_k1(x: [Field; 8], y: [Field; 8]) {
+    require_lt::<8, 32>(x, M1_K1);
+    require_lt::<8, 32>(y, M1_K1);
+    xark::witness_begin();
+    let s = hint_mul_k1(x, x);
+    let z = hint_mul_k1(y, y);
+    xark::witness_end();
+    on_curve_k1_check(x, y, s, z);
+}
+
+/// The rows of [`on_curve_k1`]'s curve equation: `s`, `z` range-checked below `2^32` and the
+/// certificates `x·x ≡ s`, `y·y ≡ z`, `s·x ≡ z − 7` (as `2p + z − 7` limb-wise), so
+/// `y² ≡ x³ + 7 (mod p)`. Proven in `formal/Formal/EcK1Check.lean`: on `x`, `y` limbs
+/// `< 2^32`, every satisfying assignment has `(x, y)` on secp256k1 in `ZMod p`.
+/// (Canonicity is [`require_lt`]'s, called by [`on_curve_k1`].)
+#[xark::gadget]
+pub fn on_curve_k1_check(x: [Field; 8], y: [Field; 8], s: [Field; 8], z: [Field; 8]) {
+    range32(s);
+    range32(z);
+    mul_cert_k1(x, x, s);
+    mul_cert_k1(y, y, z);
+    let mut c = b2_k1();
+    c[0] -= Field::from(7u8);
+    let zero8 = [Field::from(0u8); 8];
+    mul_cert_k1(s, x, lin8(c, z, Field::from(1u8), zero8, Field::from(0u8)));
+}
+
+// ===========================================================================
+// secp256r1 (NIST P-256) point arithmetic over 8 × 32-bit limbs, by certificates.
+// ===========================================================================
+
+/// secp256r1's `p = 2²⁵⁶ − 2²²⁴ + 2¹⁹² + 2⁹⁶ − 1` as 8 × 32-bit limbs.
+pub const M_R1: [Field; 8] =
+    modulus_limbs::<8, 32>("0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF");
+/// secp256r1 `p − 1` (the canonical-coordinate bound).
+pub const M1_R1: [Field; 8] =
+    modulus_minus_1::<8, 32>("0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF");
+
+/// The 15 evaluation points of `mul_cert_r1`'s products.
+const CERT_R1_PTS: [i64; 15] = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7];
+/// `L` and `H` read off the 15 products: column `m` of `a·b` (`Σ_{i+j=m} aᵢbⱼ`) is
+/// `Σᵢ V[m][i]·Pᵢ` (inverse Vandermonde of the points), and `CERT_R1_LO[i] =
+/// Σₘ ℓₘ·V[m][i]`, `CERT_R1_HI[i] = Σₘ hₘ·V[m][i]`, where `ℓₘ + 2⁹⁶·hₘ ≡ 2³²ᵐ (mod p)`
+/// is `Y^m mod (Y⁸ − Y⁷ + Y⁶ + Y³ − 1)` at `Y = 2³²` split after its third word.
+/// `formal/Formal/MulCertR1.lean` checks both against `ℓₘ`, `hₘ`.
+const CERT_R1_LO: [Field; 15] = [
+    Field::constant("9363695963018136371772207501888011185057361295673458298760118506927698404381"),
+    Field::constant("3101071155502605351026484082051190841481527969099589744492656422263611879870"),
+    Field::constant(
+        "21197337903973721314227396382249703249619478934780272100039472390038301301758",
+    ),
+    Field::constant("256225885409253718062557022574936405035467193120491463903323163317571138900"),
+    Field::constant("887497334438707814991195163580610633139029299892521034645282519898879885554"),
+    Field::constant("2181101555989893254135221809418113128195011863720505735598176604469702270361"),
+    Field::constant("6350696313857077509226549995570063385292215994858482729831480464349624893139"),
+    Field::constant("7976670793853647505480671914368216556543358684113142538090307562902073820475"),
+    Field::constant(
+        "19626091022576317606446736688975739543102327882427679145911888680060699327075",
+    ),
+    Field::constant(
+        "20574505555318491748463830943421725001697670292894024191886748720111751221575",
+    ),
+    Field::constant(
+        "19541704953953767424502724639783047701528996098911763768062403523289956055126",
+    ),
+    Field::constant(
+        "14448463183696943128604708744492998269775383910372129714894147307889591144299",
+    ),
+    Field::constant("7789229095286828943191255023306409733993036010958532347169306130958930965552"),
+    Field::constant(
+        "21724227873626453284752979642940546878233506429044833699710731712131689712499",
+    ),
+    Field::constant(
+        "20087424384212356803086726407436888195692543343460848236589589783996385944373",
+    ),
+];
+const CERT_R1_HI: [Field; 15] = [
+    Field::constant("1011728051526495070430399616529842720778787803040074331232270180561418765911"),
+    Field::constant(
+        "19744570474549393079922979966533697461147104043859476936889883051141598816419",
+    ),
+    Field::constant(
+        "21859758389108923040443149608150997717393548751786418322234209022783658594634",
+    ),
+    Field::constant(
+        "15666666059474643735149875544307665963918319094701319466115831002753719218030",
+    ),
+    Field::constant("4471381942475191821641329605165599412181420495324749025246455615776461844075"),
+    Field::constant(
+        "19201803314441416707144589747053876010621873214879839525321790178407079160879",
+    ),
+    Field::constant(
+        "11124337178978912744892621940801999800533818977729610133356075549780469157123",
+    ),
+    Field::constant(
+        "13342343217332340450723886862279789915416170463204047011136657164251232967442",
+    ),
+    Field::constant("2603900754342303388331934728689637114610062599098757882361910687811558547087"),
+    Field::constant("4570305160136366643975041522131053535870439368061723394964113354022547770337"),
+    Field::constant(
+        "19901294705143205314610607660495439235543179494194327232418528267025671209772",
+    ),
+    Field::constant("3287327061506095839027523073285627398746012351398081048246495227756153619192"),
+    Field::constant("4799062079688944208046447727706920064275310183731841173320189888946735507325"),
+    Field::constant(
+        "16636718668458145549991910924360642308019972821585257186965161289237518955040",
+    ),
+    Field::constant(
+        "16884745917551824183638947434565412049330895540732752079776063012350643831670",
+    ),
+];
+
+/// The 15 products `A(ωᵢ)·B(ωᵢ)` at `CERT_R1_PTS` (one row each) of two 8 × 32-bit values,
+/// read through the coefficient vectors `lo` and `hi` (linear): `(Σᵢ loᵢ·Pᵢ, Σᵢ hiᵢ·Pᵢ)`.
+/// Shared by [`mul_cert_r1`] and [`mul_cert_k1`].
+#[inline(always)]
+fn cert_products(a: [Field; 8], b: [Field; 8], lo: [Field; 15], hi: [Field; 15]) -> (Field, Field) {
+    let z = Field::from(0u8);
+    let (mut l, mut h) = (z, z);
+    let mut i = 0usize;
+    while i < 15 {
+        let (mut pa, mut pb, mut c) = (z, z, 1i64);
         let mut j = 0usize;
-        while j < 64usize {
-            let b = Field::hint_bit(u[l], j);
-            b.require_bool();
-            bits[l * 64 + j] = b;
-            acc = acc + b * pow;
-            pow = pow + pow;
+        while j < 8 {
+            let f = if c < 0 {
+                z - Field::from((-c) as u64)
+            } else {
+                Field::from(c as u64)
+            };
+            pa += f * a[j];
+            pb += f * b[j];
+            c *= CERT_R1_PTS[i];
             j += 1;
         }
-        require_eq(acc, u[l]);
-        l += 1;
+        let prod = pa * pb;
+        l += lo[i] * prod;
+        h += hi[i] * prod;
+        i += 1;
     }
-    bits
+    (l, h)
+}
+
+/// `p′ = (p + 1)/2⁹⁶`, so `p = 2⁹⁶·p′ − 1`.
+const CERT_R1_PP: Field = Field::constant("1461501636990620551361974531767172749817708281857");
+/// Limb bound `mul_cert_r1` assumes of `a`, `b` and `t` (`< 2^CERT_R1_IN`, caller-enforced).
+const CERT_R1_IN: usize = 35;
+/// Width of the range-checked `K + 2⁴²` and `T + 2⁴²`.
+const CERT_R1_W: usize = 43;
+
+/// Assert `a·b ≡ t (mod p)` for secp256r1's Solinas `p`, over 8 × 32-bit limbs that may be
+/// unreduced (each limb of `a`, `b`, `t` in `[0, 2^35)`, which the caller enforces). The
+/// limb products come from 15 rows `A(ωᵢ)·B(ωᵢ)` at small points (interpolation, linear;
+/// Winograd/Toom); folding each column `2³²ᵐ` mod `Y⁸ − Y⁷ + Y⁶ + Y³ − 1` (`= p` at
+/// `Y = 2³²`, coefficients in `[−1, 3]`) splits `E ≡ a·b − t` as `L + 2⁹⁶·H`, `|L| < 2¹³⁸`,
+/// `|H| < 2²⁰²`. Since `p = 2⁹⁶·p′ − 1`, `E = K·p` iff `L + K = 2⁹⁶·(K·p′ − H)`: one row,
+/// with `K` and the linear form `T = K·p′ − H` range-checked in `(−2⁴², 2⁴²)`. The honest
+/// `K ≡ −L (mod 2⁹⁶)` comes from one `div_rem`. `15 + 43 + 43 + 1` rows. Proven sound and
+/// complete over its exported rows (`formal/Formal/MulCertR1.lean`).
+#[xark::gadget]
+pub fn mul_cert_r1(a: [Field; 8], b: [Field; 8], t: [Field; 8]) {
+    // No-wrap budget (bug checklist 5), proven exactly in MulCertR1.lean: a column is
+    // `< 8·2^(2·CERT_R1_IN)`, `Σ|ℓₘ| < 2^67` and `Σ|hₘ| < 2^133`, so `|L|`, `|K|`,
+    // `2^96·|T|` and `|K·p′|`, `|H|` stay far below `r/2`; the honest `K`, `T` lie in
+    // `(−2^42, 2^42)` (MulCertR1.int_complete).
+    const {
+        assert!(2 * CERT_R1_IN + 3 + 67 < 252 && 96 + CERT_R1_W < 252);
+        assert!(2 * CERT_R1_IN + 3 + 133 < 252 && CERT_R1_W + 160 < 252);
+    };
+    let (mut lo, mut hi) = cert_products(a, b, CERT_R1_LO, CERT_R1_HI);
+    let two32 = Field::from(1u64 << 32);
+    lo = lo - t[0] - two32 * t[1] - two32 * two32 * t[2];
+    let mut w = Field::from(1u8);
+    let mut k = 3usize;
+    while k < 8 {
+        hi -= w * t[k];
+        w *= two32;
+        k += 1;
+    }
+    // `K + 2⁴² ≡ 2¹⁴⁰ + 2⁴² − L (mod 2⁹⁶)`; the `div_rem` quotient is scratch.
+    let n = two_pow_big(140) + two_pow_big(42) - lo;
+    xark::witness_begin();
+    let q = Field::hint_div_rem(n, two_pow_big(96))[0];
+    xark::witness_end();
+    let kb = n - two_pow_big(96) * q;
+    let kk = kb - two_pow_big(42);
+    let tt = kk * CERT_R1_PP - hi;
+    let _ = kb.to_bits::<CERT_R1_W>();
+    let _ = (tt + two_pow_big(42)).to_bits::<CERT_R1_W>();
+    require_eq(lo + kk, two_pow_big(96) * tt);
+}
+
+fn hint_mul_r1(a: [Field; 8], b: [Field; 8]) -> [Field; 8] {
+    Field::hint_mulmod_divmod::<8>(a, b, M_R1, 32).1
+}
+fn hint_sub2_r1(a: [Field; 8], b: [Field; 8], c: [Field; 8]) -> [Field; 8] {
+    Field::hint_sub2::<8>(a, b, c, M_R1, 32).1
+}
+/// Range-check each limb below `2^32` (`to_bits::<32>`, `formal/Formal/ToBits32.lean`).
+fn range32(v: [Field; 8]) {
+    let mut i = 0usize;
+    while i < 8 {
+        let _ = v[i].to_bits::<32>();
+        i += 1;
+    }
+}
+/// `2p` limb-wise, each limb in `[2³³ − 5, 2³⁴)`: a bias keeping `2p + u − v` limbs in
+/// `[0, 2^35)` for `u` limbs `< 2^34` and `v` limbs `< 2^32`. A caller may pass `2p − y`
+/// for `−y`.
+pub fn b2_r1() -> [Field; 8] {
+    let l = [
+        12884901886u64,
+        12884901885,
+        12884901885,
+        12884901887,
+        12884901885,
+        12884901885,
+        12884901887,
+        8589934587,
+    ];
+    let mut out = [Field::from(0u8); 8];
+    let mut i = 0usize;
+    while i < 8 {
+        out[i] = Field::from(l[i]);
+        i += 1;
+    }
+    out
+}
+/// `c + su·u + sv·v` limb-wise (linear).
+fn lin8(c: [Field; 8], u: [Field; 8], su: Field, v: [Field; 8], sv: Field) -> [Field; 8] {
+    let mut out = [Field::from(0u8); 8];
+    let mut i = 0usize;
+    while i < 8 {
+        out[i] = c[i] + su * u[i] + sv * v[i];
+        i += 1;
+    }
+    out
+}
+
+/// Incomplete affine addition on secp256r1: the honest `w = (x_Q − x_P)⁻¹`, `λ`, `x₃`, `y₃`
+/// as hints in a witness region, pinned by [`ec_add_r1_check`]. Inputs: `P`'s and `x_Q`'s
+/// limbs `< 2^32`, `y_Q`'s `< 2^34` (so a caller can pass `2p − y` for `−Q`); outputs:
+/// limbs `< 2^32`, canonical for an honest prover.
+pub fn ec_add_r1(
+    px: [Field; 8],
+    py: [Field; 8],
+    qx: [Field; 8],
+    qy: [Field; 8],
+) -> ([Field; 8], [Field; 8]) {
+    let (one, m1) = (Field::from(1u8), Field::from(0u8) - Field::from(1u8));
+    let b2 = b2_r1();
+    let zero8 = [Field::from(0u8); 8];
+    xark::witness_begin();
+    let w = Field::hint_mod_inverse::<8>(lin8(b2, qx, one, px, m1), M_R1, 32);
+    let lam = hint_mul_r1(lin8(b2, qy, one, py, m1), w);
+    let x3 = hint_sub2_r1(hint_mul_r1(lam, lam), px, qx);
+    let y3 = hint_sub2_r1(hint_mul_r1(lam, hint_sub2_r1(px, x3, zero8)), py, zero8);
+    xark::witness_end();
+    ec_add_r1_check(px, py, qx, qy, w, lam, x3, y3);
+    (x3, y3)
+}
+
+/// The rows of [`ec_add_r1`]: `w`, `λ`, `x₃`, `y₃` range-checked below `2^32` and the
+/// certificates `w·Δx ≡ 1` (the chord guard, bug checklist 1), `λ·Δx ≡ Δy`,
+/// `λ² ≡ x₃ + x_P + x_Q`, `λ·(2p + x_P − x₃) ≡ y₃ + y_P`, with `Δ = 2p + Q − P`
+/// limb-wise. Proven in `formal/Formal/EcR1Check.lean`: on `P`, `x_Q` limbs `< 2^32` and
+/// `y_Q` limbs `< 2^34`, every satisfying assignment has `x_P ≢ x_Q` and `(x₃, y₃) = P + Q`
+/// for affine `P`, `Q`, with limbs `< 2^32`.
+#[xark::gadget]
+#[allow(clippy::too_many_arguments)]
+pub fn ec_add_r1_check(
+    px: [Field; 8],
+    py: [Field; 8],
+    qx: [Field; 8],
+    qy: [Field; 8],
+    w: [Field; 8],
+    lam: [Field; 8],
+    x3: [Field; 8],
+    y3: [Field; 8],
+) {
+    let (z, one, m1) = (
+        Field::from(0u8),
+        Field::from(1u8),
+        Field::from(0u8) - Field::from(1u8),
+    );
+    let b2 = b2_r1();
+    let zero8 = [z; 8];
+    range32(w);
+    range32(lam);
+    range32(x3);
+    range32(y3);
+    let dx = lin8(b2, qx, one, px, m1);
+    let mut unit = zero8;
+    unit[0] = one;
+    mul_cert_r1(w, dx, unit);
+    mul_cert_r1(lam, dx, lin8(b2, qy, one, py, m1));
+    mul_cert_r1(lam, lam, lin8(x3, px, one, qx, one));
+    mul_cert_r1(lam, lin8(b2, px, one, x3, m1), lin8(y3, py, one, zero8, z));
+}
+
+/// The fused incomplete step `(A + S) + A` on secp256r1, without `A + S`'s `y`
+/// (Eisenträger–Lauter–Montgomery, arXiv math/0208038; gnark `doubleAndAdd`): `w`, `λ₁`,
+/// `x_R`, `λ₂` and the result as hints in a witness region, pinned by
+/// [`ec_double_add_r1_check`]. `A`'s and `x_S`'s limbs are below `2^32`; `y_S`'s may be up
+/// to `2^34`, so a caller can pass `2p − y` for `−S`.
+pub fn ec_double_add_r1(
+    ax: [Field; 8],
+    ay: [Field; 8],
+    sx: [Field; 8],
+    sy: [Field; 8],
+) -> ([Field; 8], [Field; 8]) {
+    let (z, one, m1) = (
+        Field::from(0u8),
+        Field::from(1u8),
+        Field::from(0u8) - Field::from(1u8),
+    );
+    let b2 = b2_r1();
+    let zero8 = [z; 8];
+    xark::witness_begin();
+    let w = Field::hint_mod_inverse::<8>(lin8(b2, sx, one, ax, m1), M_R1, 32);
+    let l1 = hint_mul_r1(lin8(b2, sy, one, ay, m1), w);
+    let xr = hint_sub2_r1(hint_mul_r1(l1, l1), ax, sx);
+    let ar = hint_sub2_r1(ax, xr, zero8);
+    let two_ay = lin8(zero8, ay, Field::from(2u8), zero8, z);
+    let l2 = hint_sub2_r1(
+        hint_mul_r1(two_ay, Field::hint_mod_inverse::<8>(ar, M_R1, 32)),
+        l1,
+        zero8,
+    );
+    let x3 = hint_sub2_r1(hint_mul_r1(l2, l2), xr, ax);
+    let y3 = hint_sub2_r1(hint_mul_r1(l2, hint_sub2_r1(ax, x3, zero8)), ay, zero8);
+    xark::witness_end();
+    ec_double_add_r1_check(ax, ay, sx, sy, w, l1, xr, l2, x3, y3);
+    (x3, y3)
+}
+
+/// The rows of [`ec_double_add_r1`]: `w`, `λ₁`, `x_R`, `λ₂`, `x₃`, `y₃` range-checked below
+/// `2^32` and the certificates `w·(x_S − x_A) ≡ 1` (the guard, bug checklist 1),
+/// `λ₁·(x_S − x_A) ≡ y_S − y_A`, `λ₁² ≡ x_R + x_A + x_S`, `(λ₁ + λ₂)·(x_A − x_R) ≡ 2y_A`,
+/// `λ₂² ≡ x₃ + x_R + x_A`, `λ₂·(x_A − x₃) ≡ y₃ + y_A`, differences biased by `2p`. The
+/// fourth needs no guard: at `x_A ≡ x_R` it would say `2y_A ≡ 0`, and P-256 has no
+/// 2-torsion. Proven in `formal/Formal/EcR1Check.lean`: on `A`, `x_S` limbs `< 2^32` and
+/// `y_S` limbs `< 2^34`, every satisfying assignment has `x_A ≢ x_S` and
+/// `(x₃, y₃) = (A + S) + A` for affine `A`, `S`, with limbs `< 2^32`.
+#[xark::gadget]
+#[allow(clippy::too_many_arguments)]
+pub fn ec_double_add_r1_check(
+    ax: [Field; 8],
+    ay: [Field; 8],
+    sx: [Field; 8],
+    sy: [Field; 8],
+    w: [Field; 8],
+    l1: [Field; 8],
+    xr: [Field; 8],
+    l2: [Field; 8],
+    x3: [Field; 8],
+    y3: [Field; 8],
+) {
+    let (z, one, m1) = (
+        Field::from(0u8),
+        Field::from(1u8),
+        Field::from(0u8) - Field::from(1u8),
+    );
+    let b2 = b2_r1();
+    let zero8 = [z; 8];
+    range32(w);
+    range32(l1);
+    range32(xr);
+    range32(l2);
+    range32(x3);
+    range32(y3);
+    let dx = lin8(b2, sx, one, ax, m1);
+    let mut unit = zero8;
+    unit[0] = one;
+    mul_cert_r1(w, dx, unit);
+    mul_cert_r1(l1, dx, lin8(b2, sy, one, ay, m1));
+    mul_cert_r1(l1, l1, lin8(xr, ax, one, sx, one));
+    mul_cert_r1(
+        lin8(l1, l2, one, zero8, z),
+        lin8(b2, ax, one, xr, m1),
+        lin8(zero8, ay, Field::from(2u8), zero8, z),
+    );
+    mul_cert_r1(l2, l2, lin8(x3, xr, one, ax, one));
+    mul_cert_r1(l2, lin8(b2, ax, one, x3, m1), lin8(y3, ay, one, zero8, z));
+}
+
+/// On-curve check for secp256r1 (`y² = x³ − 3x + b`), sound only on range-checked limbs:
+/// every limb of `x` and `y` must already be range-checked below `2^32` by the caller,
+/// which owns that check (bug checklist 6). The coordinates must be canonical (`< p`), so
+/// each point has exactly one accepted encoding.
+pub fn on_curve_r1(x: [Field; 8], y: [Field; 8]) {
+    require_lt::<8, 32>(x, M1_R1);
+    require_lt::<8, 32>(y, M1_R1);
+    xark::witness_begin();
+    let s = hint_mul_r1(x, x);
+    let z = hint_mul_r1(y, y);
+    xark::witness_end();
+    on_curve_r1_check(x, y, s, z);
+}
+
+/// `2p − b` limb-wise (each limb in `[2³², 2³³)`), for the curve equation's `−b`.
+const B2_MINUS_B_R1: [u64; 8] = [
+    7921835955, 7586563008, 5161897736, 6893533520, 6600227138, 5571363497, 5733968921, 7066995236,
+];
+
+/// The rows of [`on_curve_r1`]'s curve equation: `s`, `z` range-checked below `2^32` and the
+/// certificates `x·x ≡ s`, `y·y ≡ z`, `s·x ≡ z + 3x − b` (as `z + 3x + (2p − b)`
+/// limb-wise), so `y² ≡ x³ − 3x + b (mod p)`. Proven in `formal/Formal/EcR1Check.lean`: on
+/// `x`, `y` limbs `< 2^32`, every satisfying assignment has `(x, y)` on secp256r1 in
+/// `ZMod p`. (Canonicity is [`require_lt`]'s, called by [`on_curve_r1`].)
+#[xark::gadget]
+pub fn on_curve_r1_check(x: [Field; 8], y: [Field; 8], s: [Field; 8], z: [Field; 8]) {
+    range32(s);
+    range32(z);
+    mul_cert_r1(x, x, s);
+    mul_cert_r1(y, y, z);
+    let mut c = [Field::from(0u8); 8];
+    let mut i = 0usize;
+    while i < 8 {
+        c[i] = Field::from(B2_MINUS_B_R1[i]);
+        i += 1;
+    }
+    mul_cert_r1(s, x, lin8(c, z, Field::from(1u8), x, Field::from(3u8)));
 }
 
 pub fn weak_reduce_25519(v: [Field; 3]) -> [Field; 3] {
@@ -1501,6 +2025,7 @@ pub fn select16_affine(
 
 /// Decompose a 3×86-bit scalar (`< 2^256`) into 256 little-endian pinned bits
 /// (`86 + 86 + 84`), enforcing `< 2^256`.
+#[xark::gadget]
 pub fn scalar_to_bits(u: [Field; 3]) -> [Field; 256] {
     let mut bits = [Field::from(0u8); 256];
     let mut acc = Field::from(0u8);
@@ -1561,6 +2086,28 @@ pub fn point_select_affine(
     }
     out
 }
+/// The one-hot vector of the byte `b₀ + 2b₁ + … + 2⁷b₇` over boolean `bits`: `out[v] = 1`
+/// at `v = Σ 2ⁱbᵢ` and `0` elsewhere, built a bit at a time (`out[v + 2ⁱ] = old[v]·bᵢ`,
+/// `out[v] = old[v] − out[v + 2ⁱ]`): 254 rows. Proven in `formal/Formal/OneHot8.lean`
+/// on boolean bits (its callers': `xark_secp256k1::fake_glv_check_k1`'s `to_bits` rows).
+#[xark::gadget]
+pub fn one_hot8(bits: [Field; 8]) -> [Field; 256] {
+    let mut out = [Field::from(0u8); 256];
+    out[0] = Field::from(1u8);
+    let mut i = 0usize;
+    while i < 8 {
+        let mut v = 0usize;
+        while v < 1usize << i {
+            let hi = out[v] * bits[i];
+            out[v + (1usize << i)] = hi;
+            out[v] -= hi;
+            v += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
 /// The gadget's public API plus the xark circuit essentials, so a circuit crate
 /// needs a single `use xark_bignum::prelude::*;`. `Field` comes via `crate::*`, so
 /// the `xark` essentials are listed explicitly to avoid a duplicate-`Field` glob.

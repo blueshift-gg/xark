@@ -25,6 +25,12 @@ xark-curve = { path = "../xark-curve", version = "0.3.0" }
 [target.'cfg(not(xark))'.dependencies]
 num-bigint = "0.4"
 
+# The fixed-base comb tables (`build.rs`).
+[build-dependencies]
+num-bigint = "0.4"
+p256 = "0.13"
+sha2 = "0.10"
+
 [dev-dependencies]
 num-bigint = "0.4"
 p256 = "0.13"

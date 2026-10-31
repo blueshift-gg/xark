@@ -11,7 +11,7 @@ The axiom check CI runs after `lake build` (`lake env lean AxiomCheck.lean`).
    `Assumptions`, or a `Spec` that is `True`); statements are reviewed by hand.
 2. Every declaration of every `Formal.*` module may depend only on `propext`,
    `Classical.choice` and `Quot.sound`: no `sorryAx`, no declared `axiom`, no
-   `native_decide`, except the twelve hand-restated lemmas in `legacyNative` below, which
+   `native_decide`, except the nine hand-restated lemmas in `legacyNative` below, which
    evaluate GF(2⁸) tables and secp256k1 constants with the compiler. Each goes when the
    template proof of its gadget lands; the list only shrinks.
 
@@ -27,10 +27,9 @@ def camel (s : String) : String :=
 def standard : NameSet := .ofList [``propext, ``Classical.choice, ``Quot.sound]
 
 /-- The hand-restated lemmas still proven with `native_decide` (`Formal/Aes.lean`,
-`GF256.lean`, `Secp256k1Group.lean`, `CurvePrimes.lean`, `Pratt.lean`). -/
+`GF256.lean`). -/
 def legacyNative : List Name := [
-  `Xark.secp256k1_beta_cube_eq_one, `Xark.secp256k1_G_nonsingular,
-  `Xark.secp256k1_phi_eigenvalue_at_G, `Xark.aesSbox_algebraic_eq_table_all,
+  `Xark.aesSbox_algebraic_eq_table_all,
   `Xark.gf256_inv_unique_all, `Xark.gf256_inv_zero, `Xark.aesAffine_nat_lt_256_all,
   `Xark.aesSbox_algebraic_lt_256_all, `Xark.gf256_bit_xor_byte_all, `Xark.gf256_pow254_eq_inv_all,
   `Xark.gf256_inv_lt_256_all, `Xark.gf256_mul_inv_all]

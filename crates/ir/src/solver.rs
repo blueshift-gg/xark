@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use ark_bn254::Fr;
 use ark_ff::{BigInteger, Field as ArkField, PrimeField};
 use num_bigint::BigUint;
-use num_traits::{One, Zero};
+use num_traits::{One, Signed, Zero};
 
 use crate::linear_combination::{LinearCombination, VarId};
 use crate::primitive::{Expression, PrimitiveProgram, WitnessGen};
@@ -246,6 +246,101 @@ impl std::error::Error for SolveError {}
 
 /// Cap on a hint's limb_bits (real limbs are 86-bit).
 const MAX_LIMB_BITS: u32 = 128;
+
+/// The [`WitnessGen::FakeGlv`] decomposition (ePrint 2025/933, §4): a nonzero
+/// `(a₁, a₂, b₁, b₂)` of the lattice `a₁ + λa₂ ≡ u·(b₁ + λb₂) (mod m)` with the least
+/// `max |·|` among small combinations of an LLL-reduced basis, if that is below
+/// `2^⌈bits(m)/4⌉`. The lattice has determinant `m`, so by Minkowski a nonzero vector
+/// with `max |·| < m^¼` exists; an LLL basis spells it with coefficients in `[−3, 3]`.
+pub fn fake_glv(u: &BigUint, m: &BigUint, lambda: &BigUint) -> Option<[num_bigint::BigInt; 4]> {
+    use num_bigint::BigInt;
+    if m.is_zero() {
+        return None;
+    }
+    let z = BigInt::zero;
+    let int = |x: &BigUint| BigInt::from(x % m);
+    let mut b: [[BigInt; 4]; 4] = [
+        [BigInt::from(m.clone()), z(), z(), z()],
+        [-int(lambda), BigInt::one(), z(), z()],
+        [int(u), z(), BigInt::one(), z()],
+        [int(&(u * lambda)), z(), z(), BigInt::one()],
+    ];
+    lll(&mut b);
+    let bound = BigInt::one() << m.bits().div_ceil(4) as usize;
+    let mut best: Option<(BigInt, [BigInt; 4])> = None;
+    for idx in 0..7usize.pow(4) {
+        let c: [i64; 4] = std::array::from_fn(|i| (idx / 7usize.pow(i as u32) % 7) as i64 - 3);
+        let v: [BigInt; 4] =
+            std::array::from_fn(|j| (0..4).map(|i| &b[i][j] * c[i]).sum::<BigInt>());
+        let norm = v
+            .iter()
+            .map(|x| x.magnitude().clone())
+            .max()
+            .map(BigInt::from)?;
+        if !norm.is_zero() && norm < bound && best.as_ref().is_none_or(|(n, _)| norm < *n) {
+            best = Some((norm, v));
+        }
+    }
+    best.map(|(_, v)| v)
+}
+
+/// LLL-reduce (δ = 0.99) the rows of `b` in place, in exact integer arithmetic:
+/// Gram–Schmidt as the integral `dᵢ`, `λₖⱼ` of Cohen, *A Course in Computational
+/// Algebraic Number Theory*, Algorithm 2.6.7, recomputed after every change.
+fn lll(b: &mut [[num_bigint::BigInt; 4]; 4]) {
+    use num_bigint::BigInt;
+    type Gs = ([BigInt; 5], [[BigInt; 4]; 4]);
+    let gram = |b: &[[BigInt; 4]; 4]| -> Gs {
+        let dot = |x: &[BigInt; 4], y: &[BigInt; 4]| x.iter().zip(y).map(|(p, q)| p * q).sum();
+        let mut d: [BigInt; 5] = std::array::from_fn(|_| BigInt::one());
+        let mut lam: [[BigInt; 4]; 4] = Default::default();
+        for k in 0..4 {
+            for j in 0..=k {
+                let mut v: BigInt = dot(&b[k], &b[j]);
+                for i in 0..j {
+                    v = (&d[i + 1] * v - &lam[k][i] * &lam[j][i]) / &d[i];
+                }
+                if j < k {
+                    lam[k][j] = v;
+                } else {
+                    d[k + 1] = v;
+                }
+            }
+        }
+        (d, lam)
+    };
+    // ⌊x / y⌉ for y > 0.
+    let round = |x: &BigInt, y: &BigInt| -> BigInt {
+        let (n, d) = (x * 2u32 + y, y * 2u32);
+        let q = &n / &d;
+        if Signed::is_negative(&(&n % &d)) {
+            q - 1
+        } else {
+            q
+        }
+    };
+    let mut k = 1;
+    while k < 4 {
+        for j in (0..k).rev() {
+            let (d, lam) = gram(b);
+            if (&lam[k][j] * 2u32).magnitude() > d[j + 1].magnitude() {
+                let q = round(&lam[k][j], &d[j + 1]);
+                let row = b[j].clone();
+                for (x, y) in b[k].iter_mut().zip(&row) {
+                    *x -= &q * y;
+                }
+            }
+        }
+        let (d, lam) = gram(b);
+        let l = &lam[k][k - 1];
+        if &d[k + 1] * &d[k - 1] * 100u32 < &d[k] * &d[k] * 99u32 - l * l * 100u32 {
+            b.swap(k, k - 1);
+            k = k.saturating_sub(1).max(1);
+        } else {
+            k += 1;
+        }
+    }
+}
 
 pub(crate) fn modulus_of(program: &PrimitiveProgram) -> Result<BigUint, SolveError> {
     modulus_of_field(&program.field)
@@ -628,6 +723,33 @@ pub(crate) fn exec_witness_op<L, V: Copy>(
                 emit(o, Fp::new(limb, modulus));
             }
         }
+        WitnessGen::FakeGlv {
+            out,
+            u,
+            modulus: m,
+            lambda,
+            limb_bits,
+        } => {
+            if *limb_bits > MAX_LIMB_BITS || out.len() != 4 {
+                return Err(SolveError::MalformedHint(
+                    "fake_glv: limb_bits or output count",
+                ));
+            }
+            let recompose = |limbs: &[L]| -> BigUint {
+                let mut acc = BigUint::zero();
+                for (i, lc) in limbs.iter().enumerate() {
+                    let v = eval_lc(lc).to_biguint();
+                    acc += v << (*limb_bits as usize * i);
+                }
+                acc
+            };
+            let v = fake_glv(&recompose(u), &recompose(m), &recompose(lambda)).ok_or(
+                SolveError::MalformedHint("fake_glv: no short lattice vector"),
+            )?;
+            for (o, x) in out.iter().zip(&v) {
+                emit(*o, Fp::from_bigint(x, modulus));
+            }
+        }
         WitnessGen::Sub2 {
             qabs,
             r,
@@ -810,7 +932,9 @@ fn op_output_vars(op: &WitnessGen, mut f: impl FnMut(VarId)) {
         WitnessGen::MulModDivMod { q, r, .. } => {
             q.iter().chain(r).for_each(|o| f(*o));
         }
-        WitnessGen::ModInverse { out, .. } => out.iter().for_each(|o| f(*o)),
+        WitnessGen::ModInverse { out, .. } | WitnessGen::FakeGlv { out, .. } => {
+            out.iter().for_each(|o| f(*o))
+        }
         WitnessGen::Sub2 { qabs, r, .. } => {
             f(*qabs);
             r.iter().for_each(|o| f(*o));
@@ -854,6 +978,13 @@ fn op_read_vars(op: &WitnessGen, mut f: impl FnMut(VarId)) {
         WitnessGen::ModInverse { a, modulus, .. } => {
             each(a, &mut f);
             each(modulus, &mut f);
+        }
+        WitnessGen::FakeGlv {
+            u, modulus, lambda, ..
+        } => {
+            each(u, &mut f);
+            each(modulus, &mut f);
+            each(lambda, &mut f);
         }
         WitnessGen::Sub2 {
             a, b, c, modulus, ..

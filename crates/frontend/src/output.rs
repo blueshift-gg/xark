@@ -139,6 +139,18 @@ pub(crate) fn subst_witness_vars(
             subst(a);
             subst(modulus);
         }
+        WitnessGen::FakeGlv {
+            out,
+            u,
+            modulus,
+            lambda,
+            ..
+        } => {
+            ids(out);
+            subst(u);
+            subst(modulus);
+            subst(lambda);
+        }
         WitnessGen::Sub2 {
             qabs,
             r,
@@ -344,6 +356,20 @@ fn put_witness_with(
             put_ids_g(buf, out);
             lcs(buf, a, put);
             lcs(buf, modulus, put);
+            put_uv(buf, u64::from(*limb_bits));
+        }
+        WitnessGen::FakeGlv {
+            out,
+            u,
+            modulus,
+            lambda,
+            limb_bits,
+        } => {
+            buf.push(12);
+            put_ids_g(buf, out);
+            lcs(buf, u, put);
+            lcs(buf, modulus, put);
+            lcs(buf, lambda, put);
             put_uv(buf, u64::from(*limb_bits));
         }
         WitnessGen::Sub2 {
@@ -1268,6 +1294,9 @@ fn for_each_lc(w: &WitnessGen, f: &mut dyn FnMut(&LinearCombination)) {
             a.iter().chain(b).chain(modulus).for_each(f);
         }
         WitnessGen::ModInverse { a, modulus, .. } => a.iter().chain(modulus).for_each(f),
+        WitnessGen::FakeGlv {
+            u, modulus, lambda, ..
+        } => u.iter().chain(modulus).chain(lambda).for_each(f),
         WitnessGen::Sub2 {
             a, b, c, modulus, ..
         } => {
@@ -1613,7 +1642,7 @@ fn witness_gen_outs(op: &WitnessGen) -> Vec<VarId> {
         WitnessGen::Bits { outs, .. } => outs.clone(),
         WitnessGen::DivRem { q, r, .. } => vec![*q, *r],
         WitnessGen::MulModDivMod { q, r, .. } => q.iter().chain(r).copied().collect(),
-        WitnessGen::ModInverse { out, .. } => out.clone(),
+        WitnessGen::ModInverse { out, .. } | WitnessGen::FakeGlv { out, .. } => out.clone(),
         WitnessGen::Sub2 { qabs, r, .. } => {
             let mut v = vec![*qabs];
             v.extend(r);
@@ -1656,6 +1685,13 @@ fn witness_gen_input_vars(op: &WitnessGen) -> Vec<VarId> {
                 add(l, &mut v);
             }
         }
+        WitnessGen::FakeGlv {
+            u, modulus, lambda, ..
+        } => {
+            for l in u.iter().chain(modulus).chain(lambda) {
+                add(l, &mut v);
+            }
+        }
         WitnessGen::Sub2 {
             a, b, c, modulus, ..
         } => {
@@ -1684,7 +1720,9 @@ fn witness_gen_out(op: &WitnessGen) -> VarId {
         // Multi-output; represented by its first output for the "is any output
         // still referenced" filter (all limbs are used together in practice).
         WitnessGen::MulModDivMod { q, r, .. } => *q.first().or_else(|| r.first()).unwrap_or(&0),
-        WitnessGen::ModInverse { out, .. } => *out.first().unwrap_or(&0),
+        WitnessGen::ModInverse { out, .. } | WitnessGen::FakeGlv { out, .. } => {
+            *out.first().unwrap_or(&0)
+        }
         WitnessGen::Sub2 { qabs, .. } => *qabs,
     }
 }

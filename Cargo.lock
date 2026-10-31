@@ -4546,6 +4546,7 @@ dependencies = [
  "ark-ff 0.6.0",
  "num-bigint 0.4.8",
  "serde_json",
+ "xark-ir",
  "xark-macros",
  "xark-prover",
  "xark-schema",
@@ -4587,6 +4588,7 @@ dependencies = [
 name = "xark-bignum"
 version = "0.3.0"
 dependencies = [
+ "num-bigint 0.4.8",
  "xark",
  "xark-ir",
  "xark-test-harness",

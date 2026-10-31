@@ -128,6 +128,19 @@ pub enum WitnessGen<L = LinearCombination, V = VarId> {
         modulus: Vec<L>,
         limb_bits: u32,
     },
+    /// Fake-GLV lattice hint (Eagen–El Housni–Masson–Piellard, ePrint 2025/933):
+    /// reconstructs `u`, prime `M` and a cube root of unity `λ` mod `M` from their
+    /// little-endian limbs and outputs a nonzero `(a₁, a₂, b₁, b₂)` with
+    /// `a₁ + λa₂ ≡ u·(b₁ + λb₂) (mod M)` and every `|·| < 2^⌈log₂M / 4⌉` (Minkowski
+    /// guarantees one), each as a field element (`−x` as `p − x`). Pin the outputs
+    /// with the congruence.
+    FakeGlv {
+        out: Vec<V>,
+        u: Vec<L>,
+        modulus: Vec<L>,
+        lambda: Vec<L>,
+        limb_bits: u32,
+    },
     /// Linear multi-subtract hint for the fused subtract `(a - b - c) mod m`.
     /// Reconstructs `a`, `b`, `c`, `m` from little-endian limbs, computes the
     /// signed `val = a - b - c ∈ (-2m, m)`, and outputs the canonical remainder
@@ -219,6 +232,19 @@ impl<L, V> WitnessGen<L, V> {
                 out: out.iter().map(&mut var).collect(),
                 a: lcs(a),
                 modulus: lcs(modulus),
+                limb_bits: *limb_bits,
+            },
+            WitnessGen::FakeGlv {
+                out,
+                u,
+                modulus,
+                lambda,
+                limb_bits,
+            } => WitnessGen::FakeGlv {
+                out: out.iter().map(&mut var).collect(),
+                u: lcs(u),
+                modulus: lcs(modulus),
+                lambda: lcs(lambda),
                 limb_bits: *limb_bits,
             },
             WitnessGen::Sub2 {

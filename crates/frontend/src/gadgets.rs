@@ -35,6 +35,8 @@ pub(crate) struct GadgetCall {
     stack: Vec<(u32, u32)>,
     /// A decomposition outside any call, recorded as a `to_bits` call.
     decomposition: bool,
+    /// The innermost call open when this one began.
+    parent: Option<usize>,
 }
 
 /// One recorded `#[gadget]` call: its template, or why its rows aren't one.
@@ -56,6 +58,9 @@ pub struct RecordedCall {
     /// range check, a native bitwise op's bits), recorded as `xark::lang::to_bits`:
     /// its rows are that gadget's at its width.
     pub decomposition: bool,
+    /// The innermost `#[gadget]` call (its index in the recorded calls) this one ran
+    /// inside: its rows are part of that call's.
+    pub parent: Option<usize>,
     stack: Vec<(u32, u32)>,
 }
 
@@ -430,6 +435,7 @@ impl Builder {
         refused: Option<String>,
         stack: Vec<(u32, u32)>,
     ) {
+        let parent = self.gadget_stack.last().copied();
         self.gadget_stack.push(self.gadget_calls.len());
         let (c0, w0, v0) = self.counters();
         self.gadget_calls.push(GadgetCall {
@@ -447,6 +453,7 @@ impl Builder {
             rows: Vec::new(),
             stack,
             decomposition: false,
+            parent,
         });
     }
 
@@ -479,6 +486,7 @@ impl Builder {
             rows: self.constraints[c0..c1].to_vec(),
             stack: self.site_stack.clone(),
             decomposition: true,
+            parent: self.gadget_stack.last().copied(),
         });
     }
 
@@ -515,8 +523,8 @@ impl Builder {
     }
 }
 
-/// Every recorded call as a template, or why it isn't one. Runs once the products'
-/// witness ops are filled in, before anything renumbers variables (a template's
+/// Every recorded call as a template, or why it isn't one. Runs before anything
+/// renumbers variables (a template's
 /// variables are its own, so a renumbering wouldn't change it).
 pub(crate) fn extract(b: &Builder) -> Vec<RecordedCall> {
     if b.gadget_calls.is_empty() {
@@ -547,6 +555,7 @@ pub(crate) fn extract(b: &Builder) -> Vec<RecordedCall> {
             rows: c.c1.saturating_sub(c.c0),
             witnesses: c.v1.saturating_sub(c.v0),
             decomposition: c.decomposition,
+            parent: c.parent,
             stack: c.stack.clone(),
         })
         .collect()

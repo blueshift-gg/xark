@@ -1,0 +1,17 @@
+# The `fake_glv_check_r1` harness: every input a fresh variable. Production passes the inputs named in formal/coverage-allowlist.txt.
+[package]
+name = "fake-glv-check-r1-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+xark-secp256r1 = { path = "../../../gadgets/xark-secp256r1", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

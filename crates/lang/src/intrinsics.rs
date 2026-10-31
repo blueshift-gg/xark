@@ -244,6 +244,22 @@ pub fn __xark_hint_mulmod_divmod<const N: usize>(
     )
 }
 
+/// Fake-GLV lattice hint (`N` × `bits`-bit limbs): a short nonzero `(a₁, a₂, b₁, b₂)`
+/// with `a₁ + λa₂ ≡ u·(b₁ + λb₂) (mod m)` (`xark_ir::solver::fake_glv`).
+/// **Unconstrained** — the caller must pin the congruence.
+#[inline(never)]
+pub fn __xark_hint_fake_glv<const N: usize>(
+    _u: [Field; N],
+    _m: [Field; N],
+    _lambda: [Field; N],
+    _bits: usize,
+) -> [Field; 4] {
+    circuit_op!(
+        crate::wasm::hint_fake_glv::<N>(_u, _m, _lambda, _bits),
+        native::fake_glv(_u, _m, _lambda, _bits)
+    )
+}
+
 /// Non-native modular-inverse hint (`N` × `bits`-bit limbs). Allocates `N` advice variables + records a
 /// Fermat mod-inverse witness-gen step (`A^(m−2) mod m`, `m` prime). Returns
 /// `A⁻¹ mod m` as limbs. **Unconstrained** — the caller must pin the non-native
@@ -368,6 +384,24 @@ pub(crate) mod native {
         let a = join(a, bits) % &m;
         assert!(a != BigUint::ZERO, "xark: mod_inverse of zero");
         split(&a.modpow(&(&m - 2u8), &m), bits)
+    }
+
+    pub fn fake_glv<const N: usize>(
+        u: [Field; N],
+        m: [Field; N],
+        lambda: [Field; N],
+        bits: usize,
+    ) -> [Field; 4] {
+        let v = xark_ir::solver::fake_glv(&join(u, bits), &join(m, bits), &join(lambda, bits))
+            .expect("xark: fake_glv: no short lattice vector");
+        v.map(|x| {
+            let f = from_big(x.magnitude());
+            if x.sign() == num_bigint::Sign::Minus {
+                field(-fr(f))
+            } else {
+                f
+            }
+        })
     }
 
     pub fn sub2<const N: usize>(
