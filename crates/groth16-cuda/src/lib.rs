@@ -2,7 +2,8 @@
 //!
 //! The adapter accepts Xark's canonical serialized proving-key points and scalar
 //! integers, converts them to ICICLE's fixed-width limbs, and returns an arkworks
-//! uncompressed point. G2 remains on the CPU path for now.
+//! uncompressed point. G2 remains on the CPU path for now. This adapter has not
+//! been audited for constant-time behavior or GPU memory remanence.
 
 use std::sync::OnceLock;
 use std::{cmp::min, ops::Range};
@@ -29,7 +30,8 @@ type IcicleG1Affine = <IcicleG1 as IcicleProjective>::Affine;
 const PARALLEL_PREPARE_THRESHOLD: usize = 1024;
 
 /// MSM adapter. The runtime is loaded lazily so the default Xark build does not
-/// initialize GPU support.
+/// initialize GPU support. It has no constant-time or device-memory wiping
+/// guarantee.
 #[derive(Default)]
 pub struct IcicleMsm;
 

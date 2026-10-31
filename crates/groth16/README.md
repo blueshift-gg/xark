@@ -53,9 +53,10 @@ scalar bits and on intermediate curve values; its execution time can depend on
 prover scalars. The CUDA path delegates MSM to ICICLE and has not had a
 constant-time audit. GPU execution also relies on the device runtime and driver,
 which this crate does not audit. Scalar staging and intermediate device buffers
-are released without a guaranteed secure wipe. The `xark-gpu` CLI defaults to CPU and requires
-`--acknowledge-gpu-side-channel-risk` before selecting a GPU backend. That flag
-records acceptance of this risk; it does not make either backend constant-time.
+are released without a guaranteed secure wipe. The `xark-gpu` CLI defaults to
+CPU and requires `--acknowledge-gpu-side-channel-risk` before selecting a GPU
+backend. That flag records acceptance of this risk; it does not make either
+backend constant-time.
 
 Do not use these GPU backends on shared or untrusted devices, or when the threat
 model requires witness secrecy from the device runtime. The CPU prover has not
