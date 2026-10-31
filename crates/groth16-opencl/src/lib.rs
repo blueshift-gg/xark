@@ -30,8 +30,10 @@ const MSM_SOURCE: &str = concat!(
 const POINT_WORDS: usize = 17;
 const TERM_WORDS: usize = 24;
 
-/// OpenCL backend. The default constructor selects a GPU; `with_any_device`
-/// also permits CPU OpenCL runtimes for correctness testing.
+/// OpenCL backend. Its scalar multiplication is variable-time and may expose
+/// scalar-dependent timing; use it only when the device is trusted. The default
+/// constructor selects a GPU; `with_any_device` also permits CPU OpenCL runtimes
+/// for correctness testing.
 pub struct OpenClMsm {
     device_type: cl_device_type,
     runtime: Option<Runtime>,

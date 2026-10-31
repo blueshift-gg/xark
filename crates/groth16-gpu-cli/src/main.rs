@@ -31,6 +31,10 @@ struct ProveCommand {
     /// OpenCL device class. `any` includes CPU OpenCL runtimes such as POCL.
     #[arg(long, value_enum, default_value_t = OpenclDevice::Gpu)]
     opencl_device: OpenclDevice,
+
+    /// Accept GPU MSM timing side-channel risk. GPU backends are not verified constant-time.
+    #[arg(long)]
+    acknowledge_gpu_side_channel_risk: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
@@ -57,7 +61,16 @@ struct TrackedAccelerator {
 }
 
 impl TrackedAccelerator {
-    fn new(backend: Backend, opencl_device: OpenclDevice) -> Result<Self> {
+    fn new(
+        backend: Backend,
+        opencl_device: OpenclDevice,
+        acknowledge_gpu_side_channel_risk: bool,
+    ) -> Result<Self> {
+        if backend != Backend::Cpu && !acknowledge_gpu_side_channel_risk {
+            anyhow::bail!(
+                "GPU MSM backends are not verified constant-time; use CPU or pass --acknowledge-gpu-side-channel-risk only on hardware you trust"
+            );
+        }
         let inner: Box<dyn Accelerator> = match backend {
             Backend::Cpu => Box::new(Local),
             Backend::Cuda => {
@@ -140,7 +153,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Prove(args) => {
-            let mut accelerator = TrackedAccelerator::new(args.accelerator, args.opencl_device)?;
+            let mut accelerator = TrackedAccelerator::new(
+                args.accelerator,
+                args.opencl_device,
+                args.acknowledge_gpu_side_channel_risk,
+            )?;
             run_with_accelerator(args.args, &mut accelerator)
                 .context("running Xark's streaming prover")?;
             accelerator.report();
@@ -172,6 +189,7 @@ mod tests {
                 "{}",
                 "--opencl-device",
                 "any",
+                "--acknowledge-gpu-side-channel-risk",
             ])
             .unwrap();
             let command = match cli.command {
@@ -183,15 +201,27 @@ mod tests {
 
     #[test]
     fn cpu_backend_works_without_gpu_features() {
-        let backend = TrackedAccelerator::new(Backend::Cpu, OpenclDevice::Gpu).unwrap();
+        let backend = TrackedAccelerator::new(Backend::Cpu, OpenclDevice::Gpu, false).unwrap();
         assert!(!backend.wants_msm());
+    }
+
+    #[test]
+    fn gpu_backends_require_explicit_side_channel_acknowledgment() {
+        for backend in [Backend::Cuda, Backend::Opencl] {
+            let error = TrackedAccelerator::new(backend, OpenclDevice::Gpu, false)
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(error.contains("not verified constant-time"));
+            assert!(error.contains("--acknowledge-gpu-side-channel-risk"));
+        }
     }
 
     #[cfg(not(feature = "cuda-msm"))]
     #[test]
     fn cuda_selection_names_the_build_feature() {
         assert!(
-            TrackedAccelerator::new(Backend::Cuda, OpenclDevice::Gpu)
+            TrackedAccelerator::new(Backend::Cuda, OpenclDevice::Gpu, true)
                 .err()
                 .unwrap()
                 .to_string()
@@ -203,7 +233,7 @@ mod tests {
     #[test]
     fn opencl_selection_names_the_build_feature() {
         assert!(
-            TrackedAccelerator::new(Backend::Opencl, OpenclDevice::Gpu)
+            TrackedAccelerator::new(Backend::Opencl, OpenclDevice::Gpu, true)
                 .err()
                 .unwrap()
                 .to_string()
