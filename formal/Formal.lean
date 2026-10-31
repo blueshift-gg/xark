@@ -15,7 +15,6 @@ import Formal.Bookkeeping
 import Formal.AdvancedGadgets
 import Formal.Poseidon2Bn254T3
 import Formal.GF128
-import Formal.Aes256
 import Formal.TemplateSolve
 import Formal.Gadgets
 import Formal.Secp256k1Group
@@ -93,6 +92,8 @@ import Formal.OddRecode
 import Formal.Templates.OnCurveK1Check
 import Formal.Templates.OneHot8
 import Formal.OneHot8
+import Formal.Templates.Sbox
+import Formal.AesSbox
 import Formal.Templates.FakeGlvCheckK1
 import Formal.FakeGlvK1
 import Formal.Templates.RequireLt8x32

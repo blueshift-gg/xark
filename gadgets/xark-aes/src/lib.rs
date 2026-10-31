@@ -8,16 +8,12 @@
 //! byte arrays: state uses FIPS-197 column-major index `row + 4*col`; the expanded
 //! key uses index `4*word + byte_in_word`, so round `k`'s byte `i` is `ek[16*k + i]`.
 //!
-//! S-box: `affine(inv(b))` with the GF(2^8) inverse computed as `b^254`. The
-//! multiplicative group has order 255, so `b^254 = b^-1` for `b != 0` and
-//! `0^254 = 0`, meaning `b^254` IS the S-box inverse for all 256 bytes — no zero
-//! special-case, no advice/hint. `b^254` uses an Itoh–Tsujii addition chain; GF
-//! squaring is a linear (Frobenius) map so it is XOR-only, and the 4 general muls
-//! (64 AND gates each) dominate.
+//! S-box: a select over the constant 256-byte table ([`sbox`], 34 rows): the one-hot of
+//! the low nibble, a binary mux over the high nibble, and the selected byte's bits.
 //!
 //! Everything is straight-line: no data-dependent control flow, every `while` has
-//! a literal bound and is fully unrolled, selection is pure index arithmetic. All
-//! additions here are GF(2) XORs — never modular field adds.
+//! a literal bound and is fully unrolled, selection is pure index arithmetic. Outside
+//! the S-box's select, all additions are GF(2) XORs — never modular field adds.
 
 #![no_std]
 // Circuit-lowered gadget code: native `usize` index math is const-folded, but the
@@ -28,112 +24,88 @@
 
 use xark::{Field, require_eq};
 
-// GF(2^8) arithmetic on `[Field; 8]` little-endian bit vectors.
-// Irreducible polynomial m(x) = x^8 + x^4 + x^3 + x + 1  (AES, 0x11B).
+/// The AES S-box table (FIPS-197 Figure 7), `SBOX[x] = affine(x⁻¹)` in GF(2⁸) with
+/// `0⁻¹ = 0`: `formal/Formal/AesSbox.lean` proves the table equals that map.
+#[rustfmt::skip]
+const SBOX: [u8; 256] = [
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
+];
 
-/// Reduce a 15-coefficient GF(2) polynomial modulo the AES irreducible `m(x)`,
-/// returning the 8 low bits. Uses `x^8 ≡ x^4+x^3+x+1`: a coefficient at position
-/// `pos >= 8` folds (XORs) into positions `pos-8, pos-7, pos-5, pos-4`. Folds
-/// high→low so cascaded carries settle.
-fn gf_reduce(p_in: [Field; 15]) -> [Field; 8] {
-    let mut p = [Field::from(0u8); 15];
+/// The AES S-box of the byte `Σ 2ⁱbᵢ`, selected from the constant `SBOX` table
+/// (a multilinear select over constants, bellman `lookup3_xy`,
+/// <https://github.com/zkcrypto/bellman/blob/b726862a4ece8a627e7fea486d77b502a6edbb0b/src/gadgets/lookup.rs#L29-L118>;
+/// the factored one-hot of zkGolf 5ea9ba6c): 34 rows.
+///
+/// * The one-hot `lo` of the low nibble `l = b₀ + 2b₁ + 4b₂ + 8b₃`: `u` and `v` are the
+///   one-hots of `(b₀, b₁)` and `(b₂, b₃)` (one product each), `lo[i + 4j] = u[i]·v[j]`
+///   for `i, j < 3` (9 products), and the last column and row are what `u` and `v` leave
+///   (`Σᵢ u[i] = Σⱼ v[j] = 1`): 11 rows, `Σ lo = 1`.
+/// * Row `h` of the table is `c[h] = Σₗ SBOX[16h + l]·lo[l]`, a constant combination.
+/// * A binary mux over the high nibble, `c[j] ← c[2j] + bₖ·(c[2j + 1] − c[2j])` for
+///   `k = 4..8`: 8 + 4 + 2 + 1 = 15 rows.
+/// * The selected byte's bits, `to_bits::<8>`: 8 rows.
+///
+/// The inputs must be bits (every caller passes `to_bits` or XOR outputs). Proven sound
+/// (the outputs are `SBOX[Σ 2ⁱbᵢ]`'s bits) in `formal/Formal/AesSbox.lean`.
+#[xark::gadget]
+pub fn sbox(b: [Field; 8]) -> [Field; 8] {
+    let one = Field::from(1u8);
+    let m01 = b[0] * b[1];
+    let m23 = b[2] * b[3];
+    let u = [one - b[0] - b[1] + m01, b[0] - m01, b[1] - m01, m01];
+    let v = [one - b[2] - b[3] + m23, b[2] - m23, b[3] - m23, m23];
+    let mut lo = [Field::from(0u8); 16];
+    let mut j = 0usize;
+    while j < 3usize {
+        let mut i = 0usize;
+        while i < 3usize {
+            lo[i + 4usize * j] = u[i] * v[j];
+            i += 1;
+        }
+        lo[3usize + 4usize * j] =
+            v[j] - lo[4usize * j] - lo[1usize + 4usize * j] - lo[2usize + 4usize * j];
+        j += 1;
+    }
     let mut i = 0usize;
-    while i < 15usize {
-        p[i] = p_in[i];
+    while i < 4usize {
+        lo[i + 12usize] = u[i] - lo[i] - lo[i + 4usize] - lo[i + 8usize];
         i += 1;
     }
-    let mut step = 0usize;
-    while step < 7usize {
-        let pos = 14usize - step;
-        let t = p[pos];
-        p[pos - 8] = p[pos - 8].xor(t);
-        p[pos - 7] = p[pos - 7].xor(t);
-        p[pos - 5] = p[pos - 5].xor(t);
-        p[pos - 4] = p[pos - 4].xor(t);
-        step += 1;
+    let mut c = [Field::from(0u8); 16];
+    let mut h = 0usize;
+    while h < 16usize {
+        let mut l = 0usize;
+        while l < 16usize {
+            c[h] += Field::from(SBOX[16usize * h + l]) * lo[l];
+            l += 1;
+        }
+        h += 1;
     }
-    let mut o = [Field::from(0u8); 8];
-    let mut i = 0usize;
-    while i < 8usize {
-        o[i] = p[i];
-        i += 1;
-    }
-    o
-}
-
-/// GF(2^8) multiplication: schoolbook polynomial multiply (64 AND gates, one per
-/// `a[i]·b[j]`) XOR-accumulated into 15 positions, then reduced mod `m(x)`.
-pub fn gf_mul(a: [Field; 8], b: [Field; 8]) -> [Field; 8] {
-    let mut p = [Field::from(0u8); 15];
-    let mut i = 0usize;
-    while i < 8usize {
+    let mut k = 4usize;
+    while k < 8usize {
         let mut j = 0usize;
-        while j < 8usize {
-            let prod = a[i] * b[j]; // boolean AND (1 R1CS mult gate)
-            p[i + j] = p[i + j].xor(prod);
+        while j < 1usize << (7usize - k) {
+            c[j] = c[2usize * j] + b[k] * (c[2usize * j + 1usize] - c[2usize * j]);
             j += 1;
         }
-        i += 1;
+        k += 1;
     }
-    gf_reduce(p)
-}
-
-/// GF(2^8) squaring: in characteristic 2 this is the linear Frobenius map
-/// `(Σ a_i x^i)^2 = Σ a_i x^{2i}` (cross terms vanish), so it is XOR-only. Closed
-/// form after reduction mod `m(x)`, validated against `gf_mul(a,a)`.
-pub fn gf_square(a: [Field; 8]) -> [Field; 8] {
-    let mut o = [Field::from(0u8); 8];
-    o[0] = a[0].xor(a[4]).xor(a[6]);
-    o[1] = a[4].xor(a[6]).xor(a[7]);
-    o[2] = a[1].xor(a[5]);
-    o[3] = a[4].xor(a[5]).xor(a[6]).xor(a[7]);
-    o[4] = a[2].xor(a[4]).xor(a[7]);
-    o[5] = a[5].xor(a[6]);
-    o[6] = a[3].xor(a[5]);
-    o[7] = a[6].xor(a[7]);
-    o
-}
-
-/// GF(2^8) multiplicative inverse (with `inv(0)=0`) as `a^254`, via the
-/// Itoh–Tsujii addition chain: `a^(2^k-1)` towers built from squares + muls.
-///   r2 = a^3, r4 = a^15, r6 = a^63, r7 = a^127, inv = (a^127)^2 = a^254.
-pub fn gf_inv(a: [Field; 8]) -> [Field; 8] {
-    let r2 = gf_mul(gf_square(a), a); // a^(2^2-1) = a^3
-    let r4 = gf_mul(gf_square(gf_square(r2)), r2); // a^(2^4-1) = a^15
-    let r6 = gf_mul(gf_square(gf_square(r4)), r2); // a^(2^6-1) = a^63
-    let r7 = gf_mul(gf_square(r6), a); // a^(2^7-1) = a^127
-    gf_square(r7) // a^254 = a^-1
-}
-
-/// One row of the AES S-box GF(2)-affine map (before adding the constant):
-/// `b_i ⊕ b_{i+4} ⊕ b_{i+5} ⊕ b_{i+6} ⊕ b_{i+7}` (indices mod 8).
-fn aff_row(b: [Field; 8], i: usize) -> Field {
-    let t = b[i].xor(b[(i + 4) % 8]);
-    let t = t.xor(b[(i + 5) % 8]);
-    let t = t.xor(b[(i + 6) % 8]);
-    t.xor(b[(i + 7) % 8])
-}
-
-/// Boolean NOT of a bit: `1 - x` (no gate). Applies the `+c_i` term of the
-/// affine map for the bits of `0x63` that are set.
-fn bnot(x: Field) -> Field {
-    Field::from(1u8) - x
-}
-
-/// The AES S-box: `affine(gf_inv(byte))`. The affine constant is `0x63`
-/// (bits 0,1,5,6 set → those output bits are complemented).
-pub fn sbox(byte: [Field; 8]) -> [Field; 8] {
-    let b = gf_inv(byte);
-    let mut o = [Field::from(0u8); 8];
-    o[0] = bnot(aff_row(b, 0)); // c0 = 1
-    o[1] = bnot(aff_row(b, 1)); // c1 = 1
-    o[2] = aff_row(b, 2); // c2 = 0
-    o[3] = aff_row(b, 3); // c3 = 0
-    o[4] = aff_row(b, 4); // c4 = 0
-    o[5] = bnot(aff_row(b, 5)); // c5 = 1
-    o[6] = bnot(aff_row(b, 6)); // c6 = 1
-    o[7] = aff_row(b, 7); // c7 = 0
-    o
+    c[0].to_bits::<8>()
 }
 
 /// GF(2^8) multiply-by-`x` (i.e. by 2), a.k.a. `xtime`: shift up one position and

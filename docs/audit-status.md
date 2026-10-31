@@ -77,13 +77,10 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`Formal.AdvancedGadgets`).
 * **Bit-hash gadgets** — per-primitive bit-soundness (`rotr_sound`, `xor32_sound`,
   `Ch_bit_sound`, `and64_sound`, …) plus whole-compression round-step composition for
-  SHA-256, Keccak-f[1600], BLAKE2s, BLAKE3, AES-128, transcribed from FIPS/RFC
-  (`Formal.Sha256 / Keccak / Blake / Aes`, composed in `Formal.Wrappers`). The Keccak ρ·π
+  SHA-256, Keccak-f[1600], BLAKE2s, BLAKE3, transcribed from FIPS/RFC
+  (`Formal.Sha256 / Keccak / Blake`, composed in `Formal.Wrappers`). The Keccak ρ·π
   index was **corrected to `(X + 3Y) % 5`** to match the KAT-verified `xark-keccak` gadget
   across all 25 lanes.
-* **AES algebraic S-box** — `gf256_pow254_eq_inv` (`b²⁵⁴ = inv b` in GF(2⁸),
-  Itoh–Tsujii) and `aesSbox_pow_eq_table` prove the table-free `affine(b²⁵⁴) ⊕ 0x63` S-box
-  equals the AES lookup table for every byte (`Formal.GF256`).
 * **secp incomplete point-add** — `ec_add_incomplete_secp256k1_sound` /
   `_secp256r1_sound`: the flag-free 3-limb chord addition lands on the curve with a unique
   slope (no prover freedom), from the generic `Curve` algebra at `(a,b) = (0,7)` and
@@ -105,61 +102,19 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`pairing_operand_assembly`); see `#[cfg(kani)] mod proofs` in
   `crates/verifier/src/verifier.rs` and `.github/workflows/kani.yml`.
 
-`lean.yml` enumerates **all** these theorem names and checks what each depends on: only
-the standard mathlib axioms (`propext`, `Classical.choice`, `Quot.sound`), plus the
-`native_decide` of the lemmas listed below. Anything else — a `sorryAx`, a declared
-`axiom`, a new `native_decide` — fails CI.
+`lean.yml` builds with `lake build` and
+runs `formal/AxiomCheck.lean`: every harness under `formal/templates/` must have its
+`soundness` theorem, and every declaration in `Formal` may depend only on
+the standard axioms (`propext`, `Classical.choice`, `Quot.sound`). Anything else — a
+`sorryAx`, a declared `axiom`, a `native_decide` — fails CI.
 
 ### Trusted base additions
 
 There are no `axiom` declarations in `formal/`: the secp256k1, secp256r1 and BN254
 primes, once trusted axioms, are theorems proven by Pratt certificates
 (`Formal.CurvePrimes`, checked by the kernel with `decide`). No `sorry`/`sorryAx`.
-The only additions to the kernel's trust are the `native_decide` uses below.
-
-### `native_decide` axioms
-
-The GF(2^8) infrastructure in `Formal.GF256` (AES S-box) verifies key identities by
-exhaustive computation over the 256-element byte range — `gf256_mul_inv` (`x·x⁻¹ = 1` for
-255 nonzero bytes), `gf256_inv_unique` (over 65 536 pairs), `aesSbox_algebraic_eq_table`
-(`Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]` over all 256). These use `native_decide`, adding
-`Lean.ofReduceBool`-style axioms — strictly weaker than `axiom`, since the propositions are
-pure computations the compiled bytecode deterministically evaluates.
-
-### AES S-box bit-level soundness
-
-The S-box gadget uses a GF(2^8) multiplicative-inverse trick + affine transform
-(`s_box_in_circuit` in `gadgets/xark-aes/src/lib.rs`): allocates `x_inv`/`is_zero` boolean
-wires, enforces the inverse identity via cross-product/XOR constraints, and emits the
-FIPS-197 affine transform as a per-bit XOR chain. The algebraic identities it relies on
-(cross-product/XOR chain = GF(2^8) mul; `gf256_mul x x_inv = 1` uniquely pins
-`x_inv = gf256_inv x`; `Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]`) are **mechanically verified**
-in `Formal.GF256` by `native_decide`.
-
-The **per-row bridge** from the gadget's `Fr`-level constraint emission (64 cross-product
-linear constraints, 8 parity-decomposition carry chains, 8 affine XOR-chains) to those
-GF(2^8) statements is mechanised in `Formal.Aes`:
-
-* **`IsValidSBoxByteWitness`** (structure) — encodes the full per-byte constraint chain over
-  `Fr` (booleanness, `x·is_zero = 0`, `x_inv·is_zero = 0`, the 64 cross-products
-  `wP a b = wX a · wX_inv b`, 8 parity rows giving `prod_bits[k]`, `prod_bits[0] = 1 − is_zero`
-  and `prod_bits[k] = 0` for `k ≠ 0`, and the 8 affine XOR-with-`0x63` rows).
-* **`aesSbox_byte_constraint_sound`** (theorem) — from `IsValidSBoxByteWitness x`, concludes
-  `∀ j, BitOf (wOut j) ((aesSbox x) j)`, routing through
-  `byteWireToNat_wX_inv_eq_gf256_inv`, `gf256_bit_aesAffine_nat` + `gf256_bit_xor_byte`, and
-  `byteToNat_aesSbox` (the algebraic↔table identity from `Formal.GF256`).
-* **`aesSubBytes_constraint_sound`** (theorem) — the 16-byte lift to the full SubBytes layer.
-
-The `Fr → ℕ` no-wrap argument is the same shape as `Formal.Blake.addMod32_bit_sound`,
-applied at the per-byte cross-product/parity chain level. `aesRoundStep_bit_sound` consumes
-`IsValidSBoxByteWitness ×16` directly (via `aesSubBytes_constraint_sound`) — no
-canonical-lift/existential intermediate. Trust that the gadget's emitted R1CS *forces* the
-output wires to satisfy `IsValidSBoxByteWitness` rests on: the Rust exhaustive test
-`sbox_all_inputs_match_table` (`gadgets/xark-aes/src/lib.rs`); and the pure-Lean per-bit
-composition proofs in `Formal.Aes`, discharged against FIPS-197 through
-`aesSubBytes_constraint_sound`, `aesShiftRows_sound`, `aesMixColumns_sound`,
-`aesAddRoundKey_sound`, resting on the `Formal.GF256` S-box identities (`#print axioms` gated
-by `lean.yml`).
+No `native_decide` either: the legacy AES / GF(2⁸) proofs, its last users, are deleted.
+Nothing is added to the kernel's trust.
 
 This is **not** an external audit. Until an external firm reviews the code, the README's
 "experimental — do not use in production" label stays.

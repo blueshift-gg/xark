@@ -2473,12 +2473,9 @@ fn keccak_matches_lean_model() {
     assert_eq!(mul, 93248, "Keccak mult-gate count; got {mul}");
 }
 
-/// **R1CS ↔ Lean bridge (AES-128).** `#[ignore]` — 158k constraints.
-/// `formal/Formal/Aes.lean` proves the linear layers + S-box soundness. NOTE:
-/// the Lean S-box is modeled as a *table lookup* while this gadget computes it
-/// *algebraically* (`affine(b^254)`, Itoh–Tsujii); `GF256.lean`'s
-/// `aesSbox_algebraic_eq_table` is the link that must be threaded to make the
-/// proof cover this gadget. This test pins the Rust gadget's mult-gate count.
+/// **AES-128 mult-gate count.** `#[ignore]` — 158k constraints. The hand-restated Lean
+/// AES proofs (`Formal/Aes.lean`, `GF256.lean`) bound no emitted rows and are
+/// deleted; this test pins the Rust gadget's mult-gate count.
 #[test]
 #[ignore]
 fn aes_matches_lean_model() {
@@ -2486,10 +2483,11 @@ fn aes_matches_lean_model() {
     assert!(c.status_success, "aes gadget compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    // 145816 for the block + 128 booleanity rows range-checking `ct`'s 16 `u8`s.
-    // `pt` and `key` are range-checked too, but the block splits them into bits
-    // anyway and reuses the range check's.
-    assert_eq!(mul, 145944, "AES-128 mult-gate count; got {mul}");
+    // 15216 for the block (200 S-boxes at 34 rows, ticket 33's constant-table select)
+    // + 128 booleanity rows range-checking `ct`'s 16 `u8`s. `pt` and `key` are
+    // range-checked too, but the block splits them into bits anyway and reuses the
+    // range check's.
+    assert_eq!(mul, 15344, "AES-128 mult-gate count; got {mul}");
 }
 
 /// **AES-256 mult-gate count.** The AES-256 block runs the AES-128 round-step 14 times
@@ -2514,7 +2512,7 @@ fn aes256_matches_lean_model() {
     assert!(c.status_success, "aes256 gadget compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    assert_eq!(mul, 201484, "AES-256 mult-gate count; got {mul}");
+    assert_eq!(mul, 21256, "AES-256 mult-gate count; got {mul}");
 }
 
 /// **R1CS ↔ Lean bridge (GHASH GF(2¹²⁸) multiply).** `formal/Formal/GF128.lean`
@@ -2566,8 +2564,9 @@ fn aes_gcm_matches_lean_model() {
     // (the bit-sum shortcut) instead of re-decomposing. 488 fewer again since the
     // `u8` inputs' range-check bits are kept: the gadget's split of `aad`, `pt`,
     // `key` and `nonce` (61 bytes) reuses them. 715336 → 709192 with XOR/OR of a
-    // constant and `hint_bit` of a constant folded, and T9 range checks.
-    let want = 709192;
+    // constant and `hint_bit` of a constant folded, and T9 range checks. 709192 →
+    // 185939 with the S-box a 34-row select over its constant table.
+    let want = 185939;
     assert_eq!(mul, want, "AES-128-GCM mult-gate count; got {mul}");
 }
 
