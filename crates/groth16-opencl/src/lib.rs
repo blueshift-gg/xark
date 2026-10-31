@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn malformed_point_buffer_is_declined() {
         let mut backend = OpenClMsm::new();
-        let scalar = Scalar([1, 0, 0, 0]);
+        let scalar = BigInt([1, 0, 0, 0]);
         assert!(backend.msm(false, &[0; 17], false, &[scalar]).is_none());
     }
 
