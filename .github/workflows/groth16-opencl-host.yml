@@ -62,5 +62,5 @@ jobs:
           cargo run -p xark-cli -- setup examples/cube --insecure-dev-mode
           prove_output=$(cargo run --manifest-path crates/groth16-gpu-cli/Cargo.toml --features opencl-msm -- prove examples/cube --inputs '{"secret":"3","result":"27"}' --accelerator opencl --opencl-device any --acknowledge-gpu-side-channel-risk 2>&1)
           printf '%s\n' "$prove_output"
-          printf '%s\n' "$prove_output" | grep -E 'MSM backend: Opencl handled [1-9]'
+          printf '%s\n' "$prove_output" | grep -E 'MSM backend: Opencl; status=.*; GPU G1 chunks=[1-9][0-9]* points='
           cargo run -p xark-cli -- verify examples/cube
