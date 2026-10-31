@@ -32,7 +32,7 @@ struct ProveCommand {
     #[arg(long, value_enum, default_value_t = OpenclDevice::Gpu)]
     opencl_device: OpenclDevice,
 
-    /// Accept GPU MSM timing side-channel risk. GPU backends are not verified constant-time.
+    /// Confirm use of a trusted, single-tenant GPU. GPU MSM is variable-time and device buffers are not guaranteed to be erased.
     #[arg(long)]
     acknowledge_gpu_side_channel_risk: bool,
 }
@@ -68,7 +68,7 @@ impl TrackedAccelerator {
     ) -> Result<Self> {
         if backend != Backend::Cpu && !acknowledge_gpu_side_channel_risk {
             anyhow::bail!(
-                "GPU MSM backends are not verified constant-time; use CPU or pass --acknowledge-gpu-side-channel-risk only on hardware you trust"
+                "GPU MSM is variable-time and device buffers are not guaranteed to be erased; use CPU for secret inputs on shared or untrusted hardware, or pass --acknowledge-gpu-side-channel-risk for a trusted single-tenant device"
             );
         }
         let inner: Box<dyn Accelerator> = match backend {
@@ -127,7 +127,7 @@ impl TrackedAccelerator {
     fn warn_gpu_security_limits(&self) {
         if self.backend != Backend::Cpu {
             eprintln!(
-                "warning: GPU MSM is not verified constant-time and device buffers are not guaranteed to be wiped"
+                "warning: GPU MSM is variable-time; device buffers are not guaranteed to be erased. Use only on trusted, single-tenant hardware"
             );
         }
     }
@@ -221,7 +221,9 @@ mod tests {
                 .err()
                 .unwrap()
                 .to_string();
-            assert!(error.contains("not verified constant-time"));
+            assert!(error.contains("variable-time"));
+            assert!(error.contains("not guaranteed to be erased"));
+            assert!(error.contains("single-tenant"));
             assert!(error.contains("--acknowledge-gpu-side-channel-risk"));
         }
     }

@@ -4,6 +4,7 @@ use ark_ff::{PrimeField, UniformRand};
 use ark_serialize::CanonicalSerialize;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use std::sync::{Arc, Barrier};
 use xark_groth16::{
     Accelerator,
     msm::{Scalar, msm},
@@ -109,4 +110,53 @@ fn unsupported_group_and_malformed_lengths_decline() {
     let scalar = Fr::from(1u64).into_bigint();
     assert!(opencl.msm(true, &[], true, &[scalar]).is_none());
     assert!(opencl.msm(false, &[0; 31], true, &[scalar]).is_none());
+}
+
+#[test]
+fn concurrent_msm_calls_share_the_per_device_admission_queue() {
+    let bases: Vec<_> = (1..=16)
+        .map(|value| (G1Affine::generator() * Fr::from(value)).into_affine())
+        .collect();
+    let scalars: Vec<_> = (17..=32)
+        .map(|value| Fr::from(value).into_bigint())
+        .collect();
+    let mut encoded = Vec::new();
+    for point in &bases {
+        point.serialize_compressed(&mut encoded).unwrap();
+    }
+    let expected_point = msm::<G1Projective>(&bases, &scalars).into_affine();
+    let mut expected = Vec::new();
+    expected_point
+        .serialize_uncompressed(&mut expected)
+        .unwrap();
+
+    let mut probe = OpenClMsm::with_device_kind(OpenClDeviceKind::Any);
+    if !probe.initialize() {
+        if std::env::var_os("XARK_OPENCL_REQUIRED").is_some() {
+            panic!("OpenCL runtime is required for the concurrent admission test");
+        }
+        eprintln!("skipping concurrent OpenCL test because no usable device is available");
+        return;
+    }
+    drop(probe);
+
+    let barrier = Arc::new(Barrier::new(3));
+    let workers: Vec<_> = (0..2)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let points = encoded.clone();
+            let scalars = scalars.clone();
+            std::thread::spawn(move || {
+                let mut backend = OpenClMsm::with_device_kind(OpenClDeviceKind::Any);
+                barrier.wait();
+                backend
+                    .msm(false, &points, true, &scalars)
+                    .expect("queued OpenCL MSM completes")
+            })
+        })
+        .collect();
+    barrier.wait();
+    for worker in workers {
+        assert_eq!(worker.join().unwrap(), expected);
+    }
 }

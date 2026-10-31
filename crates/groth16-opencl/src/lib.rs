@@ -5,6 +5,20 @@
 //! not a measured crossover; run `cargo run --release --example msm_bench
 //! --manifest-path crates/groth16-opencl/Cargo.toml` on the target GPU before
 //! treating it as a performance choice. Both kernels are variable-time.
+//!
+//! OpenCL dispatch uses a per-device, in-process admission queue. By default it
+//! permits one active MSM, up to eight waiting chunks, and reserves at most 75%
+//! of reported global device memory. Set `XARK_OPENCL_MAX_ACTIVE_JOBS`,
+//! `XARK_OPENCL_MAX_QUEUED_JOBS`, and `XARK_OPENCL_MEMORY_PERCENT` before process
+//! startup to change those limits. Up to 256 MiB of combined active and waiting
+//! host input/preparation memory is reserved by default; set
+//! `XARK_OPENCL_MAX_RESERVED_HOST_BYTES` to change it. An over-budget or
+//! queue-full chunk declines to the prover's CPU path. Separate processes do
+//! not share this queue.
+//!
+//! GPU work exposes input-dependent timing and device/driver memory residency.
+//! Neither OpenCL nor CUDA is claimed constant-time or guaranteed to erase device
+//! memory. Use CPU proving for secret inputs on shared or untrusted hardware.
 
 use std::ops::Range;
 
@@ -23,6 +37,8 @@ use opencl3::{
     types::cl_device_type,
 };
 use xark_groth16::{Accelerator, msm::Scalar};
+mod scheduler;
+use scheduler::DeviceScheduler;
 
 const MSM_SOURCE: &str = concat!(
     include_str!("../../groth16/opencl/msm_pointwise.cl"),
@@ -38,10 +54,11 @@ const BUCKET_WINDOWS: usize = 256 / BUCKET_BITS;
 const BUCKET_COUNT: usize = (1 << BUCKET_BITS) - 1;
 const BUCKET_THRESHOLD: usize = 256;
 
-/// OpenCL backend. Its scalar multiplication is variable-time and may expose
-/// scalar-dependent timing; use it only when the device is trusted. The default
-/// constructor selects a GPU; `with_any_device` also permits CPU OpenCL runtimes
-/// for correctness testing.
+/// OpenCL backend. Its variable-time scalar multiplication may expose input-
+/// dependent timing, and device buffers are not guaranteed to be erased. Use
+/// only on trusted, single-tenant hardware; separate processes do not share the
+/// in-process admission queue. The default constructor selects a GPU;
+/// `with_any_device` also permits CPU OpenCL runtimes for correctness testing.
 pub struct OpenClMsm {
     device_type: cl_device_type,
     runtime: Option<Runtime>,
@@ -144,24 +161,25 @@ struct Runtime {
     queue: CommandQueue,
     program: Program,
     max_alloc_bytes: usize,
-    global_mem_bytes: usize,
+    scheduler: std::sync::Arc<DeviceScheduler>,
 }
 
 impl Runtime {
     fn new(device_type: cl_device_type) -> Option<Self> {
-        let device = find_device(device_type)?;
+        let (device, device_id) = find_device(device_type)?;
         let context = Context::from_device(&device).ok()?;
         let queue = CommandQueue::create_default(&context, 0).ok()?;
         let program =
             Program::create_and_build_from_source(&context, MSM_SOURCE, "-cl-std=CL1.2").ok()?;
         let max_alloc_bytes = usize::try_from(device.max_mem_alloc_size().ok()?).ok()?;
         let global_mem_bytes = usize::try_from(device.global_mem_size().ok()?).ok()?;
+        let scheduler = scheduler::for_device(device_id, global_mem_bytes)?;
         Some(Self {
             context,
             queue,
             program,
             max_alloc_bytes,
-            global_mem_bytes,
+            scheduler,
         })
     }
 
@@ -181,7 +199,11 @@ impl Runtime {
             .collect::<Option<Vec<_>>>()?
             .into_iter()
             .min()?;
-        let by_global = self.global_mem_bytes.checked_div(live_bytes_per_point)?;
+        let usable_memory = self
+            .scheduler
+            .memory_budget_bytes()
+            .checked_sub(POINT_WORDS.checked_mul(word_bytes)?)?;
+        let by_global = usable_memory.checked_div(live_bytes_per_point)?;
         let max_points = by_buffer.min(by_global);
         if max_points == 0 {
             return None;
@@ -204,7 +226,16 @@ impl Runtime {
         encoding: Compress,
         scalars: &[Scalar],
     ) -> Option<G1Projective> {
-        if scalars.len() >= BUCKET_THRESHOLD {
+        let bucket_bytes = estimated_chunk_bytes(scalars.len(), true);
+        let use_buckets = scalars.len() >= BUCKET_THRESHOLD
+            && self.bucket_scratch_fits()
+            && bucket_bytes.is_some_and(|bytes| bytes <= self.scheduler.memory_budget_bytes());
+        let host_bytes = estimated_host_chunk_bytes(point_bytes.len(), scalars.len())?;
+        let _permit = self.scheduler.acquire(
+            estimated_chunk_bytes(scalars.len(), use_buckets)?,
+            host_bytes,
+        )?;
+        if use_buckets {
             return self.run_bucket_chunk(point_bytes, encoding, scalars);
         }
         let (point_words, scalar_limbs) = prepare_inputs(point_bytes, encoding, scalars)?;
@@ -363,6 +394,14 @@ impl Runtime {
         decode_result(&result_words).map(|point| point.into_group())
     }
 
+    fn bucket_scratch_fits(&self) -> bool {
+        BUCKET_WINDOWS
+            .checked_mul(BUCKET_COUNT)
+            .and_then(|slots| slots.checked_mul(TERM_WORDS))
+            .and_then(|words| words.checked_mul(std::mem::size_of::<u32>()))
+            .is_some_and(|bytes| bytes <= self.max_alloc_bytes)
+    }
+
     fn run_bucket_chunk(
         &self,
         point_bytes: &[u8],
@@ -514,7 +553,58 @@ impl Runtime {
     }
 }
 
-fn find_device(device_type: cl_device_type) -> Option<Device> {
+fn estimated_chunk_bytes(count: usize, buckets: bool) -> Option<usize> {
+    let word_bytes = std::mem::size_of::<u32>();
+    let point_bytes = count.checked_mul(POINT_WORDS)?.checked_mul(word_bytes)?;
+    let scalar_bytes = count
+        .checked_mul(4)?
+        .checked_mul(std::mem::size_of::<u64>())?;
+    let valid_bytes = count.checked_mul(word_bytes)?;
+    let result_bytes = POINT_WORDS.checked_mul(word_bytes)?;
+    let fixed_bytes = if buckets {
+        BUCKET_WINDOWS
+            .checked_mul(BUCKET_COUNT)?
+            .checked_mul(TERM_WORDS)?
+            .checked_mul(word_bytes)?
+            .checked_add(
+                BUCKET_WINDOWS
+                    .checked_mul(TERM_WORDS)?
+                    .checked_mul(word_bytes)?,
+            )?
+    } else {
+        count
+            .checked_mul(TERM_WORDS)?
+            .checked_mul(word_bytes)?
+            .checked_mul(2)?
+            .checked_add(valid_bytes)?
+    };
+    let point_copies = if buckets {
+        point_bytes.checked_mul(2)?
+    } else {
+        point_bytes
+    };
+    point_copies
+        .checked_add(scalar_bytes)?
+        .checked_add(valid_bytes)?
+        .checked_add(fixed_bytes)?
+        .checked_add(result_bytes)
+}
+
+fn estimated_host_chunk_bytes(point_bytes: usize, scalar_count: usize) -> Option<usize> {
+    let scalar_bytes = scalar_count.checked_mul(std::mem::size_of::<Scalar>())?;
+    let prepared_bytes = scalar_count
+        .checked_mul(POINT_WORDS.checked_mul(std::mem::size_of::<u32>())?)?
+        .checked_add(
+            scalar_count
+                .checked_mul(4)?
+                .checked_mul(std::mem::size_of::<u64>())?,
+        )?;
+    point_bytes
+        .checked_add(scalar_bytes)?
+        .checked_add(prepared_bytes)
+}
+
+fn find_device(device_type: cl_device_type) -> Option<(Device, usize)> {
     let platforms = get_platforms().ok()?;
     for platform in platforms {
         let Ok(devices) = platform.get_devices(device_type) else {
@@ -523,7 +613,7 @@ fn find_device(device_type: cl_device_type) -> Option<Device> {
         for id in devices {
             let device = Device::new(id);
             if device.available().unwrap_or(false) && device.compiler_available().unwrap_or(false) {
-                return Some(device);
+                return Some((device, id as usize));
             }
         }
     }
@@ -634,6 +724,18 @@ mod tests {
         let mut backend = OpenClMsm::new();
         let scalar = BigInt([1, 0, 0, 0]);
         assert!(backend.msm(false, &[0; 17], false, &[scalar]).is_none());
+    }
+
+    #[test]
+    fn chunk_memory_estimates_cover_both_execution_paths() {
+        let pointwise = estimated_chunk_bytes(256, false).unwrap();
+        let bucket = estimated_chunk_bytes(256, true).unwrap();
+        assert!(pointwise > 256 * 17 * 4);
+        assert!(bucket > 256 * 17 * 8);
+        assert!(bucket > pointwise);
+        assert!(estimated_chunk_bytes(usize::MAX, true).is_none());
+        assert_eq!(estimated_host_chunk_bytes(32, 1), Some(32 + 32 + 68 + 32));
+        assert!(estimated_host_chunk_bytes(usize::MAX, 2).is_none());
     }
 
     #[test]
