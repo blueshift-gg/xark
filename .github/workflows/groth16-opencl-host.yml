@@ -46,6 +46,9 @@ jobs:
       - name: Compile OpenCL 1.2 kernels
         run: make -C crates/groth16/opencl test
 
+      - name: Compile OpenCL MSM benchmark
+        run: cargo check --manifest-path crates/groth16-opencl/Cargo.toml --example msm_bench
+
       - name: Run MSM and proof comparisons on POCL
         env:
           XARK_OPENCL_REQUIRED: "1"

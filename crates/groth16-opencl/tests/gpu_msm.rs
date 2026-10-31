@@ -63,6 +63,47 @@ fn opencl_g1_msm_matches_xark_cpu() {
 }
 
 #[test]
+fn opencl_bucket_msm_matches_xark_cpu_at_the_large_batch_dispatch_boundary() {
+    let mut rng = ChaCha20Rng::seed_from_u64(0x5841_524b_4255_434b);
+    let mut bases = Vec::with_capacity(256);
+    let mut scalars = Vec::with_capacity(256);
+    for _ in 0..256 {
+        let base_scalar = Fr::rand(&mut rng);
+        let msm_scalar = Fr::rand(&mut rng);
+        bases.push((G1Affine::generator() * base_scalar).into_affine());
+        scalars.push(msm_scalar.into_bigint());
+    }
+    bases[0] = G1Affine::zero();
+    scalars[0] = Fr::from(0u64).into_bigint();
+    bases[1] = G1Affine::generator();
+    scalars[1] = (-Fr::from(1u64)).into_bigint();
+    bases[2] = G1Affine::generator();
+    bases[3] = -G1Affine::generator();
+    scalars[3] = scalars[2];
+    let mut encoded = Vec::new();
+    for point in &bases {
+        point.serialize_compressed(&mut encoded).unwrap();
+    }
+
+    let mut opencl = OpenClMsm::with_device_kind(OpenClDeviceKind::Any);
+    let Some(actual) = opencl.msm(false, &encoded, true, &scalars) else {
+        if std::env::var_os("XARK_OPENCL_REQUIRED").is_some() {
+            panic!("OpenCL bucket MSM declined a valid 256-point input");
+        }
+        eprintln!(
+            "skipping OpenCL bucket comparison because no usable OpenCL runtime is available"
+        );
+        return;
+    };
+    let expected_point = msm::<G1Projective>(&bases, &scalars).into_affine();
+    let mut expected = Vec::new();
+    expected_point
+        .serialize_uncompressed(&mut expected)
+        .unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn unsupported_group_and_malformed_lengths_decline() {
     let mut opencl = OpenClMsm::new();
     let scalar = Fr::from(1u64).into_bigint();
