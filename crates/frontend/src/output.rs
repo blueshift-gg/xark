@@ -35,6 +35,10 @@ pub struct LowerOutput {
     /// (`c` a wire or zero), each reduced mod `r`, over the same variables as
     /// `gadgets`; else empty.
     pub gadget_rows: Vec<[LinearCombination; 3]>,
+    /// The variable renumbering `renumber_inputs` applied after `gadgets` and
+    /// `gadget_rows` were taken: `var_map[old] = new`, a permutation (`r1cs` is in
+    /// the new numbering, the recorded calls in the old).
+    pub var_map: Vec<VarId>,
 }
 
 /// A template def: the rows `c0..c1` and witness ops `w0..w1` of its first call,
@@ -1310,7 +1314,7 @@ fn for_each_lc(w: &WitnessGen, f: &mut dyn FnMut(&LinearCombination)) {
 /// variable's relative order. The compiler may schedule pure arithmetic on earlier
 /// inputs before a later input is bound (only the intrinsic calls keep their
 /// order), which interleaves variables; the prover requires inputs first.
-fn renumber_inputs(env: &mut Builder) {
+fn renumber_inputs(env: &mut Builder) -> Vec<VarId> {
     let n_vars = env.variables.len();
     if env
         .input_ids
@@ -1318,7 +1322,7 @@ fn renumber_inputs(env: &mut Builder) {
         .enumerate()
         .all(|(i, &v)| v as usize == i)
     {
-        return;
+        return (0..n_vars as VarId).collect();
     }
     let mut is_input = vec![false; n_vars];
     for &v in &env.input_ids {
@@ -1410,13 +1414,14 @@ fn renumber_inputs(env: &mut Builder) {
         }
     }
     env.input_ids = (0..env.input_ids.len() as VarId).collect();
+    map
 }
 
 pub(crate) fn finish(mut env: Builder, field: FieldSpec, n_inputs: usize) -> LowerOutput {
     env.fill_products();
     let gadgets = crate::gadgets::extract(&env);
     let gadget_rows = crate::gadgets::bit_rows(&env);
-    renumber_inputs(&mut env);
+    let var_map = renumber_inputs(&mut env);
     // Developer diagnostic only (behind `XARK_BUILD_TIME`); a normal build stays
     // quiet on stderr rather than printing this on every compile.
     // Revive a merged mul output (its `a·b = out` folded into `require_eq`) if a
@@ -1626,6 +1631,7 @@ pub(crate) fn finish(mut env: Builder, field: FieldSpec, n_inputs: usize) -> Low
         witness_only_vars: wo,
         gadgets,
         gadget_rows,
+        var_map,
     }
 }
 

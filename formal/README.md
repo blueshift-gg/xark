@@ -12,6 +12,52 @@ there is no input bound.
 
 ## What is proven
 
+### Trusted, and what the statements do not say
+
+Not proven: completeness, that the honest prover's witness satisfies the rows (the
+completeness proofs were deleted to cut the Lean build; release KATs, edge cases and
+random sampling exercise the honest path instead); the rows outside `#[gadget]` calls
+(glue, user circuits); that the per-call specs compose (`coverage-allowlist.txt`'s
+reasons are prose; `Formal/Circuits/` is the first step, below); the Groth16 layer; the
+minimizer the keyed rows go through.
+
+Trusted Rust, by line count: the recorder and exporter that cut a call's rows into a
+template (`crates/frontend/src/gadgets.rs`, 794 lines; `xtask/src/lean.rs`, 663) and the
+coverage classifier (`xtask/src/coverage.rs`, 992). The fixed-base
+comb tables and offset points the ECDSA and Ed25519 circuits read (`COMB`, `OH`, `HH` from
+`gadgets/xark-secp256k1/build.rs`, `xark-secp256r1/build.rs`, `xark-ed25519/build.rs`,
+94 + 94 + 144 lines of `k256`/`p256`/`curve25519` arithmetic) are constants no Lean
+theorem checks: a wrong entry would make the circuit accept a wrong `C·G`.
+
+What a statement says less than its name suggests:
+
+* `EcAddK1Check.Spec` ([`Formal/EcK1Check.lean`](Formal/EcK1Check.lean)) pins `(x₃, y₃)`
+  only in `ZMod p` with limbs below `2⁶⁴`: no row asks `x₃ < p`, so `x₃` and `x₃ + p` both
+  satisfy it when `x₃ < 2³² + 977`. The chain stays sound because every consumer reads the
+  point in `ZMod p`; the hinted `R.x` that `fake_glv_check_k1` compares with `r` is the one
+  coordinate the circuit forces canonical (`OnCurveK1Check.x_lt_p`).
+* `require_lt::<4, 64>(x, NN1)` and `::<8, 32>(x, M1_K1)` are proven as `x ≤ m₋₁` read
+  limb-wise (`RequireLt.Spec`); that the constant limbs of `NN1` are `n − 1`, so `x < n`,
+  is a fact about a Rust constant with no Lean theorem yet (`M1_K1 = p − 1` has one:
+  `x_lt_p`). The whole-circuit theorem needs it and will carry it.
+* `ScalarMul.Spec` and `WideScalarMul.Spec` (Grumpkin) give the output as the affine
+  point `s·P`, which does not exist at `s = 0`: the rows reject `s = 0`. A soundness
+  statement, not a liveness one: a caller that can reach `s = 0` gets no proof, not a
+  wrong one.
+* `EdTorsionCheck` is the cofactored check `x·y·(x² + y²) = 0`: it accepts exactly the
+  points of order dividing 8 (`Ed25519.torsion_iff`), the check RFC 8032 implementations
+  make, not a prime-order-subgroup membership test.
+* `Sbox.soundness` (AES) assumes its eight input plugs are bits; the producers are the
+  covered `to_bits` and `xor` calls the coverage report names, not the template.
+
+CI (`lean.yml`) runs `lake build`, then [`AxiomCheck.lean`](AxiomCheck.lean) fails unless every harness has its
+`soundness` theorem (and its `Consts` module, when it has one), and
+every declaration in `Formal`, legacy included, depends only on `propext`,
+`Classical.choice` and `Quot.sound`: no `sorry`, no `axiom`, no `native_decide`. The
+secp256k1, secp256r1 and BN254 primes are proven prime by kernel-checked Pratt
+certificates ([`Formal/CurvePrimes.lean`](Formal/CurvePrimes.lean), machinery in
+[`Formal/Pratt.lean`](Formal/Pratt.lean)).
+
 Each theorem mirrors the exact constraints the Rust builder enforces.
 
 [`Formal/Gadgets.lean`](Formal/Gadgets.lean) — boolean primitive and range gadget:
@@ -272,6 +318,27 @@ the rows the frontend really emits, and CI fails when the code drifts from them.
 | `Xark.Templates.{Unpack,Unpack4}.soundness` | `xark_secp256k1::unpack`, `xark_secp256r1::unpack4` (the public 128-bit halves as 4 × 64-bit limbs: `divRem` hints, the limbs' range checks, one packing row per half) | with no input assumption, every limb is below `2⁶⁴` and each half is exactly its two limbs' value |
 | `Xark.Templates.{Unpack8K1,Unpack8R1}.soundness` | `unpack8` of both curves (the same as 8 × 32-bit limbs, three chained splits per half) | every limb below `2³²`, each half exactly its four limbs' value |
 | `Xark.Templates.{MuxpK1,MuxpR1,Mux}.soundness`, `MuxModel.select_bit` | `muxp` of both secp curves (16 limbs) and `xark_ed25519::mux` (24 limbs): one row `s·(aⱼ − bⱼ) = wⱼ` per limb, output `bⱼ + wⱼ`; `select8` is a tree of these calls | with no input assumption the outputs are `bⱼ + s·(aⱼ − bⱼ)`, so `a` at `s = 1` and `b` at `s = 0` |
+
+### A whole circuit as its calls
+
+`cargo xtask lean-export --example <example>` writes `Formal/Circuits/<Example>.lean` and
+`Formal/Circuits/<Example>/Part<k>.lean` ([`Formal/Circuit.lean`](Formal/Circuit.lean); the
+parts keep each file's elaboration small): the example's rows as segments in row
+order, each a run of glue rows outside every `#[gadget]` call, a `Call` of a proven
+template (the combinations its plugs carry over the circuit's variables, and the first
+variable it allocated), or a `folded` call the frontend shortened at constant plugs
+(its rows as emitted, which no template proof covers yet). `Circuit.rows` spells the
+segments out, and `CircuitHash.lean` (the `lean` CI job) fails unless they hash to the
+hash the exporter took of the compiler's rows, so `Sat circuit σ` is about the production
+circuit; `--check` re-exports each committed circuit, and `lean.yml` runs the mutation test
+`the_hash_check_refuses_a_mutated_circuit` (a bumped coefficient is refused, naming its
+segment). `sat_call` hands every call's
+template its satisfying assignment, so each template's `soundness` applies to its call
+inside the circuit. secp256k1_ecdsa: 619 template calls of 12 templates, 4 folded
+`mul_cert_k1` calls (`phi_x`'s multiplication by the constant `β`), 745 glue rows (the
+`xor` and `d·(2y − 2p)` products of the digit selectors). Not yet proven: that each
+call's plugs meet its `Assumptions` (the allowlist's prose), and the top-level statement.
+
 
 ### Adding a proven gadget
 
