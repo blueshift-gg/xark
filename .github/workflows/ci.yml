@@ -105,6 +105,28 @@ jobs:
         # and four at once exceed the runner's memory.
         run: cargo xtask digests --check --toolchain ${{ matrix.toolchain }} --jobs 1
 
+  keyed-rows:
+    # The rows each circuit's Groth16 keys are made for (after the minimizer), by
+    # SHA-256: the first field of tests/stable-digests.txt. They follow the compiled
+    # wasm's function structure, so they are pinned under one rustc (the version
+    # here, and in lean.yml's coverage job); `--toolchain` runs above compare only the
+    # flat rows. Bump the version and `cargo xtask digests --update` together.
+    name: keyed rows (rustc 1.99.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install rustc 1.99.1 + wasm32
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Compare keyed and flat digests
+        run: cargo xtask digests --check --jobs 1
+
   msrv:
     # The minimum Rust (`rust-version`, 1.89) builds the CLI and every crate, not
     # only the circuits `reproducible` checks. Except `xark-tests`, which isn't

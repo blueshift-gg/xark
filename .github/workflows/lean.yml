@@ -28,9 +28,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Install stable Rust + wasm32
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install rustc 1.99.1 + wasm32
+        # The keyed rows coverage compares with are pinned under this rustc
+        # (ci.yml's keyed-rows job).
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.99.1"
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

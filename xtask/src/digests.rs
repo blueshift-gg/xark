@@ -8,7 +8,9 @@
 //! The keyed rows are those after the template-body and global minimizer passes, and
 //! which rows a template body holds follows the compiled wasm's function structure
 //! (inlining), so for the largest circuits they change with the rustc that compiled
-//! the circuit; they are pinned under the workspace toolchain, the one CI keys with.
+//! the circuit; they are pinned under one rustc, the one CI's `keyed-rows` job (and
+//! `lean-export --coverage`) installs. `--check` compares both digests;
+//! `--check --toolchain <rustc>` only the flat one.
 //! An example with Rust client functions (`#[input]` on an `impl`) also builds its
 //! `client.wasm`, which must build on that rustc too. A difference means a toolchain
 //! changed a circuit (a bug to report) or the lowering or a minimizer changed on

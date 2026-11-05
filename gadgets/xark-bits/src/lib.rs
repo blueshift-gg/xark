@@ -85,7 +85,7 @@ pub fn shr32(a: [Field; 32], n: usize) -> [Field; 32] {
 /// Adds the two words as field elements (a sum `< 2^33`), decomposes the sum
 /// into 33 bits (32 result bits + 1 carry), and returns the low 32 bits. Cost:
 /// 33 booleanity gates + 1 recomposition equality. The rows it emits on fresh
-/// inputs are proven sound and complete in `formal/Formal/Add32.lean`
+/// inputs are proven sound in `formal/Formal/Add32.lean`
 /// (`cargo xtask lean-export add32`).
 #[gadget]
 pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {

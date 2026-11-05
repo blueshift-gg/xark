@@ -9,7 +9,7 @@ wasm import, so the constraint system doesn't depend on the compiler version:
 `cargo xtask digests --check` rebuilds every example and compares the SHA-256 of
 the rows its keys are made for (both key forms, after the minimizer; the byte layout
 is in `xtask/src/digests.rs`) with `tests/stable-digests.txt` (`--toolchain 1.89`
-builds the circuits with another installed toolchain), and CI runs it on 1.89, stable and beta. It also builds the
+builds the circuits with another installed toolchain and compares the flat rows only), and CI runs it on 1.89, stable and beta, and once without `--toolchain` under a pinned rustc (its `keyed-rows` job), where the keyed rows are compared too. It also builds the
 `client.wasm` of each example with Rust client functions (`#[input]` on an `impl`),
 which has to build on every supported rustc too.
 (All 70 examples were identical on 1.88, 1.89, 1.93, 1.96, 1.98 and a 2026-10
