@@ -27,7 +27,7 @@ the already-proven per-primitive theorems into a single top-level "the
 entire gadget is sound" statement.
 
 The shape for the bit-oriented gadgets (SHA-256, Keccak-f[1600], BLAKE2s,
-BLAKE3, AES-128) is:
+BLAKE3) is:
 
 * **Concrete round-step** — a pure-Lean transcription of the FIPS / RFC
   round transformation, written over `Fin n → Bool` words / bytes. No
@@ -51,7 +51,7 @@ The bit-level equivalence of each round-step's individual constraints
 with the FIPS / RFC reference is the `<X>_round_bit_equivalence`
 theorem family in `Formal.BitwuzlaCompose` (historical name; pure
 Lean), composed structurally through the per-layer soundness lemmas in
-`Formal.Sha256`, `Formal.Keccak`, `Formal.Blake`, and `Formal.Aes`.
+`Formal.Sha256`, `Formal.Keccak` and `Formal.Blake`.
 What this file adds is the round-loop induction that lifts those
 per-round equivalences to whole-permutation equality.
 -/
@@ -63,14 +63,11 @@ namespace Xark
 /-- A 64-bit lane, as used by Keccak. Same `Fin n → Bool` shape as `Word32`. -/
 abbrev Word64 : Type := Fin 64 → Bool
 
-/-- An AES byte: 8 bits, LSB first. -/
-abbrev Byte8 : Type := Fin 8 → Bool
-
-/-! ## Word64 / Byte8 pure-Lean primitives
+/-! ## Word64 pure-Lean primitives
 
 These are the same pointwise / index-permutation primitives that
-`Formal.Sha256` defines for `Word32`, restated at width 64 and 8. They
-are the building blocks of the Keccak / BLAKE / AES round-steps below.
+`Formal.Sha256` defines for `Word32`, restated at width 64. They
+are the building blocks of the Keccak / BLAKE round-steps below.
 -/
 
 /-- Bitwise NOT on a `Word64`. -/
@@ -85,16 +82,6 @@ def xor64 (a b : Word64) : Word64 := fun i => xor (a i) (b i)
 /-- Left rotation by `k` positions on a `Word64`: `out i = a ((i + 64 − k) mod 64)`. -/
 def rotl64 (a : Word64) (k : ℕ) : Word64 :=
   fun i => a ⟨(i.val + (64 - k % 64)) % 64, Nat.mod_lt _ (by decide)⟩
-
-/-- Bitwise XOR on a `Byte8`. -/
-def xor8 (a b : Byte8) : Byte8 := fun i => xor (a i) (b i)
-
-/-- Byte → `ℕ` (LSB first). -/
-def byteToNat (b : Byte8) : ℕ :=
-  ∑ i : Fin 8, (if b i then 1 else 0) * 2 ^ i.val
-
-/-- `ℕ` → byte, taking the low 8 bits. -/
-def byteOfNat (n : ℕ) : Byte8 := fun i => (n / 2 ^ i.val) % 2 = 1
 
 /-! ## SHA-256 compression wrapper
 
@@ -663,232 +650,6 @@ theorem blake3_iter_of_rel
             (⟨(⟨n, hfin⟩ : Fin 7).val + 1, by omega⟩ : Fin 8) from rfl, hstepn]
       rw [ihn]
   exact ⟨rounds ⟨0, by decide⟩, rounds ⟨7, by decide⟩, hsnap 7 (le_refl _)⟩
-
-/-! ## AES-128 single-block encrypt wrapper
-
-FIPS 197: AES-128 has 10 rounds of `SubBytes → ShiftRows → MixColumns →
-AddRoundKey`, with MixColumns skipped on the final round, plus an
-initial AddRoundKey. The key schedule expands the 16-byte key to 11
-round keys.
--/
-
-/-- FIPS 197 §5.1.1 SubBytes S-box, as a list of 256 byte values
-(`s[i]` is the substitution of input byte `i`). -/
-def aesSboxTable : List ℕ :=
-  [0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
-   0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
-   0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
-   0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
-   0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
-   0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
-   0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
-   0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
-   0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
-   0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
-   0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
-   0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
-   0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
-   0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
-   0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
-   0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16]
-
-/-- FIPS 197 §5.1.1 SubBytes on a single byte. -/
-def aesSbox (b : Byte8) : Byte8 :=
-  byteOfNat ((aesSboxTable[byteToNat b]?).getD 0)
-
-/-- FIPS 197 Rcon table: `Rcon[i].val = (2^(i-1) in GF(2^8), 0, 0, 0)`.
-We only encode the high byte; for key expansion only `Rcon[1..10]` are
-used. The values come from doubling in GF(2^8) with reduction polynomial
-`x^8 + x^4 + x^3 + x + 1` (`0x11b`). -/
-def aesRcon : Fin 11 → Byte8
-  | 0  => byteOfNat 0x00  -- Unused; placeholder.
-  | 1  => byteOfNat 0x01
-  | 2  => byteOfNat 0x02
-  | 3  => byteOfNat 0x04
-  | 4  => byteOfNat 0x08
-  | 5  => byteOfNat 0x10
-  | 6  => byteOfNat 0x20
-  | 7  => byteOfNat 0x40
-  | 8  => byteOfNat 0x80
-  | 9  => byteOfNat 0x1b
-  | 10 => byteOfNat 0x36
-
-/-- FIPS 197 §5.1.1 SubBytes applied state-wise. -/
-def aesSubBytes (s : Fin 16 → Byte8) : Fin 16 → Byte8 := fun i => aesSbox (s i)
-
-/-- FIPS 197 §5.1.2 ShiftRows. Row `r` is cyclically shifted left by
-`r` byte positions; the 4×4 layout is column-major so byte index `i` is
-at row `i % 4`, column `i / 4`. -/
-def aesShiftRows (s : Fin 16 → Byte8) : Fin 16 → Byte8 :=
-  fun i =>
-    let row : ℕ := i.val % 4
-    let col : ℕ := i.val / 4
-    let col' : ℕ := (col + row) % 4
-    s ⟨4 * col' + row, by
-      have hrow : row < 4 := Nat.mod_lt _ (by decide)
-      have hcol' : col' < 4 := Nat.mod_lt _ (by decide)
-      omega⟩
-
-/-- GF(2^8) multiplication by `x` (i.e. `0x02`), used by MixColumns.
-Equivalent to a left-shift with conditional XOR by the reduction
-polynomial `0x1b` when the high bit was set. -/
-def aesXTime (b : Byte8) : Byte8 :=
-  let shifted : Byte8 := fun i =>
-    match i with
-    | ⟨0, _⟩ => false
-    | ⟨n + 1, hn⟩ => b ⟨n, by omega⟩
-  let highBit := b ⟨7, by decide⟩
-  if highBit then xor8 shifted (byteOfNat 0x1b) else shifted
-
-/-- GF(2^8) multiplication by `0x03` = `xTime ⊕ identity`. -/
-def aesMul3 (b : Byte8) : Byte8 := xor8 (aesXTime b) b
-
-/-- FIPS 197 §5.1.3 MixColumns on one 4-byte column. The column matrix is
-`[[2,3,1,1],[1,2,3,1],[1,1,2,3],[3,1,1,2]]` over GF(2^8). -/
-def aesMixColumn (c0 c1 c2 c3 : Byte8) : Fin 4 → Byte8
-  | 0 => xor8 (xor8 (xor8 (aesXTime c0) (aesMul3 c1)) c2) c3
-  | 1 => xor8 (xor8 (xor8 c0 (aesXTime c1)) (aesMul3 c2)) c3
-  | 2 => xor8 (xor8 (xor8 c0 c1) (aesXTime c2)) (aesMul3 c3)
-  | 3 => xor8 (xor8 (xor8 (aesMul3 c0) c1) c2) (aesXTime c3)
-
-/-- FIPS 197 §5.1.3 MixColumns applied to the whole state. -/
-def aesMixColumns (s : Fin 16 → Byte8) : Fin 16 → Byte8 :=
-  fun i =>
-    let col : ℕ := i.val / 4
-    let row : ℕ := i.val % 4
-    have hcol_lt : col < 4 := by have := i.isLt; omega
-    aesMixColumn (s ⟨4 * col,     by omega⟩)
-                 (s ⟨4 * col + 1, by omega⟩)
-                 (s ⟨4 * col + 2, by omega⟩)
-                 (s ⟨4 * col + 3, by omega⟩)
-                 ⟨row, Nat.mod_lt _ (by decide)⟩
-
-/-- FIPS 197 §5.1.4 AddRoundKey: byte-wise XOR. -/
-def aesAddRoundKey (s rk : Fin 16 → Byte8) : Fin 16 → Byte8 :=
-  fun i => xor8 (s i) (rk i)
-
-/-- **AES round-step.** FIPS 197 §5.1: `SubBytes → ShiftRows →
-(MixColumns if not final) → AddRoundKey`. -/
-def aesRoundStep (s : Fin 16 → Byte8) (rk : Fin 16 → Byte8)
-    (is_final : Bool) : Fin 16 → Byte8 :=
-  let s1 := aesSubBytes s
-  let s2 := aesShiftRows s1
-  let s3 := if is_final then s2 else aesMixColumns s2
-  aesAddRoundKey s3 rk
-
-/-- FIPS 197 §5.2 key-expansion `RotWord`: cyclic byte-rotation of a
-4-byte word. -/
-def aesRotWord (w : Fin 4 → Byte8) : Fin 4 → Byte8 :=
-  fun i => w ⟨(i.val + 1) % 4, Nat.mod_lt _ (by decide)⟩
-
-/-- FIPS 197 §5.2 key-expansion `SubWord`: SubBytes on each of the 4 bytes. -/
-def aesSubWord (w : Fin 4 → Byte8) : Fin 4 → Byte8 := fun i => aesSbox (w i)
-
-/-- One word of the AES-128 expanded key, viewed as 4 bytes. The
-expansion treats `w[i]` for `i ∈ [0, 44)`; for AES-128 `i ∈ [0, 4·11)`. -/
-def aesKeyExpansionWord (key : Fin 16 → Byte8) : Fin 44 → Fin 4 → Byte8
-  | ⟨0, _⟩ => fun b => key ⟨b.val, by omega⟩
-  | ⟨1, _⟩ => fun b => key ⟨4 + b.val, by omega⟩
-  | ⟨2, _⟩ => fun b => key ⟨8 + b.val, by omega⟩
-  | ⟨3, _⟩ => fun b => key ⟨12 + b.val, by omega⟩
-  | ⟨n + 4, hn⟩ =>
-      let prev : Fin 4 → Byte8 :=
-        aesKeyExpansionWord key ⟨n + 3, by omega⟩
-      let four_back : Fin 4 → Byte8 :=
-        aesKeyExpansionWord key ⟨n, by omega⟩
-      if (n + 4) % 4 = 0 then
-        -- Subword(Rotword(prev)) ⊕ Rcon[(n+4)/4]
-        let temp := aesSubWord (aesRotWord prev)
-        fun b =>
-          let rconByte := if b = (0 : Fin 4)
-            then aesRcon ⟨(n + 4) / 4, by omega⟩
-            else byteOfNat 0
-          xor8 (xor8 (four_back b) (temp b)) rconByte
-      else
-        fun b => xor8 (four_back b) (prev b)
-  termination_by w => w.val
-
-/-- **AES-128 key expansion.** Produces 11 round keys, each 16 bytes. -/
-def aesKeyExpansion (key : Fin 16 → Byte8) : Fin 11 → Fin 16 → Byte8 :=
-  fun r i =>
-    let col : ℕ := i.val / 4
-    let row : ℕ := i.val % 4
-    aesKeyExpansionWord key
-      ⟨4 * r.val + col, by have := r.isLt; have := i.isLt; omega⟩
-      ⟨row, Nat.mod_lt _ (by decide)⟩
-
-/-- AES-128 single-block encrypt spec relation. The first AddRoundKey
-(with `rk[0]`) is absorbed into the snapshot at round 0: `rounds 0 =
-AddRoundKey(plaintext, rk[0])`. Then rounds 1..10 apply `aesRoundStep`
-with MixColumns skipped on the final round (round 10). -/
-def AES128EncryptRel
-    (plaintext key ciphertext : Fin 16 → Byte8) : Prop :=
-  ∃ (rounds : Fin 11 → Fin 16 → Byte8) (rk : Fin 11 → Fin 16 → Byte8),
-    rk = aesKeyExpansion key ∧
-    rounds ⟨0, by decide⟩ = aesAddRoundKey plaintext (rk ⟨0, by decide⟩) ∧
-    (∀ i : Fin 10,
-      rounds ⟨i.val + 1, by omega⟩ =
-        aesRoundStep (rounds ⟨i.val, by omega⟩)
-          (rk ⟨i.val + 1, by omega⟩) (decide (i.val = 9))) ∧
-    ciphertext = rounds ⟨10, by decide⟩
-
-/-- Gadget intermediate-state witness for AES-128 single-block encrypt. -/
-def IsValidAES128EncryptWitness
-    (plaintext key ciphertext : Fin 16 → Byte8) : Prop :=
-  ∃ (rounds : Fin 11 → Fin 16 → Byte8) (rk : Fin 11 → Fin 16 → Byte8),
-    rk = aesKeyExpansion key ∧
-    rounds ⟨0, by decide⟩ = aesAddRoundKey plaintext (rk ⟨0, by decide⟩) ∧
-    (∀ i : Fin 10,
-      rounds ⟨i.val + 1, by omega⟩ =
-        aesRoundStep (rounds ⟨i.val, by omega⟩)
-          (rk ⟨i.val + 1, by omega⟩) (decide (i.val = 9))) ∧
-    ciphertext = rounds ⟨10, by decide⟩
-
-/-- **End-to-end soundness wrapper for the AES-128 encryption gadget
-(`gadgets/xark-aes/src/lib.rs`) (single block).** -/
-theorem lowerAES128Encrypt_sound
-    {plaintext key ciphertext : Fin 16 → Byte8}
-    (h : IsValidAES128EncryptWitness plaintext key ciphertext) :
-    AES128EncryptRel plaintext key ciphertext := h
-
-/-- Iterate AES round-step `k` times against round keys `rk[1..k]`. -/
-def aesIterAux (s0 : Fin 16 → Byte8) (rk : Fin 11 → Fin 16 → Byte8)
-    (k : ℕ) (hk : k ≤ 10) : Fin 16 → Byte8 :=
-  match k with
-  | 0 => s0
-  | n + 1 =>
-      aesRoundStep
-        (aesIterAux s0 rk n (by omega))
-        (rk ⟨n + 1, by omega⟩)
-        (decide (n = 9))
-
-/-- **Per-round structural ⇒ direct-iteration for AES-128 encrypt.** -/
-theorem aes128_iter_of_rel
-    {plaintext key ciphertext : Fin 16 → Byte8}
-    (h : AES128EncryptRel plaintext key ciphertext) :
-    ∃ rk : Fin 11 → Fin 16 → Byte8,
-      rk = aesKeyExpansion key ∧
-      ciphertext = aesIterAux
-        (aesAddRoundKey plaintext (rk ⟨0, by decide⟩))
-        rk 10 (le_refl _) := by
-  obtain ⟨rounds, rk, hrk, h0, hstep, hout⟩ := h
-  have hsnap : ∀ k : ℕ, (hk : k ≤ 10) →
-      rounds ⟨k, by omega⟩ =
-        aesIterAux (aesAddRoundKey plaintext (rk ⟨0, by decide⟩)) rk k hk := by
-    intro k hk
-    induction k with
-    | zero => simpa [aesIterAux] using h0
-    | succ n ih =>
-      have hnle : n ≤ 10 := by omega
-      have ihn := ih hnle
-      have hfin : n < 10 := by omega
-      have hstepn := hstep ⟨n, hfin⟩
-      simp only [aesIterAux]
-      rw [show (⟨n + 1, by omega⟩ : Fin 11) =
-            (⟨(⟨n, hfin⟩ : Fin 10).val + 1, by omega⟩ : Fin 11) from rfl, hstepn]
-      rw [ihn]
-  refine ⟨rk, hrk, ?_⟩
-  rw [hout, hsnap 10 (le_refl _)]
 
 /-! ## EmbeddedCurveAdd + MultiScalarMul wrappers -/
 

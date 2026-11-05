@@ -12,7 +12,7 @@ set_option linter.unusedSimpArgs false
 namespace Xark.Templates.Xor.Consts
 open Xark.Template
 
-/-- Constant plugs of calls in aes, aes256_ctr, aes256_gcm, aes_ctr, aes_gcm, blake2s, blake3, keccak256. -/
+/-- Constant plugs of calls in aes256_ctr, aes256_gcm, aes_ctr, aes_gcm, blake2s, blake3, keccak256. -/
 def k_1484d6828a6c1691 : List (ℕ × F) := [(0, 0)]
 
 theorem k_1484d6828a6c1691_assumptions : Assumptions (k_1484d6828a6c1691.map Prod.snd) := by

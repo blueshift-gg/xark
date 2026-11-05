@@ -19,7 +19,7 @@ set_option maxHeartbeats 800000
 GHASH multiplies 128-bit blocks in the binary field
 `GF(2¹²⁸) = GF(2)[x] / (x¹²⁸ + x⁷ + x² + x + 1)`
 (NIST SP 800-38D §6.3). This file establishes the field's *computational* model
-in the same style `Formal.GF256` uses for the AES GF(2⁸) field: the carryless
+in the style the (since deleted) AES GF(2⁸) proofs used: the carryless
 polynomial product reduced modulo the GCM polynomial, on `ℕ` bit representations.
 
 * `gf128_timesX` — multiply a reduced 128-bit value by `x` (shift + conditional
@@ -76,7 +76,7 @@ theorem gf128_prodBit_lt_2 (x y k : ℕ) : gf128_prodBit x y k < 2 := by
 
 /-- **`gf128_mul` is closed in `[0, 2¹²⁸)`** — each output bit is `0/1`, weighted by
 `2ᵏ` for `k < 128`, so the maximum is `2¹²⁸ − 1`. The GHASH multiply is therefore
-well-defined on 128-bit blocks (mirrors `Formal.GF256.gf256_mul_lt_256`). -/
+well-defined on 128-bit blocks. -/
 theorem gf128_mul_lt_two128 (x y : ℕ) : gf128_mul x y < 2 ^ 128 := by
   unfold gf128_mul
   have h_sum_le :

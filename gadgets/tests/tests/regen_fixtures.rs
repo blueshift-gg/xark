@@ -310,7 +310,16 @@ fn specs() -> Vec<Spec> {
             m.extend(arr("key", 16, 16));
             m
         },
-        public_in: BTreeMap::new(),
+        // AES-128(key = 16..31, pt = 0..15), supplied: `ct` is range-checked, so its
+        // bits are hinted from it and a placeholder 0 would leave them wrong.
+        public_in: [
+            0x9c, 0x54, 0xd5, 0x71, 0x70, 0x2c, 0xfa, 0x0f, 0x03, 0xf3, 0x62, 0x15, 0x67, 0x6b,
+            0xab, 0x78,
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, b): (usize, &u8)| (format!("ct[{i}]"), b.to_string()))
+        .collect(),
     });
     v.push(Spec {
         name: "keccak_basic",

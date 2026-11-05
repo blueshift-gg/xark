@@ -433,12 +433,13 @@ fn inside_accepted(calls: &mut [Call], circuit: &str, allowed: &dyn Fn(&str) -> 
 
 /// The gadgets whose `Spec` makes every output a bit (on inputs meeting their
 /// `Assumptions`): `ToBits.spec_isBit`, `ToBitsCanonical.spec_isBit`,
-/// `Reduce.spec_isBit`, and each bitwise `BIT_ASSUMING` gadget's `outs_isBit`.
+/// `Reduce.spec_isBit`, each bitwise `BIT_ASSUMING` gadget's `outs_isBit`, and
+/// `Sbox.outs_isBit`.
 /// Gadgets whose `Assumptions` read only the first half of their inputs (`x`), so a call
 /// whose constants are all in the second half (`m₋₁`'s limbs) needs no obligation.
 const UNASSUMED_TAIL: [&str; 1] = ["xark_bignum::require_lt"];
 
-const BIT_PRODUCERS: [&str; 10] = [
+const BIT_PRODUCERS: [&str; 11] = [
     "xark::lang::to_bits",
     "xark::lang::to_bits_canonical",
     "xark_bits::reduce",
@@ -449,6 +450,7 @@ const BIT_PRODUCERS: [&str; 10] = [
     "xark_bits::maj3",
     "xark_bits::chi",
     "xark_bits::ch",
+    "xark_aes::sbox",
 ];
 
 /// The producers whose outputs are bits whatever their inputs (their `soundness`
@@ -462,8 +464,9 @@ const FREE_PRODUCERS: [&str; 3] = [
 /// The gadgets whose `Assumptions` are exactly that their first `n` inputs are bits
 /// (`usize::MAX`: every input), so proven bit inputs discharge them (`Xor`, `Or`,
 /// `Add32`'s `Assumptions`, `Xark.HashOps.Assumptions` for `xor3`, `maj3`, `chi`, `ch`,
-/// `ScalarMul.Assumptions`, the 128 scalar bits before `P`, and `OneHot8.Assumptions`).
-const BIT_ASSUMING: [(&str, usize); 9] = [
+/// `ScalarMul.Assumptions`, the 128 scalar bits before `P`, `OneHot8.Assumptions` and
+/// `Sbox.Assumptions`).
+const BIT_ASSUMING: [(&str, usize); 10] = [
     ("xark::lang::xor", usize::MAX),
     ("xark::lang::or", usize::MAX),
     ("xark_bits::add32", usize::MAX),
@@ -473,6 +476,7 @@ const BIT_ASSUMING: [(&str, usize); 9] = [
     ("xark_bits::ch", usize::MAX),
     ("xark_grumpkin::scalar_mul", 128),
     ("xark_bignum::one_hot8", usize::MAX),
+    ("xark_aes::sbox", usize::MAX),
 ];
 
 /// A linear combination's identity mod `r` (for matching wires across calls).

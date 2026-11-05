@@ -7,8 +7,7 @@
 //! public output is rejected.
 //!
 //! Layers validated incrementally:
-//!   * `gf256_mul` against known GF(2^8) products (0x53·0xCA=0x01, 0x57·0x83=0xC1).
-//!   * S-box against FIPS-197 table entries (S(0x00)=0x63, S(0x53)=0xED, S(0xFF)=0x16).
+//!   * S-box against the full FIPS-197 table, with every derived variable forged rejected.
 //!   * full AES-128 block against the FIPS-197 KAT.
 
 use std::collections::BTreeMap;
@@ -30,46 +29,6 @@ fn id_of(p: &PrimitiveProgram, name: &str) -> u32 {
         .find(|v| v.name == name)
         .map(|v| v.id)
         .unwrap()
-}
-
-// --------------------------------------------------------------------------
-// Layer 1: GF(2^8) multiplication.
-// --------------------------------------------------------------------------
-
-#[test]
-fn gf_mul_matches_known_products() {
-    let src = "#![no_std]\n\
-        use xark::{require_eq, Field, Private, Public};\n\
-        use xark_aes::gf_mul;\n\
-        pub fn circuit(a: Private<Field>, b: Private<Field>, expected: Public<Field>) {\n\
-            let r = gf_mul(a.to_bits::<8>(), b.to_bits::<8>());\n\
-            require_eq(Field::from_bits::<8>(r), expected);\n\
-        }\n";
-    let p = compile("gf_mul", src);
-
-    // Known GF(2^8) products (AES field, 0x11B).
-    for &(a, b, c) in &[
-        (0x53u32, 0xCAu32, 0x01u32),
-        (0x57, 0x83, 0xC1),
-        (0x02, 0x87, 0x15),
-    ] {
-        let mut inputs = BTreeMap::new();
-        inputs.insert(id_of(&p, "a"), a.to_string());
-        inputs.insert(id_of(&p, "b"), b.to_string());
-        inputs.insert(id_of(&p, "expected"), c.to_string());
-        let assign = solver::solve_and_check(&p, &inputs)
-            .unwrap_or_else(|e| panic!("gf_mul {a:#x}·{b:#x} should = {c:#x}: {e:?}"));
-        assert!(
-            solver::analyze_underconstrained(&p, &assign).is_empty(),
-            "gf_mul under-constrained"
-        );
-        // Wrong product must be rejected.
-        inputs.insert(id_of(&p, "expected"), ((c + 1) & 0xff).to_string());
-        assert!(
-            solver::solve_and_check(&p, &inputs).is_err(),
-            "wrong product accepted"
-        );
-    }
 }
 
 // --------------------------------------------------------------------------
@@ -275,27 +234,61 @@ fn sbox_matches_fips_table() {
 
     let xid = id_of(&p, "x");
     let yid = id_of(&p, "y");
+    let read: std::collections::BTreeSet<u32> = p
+        .constraints
+        .iter()
+        .flat_map(|e| {
+            let muls = e.mul_terms.iter().flat_map(|t| [t.left, t.right]);
+            muls.chain(e.linear_terms.iter().map(|t| t.var))
+                .collect::<Vec<_>>()
+        })
+        .collect();
     for x in 0u32..256 {
+        let y = SBOX[x as usize];
         let mut inputs = BTreeMap::new();
         inputs.insert(xid, x.to_string());
-        inputs.insert(yid, SBOX[x as usize].to_string());
+        inputs.insert(yid, y.to_string());
         let assign = solver::solve_and_check(&p, &inputs)
-            .unwrap_or_else(|e| panic!("S({x:#x}) should = {:#x}: {e:?}", SBOX[x as usize]));
-        if x == 0 {
+            .unwrap_or_else(|e| panic!("S({x:#x}) should = {y:#x}: {e:?}"));
+        assert!(
+            solver::analyze_underconstrained(&p, &assign).is_empty(),
+            "sbox under-constrained at {x:#x}"
+        );
+        // Every derived variable a row reads, forged alone (bug checklist 7, 8): the
+        // one-hot selectors, the mux products and the output bits are each pinned.
+        let mut forged_vars = 0;
+        for v in &p.vars {
+            if v.role != xark_ir::primitive::VarRole::Derived || !read.contains(&v.id) {
+                continue;
+            }
+            let mut forged = assign.clone();
+            let other = if forged[&v.id].to_decimal() == "0" {
+                "1"
+            } else {
+                "0"
+            };
+            forged.insert(v.id, solver::fp_from_decimal(other, &p));
             assert!(
-                solver::analyze_underconstrained(&p, &assign).is_empty(),
-                "sbox under-constrained"
+                solver::check(&p, &forged).is_err(),
+                "S({x:#x}): `{}` forged to {other} is accepted",
+                v.name
+            );
+            forged_vars += 1;
+        }
+        assert!(
+            forged_vars >= 33,
+            "S({x:#x}): only {forged_vars} derived variables"
+        );
+        // Every wrong output byte one bit off is rejected.
+        for k in 0..8 {
+            inputs.insert(yid, (y ^ (1 << k)).to_string());
+            assert!(
+                solver::solve_and_check(&p, &inputs).is_err(),
+                "S({x:#x}) = {:#x} accepted",
+                y ^ (1 << k)
             );
         }
     }
-    // Wrong output must be rejected.
-    let mut inputs = BTreeMap::new();
-    inputs.insert(xid, "83".to_string()); // 0x53
-    inputs.insert(yid, "0".to_string()); // S(0x53)=0xED, not 0
-    assert!(
-        solver::solve_and_check(&p, &inputs).is_err(),
-        "wrong sbox accepted"
-    );
 }
 
 #[test]
