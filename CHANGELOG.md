@@ -232,6 +232,13 @@ verification starter, and the `xark-client` npm package is removed.
 
 #### Proving and verifying
 
+- **Faster setup and proving.** Setup multiplies fixed bases with signed windows
+  and batched affine additions, and keeps no extra copy of the circuit while it
+  picks a key form; proving solves witnesses from the compiled templates, builds
+  the row source while the witness solves, and computes `h` while the witness MSMs
+  stream. On one 14-core machine: ed25519 setup 6.9 → 3.9 s and prove 8.6 → 6.8 s;
+  secp256k1_ecdsa setup 4.9 → 2.9 s; aes256_gcm setup peak 3.1 → 2.8 GB. Keys,
+  proofs and the keyed rows are unchanged.
 - **A streaming Groth16 prover.** `xark prove` uses `xark-groth16`, which never
   holds the whole constraint system or proving key in memory, always from
   `circuit.xbc`. Keys and proofs are compatible with the arkworks path
@@ -257,6 +264,10 @@ verification starter, and the `xark-client` npm package is removed.
 
 #### The CLI
 
+- `xark build` reuses an unchanged build: when the `xark` binary, the options, the
+  `XARK_*` variables, the compiled module and every source file are the same as for
+  the outputs in `target/xark/<name>/` (and those are untouched), it says so and
+  skips lowering.
 - `xark build` prints the circuit digest (a fingerprint of the R1CS, written to
   `target/xark/<name>/digest`) and the three source lines that cost the most
   constraints.
@@ -361,6 +372,10 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- `xark prove` and `xark check --inputs` refused a circuit with witness-only scratch
+  variables no constraint references (the `secp256k1_ecdsa` example's GLV
+  decomposition) as under-constrained, while `xark check` passed it. Such a variable
+  changes no row and no output, so it is ignored, as the test harness already did.
 - The generated TypeScript client runs in Node's own ESM loader. It imported its
   schema as `./cube.schema`, with no extension, which only a bundler resolves (Node:
   `ERR_MODULE_NOT_FOUND`). The schema is now inlined: `xark client` writes one file,
