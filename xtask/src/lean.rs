@@ -292,11 +292,11 @@ fn circuit_hash(rows: &[[LinearCombination; 3]]) -> String {
 fn export_circuit(example: &str) -> Result<(String, Vec<(PathBuf, String)>)> {
     let proven = crate::coverage::proven()?;
     let digests = std::fs::read_to_string(crate::root().join("tests/stable-digests.txt"))?;
-    // `<example> <keyed> <flat>`: the keyed digest.
+    // `<example> <keyed> <flat>`: the flat digest, as `coverage::calls` compares.
     let want = digests
         .lines()
         .find_map(|l| l.strip_prefix(&format!("{example} ")))
-        .map(|d| d.split(' ').next().unwrap_or(d).to_owned());
+        .map(|d| d.rsplit(' ').next().unwrap_or(d).to_owned());
     let dir = crate::root().join("examples").join(example);
     let rec = crate::coverage::calls(&dir, example, Some(want), &proven)?;
     let mut calls: Vec<&crate::coverage::Call> = rec
