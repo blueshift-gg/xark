@@ -74,8 +74,12 @@ jobs:
         # `Formal/Circuits/<Example>.lean` composes an example from its gadget templates;
         # its rows must hash to the hash `lean-export --example` took of the compiler's.
         run: lake env lean CircuitHash.lean
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install rustc 1.99.1 + wasm32
+        # The pinned rustc of ci.yml's keyed-rows job and the coverage job above.
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: A mutated circuit is refused
