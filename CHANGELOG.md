@@ -24,6 +24,13 @@ gadgets now check more:
   `to_bits` computes bit 0 linearly, `xor3`/`maj3`/`chi`/`ch` are one row each,
   `reduce` has tight carries, and a Merkle level swaps with one product. Every
   example using SHA-256, Keccak, BLAKE, AES, Merkle or `to_bits` changes (27 of 71).
+- ECDSA on secp256k1 and P-256, and EdDSA on Ed25519, are rewritten around proven
+  gadgets: non-native multiplication by pseudo-Mersenne certificates over 8×32-bit
+  limbs, fused double-and-add over signed digits, and fake GLV (ePrint 2025/933) with
+  a fixed-base comb, each gadget proven sound over its rows. Fewer rows (the
+  secp256k1 ECDSA circuit is 227,713); the hinted `R.x` is checked canonical
+  (`< p`), and Ed25519 keeps the cofactored check of RFC 8032. Keys for the ECDSA
+  and EdDSA examples must be made again.
 
 ### Highlights
 
