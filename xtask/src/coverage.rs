@@ -5,8 +5,8 @@
 //! the same call can emit other rows: a constant input folds, a decomposition memo
 //! hit reuses bits from outside the call, a caller's `require_eq` merges into it, a
 //! witness branch guards it. This builds every example with the gadget markers,
-//! checks that build keys the production rows (its keyed-rows digest is the one in
-//! `tests/stable-digests.txt`), and classifies each call of a gadget with a
+//! checks that build emits the production rows (its flat-rows digest is the one in
+//! `tests/stable-digests.txt`; the keyed rows can group differently, see `run`), and classifies each call of a gadget with a
 //! harness and a committed `formal/Formal/Templates/*.lean`:
 //!
 //! * **covered**: its template (rows, hints, inputs, outputs, variables renamed as
@@ -130,11 +130,15 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         full.collect::<Result<_>>()?
     };
     let digests = std::fs::read_to_string(crate::root().join("tests/stable-digests.txt"))?;
-    // `<example> <keyed> <flat>`: the keyed digest.
+    // `<example> <keyed> <flat>`: the flat digest. The markers keep a gadget's body
+    // out of line (they make it bigger), which can change how rows group into
+    // template bodies, and so the keyed rows, but never the flat rows: the
+    // constraint system the proofs are about. The keyed rows follow from the flat
+    // ones by the minimizer (`cargo xtask minimize-check` certifies each run).
     let digests: BTreeMap<&str, &str> = digests
         .lines()
         .filter_map(|l| l.split_once(' '))
-        .map(|(n, d)| (n, d.split(' ').next().unwrap_or(d)))
+        .map(|(n, d)| (n, d.rsplit(' ').next().unwrap_or(d)))
         .collect();
 
     let groups = Mutex::new(BTreeMap::<Group, usize>::new());
@@ -319,7 +323,9 @@ fn calls(
         };
         Ok(out.map_err(|e| anyhow::anyhow!("{e}"))?.output)
     };
-    let digest = |out: &xark_frontend::LowerOutput| crate::digests::keyed_digest(&out.xbc);
+    let digest = |out: &xark_frontend::LowerOutput| -> Result<String> {
+        Ok(xark_ir::function_decode::stream_digest_hex(&out.xbc))
+    };
     let out = lower(true)?;
     // The templates are cut from the flat rows; the digest is the artifact's.
     xark_ir::function_decode::verify_blob_matches(&out.xbc, &out.r1cs, &out.primitive)
@@ -331,7 +337,7 @@ fn calls(
     };
     let got = digest(&out)?;
     if got != want {
-        bail!("built with the gadget markers it keys rows {got}, not the production {want}");
+        bail!("built with the gadget markers its rows digest to {got}, not the production {want}");
     }
     let root = format!("{}/", crate::root().display());
     // Against each instantiation's template, keeping the closest match.

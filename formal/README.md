@@ -305,9 +305,12 @@ its rows, a witness branch guards it. `cargo xtask lean-export --coverage` (the
 `templates` job in `lean.yml`) checks what ships:
 
 * It builds every example with the gadget markers and fails unless that build's
-  keyed-rows digest (the rows Groth16 keys, after both minimizer passes) is the
-  example's line in `tests/stable-digests.txt`, so the calls it records are the
-  production circuit's.
+  flat-rows digest is the example's line in `tests/stable-digests.txt`, so the calls
+  it records are the production circuit's. Not the keyed digest: the markers keep a
+  gadget's body out of line, which can regroup the rows into template bodies (it
+  does for `ed25519`) and so change the keyed rows the minimizer makes from the same
+  flat rows; those follow from the flat rows by the minimizer, whose runs
+  `cargo xtask minimize-check` certifies.
 * For each gadget with a harness (whose template must still be the committed
   `Formal/Templates/*.lean`), it classifies every call, one line per gadget,
   example, call site (the calling function and its `file:line:col`) and
