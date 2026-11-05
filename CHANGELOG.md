@@ -31,6 +31,11 @@ gadgets now check more:
   secp256k1 ECDSA circuit is 227,713); the hinted `R.x` is checked canonical
   (`< p`), and Ed25519 keeps the cofactored check of RFC 8032. Keys for the ECDSA
   and EdDSA examples must be made again.
+- Grumpkin scalar multiplication (`scalar_mul`, `wide_scalar_mul`,
+  `multi_scalar_mul`) and the Pedersen hash are rewritten as proven gadgets: one
+  fused incomplete step per bit over signed digits, and windowed lookups from
+  constant tables for Pedersen (3,318 → 772 rows). `scalar_mul` pins its own bits
+  boolean. The seven Grumpkin and Pedersen examples change.
 
 ### Highlights
 
@@ -373,6 +378,8 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Removed
 
+- `xark-pedersen`'s `ec_add`, `ec_double` and `scalar_mul` helpers (the hash no
+  longer uses them; `xark-grumpkin` has the point operations).
 - `xark-rustc` and the pinned nightly.
 - snarkjs output: `snarkjs-verification_key.json`, `snarkjs-proof.json`,
   `snarkjs-public.json`, and xark-wasm's `proof_to_snarkjs`. Verify in JavaScript
