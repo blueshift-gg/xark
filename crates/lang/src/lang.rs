@@ -554,6 +554,20 @@ impl Field {
         __xark_hint_mod_inverse(a, m, bits)
     }
 
+    /// Fake-GLV lattice hint (ePrint 2025/933; `N` × `bits`-bit limbs): for a prime `m`
+    /// and a cube root of unity `λ` mod `m`, returns a nonzero `(a₁, a₂, b₁, b₂)` with
+    /// `a₁ + λa₂ ≡ u·(b₁ + λb₂) (mod m)` and every `|·| < 2^⌈log₂m / 4⌉`, each as a
+    /// field element (`−x` as `p − x`). Pin it with that congruence.
+    #[inline(never)]
+    pub fn hint_fake_glv<const N: usize>(
+        u: [Field; N],
+        m: [Field; N],
+        lambda: [Field; N],
+        bits: usize,
+    ) -> [Field; 4] {
+        __xark_hint_fake_glv(u, m, lambda, bits)
+    }
+
     /// Fused-subtract hint (`N` × `bits`-bit limbs): for `(a - b - c) mod m`,
     /// returns `(qabs, r)` with `r = (a-b-c) mod m` and `qabs ∈ {0,1,2}` such
     /// that `a + qabs·m == b + c + r`.

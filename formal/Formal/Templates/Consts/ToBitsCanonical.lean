@@ -6,6 +6,8 @@ import Formal.ToBitsCanonical
 
 set_option linter.style.header false
 set_option linter.style.longLine false
+-- One `simp` serves every gadget: `IsBit` is unused where `Assumptions` has no bit.
+set_option linter.unusedSimpArgs false
 
 namespace Xark.Templates.ToBitsCanonical.Consts
 open Xark.Template

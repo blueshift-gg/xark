@@ -1,0 +1,17 @@
+# The `mul_cert_r1` harness: every input a fresh variable. Production passes linear combinations; their limb bounds are the callers (formal/coverage-allowlist.txt).
+[package]
+name = "mul-cert-r1-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+xark-bignum = { path = "../../../gadgets/xark-bignum", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

@@ -48,6 +48,7 @@ pub const OP_DIVREM: u8 = 9;
 pub const OP_MULMOD_DIVMOD: u8 = 10;
 pub const OP_MODINVERSE: u8 = 11;
 pub const OP_SUB2: u8 = 12;
+pub const OP_FAKE_GLV: u8 = 13;
 
 /// A single decoded instruction: a constraint or a witness-gen op. At the byte
 /// level each `Witness` variant is encoded under its own opcode tag.
@@ -331,6 +332,21 @@ pub fn put_witness(stream: &mut Vec<u8>, w: &WitnessGen) -> u32 {
             put_vu32(stream, *limb_bits);
             out.first().copied().unwrap_or(NO_BASE)
         }
+        WitnessGen::FakeGlv {
+            out,
+            u,
+            modulus,
+            lambda,
+            limb_bits,
+        } => {
+            stream.push(OP_FAKE_GLV);
+            put_var_ids(stream, out);
+            put_lcs(stream, u);
+            put_lcs(stream, modulus);
+            put_lcs(stream, lambda);
+            put_vu32(stream, *limb_bits);
+            out.first().copied().unwrap_or(NO_BASE)
+        }
         WitnessGen::Sub2 {
             qabs,
             r,
@@ -585,6 +601,20 @@ impl<'a> Cursor<'a> {
                     limb_bits,
                 })
             }
+            OP_FAKE_GLV => {
+                let out = self.var_ids()?;
+                let u = self.lcs()?;
+                let modulus = self.lcs()?;
+                let lambda = self.lcs()?;
+                let limb_bits = self.vu32()?;
+                Opcode::Witness(WitnessGen::FakeGlv {
+                    out,
+                    u,
+                    modulus,
+                    lambda,
+                    limb_bits,
+                })
+            }
             OP_SUB2 => {
                 let qabs = self.vu32()?;
                 let r = self.var_ids()?;
@@ -761,6 +791,20 @@ fn visit_opcode_operands(op: &mut Opcode, f: &mut impl FnMut(&mut u32)) {
                 }
                 lcs(a, f);
                 lcs(modulus, f);
+            }
+            WitnessGen::FakeGlv {
+                out,
+                u,
+                modulus,
+                lambda,
+                ..
+            } => {
+                for x in out {
+                    f(x);
+                }
+                lcs(u, f);
+                lcs(modulus, f);
+                lcs(lambda, f);
             }
             WitnessGen::Sub2 {
                 qabs,
@@ -982,6 +1026,20 @@ fn put_opcode_struct(buf: &mut Vec<u8>, op: &Opcode) {
                 put_var_ids_struct(buf, out);
                 put_lcs_struct(buf, a);
                 put_lcs_struct(buf, modulus);
+                put_vu32(buf, *limb_bits); // structural
+            }
+            WitnessGen::FakeGlv {
+                out,
+                u,
+                modulus,
+                lambda,
+                limb_bits,
+            } => {
+                buf.push(OP_FAKE_GLV);
+                put_var_ids_struct(buf, out);
+                put_lcs_struct(buf, u);
+                put_lcs_struct(buf, modulus);
+                put_lcs_struct(buf, lambda);
                 put_vu32(buf, *limb_bits); // structural
             }
             WitnessGen::Sub2 {

@@ -43,6 +43,7 @@ enum Intr {
     HintDivRem,
     HintMulModDivMod,
     HintModInverse,
+    HintFakeGlv,
     HintSub2,
     RequireEq,
     WitnessBegin,
@@ -82,6 +83,7 @@ fn intrinsic(name: &str) -> Option<Intr> {
         "hint_div_rem" => Intr::HintDivRem,
         "hint_mulmod_divmod" => Intr::HintMulModDivMod,
         "hint_mod_inverse" => Intr::HintModInverse,
+        "hint_fake_glv" => Intr::HintFakeGlv,
         "hint_sub2" => Intr::HintSub2,
         "require_eq" => Intr::RequireEq,
         "witness_begin" => Intr::WitnessBegin,
@@ -1772,6 +1774,7 @@ impl crate::interp::Host for Host {
                 | Intr::HintDivRem
                 | Intr::HintMulModDivMod
                 | Intr::HintModInverse
+                | Intr::HintFakeGlv
                 | Intr::HintSub2
         ) && !self.guards.is_empty())
             && intr != Intr::Advice
@@ -2020,6 +2023,30 @@ impl crate::interp::Host for Host {
                         out: out.clone(),
                         a: x,
                         modulus: md,
+                        limb_bits: bits,
+                    }));
+                self.put_vars(m, a[0], &out)?;
+            }
+            Intr::HintFakeGlv => {
+                // (out, u, m, lambda, n, bits)
+                if self.guard().is_some() {
+                    return Err(CompileError::new(
+                        "`hint_fake_glv` inside a branch on a witness value is not supported",
+                    ));
+                }
+                let n = int_of(a[4], "the limb count")? as usize;
+                let bits = int_of(a[5], "the limb width")? as u32;
+                let u = self.get_fields(m, a[1], n)?;
+                let md = self.get_fields(m, a[2], n)?;
+                let lambda = self.get_fields(m, a[3], n)?;
+                let out: Vec<u32> = (0..4).map(|_| self.b.alloc_advice()).collect();
+                self.b
+                    .witness_gen
+                    .push(Some(xark_ir::primitive::WitnessGen::FakeGlv {
+                        out: out.clone(),
+                        u,
+                        modulus: md,
+                        lambda,
                         limb_bits: bits,
                     }));
                 self.put_vars(m, a[0], &out)?;

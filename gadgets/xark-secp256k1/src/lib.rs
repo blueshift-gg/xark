@@ -8,7 +8,7 @@
 //! constants and the incomplete-affine group law — with `a = 0` the doubling
 //! slope is just `3x²/2y` (no `a` term).
 //!
-//! The shipped verifier is the GLV-accelerated 4×64 lazy gadget below
+//! The shipped verifier is the fake-GLV 8×32 certificate gadget below
 //! ([`Point::verify`]); the non-native field / EC arithmetic lives in [`xark_bignum`]
 //! (shared with secp256r1, parameterized by modulus). Inputs are the transparent
 //! compound types [`Point`] / [`Signature`] / [`Scalar`] — the caller never touches
@@ -43,24 +43,24 @@ pub mod affine {
 pub use affine::{order, reduce_scalar};
 
 // ===========================================================================
-// SOUND LAZY ECDSA verify (4×64 lazy-affine point arithmetic + eager 4×64
-// scalar ops). Alongside the macro's eager 3×86 gadget. ~30% fewer constraints.
+// SOUND ECDSA verify (8×32 affine point arithmetic by `mul_cert_k1` certificates,
+// fake GLV). Alongside the macro's eager 3×86 gadget.
 // ===========================================================================
 use xark::{Field, input, require_eq as aeq, witness_begin, witness_end};
 use xark_bignum::{
-    M_K1, assert_nonzero_limbs, ec_add_k1, ec_double_k1, finalize_k1, mod_inverse, mod_mul,
-    modulus_limbs, modulus_minus_1, mul_lazy_k1, on_curve_k1, range_check_limbs, reduce_once,
-    require_lt, scalar_to_bits_256, weak_reduce_k1,
+    M_K1, assert_nonzero_limbs, b2_k1, ec_add_k1, ec_double_add_k1, modulus_limbs, modulus_minus_1,
+    mul_cert_k1, on_curve_k1, one_hot8, range_check_limbs, require_lt,
 };
 
 type L4 = [Field; 4];
-type Pt = [L4; 2];
+type L8 = [Field; 8];
+type Pt = [L8; 2];
 
 /// A secp256k1 256-bit value (a scalar `r`/`s`/`e`, or a point coordinate) in the
 /// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =
 /// `[lo128, hi128]` in-circuit (2 public field elements vs 4 raw 64-bit limbs),
-/// `[u8; 32]` big-endian on the host. Recomposed to the internal 4×64 limbs by the
-/// gadget. `#[input]` derives its host conversions (`[u8; 32]` →
+/// `[u8; 32]` big-endian on the host. Recomposed to internal limbs (4 × 64 for scalars,
+/// 8 × 32 for coordinates) by the gadget. `#[input]` derives its host conversions (`[u8; 32]` →
 /// `<name>.limbs[0..2]`) from this declaration.
 #[input(number(bits = 128))]
 pub struct Scalar {
@@ -99,158 +99,357 @@ const NN: L4 =
 const NN1: L4 =
     modulus_minus_1::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
 
-const G0X: L4 = modulus_limbs::<4, 64>(
-    "55066263022277343669578718895168534326250603453777594175500187360389116729240",
-);
-const G0Y: L4 = modulus_limbs::<4, 64>(
-    "32670510020758816978083085130507043184471273380659243275938904335757337482424",
-);
-fn muxc(s: Field, a: L4, b: L4) -> L4 {
-    [
-        b[0] + s * (a[0] - b[0]),
-        b[1] + s * (a[1] - b[1]),
-        b[2] + s * (a[2] - b[2]),
-        b[3] + s * (a[3] - b[3]),
-    ]
-}
-fn muxp(s: Field, a: Pt, b: Pt) -> Pt {
-    [muxc(s, a[0], b[0]), muxc(s, a[1], b[1])]
-}
-fn select16_k1(t: [Pt; 16], b3: Field, b2: Field, b1: Field, b0: Field) -> Pt {
-    let z: Pt = [[Field::from(0u8); 4]; 2];
-    let mut l1 = [z; 8];
-    let mut j = 0usize;
-    while j < 8usize {
-        l1[j] = muxp(b0, t[2 * j + 1], t[2 * j]);
-        j += 1;
-    }
-    let mut l2 = [z; 4];
-    let mut j = 0usize;
-    while j < 4usize {
-        l2[j] = muxp(b1, l1[2 * j + 1], l1[2 * j]);
-        j += 1;
-    }
-    let mut l3 = [z; 2];
-    let mut j = 0usize;
-    while j < 2usize {
-        l3[j] = muxp(b2, l2[2 * j + 1], l2[2 * j]);
-        j += 1;
-    }
-    muxp(b3, l3[1], l3[0])
-}
-
-// ===========================================================================
-// GLV-accelerated verify (endomorphism φ(x,y)=(βx,y)=λ·P halves the doublings).
-// ===========================================================================
-use xark_bignum::{complement, is_ge, mod_add, mod_neg, mod_sub, mul_divmod, sub2};
-const LAM: L4 =
-    modulus_limbs::<4, 64>("0x5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b23bd72");
-const BETA: L4 =
-    modulus_limbs::<4, 64>("0x7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
-const COMPN: L4 =
-    complement::<4, 64>("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
-const OX: L4 = modulus_limbs::<4, 64>(
-    "89565891926547004231252920425935692360644145829622209833684329913297188986597",
-);
-const OY: L4 = modulus_limbs::<4, 64>(
-    "12158399299693830322967808612713398636155367887041628176798871954788371653930",
-);
-const CORRX: L4 = modulus_limbs::<4, 64>(
-    "60853107477169765182989770797083903619426259615380584983853919641424871422399",
-);
-const CORRY: L4 = modulus_limbs::<4, 64>(
-    "41161306400859365992137843649963616879210116114343429764926620426514952863053",
-);
-const PHIGX: L4 = modulus_limbs::<4, 64>(
-    "85340279321737800624759429340272274763154997815782306132637707972559913914315",
-);
-const PHIGY: L4 = modulus_limbs::<4, 64>(
-    "32670510020758816978083085130507043184471273380659243275938904335757337482424",
-);
-
-/// Verify GLV decomposition u ≡ (±m1) + λ·(±m2) mod n via carry-safe mod_sub.
-fn glv_decomp(u: L4, m1lo: Field, m1hi: Field, s1: Field, m2lo: Field, m2hi: Field, s2: Field) {
-    let z = Field::from(0u8);
-    let m1 = [m1lo, m1hi, z, z];
-    let m2 = [m2lo, m2hi, z, z];
-    range_check_limbs::<4, 64>(m1);
-    range_check_limbs::<4, 64>(m2);
-    let sk1 = muxc(s1, mod_neg::<4, 64>(m1, NN), m1);
-    let sk2 = muxc(s2, mod_neg::<4, 64>(m2, NN), m2);
-    let lhs = mod_mul::<4, 64>(LAM, sk2, NN, NN1);
-    let rhs = mod_sub::<4, 64>(u, sk1, COMPN);
+#[xark::gadget]
+#[doc(hidden)]
+pub fn muxp(s: Field, a: Pt, b: Pt) -> Pt {
+    let mut out = b;
     let mut i = 0usize;
-    while i < 4usize {
-        aeq(lhs[i], rhs[i]);
+    while i < 16 {
+        out[i / 8][i % 8] = b[i / 8][i % 8] + s * (a[i / 8][i % 8] - b[i / 8][i % 8]);
         i += 1;
     }
+    out
+}
+/// An 8 × 32-bit value as 4 × 64-bit limbs (linear).
+fn x64(v: L8) -> L4 {
+    let t = Field::from(1u64 << 32);
+    [
+        v[0] + t * v[1],
+        v[2] + t * v[3],
+        v[4] + t * v[5],
+        v[6] + t * v[7],
+    ]
 }
 
-/// Sign-conditional point negation: s ? (x, p−y) : (x, y).
-fn negp(s: Field, x: L4, y: L4) -> Pt {
-    [x, muxc(s, mod_neg::<4, 64>(y, M_K1), y)]
-}
+// ===========================================================================
+// Fake-GLV verify (Eagen–El Housni–Masson–Piellard, ePrint 2025/933): a hinted
+// `R = u₁G + u₂Q`, and `C·G + A·Q + B·R = O` with `A`, `B` four 64-bit halves.
+// ===========================================================================
+// `OH` (the offset `O`), `HH` (the comb offset `H`), `OFF256N` (`−2^256·(O + H)`) and
+// `COMB` (the fixed-base tables).
+include!(concat!(env!("OUT_DIR"), "/comb.rs"));
 
-// GLV lattice basis (short vectors of the endomorphism sublattice): the
-// decomposition `u ↦ (k1, k2)` with `k1 + λ·k2 ≡ u (mod n)` uses
-// `c_i = ⌊(b_i·u + n/2)/n⌉` then `k1 = u − c1·a1 − c2·a2`, `k2 = c1·b1 − c2·b2`
-// (with `b2 = a1`). All magnitudes stay `< 2^128`.
-const A1: L4 = modulus_limbs::<4, 64>("0x3086d221a7d46bcde86c90e49284eb15");
-const B1: L4 = modulus_limbs::<4, 64>("0xe4437ed6010e88286f547fa90abfe4c3");
-const A2: L4 = modulus_limbs::<4, 64>("0x114ca50f7a8e2f3f657c1108d9d44cfd8");
-// (n+1)/2 — the round-half-up threshold and the sign-split boundary (`k > n/2`).
-const NHALF1: L4 = modulus_limbs::<4, 64>(
-    "57896044618658097711785492504343953926418782139537452191302581570759080747169",
-);
-
-/// Split a scalar `k ∈ [0, n)` into `(magnitude < 2^128, sign)`: the "short"
-/// signed form, `k` if `k ≤ n/2` else `−(n−k)`.
-fn signed_short(k: L4) -> (L4, Field) {
-    let s = is_ge::<4, 64>(k, NHALF1); // k > n/2  ⇔  k ≥ (n+1)/2
-    (muxc(s, mod_neg::<4, 64>(k, NN), k), s)
-}
-
-/// Derive one GLV half-decomposition of `u`: the two signed ~128-bit half-scalars
-/// `(±m1, ±m2)` with `±m1 + λ·(±m2) ≡ u (mod n)`. Returns `(m1lo2, s1, m2lo2, s2)`
-/// — the low two limbs of each magnitude and its sign bit. **Call inside a
-/// `witness_only` region:** every op here emits witness-gen but no constraints, so
-/// the whole reduction is free; the caller pins the result with `glv_decomp`.
-fn glv_split(u: L4) -> ([Field; 2], Field, [Field; 2], Field) {
-    let z = Field::from(0u8);
-    // rounded quotients c_i = ⌊(b_i·u + n/2)/n⌉  (b2 = a1)
-    let (q1, r1) = mul_divmod::<4, 64>(A1, u, NN, NN1);
-    let (q2, r2) = mul_divmod::<4, 64>(B1, u, NN, NN1);
-    let c1 = mod_add::<4, 64>(q1, [is_ge::<4, 64>(r1, NHALF1), z, z, z], NN);
-    let c2 = mod_add::<4, 64>(q2, [is_ge::<4, 64>(r2, NHALF1), z, z, z], NN);
-    // k1 = u − c1·a1 − c2·a2  (mod n)
-    let k1 = sub2::<4, 64>(
-        u,
-        mod_mul::<4, 64>(c1, A1, NN, NN1),
-        mod_mul::<4, 64>(c2, A2, NN, NN1),
-        NN,
-        NN1,
-    );
-    // k2 = c1·b1 − c2·b2  (mod n),  b2 = a1
-    let k2 = mod_sub::<4, 64>(
-        mod_mul::<4, 64>(c1, B1, NN, NN1),
-        mod_mul::<4, 64>(c2, A1, NN, NN1),
-        COMPN,
-    );
-    let (m1, s1) = signed_short(k1);
-    let (m2, s2) = signed_short(k2);
-    ([m1[0], m1[1]], s1, [m2[0], m2[1]], s2)
-}
+/// `β` with `φ(x, y) = (βx, y) = λ·(x, y)`, and `λ`.
+const BETA: L8 =
+    modulus_limbs::<8, 32>("0x7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
+const LAMBDA: L4 =
+    modulus_limbs::<4, 64>("0x5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b23bd72");
+const G: Pt = [
+    modulus_limbs::<8, 32>("0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"),
+    modulus_limbs::<8, 32>("0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8"),
+];
+/// Digits per coefficient: each `kₘ ∈ [−2^64, 2^64)` is `cₘ − 2^64`, `cₘ < 2^65`.
+const DIGITS: usize = 65;
 
 fn two64() -> Field {
     Field::from(1u128 << 64)
 }
+fn pt(c: [u32; 16]) -> Pt {
+    let mut out = [[Field::from(0u8); 8]; 2];
+    let mut i = 0usize;
+    while i < 16 {
+        out[i / 8][i % 8] = Field::from(c[i] as u64);
+        i += 1;
+    }
+    out
+}
+
+// ---- witness-region helpers: hints only, no rows -------------------------------
+fn wmul(a: L8, b: L8) -> L8 {
+    Field::hint_mulmod_divmod::<8>(a, b, M_K1, 32).1
+}
+fn wsub(a: L8, b: L8) -> L8 {
+    Field::hint_sub2::<8>(a, b, [Field::from(0u8); 8], M_K1, 32).1
+}
+fn wmuln(a: L4, b: L4) -> L4 {
+    Field::hint_mulmod_divmod::<4>(a, b, NN, 64).1
+}
+fn wsubn(a: L4, b: L4) -> L4 {
+    Field::hint_sub2::<4>(a, b, [Field::from(0u8); 4], NN, 64).1
+}
+/// `P + Q` (`x_P ≠ x_Q`) on canonical coordinates.
+fn wadd(p: Pt, q: Pt) -> Pt {
+    let w = Field::hint_mod_inverse::<8>(wsub(q[0], p[0]), M_K1, 32);
+    let l = wmul(wsub(q[1], p[1]), w);
+    let x = Field::hint_sub2::<8>(wmul(l, l), p[0], q[0], M_K1, 32).1;
+    [x, wsub(wmul(l, wsub(p[0], x)), p[1])]
+}
+/// `2P`, slope `3x²/2y`.
+fn wdbl(p: Pt) -> Pt {
+    let z = Field::from(0u8);
+    let mut two_y = p[1];
+    let mut three = [z; 8];
+    three[0] = Field::from(3u8);
+    let mut i = 0usize;
+    while i < 8 {
+        two_y[i] = p[1][i] + p[1][i];
+        i += 1;
+    }
+    let w = Field::hint_mod_inverse::<8>(two_y, M_K1, 32);
+    let l = wmul(wmul(three, wmul(p[0], p[0])), w);
+    let x = Field::hint_sub2::<8>(wmul(l, l), p[0], p[0], M_K1, 32).1;
+    [x, wsub(wmul(l, wsub(p[0], x)), p[1])]
+}
+/// `u·P` plus `2^256·off` by double-and-add from `off` (no step meets the identity).
+fn wmul1(u: L4, p: Pt, off: Pt) -> Pt {
+    let mut acc = off;
+    let mut i = 256usize;
+    while i > 0 {
+        i -= 1;
+        acc = wdbl(acc);
+        let b = Field::hint_bit(u[i / 64], i % 64);
+        acc = muxp(b, wadd(acc, p), acc);
+    }
+    acc
+}
+/// `u₁G + u₂Q`: one ladder per base, from the offsets `O` and `H` (so `Q = ±G` and
+/// `u₁G = ±u₂Q` meet no exceptional add), less `2^256·(O + H)`.
+fn wmul2(u1: L4, u2: L4, q: Pt) -> Pt {
+    let s = wadd(wmul1(u1, G, pt(OH)), wmul1(u2, q, pt(HH)));
+    wadd(s, pt(OFF256N))
+}
+/// Signed 64-bit columns (`|cᵢ| < 2^199`) as ten 64-bit limbs of their (non-negative) sum.
+fn wnorm(cols: [Field; 10]) -> [Field; 10] {
+    let mut out = [Field::from(0u8); 10];
+    let mut carry = Field::from(0u8);
+    let mut m = 0usize;
+    while m < 10 {
+        let qr = Field::hint_div_rem(cols[m] + carry + two_pow(200), two64());
+        out[m] = qr[1];
+        carry = qr[0] - two_pow(136);
+        m += 1;
+    }
+    out
+}
+fn pad10(v: L4) -> [Field; 10] {
+    let mut out = [Field::from(0u8); 10];
+    let mut i = 0usize;
+    while i < 4 {
+        out[i] = v[i];
+        i += 1;
+    }
+    out
+}
+
+// ---- the scalar relation ---------------------------------------------------------
+fn two_pow(e: usize) -> Field {
+    let mut p = Field::from(1u8);
+    let mut i = 0usize;
+    while i < e {
+        p = p + p;
+        i += 1;
+    }
+    p
+}
+/// Columns of `(k₁ + λk₂)·v` in base `2^64` (`λ = LAMBDA`'s limbs).
+fn lam_cols(k1: Field, k2: Field, v: L4) -> [Field; 7] {
+    let mut out = [Field::from(0u8); 7];
+    let mut m = 0usize;
+    while m < 7 {
+        let mut l = Field::from(0u8);
+        let mut j = 0usize;
+        while j < 4 {
+            if m >= j && m - j < 4 {
+                l += LAMBDA[j] * v[m - j];
+            }
+            j += 1;
+        }
+        out[m] = k2 * l;
+        if m < 4 {
+            out[m] += k1 * v[m];
+        }
+        m += 1;
+    }
+    out
+}
+/// Columns of `a·b` in base `2^64`.
+fn mul_cols(a: L4, b: L4) -> [Field; 7] {
+    let mut out = [Field::from(0u8); 7];
+    let mut i = 0usize;
+    while i < 4 {
+        let mut j = 0usize;
+        while j < 4 {
+            out[i + j] += a[i] * b[j];
+            j += 1;
+        }
+        i += 1;
+    }
+    out
+}
+fn add7(a: [Field; 7], b: [Field; 7]) -> [Field; 7] {
+    let mut out = a;
+    let mut m = 0usize;
+    while m < 7 {
+        out[m] += b[m];
+        m += 1;
+    }
+    out
+}
+/// The columns of `z + 2^322·n − q·n` (`2^322 = 4·2^{64·5}`).
+fn rel_cols(z: [Field; 7], q: [Field; 6]) -> [Field; 10] {
+    let mut out = [Field::from(0u8); 10];
+    let mut m = 0usize;
+    while m < 9 {
+        let mut c = if m < 7 { z[m] } else { Field::from(0u8) };
+        if m >= 5 {
+            c += Field::from(4u8) * NN[m - 5];
+        }
+        let mut j = 0usize;
+        while j < 4 {
+            if m >= j && m - j < 6 {
+                c -= NN[j] * q[m - j];
+            }
+            j += 1;
+        }
+        out[m] = c;
+        m += 1;
+    }
+    out
+}
+/// `q` with `z = (q − 2^322)·n`, from the columns of `z` (witness region).
+fn wquot(z: [Field; 7]) -> [Field; 6] {
+    let x = wnorm(rel_cols(z, [Field::from(0u8); 6]));
+    let mut one = [Field::from(0u8); 10];
+    one[0] = Field::from(1u8);
+    let q = Field::hint_mulmod_divmod::<10>(x, one, pad10(NN), 64).0;
+    [q[0], q[1], q[2], q[3], q[4], q[5]]
+}
+/// The biased carries `c_m + 2^133` of `Σ cols[m]·2^{64m} = 0` (witness region).
+fn wcarries(cols: [Field; 10]) -> [Field; 8] {
+    let mut out = [Field::from(0u8); 8];
+    let mut carry = Field::from(0u8);
+    let mut m = 0usize;
+    while m < 8 {
+        out[m] = Field::hint_div_rem(cols[m] + carry + two_pow(197), two64())[0];
+        carry = out[m] - two_pow(133);
+        m += 1;
+    }
+    out
+}
+/// Assert `Σ cols[m]·2^{64m} = 0` over the integers: the carries `c_m = h_m − 2^133`,
+/// `h_m < 2^134` (`to_bits`), satisfy `cols[m] + c_{m−1} = 2^64·c_m`, and the last column
+/// closes the chain.
+fn zero_chain(cols: [Field; 10], h: [Field; 8]) {
+    let mut carry = Field::from(0u8);
+    let mut m = 0usize;
+    while m < 9 {
+        let v = cols[m] + carry;
+        if m < 8 {
+            let _ = h[m].to_bits::<134>();
+            carry = h[m] - two_pow(133);
+            aeq(v, two64() * carry);
+        } else {
+            aeq(v, Field::from(0u8));
+        }
+        m += 1;
+    }
+}
+
+/// The fake-GLV scalar checks of `ecdsa_verify_packed` (ePrint 2025/933). Inputs: `r`,
+/// `s`, `e`, `x_R` (4 × 64-bit limbs, below `2^64` by the caller's range checks), the
+/// hinted `cₘ` (`kₘ = cₘ − 2^64`), the hinted `C`, quotients `q₁`, `q₂`, biased carries
+/// `h₁`, `h₂` of the two chains and `[t, u]` (all from the caller's witness region). Rows:
+/// `cₘ < 2^65` and `C`'s, `qᵢ`'s limbs `< 2^64` (`to_bits`, whose bits it returns: the
+/// digits of each `cₘ` and `C`'s 256 bits); `(k₂, k₃) ≠ 0` (`(k₂² + k₃²)·w = 1`); the
+/// integer identities `A·s + B·r = (q₁ − 2^322)·n` and `C·s + B·e = (q₂ − 2^322)·n` for
+/// `A = k₀ + λk₁`, `B = k₂ + λk₃` (columns in base `2^64`, carries `< 2^134` biased by
+/// `2^133`); and `x_R = r + t·n`, `t, u ∈ {0, 1}`. Proven in `formal/Formal/FakeGlvK1.lean`: every
+/// satisfying assignment has `A·s + B·r ≡ C·s + B·e ≡ 0`, `B ≢ 0 (mod n)` and
+/// `x_R ≡ r (mod n)`, and returns those bits.
+#[xark::gadget]
+#[allow(clippy::too_many_arguments)]
+pub fn fake_glv_check_k1(
+    r: [Field; 4],
+    s: [Field; 4],
+    e: [Field; 4],
+    xr: [Field; 4],
+    c: [Field; 4],
+    g: [Field; 4],
+    q1: [Field; 6],
+    q2: [Field; 6],
+    h1: [Field; 8],
+    h2: [Field; 8],
+    tu: [Field; 2],
+) -> ([[Field; DIGITS]; 4], [Field; 256]) {
+    let z = Field::from(0u8);
+    let d = [
+        c[0].to_bits::<DIGITS>(),
+        c[1].to_bits::<DIGITS>(),
+        c[2].to_bits::<DIGITS>(),
+        c[3].to_bits::<DIGITS>(),
+    ];
+    let mut gb = [z; 256];
+    let mut i = 0usize;
+    while i < 4 {
+        let b = g[i].to_bits::<64>();
+        let mut j = 0usize;
+        while j < 64 {
+            gb[64 * i + j] = b[j];
+            j += 1;
+        }
+        i += 1;
+    }
+    let mut i = 0usize;
+    while i < 6 {
+        let _ = q1[i].to_bits::<64>();
+        let _ = q2[i].to_bits::<64>();
+        i += 1;
+    }
+    let k = [
+        c[0] - two64(),
+        c[1] - two64(),
+        c[2] - two64(),
+        c[3] - two64(),
+    ];
+    let _ = (k[2] * k[2] + k[3] * k[3]).inv();
+    let bz = lam_cols(k[2], k[3], r);
+    zero_chain(rel_cols(add7(lam_cols(k[0], k[1], s), bz), q1), h1);
+    zero_chain(
+        rel_cols(add7(mul_cols(g, s), lam_cols(k[2], k[3], e)), q2),
+        h2,
+    );
+    // x_R = r + t·n over 128-bit halves (`u` the low half's carry).
+    // `t·(1 − t) = 0` rather than `require_bool`: its product folds to the constant
+    // whether `t` is the caller's hint or a harness input, so both emit one row.
+    let (t, u) = (tu[0], tu[1]);
+    aeq(t * (Field::from(1u8) - t), z);
+    aeq(u * (Field::from(1u8) - u), z);
+    let (rl, rh, xl, xh, nl, nh) = halves(r, xr);
+    aeq(rl + t * nl, xl + u * two_pow(128));
+    aeq(xh, rh + t * nh + u);
+    (d, gb)
+}
+
+/// The 128-bit halves of `r`, `x_R` and `n`.
+fn halves(r: L4, xr: L4) -> (Field, Field, Field, Field, Field, Field) {
+    let h = |v: L4| (v[0] + two64() * v[1], v[2] + two64() * v[3]);
+    let ((rl, rh), (xl, xh), (nl, nh)) = (h(r), h(xr), h(NN));
+    (rl, rh, xl, xh, nl, nh)
+}
+
+fn xor(a: Field, b: Field) -> Field {
+    a + b - Field::from(2u8) * a * b
+}
+
+/// `t[e₂ + 2e₃ + 4e₄]` by a mux tree over the three index bits.
+fn select8(t: [Pt; 8], e2: Field, e3: Field, e4: Field) -> Pt {
+    let a = [
+        muxp(e2, t[1], t[0]),
+        muxp(e2, t[3], t[2]),
+        muxp(e2, t[5], t[4]),
+        muxp(e2, t[7], t[6]),
+    ];
+    muxp(e4, muxp(e3, a[3], a[2]), muxp(e3, a[1], a[0]))
+}
 
 /// Recompose a 256-bit value from its two **128-bit halves** `[lo, hi]` (the compact
-/// public-input form) into the 4×64-bit limbs the lazy arithmetic uses. Each half
+/// public-input form) into the 4×64-bit limbs the scalar relations use. Each half
 /// is split by a `div_rem` hint into two range-checked 64-bit limbs and pinned to
 /// the half — so the halves are implicitly constrained `< 2^128` and no separate
 /// `range_check_limbs` is needed downstream.
-fn unpack(packed: [Field; 2]) -> L4 {
+#[xark::gadget]
+#[doc(hidden)]
+pub fn unpack(packed: [Field; 2]) -> L4 {
     let two64 = two64();
     let lo = Field::hint_div_rem(packed[0], two64); // [hi64, lo64]
     let hi = Field::hint_div_rem(packed[1], two64);
@@ -259,6 +458,39 @@ fn unpack(packed: [Field; 2]) -> L4 {
     aeq(packed[0], limbs[0] + limbs[1] * two64);
     aeq(packed[1], limbs[2] + limbs[3] * two64);
     limbs
+}
+
+/// The same as 8 × 32-bit limbs (the point coordinates' layout).
+#[xark::gadget]
+#[doc(hidden)]
+pub fn unpack8(packed: [Field; 2]) -> L8 {
+    let two32 = Field::from(1u64 << 32);
+    let mut out = [Field::from(0u8); 8];
+    // The split is scratch; the range checks and the two sums below pin every limb.
+    witness_begin();
+    let mut k = 0usize;
+    while k < 2 {
+        let mut v = packed[k];
+        let mut j = 0usize;
+        while j < 3 {
+            let qr = Field::hint_div_rem(v, two32);
+            out[4 * k + j] = qr[1];
+            v = qr[0];
+            j += 1;
+        }
+        out[4 * k + 3] = v;
+        k += 1;
+    }
+    witness_end();
+    range_check_limbs::<8, 32>(out);
+    let mut k = 0usize;
+    while k < 2 {
+        let o = 4 * k;
+        let sum = out[o] + two32 * (out[o + 1] + two32 * (out[o + 2] + two32 * out[o + 3]));
+        aeq(packed[k], sum);
+        k += 1;
+    }
+    out
 }
 
 impl Point {
@@ -284,12 +516,35 @@ impl Point {
     }
 }
 
-/// secp256k1 ECDSA verification core — the GLV-accelerated 4×64 lazy gadget
-/// (128-window 4-dim Shamir via the λ-endomorphism), the fastest sound variant
-/// (~1.64M constraints). Each of `qx`, `qy`, `r`, `s`, `e` is a 256-bit value as its
-/// two **128-bit halves** `[lo, hi]`, recomposed to 4×64 internally. The endomorphism
-/// decomposition is derived in-circuit at zero constraint cost (see [`glv_split`]) and
-/// pinned by [`glv_decomp`]. Wrapped by [`Point::verify`] — callers use that.
+/// `(x, βx mod p)`'s certified second coordinate: a hinted canonical product,
+/// range-checked and certified.
+fn phi_x(x: L8) -> L8 {
+    witness_begin();
+    let px = wmul(BETA, x);
+    witness_end();
+    range_check_limbs::<8, 32>(px);
+    mul_cert_k1(BETA, x, px);
+    px
+}
+
+/// secp256k1 ECDSA verification core, by fake GLV (Eagen–El Housni–Masson–Piellard,
+/// ePrint 2025/933; zkGolf b3730d4f): the prover hints `R = u₁G + u₂Q` (`u₁ = e/s`,
+/// `u₂ = r/s`), checked canonical and on the curve with `x_R ≡ r (mod n)`, and a short
+/// `(A, B) = (k₀ + λk₁, k₂ + λk₃)` with `A ≡ −B·u₂` and `C ≡ −B·u₁` (`kₘ ∈ [−2^64, 2^64)`,
+/// the lattice hint [`Field::hint_fake_glv`]); [`fake_glv_check_k1`] pins them, and the
+/// circuit proves `C·G + A·Q + B·R = O`, so `B·R = B·(u₁G + u₂Q)` with `B ≢ 0`. Group side:
+/// 65 fused steps [`ec_double_add_k1`] from the offset `O` over the 8-entry table
+/// `Q ± φQ ± R ± φR` reach `M = 2^65·O + Σₘ (2kₘ + 1)·Pₘ`; a fixed-base comb (32 windows
+/// of a byte of `C`, [`one_hot8`] over constant tables, 31 adds; Lim–Lee, CRYPTO 1994)
+/// gives `C' = 2C·G − 2^65·O`; and `M + C' = Q + φQ + R + φR` (the table's first entry),
+/// i.e. `2(C·G + A·Q + B·R) = O`. Each of `qx`, `qy`, `r`, `s`, `e` is a 256-bit value as
+/// its two 128-bit halves `[lo, hi]`. Wrapped by [`Point::verify`].
+///
+/// Exceptional cases: a step, comb add or the last add refuses `x_A ≡ x_S` and
+/// `A + S = −A`, which needs the discrete log of `O` or of the comb's `H` to reach. The
+/// table adds `(Q ± φQ) ± (R ± φR)` refuse exactly the signatures with `R = μ·Q`,
+/// `μ ∈ {±1, ±(1+λ)/(1−λ), ±(1−λ)/(1+λ)} mod n`, i.e. the nonce `k ≡ μ·q` for the key
+/// `q`: there `Q ± φQ = ±(R ± φR)`. No public key is refused.
 fn ecdsa_verify_packed(
     qx: [Field; 2],
     qy: [Field; 2],
@@ -297,8 +552,9 @@ fn ecdsa_verify_packed(
     s: [Field; 2],
     e: [Field; 2],
 ) {
-    let qx = unpack(qx);
-    let qy = unpack(qy);
+    let z = Field::from(0u8);
+    let qx = unpack8(qx);
+    let qy = unpack8(qy);
     let r = unpack(r);
     let s = unpack(s);
     let e = unpack(e);
@@ -306,84 +562,149 @@ fn ecdsa_verify_packed(
     require_lt::<4, 64>(s, NN1);
     require_lt::<4, 64>(e, NN1);
     assert_nonzero_limbs(r);
-    let s_inv = mod_inverse::<4, 64>(s, NN);
-    let u1 = mod_mul::<4, 64>(e, s_inv, NN, NN1);
-    let u2 = mod_mul::<4, 64>(r, s_inv, NN, NN1);
-    // Derive the two GLV decompositions in-circuit at ZERO constraint cost, then
-    // pin them exactly as before with `glv_decomp` — so the caller supplies only
-    // the signature `(q, r, s, e)`, no hint inputs, and the constraint count is
-    // unchanged. A wrong derivation can only fail `glv_decomp` (completeness),
-    // never forge (soundness is the pin, not the derivation).
-    witness_begin();
-    let (m11, s11, m12, s12) = glv_split(u1);
-    let (m21, s21, m22, s22) = glv_split(u2);
-    witness_end();
-    s11.require_bool();
-    s12.require_bool();
-    s21.require_bool();
-    s22.require_bool();
-    glv_decomp(u1, m11[0], m11[1], s11, m12[0], m12[1], s12);
-    glv_decomp(u2, m21[0], m21[1], s21, m22[0], m22[1], s22);
+    assert_nonzero_limbs(s);
     on_curve_k1(qx, qy);
-    let phiqx = mul_lazy_k1(BETA, qx);
-    // signed bases: ±G, ±φG, ±Q, ±φQ
-    let gs = negp(s11, G0X, G0Y);
-    let pgs = negp(s12, PHIGX, PHIGY);
-    let qs = negp(s21, qx, qy);
-    let pqs = negp(s22, phiqx, qy);
-    let z: Pt = [[Field::from(0u8); 4]; 2];
-    let mut t = [z; 16];
-    t[0] = [weak_reduce_k1(OX), weak_reduce_k1(OY)];
-    let (x1, y1) = ec_add_k1(t[0][0], t[0][1], gs[0], gs[1]);
-    t[1] = [x1, y1];
-    let (x2, y2) = ec_add_k1(t[0][0], t[0][1], pgs[0], pgs[1]);
-    t[2] = [x2, y2];
-    let (x3, y3) = ec_add_k1(t[1][0], t[1][1], pgs[0], pgs[1]);
-    t[3] = [x3, y3];
-    let (x4, y4) = ec_add_k1(t[0][0], t[0][1], qs[0], qs[1]);
-    t[4] = [x4, y4];
-    let (x5, y5) = ec_add_k1(t[1][0], t[1][1], qs[0], qs[1]);
-    t[5] = [x5, y5];
-    let (x6, y6) = ec_add_k1(t[2][0], t[2][1], qs[0], qs[1]);
-    t[6] = [x6, y6];
-    let (x7, y7) = ec_add_k1(t[3][0], t[3][1], qs[0], qs[1]);
-    t[7] = [x7, y7];
-    let (x8, y8) = ec_add_k1(t[0][0], t[0][1], pqs[0], pqs[1]);
-    t[8] = [x8, y8];
-    let (x9, y9) = ec_add_k1(t[1][0], t[1][1], pqs[0], pqs[1]);
-    t[9] = [x9, y9];
-    let (x10, y10) = ec_add_k1(t[2][0], t[2][1], pqs[0], pqs[1]);
-    t[10] = [x10, y10];
-    let (x11, y11) = ec_add_k1(t[3][0], t[3][1], pqs[0], pqs[1]);
-    t[11] = [x11, y11];
-    let (x12, y12) = ec_add_k1(t[4][0], t[4][1], pqs[0], pqs[1]);
-    t[12] = [x12, y12];
-    let (x13, y13) = ec_add_k1(t[5][0], t[5][1], pqs[0], pqs[1]);
-    t[13] = [x13, y13];
-    let (x14, y14) = ec_add_k1(t[6][0], t[6][1], pqs[0], pqs[1]);
-    t[14] = [x14, y14];
-    let (x15, y15) = ec_add_k1(t[7][0], t[7][1], pqs[0], pqs[1]);
-    t[15] = [x15, y15];
-    let u1b1 = scalar_to_bits_256([m11[0], m11[1], Field::from(0u8), Field::from(0u8)]);
-    let u1b2 = scalar_to_bits_256([m12[0], m12[1], Field::from(0u8), Field::from(0u8)]);
-    let u2b1 = scalar_to_bits_256([m21[0], m21[1], Field::from(0u8), Field::from(0u8)]);
-    let u2b2 = scalar_to_bits_256([m22[0], m22[1], Field::from(0u8), Field::from(0u8)]);
-    let mut acc: Pt = [weak_reduce_k1(OX), weak_reduce_k1(OY)];
-    let mut w = 0usize;
-    while w < 128usize {
-        let (dx, dy) = ec_double_k1(acc[0], acc[1]);
-        acc = [dx, dy];
-        let pos = 127 - w;
-        let sel = select16_k1(t, u2b2[pos], u2b1[pos], u1b2[pos], u1b1[pos]);
-        let (nx, ny) = ec_add_k1(acc[0], acc[1], sel[0], sel[1]);
-        acc = [nx, ny];
-        w += 1;
+    // The whole fake-GLV witness costs no rows; `fake_glv_check_k1` and the curve
+    // checks below pin it.
+    witness_begin();
+    let si = Field::hint_mod_inverse::<4>(s, NN, 64);
+    let u1 = wmuln(e, si);
+    let u2 = wmuln(r, si);
+    let rp = wmul2(u1, u2, [qx, qy]);
+    let k = Field::hint_fake_glv::<4>(wsubn([z; 4], u2), NN, LAMBDA, 64);
+    let c = [
+        k[0] + two64(),
+        k[1] + two64(),
+        k[2] + two64(),
+        k[3] + two64(),
+    ];
+    // C = −B·u₁ mod n, from B + 2^64·n ≥ 0.
+    let mut bc = [z; 10];
+    let mut m = 0usize;
+    while m < 5 {
+        if m < 4 {
+            bc[m] = LAMBDA[m] * k[3];
+        }
+        if m == 0 {
+            bc[m] += k[2];
+        } else {
+            bc[m] += NN[m - 1];
+        }
+        m += 1;
     }
-    let (fx, _fy) = ec_add_k1(acc[0], acc[1], CORRX, CORRY);
-    let rxn = reduce_once::<4, 64>(finalize_k1(fx), NN);
+    let g = Field::hint_mulmod_divmod::<10>(wnorm(bc), pad10(wsubn([z; 4], u1)), pad10(NN), 64).1;
+    let g = [g[0], g[1], g[2], g[3]];
+    let bz = lam_cols(k[2], k[3], r);
+    let z1 = add7(lam_cols(k[0], k[1], s), bz);
+    let z2 = add7(mul_cols(g, s), lam_cols(k[2], k[3], e));
+    let q1 = wquot(z1);
+    let q2 = wquot(z2);
+    let h1 = wcarries(rel_cols(z1, q1));
+    let h2 = wcarries(rel_cols(z2, q2));
+    let (rl, rh, _, xh, nl, _) = halves(r, x64(rp[0]));
+    let t = Field::hint_div_rem(xh - rh, two_pow(127))[0];
+    let u = Field::hint_div_rem(rl + t * nl, two_pow(128))[0];
+    witness_end();
+    // R: limbs, canonical, on the curve (gnark GHSA-7fx8: a hinted point is checked).
+    range_check_limbs::<8, 32>(rp[0]);
+    range_check_limbs::<8, 32>(rp[1]);
+    on_curve_k1(rp[0], rp[1]);
+    let (d, gb) = fake_glv_check_k1(r, s, e, x64(rp[0]), c, g, q1, q2, h1, h2, [t, u]);
+
+    // Table over P = (Q, φQ, R, φR): entry e₂ + 2e₃ + 4e₄ is A_{e₂} + σ(e₃)·B_{e₃⊕e₄},
+    // A_e = Q + σ(e)φQ, B_e = R + σ(e)φR, σ(b) = 1 − 2b; an entry with e₃ = 1 is
+    // −(B_{¬e₄} − A_{e₂}). Every `−y` is kept as `2p − y` limb-wise (limbs < 2^33, no rows).
+    let b2 = b2_k1();
+    let neg = |y: L8| -> L8 {
+        let mut out = y;
+        let mut l = 0usize;
+        while l < 8 {
+            out[l] = b2[l] - y[l];
+            l += 1;
+        }
+        out
+    };
+    let phiqx = phi_x(qx);
+    let phirx = phi_x(rp[0]);
+    let a = [
+        ec_add_k1(qx, qy, phiqx, qy),
+        ec_add_k1(qx, qy, phiqx, neg(qy)),
+    ];
+    let b = [
+        ec_add_k1(rp[0], rp[1], phirx, rp[1]),
+        ec_add_k1(rp[0], rp[1], phirx, neg(rp[1])),
+    ];
+    let na = [neg(a[0].1), neg(a[1].1)];
+    let zp: Pt = [[z; 8]; 2];
+    let mut t = [zp; 8];
     let mut i = 0usize;
-    while i < 4usize {
-        aeq(rxn[i], r[i]);
+    while i < 8 {
+        let (e2, e3, e4) = (i & 1, (i >> 1) & 1, i >> 2);
+        if e3 == 0 {
+            let (x, y) = ec_add_k1(a[e2].0, a[e2].1, b[e4].0, b[e4].1);
+            t[i] = [x, y];
+        } else {
+            let (x, y) = ec_add_k1(b[1 - e4].0, b[1 - e4].1, a[e2].0, na[e2]);
+            t[i] = [x, neg(y)];
+        }
         i += 1;
     }
+    // Digit i adds d₀·t[d₀d₁, d₀d₂, d₀d₃] = Σ dₘPₘ; d₀ = −1 gives `y ↦ 2p − y`.
+    let mut acc: Pt = pt(OH);
+    let mut w = 0usize;
+    while w < DIGITS {
+        let i = DIGITS - 1 - w;
+        let sel = select8(
+            t,
+            xor(d[0][i], d[1][i]),
+            xor(d[0][i], d[2][i]),
+            xor(d[0][i], d[3][i]),
+        );
+        let mut sy = [z; 8];
+        let mut l = 0usize;
+        while l < 8 {
+            let y = sel[1][l];
+            sy[l] = b2[l] - y + d[0][i] * (y + y - b2[l]);
+            l += 1;
+        }
+        let (x, y) = ec_double_add_k1(acc[0], acc[1], sel[0], sy);
+        acc = [x, y];
+        w += 1;
+    }
+    // C' = Σⱼ COMB[j][byte j of C] = 2C·G − 2^65·O.
+    let mut cacc: Pt = zp;
+    let mut j = 0usize;
+    while j < 32 {
+        let mut bits = [z; 8];
+        let mut l = 0usize;
+        while l < 8 {
+            bits[l] = gb[8 * j + l];
+            l += 1;
+        }
+        let hot = one_hot8(bits);
+        let mut sel: Pt = zp;
+        let mut v = 0usize;
+        while v < 256 {
+            let c = pt(COMB[j][v]);
+            let mut l = 0usize;
+            while l < 16 {
+                sel[l / 8][l % 8] += hot[v] * c[l / 8][l % 8];
+                l += 1;
+            }
+            v += 1;
+        }
+        cacc = if j == 0 {
+            sel
+        } else {
+            let (x, y) = ec_add_k1(cacc[0], cacc[1], sel[0], sel[1]);
+            [x, y]
+        };
+        j += 1;
+    }
+    // M + C' = t[0] = Q + φQ + R + φR, compared mod p.
+    let (fx, fy) = ec_add_k1(acc[0], acc[1], cacc[0], cacc[1]);
+    let mut one = [z; 8];
+    one[0] = Field::from(1u8);
+    mul_cert_k1(fx, one, t[0][0]);
+    mul_cert_k1(fy, one, t[0][1]);
 }

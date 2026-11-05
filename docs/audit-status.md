@@ -69,10 +69,10 @@ depending on `sorryAx`. Coverage (theorem names → modules):
 * **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints` (4×64-bit) and
   `mul_mod_via_Fr_limbwise_constraints_3` (3×86-bit, matching the `mod_mul_3` gadget the
   secp curves use) — the full ℕ + Fr no-wrap chain (`Formal.NonNative`).
-* **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over `G : AddCommGroup`),
-  specialised to secp256k1/r1/Grumpkin (`Formal.EcdsaVerify` + per-curve `*Group`).
-* **GLV** — `glv_sum_eq`, `glv_via_endomorphism`, `glv_endomorphism_correct` (abstract),
-  `glv_endomorphism_correct_secp256k1` (concrete φ) (`Formal.Glv` + `Formal.Secp256k1Group`).
+* **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over `G : AddCommGroup`,
+  `Formal.EcdsaVerify`).
+* **GLV** — `glv_sum_eq`, `glv_via_endomorphism`, `glv_endomorphism_correct` (abstract,
+  `Formal.Glv`).
 * **Comb / Strauss-Shamir** — `windowed_scalar_mul_sound`, `joint_strauss_shamir_correct`
   (`Formal.AdvancedGadgets`).
 * **Bit-hash gadgets** — per-primitive bit-soundness (`rotr_sound`, `xor32_sound`,
@@ -88,12 +88,12 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   `_secp256r1_sound`: the flag-free 3-limb chord addition lands on the curve with a unique
   slope (no prover freedom), from the generic `Curve` algebra at `(a,b) = (0,7)` and
   `a = −3` (`Formal.Secp256k1 / Secp256r1`).
-* **Lazy non-native reduction** — `mul_lazy_25519_value_correct` / `mul_lazy_k1_value_correct`
-  and `weak_reduce_*_value_correct`: the quotient-free pseudo-Mersenne multiply/normalise
-  the ed25519/secp256k1 incomplete-add paths use compute `a·b mod p` correctly, via the
-  Mersenne relations (`2²⁵⁵ ≡ 19`, `2²⁵⁶ ≡ 2³²+977`); `lazy_t_no_wrap` bounds every
+* **Lazy non-native reduction** — `mul_lazy_25519_value_correct`
+  and `weak_reduce_25519_value_correct`: the quotient-free pseudo-Mersenne multiply/normalise
+  the ed25519 incomplete-add path uses compute `a·b mod p` correctly, via the
+  Mersenne relations (`2²⁵⁵ ≡ 19`); `lazy_t_no_wrap` bounds every
   intermediate `< 2²⁵³ < r` so the `Fr` arithmetic lifts faithfully to ℕ
-  (`Formal.Lazy25519 / LazyK1`). Discharges the "non-native limb bridge" trust boundary
+  (`Formal.Lazy25519`). Discharges the "non-native limb bridge" trust boundary
   `Formal.Edwards` names for the lazy path.
 * **Merkle membership** — `Xark.Templates.CondSwap.soundness`, over `cond_swap`'s exported
   rows: the template forces its position bit boolean and its output to be the input pair in
@@ -132,12 +132,6 @@ exhaustive computation over the 256-element byte range — `gf256_mul_inv` (`x·
 (`Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]` over all 256). These use `native_decide`, adding
 `Lean.ofReduceBool`-style axioms — strictly weaker than `axiom`, since the propositions are
 pure computations the compiled bytecode deterministically evaluates.
-
-The secp256k1 GLV constants are checked the same way in `Formal.Secp256k1Group`:
-`secp256k1_beta_cube_eq_one` (`β³ = 1`), `secp256k1_G_nonsingular` and
-`secp256k1_phi_eigenvalue_at_G` (`λ·G = φ(G)`) — and so every theorem built on them
-(`glv_endomorphism_correct_secp256k1`, `secp256k1_phi_acts_as_lambda`, …). Moving these to
-the kernel would need a kernel-evaluable scalar multiplication.
 
 ### AES S-box bit-level soundness
 
@@ -200,9 +194,7 @@ The single largest soundness surface — every ECDSA proof depends on:
 * `enforce_in_range_one_to_n` — `r, s ∈ [1, n−1]`. Without it a malicious prover could
   exploit the `inv_mod(s)` step.
 * GLV decomposition (`glv_decompose_in_circuit`) — proves `k = k1 + λ·k2 (mod n)` with
-  `|k1|, |k2| < 2^129`. Kernel proven (`glv_via_endomorphism` + `glv_endomorphism_correct`);
-  concrete `secp256k1_phi`, homomorphism, and eigenvalue discharged in `Formal.Secp256k1Group`
-  (`secp256k1_phi_hom`, `secp256k1_phi_eigenvalue_at_G`, `secp256k1_phi_acts_as_lambda`).
+  `|k1|, |k2| < 2^129`. Kernel proven (`glv_via_endomorphism` + `glv_endomorphism_correct`).
 * Fixed-base comb tables for `u1·G` — core proven (`windowed_scalar_mul_sound`); the
   comb-row-2 doubling exception is in scope of the same proof.
 

@@ -3,8 +3,6 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Secp256r1
-import Formal.EcdsaVerify
 import Mathlib
 import Formal.CurvePrimes
 
@@ -14,10 +12,8 @@ set_option linter.style.longLine false
 /-!
 # secp256r1 point group as a concrete `AddCommGroup`
 
-Mirrors `Formal.Secp256k1Group` for **secp256r1** (NIST P-256). Closes the
-end-to-end chain at `G = Secp256r1Point` so that `EcdsaVerifyRel` and
-`ecdsa_verify_compose` specialise to a fully concrete statement at the
-actual NIST P-256 point group `{(x, y) : ZMod p × ZMod p // y² = x³ − 3·x + b} ∪ {∞}`.
+Mirrors `Formal.Secp256k1Group` for **secp256r1** (NIST P-256): the curve the
+secp256r1 template proofs (`Formal.EcR1`) work in, the NIST P-256 point group `{(x, y) : ZMod p × ZMod p // y² = x³ − 3·x + b} ∪ {∞}`.
 
 ## Strategy: reuse mathlib's `WeierstrassCurve.Affine.Point`
 
@@ -44,7 +40,6 @@ Pratt certificate (`Formal.CurvePrimes`, kernel-checked; see `Formal.Pratt`).
 | `secp256r1Curve`                  | the short Weierstrass curve `y² = x³ − 3·x + b`        |
 | `Secp256r1Point`                  | nonsingular points of `secp256r1Curve` ∪ {∞}           |
 | `Secp256r1Point.addCommGroup`     | inherited `AddCommGroup` instance                      |
-| `ecdsa_verify_compose_secp256r1`  | `ecdsa_verify_compose` at `G = Secp256r1Point`         |
 -/
 
 namespace Xark
@@ -106,24 +101,5 @@ end Secp256r1Point
 group law (mathlib instance, inherited via `abbrev`). -/
 instance Secp256r1Point.addCommGroup : AddCommGroup Secp256r1Point :=
   inferInstance
-
-/-! ## Headline: full ECDSA-verify soundness specialised to secp256r1 -/
-
-/-- **ECDSA-verify end-to-end soundness, specialised to secp256r1.**
-Direct specialisation of `Formal.EcdsaVerify.ecdsa_verify_compose` at
-`G = Secp256r1Point`. -/
-theorem ecdsa_verify_compose_secp256r1
-    {n : ℕ} [NeZero n] {g Q : Secp256r1Point} {xProj : Secp256r1Point → ZMod n}
-    {e r s w u₁ u₂ : ZMod n} {acc₁ acc₂ Rpt : Secp256r1Point}
-    (h_r_ne : r ≠ 0) (h_s_ne : s ≠ 0)
-    (h_w : s * w = 1)
-    (h_u1_nat : u₁.val = (e.val * w.val) % n)
-    (h_u2_nat : u₂.val = (r.val * w.val) % n)
-    (h_acc1 : acc₁ = u₁.val • g)
-    (h_acc2 : acc₂ = u₂.val • Q)
-    (h_R : Rpt = acc₁ + acc₂)
-    (h_r_eq : r = xProj Rpt) :
-    EcdsaVerifyRel n g Q xProj e r s :=
-  ecdsa_verify_compose h_r_ne h_s_ne h_w h_u1_nat h_u2_nat h_acc1 h_acc2 h_R h_r_eq
 
 end Xark

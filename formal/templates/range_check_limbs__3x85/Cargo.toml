@@ -1,0 +1,17 @@
+# The `range_check_limbs::<3, 86>` harness: every limb a fresh variable.
+[package]
+name = "range-check-limbs-3x85-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+xark-bignum = { path = "../../../gadgets/xark-bignum", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

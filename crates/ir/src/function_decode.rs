@@ -184,6 +184,13 @@ fn get_witness_with(
             modulus: lcs(b, p, lc),
             limb_bits: get_uv(b, p) as u32,
         },
+        12 => WitnessGen::FakeGlv {
+            out: get_ids(b, p),
+            u: lcs(b, p, lc),
+            modulus: lcs(b, p, lc),
+            lambda: lcs(b, p, lc),
+            limb_bits: get_uv(b, p) as u32,
+        },
         11 => WitnessGen::Sub2 {
             qabs: get_uv(b, p) as u32,
             r: get_ids(b, p),
@@ -211,7 +218,9 @@ fn witness_out(op: &WitnessGen) -> VarId {
         WitnessGen::Bits { outs, .. } => *outs.first().unwrap_or(&0),
         WitnessGen::DivRem { q, .. } => *q,
         WitnessGen::MulModDivMod { q, r, .. } => *q.first().or_else(|| r.first()).unwrap_or(&0),
-        WitnessGen::ModInverse { out, .. } => *out.first().unwrap_or(&0),
+        WitnessGen::ModInverse { out, .. } | WitnessGen::FakeGlv { out, .. } => {
+            *out.first().unwrap_or(&0)
+        }
         WitnessGen::Sub2 { qabs, .. } => *qabs,
     }
 }

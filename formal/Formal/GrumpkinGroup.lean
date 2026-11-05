@@ -4,8 +4,6 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Gadgets
-import Formal.Curve
-import Formal.EcdsaVerify
 import Mathlib
 import Formal.CurvePrimes
 
@@ -16,10 +14,8 @@ set_option linter.style.longLine false
 # Grumpkin point group as a concrete `AddCommGroup`
 
 Mirrors `Formal.Secp256k1Group` for **Grumpkin** (the BN254 embedded curve
-used by the xark scalar-mul gadget). Closes the end-to-end chain at
-`G = GrumpkinPoint` so that `EcdsaVerifyRel` and `ecdsa_verify_compose`
-specialise to a fully concrete statement at the actual Grumpkin point group
-`{(x, y) : ZMod r × ZMod r // y² = x³ − 17} ∪ {∞}`.
+used by the xark scalar-mul gadget): the actual Grumpkin point group
+`{(x, y) : ZMod r × ZMod r // y² = x³ − 17} ∪ {∞}` as an `AddCommGroup`.
 
 ## Strategy: reuse mathlib's `WeierstrassCurve.Affine.Point`
 
@@ -44,7 +40,6 @@ is the 254-bit BN254 scalar field prime — the standard `ark_bn254::Fr` modulus
 | `grumpkinCurve`                   | the short Weierstrass curve `y² = x³ − 17` over `ZMod r` |
 | `GrumpkinPoint`                   | nonsingular points of `grumpkinCurve` ∪ {∞}            |
 | `GrumpkinPoint.addCommGroup`      | inherited `AddCommGroup` instance                      |
-| `ecdsa_verify_compose_grumpkin`   | `ecdsa_verify_compose` at `G = GrumpkinPoint`          |
 -/
 
 namespace Xark
@@ -98,24 +93,5 @@ end GrumpkinPoint
 group law (mathlib instance, inherited via `abbrev`). -/
 instance GrumpkinPoint.addCommGroup : AddCommGroup GrumpkinPoint :=
   inferInstance
-
-/-! ## Headline: full ECDSA-verify soundness specialised to Grumpkin -/
-
-/-- **ECDSA-verify end-to-end soundness, specialised to Grumpkin.**
-Direct specialisation of `Formal.EcdsaVerify.ecdsa_verify_compose` at
-`G = GrumpkinPoint`. -/
-theorem ecdsa_verify_compose_grumpkin
-    {n : ℕ} [NeZero n] {g Q : GrumpkinPoint} {xProj : GrumpkinPoint → ZMod n}
-    {e r s w u₁ u₂ : ZMod n} {acc₁ acc₂ Rpt : GrumpkinPoint}
-    (h_r_ne : r ≠ 0) (h_s_ne : s ≠ 0)
-    (h_w : s * w = 1)
-    (h_u1_nat : u₁.val = (e.val * w.val) % n)
-    (h_u2_nat : u₂.val = (r.val * w.val) % n)
-    (h_acc1 : acc₁ = u₁.val • g)
-    (h_acc2 : acc₂ = u₂.val • Q)
-    (h_R : Rpt = acc₁ + acc₂)
-    (h_r_eq : r = xProj Rpt) :
-    EcdsaVerifyRel n g Q xProj e r s :=
-  ecdsa_verify_compose h_r_ne h_s_ne h_w h_u1_nat h_u2_nat h_acc1 h_acc2 h_R h_r_eq
 
 end Xark

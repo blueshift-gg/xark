@@ -64,6 +64,15 @@ mod ffi {
             n: u32,
             bits: u32,
         );
+        #[cfg_attr(target_arch = "wasm32", link_name = "hint_fake_glv")]
+        pub fn xark_hint_fake_glv(
+            out: *mut Field,
+            u: *const Field,
+            m: *const Field,
+            lambda: *const Field,
+            n: u32,
+            bits: u32,
+        );
         #[cfg_attr(target_arch = "wasm32", link_name = "hint_sub2")]
         pub fn xark_hint_sub2(
             qabs: *mut Field,
@@ -211,6 +220,23 @@ pub(crate) fn hint_mod_inverse<const N: usize>(
 ) -> [Field; N] {
     out_n(|o| unsafe {
         ffi::xark_hint_mod_inverse(o, a.as_ptr(), m.as_ptr(), N as u32, bits as u32)
+    })
+}
+pub(crate) fn hint_fake_glv<const N: usize>(
+    u: [Field; N],
+    m: [Field; N],
+    lambda: [Field; N],
+    bits: usize,
+) -> [Field; 4] {
+    out_n(|o| unsafe {
+        ffi::xark_hint_fake_glv(
+            o,
+            u.as_ptr(),
+            m.as_ptr(),
+            lambda.as_ptr(),
+            N as u32,
+            bits as u32,
+        )
     })
 }
 pub(crate) fn hint_sub2<const N: usize>(

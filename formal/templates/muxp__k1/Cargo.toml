@@ -1,0 +1,17 @@
+# The `muxp_k1` harness: every input a fresh variable.
+[package]
+name = "muxp-k1-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+xark-secp256k1 = { path = "../../../gadgets/xark-secp256k1", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

@@ -19,6 +19,7 @@ xark = { path = "../../crates/lang", version = "0.3.0" }
 [dev-dependencies]
 xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
 xark-ir = { path = "../../crates/ir", version = "0.3.0" }
+num-bigint.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

@@ -5,7 +5,7 @@
 //! the same call can emit other rows: a constant input folds, a decomposition memo
 //! hit reuses bits from outside the call, a caller's `require_eq` merges into it, a
 //! witness branch guards it. This builds every example with the gadget markers,
-//! checks that build is the production circuit (its digest is the one in
+//! checks that build keys the production rows (its keyed-rows digest is the one in
 //! `tests/stable-digests.txt`), and classifies each call of a gadget with a
 //! harness and a committed `formal/Formal/Templates/*.lean`:
 //!
@@ -28,6 +28,9 @@
 //!   same input at the same width, or the proven bits its input sums;
 //! * **covered with LC plugs (assumptions discharged by producers …)**: LC plugs to a
 //!   gadget assuming bit inputs, each a proven bit (see [`in_context`]);
+//! * **covered: inside a covered / an allowlisted `G` call**: nested in a call of
+//!   proven gadget `G` that is covered, or LC plugs listed in the allowlist (see
+//!   [`inside_accepted`]);
 //! * **refused**: the recorder can't attribute its rows exactly to the call (the
 //!   reason says why);
 //! * **different rows**: neither.
@@ -35,7 +38,8 @@
 //! Calls are grouped by (gadget, circuit, call site, classification). A refused or
 //! different group fails the check unless `formal/coverage-allowlist.txt` lists it
 //! with a reason; an entry no group matches fails too, so the list stays current.
-//! A missing or stale `Consts/<Gadget>.lean` fails (`--update` rewrites them).
+//! A missing or stale `Consts/<Gadget>.lean` fails (`--update` rewrites them), and so
+//! does a call of a `#[gadget]` with no harness.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
@@ -106,6 +110,8 @@ struct Call {
     outputs: Vec<LinearCombination>,
     rows: usize,
     witnesses: u32,
+    /// The innermost enclosing call of a proven gadget, as an index in the circuit's calls.
+    parent: Option<usize>,
 }
 
 pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
@@ -135,11 +141,14 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
     // Keyed by harness: a generic gadget has one per instantiation.
     let vectors = Mutex::new(BTreeMap::<String, Vectors>::new());
     let failures = Mutex::new(Vec::new());
+    let listed = allowlist()?;
+    let allowed = |k: &str| listed.contains_key(k);
     crate::parallel(targets, crate::default_jobs(), |dir| {
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         let want = examples.then(|| digests.get(name.as_str()).map(|d| d.to_string()));
         match calls(&dir, &name, want, &proven) {
-            Ok(calls) => {
+            Ok(mut calls) => {
+                inside_accepted(&mut calls, &name, &allowed);
                 let (mut g, mut v) = (groups.lock().unwrap(), vectors.lock().unwrap());
                 for c in calls {
                     if let Some(k) = c.consts {
@@ -333,10 +342,18 @@ fn calls(
         _ => 3,
     };
     let mut calls: Vec<Call> = Vec::new();
+    // Each recorded call's index in `calls` (proven gadgets only), and its parent.
+    let mut index: Vec<Option<usize>> = Vec::new();
+    let parents: Vec<Option<usize>> = out.gadgets.iter().map(|c| c.parent).collect();
+    let mut unproven = BTreeSet::new();
     for c in out.gadgets {
         let Some(ps) = proven.get(&c.name) else {
+            // Every recorded call is of a `#[gadget]`; this one has no harness, so no proof.
+            unproven.insert(format!("`{}` at {}", c.name, c.site.replace(&root, "")));
+            index.push(None);
             continue;
         };
+        index.push(Some(calls.len()));
         let (p, (class, consts)) = ps
             .iter()
             .map(|p| (p, classify(c.template.clone(), p)))
@@ -352,15 +369,69 @@ fn calls(
             outputs: c.outputs,
             rows: c.rows,
             witnesses: c.witnesses,
+            parent: None,
         });
     }
+    if !unproven.is_empty() {
+        let calls: Vec<String> = unproven.into_iter().collect();
+        bail!(
+            "a #[gadget] with no harness under formal/templates/: {}",
+            calls.join(", ")
+        );
+    }
     in_context(&mut calls, &out.gadget_rows);
+    // Each call's innermost enclosing call of a proven gadget, as an index in `calls`.
+    for (i, me) in index.iter().enumerate() {
+        let Some(me) = *me else { continue };
+        let mut up = parents[i];
+        while let Some(a) = up {
+            if let Some(k) = index[a] {
+                calls[me].parent = Some(k);
+                break;
+            }
+            up = parents[a];
+        }
+    }
     Ok(calls)
+}
+
+/// A call nested in an accepted call of a proven gadget is covered: its rows are part of
+/// that call's, which the gadget's proof is about (`soundness_inst` when the enclosing
+/// call has LC plugs, whose `Assumptions` its allowlist entry names the enforcer of).
+/// Accepted: covered, or allowlisted as LC plugs. Parents come first, so an ancestor's
+/// class is final when its descendants are visited.
+fn inside_accepted(calls: &mut [Call], circuit: &str, allowed: &dyn Fn(&str) -> bool) {
+    for i in 0..calls.len() {
+        let mut up = calls[i].parent;
+        while let Some(k) = up {
+            let (gadget, class) = (&calls[k].gadget, &calls[k].class);
+            let how = if class.starts_with("covered") {
+                Some("a covered")
+            } else if class.starts_with("LC plugs")
+                && allowed(&key(gadget, circuit, &calls[k].site, class))
+            {
+                Some("an allowlisted")
+            } else {
+                None
+            };
+            if let Some(how) = how {
+                calls[i].class = format!("covered: inside {how} `{gadget}` call");
+                // Its proof is the parent's: no obligation of its own.
+                calls[i].consts = None;
+                break;
+            }
+            up = calls[k].parent;
+        }
+    }
 }
 
 /// The gadgets whose `Spec` makes every output a bit (on inputs meeting their
 /// `Assumptions`): `ToBits.spec_isBit`, `ToBitsCanonical.spec_isBit`,
 /// `Reduce.spec_isBit`, and each bitwise `BIT_ASSUMING` gadget's `outs_isBit`.
+/// Gadgets whose `Assumptions` read only the first half of their inputs (`x`), so a call
+/// whose constants are all in the second half (`m₋₁`'s limbs) needs no obligation.
+const UNASSUMED_TAIL: [&str; 1] = ["xark_bignum::require_lt"];
+
 const BIT_PRODUCERS: [&str; 10] = [
     "xark::lang::to_bits",
     "xark::lang::to_bits_canonical",
@@ -385,8 +456,8 @@ const FREE_PRODUCERS: [&str; 3] = [
 /// The gadgets whose `Assumptions` are exactly that their first `n` inputs are bits
 /// (`usize::MAX`: every input), so proven bit inputs discharge them (`Xor`, `Or`,
 /// `Add32`'s `Assumptions`, `Xark.HashOps.Assumptions` for `xor3`, `maj3`, `chi`, `ch`,
-/// and `ScalarMul.Assumptions`, the 128 scalar bits before `P`).
-const BIT_ASSUMING: [(&str, usize); 8] = [
+/// `ScalarMul.Assumptions`, the 128 scalar bits before `P`, and `OneHot8.Assumptions`).
+const BIT_ASSUMING: [(&str, usize); 9] = [
     ("xark::lang::xor", usize::MAX),
     ("xark::lang::or", usize::MAX),
     ("xark_bits::add32", usize::MAX),
@@ -395,6 +466,7 @@ const BIT_ASSUMING: [(&str, usize); 8] = [
     ("xark_bits::chi", usize::MAX),
     ("xark_bits::ch", usize::MAX),
     ("xark_grumpkin::scalar_mul", 128),
+    ("xark_bignum::one_hot8", usize::MAX),
 ];
 
 /// A linear combination's identity mod `r` (for matching wires across calls).
@@ -595,6 +667,18 @@ fn classify(
                         "covered with constant plugs (no assumptions)".into(),
                         Some(Vec::new()),
                     )
+                } else if !k.is_empty()
+                    && distinct
+                    && vars.len() + k.len() == sub.len()
+                    && UNASSUMED_TAIL.contains(&p.template.name.as_str())
+                    && k.iter()
+                        .all(|(i, _)| *i as usize >= p.template.inputs.len() / 2)
+                {
+                    // `soundness_consts` needs nothing of these constants.
+                    (
+                        "covered with constant plugs (none it assumes anything of)".into(),
+                        None,
+                    )
                 } else if !k.is_empty() && distinct && vars.len() + k.len() == sub.len() {
                     let class = format!("covered with constant plugs ({})", vector_name(&k));
                     (class, Some(k))
@@ -740,7 +824,9 @@ fn consts_file(gadget: &str, module: &str, proof: &str, vectors: &Vectors) -> St
          -- needing exactly these.\n\
          import {proof}\n\n\
          set_option linter.style.header false\n\
-         set_option linter.style.longLine false\n\n\
+         set_option linter.style.longLine false\n\
+         -- One `simp` serves every gadget: `IsBit` is unused where `Assumptions` has no bit.\n\
+         set_option linter.unusedSimpArgs false\n\n\
          namespace Xark.Templates.{module}.Consts\n\
          open Xark.Template\n"
     );
@@ -827,6 +913,7 @@ mod tests {
             outputs: outputs.iter().map(|&v| var(v)).collect(),
             rows,
             witnesses: if rows == 0 { 0 } else { 1 },
+            parent: None,
         }
     }
 

@@ -253,7 +253,10 @@ pub(crate) fn render(t: &GadgetTemplate) -> Result<String> {
             WitnessGen::DivRem { q, r, num, den } => {
                 format!(".divRem {} {} {} {}", wit(*q)?, wit(*r)?, lc(num), lc(den))
             }
-            WitnessGen::MulModDivMod { .. } | WitnessGen::ModInverse { .. } | WitnessGen::Sub2 { .. } => {
+            WitnessGen::MulModDivMod { .. }
+            | WitnessGen::ModInverse { .. }
+            | WitnessGen::FakeGlv { .. }
+            | WitnessGen::Sub2 { .. } => {
                 bail!("its big-integer hints have no Lean meaning yet: add them to Formal/Template.lean's `Hint`")
             }
         });

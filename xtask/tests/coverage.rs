@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::process::Command;
 
-/// Build `src` as circuit crate `name` (depending on `xark` and `xark-bits`), run
+/// Build `src` as circuit crate `name` (depending on `xark`, `xark-bits` and `xark-bignum`), run
 /// the coverage check on it, and return whether it passed and its output.
 fn coverage(name: &str, src: &str) -> (bool, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -15,11 +15,13 @@ fn coverage(name: &str, src: &str) -> (bool, String) {
         format!(
             "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
              [lib]\npath = \"src/lib.rs\"\n\n[dependencies]\n\
-             xark = {{ path = \"{lang}\" }}\nxark-bits = {{ path = \"{bits}\" }}\n\n\
+             xark = {{ path = \"{lang}\" }}\nxark-bits = {{ path = \"{bits}\" }}\n\
+             xark-bignum = {{ path = \"{bignum}\" }}\n\n\
              [lints.rust]\nunexpected_cfgs = {{ level = \"warn\", check-cfg = ['cfg(xark)'] }}\n\n\
              [workspace]\n",
             lang = root.join("crates/lang").display(),
             bits = root.join("gadgets/xark-bits").display(),
+            bignum = root.join("gadgets/xark-bignum").display(),
         ),
     )
     .unwrap();
@@ -226,5 +228,85 @@ fn lc_plugs_are_covered_only_when_every_input_is_a_proven_bit() {
     assert!(
         xor.contains(": 32 calls LC plugs: the caller must enforce Assumptions — not allowlisted"),
         "{xor}"
+    );
+}
+
+/// A `mul_cert_k1` nested in a covered `ec_add_k1_check` is covered by the
+/// enclosing proof (its rows are part of that call's); the same certificates nested
+/// in an `ec_add_k1_check` with linear-combination plugs no allowlist entry names,
+/// and the gadget called directly with such plugs, are not.
+#[test]
+fn a_nested_call_is_covered_only_inside_a_covered_parent() {
+    let (ok, text) = coverage(
+        "nested-cert",
+        "use xark::{Field, Private, circuit};\n\
+         \n\
+         #[circuit]\n\
+         pub fn nested(p: Private<[Field; 120]>, x: Private<Field>, z: Private<Field>) {\n\
+         \x20   let l = |i: usize| core::array::from_fn::<Field, 8, _>(|j| p[8 * i + j]);\n\
+         \x20   xark_bignum::ec_add_k1_check(l(0), l(1), l(2), l(3), l(4), l(5), l(6), l(7));\n\
+         \x20   xark_bignum::mul_cert_k1([x; 8], [x; 8], [x; 8]);\n\
+         \x20   xark_bignum::ec_add_k1_check([z; 8], l(8), l(9), l(10), l(11), l(12), l(13), l(14));\n\
+         }\n",
+    );
+    assert!(!ok, "the check passed:\n{text}");
+    let add = lines(&text, 6);
+    assert!(add.ends_with(": 1 call covered"), "{add}");
+    let nested: Vec<&str> = text
+        .lines()
+        .filter(|l| {
+            l.starts_with("xark_bignum::mul_cert_k1") && l.contains("xark-bignum/src/lib.rs")
+        })
+        .collect();
+    let inside: Vec<&&str> = nested.iter().filter(|l| l.contains("inside")).collect();
+    assert_eq!(inside.len(), 4, "{text}");
+    for l in inside {
+        assert!(
+            l.ends_with(": 1 call covered: inside a covered `xark_bignum::ec_add_k1_check` call"),
+            "{l}"
+        );
+    }
+    // The LC-plug parent's certificates are classified on their own.
+    assert!(nested.len() > 4, "{text}");
+    let bad = lines(&text, 8);
+    assert!(
+        bad.ends_with(": 1 call LC plugs: the caller must enforce Assumptions — not allowlisted"),
+        "{bad}"
+    );
+    // `[x; 8]` folds the product at `ω = −1` (`Σ (−1)ʲ·x = 0`) to a constant.
+    let direct = lines(&text, 7);
+    assert!(
+        direct.ends_with(
+            ": 1 call LC plugs: the caller must enforce Assumptions (after folding constants) \
+             — not allowlisted"
+        ),
+        "{direct}"
+    );
+}
+
+/// A `#[gadget]` with no harness under `formal/templates/` has no proof: its call
+/// fails the check, naming the gadget and its site, instead of being skipped.
+#[test]
+fn a_gadget_with_no_harness_fails_naming_it() {
+    let (ok, text) = coverage(
+        "harness-less",
+        "use xark::{Field, Private, circuit, gadget};\n\
+         \n\
+         #[gadget]\n\
+         pub fn square(x: Field) -> Field {\n\
+         \x20   x * x\n\
+         }\n\
+         \n\
+         #[circuit]\n\
+         pub fn unproven(a: Private<Field>) {\n\
+         \x20   xark::require_eq(square(a), Field::from(4u8));\n\
+         }\n",
+    );
+    assert!(!ok, "the check passed:\n{text}");
+    assert!(
+        text.lines().any(|l| l.contains("harness_less::square")
+            && l.contains("no harness under formal/templates/")
+            && l.contains("/src/lib.rs:10:")),
+        "{text}"
     );
 }
