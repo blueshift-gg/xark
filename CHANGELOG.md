@@ -36,6 +36,9 @@ gadgets now check more:
   fused incomplete step per bit over signed digits, and windowed lookups from
   constant tables for Pedersen (3,318 → 772 rows). `scalar_mul` pins its own bits
   boolean. The seven Grumpkin and Pedersen examples change.
+- The AES S-box is a select over its constant 256-byte table (687 → 34 rows),
+  proven to output `S(x)` for every byte: `aes` is 145,944 → 15,360 rows,
+  `aes256_gcm` 931,512 → 209,883. The five AES examples change.
 
 ### Highlights
 
@@ -378,6 +381,8 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Removed
 
+- `xark-aes`'s `gf_mul`, `gf_square` and `gf_inv` (the S-box no longer computes
+  `b²⁵⁴`).
 - `xark-pedersen`'s `ec_add`, `ec_double` and `scalar_mul` helpers (the hash no
   longer uses them; `xark-grumpkin` has the point operations).
 - `xark-rustc` and the pinned nightly.
