@@ -13,6 +13,7 @@ publish = false
 #   nova_fold     -> grumpkin_nova_fold
 #   ivc           -> grumpkin_ivc
 #   complete_add  -> grumpkin_complete_add
+#   pedersen_tables -> xark-pedersen (src/tables.rs, formal/Formal/PedersenData.lean, KATs)
 # The Poseidon2 challenges use `xark-poseidon2`'s host `native` module: the same
 # permutation code as the in-circuit gadget.
 

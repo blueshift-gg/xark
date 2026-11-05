@@ -135,6 +135,20 @@ import Formal.Templates.EdTorsionCheck
 import Formal.EdCurveCheck
 import Formal.Templates.FakeGlvCheck25519
 import Formal.FakeGlv25519
+import Formal.GrumpkinOrder
+import Formal.PedersenData
+import Formal.Templates.PedersenHash
+import Formal.PedersenHash
+import Formal.GrumpkinMul
+import Formal.SignedMul
+import Formal.Templates.ScalarMul
+import Formal.ScalarMul
+import Formal.Templates.Consts.ScalarMul
+import Formal.Templates.WideScalarMul
+import Formal.WideScalarMul
+import Formal.Templates.Consts.WideScalarMul
+import Formal.Templates.MultiScalarMul
+import Formal.MultiScalarMul
 -- What the zkGolf specs import: built here so CI keeps the pinned Clean usable.
 import Clean.Utils.Bitwise
 import Clean.Utils.Vector
