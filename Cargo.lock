@@ -4659,6 +4659,7 @@ version = "0.3.0"
 name = "xark-ed25519"
 version = "0.3.0"
 dependencies = [
+ "curve25519-dalek",
  "ed25519-dalek",
  "num-bigint 0.4.8",
  "sha2 0.10.9",

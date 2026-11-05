@@ -14,15 +14,16 @@ import Formal.Wrappers
 import Formal.Bookkeeping
 import Formal.AdvancedGadgets
 import Formal.Poseidon2Bn254T3
-import Formal.Lazy25519
 import Formal.GF128
 import Formal.Aes256
 import Formal.TemplateSolve
 import Formal.Gadgets
 import Formal.Secp256k1Group
 import Formal.Edwards
+
 import Formal.Secp256r1Group
 import Formal.GrumpkinGroup
+
 
 import Formal.Rewrites
 import Formal.Template
@@ -100,7 +101,9 @@ import Formal.RangeCheckLimbs
 import Formal.RangeCheckLimbs8x32
 import Formal.RangeCheckLimbs4x64
 import Formal.RangeCheckLimbs3x86
+import Formal.Templates.Mux
 import Formal.Mux
+import Formal.Templates.Consts.Mux
 import Formal.Unpack
 import Formal.ScalarToBits
 import Formal.Templates.Consts.MuxpR1
@@ -118,6 +121,20 @@ import Formal.Templates.FakeGlvCheckR1
 import Formal.FakeGlvR1
 import Formal.Templates.ToBits85
 import Formal.ToBits85
+import Formal.Ed25519Primes
+import Formal.Ed25519Curve
+import Formal.Templates.MulCert25519
+import Formal.MulCert25519
+import Formal.Templates.Consts.MulCert25519
+import Formal.EdCheck
+import Formal.Templates.EdOnCurveCheck
+import Formal.Templates.EdFCheck
+import Formal.Templates.EdDoubleCheck
+import Formal.Templates.EdAddCheck
+import Formal.Templates.EdTorsionCheck
+import Formal.EdCurveCheck
+import Formal.Templates.FakeGlvCheck25519
+import Formal.FakeGlv25519
 -- What the zkGolf specs import: built here so CI keeps the pinned Clean usable.
 import Clean.Utils.Bitwise
 import Clean.Utils.Vector
