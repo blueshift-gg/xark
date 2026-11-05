@@ -57,7 +57,9 @@ gadgets now check more:
   hashes, AES, ECDSA, EdDSA, Grumpkin, Pedersen) are exported from the compiler and
   proven sound in `formal/`; CI fails when the code stops emitting a proven
   template or a production call isn't covered, and the secp256k1 ECDSA circuit is
-  composed in Lean from its calls, its rows hashed against the compiler's.
+  composed in Lean from its calls, its rows hashed against the compiler's. Every
+  minimizer run on the keyed path writes a certificate a Lean checker accepts,
+  proven to mean the keyed rows have the same solutions and eliminate no input.
 
 ### Changed
 
