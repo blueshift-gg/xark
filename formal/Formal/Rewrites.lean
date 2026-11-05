@@ -269,6 +269,17 @@ theorem const_mul_sound (S : List (Row F V)) (a b : F) (t : V) (τ : V → F) :
     simp only [Row.Sat, Row.mul, LC.eval_cst, LC.eval_var] at h
     rw [LC.eval_cst, h]
 
+/-- **Folding a hint of a constant.** Writing a constant `c` in place of a hint's
+variable `h` keeps exactly the original solutions that give `h` the value `c`: the
+fold adds none. That `c` is the honest value (`host.rs`, `Intr::HintBit`: bit `i` of
+the constant input `k`) is the frontend's computation, not proved here; the test
+`hint_bit_of_a_constant_folds` checks it against the unfolded circuit. A row the
+substitution leaves without variables either holds, and is dropped (`sat_drop`), or
+never does, which the frontend reports as a compile error. -/
+theorem const_hint_sound (S : List (Row F V)) (h : V) (c : F) (τ : V → F) :
+    Sat (subst S h (LC.cst c)) τ ↔ Sat S (Function.update τ h c) := by
+  simpa using sat_subst S h (LC.cst c) τ
+
 /-! ## Branch guards
 
 A witness branch runs both arms. A `require` (`assert!`, `require_eq`, the

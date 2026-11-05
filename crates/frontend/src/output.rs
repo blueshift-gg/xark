@@ -31,6 +31,10 @@ pub struct LowerOutput {
     /// Every `#[gadget]` call as a template (or why it can't be one), when recorded
     /// ([`crate::lower_recording_gadgets`]); else empty.
     pub gadgets: Vec<crate::RecordedCall>,
+    /// When recording, the rows `a · b = c` that can pin a wire to `{0, 1}`
+    /// (`c` a wire or zero), each reduced mod `r`, over the same variables as
+    /// `gadgets`; else empty.
+    pub gadget_rows: Vec<[LinearCombination; 3]>,
 }
 
 /// A template def: the rows `c0..c1` and witness ops `w0..w1` of its first call,
@@ -1382,6 +1386,7 @@ fn renumber_inputs(env: &mut Builder) {
 pub(crate) fn finish(mut env: Builder, field: FieldSpec, n_inputs: usize) -> LowerOutput {
     env.fill_products();
     let gadgets = crate::gadgets::extract(&env);
+    let gadget_rows = crate::gadgets::bit_rows(&env);
     renumber_inputs(&mut env);
     // Developer diagnostic only (behind `XARK_BUILD_TIME`); a normal build stays
     // quiet on stderr rather than printing this on every compile.
@@ -1591,6 +1596,7 @@ pub(crate) fn finish(mut env: Builder, field: FieldSpec, n_inputs: usize) -> Low
         xbc,
         witness_only_vars: wo,
         gadgets,
+        gadget_rows,
     }
 }
 

@@ -129,7 +129,10 @@ pub(crate) fn harness(gadget: &str) -> Result<GadgetTemplate> {
     let out = xark_frontend::lower_recording_gadgets(&wasm, xark_ir::FieldSpec::bn254())
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .output;
-    let suffix = format!("::{gadget}");
+    // `<function>__<instance>` names one instantiation of a generic gadget
+    // (`reduce__33`); its template is `Formal/Templates/<Function><Instance>.lean`.
+    let function = gadget.split_once("__").map_or(gadget, |(f, _)| f);
+    let suffix = format!("::{function}");
     let calls: Vec<_> = out
         .gadgets
         .into_iter()
@@ -161,8 +164,10 @@ fn export(gadget: &str) -> Result<(String, PathBuf, String, String)> {
          set_option linter.style.longLine false\n\n\
          namespace Xark.Templates.{module}\n\
          open Xark.Template\n\n\
-         -- A long list literal nests deeply (and so does its compiled code).\n\
+         -- A long list literal nests deeply (and so does its compiled code), and a\n\
+         -- template of a few thousand rows takes more than the default heartbeats.\n\
          set_option maxRecDepth 100000 in\n\
+         set_option maxHeartbeats 0 in\n\
          /-- `{name}`'s rows, hints and variables, as the frontend emits them. -/\n\
          def template : Template where\n  \
            hash := \"{hash}\"\n\

@@ -53,11 +53,6 @@
       "id": 9,
       "name": "w6",
       "visibility": "Private"
-    },
-    {
-      "id": 10,
-      "name": "w7",
-      "visibility": "Private"
     }
   ],
   "constraints": [
@@ -92,7 +87,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w0 * w0 = w0"
+        "note": "w0 in {0,1}"
       }
     },
     {
@@ -126,7 +121,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w1 * w1 = w1"
+        "note": "w1 in {0,1}"
       }
     },
     {
@@ -160,7 +155,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w2 * w2 = w2"
+        "note": "w2 in {0,1}"
       }
     },
     {
@@ -194,7 +189,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w3 * w3 = w3"
+        "note": "w3 in {0,1}"
       }
     },
     {
@@ -228,7 +223,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w4 * w4 = w4"
+        "note": "w4 in {0,1}"
       }
     },
     {
@@ -262,7 +257,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w5 * w5 = w5"
+        "note": "w5 in {0,1}"
       }
     },
     {
@@ -296,7 +291,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "w6 * w6 = w6"
+        "note": "w6 in {0,1}"
       }
     },
     {
@@ -306,31 +301,82 @@
         "terms": [
           {
             "coeff": "1",
-            "var": 10
+            "var": 0
+          },
+          {
+            "coeff": "-2",
+            "var": 3
+          },
+          {
+            "coeff": "-4",
+            "var": 4
+          },
+          {
+            "coeff": "-8",
+            "var": 5
+          },
+          {
+            "coeff": "-16",
+            "var": 6
+          },
+          {
+            "coeff": "-32",
+            "var": 7
+          },
+          {
+            "coeff": "-64",
+            "var": 8
+          },
+          {
+            "coeff": "-128",
+            "var": 9
           }
         ]
       },
       "b": {
-        "constant": "0",
+        "constant": "-1",
         "terms": [
           {
             "coeff": "1",
-            "var": 10
+            "var": 0
+          },
+          {
+            "coeff": "-2",
+            "var": 3
+          },
+          {
+            "coeff": "-4",
+            "var": 4
+          },
+          {
+            "coeff": "-8",
+            "var": 5
+          },
+          {
+            "coeff": "-16",
+            "var": 6
+          },
+          {
+            "coeff": "-32",
+            "var": 7
+          },
+          {
+            "coeff": "-64",
+            "var": 8
+          },
+          {
+            "coeff": "-128",
+            "var": 9
           }
         ]
       },
       "c": {
         "constant": "0",
-        "terms": [
-          {
-            "coeff": "1",
-            "var": 10
-          }
-        ]
+        "terms": []
       },
       "debug": {
         "source_span": null,
-        "note": "w7 * w7 = w7"
+        "note": "8-bit range: bit 0 = value − Σ 2ⁱ·bᵢ ∈ {0,1}"
       }
     },
     {
@@ -339,40 +385,40 @@
         "constant": "0",
         "terms": [
           {
-            "coeff": "-1",
+            "coeff": "1",
             "var": 0
           },
           {
-            "coeff": "1",
+            "coeff": "-1",
+            "var": 1
+          },
+          {
+            "coeff": "-2",
             "var": 3
           },
           {
-            "coeff": "2",
+            "coeff": "-4",
             "var": 4
           },
           {
-            "coeff": "4",
+            "coeff": "-8",
             "var": 5
           },
           {
-            "coeff": "8",
+            "coeff": "-16",
             "var": 6
           },
           {
-            "coeff": "16",
+            "coeff": "-32",
             "var": 7
           },
           {
-            "coeff": "32",
+            "coeff": "-64",
             "var": 8
           },
           {
-            "coeff": "64",
+            "coeff": "-128",
             "var": 9
-          },
-          {
-            "coeff": "128",
-            "var": 10
           }
         ]
       },
@@ -386,7 +432,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(-x + w0 + 2*w1 + 4*w2 + 8*w3 + 16*w4 + 32*w5 + 64*w6 + 128*w7) * 1 = 0"
+        "note": "(x - bit0 - 2*w0 - 4*w1 - 8*w2 - 16*w3 - 32*w4 - 64*w5 - 128*w6) * 1 = 0"
       }
     },
     {
@@ -396,39 +442,11 @@
         "terms": [
           {
             "coeff": "-1",
-            "var": 1
-          },
-          {
-            "coeff": "1",
-            "var": 3
-          }
-        ]
-      },
-      "b": {
-        "constant": "1",
-        "terms": []
-      },
-      "c": {
-        "constant": "0",
-        "terms": []
-      },
-      "debug": {
-        "source_span": null,
-        "note": "(-bit0 + w0) * 1 = 0"
-      }
-    },
-    {
-      "id": 10,
-      "a": {
-        "constant": "0",
-        "terms": [
-          {
-            "coeff": "-1",
             "var": 2
           },
           {
             "coeff": "1",
-            "var": 10
+            "var": 9
           }
         ]
       },
@@ -442,7 +460,7 @@
       },
       "debug": {
         "source_span": null,
-        "note": "(-bit7 + w7) * 1 = 0"
+        "note": "(-bit7 + w6) * 1 = 0"
       }
     }
   ]

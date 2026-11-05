@@ -947,8 +947,9 @@ fn mimc_loop_equals_unrolled() {
     );
 }
 
-/// Bit-decomposition gadget (`xark-bits`): 8 advice bits, 8 booleanity gates,
-/// and a gate-free recomposition `Σ bits[i]·2^i == x`.
+/// Bit-decomposition gadget (`xark-bits`): 7 advice bits (bits 1–7), 7 booleanity
+/// gates, and bit 0 as the linear form `x − Σ 2^i·bits[i]`, pinned by one row
+/// `b0·(b0 − 1) = 0` (no separate recomposition row).
 #[test]
 fn bit_decompose_gadget() {
     let c = compile_with_field(&example("bit_decompose"), "bit_decompose", "bn254");
@@ -957,19 +958,19 @@ fn bit_decompose_gadget() {
     let dot = std::fs::read_to_string(c.out_dir.join("graph.dot")).unwrap();
     check_snapshot("bit_decompose.r1cs.json", &json);
     check_snapshot("bit_decompose.graph.dot", &dot);
-    // 8 distinct private advice bits.
-    for i in 0..8 {
+    // 7 distinct private advice bits.
+    for i in 0..7 {
         assert!(
             json.contains(&format!("\"name\": \"w{i}\"")),
             "missing advice bit w{i}"
         );
     }
-    // 8 booleanity gates + 1 recomposition + 2 demo equalities.
-    assert_eq!(json.matches("\"source_span\"").count(), 11);
-    // Recomposition folds bits into a linear combination (no gate): the note is a
-    // `(...) * 1 = 0` equality carrying all 8 power-of-two coefficients.
+    // 7 booleanity gates + bit 0's row + 2 demo equalities.
+    assert_eq!(json.matches("\"source_span\"").count(), 10);
+    // `bits[0] == bit0` is a `(...) * 1 = 0` equality carrying bit 0's linear form,
+    // with the power-of-two coefficients of bits 1–7.
     assert!(
-        json.contains("128*w7"),
+        json.contains("128*w6"),
         "recomposition coefficients missing: {json}"
     );
 }
@@ -1012,9 +1013,9 @@ fn poseidon_gadget() {
 }
 
 /// Merkle membership (`xark-merkle`): a depth-4 Poseidon path fold. Each level is
-/// one `hash2` (240 S-box gates) plus one booleanity gate for the direction bit
-/// and two sibling muxes (each a single mul); the direction bits let the sibling
-/// ordering fold as free linear combinations. The whole path is proven against
+/// one `hash2` (240 S-box gates) plus `cond_swap`: one booleanity gate for the
+/// direction bit and one product `b·(sib − node)`, whose two outputs are free linear
+/// combinations. The whole path is proven against
 /// the public root with a single final equality.
 #[test]
 fn merkle_membership_gadget() {
@@ -1024,16 +1025,16 @@ fn merkle_membership_gadget() {
     let r1cs = xark_ir::json::from_json(&json).unwrap();
 
     // 4 levels × (241 Poseidon `hash2` gates [240 S-box + 1 output binding] + 1
-    // booleanity + 2 sibling muxes) + 1 final root equality = 4×244 + 1 = 977.
+    // booleanity + 1 swap product) + 1 final root equality = 4×243 + 1 = 973.
     // (No `r1cs.json` snapshot: Poseidon's full-field round-constant coefficients
     // make it ~40 MB — the count + nonzero pins below catch a lowering change, and
     // `xark-merkle`'s `vec` KAT covers the values. The gadget's cost is linear in
     // depth: exactly 4× the single-`hash2` `poseidon` circuit, no LC blow-up.)
     //
-    // 961 = 977 − 16. Per level, Poseidon's constant capacity lane
+    // 957 = 973 − 16. Per level, Poseidon's constant capacity lane
     // folds its first S-box (3 rows: `rc⁵` is a constant) and the `hash2` output
     // binding stays an inline sum (1 row); see `merkle_matches_lean_model`.
-    let (want, want_nz) = (961, 25_254);
+    let (want, want_nz) = (957, 25_232);
     assert_eq!(r1cs.constraints.len(), want);
     let nonzeros: usize = r1cs
         .constraints
@@ -1045,19 +1046,15 @@ fn merkle_membership_gadget() {
 
 /// **R1CS ↔ Lean bridge (Merkle membership).**
 ///
-/// `formal/Formal/Merkle.lean` proves the soundness fact a Merkle fold adds over
-/// the Poseidon compression: `merkle_level_swap_sound` shows that with the
-/// position bit constrained boolean (`b·b = b`), each level's `(left, right)` is
-/// exactly the input pair `(node, sib)` in one of its two orders — a genuine
-/// conditional swap, no third value reachable, so the only prover freedom is the
-/// position bit itself. Poseidon's own determinacy is `poseidon_permutation_determined`
-/// (`Formal/Poseidon.lean`); the full root is their composition.
+/// `formal/Formal/CondSwap.lean` proves each level's swap over its exported rows
+/// (`Xark.Templates.CondSwap.soundness`: the booleanity row `b·b = b` and the product
+/// `b·(sib − node)` force `(left, right)` to be `(node, sib)` or `(sib, node)`), and
+/// `root_binds` composes the levels, given that `hash2`'s rows compute a function.
+/// Poseidon's own determinacy is `poseidon_permutation_determined` (`Formal/Poseidon.lean`).
 ///
-/// This is the bridge to the actual `xark-merkle` gadget: it pins the per-level
-/// multiplication shape the Lean model is stated over — one Poseidon `hash2`
-/// (240 S-box muls) + one booleanity gate (`b·b`) + two select muxes (`b·(t−f)`)
-/// — across the depth-4 path: 4 × (240 + 1 + 2) = 972. Any drift in the fold's
-/// mux/booleanity shape or the compression changes this and fails here.
+/// This pins the per-level multiplication shape: one Poseidon `hash2` (240 S-box muls)
+/// + `cond_swap`'s booleanity and product — across the depth-4 path:
+/// 4 × (240 + 1 + 1) = 968. Any drift in the fold or the compression fails here.
 #[test]
 fn merkle_matches_lean_model() {
     let c = xark_test_harness::compile_file(&example("merkle"), "merkle_lean_bridge", "bn254");
@@ -1065,20 +1062,20 @@ fn merkle_matches_lean_model() {
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul_gates = c.mul_gate_count();
 
-    // 4 levels × (240 Poseidon S-box muls + 1 booleanity + 2 select muxes) = 972.
-    // The shape `merkle_level_swap_sound` + `poseidon_permutation_determined` are
+    // 4 levels × (240 Poseidon S-box muls + 1 booleanity + 1 swap product) = 968.
+    // The shape `CondSwap.root_binds` + `poseidon_permutation_determined` are
     // stated over. If this fails, reconcile the gadget with the Lean model.
     //
-    // 4 × (237 + 1 + 2) = 960. `hash2` seeds the capacity lane
+    // 4 × (237 + 1 + 1) = 956. `hash2` seeds the capacity lane
     // with the constant 0, so the first round's lane-0 S-box is `rc⁵` — a constant,
     // folded (`Xark.R1cs.const_mul_sound`) instead of emitted as 3 rows whose
     // operands are all constants. The 79 S-boxes on witness values and the
     // swap/booleanity rows are exactly the modelled ones.
-    let want = 960;
+    let want = 956;
     assert_eq!(
         mul_gates, want,
         "depth-4 Merkle must emit {want} multiplication gates (matches \
-         Xark.merkle_level_swap_sound ∘ poseidon compression); got {mul_gates}"
+         Xark.Templates.CondSwap.root_binds ∘ poseidon compression); got {mul_gates}"
     );
 }
 
@@ -1090,18 +1087,20 @@ fn word32_ops() {
     assert!(c.status_success, "word_ops failed: {}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     check_snapshot("word_ops.r1cs.json", &json);
-    // 32+32 booleanity (two to_bits32) + 32 xor + 32 and + 33 (add32 decomp) = 161 gates,
-    // + 4 equalities (2 recompositions + add32 recomposition + final) = 165 constraints.
+    // (31 booleanity + bit 0's row) × 2 (two to_bits32) + 32 xor + 32 and + 33 (add32
+    // decomp) = 161 gates, + 2 equalities (add32 recomposition + final) = 163
+    // constraints: `to_bits`' bit 0 is a linear form whose booleanity row also does
+    // the recomposition.
     // Counted from the parsed R1CS (note-robust): cache-all drops debug notes on
-    // cached-function bodies, but the R1CS math is unchanged (same 165 constraints).
+    // cached-function bodies, but the R1CS math is unchanged.
     assert_eq!(
         xark_ir::json::from_json(&json).unwrap().constraints.len(),
-        165
+        163
     );
-    // add32's carry decomposition uses 33 bits; two inputs use 32 each → 97 advice.
+    // add32's carry decomposition uses 33 bits; two inputs hint 31 each → 95 advice.
     assert_eq!(
         json.matches("\"visibility\": \"Private\"").count() - 2, /*a,b inputs*/
-        97
+        95
     );
 }
 
@@ -1368,7 +1367,12 @@ fn sha256_compiles() {
     //
     // the 1952 `Maj` ANDs
     // reuse the previous round's `a ∧ b` rows (see `sha256_matches_lean_model`).
-    let (want, want_w) = (35114, 6568);
+    // XOR/OR with a constant and `hint_bit` of a constant (the IV, the padding
+    // words) fold: 35114 → 33176. Bit 0 of each range check as a linear form
+    // (`decompose_bits_gated`): → 33174. Single-row XOR3/MAJ3/Ch
+    // (`xark_bits::{xor3, maj3, ch}`), `reduce::<N>` carries, `a` derived from
+    // `e` and round 63 fused into the feed-forward: → 16846.
+    let (want, want_w) = (16846, 14672);
     assert_eq!(constraints, want, "SHA-256 constraint count changed");
     assert_eq!(
         json.matches("\"name\": \"w").count(),
@@ -2389,7 +2393,13 @@ fn sha256_matches_lean_model() {
     // bit wires (the state shifts `a → b → c`): 61 rounds × 32 bits reuse that row
     // (`Xark.R1cs.cse_sound`) instead of re-emitting `bᵢ · cᵢ = t`. The reused
     // output satisfies the very `and_sound` row the model is stated over.
-    let want = 32982;
+    //
+    // 32982 → 16838: Σ/σ use the single-row `xor3`, Maj the single-row `maj3`
+    // and Ch the one-row `g + e(f − g)` (each proven in `HashOps.lean`), the
+    // carries use `reduce::<N>` (`Reduce.lean`), `a` is derived from `e`
+    // (`Sha256.lean` `newA_of_newE`) and round 63 is fused into the
+    // feed-forward (`feedForward_fused`).
+    let want = 16838;
     assert_eq!(
         mul, want,
         "SHA-256 multiplication-gate count pins the Sha256.lean bit-soundness model; got {mul}"
@@ -2435,18 +2445,20 @@ fn blake2s_matches_lean_model() {
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
     // Same `add3` (34-bit) mixing tightening as BLAKE3 (Blake.lean
-    // `add3Mod32_bit_sound`): 26720 → 21600 mult-gates.
+    // `add3Mod32_bit_sound`): 26720 → 21600 mult-gates; XORs with the constant IV
+    // and counter words fold: → 21536.
     assert_eq!(
-        mul, 21600,
+        mul, 21536,
         "BLAKE2s mult-gate count pins blake2s_round_compose_bit; got {mul}"
     );
 }
 
-/// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 156k constraints.
+/// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 93k constraints.
 /// `formal/Formal/Keccak.lean` proves per-bit soundness of one round
 /// `ι∘χ∘π∘ρ∘θ` (`keccakRoundStep_bit_sound`). The ρ·π
 /// permutation index in the Lean model was corrected to `(X+3Y)%5` to match this
-/// (KAT-verified) gadget exactly across all 25 lanes. This test pins the count.
+/// (KAT-verified) gadget exactly across all 25 lanes. This test pins the count:
+/// θ by `xor3` rows and χ by `chi` rows, 153,664 → 93,248.
 #[test]
 #[ignore]
 fn keccak_matches_lean_model() {
@@ -2458,7 +2470,7 @@ fn keccak_matches_lean_model() {
     assert!(c.status_success, "keccak gadget compiles: {}", c.stderr);
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
-    assert_eq!(mul, 153664, "Keccak mult-gate count; got {mul}");
+    assert_eq!(mul, 93248, "Keccak mult-gate count; got {mul}");
 }
 
 /// **R1CS ↔ Lean bridge (AES-128).** `#[ignore]` — 158k constraints.
@@ -2557,8 +2569,9 @@ fn aes_gcm_matches_lean_model() {
     // bits) were known boolean: a `to_bits` of a sum of them now reuses those bits
     // (the bit-sum shortcut) instead of re-decomposing. 488 fewer again since the
     // `u8` inputs' range-check bits are kept: the gadget's split of `aad`, `pt`,
-    // `key` and `nonce` (61 bytes) reuses them.
-    let want = 715336;
+    // `key` and `nonce` (61 bytes) reuses them. 715336 → 709192 with XOR/OR of a
+    // constant and `hint_bit` of a constant folded, and T9 range checks.
+    let want = 709192;
     assert_eq!(mul, want, "AES-128-GCM mult-gate count; got {mul}");
 }
 
@@ -2769,8 +2782,8 @@ fn bignum_ops_lowers() {
 }
 
 /// **`Field::to_bits` / `from_bits`.** Bit decomposition as a first-class `Field`
-/// operation (const-generic bit count, composed from `hint_bit` + arithmetic +
-/// `require_eq`). 8 merged booleanity checks + 2 recompositions = 10.
+/// operation (const-generic bit count): 7 booleanity rows + bit 0's
+/// `b₀(b₀ − 1) = 0` + the `require_eq` of the recomposed bits = 9.
 #[test]
 fn to_bits_lowers() {
     let c = compile(&example("to_bits"), "to_bits");
@@ -2779,7 +2792,11 @@ fn to_bits_lowers() {
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
     )
     .expect("parse r1cs.json");
-    assert_eq!(r1cs.constraints.len(), 10, "8 booleanity + 2 recomposition");
+    assert_eq!(
+        r1cs.constraints.len(),
+        9,
+        "8 decomposition rows + 1 equality"
+    );
 }
 
 /// **Const-fold `to_bits` — zero constraints.** Decomposing a *constant* has
@@ -2831,6 +2848,501 @@ fn const_to_bits_overflow_rejected() {
     let c = compile(&src, "const_to_bits_overflow");
     assert!(!c.status_success, "overflow must be rejected");
     assert!(c.stderr.contains("does not fit in 8 bits"), "{}", c.stderr);
+}
+
+/// BN254's scalar modulus `r`.
+const BN254_R: &str =
+    "21888242871839275222246405745257275088548364400416034343698204186575808495617";
+
+/// Inputs by name → var id, for the solver and the witness search.
+fn input_ids(
+    program: &xark_ir::primitive::PrimitiveProgram,
+    inputs: &[(&str, String)],
+) -> std::collections::BTreeMap<u32, String> {
+    inputs
+        .iter()
+        .map(|(n, v)| {
+            let var = program.vars.iter().find(|x| x.name == *n);
+            (
+                var.unwrap_or_else(|| panic!("no input `{n}`")).id,
+                v.clone(),
+            )
+        })
+        .collect()
+}
+
+/// Whether some witness proves `inputs`, by exhaustive witness search, panicking
+/// unless the verdict is "exactly one" or "none" (bug checklist 8: no hint is free).
+fn unique_or_none(c: &Compiled, inputs: &[(&str, String)]) -> bool {
+    use xark_ir::witness_search::{WitnessSearch, search_witnesses};
+    let program = c.program();
+    match search_witnesses(&program, &input_ids(&program, inputs), 1 << 14).unwrap() {
+        WitnessSearch::Unique(_) => true,
+        WitnessSearch::None => false,
+        other => panic!("{inputs:?}: {other:?}"),
+    }
+}
+
+/// Each derived variable a row reads, tampered alone (`+1`) in the honest witness
+/// for `inputs`, breaks some row: a forged hint output is never accepted (bug
+/// checklist 7).
+fn rejects_each_tampered_witness(c: &Compiled, inputs: &[(&str, String)]) {
+    use xark_ir::primitive::VarRole;
+    use xark_ir::solver;
+    let program = c.program();
+    let honest = solver::solve_and_check(&program, &input_ids(&program, inputs))
+        .unwrap_or_else(|e| panic!("{inputs:?}: honest witness fails: {e}"));
+    let read: std::collections::BTreeSet<u32> = program
+        .constraints
+        .iter()
+        .flat_map(|e| {
+            let muls = e.mul_terms.iter().flat_map(|t| [t.left, t.right]);
+            muls.chain(e.linear_terms.iter().map(|t| t.var))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut tampered = 0;
+    for v in &program.vars {
+        if v.role != VarRole::Derived || !read.contains(&v.id) {
+            continue;
+        }
+        let mut forged = honest.clone();
+        let x: num_bigint::BigUint = forged[&v.id].to_decimal().parse().unwrap();
+        forged.insert(
+            v.id,
+            solver::fp_from_decimal(&(x + 1u8).to_string(), &program),
+        );
+        assert!(
+            solver::check(&program, &forged).is_err(),
+            "{inputs:?}: `{}` tampered is accepted",
+            v.name
+        );
+        tampered += 1;
+    }
+    assert!(tampered > 0, "no derived variable to tamper");
+}
+
+/// **XOR / OR with a constant fold to the row's one solution** (zkGolf T0, audit
+/// #39; `formal/Formal/BoolOps.lean` `fold_lhs`/`fold_rhs`). The folded circuit
+/// emits no row for them; a twin whose constants are public inputs keeps the rows.
+/// Both accept exactly the same values, by exhaustive witness search, for inputs
+/// on and off the bits (0, 1, 2, r − 1) and every output mutated by one (bug
+/// checklist 12); a forged XOR/OR output in the twin is rejected (7).
+#[test]
+fn xor_or_with_a_constant_fold_exactly() {
+    use num_bigint::BigInt;
+    // (name, `false`: XOR, `true`: OR, the constant, constant on the left)
+    let ops = [
+        ("x0", false, 0, false),
+        ("x1", false, 1, false),
+        ("x1l", false, 1, true),
+        ("x5", false, 5, false),
+        ("o0", true, 0, false),
+        ("o1", true, 1, true),
+        ("o3", true, 3, false),
+    ];
+    let src = |folded: bool| {
+        let mut params = String::from("x: Private<Field>");
+        let mut body = String::new();
+        for (name, or, k, left) in ops {
+            let k = if folded {
+                format!("Field::from({k}u8)")
+            } else {
+                params += &format!(", k_{name}: Public<Field>");
+                format!("k_{name}")
+            };
+            let op = if or { "or" } else { "xor" };
+            let call = if left {
+                format!("{k}.{op}(x)")
+            } else {
+                format!("x.{op}({k})")
+            };
+            params += &format!(", {name}: Public<Field>");
+            body += &format!("require_eq({call}, {name});\n");
+        }
+        format!(
+            "#![no_std]\nuse xark::{{require_eq, Field, Private, Public}};\n\
+             pub fn circuit({params}) {{\n{body}}}\n"
+        )
+    };
+    let folded = compile_with_field(
+        &write_case("xor_const_fold", &src(true)),
+        "xor_const_fold",
+        "bn254",
+    );
+    let twin = compile_with_field(
+        &write_case("xor_const_twin", &src(false)),
+        "xor_const_twin",
+        "bn254",
+    );
+    assert!(folded.status_success, "{}", folded.stderr);
+    assert!(twin.status_success, "{}", twin.stderr);
+    assert_eq!(folded.mul_gate_count(), 0, "every constant XOR/OR folds");
+    assert_eq!(twin.mul_gate_count(), ops.len(), "one row per XOR/OR");
+    let r: BigInt = BN254_R.parse().unwrap();
+    let modr = |v: BigInt| ((v % &r) + &r) % &r;
+    let ks: Vec<String> = ops.iter().map(|(n, ..)| format!("k_{n}")).collect();
+    for x in [0, 1, 2, -1] {
+        let xb = modr(BigInt::from(x));
+        let honest: Vec<BigInt> = ops
+            .iter()
+            .map(|&(_, or, k, _)| {
+                let k = BigInt::from(k);
+                // a + b − 2ab (XOR), a + b − ab (OR): the row's solution.
+                let ab = &k * &xb;
+                modr(if or { &k + &xb - ab } else { &k + &xb - 2 * ab })
+            })
+            .collect();
+        for mutate in std::iter::once(None).chain((0..ops.len()).map(Some)) {
+            let mut inputs = vec![("x", xb.to_string())];
+            for (i, (name, ..)) in ops.iter().enumerate() {
+                let off = if mutate == Some(i) { 1 } else { 0 };
+                inputs.push((*name, modr(&honest[i] + off).to_string()));
+            }
+            let mut twin_inputs = inputs.clone();
+            for (i, &(_, _, k, _)) in ops.iter().enumerate() {
+                twin_inputs.push((ks[i].as_str(), k.to_string()));
+            }
+            let want = mutate.is_none();
+            assert_eq!(
+                unique_or_none(&folded, &inputs),
+                want,
+                "folded, x = {x}, {mutate:?}"
+            );
+            assert_eq!(
+                unique_or_none(&twin, &twin_inputs),
+                want,
+                "twin, x = {x}, {mutate:?}"
+            );
+            if want {
+                rejects_each_tampered_witness(&twin, &twin_inputs);
+            }
+        }
+    }
+}
+
+/// **`hint_bit` of a constant is a constant** (zkGolf T0): `add32` of two constant
+/// words emits no row (its bits fold, and the booleanity and recomposition rows
+/// become `c = c`), matching `u32` wrapping addition at the edges (carry out, top
+/// bit set, all ones); `hint_bit` of a negative constant reads `r − 1`'s bits.
+/// The same `add32` on input words keeps its 34 rows and gives the same sums.
+#[test]
+fn hint_bit_of_a_constant_folds() {
+    let pairs: [(u32, u32); 4] = [
+        (0, 0),
+        (u32::MAX, 1),
+        (0x8000_0000, 0x8000_0000),
+        (u32::MAX, u32::MAX),
+    ];
+    let mut body = String::new();
+    for (i, (a, b)) in pairs.iter().enumerate() {
+        body += &format!(
+            "let s = xark_bits::add32(Field::from({a}u32).to_bits::<32>(), \
+             Field::from({b}u32).to_bits::<32>());\n\
+             require_eq(Field::from_bits::<32>(s), s{i});\n"
+        );
+    }
+    let bits = [0usize, 1, 253, 254];
+    for i in bits {
+        body += &format!(
+            "require_eq(Field::hint_bit(Field::from(0u8) - Field::from(1u8), {i}), m{i});\n"
+        );
+    }
+    let src = format!(
+        "#![no_std]\nuse xark::{{require_eq, Field, Public}};\n\
+         pub fn circuit(s0: Public<Field>, s1: Public<Field>, s2: Public<Field>, s3: Public<Field>, \
+         m0: Public<Field>, m1: Public<Field>, m253: Public<Field>, m254: Public<Field>) {{\n{body}}}\n"
+    );
+    let c = compile_with_field(&write_case("hint_bit_fold", &src), "hint_bit_fold", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    assert_eq!(
+        c.mul_gate_count(),
+        0,
+        "constant add32 and hint_bit emit no row"
+    );
+    let r: num_bigint::BigUint = BN254_R.parse().unwrap();
+    let r1 = r - 1u8;
+    let honest: Vec<(String, String)> = pairs
+        .iter()
+        .enumerate()
+        .map(|(i, (a, b))| (format!("s{i}"), a.wrapping_add(*b).to_string()))
+        .chain(
+            bits.iter()
+                .map(|&i| (format!("m{i}"), u8::from(r1.bit(i as u64)).to_string())),
+        )
+        .collect();
+    let named = |m: Option<usize>| -> Vec<(&str, String)> {
+        honest
+            .iter()
+            .enumerate()
+            .map(|(j, (n, v))| {
+                let v: u64 = v.parse().unwrap();
+                (n.as_str(), (v + u64::from(m == Some(j))).to_string())
+            })
+            .collect()
+    };
+    assert!(unique_or_none(&c, &named(None)), "the honest sums and bits");
+    for (j, (name, _)) in honest.iter().enumerate() {
+        assert!(!unique_or_none(&c, &named(Some(j))), "{name} off by one");
+    }
+
+    // The template itself, on input words: the same sums, and no forged carry bit.
+    let twin = compile_with_field(
+        &write_case(
+            "hint_bit_twin",
+            "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+             pub fn circuit(a: Private<u32>, b: Private<u32>, s: Public<Field>) {\n\
+             let s2 = xark_bits::add32(Field::from(a).to_bits::<32>(), Field::from(b).to_bits::<32>());\n\
+             require_eq(Field::from_bits::<32>(s2), s);\n}\n",
+        ),
+        "hint_bit_twin",
+        "bn254",
+    );
+    assert!(twin.status_success, "{}", twin.stderr);
+    for (a, b) in pairs {
+        let inputs = |s: u64| {
+            vec![
+                ("a", a.to_string()),
+                ("b", b.to_string()),
+                ("s", s.to_string()),
+            ]
+        };
+        let sum = u64::from(a.wrapping_add(b));
+        assert!(unique_or_none(&twin, &inputs(sum)));
+        assert!(!unique_or_none(&twin, &inputs(sum + 1)));
+        rejects_each_tampered_witness(&twin, &inputs(sum));
+    }
+}
+
+/// **`to_bits::<N>` is an `N`-row range check** (zkGolf T9; `formal/Formal/ToBits.lean`):
+/// bits `1..N` hinted and pinned boolean, bit 0 computed, one row `b₀(b₀ − 1) = 0`.
+/// A twin writes out the `N + 1`-row decomposition it replaced (every bit hinted,
+/// one recomposition row). By exhaustive witness search both accept exactly the
+/// in-range values with their own bits, at the edges (0, 1, top bit set, all ones)
+/// and outside (2⁸, r − 1), with every bit claim flipped (bug checklist 8, 12); a
+/// forged bit is rejected (7).
+#[test]
+fn to_bits_range_check_is_exact() {
+    let new = "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+        pub fn circuit(x: Private<Field>, b: Public<[Field; 8]>) {\n\
+        let bits = x.to_bits::<8>();\n\
+        for i in 0..8 { require_eq(bits[i], b[i]); }\n}\n";
+    let old = "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+        pub fn circuit(x: Private<Field>, b: Public<[Field; 8]>) {\n\
+        let mut acc = Field::from(0u8);\n\
+        let mut pow = Field::from(1u8);\n\
+        for i in 0..8 {\n\
+            let bit = Field::hint_bit(x, i);\n\
+            bit.require_bool();\n\
+            acc = acc + bit * pow;\n\
+            pow = pow + pow;\n\
+            require_eq(bit, b[i]);\n\
+        }\n\
+        require_eq(acc, x);\n}\n";
+    let c = compile_with_field(&write_case("to_bits_t9", new), "to_bits_t9", "bn254");
+    let twin = compile_with_field(&write_case("to_bits_twin", old), "to_bits_twin", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    assert!(twin.status_success, "{}", twin.stderr);
+    // 8 rows, 7 new variables (+ 8 rows binding the bits to `b`), against 9 and 8.
+    let size = |c: &Compiled| {
+        let p = c.program();
+        (p.constraints.len(), p.vars.len())
+    };
+    assert_eq!(
+        size(&c),
+        (16, 1 + 8 + 7),
+        "7 booleanity rows + b₀(b₀ − 1) = 0"
+    );
+    assert_eq!(
+        size(&twin),
+        (17, 1 + 8 + 8),
+        "8 booleanity rows + recomposition"
+    );
+    let r: num_bigint::BigUint = BN254_R.parse().unwrap();
+    let names: Vec<String> = (0..8).map(|i| format!("b[{i}]")).collect();
+    for x in [0u32, 1, 128, 255, 256] {
+        let x = num_bigint::BigUint::from(x);
+        for x in [x.clone(), &r - 1u8 - x] {
+            let in_range = x.bits() <= 8;
+            for flip in std::iter::once(None).chain((0..8).map(Some)) {
+                let mut inputs = vec![("x", x.to_string())];
+                for (i, n) in names.iter().enumerate() {
+                    let bit = u8::from(x.bit(i as u64)) ^ u8::from(flip == Some(i));
+                    inputs.push((n.as_str(), bit.to_string()));
+                }
+                let want = in_range && flip.is_none();
+                assert_eq!(unique_or_none(&c, &inputs), want, "x = {x}, {flip:?}");
+                assert_eq!(
+                    unique_or_none(&twin, &inputs),
+                    want,
+                    "twin, x = {x}, {flip:?}"
+                );
+                if want {
+                    rejects_each_tampered_witness(&c, &inputs);
+                }
+            }
+        }
+    }
+}
+
+/// **`to_bits::<253>` at the field's edge** (bug checklist 3): `2²⁵³ − 1` decomposes;
+/// `2²⁵³` and `r − 1` (whose 253 low bits recompose to something else mod `r`) are
+/// rejected; a forged bit of an accepted value is too.
+#[test]
+fn to_bits_253_rejects_values_past_its_width() {
+    let src = "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+        pub fn circuit(x: Private<Field>, y: Public<Field>) {\n\
+        require_eq(Field::from_bits::<253>(x.to_bits::<253>()), y);\n}\n";
+    let c = compile_with_field(&write_case("to_bits_253", src), "to_bits_253", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    assert_eq!(c.mul_gate_count(), 253);
+    let program = c.program();
+    let solves = |x: &num_bigint::BigUint| {
+        let inputs = [("x", x.to_string()), ("y", x.to_string())];
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &inputs)).is_ok()
+    };
+    let top = num_bigint::BigUint::from(1u8) << 253;
+    let r: num_bigint::BigUint = BN254_R.parse().unwrap();
+    let max = &top - 1u8;
+    assert!(solves(&max), "2^253 − 1 fits");
+    assert!(!solves(&top), "2^253 doesn't");
+    assert!(!solves(&(&r - 1u8)), "r − 1 doesn't");
+    rejects_each_tampered_witness(&c, &[("x", max.to_string()), ("y", max.to_string())]);
+}
+
+/// **`to_bits_canonical`** (bug checklist 3, 7, 8, 9): the 254 bits of `x`'s
+/// representative in `[0, r)`, 353 rows. `0`, `1`, `2²⁵³` and `r − 1` give their own
+/// bits (num-bigint); claiming the bits of `x + r` (`r` itself for `x = 0`, `r + 1` for
+/// `x = 1`, which fit 254 bits) is rejected; so is each tampered witness, and no
+/// variable is free.
+#[test]
+fn to_bits_canonical_is_the_unique_representative() {
+    use num_bigint::BigUint;
+    let src = "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+        pub fn circuit(x: Private<Field>, y: Public<[Field; 254]>) {\n\
+        let b = x.to_bits_canonical();\n\
+        for i in 0..254 { require_eq(b[i], y[i]); }\n}\n";
+    let c = compile_with_field(
+        &write_case("to_bits_canonical", src),
+        "to_bits_canonical",
+        "bn254",
+    );
+    assert!(c.status_success, "{}", c.stderr);
+    assert_eq!(c.mul_gate_count(), 353);
+    let program = c.program();
+    let inputs = |x: &BigUint, bits: &BigUint| {
+        let mut v = vec![("x".to_string(), x.to_string())];
+        v.extend((0..254).map(|i| (format!("y[{i}]"), u8::from(bits.bit(i)).to_string())));
+        v
+    };
+    fn named(v: &[(String, String)]) -> Vec<(&str, String)> {
+        v.iter().map(|(n, x)| (n.as_str(), x.clone())).collect()
+    }
+    let solves = |x: &BigUint, bits: &BigUint| {
+        let v = inputs(x, bits);
+        xark_ir::solver::solve_and_check(&program, &input_ids(&program, &named(&v))).is_ok()
+    };
+    let r: BigUint = BN254_R.parse().unwrap();
+    let r1 = &r - 1u8;
+    let top: BigUint = BigUint::from(1u8) << 253usize;
+    for x in [
+        BigUint::from(0u8),
+        BigUint::from(1u8),
+        top.clone(),
+        r1.clone(),
+    ] {
+        assert!(solves(&x, &x), "{x}");
+        let v = inputs(&x, &x);
+        let assign =
+            xark_ir::solver::solve_and_check(&program, &input_ids(&program, &named(&v))).unwrap();
+        assert!(
+            xark_ir::solver::analyze_underconstrained(&program, &assign).is_empty(),
+            "{x}"
+        );
+        rejects_each_tampered_witness(&c, &named(&v));
+    }
+    // A prover that hints the bits of `claim` instead of `x`'s (every other variable
+    // recomputed from them): the rows hold iff `claim` is `x`'s representative.
+    let forged_holds = |x: &BigUint, claim: &BigUint| {
+        use xark_ir::primitive::WitnessGen;
+        let mut forger = program.clone();
+        for w in &mut forger.witness_gen {
+            if let WitnessGen::Bit { out, index, .. } = w {
+                let bit = u8::from(claim.bit(u64::from(*index)));
+                *w = WitnessGen::Linear {
+                    out: *out,
+                    lc: xark_ir::LinearCombination::constant(bit.to_string()),
+                };
+            }
+        }
+        let v = inputs(x, claim);
+        let assign = xark_ir::solver::solve(&forger, &input_ids(&program, &named(&v))).unwrap();
+        xark_ir::solver::check(&program, &assign).is_ok()
+    };
+    assert!(
+        forged_holds(&r1, &r1),
+        "control: the forger's honest claim holds"
+    );
+    assert!(
+        !forged_holds(&BigUint::from(0u8), &r),
+        "x = 0 claiming r's bits"
+    );
+    assert!(
+        !forged_holds(&BigUint::from(1u8), &(&r + 1u8)),
+        "x = 1 claiming r + 1's bits"
+    );
+    let max: BigUint = (BigUint::from(1u8) << 254usize) - 1u8;
+    assert!(
+        !forged_holds(&(&max - &r), &max),
+        "claiming 2²⁵⁴ − 1, the widest"
+    );
+    assert!(
+        !solves(&BigUint::from(1u8), &BigUint::from(0u8)),
+        "x = 1 with 0's bits"
+    );
+}
+
+/// `to_bits` in a witness-branch arm decomposes `g·x`: it binds `x < 2⁸` only where
+/// the arm is taken (an out-of-range `x` is fine where it isn't), and every
+/// variable stays determined.
+#[test]
+fn to_bits_in_an_arm_binds_where_taken() {
+    let src = "#![no_std]\nuse xark::{require_eq, Field, Private, Public};\n\
+        pub fn circuit(c: Private<bool>, x: Private<Field>, y: Public<Field>) {\n\
+        let v = if c { Field::from_bits::<8>(x.to_bits::<8>()) } else { Field::from(7u8) };\n\
+        require_eq(v, y);\n}\n";
+    let c = compile_with_field(&write_case("to_bits_arm", src), "to_bits_arm", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    let case = |cond: u8, x: u32, y: u32| {
+        let inputs = [
+            ("c", cond.to_string()),
+            ("x", x.to_string()),
+            ("y", y.to_string()),
+        ];
+        unique_or_none(&c, &inputs)
+    };
+    assert!(case(1, 200, 200));
+    assert!(!case(1, 200, 201));
+    assert!(!case(1, 300, 300), "taken: x must fit 8 bits");
+    assert!(case(0, 300, 7), "untaken: x is free");
+    assert!(!case(0, 300, 300));
+}
+
+/// A `require_eq` of two different constants (which folds now make more of) can
+/// never hold: a compile error, as `to_bits` of a too-wide constant is.
+#[test]
+fn require_eq_of_unequal_constants_is_rejected() {
+    let src = write_case(
+        "const_require_mismatch",
+        "#![no_std]\nuse xark::{require_eq, Field, Public};\n\
+         pub fn circuit(out: Public<Field>) {\n\
+           require_eq(Field::hint_bit(Field::from(2u8), 0), Field::from(1u8));\n\
+           require_eq(out, Field::from(0u8));\n\
+         }\n",
+    );
+    let c = compile_with_field(&src, "const_require_mismatch", "bn254");
+    assert!(!c.status_success, "must be rejected");
+    assert!(c.stderr.contains("can never hold"), "{}", c.stderr);
 }
 
 /// **Poseidon2 sponge — lowering.** Variable-length `hash::<N>` (5 elements → 3
@@ -3838,6 +4350,34 @@ fn narrowed_index_and_nested_pointer_store() {
             (7, None),
             (u64::MAX, None),
         ],
+    );
+    // The low bits of a decomposed value, bit 0 included (a linear form, T9), still
+    // index a table: `& 7` of a `u32` input, `% 4` of a `u64` sum.
+    let table = |x: u64| Some([10u64, 20, 30, 40, 50, 60, 70, 80][(x & 7) as usize]);
+    let xs = [0u64, 1, 6, 7, 8, 0xffff_fffe, 0xffff_ffff];
+    run(
+        "low_bits_index",
+        "let v = [10u64, 20, 30, 40, 50, 60, 70, 80][(x0 & 7) as usize];\n\
+         require_eq(Field::from(v), out);",
+        "u32",
+        &xs.map(|x| (x, table(x))),
+    );
+    // A later boolean (bit 0 of another slice) sorts after the decomposition's bits.
+    let mixed = |x: u64| Some((x & 1) + ((x >> 1) & 6));
+    run(
+        "low_bits_index_mixed",
+        "let v = [0u64, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15][((x0 & 1) + ((x0 >> 1) & 6)) as usize];\n\
+         require_eq(Field::from(v), out);",
+        "u32",
+        &xs.map(|x| (x, mixed(x))),
+    );
+    let quarter = |x: u64| Some([5u64, 6, 7, 8][(x.wrapping_add(3) % 4) as usize]);
+    run(
+        "low_bits_index_of_a_sum",
+        "let v = [5u64, 6, 7, 8][(x0.wrapping_add(3) % 4) as usize];\n\
+         require_eq(Field::from(v), out);",
+        "u64",
+        &[0u64, 1, 2, 5, u64::MAX].map(|x| (x, quarter(x))),
     );
     let native = |x: u64| {
         let i = if x < 100 { x & 3 } else { (x >> 2) & 3 };
@@ -4966,8 +5506,8 @@ fn bit_cache_shares_one_decomposition() {
          }",
     );
 
-    // A width-32 decomposition is 32 booleanity constraints + 1 recomposition.
-    const DECOMP_32: usize = 33;
+    // A width-32 decomposition is 31 booleanity constraints + bit 0's row.
+    const DECOMP_32: usize = 32;
     let shared_n = shared.constraints.len();
     let distinct_n = distinct.constraints.len();
     assert!(
@@ -5369,9 +5909,9 @@ fn byte_inputs_are_not_repacked() {
     assert!(c.status_success, "{}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let rows = xark_ir::json::from_json(&json).unwrap().constraints.len();
-    // 3 × 9 entry range checks (whose bits `to_bits` reads), 3 products and the final
+    // 3 × 8 entry range checks (whose bits `to_bits` reads), 3 products and the final
     // equality. (A repacking shim once cost 105; before reuse, `to_bits` cost 27 more.)
-    assert_eq!(rows, 31, "byte inputs cost more than their range checks");
+    assert_eq!(rows, 28, "byte inputs cost more than their range checks");
 }
 
 /// Packing narrow values into a word (`c << 16 | b << 8 | a`) and taking it apart
@@ -5393,8 +5933,8 @@ fn packed_words_cost_nothing() {
     assert!(c.status_success, "{}", c.stderr);
     let json = std::fs::read_to_string(c.out_dir.join("r1cs.json")).unwrap();
     let rows = xark_ir::json::from_json(&json).unwrap().constraints.len();
-    // 3 × 9 entry range checks and the final equality.
-    assert_eq!(rows, 28, "taking a packed word apart emitted constraints");
+    // 3 × 8 entry range checks and the final equality.
+    assert_eq!(rows, 25, "taking a packed word apart emitted constraints");
     let p = c.program();
     let run = |a: u64, b: u64, cc: u64| {
         let out = (a + 2 * b + 4 * cc + 8 * a + 16 * cc).to_string();

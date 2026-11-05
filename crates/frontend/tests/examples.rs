@@ -71,8 +71,11 @@ fn poseidon_keeps_large_sums_inline() {
 
 #[test]
 fn sha256_with_byte_inputs() {
-    // The byte inputs' range checks are reused where the hash splits them into bits.
-    let l = check("sha256", 35069);
+    // The byte inputs' range checks are reused where the hash splits them into bits;
+    // XORs with constants and bits of constants (IV, padding) fold, and each range
+    // check's bit 0 is a linear form. Σ/σ, Maj and Ch are one row per bit (XOR3,
+    // MAJ3, affine Ch), and the modular sums are reduced at their tight widths.
+    let l = check("sha256", 16474);
     assert_eq!(l.schema["inputs"][0]["type"]["array"]["of"]["uint"], 8);
 }
 

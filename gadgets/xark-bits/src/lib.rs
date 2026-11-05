@@ -123,45 +123,121 @@ pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
     out
 }
 
-/// `(a + b + c) mod 2^32` — a three-input modular add done as a SINGLE 34-bit
-/// range-check instead of two chained [`add32`]s.
-///
-/// The three words sum to `< 3·2^32 < 2^34`, so decomposing the field sum into
-/// 34 bits (32 result + 2 carry) and returning the low 32 pins `(a+b+c) mod
-/// 2^32` in one gadget. Cost: 34 booleanity gates + 1 recomposition, vs the
-/// chain's `2×(33+1) = 68`. Soundness: `formal/Formal/Blake.lean`
-/// `add3Mod32_bit_sound` (with `add3Mod32_eq_nested` bridging it to the
-/// `addMod32 (addMod32 a b) c` the BLAKE `G` spec uses).
+/// `(a + b + c) mod 2^32`: the three words' field sum (`< 3·2^32 < 2^34`) reduced
+/// once by [`reduce::<34>`](reduce), 34 rows, against two chained [`add32`]s' 68.
 pub fn add3(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
-    let sum = Field::from_bits::<32>(a) + Field::from_bits::<32>(b) + Field::from_bits::<32>(c);
+    reduce::<34>(Field::from_bits::<32>(a) + Field::from_bits::<32>(b) + Field::from_bits::<32>(c))
+}
 
-    // Decompose the 34-bit sum.
-    let mut bits = [Field::from(0u8); 34];
+/// The low 32 bits of `sum`, requiring `sum < 2^N` (`33 ≤ N ≤ 253`): the modular
+/// reduction of a sum of `k` words of bits, `N = 32 + ⌈log₂ k⌉`. Bits `0..N−1` are
+/// hinted and pinned boolean, and the top carry is what they leave,
+/// `t = sum − Σᵢ<N−1 2ⁱ·bᵢ`, pinned by the one row `t·(t − 2^(N−1)) = 0`: `N` rows
+/// and `N − 1` variables, one of each fewer than a full decomposition and its
+/// recomposition row (zkGolf 650c4497 / 3e1e47a3, "fused carry"). `2^N < r` makes
+/// the bits unique. Proven sound with no input assumption and complete for
+/// `sum < 2^N` in `formal/Formal/Reduce.lean`.
+#[gadget]
+pub fn reduce<const N: usize>(sum: Field) -> [Field; 32] {
+    // 2^N < r (bug checklist 3, 9); the output bits are all hinted (N − 1 ≥ 32).
+    const { assert!(N >= 33 && N <= 253, "reduce::<N>: need 33 <= N <= 253") };
+    let mut bits = [Field::from(0u8); 252];
     let mut i = 0usize;
-    while i < 34 {
+    while i < N - 1 {
         bits[i] = Field::hint_bit(sum, i);
-        i += 1;
-    }
-    let mut i = 0usize;
-    while i < 34 {
-        bits[i].require_bool();
         i += 1;
     }
     let mut acc = Field::from(0u8);
     let mut pow = Field::from(1u8);
     let mut i = 0usize;
-    while i < 34 {
+    while i < N - 1 {
+        bits[i].require_bool();
         acc = acc + bits[i] * pow;
         pow = pow + pow;
         i += 1;
     }
-    require_eq(acc, sum);
-
-    // Return the low 32 bits (the 2 carry bits, bits[32..34], are discarded).
+    // `pow` is 2^(N−1): the top carry is 0 or that.
+    let top = sum - acc;
+    require_eq(top * (top - pow), Field::from(0u8));
     let mut out = [Field::from(0u8); 32];
     let mut i = 0usize;
     while i < 32 {
         out[i] = bits[i];
+        i += 1;
+    }
+    out
+}
+
+// Single-row three-input bit functions (zkGolf T1/T2, Verified-zkEVM/clean PR #395,
+// https://github.com/Verified-zkEVM/clean/pull/395, and zkGolf f8fd1e03 for χ). On
+// bits `a, b, c` each row `(z + L)·M = R` is linear in the hinted `z`, with a
+// multiplier `M` that is nonzero (±1…±4) on {0,1}³, so it has one root: the target
+// bit. Proven in `formal/Formal/HashOps.lean`. The inputs must be bits (callers pass
+// `to_bits`/`reduce` outputs or earlier bit gadgets' results): on other inputs the
+// row may have no root (`xor3`, `maj3`) or leave `z` free (`chi` at `(0, 0, 3)`).
+
+/// `a ⊕ b ⊕ c` in one row `(z + 2a + 2b + 7c)·(a + b − 4c + 1) = 6a + 6b − 24c`.
+#[gadget]
+pub fn xor3(a: Field, b: Field, c: Field) -> Field {
+    let z = Field::hint_bit(a + b + c, 0);
+    let k = |n: u8| Field::from(n);
+    require_eq(
+        (z + k(2) * a + k(2) * b + k(7) * c) * (a + b - k(4) * c + k(1)),
+        k(6) * a + k(6) * b - k(24) * c,
+    );
+    z
+}
+
+/// `maj(a, b, c)` in one row `(z + a + b − 9c + 3)·(a + b + 6c − 4) = −12`.
+#[gadget]
+pub fn maj3(a: Field, b: Field, c: Field) -> Field {
+    let z = Field::hint_bit(a + b + c, 1);
+    let k = |n: u8| Field::from(n);
+    require_eq(
+        (z + a + b - k(9) * c + k(3)) * (a + b + k(6) * c - k(4)),
+        k(0) - k(12),
+    );
+    z
+}
+
+/// Keccak's χ bit `a ⊕ (¬b ∧ c)` in one row `(z + 3a − b − c)·(4a + b + c − 3) = 4a + 2b`.
+/// `a`, `b` and `c` must be bits: at `(0, 0, 3)` the row leaves `z` free.
+#[gadget]
+pub fn chi(a: Field, b: Field, c: Field) -> Field {
+    let k = |n: u8| Field::from(n);
+    let z = Field::hint_bit(k(2) * a + k(1) - b + c, 1);
+    require_eq(
+        (z + k(3) * a - b - c) * (k(4) * a + b + c - k(3)),
+        k(4) * a + k(2) * b,
+    );
+    z
+}
+
+/// SHA-256's choice bit `e ? f : g` as `g + e·(f − g)`: one product, the output a
+/// linear form (zkGolf T3; bellman `Boolean::sha256_ch`, "a(b−c) = ch−c",
+/// <https://github.com/zkcrypto/bellman/blob/b726862a4ece8a627e7fea486d77b502a6edbb0b/src/gadgets/boolean.rs#L511-L615>).
+#[gadget]
+pub fn ch(e: Field, f: Field, g: Field) -> Field {
+    g + e * (f - g)
+}
+
+/// [`xor3`] bit by bit.
+pub fn xor3_32(a: [Field; 32], b: [Field; 32], c: [Field; 32]) -> [Field; 32] {
+    let mut out = [Field::from(0u8); 32];
+    let mut i = 0usize;
+    while i < 32 {
+        out[i] = xor3(a[i], b[i], c[i]);
+        i += 1;
+    }
+    out
+}
+
+/// [`xor3`] bit by bit, on 64-bit lanes.
+pub fn xor3_64(a: [Field; 64], b: [Field; 64], c: [Field; 64]) -> [Field; 64] {
+    let mut out = [Field::from(0u8); 64];
+    let mut i = 0usize;
+    while i < 64 {
+        out[i] = xor3(a[i], b[i], c[i]);
         i += 1;
     }
     out

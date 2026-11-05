@@ -1,0 +1,17 @@
+# The `to_bits::<127>` harness: one call on a fresh input, which
+# `cargo xtask lean-export to_bits__127` records and writes to formal/Formal/Templates/.
+[package]
+name = "to-bits-127-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

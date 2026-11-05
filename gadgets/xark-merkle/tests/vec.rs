@@ -16,16 +16,20 @@ use xark_ir::{primitive, solver};
 
 const DEPTH: usize = 4;
 
-fn load() -> primitive::PrimitiveProgram {
-    let src =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/merkle/src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "merkle", "bn254");
-    assert!(
-        c.status_success,
-        "compiling examples/merkle failed: {}",
-        c.stderr
-    );
-    c.program()
+/// Compiled once: the tests run in parallel and would rewrite one out dir.
+fn load() -> &'static primitive::PrimitiveProgram {
+    static PROGRAM: std::sync::OnceLock<primitive::PrimitiveProgram> = std::sync::OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/merkle/src/lib.rs");
+        let c = xark_test_harness::compile_file(&src, "merkle", "bn254");
+        assert!(
+            c.status_success,
+            "compiling examples/merkle failed: {}",
+            c.stderr
+        );
+        c.program()
+    })
 }
 
 fn id(p: &primitive::PrimitiveProgram, name: &str) -> u32 {
@@ -126,53 +130,91 @@ fn merkle_membership_accepts_valid_rejects_forgery() {
     let siblings = ["11", "22", "33", "44"];
     let index_bits = ["1", "0", "1", "0"];
 
-    let root = honest_root(&p, leaf, siblings, index_bits);
+    let root = honest_root(p, leaf, siblings, index_bits);
     assert_ne!(root, "0", "sanity: a real Poseidon root is not zero");
 
     // (1) The honest membership proof is accepted and fully constrained.
-    let mut ok = path_inputs(&p, leaf, siblings, index_bits);
-    ok.insert(id(&p, "root"), root.clone());
-    let assign = solver::solve_and_check(&p, &ok)
+    let mut ok = path_inputs(p, leaf, siblings, index_bits);
+    ok.insert(id(p, "root"), root.clone());
+    let assign = solver::solve_and_check(p, &ok)
         .unwrap_or_else(|e| panic!("valid membership must accept: {e:?}"));
-    let holes = solver::analyze_underconstrained(&p, &assign);
+    let holes = solver::analyze_underconstrained(p, &assign);
     assert!(
         holes.is_empty(),
         "merkle circuit under-constrained: {holes:?}"
     );
 
     // (2) A wrong root is rejected.
-    let mut bad_root = path_inputs(&p, leaf, siblings, index_bits);
-    bad_root.insert(id(&p, "root"), "12345".to_string());
+    let mut bad_root = path_inputs(p, leaf, siblings, index_bits);
+    bad_root.insert(id(p, "root"), "12345".to_string());
     assert!(
-        solver::solve_and_check(&p, &bad_root).is_err(),
+        solver::solve_and_check(p, &bad_root).is_err(),
         "a wrong root must be rejected"
     );
 
     // (3) A tampered sibling (with the honest root) is rejected — the fold no
     // longer reaches `root`.
-    let mut bad_path = path_inputs(&p, leaf, ["99", "22", "33", "44"], index_bits);
-    bad_path.insert(id(&p, "root"), root.clone());
+    let mut bad_path = path_inputs(p, leaf, ["99", "22", "33", "44"], index_bits);
+    bad_path.insert(id(p, "root"), root.clone());
     assert!(
-        solver::solve_and_check(&p, &bad_path).is_err(),
+        solver::solve_and_check(p, &bad_path).is_err(),
         "a tampered authentication path must be rejected"
     );
 }
 
 #[test]
 fn merkle_position_bit_is_boolean_constrained() {
-    // A non-boolean index bit must be rejected: the gadget pins each direction bit
-    // with `b·b == b`, so `index_bits[0] = 2` (with an otherwise honest witness)
-    // cannot satisfy the circuit — this is what stops a prover forging a different
-    // fold via an out-of-range selector.
+    // A non-boolean index bit must be rejected (bug checklist #11): with
+    // `index_bits[0] = 2` the swap outputs `(2·sib − node, 2·node − sib)`, a pair
+    // that is neither child order. The root is the one that forged fold reaches, so
+    // every row but the bit's booleanity holds and only `b·b = b` can reject it.
     let p = load();
     let leaf = "7";
     let siblings = ["11", "22", "33", "44"];
-    let honest = honest_root(&p, leaf, siblings, ["1", "0", "1", "0"]);
+    let bits = ["2", "0", "1", "0"];
+    let forged = honest_root(p, leaf, siblings, bits);
 
-    let mut m = path_inputs(&p, leaf, siblings, ["2", "0", "1", "0"]);
-    m.insert(id(&p, "root"), honest);
+    let mut m = path_inputs(p, leaf, siblings, bits);
+    m.insert(id(p, "root"), forged);
+    let err = solver::solve_and_check(p, &m).expect_err("a non-boolean index bit must be rejected");
+    let solver::SolveError::ConstraintFailed(row) = err else {
+        panic!("expected a failed row, got {err:?}");
+    };
+    let bit = id(p, "index_bits[0]");
+    let c = &p.constraints[row];
     assert!(
-        solver::solve_and_check(&p, &m).is_err(),
-        "a non-boolean index bit must be rejected"
+        c.mul_terms.iter().any(|t| t.left == bit && t.right == bit),
+        "the failing row must be index_bits[0]'s booleanity, got row {row}: {c:?}"
     );
+}
+
+#[test]
+fn merkle_rejects_every_tampered_witness_value() {
+    // Forged hints (bug checklist #7, #8): starting from an honest membership
+    // witness, change any one prover-computed value (each level's swap product,
+    // every Poseidon S-box output) and some row must fail.
+    let p = load();
+    let modulus = BigUint::parse_bytes(p.field.modulus_decimal.as_bytes(), 10).unwrap();
+    let (leaf, siblings, bits) = ("7", ["11", "22", "33", "44"], ["1", "0", "1", "0"]);
+    let mut inputs = path_inputs(p, leaf, siblings, bits);
+    inputs.insert(id(p, "root"), honest_root(p, leaf, siblings, bits));
+    let honest = solver::solve_and_check(p, &inputs).expect("honest witness");
+
+    let derived: Vec<_> = p
+        .vars
+        .iter()
+        .filter(|v| v.role == xark_ir::primitive::VarRole::Derived)
+        .collect();
+    assert!(!derived.is_empty());
+    for v in derived {
+        let mut forged = honest.clone();
+        let x = fp(&honest[&v.id].to_decimal(), &modulus);
+        let bumped = ((x + 1u8) % &modulus).to_str_radix(10);
+        forged.insert(v.id, solver::fp_from_decimal(&bumped, p));
+        assert!(
+            solver::check(p, &forged).is_err(),
+            "tampering `{}` must be rejected",
+            v.name
+        );
+    }
 }

@@ -5,15 +5,15 @@
 //! State: 1600 bits as 25 lanes of 64 LE bits (`[[Field; 64]; 25]`), lanes
 //! indexed `x + 5*y` with `x, y ∈ 0..5`, lane byte-order little-endian.
 //!
-//! Gate cost (only `var * var` products emit a gate): θ is XORs + one rotate;
-//! ρ/π are pure lane re-wiring (FREE); χ is the only AND source and dominates;
-//! ι XORs lane 0 with a compile-time-constant round-constant lane (FREE).
-//! ~6400 gates/round × 24 ≈ 154k gates for the permutation.
+//! Gate cost (only `var * var` products emit a gate): θ is 35 XOR3 lanes
+//! (`xark_bits::xor3`, one row per bit); ρ/π are pure lane re-wiring (FREE); χ is
+//! one `xark_bits::chi` row per bit; ι XORs lane 0 with a compile-time-constant
+//! round-constant lane (FREE). 3,840 rows/round × 24 ≈ 92k for the permutation.
 
 #![no_std]
 
 use xark::Field;
-use xark_bits::{and64, not64, rotl64, xor64};
+use xark_bits::{rotl64, xor3_64, xor64};
 
 // Lane readers. Reading a whole inner `[Field; 64]` out of a nested array
 // (`s[i]` as a value) is NOT supported by the circuit subset (it lowers to a
@@ -57,7 +57,10 @@ fn read24(s: [[Field; 64]; 24], r: usize) -> [Field; 64] {
 // updated state (whole nested-array params/returns are supported).
 
 /// θ (theta): `C[x] = ⊕_y A[x,y]`, `D[x] = C[x-1] ⊕ rotl(C[x+1], 1)`, then
-/// `A[x,y] ⊕= D[x]`. All XOR + one rotate; 50 `xor64` per call.
+/// `A[x,y] ⊕= D[x]`. With three-input XOR rows (`xark_bits::xor3`, zkGolf
+/// 20f52596 / 5bdce6d5) the column parity is two XOR3s and `D` is never named:
+/// `A'[x,y] = XOR3(A[x,y], C[x-1], rotl(C[x+1], 1))`, so 10 + 25 XOR3 lanes (2,240
+/// rows) where pairwise XORs took 20 + 5 + 25 (3,200).
 fn theta(a: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     let zero = [Field::from(0u8); 64];
 
@@ -65,11 +68,8 @@ fn theta(a: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     let mut c = [zero; 5]; // C[x]
     let mut x = 0usize;
     while x < 5usize {
-        let mut lane = read25(a, x);
-        lane = xor64(lane, read25(a, x + 5));
-        lane = xor64(lane, read25(a, x + 10));
-        lane = xor64(lane, read25(a, x + 15));
-        lane = xor64(lane, read25(a, x + 20));
+        let p = xor3_64(read25(a, x), read25(a, x + 5), read25(a, x + 10));
+        let lane = xor3_64(p, read25(a, x + 15), read25(a, x + 20));
         let mut j = 0usize;
         while j < 64usize {
             c[x][j] = lane[j];
@@ -78,17 +78,14 @@ fn theta(a: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
         x += 1;
     }
 
-    // D[x] = C[x-1] ⊕ rotl(C[x+1], 1); apply A[x,y] ⊕= D[x] into a fresh state.
     let mut out = [zero; 25];
     let mut x = 0usize;
     while x < 5usize {
         let cm1 = read5(c, (x + 4) % 5); // C[x-1]
-        let cp1 = read5(c, (x + 1) % 5); // C[x+1]
-        let d = xor64(cm1, rotl64(cp1, 1));
+        let cp1 = rotl64(read5(c, (x + 1) % 5), 1); // rotl(C[x+1], 1)
         let mut y = 0usize;
         while y < 5usize {
-            let lane = read25(a, x + 5 * y);
-            let nl = xor64(lane, d);
+            let nl = xor3_64(read25(a, x + 5 * y), cm1, cp1);
             let mut j = 0usize;
             while j < 64usize {
                 out[x + 5 * y][j] = nl[j];
@@ -287,8 +284,8 @@ fn rho_pi(a: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     b
 }
 
-/// χ (chi): `A[x,y] = B[x,y] ⊕ ((¬B[x+1,y]) ∧ B[x+2,y])`. The only AND source.
-/// Cost: 25 `and64` + 25 `xor64` per call.
+/// χ (chi): `A[x,y] = B[x,y] ⊕ ((¬B[x+1,y]) ∧ B[x+2,y])`, one `xark_bits::chi` row
+/// per bit (zkGolf f8fd1e03): 1,600 rows where AND + XOR took 3,200.
 fn chi(b: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     let zero = [Field::from(0u8); 64];
     let mut out = [zero; 25];
@@ -299,11 +296,9 @@ fn chi(b: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
             let bx = read25(b, x + 5 * y);
             let bx1 = read25(b, (x + 1) % 5 + 5 * y);
             let bx2 = read25(b, (x + 2) % 5 + 5 * y);
-            let t = and64(not64(bx1), bx2);
-            let nl = xor64(bx, t);
             let mut j = 0usize;
             while j < 64usize {
-                out[x + 5 * y][j] = nl[j];
+                out[x + 5 * y][j] = xark_bits::chi(bx[j], bx1[j], bx2[j]);
                 j += 1;
             }
             x += 1;
@@ -1909,6 +1904,8 @@ fn rc_bits() -> [[Field; 64]; 24] {
 // ===========================================================================
 
 /// Keccak-f\[1600\]: apply all 24 rounds (θ, ρ, π, χ, ι) to the 25-lane state.
+/// Every state bit must already be a constrained bit: θ and χ are single-row
+/// bit gadgets whose output is unique only on bit inputs.
 pub fn keccak_f(state: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
     let zero = [Field::from(0u8); 64];
 
@@ -1953,6 +1950,8 @@ pub fn keccak_f(state: [[Field; 64]; 25]) -> [[Field; 64]; 25] {
 /// domain byte (NIST SHA3 would use 0x06). Absorption into a zero state makes
 /// the 25-lane state `[block[0..17], 0, 0, ..., 0]` (capacity lanes zero), which
 /// we permute once and squeeze: the first 256 output bits are lanes 0..4.
+///
+/// Every block bit must already be a constrained bit (see [`keccak_f`]).
 ///
 /// Returns the 4 digest lanes (each a `[Field; 64]` little-endian word).
 pub fn keccak256_block(block: [[Field; 64]; 17]) -> [[Field; 64]; 4] {

@@ -6,7 +6,8 @@
 //! booleanity row beside a packing row): this checks no kept variable lost its
 //! constraints, not that every row survived.
 //!
-//! For each example: `xark build` + `xark setup` (default `auto` form), then the
+//! For each example: `xark build` + `xark setup` (`auto`, or the form it asks for),
+//! then the
 //! honest witness from the example's inputs (`fixtures/inputs/<name>.json`).
 //! Every variable the keyed rows still use is changed in turn (a bit flips, any
 //! other value gets `+1`), all others kept, and the keyed rows must reject the
@@ -77,14 +78,37 @@ fn rejects(
         .collect()
 }
 
-/// `form`: the key form `auto` picks for `name`, so both row sources stay covered.
-fn keyed_rows_reject_what_the_flat_circuit_rejects(name: &str, form: &str) {
+/// `form`: the key form for `name`, so both row sources stay covered: the one `auto`
+/// picks, or with `request` the one asked for (`auto` minimizes no example now: the
+/// frontend's folds and its `n`-row decompositions leave the global minimize under
+/// 1% to save).
+fn keyed_rows_reject_what_the_flat_circuit_rejects(name: &str, form: &str, request: bool) {
     let tmp = tempdir();
     let (out, target) = (tmp.path().join("out"), tmp.path().join("target"));
     let (ok, err) = xark_build(name, &out, &target);
     assert!(ok, "build failed: {err}");
-    let (ok, err) = xark_setup(&out);
-    assert!(ok, "setup failed: {err}");
+    if request {
+        let o = std::process::Command::new(common::xark_bin())
+            .arg("setup")
+            .arg(&out)
+            .args([
+                "--insecure-dev-mode",
+                "--deterministic-rng",
+                "1",
+                "--r1cs-form",
+                form,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "setup failed: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    } else {
+        let (ok, err) = xark_setup(&out);
+        assert!(ok, "setup failed: {err}");
+    }
 
     let xbc = std::fs::read(out.join("circuit.xbc")).unwrap();
     let flat = xark_ir::function_decode::expand_function_blob(&xbc).unwrap();
@@ -149,15 +173,15 @@ fn keyed_rows_reject_what_the_flat_circuit_rejects(name: &str, form: &str) {
 
 #[test]
 fn cube_keyed_rows_reject_every_change_the_flat_r1cs_rejects() {
-    keyed_rows_reject_what_the_flat_circuit_rejects("cube", "reduced");
+    keyed_rows_reject_what_the_flat_circuit_rejects("cube", "reduced", false);
 }
 
 #[test]
 fn sha256_keyed_rows_reject_every_change_the_flat_r1cs_rejects() {
-    keyed_rows_reject_what_the_flat_circuit_rejects("sha256", "minimized");
+    keyed_rows_reject_what_the_flat_circuit_rejects("sha256", "minimized", true);
 }
 
 #[test]
 fn aes256_gcm_keyed_rows_reject_every_change_the_flat_r1cs_rejects() {
-    keyed_rows_reject_what_the_flat_circuit_rejects("aes256_gcm", "reduced");
+    keyed_rows_reject_what_the_flat_circuit_rejects("aes256_gcm", "reduced", false);
 }

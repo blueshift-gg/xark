@@ -95,9 +95,10 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   intermediate `< 2²⁵³ < r` so the `Fr` arithmetic lifts faithfully to ℕ
   (`Formal.Lazy25519 / LazyK1`). Discharges the "non-native limb bridge" trust boundary
   `Formal.Edwards` names for the lazy path.
-* **Merkle membership** — `merkle_level_swap_sound`: a boolean position bit makes the
-  per-level sibling mux a genuine conditional swap (no under-constraint, no off-pair value),
-  composed with Poseidon determinacy (`Formal.Merkle`).
+* **Merkle membership** — `Xark.Templates.CondSwap.soundness`, over `cond_swap`'s exported
+  rows: the template forces its position bit boolean and its output to be the input pair in
+  one of its two orders; `root_binds` composes the levels into the Merkle root, assuming
+  (not proven over its rows) that `hash2` computes a function (`Formal.CondSwap`).
 * **R1CS ↔ Lean bridge** — ten snapshot tests in `crates/lang/tests/snapshot.rs` pin each
   frontend gadget's multiplication-gate count to its Lean soundness model.
 * **Allocation bookkeeping** — `AllocState`, `alloc_witness_idempotent`,

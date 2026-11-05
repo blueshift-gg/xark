@@ -184,7 +184,11 @@ pub struct Builder {
     /// copying its operands into a witness op it then drops.
     deferred_products: Vec<(usize, usize, VarId)>,
     pub(crate) witness_gen: Vec<Option<WitnessGen>>,
-    pub(crate) bit_cache: BTreeMap<(CanonicalLcKey, usize), Vec<VarId>>,
+    pub(crate) bit_cache: BTreeMap<(CanonicalLcKey, usize), Vec<LinearCombination>>,
+    /// Every decomposition whose bit 0 is computed (see [`Builder::decompose_bits`]),
+    /// by its top hinted bit, the last variable of its bit 0 and of its low parts:
+    /// so that bit 0 counts as boolean and a low part's bits are found.
+    computed_bits: IdMap<VarId, Vec<LinearCombination>>,
     /// Template defs found by [`crate::templates::detect`], in creation order.
     pub(crate) function_templates: Vec<FunctionTemplate>,
     /// Every template call, top-level or nested inside a def body.
@@ -223,6 +227,9 @@ pub struct Builder {
     /// inside any enclosing call, and memo tables (muxes, bit decompositions) now
     /// differ from a build that doesn't record, so no call here is exact.
     pub(crate) gadget_tainted: Option<String>,
+    /// The wasm call stack at the latest intrinsic, when recording: names the site of
+    /// a decomposition recorded as a `to_bits` call.
+    pub(crate) site_stack: Vec<(u32, u32)>,
 }
 
 impl Builder {
@@ -240,6 +247,7 @@ impl Builder {
             deferred_products: Vec::new(),
             witness_gen: Vec::new(),
             bit_cache: BTreeMap::new(),
+            computed_bits: IdMap::default(),
             function_templates: Vec::new(),
             function_calls: Vec::new(),
             witness_only: false,
@@ -262,6 +270,7 @@ impl Builder {
             gadget_stack: Vec::new(),
             gadget_mark: (0, 0, 0),
             gadget_tainted: None,
+            site_stack: Vec::new(),
         }
     }
 
@@ -333,8 +342,25 @@ impl Builder {
     /// is a lossless rewrite, NOT a new constraint. Strictly gated on genuine
     /// booleanity: a non-boolean summand, a repeated var, or a stray coefficient
     /// all yield `None` (never assume a value is boolean).
-    pub(crate) fn bit_sum_shortcut(&self, x: &LinearCombination, n: usize) -> Option<Vec<VarId>> {
-        bit_sum_match(x, n, |v| self.boolean_vars.contains(&v))
+    ///
+    /// Also when `x` is the low `n` bits `Σᵢ<n 2ⁱ·bitᵢ` of a decomposition whose bit 0
+    /// is a linear form (a packed input's first field): those bits.
+    pub(crate) fn bit_sum_shortcut(
+        &self,
+        x: &LinearCombination,
+        n: usize,
+    ) -> Option<Vec<LinearCombination>> {
+        if let Some(vars) = bit_sum_match(x, n, |v| self.boolean_vars.contains(&v)) {
+            return Some(vars.into_iter().map(LinearCombination::var).collect());
+        }
+        let bits = self.computed_bits.get(&x.terms.last()?.var)?.get(..n)?;
+        let mut low = LinearCombination::zero();
+        let mut pow = xark_ir::FieldConst::one();
+        for b in bits {
+            low = low + b.clone().scale(&pow);
+            pow = pow.mul(&xark_ir::FieldConst::from_i64(2));
+        }
+        (x.clone() - low).is_zero().then(|| bits.to_vec())
     }
 
     pub(crate) fn alloc_advice(&mut self) -> VarId {
@@ -593,7 +619,8 @@ impl Builder {
         out
     }
 
-    /// `lc` is `0`, `1`, `v` or `1 − v` for a pinned-boolean `v`.
+    /// `lc` is `0`, `1`, `v` or `1 − v` for a pinned-boolean `v` (or a decomposition's
+    /// computed bit 0).
     pub(crate) fn is_boolean_lc(&self, lc: &LinearCombination) -> bool {
         match &lc.terms[..] {
             [] => lc.constant.is_zero() || lc.constant.is_one(),
@@ -602,8 +629,31 @@ impl Builder {
                     && ((lc.constant.is_zero() && t.coeff.is_one())
                         || (lc.constant.is_one() && t.coeff.is_neg_one()))
             }
-            _ => false,
+            // A decomposition's computed bit 0, or `1 −` it.
+            [.., t] => self.computed_bits.get(&t.var).is_some_and(|bits| {
+                (lc.clone() - bits[0].clone()).is_zero()
+                    || (lc.clone() + bits[0].clone() - LinearCombination::one()).is_zero()
+            }),
         }
+    }
+
+    /// `lc` as `c·b₀ + rest` for a decomposition's computed bit 0 `b₀` and `c > 0`,
+    /// taken at the highest term of `lc` that is a decomposition's top bit with a
+    /// coefficient `c` cancels. (`(x & 3)` is `b₀ + 2·b₁`, which simplifies to
+    /// `x − 4·b₂ − …`.) `rest` loses that term and gains only lower variables (`b₀`'s
+    /// value predates its bits), so repeated splitting ends.
+    pub(crate) fn split_computed_bit0(
+        &self,
+        lc: &LinearCombination,
+    ) -> Option<(i64, LinearCombination)> {
+        lc.terms.iter().rev().find_map(|t| {
+            let b0 = &self.computed_bits.get(&t.var)?[0];
+            let top = b0.terms.last()?.coeff.as_i64()?;
+            let coeff = t.coeff.as_i64()?;
+            let c = (coeff % top == 0).then(|| coeff / top).filter(|c| *c > 0)?;
+            let rest = lc.clone() - b0.clone().scale(&xark_ir::FieldConst::from_i64(c));
+            Some((c, rest))
+        })
     }
 
     /// Emit a fused boolean XOR: allocate `c`, emit `(2a) * b = a + b - c`, and
@@ -736,6 +786,10 @@ impl Builder {
         }
 
         let diff = lhs - rhs;
+        // `0 = 0`: two equal constants, e.g. a folded hint's recomposition.
+        if diff.is_zero() {
+            return;
+        }
         let id = self.fresh_constraint_id();
         let note = note!(self, "({}) * 1 = 0", self.render_lc(&diff));
         self.push_constraint(
@@ -812,14 +866,19 @@ impl Builder {
         }
     }
 
-    /// Emit an `n`-bit range proof over a (possibly compound) linear combination:
-    /// decompose `value` into `n` boolean bits and pin their recomposition to
-    /// `value` (⇒ `value < 2^n`).
-    /// Decompose `value` into `n` little-endian boolean bit vars: hint them (batched
-    /// `Bits`), pin each `∈ {0,1}`, and pin `Σ bitᵢ·2ⁱ == value` (which also proves
-    /// `value < 2^n`). Returns the bit vars — the shared core of the range proof and
-    /// the native bitwise ops.
-    pub(crate) fn decompose_bits(&mut self, value: LinearCombination, n: usize) -> Vec<VarId> {
+    /// Decompose `value` into `n ≤ 253` little-endian bits, proving `value < 2^n`:
+    /// the shared core of the range proof and the native bitwise ops. Bits `1..n`
+    /// are hinted variables pinned boolean (`b · b = b`); bit 0 is what they leave,
+    /// `b₀ = value − Σᵢ 2ⁱ·bᵢ`, pinned by the one row `b₀ · (b₀ − 1) = 0`. That is
+    /// `n` rows and `n − 1` variables, one fewer of each than hinting every bit and
+    /// adding a recomposition row (zkGolf T9, `d9e2018b`; the computed bit is the
+    /// lowest, so no coefficient is `2^−(n−1)`). `2^n < r` (bug checklist 3, 9) makes
+    /// the bits unique: formal/Formal/ToBits.lean `model_sound`.
+    pub(crate) fn decompose_bits(
+        &mut self,
+        value: LinearCombination,
+        n: usize,
+    ) -> Vec<LinearCombination> {
         self.decompose_bits_gated(value, n, None)
     }
 
@@ -831,46 +890,83 @@ impl Builder {
         value: LinearCombination,
         n: usize,
         gate: Option<LinearCombination>,
-    ) -> Vec<VarId> {
+    ) -> Vec<LinearCombination> {
+        assert!(n <= 253, "a {n}-bit decomposition can wrap mod r");
+        // Recorded as a `to_bits` call (for `lean-export --coverage`) when it is
+        // constrained and not inside a recorded call (whose rows it is); a gated one
+        // decomposes `g·x`, so it is refused.
+        let record =
+            (self.record_gadgets && self.gadget_stack.is_empty() && !self.witness_only && n > 0)
+                .then(|| (self.gadget_counters(), value.clone(), gate.is_some()));
         let value = self.gate_input(gate.as_ref(), value);
-        let two = xark_ir::FieldConst::from_i64(2);
-        let mut pow = xark_ir::FieldConst::from_i64(1);
-        let mut recomp = LinearCombination::zero();
-        // Allocate all `n` bit variables up front (a contiguous block), then emit
-        // a single batched `Bits` witness-gen op: the shared `input` LC is stored
-        // once instead of re-serialized per bit. The R1CS is unchanged — the same
-        // booleanity + recomposition constraints, in the same order, over the same
-        // var ids — so only `circuit.json`'s hint program shrinks.
-        let bit_vars: Vec<u32> = (0..n).map(|_| self.alloc_advice()).collect();
-        self.witness_gen.push(Some(WitnessGen::Bits {
-            outs: bit_vars.clone(),
-            input: value.clone(),
-        }));
-        for &b in &bit_vars {
-            // Booleanity: `b * b = b` (⟺ `b ∈ {0, 1}`).
+        if n == 0 {
+            let id = self.fresh_constraint_id();
+            let note = note!(self, "0-bit range: value == 0");
+            self.push_constraint(
+                ConstraintKind::Equality,
+                R1csConstraint::equal(id, value, LinearCombination::zero(), &note),
+            );
+            return Vec::new();
+        }
+        let high: Vec<VarId> = (1..n).map(|_| self.alloc_advice()).collect();
+        let mut sum = LinearCombination::zero();
+        let mut pow = xark_ir::FieldConst::one();
+        for (i, &b) in high.iter().enumerate() {
+            self.witness_gen.push(Some(WitnessGen::Bit {
+                out: b,
+                input: value.clone(),
+                index: i as u32 + 1,
+            }));
             let id = self.fresh_constraint_id();
             let note = note!(self, "{} in {{0,1}}", self.var_names[b as usize]);
+            let lc = LinearCombination::var(b);
             self.push_constraint(
                 ConstraintKind::Booleanity,
-                R1csConstraint::general(
-                    id,
-                    LinearCombination::var(b),
-                    LinearCombination::var(b),
-                    LinearCombination::var(b),
-                    &note,
-                ),
+                R1csConstraint::general(id, lc.clone(), lc.clone(), lc, &note),
             );
-            recomp = recomp + LinearCombination::var(b).scale(&pow);
-            pow = pow.mul(&two);
+            pow = pow.mul(&xark_ir::FieldConst::from_i64(2));
+            sum = sum + LinearCombination::var(b).scale(&pow);
         }
-        // Recomposition pins the bits to `value` (⇒ `value < 2^n`).
+        let low = value - sum;
         let id = self.fresh_constraint_id();
-        let note = note!(self, "{n}-bit range: recompose == <lc>");
+        let note = note!(self, "{n}-bit range: bit 0 = value − Σ 2ⁱ·bᵢ ∈ {{0,1}}");
         self.push_constraint(
-            ConstraintKind::Equality,
-            R1csConstraint::equal(id, recomp, value, &note),
+            ConstraintKind::Booleanity,
+            R1csConstraint::general(
+                id,
+                low.clone(),
+                low.clone() - LinearCombination::one(),
+                LinearCombination::zero(),
+                &note,
+            ),
         );
-        bit_vars
+        let top = high.last().copied();
+        let bits: Vec<LinearCombination> = std::iter::once(low)
+            .chain(high.into_iter().map(LinearCombination::var))
+            .collect();
+        // A witness-only region emitted no row: nothing is proven.
+        if !self.witness_only {
+            match top {
+                Some(top) => {
+                    self.computed_bits.insert(top, bits.clone());
+                }
+                // `n = 1` of a variable: the row is its booleanity.
+                None => {
+                    if let [t] = &bits[0].terms[..]
+                        && bits[0].constant.is_zero()
+                        && t.coeff.is_one()
+                    {
+                        self.boolean_vars.insert(t.var);
+                    }
+                }
+            }
+        }
+        if let Some((start, value, gated)) = record {
+            let refused =
+                gated.then(|| "a witness branch gates it (its rows decompose `g·x`)".into());
+            self.record_decomposition(start, value, bits.clone(), refused);
+        }
+        bits
     }
 
     pub(crate) fn emit_range_proof_lc(&mut self, value: LinearCombination, n: usize) {

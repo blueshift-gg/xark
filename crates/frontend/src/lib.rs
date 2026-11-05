@@ -20,7 +20,7 @@ mod output;
 mod templates;
 
 pub use error::{CompileError, CompileResult, ErrorSite};
-pub use gadgets::{GadgetTemplate, RecordedCall};
+pub use gadgets::{GadgetTemplate, RecordedCall, canonical_lc};
 pub use output::LowerOutput;
 
 /// A lowered circuit and the name of its `#[circuit]` fn.

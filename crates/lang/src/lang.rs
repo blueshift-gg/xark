@@ -292,60 +292,78 @@ impl Field {
 
     /// Advice hint: the `index`-th least-significant bit of `x`. Allocates a
     /// private witness and records that its value is `bit(x, index)`. Pin it
-    /// with a booleanity check and a recomposition constraint.
+    /// with a booleanity check and a recomposition constraint. The bit of a
+    /// constant is that constant bit: no witness, and its pins fold away.
     #[inline(never)]
     pub fn hint_bit(x: Field, index: usize) -> Field {
         __xark_hint_bit(x, index)
     }
 
-    /// Decompose `self` into `N` little-endian boolean bits. Each bit is pinned
-    /// boolean (`b² == b`) and the bits are pinned to recompose to `self`
-    /// (`Σ bitᵢ·2ⁱ == self`) — which also proves `self < 2^N`. Composed entirely
-    /// from `Field` primitives (`hint_bit` + arithmetic + `require_eq`).
+    /// Decompose `self` into `N` little-endian boolean bits, proving `self < 2^N`.
+    /// In a circuit it costs `N` rows and `N − 1` new variables (none when the bits
+    /// are already known: a constant, a sum of proven bits, an earlier `to_bits` of
+    /// the same value); the rows are proven in `formal/Formal/ToBits.lean`.
     #[cfg_attr(not(xark), track_caller)]
+    #[crate::gadget]
     pub fn to_bits<const N: usize>(self) -> [Field; N] {
-        // N > 253 wraps mod r, so recomposition wouldn't pin `self`
+        // N > 253 wraps mod r, so the bits wouldn't be unique
         const {
             assert!(
                 N <= 253,
                 "to_bits::<N>: N must be <= 253 (BN254 field capacity)"
             )
         };
-        // The compiler's decomposition memo: a constant's bits, a sum of proven bits,
-        // or an earlier `to_bits::<N>` of the same value.
-        #[cfg(all(xark, target_arch = "wasm32"))]
-        if let Some(bits) = crate::wasm::to_bits_lookup::<N>(&self) {
-            return bits;
-        }
         let mut bits = [Field::from(0u8); N];
-        let mut i = 0usize;
-        while i < N {
-            bits[i] = Field::hint_bit(self, i);
-            i += 1;
-        }
-        let mut i = 0usize;
-        while i < N {
-            bits[i].require_bool();
-            i += 1;
-        }
-        let mut acc = Field::from(0u8);
-        let mut pow = Field::from(1u8);
-        let mut i = 0usize;
-        while i < N {
-            acc = acc + bits[i] * pow;
+        self.decompose(&mut bits);
+        bits
+    }
+
+    /// The 254 little-endian bits of `self`'s representative in `[0, r)`, for BN254's `r`
+    /// (like `to_bits`'s 253-bit cap, the constant below assumes that field): unlike
+    /// [`Field::to_bits`], every field element fits, and the bits are unique because
+    /// they must spell a number `≤ r − 1`. 353 rows: bits `1..254` hinted, bit `0` what
+    /// they leave of `self` (as in `to_bits`), then MSB-first against `r − 1`'s bits
+    /// (bellman `into_bits_le_strict`; ACL2 `bits-lt-prime`): `all` is the AND of the
+    /// bits where `r − 1` has a one, so far, and where `r − 1` has a zero, `all = 1`
+    /// (an equal prefix) forces the bit to `0` in the same row that makes it boolean.
+    /// Proven in `formal/Formal/ToBitsCanonical.lean`.
+    #[cfg_attr(not(xark), track_caller)]
+    #[crate::gadget]
+    pub fn to_bits_canonical(self) -> [Field; 254] {
+        // r − 1, little-endian 64-bit limbs.
+        const R1: [u64; 4] = [
+            0x43e1_f593_f000_0000,
+            0x2833_e848_79b9_7091,
+            0xb850_45b6_8181_585d,
+            0x3064_4e72_e131_a029,
+        ];
+        let one = Field::from(1u8);
+        let mut bits = [Field::from(0u8); 254];
+        let mut rest = self;
+        let mut pow = Field::from(2u8);
+        for (i, bit) in bits.iter_mut().enumerate().skip(1) {
+            *bit = Field::hint_bit(self, i);
+            rest = rest - *bit * pow;
             pow = pow + pow;
-            i += 1;
         }
-        __xark_require_eq_scalar(acc, self); // recomposition pins the bits to `self` (⇒ self < 2^N)
-        #[cfg(all(xark, target_arch = "wasm32"))]
-        crate::wasm::to_bits_record::<N>(&self, &bits);
+        bits[0] = rest;
+        let mut all = one;
+        for i in (0..254).rev() {
+            let b = bits[i];
+            if R1[i / 64] >> (i % 64) & 1 == 1 {
+                b.require_bool();
+                all = all * b;
+            } else {
+                __xark_require_eq_scalar((one - all - b) * b, Field::from(0u8));
+            }
+        }
         bits
     }
 
     /// [`Field::to_bits`] for a width known as a value, `n ≤ 253`: the low `n` bits
-    /// (the rest of the array zero), proving `self < 2^n` with `n` booleanity rows and
-    /// one recomposition. For a width that comes from a type, such as an enum's
-    /// variant count, which a const generic can't take.
+    /// (the rest of the array zero), proving `self < 2^n`, at the same cost. For a
+    /// width that comes from a type, such as an enum's variant count, which a const
+    /// generic can't take.
     #[cfg_attr(not(xark), track_caller)]
     pub fn to_bits_n(self, n: usize) -> [Field; 253] {
         assert!(
@@ -353,32 +371,28 @@ impl Field {
             "to_bits_n: n must be <= 253 (BN254 field capacity)"
         );
         let mut bits = [Field::from(0u8); 253];
-        #[cfg(all(xark, target_arch = "wasm32"))]
-        if crate::wasm::to_bits_lookup_n(&self, n, &mut bits) {
-            return bits;
-        }
-        let mut i = 0usize;
-        while i < n {
-            bits[i] = Field::hint_bit(self, i);
-            i += 1;
-        }
-        let mut i = 0usize;
-        while i < n {
-            bits[i].require_bool();
-            i += 1;
-        }
-        let mut acc = Field::from(0u8);
-        let mut pow = Field::from(1u8);
-        let mut i = 0usize;
-        while i < n {
-            acc = acc + bits[i] * pow;
-            pow = pow + pow;
-            i += 1;
-        }
-        __xark_require_eq_scalar(acc, self); // ⇒ self < 2^n
-        #[cfg(all(xark, target_arch = "wasm32"))]
-        crate::wasm::to_bits_record_n(&self, n, &bits);
+        self.decompose(&mut bits[..n]);
         bits
+    }
+
+    /// `bits` = `self`'s low `bits.len()` bits, requiring `self < 2^bits.len()`: in a
+    /// circuit, the compiler's decomposition (`builder.rs::decompose_bits_gated`).
+    #[cfg_attr(not(xark), track_caller)]
+    fn decompose(self, bits: &mut [Field]) {
+        #[cfg(all(xark, target_arch = "wasm32"))]
+        crate::wasm::to_bits(&self, bits);
+        #[cfg(not(all(xark, target_arch = "wasm32")))]
+        {
+            let mut acc = Field::from(0u8);
+            let mut pow = Field::from(1u8);
+            for (i, bit) in bits.iter_mut().enumerate() {
+                *bit = Field::hint_bit(self, i);
+                bit.require_bool();
+                acc = acc + *bit * pow;
+                pow = pow + pow;
+            }
+            __xark_require_eq_scalar(acc, self); // ⇒ self < 2^n
+        }
     }
 
     /// Recompose `N` little-endian bits into a field element (`Σ bitᵢ·2ⁱ`). Only
@@ -414,20 +428,24 @@ impl Field {
 
     /// Boolean XOR: for `self, rhs ∈ {0,1}`, returns `self ^ rhs` as a single
     /// constrained variable (one fused R1CS constraint), avoiding the linear-
-    /// combination growth of writing `self + rhs - 2*self*rhs` by hand.
+    /// combination growth of writing `self + rhs - 2*self*rhs` by hand. With a
+    /// constant operand `k` it is the linear `k + (1 − 2k)·x`: no row.
     ///
     /// Booleanity is **not** checked: the result is constrained to
     /// `self + rhs - 2·self·rhs` whatever the operands are, so for other values it
     /// is not XOR (`x ^ Field::from(3u8)` is `3 - 5x`). Use it only on values
     /// already constrained to 0 or 1, such as bits from `to_bits`.
     #[inline(never)]
+    #[crate::gadget]
     pub fn xor(self, rhs: Field) -> Field {
         __xark_xor(self, rhs)
     }
 
     /// Boolean OR: for `self, rhs ∈ {0,1}`, returns `self | rhs` as a single
-    /// constrained variable (one fused R1CS constraint).
+    /// constrained variable (one fused R1CS constraint). With a constant operand
+    /// `k` it is the linear `k + (1 − k)·x`: no row.
     #[inline(never)]
+    #[crate::gadget]
     pub fn or(self, rhs: Field) -> Field {
         __xark_or(self, rhs)
     }

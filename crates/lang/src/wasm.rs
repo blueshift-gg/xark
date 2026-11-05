@@ -90,10 +90,8 @@ mod ffi {
         #[cfg(xark_gadgets)]
         #[cfg_attr(target_arch = "wasm32", link_name = "gadget_end")]
         pub fn xark_gadget_end(outputs: *const Field, n: usize);
-        #[cfg_attr(target_arch = "wasm32", link_name = "to_bits_lookup")]
-        pub fn xark_to_bits_lookup(x: *const Field, n: u32, out: *mut Field) -> bool;
-        #[cfg_attr(target_arch = "wasm32", link_name = "to_bits_record")]
-        pub fn xark_to_bits_record(x: *const Field, n: u32, bits: *const Field);
+        #[cfg_attr(target_arch = "wasm32", link_name = "to_bits")]
+        pub fn xark_to_bits(x: *const Field, n: u32, out: *mut Field);
         #[cfg_attr(target_arch = "wasm32", link_name = "input_field")]
         pub fn xark_input_field(out: *mut Field, name: *const u8, len: usize, vis: u32);
         #[cfg_attr(target_arch = "wasm32", link_name = "input_uint")]
@@ -260,25 +258,10 @@ pub(crate) fn gadget_end(outputs: &[Field]) {
     unsafe { ffi::xark_gadget_end(outputs.as_ptr(), outputs.len()) }
 }
 
-/// `to_bits::<N>` memo: `Some(bits)` when `x`'s bits are already known (a constant,
-/// a sum of proven bits, or an earlier decomposition), else `None` and the caller
-/// decomposes and then calls [`to_bits_record`].
-pub(crate) fn to_bits_lookup<const N: usize>(x: &Field) -> Option<[Field; N]> {
-    let mut o = MaybeUninit::<[Field; N]>::uninit();
-    // SAFETY: on `true` the host wrote all `N` fields.
-    unsafe { ffi::xark_to_bits_lookup(x, N as u32, o.as_mut_ptr().cast()).then(|| o.assume_init()) }
-}
-pub(crate) fn to_bits_record<const N: usize>(x: &Field, bits: &[Field; N]) {
-    unsafe { ffi::xark_to_bits_record(x, N as u32, bits.as_ptr()) }
-}
-
-/// [`to_bits_lookup`] for a width known as a value: on a hit, fills `out[..n]`.
-pub(crate) fn to_bits_lookup_n(x: &Field, n: usize, out: &mut [Field; 253]) -> bool {
-    // SAFETY: on `true` the host wrote `n ≤ 253` fields to `out`.
-    unsafe { ffi::xark_to_bits_lookup(x, n as u32, out.as_mut_ptr()) }
-}
-pub(crate) fn to_bits_record_n(x: &Field, n: usize, bits: &[Field; 253]) {
-    unsafe { ffi::xark_to_bits_record(x, n as u32, bits.as_ptr()) }
+/// `x`'s low `bits.len()` bits, proving `x < 2^bits.len()`: the compiler reuses
+/// known bits or emits the decomposition.
+pub(crate) fn to_bits(x: &Field, bits: &mut [Field]) {
+    unsafe { ffi::xark_to_bits(x, bits.len() as u32, bits.as_mut_ptr()) }
 }
 
 // --- inputs ------------------------------------------------------------------

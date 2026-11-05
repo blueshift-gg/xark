@@ -91,7 +91,7 @@ export const Merkle = new Circuit<MerkleInputs, MerklePublicInputs, MerklePublic
   schema,
   decodePublic,
   client: false,
-  digest: "8f678a5c562e29a351cba72692aeea0b",
+  digest: "8e8131c5d049da59eb6657d46bc9fda7",
 });
 
 export type MerkleProver = Prover<MerkleInputs, MerklePublicInputs, MerklePublicValues, {}>;

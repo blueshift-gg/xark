@@ -211,7 +211,7 @@ jobs:
         run: |
           x=target/release/xark
           k=examples/sha256/target/xark
-          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7
+          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form minimized
           $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form reduced --out $k/sha256-streamable
           $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --out $k/sha256-smooth
 

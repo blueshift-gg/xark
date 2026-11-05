@@ -14,9 +14,9 @@ set_option linter.style.header false
 `Formal/Templates/Add32.lean` is the R1CS the frontend emits for one call of
 `xark_bits::add32` (`cargo xtask lean-export add32`): 33 booleanity rows `wᵢ · wᵢ = wᵢ`
 and the recomposition `(Σᵢ<33 2ⁱ·wᵢ − Σᵢ<32 2ⁱ·aᵢ − Σᵢ<32 2ⁱ·bᵢ) · 1 = 0`, with a bit
-hint per `wᵢ`. On input words of bits it is **sound** (`soundness`): every assignment satisfying
-the rows outputs exactly the 32 bits of `(a + b) mod 2³²`, so the result has no prover
-freedom.
+hint per `wᵢ`. On input words of bits it is **sound** (`soundness`): every assignment
+satisfying the rows outputs exactly the 32 bits of `(a + b) mod 2³²`, so the result has no
+prover freedom.
 
 The input assumption, that both words are bits, is the caller's to enforce (`to_bits`
 outputs, or an earlier word gadget's result, which `soundness` shows is bits).
@@ -59,9 +59,6 @@ theorem inputs_eq :
 
 theorem outputs_eq :
     template.outputs = (List.range 32).map fun i => ⟨0, [(1, .wit i)]⟩ := by
-  decide +kernel
-
-theorem hints_eq : template.hints = (List.range 33).map fun i => .bit i inSum i := by
   decide +kernel
 
 theorem rows_eq : template.rows = (List.range 33).map boolRow ++ [recompRow] := by
@@ -281,5 +278,33 @@ theorem assumptions_consts (c : List (ℕ × F)) (σ : TVar → F)
   rcases env_consts_plug c σ j with ⟨hj, h⟩ | h
   · rw [h]; exact hx j hj
   · exact hc _ h
+
+/-- **Its outputs are bits** (on input bits): a producer of bits for the calls it feeds
+(`lean-export --coverage`, "assumptions discharged by producer"). -/
+theorem outs_isBit (σ : TVar → F) (ha : Assumptions (template.ins σ)) (h : template.Sat σ) :
+    ∀ v ∈ template.outs σ, IsBit v := by
+  have hs := soundness σ ha h
+  rw [Spec] at hs
+  rw [hs]
+  intro v hv
+  obtain ⟨i, -, rfl⟩ := List.mem_map.mp hv
+  split
+  · exact Or.inr rfl
+  · exact Or.inl rfl
+
+/-- `1 − b` of a bit `b` is a bit: a producer's output negated (`!x` on a bit) is
+still one. -/
+theorem isBit_one_sub {x : F} (h : IsBit x) : IsBit (1 - x) := by
+  rcases h with rfl | rfl
+  · exact Or.inr (by ring)
+  · exact Or.inl (by ring)
+
+/-- A product of bits is a bit: a row `a · b = v` with `a` and `b` proven bits
+pins `v` (`lean-export --coverage`, "booleanity rows"; the other two shapes it
+reads are `isBit_of_mul_self` and `ToBits.isBit_of_mul_sub_one`). -/
+theorem isBit_mul {x y : F} (hx : IsBit x) (hy : IsBit y) : IsBit (x * y) := by
+  rcases hx with rfl | rfl
+  · exact Or.inl (zero_mul y)
+  · simpa using hy
 
 end Xark.Templates.Add32

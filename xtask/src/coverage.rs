@@ -5,7 +5,7 @@
 //! the same call can emit other rows: a constant input folds, a decomposition memo
 //! hit reuses bits from outside the call, a caller's `require_eq` merges into it, a
 //! witness branch guards it. This builds every example with the gadget markers,
-//! checks that build keys the production rows (its keyed-rows digest is the one in
+//! checks that build is the production circuit (its digest is the one in
 //! `tests/stable-digests.txt`), and classifies each call of a gadget with a
 //! harness and a committed `formal/Formal/Templates/*.lean`:
 //!
@@ -13,9 +13,21 @@
 //!   the export renames them) hashes to the proven template's hash;
 //! * **covered with constant plugs**: it is the proven template with some input
 //!   plugs replaced by the constants the call passes (every linear combination
-//!   reduced mod `r`); `Template.soundness_inst` carries the
-//!   proof over, given `Assumptions` of those constants, which
-//!   `formal/Formal/Templates/Consts/<Gadget>.lean` proves per constant vector;
+//!   reduced mod `r`); `Template.soundness_inst` / `completeness_inst` carry the
+//!   proof over on inputs meeting the gadget's `Assumptions`;
+//!   `formal/Formal/Templates/Consts/<Gadget>.lean` proves `Assumptions` of each constant
+//!   vector (for add32, the constants' share of them; for `require_lt`, whose constants are
+//!   all `m − 1`'s, completeness's bound on `m − 1`: see `Formal/RequireLt3x86.lean`);
+//! * **covered with folded constants**: it is the proven template with constant
+//!   plugs substituted and then folded as the frontend folds (a hint of constants or
+//!   affine in the call's wires replaced by its value, the rows that leaves holding
+//!   at every assignment dropped; a closed false row fails): `Template.foldAt`,
+//!   `soundness_foldAt`, `sat_foldAt_of_sat`;
+//! * **covered: reuses a covered decomposition** / **bits of producer bits**: a
+//!   `to_bits` that emits nothing, returning a covered decomposition's bits of the
+//!   same input at the same width, or the proven bits its input sums;
+//! * **covered with LC plugs (assumptions discharged by producers …)**: LC plugs to a
+//!   gadget assuming bit inputs, each a proven bit (see [`in_context`]);
 //! * **refused**: the recorder can't attribute its rows exactly to the call (the
 //!   reason says why);
 //! * **different rows**: neither.
@@ -25,13 +37,15 @@
 //! with a reason; an entry no group matches fails too, so the list stays current.
 //! A missing or stale `Consts/<Gadget>.lean` fails (`--update` rewrites them).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use xark_frontend::GadgetTemplate;
+use xark_ir::LinearCombination;
 
 const ALLOWLIST: &str = "formal/coverage-allowlist.txt";
 
@@ -49,14 +63,49 @@ struct Proven {
     template: GadgetTemplate,
     /// Its soundness theorem assumes nothing of the inputs.
     trivial: bool,
+    /// The Lean module of its proof (`Formal.BoolOps` for `xor`).
+    proof: String,
+}
+
+/// The proof of template `module`: the one file under `formal/Formal/` importing
+/// `Formal.Templates.<module>`, as its Lean module and text.
+fn proof_of(module: &str) -> Result<(String, String)> {
+    let dir = crate::root().join("formal/Formal");
+    let import = format!("import Formal.Templates.{module}");
+    let mut found = Vec::new();
+    for e in std::fs::read_dir(&dir)? {
+        let path = e?.path();
+        if path.extension().is_some_and(|x| x == "lean") {
+            let text = std::fs::read_to_string(&path)?;
+            if text.lines().any(|l| l.trim_end() == import) {
+                let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+                found.push((format!("Formal.{stem}"), text));
+            }
+        }
+    }
+    match <[_; 1]>::try_from(found) {
+        Ok([p]) => Ok(p),
+        Err(f) => bail!(
+            "Formal.Templates.{module} must be imported by exactly one proof under formal/Formal/ (it is by {})",
+            f.len()
+        ),
+    }
 }
 
 /// One recorded call of a proven gadget.
 struct Call {
     gadget: String,
+    /// The harness whose template it was classified against.
+    harness: String,
     site: String,
     class: String,
     consts: Option<Vec<(u32, String)>>,
+    /// The call's inputs and outputs over the circuit's variables, and how many rows
+    /// and variables it emitted: what [`in_context`] reads.
+    inputs: Vec<LinearCombination>,
+    outputs: Vec<LinearCombination>,
+    rows: usize,
+    witnesses: u32,
 }
 
 pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
@@ -83,6 +132,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         .collect();
 
     let groups = Mutex::new(BTreeMap::<Group, usize>::new());
+    // Keyed by harness: a generic gadget has one per instantiation.
     let vectors = Mutex::new(BTreeMap::<String, Vectors>::new());
     let failures = Mutex::new(Vec::new());
     crate::parallel(targets, crate::default_jobs(), |dir| {
@@ -93,7 +143,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
                 let (mut g, mut v) = (groups.lock().unwrap(), vectors.lock().unwrap());
                 for c in calls {
                     if let Some(k) = c.consts {
-                        let users = v.entry(c.gadget.clone()).or_default().entry(k);
+                        let users = v.entry(c.harness.clone()).or_default().entry(k);
                         users.or_default().insert(name.clone());
                     }
                     *g.entry((c.gadget, name.clone(), c.site, c.class))
@@ -154,32 +204,31 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         }
     }
     for gadget in proven.keys() {
-        let mut n = BTreeMap::<&str, usize>::new();
+        // Per class, without the per-call detail in parentheses.
+        let mut n = BTreeMap::<String, usize>::new();
+        let (mut total, mut covered) = (0, 0);
         for ((g, _, _, class), m) in &groups {
             if g == gadget {
-                *n.entry(class.split(" (").next().unwrap_or(class))
-                    .or_default() += m;
-                *n.entry("total").or_default() += m;
+                let kind = match class.split_once(" (") {
+                    Some((k, rest)) if rest.starts_with("k_") || rest.starts_with("template ") => k,
+                    _ => class.as_str(),
+                };
+                let kind = if kind.starts_with("refused") {
+                    "refused"
+                } else {
+                    kind
+                };
+                *n.entry(kind.to_string()).or_default() += m;
+                total += m;
+                if class.starts_with("covered") {
+                    covered += m;
+                }
             }
         }
-        let get = |k: &str| n.get(k).copied().unwrap_or(0);
+        let parts: Vec<String> = n.iter().map(|(k, m)| format!("{m} {k}")).collect();
         println!(
-            "{gadget}: {} of {} calls covered ({} the proven template, {} with constant \
-             plugs, {} with LC plugs); {} caller-enforced, {} without a committed \
-             obligation, {} refused, {} different",
-            get("covered") + get("covered with constant plugs") + get("covered with LC plugs"),
-            get("total"),
-            get("covered"),
-            get("covered with constant plugs"),
-            get("covered with LC plugs"),
-            get("LC plugs: the caller must enforce Assumptions"),
-            get("not covered: covered with constant plugs")
-                + get("not covered: covered with LC plugs"),
-            n.iter()
-                .filter(|(k, _)| k.starts_with("refused"))
-                .map(|(_, m)| m)
-                .sum::<usize>(),
-            get("different rows"),
+            "{gadget}: {covered} of {total} calls covered; {}",
+            parts.join("; ")
         );
     }
     println!("coverage took {:.0?}", t.elapsed());
@@ -189,9 +238,10 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
     Ok(())
 }
 
-/// Every gadget with a harness: its template, which must be the one its committed
-/// Lean file (and so its proof) is about.
-fn proven() -> Result<BTreeMap<String, Proven>> {
+/// Every gadget with a harness: its templates (one per instantiation of a generic
+/// gadget), each of which must be the one its committed Lean file (and so its proof)
+/// is about.
+fn proven() -> Result<BTreeMap<String, Vec<Proven>>> {
     let mut out = BTreeMap::new();
     for harness in crate::lean::harnesses()? {
         let template = crate::lean::harness(&harness)?;
@@ -205,13 +255,17 @@ fn proven() -> Result<BTreeMap<String, Proven>> {
                 "{harness}: its harness no longer emits the proven template (run `cargo xtask lean-export --check`)"
             );
         }
+        // Its proof: the file importing the template (`BoolOps.lean` proves both
+        // `xor` and `or`), in the template's namespace there.
+        let module = crate::lean::camel(&harness);
+        let (proof, text) = proof_of(&module)?;
+        let body = text
+            .split_once(&format!("namespace Xark.Templates.{module}\n"))
+            .and_then(|(_, b)| b.split_once(&format!("end Xark.Templates.{module}\n")))
+            .map_or("", |(b, _)| b);
         // A soundness theorem with no hypothesis but the rows needs nothing of the
         // inputs, whatever combinations a caller passes.
-        let proof = crate::root()
-            .join("formal/Formal")
-            .join(format!("{}.lean", crate::lean::camel(&harness)));
-        let proof = std::fs::read_to_string(&proof).unwrap_or_default();
-        let trivial = proof
+        let trivial = body
             .lines()
             .any(|l| l.trim_end() == "theorem soundness (σ : TVar → F) (h : template.Sat σ) :");
         let p = Proven {
@@ -219,8 +273,11 @@ fn proven() -> Result<BTreeMap<String, Proven>> {
             hash,
             template,
             trivial,
+            proof,
         };
-        out.insert(p.template.name.clone(), p);
+        out.entry(p.template.name.clone())
+            .or_insert_with(Vec::new)
+            .push(p);
     }
     Ok(out)
 }
@@ -233,7 +290,7 @@ fn calls(
     dir: &Path,
     name: &str,
     want: Option<Option<String>>,
-    proven: &BTreeMap<String, Proven>,
+    proven: &BTreeMap<String, Vec<Proven>>,
 ) -> Result<Vec<Call>> {
     let target = crate::target_dir().join("coverage").join(name);
     let lower = |markers: bool| -> Result<xark_frontend::LowerOutput> {
@@ -268,21 +325,205 @@ fn calls(
         bail!("built with the gadget markers it keys rows {got}, not the production {want}");
     }
     let root = format!("{}/", crate::root().display());
-    Ok(out
-        .gadgets
-        .into_iter()
-        .filter_map(|c| {
-            let p = proven.get(&c.name)?;
-            let (class, consts) = classify(c.template, p);
-            let site = c.site.replace(&root, "");
-            Some(Call {
-                gadget: c.name,
-                site,
-                class,
-                consts,
-            })
-        })
-        .collect())
+    // Against each instantiation's template, keeping the closest match.
+    let rank = |class: &str| match class {
+        "covered" => 0,
+        c if c.starts_with("covered") => 1,
+        c if c.starts_with("LC plugs") => 2,
+        _ => 3,
+    };
+    let mut calls: Vec<Call> = Vec::new();
+    for c in out.gadgets {
+        let Some(ps) = proven.get(&c.name) else {
+            continue;
+        };
+        let (p, (class, consts)) = ps
+            .iter()
+            .map(|p| (p, classify(c.template.clone(), p)))
+            .min_by_key(|(_, (class, _))| rank(class))
+            .expect("a gadget has a harness");
+        calls.push(Call {
+            harness: p.harness.clone(),
+            gadget: c.name,
+            site: c.site.replace(&root, ""),
+            class,
+            consts,
+            inputs: c.inputs,
+            outputs: c.outputs,
+            rows: c.rows,
+            witnesses: c.witnesses,
+        });
+    }
+    in_context(&mut calls, &out.gadget_rows);
+    Ok(calls)
+}
+
+/// The gadgets whose `Spec` makes every output a bit (on inputs meeting their
+/// `Assumptions`): `ToBits.spec_isBit`, `ToBitsCanonical.spec_isBit`,
+/// `Reduce.spec_isBit`, and each bitwise `BIT_ASSUMING` gadget's `outs_isBit`.
+const BIT_PRODUCERS: [&str; 10] = [
+    "xark::lang::to_bits",
+    "xark::lang::to_bits_canonical",
+    "xark_bits::reduce",
+    "xark::lang::xor",
+    "xark::lang::or",
+    "xark_bits::add32",
+    "xark_bits::xor3",
+    "xark_bits::maj3",
+    "xark_bits::chi",
+    "xark_bits::ch",
+];
+
+/// The producers whose outputs are bits whatever their inputs (their `soundness`
+/// assumes nothing): `to_bits`, `to_bits_canonical` and `reduce`.
+const FREE_PRODUCERS: [&str; 3] = [
+    "xark::lang::to_bits",
+    "xark::lang::to_bits_canonical",
+    "xark_bits::reduce",
+];
+
+/// The gadgets whose `Assumptions` are exactly that their first `n` inputs are bits
+/// (`usize::MAX`: every input), so proven bit inputs discharge them (`Xor`, `Or`,
+/// `Add32`'s `Assumptions`, `Xark.HashOps.Assumptions` for `xor3`, `maj3`, `chi`, `ch`,
+/// and `ScalarMul.Assumptions`, the 128 scalar bits before `P`).
+const BIT_ASSUMING: [(&str, usize); 8] = [
+    ("xark::lang::xor", usize::MAX),
+    ("xark::lang::or", usize::MAX),
+    ("xark_bits::add32", usize::MAX),
+    ("xark_bits::xor3", usize::MAX),
+    ("xark_bits::maj3", usize::MAX),
+    ("xark_bits::chi", usize::MAX),
+    ("xark_bits::ch", usize::MAX),
+    ("xark_grumpkin::scalar_mul", 128),
+];
+
+/// A linear combination's identity mod `r` (for matching wires across calls).
+fn wire(l: &LinearCombination) -> String {
+    let l = xark_frontend::canonical_lc(l);
+    let mut s = l.constant.decimal();
+    for t in &l.terms {
+        let _ = write!(s, "+{}*v{}", t.coeff.decimal(), t.var);
+    }
+    s
+}
+
+/// The classes that need the circuit around a call, over its own variables: a
+/// `to_bits` that emits nothing, reusing a covered decomposition of the same input
+/// at the same width (the frontend's memo is keyed by both) or reading the bits of
+/// a sum of proven bits (`ToBits.spec_of_bits`); and LC plugs whose `Assumptions`
+/// (`BIT_ASSUMING`: its first `n` inputs are bits) hold because each of those inputs is
+/// a proven bit. A wire is a proven bit when it is a 0/1 constant, an output of a
+/// covered `BIT_PRODUCERS` call whose own inputs are proven bits (`FREE_PRODUCERS` need
+/// none), one minus a proven bit, or
+/// pinned by a row of the circuit (`rows`, from `LowerOutput::gadget_rows`):
+/// `x · x = x`, `x · (x − 1) = 0`, or `a · b = v` with `a` and `b` proven bits.
+/// Repeated until nothing changes, since a covered call's outputs can discharge
+/// another's inputs.
+fn in_context(calls: &mut [Call], rows: &[[LinearCombination; 3]]) {
+    let covered = |c: &Call| c.class.starts_with("covered");
+    let to_bits = |c: &Call| c.gadget == "xark::lang::to_bits" && c.inputs.len() == 1;
+    let key = |c: &Call| format!("{}/{}", wire(&c.inputs[0]), c.outputs.len());
+    // Outputs of producers, and wires the rows pin.
+    let (mut bits, mut pinned) = (HashSet::<String>::new(), HashSet::<String>::new());
+    let mut decomps: HashMap<String, Vec<String>> = HashMap::new();
+    let mut learned = vec![false; calls.len()];
+    let one = LinearCombination::one();
+    // A 0/1 constant, or a wire (or one minus it) in `set`.
+    let in_set = |set: &HashSet<String>, l: &LinearCombination| {
+        let l = xark_frontend::canonical_lc(l);
+        (l.is_constant() && (l.constant.is_zero() || l.constant.is_one()))
+            || set.contains(&wire(&l))
+            || set.contains(&wire(&(one.clone() - l)))
+    };
+    let is_bit = |bits: &HashSet<String>, pinned: &HashSet<String>, l: &LinearCombination| {
+        in_set(bits, l) || in_set(pinned, l)
+    };
+    loop {
+        let mut changed = false;
+        for [a, b, c] in rows {
+            let pins = if a == b && a == c {
+                Some(a)
+            } else if c.is_zero() {
+                let less = |x: &LinearCombination| wire(&(x.clone() - one.clone()));
+                if less(a) == wire(b) {
+                    Some(a)
+                } else if less(b) == wire(a) {
+                    Some(b)
+                } else {
+                    None
+                }
+            } else if is_bit(&bits, &pinned, a) && is_bit(&bits, &pinned, b) {
+                Some(c)
+            } else {
+                None
+            };
+            if let Some(x) = pins {
+                changed |= pinned.insert(wire(x));
+            }
+        }
+        for (i, c) in calls.iter_mut().enumerate() {
+            if !covered(c) {
+                let silent = c.rows == 0 && c.witnesses == 0 && !c.outputs.is_empty();
+                let class = if to_bits(c) && silent {
+                    let outs: Vec<String> = c.outputs.iter().map(wire).collect();
+                    let mut sum = LinearCombination::zero();
+                    let mut pow = xark_ir::FieldConst::one();
+                    for o in &c.outputs {
+                        sum = sum + o.clone().scale(&pow);
+                        pow = pow.mul(&xark_ir::FieldConst::from_i64(2));
+                    }
+                    if decomps.get(&key(c)) == Some(&outs) {
+                        Some("covered: reuses a covered decomposition")
+                    } else if c.outputs.len() <= 253
+                        && wire(&sum) == wire(&c.inputs[0])
+                        && c.outputs.iter().all(|o| is_bit(&bits, &pinned, o))
+                    {
+                        Some("covered: bits of producer bits")
+                    } else {
+                        None
+                    }
+                } else if let Some(&(_, n)) = BIT_ASSUMING.iter().find(|(g, _)| *g == c.gadget)
+                    && c.class
+                        .starts_with("LC plugs: the caller must enforce Assumptions")
+                    && c.inputs.iter().take(n).all(|i| is_bit(&bits, &pinned, i))
+                {
+                    if c.inputs.iter().take(n).all(|i| in_set(&bits, i)) {
+                        Some("covered with LC plugs (assumptions discharged by producers)")
+                    } else {
+                        Some(
+                            "covered with LC plugs (assumptions discharged by producers and \
+                             booleanity rows)",
+                        )
+                    }
+                } else {
+                    None
+                };
+                if let Some(class) = class {
+                    c.class = class.into();
+                    c.consts = None;
+                    changed = true;
+                }
+            }
+            if covered(c) && !learned[i] {
+                if to_bits(c) {
+                    decomps
+                        .entry(key(c))
+                        .or_insert_with(|| c.outputs.iter().map(wire).collect());
+                }
+                if BIT_PRODUCERS.contains(&c.gadget.as_str())
+                    && (FREE_PRODUCERS.contains(&c.gadget.as_str())
+                        || c.inputs.iter().all(|i| is_bit(&bits, &pinned, i)))
+                {
+                    bits.extend(c.outputs.iter().map(wire));
+                    learned[i] = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 /// A call's classification, and its constant plugs when it is the proven
@@ -299,9 +540,45 @@ fn classify(
     match call {
         Ok((h, _)) if h == p.hash => ("covered".into(), None),
         Ok((h, t)) => match p.template.substitution_of(&t) {
-            None => (format!("different rows (template {})", &h[..23]), None),
+            None => match p.template.folding_of(&t) {
+                None => (format!("different rows (template {})", &h[..23]), None),
+                Some(Err(why)) => (format!("folded constants: {why}"), None),
+                Some(Ok(sub)) => {
+                    let k: Vec<(u32, String)> = sub
+                        .iter()
+                        .filter(|(_, e)| e.is_constant())
+                        .map(|(p, e)| (*p, e.constant.decimal()))
+                        .collect();
+                    let var = |e: &LinearCombination| match &e.terms[..] {
+                        [u] if e.constant.is_zero() && u.coeff.is_one() => Some(u.var),
+                        _ => None,
+                    };
+                    let vars: Vec<u32> = sub.iter().filter_map(|(_, e)| var(e)).collect();
+                    let distinct = vars.iter().collect::<BTreeSet<_>>().len() == vars.len();
+                    if p.trivial {
+                        (
+                            "covered with folded constants (no assumptions)".into(),
+                            Some(Vec::new()),
+                        )
+                    } else if distinct && vars.len() + k.len() == sub.len() {
+                        if k.is_empty() {
+                            ("covered with folded constants".into(), None)
+                        } else {
+                            let class =
+                                format!("covered with folded constants ({})", vector_name(&k));
+                            (class, Some(k))
+                        }
+                    } else {
+                        (
+                            "LC plugs: the caller must enforce Assumptions (after folding constants)"
+                                .into(),
+                            None,
+                        )
+                    }
+                }
+            },
             Some(sub) => {
-                let var = |e: &xark_ir::LinearCombination| match &e.terms[..] {
+                let var = |e: &LinearCombination| match &e.terms[..] {
                     [u] if e.constant.is_zero() && u.coeff.is_one() => Some(u.var),
                     _ => None,
                 };
@@ -312,7 +589,13 @@ fn classify(
                     .map(|(p, e)| (*p, e.constant.decimal()))
                     .collect();
                 let distinct = vars.iter().collect::<BTreeSet<_>>().len() == vars.len();
-                if !k.is_empty() && distinct && vars.len() + k.len() == sub.len() {
+                if !k.is_empty() && p.trivial {
+                    // The empty vector: the obligation that soundness assumes nothing.
+                    (
+                        "covered with constant plugs (no assumptions)".into(),
+                        Some(Vec::new()),
+                    )
+                } else if !k.is_empty() && distinct && vars.len() + k.len() == sub.len() {
                     let class = format!("covered with constant plugs ({})", vector_name(&k));
                     (class, Some(k))
                 } else if p.trivial {
@@ -350,7 +633,7 @@ fn vector_name(k: &[(u32, String)]) -> String {
 /// it must already hold each obligation they need. The problems, if any, and the
 /// names of the vectors with no committed obligation.
 fn obligations(
-    proven: &BTreeMap<String, Proven>,
+    proven: &BTreeMap<String, Vec<Proven>>,
     vectors: &BTreeMap<String, Vectors>,
     update: bool,
     examples: bool,
@@ -361,13 +644,19 @@ fn obligations(
     let mut out = Vec::new();
     let imports = std::fs::read_to_string(crate::root().join("formal/Formal.lean"))?;
     let mut want = BTreeSet::new();
-    for (gadget, vs) in vectors {
-        let module = crate::lean::camel(&proven[gadget].harness);
+    for (harness, vs) in vectors {
+        let p = proven
+            .values()
+            .flatten()
+            .find(|p| &p.harness == harness)
+            .context("a vector of no harness")?;
+        let (gadget, proof) = (&p.template.name, &p.proof);
+        let module = crate::lean::camel(harness);
         let file = format!("{module}.lean");
         let path = dir.join(&file);
         let have = std::fs::read_to_string(&path).ok();
         if examples {
-            let text = consts_file(gadget, &module, vs);
+            let text = consts_file(gadget, &module, proof, vs);
             if update {
                 std::fs::create_dir_all(&dir)?;
                 std::fs::write(&path, &text)?;
@@ -443,13 +732,13 @@ fn obligation(k: &[(u32, String)]) -> String {
 }
 
 /// The Lean obligations for `gadget`'s calls with constant or LC plugs.
-fn consts_file(gadget: &str, module: &str, vectors: &Vectors) -> String {
+fn consts_file(gadget: &str, module: &str, proof: &str, vectors: &Vectors) -> String {
     let mut s = format!(
         "-- Generated by `cargo xtask lean-export --coverage --update`: what `{gadget}`'s\n\
          -- production calls with constant or LC plugs need (formal/README.md, \"Coverage\").\n\
          -- Don't edit: `cargo xtask lean-export --coverage` fails when the examples stop\n\
          -- needing exactly these.\n\
-         import Formal.{module}\n\n\
+         import {proof}\n\n\
          set_option linter.style.header false\n\
          set_option linter.style.longLine false\n\n\
          namespace Xark.Templates.{module}.Consts\n\
@@ -517,4 +806,52 @@ fn allowlist() -> Result<BTreeMap<String, (String, bool)>> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(v: u32) -> LinearCombination {
+        LinearCombination::var(v)
+    }
+
+    fn to_bits(class: &str, input: u32, outputs: &[u32], rows: usize) -> Call {
+        Call {
+            gadget: "xark::lang::to_bits".into(),
+            harness: "to_bits".into(),
+            site: String::new(),
+            class: class.into(),
+            consts: None,
+            inputs: vec![var(input)],
+            outputs: outputs.iter().map(|&v| var(v)).collect(),
+            rows,
+            witnesses: if rows == 0 { 0 } else { 1 },
+        }
+    }
+
+    /// A memo hit returns the bits of the same input at the same width. A call that
+    /// emits nothing and returns a covered decomposition's bits as another input's
+    /// (which the frontend's memo, keyed by input and width, never does) proves
+    /// nothing about that input, and isn't covered.
+    #[test]
+    fn a_silent_to_bits_of_another_input_does_not_reuse_a_decomposition() {
+        let mut calls = [
+            to_bits("covered", 0, &[1, 2], 2),
+            to_bits("refused: it reads variable #", 0, &[1, 2], 0),
+            to_bits("refused: it reads variable #", 5, &[1, 2], 0),
+            to_bits("refused: it reads variable #", 0, &[1], 0),
+        ];
+        in_context(&mut calls, &[]);
+        let classes: Vec<&str> = calls.iter().map(|c| c.class.as_str()).collect();
+        assert_eq!(
+            classes,
+            [
+                "covered",
+                "covered: reuses a covered decomposition",
+                "refused: it reads variable #",
+                "refused: it reads variable #",
+            ]
+        );
+    }
 }

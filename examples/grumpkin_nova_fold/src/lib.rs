@@ -25,65 +25,10 @@
 
 use xark_grumpkin::prelude::*;
 
-/// Little-endian bits of the BN254 scalar-field modulus `r` (bit 253 set).
-const R_BITS: [u8; 254] = [
-    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
-    1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0,
-    1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0,
-    0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
-    1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1,
-    0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1,
-    1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1,
-    0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1,
-];
-
-/// Canonical 254-bit decomposition of a full field element: boolean,
-/// recompose-pinned, and enforced `< r` (branch-free bit-serial). Needed because
-/// a Poseidon output can be 254 bits (so `to_bits::<253>` can't hold it).
-fn canonical_bits(h: Field) -> [Field; 254] {
-    let mut bits = [Field::from(0u8); 254];
-    let mut i = 0usize;
-    while i < 254usize {
-        bits[i] = Field::hint_bit(h, i);
-        i += 1;
-    }
-    let mut i = 0usize;
-    while i < 254usize {
-        bits[i].require_bool();
-        i += 1;
-    }
-    let mut acc = Field::from(0u8);
-    let mut pow = Field::from(1u8);
-    let mut i = 0usize;
-    while i < 254usize {
-        acc = acc + bits[i] * pow;
-        pow = pow + pow;
-        i += 1;
-    }
-    require_eq(acc, h);
-    let mut undecided = Field::from(1u8);
-    let mut lt = Field::from(0u8);
-    let one = Field::from(1u8);
-    let two = Field::from(2u8);
-    let mut i = 0usize;
-    while i < 254usize {
-        let idx = 253usize - i;
-        let vi = bits[idx];
-        let ri = Field::from(R_BITS[idx]);
-        lt = lt + undecided * (one - vi) * ri;
-        require_eq(undecided * vi * (one - ri), Field::from(0u8));
-        let agree = one - (vi + ri - two * vi * ri);
-        undecided = undecided * agree;
-        i += 1;
-    }
-    require_eq(lt, one);
-    bits
-}
-
 /// `r = low128(Poseidon2(transcript))` as 128 little-endian bits.
 fn challenge(t: [Field; 14]) -> [Field; 128] {
     let h = xark_poseidon2::hash(t);
-    let bits = canonical_bits(h);
+    let bits = h.to_bits_canonical();
     let mut out = [Field::from(0u8); 128];
     let mut i = 0usize;
     while i < 128usize {

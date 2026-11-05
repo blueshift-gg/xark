@@ -1,0 +1,18 @@
+# The `cond_swap` template's harness: one call on fresh inputs, which
+# `cargo xtask lean-export cond_swap` records and writes to formal/Formal/Templates/.
+[package]
+name = "cond-swap-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+xark-merkle = { path = "../../../gadgets/xark-merkle", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

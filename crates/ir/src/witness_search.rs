@@ -5,7 +5,9 @@
 //! witness satisfies the circuit; a malicious prover picks any values it likes. This
 //! search is the adversary: a constraint-propagation solver (exact field values from
 //! linear rows, integer interval reasoning on rows whose coefficients are small,
-//! `{0,1}` from booleanity rows) with complete case splitting on bounded domains. Each
+//! `{0,1}` from booleanity rows, and the two roots of a row that is a quadratic in one
+//! linear form, as a computed bit's `L·(L − 1) = 0`) with complete case splitting on
+//! bounded domains. Each
 //! deduction is implied by the constraints, so its verdicts are proofs:
 //!
 //! * [`WitnessSearch::None`]: no assignment satisfies the circuit for these inputs;
@@ -347,6 +349,43 @@ fn ceil_div(a: &BigInt, b: &BigInt) -> BigInt {
     -floor_div(&-a, b)
 }
 
+/// A square root of `n` modulo the odd prime `p` (Tonelli–Shanks), or `None` when
+/// `n` is not a square.
+fn sqrt_mod(n: &BigUint, p: &BigUint) -> Option<BigUint> {
+    let one = BigUint::one();
+    let n = n % p;
+    if n.is_zero() {
+        return Some(n);
+    }
+    let pm1 = p - &one;
+    if n.modpow(&(&pm1 >> 1u32), p) != one {
+        return None;
+    }
+    let s = pm1.trailing_zeros().expect("p > 1");
+    let q = &pm1 >> s;
+    // A non-residue `z`: half of the small integers are.
+    let mut z = BigUint::from(2u32);
+    while z.modpow(&(&pm1 >> 1u32), p) == one {
+        z += 1u32;
+    }
+    let (mut m, mut c) = (s, z.modpow(&q, p));
+    let mut t = n.modpow(&q, p);
+    let mut r = n.modpow(&((&q + &one) >> 1u32), p);
+    while t != one {
+        let (mut i, mut t2) = (0u64, t.clone());
+        while t2 != one {
+            t2 = &t2 * &t2 % p;
+            i += 1;
+        }
+        let b = c.modpow(&(BigUint::one() << (m - i - 1)), p);
+        m = i;
+        c = &b * &b % p;
+        t = t * &c % p;
+        r = r * b % p;
+    }
+    Some(r)
+}
+
 impl Search<'_> {
     fn int(&self, x: &Fp) -> BigInt {
         BigInt::from_biguint(Sign::Plus, x.to_biguint())
@@ -550,12 +589,7 @@ impl Search<'_> {
                 }
                 (Resolved::Lin(u1, a1, b1), Resolved::Lin(u2, a2, b2)) => {
                     let k = c.mul(&a1).mul(&a2);
-                    let key = (u1.min(u2), u1.max(u2));
-                    if let Some(e) = quad.iter_mut().find(|e| (e.0, e.1) == key) {
-                        e.2 = e.2.add(&k);
-                    } else {
-                        quad.push((key.0, key.1, k));
-                    }
+                    quad.push((u1.min(u2), u1.max(u2), k));
                     add_lin(&mut lin, u1, c.mul(&a1).mul(&b2));
                     add_lin(&mut lin, u2, c.mul(&b1).mul(&a2));
                     konst = konst.add(&c.mul(&b1).mul(&b2));
@@ -581,13 +615,22 @@ impl Search<'_> {
         }
         let mut lin = merged;
         lin.retain(|e| !e.1.is_zero());
+        quad.sort_by_key(|e| (e.0, e.1));
+        let mut merged: Vec<(usize, usize, Fp)> = Vec::with_capacity(quad.len());
+        for (u1, u2, c) in quad {
+            match merged.last_mut() {
+                Some(e) if (e.0, e.1) == (u1, u2) => e.2 = e.2.add(&c),
+                _ => merged.push((u1, u2, c)),
+            }
+        }
+        let mut quad = merged;
         quad.retain(|e| !e.2.is_zero());
 
         if !quad.is_empty() {
             // Univariate quadratic `a·v² + b·v + c` (every product is `v·v`).
             let v = quad[0].0;
             if quad.iter().any(|q| q.0 != v || q.1 != v) || lin.iter().any(|e| e.0 != v) {
-                return Ok(());
+                return self.square_of_linear(&quad, &lin, &konst);
             }
             let a = quad.iter().fold(zero.clone(), |s, q| s.add(&q.2));
             let b = lin.first().map(|e| e.1.clone()).unwrap_or(zero.clone());
@@ -621,9 +664,81 @@ impl Search<'_> {
                     [r] => self.narrow(v, r.clone(), r.clone()),
                 };
             }
-            return Ok(());
+            return self.square_of_linear(&quad, &lin, &konst);
         }
         self.linear(lin, konst)
+    }
+
+    /// A quadratic row over several unknowns that is a quadratic in one linear form
+    /// `S = Σ sᵢ·vᵢ`: `d·S² + λ·S + konst = 0` (e.g. `L·(L − 1) = 0` for a bit
+    /// computed as a linear combination). Its roots `t₁, t₂` give `S = t₁` (a double
+    /// root), a conflict (none), or `(S − t₂)/(t₁ − t₂) ∈ {0, 1}`, an integer range
+    /// fact when that form's coefficients are small. Any other row: no deduction.
+    fn square_of_linear(
+        &mut self,
+        quad: &[(usize, usize, Fp)],
+        lin: &[(usize, Fp)],
+        konst: &Fp,
+    ) -> Result<(), Conflict> {
+        // Any square term's variable is a pivot: normalize `S` to `s_piv = 1`.
+        let Some((piv, _, d)) = quad.iter().find(|q| q.0 == q.1).cloned() else {
+            return Ok(());
+        };
+        let Some(inv_2d) = d.add(&d).inverse() else {
+            return Ok(());
+        };
+        // `d·S²` has the cross term `2d·s_piv·s_w·piv·w`, with `s_piv = 1`.
+        let mut s: BTreeMap<usize, Fp> = BTreeMap::from([(piv, self.one.clone())]);
+        for (u1, u2, c) in quad {
+            if u1 != u2 && (*u1 == piv || *u2 == piv) {
+                s.insert(if *u1 == piv { *u2 } else { *u1 }, c.mul(&inv_2d));
+            }
+        }
+        let n = s.len();
+        if quad.len() != n * (n + 1) / 2 {
+            return Ok(());
+        }
+        for (u1, u2, c) in quad {
+            let (Some(a), Some(b)) = (s.get(u1), s.get(u2)) else {
+                return Ok(());
+            };
+            let mut want = d.mul(a).mul(b);
+            if u1 != u2 {
+                want = want.add(&want);
+            }
+            if *c != want {
+                return Ok(());
+            }
+        }
+        let lambda = lin
+            .iter()
+            .find(|e| e.0 == piv)
+            .map_or(self.zero.clone(), |e| e.1.clone());
+        let n_lin = if lambda.is_zero() { 0 } else { n };
+        if lin.len() != n_lin
+            || lin
+                .iter()
+                .any(|(v, l)| s.get(v).map(|sv| lambda.mul(sv)) != Some(l.clone()))
+        {
+            return Ok(());
+        }
+        // Roots of `d·t² + λ·t + konst`: `(−λ ± √D)/(2d)`, `D = λ² − 4d·konst`.
+        let four_d = d.add(&d).add(&d).add(&d);
+        let disc = lambda.mul(&lambda).sub(&four_d.mul(konst));
+        let Some(root) = sqrt_mod(&disc.to_biguint(), &self.p) else {
+            return Err(Conflict);
+        };
+        let root = Fp::new(root, &self.p);
+        let t2 = lambda.neg().sub(&root).mul(&inv_2d);
+        let form = |scale: &Fp| -> Vec<(usize, Fp)> {
+            s.iter().map(|(v, c)| (*v, c.mul(scale))).collect()
+        };
+        if root.is_zero() {
+            return self.linear(form(&self.one.clone()), t2.neg());
+        }
+        // `t₁ − t₂ = √D / d`, so `(S − t₂)/(t₁ − t₂) = (d/√D)·(S − t₂)`.
+        let scale = d.mul(&root.inverse().expect("nonzero"));
+        self.intervals(&form(&scale), &t2.mul(&scale).neg(), 1)
     }
 
     /// `Σ cᵢ·vᵢ + konst = 0` over unknowns.
@@ -647,7 +762,7 @@ impl Search<'_> {
                     .rev()
                     .find(|&k| matches!(self.dom[lin[k].0], Dom::Free));
                 let Some(k) = free else {
-                    return self.intervals(&lin, &konst);
+                    return self.intervals(&lin, &konst, 0);
                 };
                 let (v, cv) = &lin[k];
                 let (u, cu) = &lin[1 - k];
@@ -659,14 +774,16 @@ impl Search<'_> {
                 self.touch(*v);
                 Ok(())
             }
-            _ => self.intervals(&lin, &konst),
+            _ => self.intervals(&lin, &konst, 0),
         }
     }
 
-    /// Integer bounds propagation for a linear row with small coefficients: when the
-    /// left side's integer range is narrower than `p`, the field equation is an
-    /// integer equation, and each unknown is bounded by the others' ranges.
-    fn intervals(&mut self, lin: &[(usize, Fp)], konst: &Fp) -> Result<(), Conflict> {
+    /// Integer bounds propagation for `Σ cᵢ·vᵢ + konst ∈ {0, …, w}` with small
+    /// coefficients (`w = 0`: a linear row). When the left side's integer range plus
+    /// `w` is narrower than `p`, the field relation is an integer one, and each
+    /// unknown is bounded by the others' ranges.
+    fn intervals(&mut self, lin: &[(usize, Fp)], konst: &Fp, w: u32) -> Result<(), Conflict> {
+        let w = BigInt::from(w);
         let mut terms = Vec::with_capacity(lin.len());
         for (v, c) in lin {
             let Some(c) = self.small(c) else {
@@ -697,11 +814,11 @@ impl Search<'_> {
                         mx += b;
                     }
                 }
-                if &mx - &mn >= self.pi {
+                if &mx - &mn + &w >= self.pi {
                     return Ok(());
                 }
                 let (v, c) = &terms[*k];
-                let (lo, hi) = (&t - &mx, &t - &mn);
+                let (lo, hi) = (&t - &mx, &t + &w - &mn);
                 let (lo, hi) = if c.is_positive() {
                     (lo, hi)
                 } else {
@@ -714,17 +831,20 @@ impl Search<'_> {
         let bounds: Vec<(BigInt, BigInt)> = terms.iter().map(|(v, c)| range(self, *v, c)).collect();
         let mn: BigInt = bounds.iter().map(|b| &b.0).sum();
         let mx: BigInt = bounds.iter().map(|b| &b.1).sum();
-        if &mx - &mn >= self.pi {
+        if &mx - &mn + &w >= self.pi {
             return Ok(());
         }
-        // The representative of `t` in `[mn, mn + p)`.
-        let t = &mn + ((&t - &mn) % &self.pi + &self.pi) % &self.pi;
-        if t > mx {
+        // The sum is `t + j (mod p)` for some `j ≤ w`. With `t` represented in
+        // `[mn − w, mn − w + p)`, the only such integers in `[mn, mx]` are `t + j`.
+        let base = &mn - &w;
+        let t = &base + ((&t - &base) % &self.pi + &self.pi) % &self.pi;
+        let (sum_lo, sum_hi) = ((&t).max(&mn).clone(), (&t + &w).min(mx.clone()));
+        if sum_lo > sum_hi {
             return Err(Conflict);
         }
         for (j, (v, c)) in terms.iter().enumerate() {
             let (rest_lo, rest_hi) = (&mn - &bounds[j].0, &mx - &bounds[j].1);
-            let (lo, hi) = (&t - rest_hi, &t - rest_lo);
+            let (lo, hi) = (&sum_lo - rest_hi, &sum_hi - rest_lo);
             let (lo, hi) = if c.is_positive() {
                 (ceil_div(&lo, c), floor_div(&hi, c))
             } else {
