@@ -40,6 +40,7 @@ members = [
 exclude = [
     "crates/lang",
     "examples",
+    "formal/templates",
     "crates/verifier/reference-program",
 ]
 

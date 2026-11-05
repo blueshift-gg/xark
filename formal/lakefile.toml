@@ -9,10 +9,18 @@ relaxedAutoImplicit = false
 weak.linter.mathlibStandardSet = true
 maxSynthPendingDepth = 3
 
+# Every dependency is pinned to a commit (lake-manifest.json pins the rest). mathlib
+# is the commit Clean is built against, the zkGolf specs' setup (Lean 4.33.1), so a
+# proof can import Clean and a zkGolf spec alongside these theorems.
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-rev = "v4.30.0"
+rev = "0df444a360eaa60ab8c11dca51a86af692955474"
+
+[[require]]
+name = "clean"
+git = "https://github.com/Verified-zkEVM/clean"
+rev = "93c9d1ef45be9f687214625d7857889cf2485504"
 
 [[lean_lib]]
 name = "Formal"

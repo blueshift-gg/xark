@@ -212,6 +212,17 @@ pub struct Builder {
     /// Per wasm call, what it produced (for post-hoc templates).
     pub(crate) regions: Vec<crate::templates::Region>,
     region_stack: Vec<usize>,
+    /// Record `#[gadget]` calls (`lower_recording_gadgets`).
+    pub(crate) record_gadgets: bool,
+    pub(crate) gadget_calls: Vec<crate::gadgets::GadgetCall>,
+    pub(crate) gadget_stack: Vec<usize>,
+    /// Rows, witness ops and variables when the guest last asked whether calls are
+    /// recorded (just before it passes a call's inputs or result).
+    pub(crate) gadget_mark: (usize, usize, VarId),
+    /// Set when passing a call's inputs or result emitted something: those rows sit
+    /// inside any enclosing call, and memo tables (muxes, bit decompositions) now
+    /// differ from a build that doesn't record, so no call here is exact.
+    pub(crate) gadget_tainted: Option<String>,
 }
 
 impl Builder {
@@ -246,6 +257,11 @@ impl Builder {
             input_ids: Vec::new(),
             regions: Vec::new(),
             region_stack: Vec::new(),
+            record_gadgets: false,
+            gadget_calls: Vec::new(),
+            gadget_stack: Vec::new(),
+            gadget_mark: (0, 0, 0),
+            gadget_tainted: None,
         }
     }
 
@@ -1044,6 +1060,7 @@ impl Builder {
             self.render_side(&target),
         );
         self.constraints[idx].c = target;
+        self.gadget_merged(idx);
         // `require_bool(b)` folds `b*b=t; require(t==b)` → `b*b=b` here (an in-place
         // rewrite, so `push_constraint` never sees the final form): harvest it.
         if let Some(v) = booleanity_var(&self.constraints[idx]) {

@@ -8,7 +8,7 @@
 // rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{Field, require_eq};
+use xark::{Field, gadget, require_eq};
 
 // 32-bit word layer (little-endian bit index: bits[i] has weight 2^i), the
 // building block for SHA-256-style hashes. Bitwise ops are bit-by-bit on
@@ -84,7 +84,10 @@ pub fn shr32(a: [Field; 32], n: usize) -> [Field; 32] {
 ///
 /// Adds the two words as field elements (a sum `< 2^33`), decomposes the sum
 /// into 33 bits (32 result bits + 1 carry), and returns the low 32 bits. Cost:
-/// 33 booleanity gates + 1 recomposition equality.
+/// 33 booleanity gates + 1 recomposition equality. The rows it emits on fresh
+/// inputs are proven sound and complete in `formal/Formal/Add32.lean`
+/// (`cargo xtask lean-export add32`).
+#[gadget]
 pub fn add32(a: [Field; 32], b: [Field; 32]) -> [Field; 32] {
     let sum = Field::from_bits::<32>(a) + Field::from_bits::<32>(b);
 

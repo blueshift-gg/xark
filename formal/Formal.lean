@@ -29,3 +29,10 @@ import Formal.LazyK1
 import Formal.GF128
 import Formal.Aes256
 import Formal.Rewrites
+import Formal.Template
+import Formal.Templates.Add32
+import Formal.Add32
+import Formal.Templates.Consts.Add32
+-- What the zkGolf specs import: built here so CI keeps the pinned Clean usable.
+import Clean.Utils.Bitwise
+import Clean.Utils.Vector

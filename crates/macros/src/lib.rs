@@ -429,6 +429,81 @@ fn to_pascal(s: &str) -> String {
     }
 }
 
+/// `#[gadget]` — make a gadget function a named template: `cargo xtask lean-export`
+/// builds a harness with `--cfg xark_gadgets` and records each call (its name
+/// `module::fn`, its parameters' and result's field elements through `xark::Input`,
+/// and the rows, witnesses and hints it emits in between), so its exact R1CS can be
+/// proven in `formal/`. Any other build compiles the markers to nothing, and the
+/// circuit is the same either way.
+#[proc_macro_attribute]
+pub fn gadget(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        let attr = TokenStream2::from(attr);
+        return syn::Error::new_spanned(attr, "`#[gadget]` takes no arguments")
+            .to_compile_error()
+            .into();
+    }
+    let mut func = parse_macro_input!(item as ItemFn);
+    if let Some(kw) = func
+        .sig
+        .asyncness
+        .map(|t| t.span)
+        .or(func.sig.constness.map(|t| t.span))
+    {
+        return syn::Error::new(kw, "a `#[gadget]` can't be `async` or `const`")
+            .to_compile_error()
+            .into();
+    }
+    // Each parameter as a reference to its value.
+    let mut args = Vec::new();
+    for arg in &func.sig.inputs {
+        match arg {
+            FnArg::Receiver(r) if r.reference.is_some() => args.push(quote!(self)),
+            FnArg::Receiver(_) => args.push(quote!(&self)),
+            FnArg::Typed(t) => match &*t.pat {
+                Pat::Ident(p) => {
+                    let id = &p.ident;
+                    args.push(match &*t.ty {
+                        Type::Reference(_) => quote!(#id),
+                        _ => quote!(&#id),
+                    });
+                }
+                pat => {
+                    return syn::Error::new_spanned(pat, "a `#[gadget]` parameter must be a name")
+                        .to_compile_error()
+                        .into();
+                }
+            },
+        }
+    }
+    let name = func.sig.ident.to_string();
+    let ret = match &func.sig.output {
+        ReturnType::Default => quote!(()),
+        ReturnType::Type(_, t) => quote!(#t),
+    };
+    let body = &func.block;
+    let end = match &func.sig.output {
+        ReturnType::Default => quote!(::xark::__gadget::end(0, |_| {});),
+        ReturnType::Type(..) => quote! {
+            ::xark::__gadget::end(::xark::__gadget::len(&__xark_out), |__xark_w| {
+                __xark_w.write(&__xark_out)
+            });
+        },
+    };
+    func.block = syn::parse_quote!({
+        ::xark::__gadget::begin(
+            concat!(module_path!(), "::", #name),
+            0 #(+ ::xark::__gadget::len(#args))*,
+            |__xark_w| { #(__xark_w.write(#args);)* },
+        );
+        #[allow(clippy::redundant_closure_call)]
+        let __xark_out: #ret = (move || -> #ret #body)();
+        #end
+        __xark_out
+    });
+    quote!(#func).into()
+}
+
 /// `#[input]` — make a type a circuit input, or an `impl` block's methods client
 /// functions. One attribute, three places:
 ///

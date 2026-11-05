@@ -81,6 +81,15 @@ mod ffi {
         pub fn xark_witness_begin();
         #[cfg_attr(target_arch = "wasm32", link_name = "witness_end")]
         pub fn xark_witness_end();
+        #[cfg(xark_gadgets)]
+        #[cfg_attr(target_arch = "wasm32", link_name = "gadget_recording")]
+        pub fn xark_gadget_recording() -> bool;
+        #[cfg(xark_gadgets)]
+        #[cfg_attr(target_arch = "wasm32", link_name = "gadget_begin")]
+        pub fn xark_gadget_begin(name: *const u8, len: usize, inputs: *const Field, n: usize);
+        #[cfg(xark_gadgets)]
+        #[cfg_attr(target_arch = "wasm32", link_name = "gadget_end")]
+        pub fn xark_gadget_end(outputs: *const Field, n: usize);
         #[cfg_attr(target_arch = "wasm32", link_name = "to_bits_lookup")]
         pub fn xark_to_bits_lookup(x: *const Field, n: u32, out: *mut Field) -> bool;
         #[cfg_attr(target_arch = "wasm32", link_name = "to_bits_record")]
@@ -237,6 +246,18 @@ pub(crate) fn witness_begin() {
 }
 pub(crate) fn witness_end() {
     unsafe { ffi::xark_witness_end() }
+}
+#[cfg(xark_gadgets)]
+pub(crate) fn gadget_recording() -> bool {
+    unsafe { ffi::xark_gadget_recording() }
+}
+#[cfg(xark_gadgets)]
+pub(crate) fn gadget_begin(name: &str, inputs: &[Field]) {
+    unsafe { ffi::xark_gadget_begin(name.as_ptr(), name.len(), inputs.as_ptr(), inputs.len()) }
+}
+#[cfg(xark_gadgets)]
+pub(crate) fn gadget_end(outputs: &[Field]) {
+    unsafe { ffi::xark_gadget_end(outputs.as_ptr(), outputs.len()) }
 }
 
 /// `to_bits::<N>` memo: `Some(bits)` when `x`'s bits are already known (a constant,

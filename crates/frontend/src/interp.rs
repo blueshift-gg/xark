@@ -1544,8 +1544,17 @@ impl Machine {
     fn call(&mut self, module: &Module, f: u32, host: &mut dyn Host) -> CompileResult<()> {
         let n_imports = module.imports.len() as u32;
         if f < n_imports {
-            if self.probing && module.imports[f as usize].name != "panic" {
-                return Err(probe_end());
+            if self.probing {
+                match module.imports[f as usize].name.as_str() {
+                    "panic" => {}
+                    // A probe never records `#[gadget]` calls, so the markers stay
+                    // invisible to it, as if the gadget weren't annotated.
+                    "gadget_recording" => {
+                        self.st.stack.push(V::i32(0));
+                        return Ok(());
+                    }
+                    _ => return Err(probe_end()),
+                }
             }
             let ty = &module.types[module.imports[f as usize].ty as usize];
             let n = ty.params.len();

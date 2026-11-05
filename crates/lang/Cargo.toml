@@ -56,7 +56,7 @@ num-bigint = "0.4"
 # `xark` is set only by the circuit build; declare it so rustc's `unexpected_cfgs`
 # lint (1.80+) stays quiet.
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)', 'cfg(xark_client)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)', 'cfg(xark_client)', 'cfg(xark_gadgets)'] }
 
 # The frontend runs inside the test process: optimize it even in test builds.
 [profile.dev.package.xark-frontend]

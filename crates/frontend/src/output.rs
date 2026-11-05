@@ -28,6 +28,9 @@ pub struct LowerOutput {
     /// Vars allocated inside a `witness_only` region — exempt from `check_pinning`
     /// (pure witness-gen scratch feeding a downstream, separately-pinned result).
     pub witness_only_vars: BTreeSet<VarId>,
+    /// Every `#[gadget]` call as a template (or why it can't be one), when recorded
+    /// ([`crate::lower_recording_gadgets`]); else empty.
+    pub gadgets: Vec<crate::RecordedCall>,
 }
 
 /// A template def: the rows `c0..c1` and witness ops `w0..w1` of its first call,
@@ -1378,6 +1381,7 @@ fn renumber_inputs(env: &mut Builder) {
 
 pub(crate) fn finish(mut env: Builder, field: FieldSpec, n_inputs: usize) -> LowerOutput {
     env.fill_products();
+    let gadgets = crate::gadgets::extract(&env);
     renumber_inputs(&mut env);
     // Developer diagnostic only (behind `XARK_BUILD_TIME`); a normal build stays
     // quiet on stderr rather than printing this on every compile.
@@ -1586,6 +1590,7 @@ pub(crate) fn finish(mut env: Builder, field: FieldSpec, n_inputs: usize) -> Low
         profile,
         xbc,
         witness_only_vars: wo,
+        gadgets,
     }
 }
 

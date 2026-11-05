@@ -149,14 +149,15 @@ gadget — the precise property that rules out the under-constraint bug class
 cap `n ≤ 253` is what keeps the field sum below the BN254 scalar modulus `r`
 (`two_pow_lt_r : 2^253 < r`) so it cannot wrap.
 
-The proofs use only the standard mathlib axioms (`propext`, `Classical.choice`,
-`Quot.sound`), plus `native_decide`'s compiled-evaluation axiom in the few places
-listed at their declaration sites (GF(2⁸) tables, the secp256k1 GLV constants). The
-secp256k1, secp256r1 and BN254 primes are proven prime by kernel-checked Pratt
-certificates ([`Formal/CurvePrimes.lean`](Formal/CurvePrimes.lean), machinery in
-[`Formal/Pratt.lean`](Formal/Pratt.lean)). No `sorry`. CI (`lean.yml`) runs
-`#print axioms` on every listed theorem and fails on anything else, including a
-`native_decide` outside that list.
+CI (`lean.yml`) builds with `lake build`; then [`AxiomCheck.lean`](AxiomCheck.lean)
+fails unless every harness under
+`templates/` has its `soundness` theorem (and its `Consts` module, when it has one), and
+every declaration in `Formal` depends only on `propext`, `Classical.choice` and
+`Quot.sound`: no `sorry` (its axiom `sorryAx`), no `axiom`, no `native_decide`, except the twelve hand-restated
+lemmas it lists (GF(2⁸) tables, the secp256k1 GLV constants), each of which goes with the
+template proof of its gadget. The secp256k1, secp256r1 and BN254 primes are proven prime
+by kernel-checked Pratt certificates ([`Formal/CurvePrimes.lean`](Formal/CurvePrimes.lean),
+machinery in [`Formal/Pratt.lean`](Formal/Pratt.lean)).
 
 [`Formal/Rewrites.lean`](Formal/Rewrites.lean) — **the stable frontend's
 constraint-reducing rewrites preserve the circuit.** The theorems above are stated
@@ -190,11 +191,129 @@ Reducing constants modulo `p` needs no theorem: the rows are over `ZMod p`, wher
 behind each difference (SHA-256 `Maj` reusing the previous round's `a ∧ b`, a
 3-limb square's repeated cross products, Poseidon's constant capacity-lane S-box).
 
+## Proofs over the exact R1CS: gadget templates
+
+The theorems above restate a gadget's rows by hand. A **template** proof is about
+the rows the frontend really emits, and CI fails when the code drifts from them.
+
+* `#[gadget]` (`xark::gadget`) on a gadget function marks each call with its name
+  and its inputs' and result's field elements. The markers exist only in a build
+  with `--cfg xark_gadgets`, which `lean-export` uses for its harness; every
+  other build compiles them to nothing (no imports, no writes, same rows). The
+  frontend records the call (`crates/frontend/src/gadgets.rs`) and refuses to
+  export one whose rows it can't attribute exactly to the call.
+* `cargo xtask lean-export <gadget>` builds the harness
+  `formal/templates/<gadget>/`, a circuit that calls the gadget once on fresh
+  private inputs, and writes that call to `Formal/Templates/<Gadget>.lean` as a
+  [`Xark.Template.Template`](Formal/Template.lean): its `rows` (`Xark.R1cs` rows
+  `a · b = c` over `ZMod r`, so [`Formal/Rewrites.lean`](Formal/Rewrites.lean)'s
+  lemmas apply; coefficients are the integers the frontend holds), its `hints`
+  (the witness ops, with the solver's meaning in `Hint.run`), its `inputs` and
+  `outputs` as linear combinations, and the variables' roles: `.plug i` is the
+  `i`-th variable its inputs read, `.wit j` the `j`-th it allocated. `hash` is the
+  sha256 of that data.
+* `cargo xtask lean-export --check` (the `templates` job in `lean.yml`) re-exports
+  every harness and fails, naming the gadget and both hashes, when one differs
+  from its committed file.
+
+| Theorem | Template | Statement |
+|---------|----------|-----------|
+| `Xark.Templates.Add32.soundness` | `xark_bits::add32` (33 booleanity rows + the recomposition) | on input words of bits, every assignment satisfying the rows outputs exactly the bits of `(a + b) mod 2³²` |
+| `Xark.Template.Template.soundness_inst` | any template with plugs replaced by linear combinations (`Template.inst`) | a template's soundness carries over to the substituted rows on inputs meeting its assumptions |
+| `Xark.Templates.Add32.soundness_consts` / `assumptions_consts` | `add32` with constant plugs | the above for `add32`; the assumptions hold when the constants are bits (`Templates/Consts/Add32.lean`) and the other inputs are |
+
+### Adding a proven gadget
+
+1. Put `#[gadget]` on the function. Its parameters and result must implement
+   `xark::Input`. `cargo xtask digests --check` must still pass unchanged.
+2. Add its harness `formal/templates/<function>/`: copy `add32`'s two files and
+   call the gadget exactly once on `Private` inputs.
+3. Run `cargo xtask lean-export <function>` and commit `Formal/Templates/<Function>.lean`.
+   The export refuses a call that reads a variable none of its inputs carries (a
+   product or bit decomposition reused from outside the call), a row rewritten
+   after the call returned, and the big-integer hints (`MulModDivMod`,
+   `ModInverse`, `Sub2`), which have no Lean meaning yet: add them to `Hint` and
+   `Hint.run` first.
+4. Write `Formal/<Function>.lean` with an `Assumptions` that lists every input
+   assumption (each one enforced in-circuit by the gadget or its callers) and a
+   `Spec` that pins the outputs to unique, canonical values. Reuse a zkGolf spec
+   where one exists: Clean and its mathlib are this package's dependencies, so a
+   zkGolf `Challenge/Specs/*.lean` file compiles here unchanged. Prove
+   `soundness : Assumptions (t.ins σ) → t.Sat σ → Spec (t.ins σ) (t.outs σ)`.
+   Soundness is the claim; completeness (the honest witness satisfies the rows) is
+   left to the release tests, which exercise the honest path.
+   [`Formal/Add32.lean`](Formal/Add32.lean) shows the pattern: `decide +kernel`
+   proves the exported rows and hints equal a parametric model, then the proof is
+   about the model.
+5. Import it from `Formal.lean` and add a `#print axioms` line per theorem to
+   `lean.yml`. No `sorry`, no new axioms.
+6. Run `cargo xtask lean-export --coverage` (below) and make every production
+   call of the gadget covered, or allowlist each other call site with a reason.
+
+When the gadget changes, `--check` fails; re-export it, and the proof's
+`decide +kernel` step fails until the model and proof match the new rows.
+
+### Coverage: every production call emits the proven rows
+
+A template is the call on fresh inputs. Inside a larger circuit the frontend can
+emit other rows for the same call: a constant input folds, a decomposition memo
+hit reuses bits from outside the call, a caller's `require_eq` merges into one of
+its rows, a witness branch guards it. `cargo xtask lean-export --coverage` (the
+`templates` job in `lean.yml`) checks what ships:
+
+* It builds every example with the gadget markers and fails unless that build's
+  keyed-rows digest (the rows Groth16 keys, after both minimizer passes) is the
+  example's line in `tests/stable-digests.txt`, so the calls it records are the
+  production circuit's.
+* For each gadget with a harness (whose template must still be the committed
+  `Formal/Templates/*.lean`), it classifies every call, one line per gadget,
+  example, call site (the calling function and its `file:line:col`) and
+  classification, with a count:
+  * **covered**: its template, renamed as the export renames it, hashes to the
+    proven one.
+  * **covered with constant plugs**: it is the proven template with some input
+    plugs replaced by the constants the call passes (every linear combination
+    reduced mod `r`), the others plain distinct variables. `Template.soundness_inst`
+    ([`Formal/Template.lean`](Formal/Template.lean), on top of `Rewrites.lean`'s
+    `eval_subst`) carries the proof over to the substituted rows whenever the
+    substituted inputs meet `Assumptions`; for add32, `Add32.soundness_consts` and
+    `assumptions_consts`. The
+    constants' `Assumptions` are per-vector theorems in the generated
+    `Formal/Templates/Consts/<Gadget>.lean` (`cargo xtask lean-export --coverage
+    --update` writes it; `--coverage` fails when it is missing, stale or not
+    imported from `Formal.lean`, and `lake build` fails when a constant doesn't
+    meet them).
+  * **covered with LC plugs (no assumptions)**: the proven template with plugs
+    replaced by any linear combinations (a sum of earlier wires, a repeated
+    variable), for a gadget whose `soundness` assumes nothing of its inputs.
+  * **LC plugs: the caller must enforce Assumptions**: the same substitution for a
+    gadget whose proof has input assumptions. This is merge-gate item 6: it fails
+    unless an allowlist entry names the caller rows that enforce them.
+  * **refused**: the recorder can't attribute its rows exactly to the call; the
+    reason says why (a value read from outside its inputs, a merged row, a witness
+    branch, …).
+  * **different rows**: none of the above.
+* Any class but the covered ones fails the check unless
+  [`coverage-allowlist.txt`](coverage-allowlist.txt) lists it with a reason
+  (a refused entry also pins its call count: its rows are unknown). Over the
+  examples, an entry that matches no call fails too. A later ticket proves the
+  variant (a second template, or a lemma that reduces it to the proven one) and
+  deletes the entry, or the reason says why the rows are sound without one.
+
+Covered means the call emits the proven rows. Plain variable plugs still need the
+proof's `Assumptions` (for `add32`, input words of bits): each assumption's
+enforcer is the gadget's own rows or named caller rows, reviewed with the proof.
+
+`--circuit <dir>` checks other circuit crates instead (their digest is compared
+with the same crate built without markers).
+
 ## Building
 
 Requires [`elan`](https://github.com/leanprover/elan) (the Lean toolchain
-manager); the pinned toolchain is in [`lean-toolchain`](lean-toolchain) and the
-mathlib revision is pinned in `lake-manifest.json`.
+manager); the pinned toolchain (Lean 4.33.1) is in [`lean-toolchain`](lean-toolchain).
+mathlib and [Clean](https://github.com/Verified-zkEVM/clean) are pinned to commits in
+`lakefile.toml` (the zkGolf specs' setup: Clean `93c9d1e`, built against mathlib
+`0df444a`), the rest in `lake-manifest.json`.
 
 ```sh
 cd formal

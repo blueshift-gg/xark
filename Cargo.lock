@@ -4925,7 +4925,9 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "num-bigint 0.4.8",
  "serde_json",
+ "sha2 0.11.0",
  "xark-frontend",
  "xark-ir",
 ]
