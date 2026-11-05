@@ -48,6 +48,7 @@ enum Intr {
     RequireEq,
     WitnessBegin,
     WitnessEnd,
+    BitOperand,
     GadgetRecording,
     GadgetBegin,
     GadgetEnd,
@@ -88,6 +89,7 @@ fn intrinsic(name: &str) -> Option<Intr> {
         "require_eq" => Intr::RequireEq,
         "witness_begin" => Intr::WitnessBegin,
         "witness_end" => Intr::WitnessEnd,
+        "bit_operand" => Intr::BitOperand,
         "gadget_recording" => Intr::GadgetRecording,
         "gadget_begin" => Intr::GadgetBegin,
         "gadget_end" => Intr::GadgetEnd,
@@ -1759,6 +1761,7 @@ impl crate::interp::Host for Host {
                 | Intr::HintBit
                 | Intr::WitnessBegin
                 | Intr::WitnessEnd
+                | Intr::BitOperand
                 | Intr::GadgetRecording
                 | Intr::GadgetBegin
                 | Intr::GadgetEnd
@@ -2115,6 +2118,31 @@ impl crate::interp::Host for Host {
             }
             Intr::WitnessBegin => self.b.witness_only = true,
             Intr::WitnessEnd => self.b.witness_only = false,
+            // `^`'s operand (`x`): 1 if it is already known to be `0` or `1`, so `^`
+            // adds no booleanity row for it. A constant that isn't a bit can't be
+            // XOR's operand: refused, naming what `x ^ 3` was likely meant to be.
+            Intr::BitOperand => {
+                let x = self.get_field(m, a[0])?;
+                let known = if x.is_constant() {
+                    let k = self.reduce_lc(x).constant;
+                    if !(k.is_zero() || k.is_one()) {
+                        return Err(CompileError::new(format!(
+                            "`^` is boolean XOR, and `{k}` isn't a bit (0 or 1)",
+                            k = k.decimal()
+                        ))
+                        .with_note(format!(
+                            "for bitwise XOR use a native integer (`u32`: `x ^ {k}`) or XOR \
+                             the bits of `x.to_bits::<N>()`; for a power, `x.pow({k})`",
+                            k = k.decimal()
+                        ))
+                        .diverging());
+                    }
+                    true
+                } else {
+                    self.b.is_boolean_lc(&x)
+                };
+                return Ok(Some(V::i32(known as u32)));
+            }
             // A `#[gadget]` call's boundary: `gadget_recording` → bool, then (only when
             // recording) `gadget_begin(name, len, inputs, n)` / `gadget_end(outputs, n)`.
             Intr::GadgetRecording => {

@@ -32,6 +32,8 @@ mod ffi {
         pub fn xark_or(out: *mut Field, a: *const Field, b: *const Field);
         #[cfg_attr(target_arch = "wasm32", link_name = "eq")]
         pub fn xark_eq(a: *const Field, b: *const Field) -> bool;
+        #[cfg_attr(target_arch = "wasm32", link_name = "bit_operand")]
+        pub fn xark_bit_operand(x: *const Field) -> bool;
         #[cfg_attr(target_arch = "wasm32", link_name = "ult")]
         pub fn xark_ult(a: *const Field, b: *const Field, n: u32) -> bool;
         #[cfg_attr(target_arch = "wasm32", link_name = "bool_to_field")]
@@ -170,6 +172,9 @@ pub(crate) fn or(a: Field, b: Field) -> Field {
 }
 pub(crate) fn eq(a: Field, b: Field) -> bool {
     unsafe { ffi::xark_eq(&a, &b) }
+}
+pub(crate) fn bit_operand(x: Field) -> bool {
+    unsafe { ffi::xark_bit_operand(&x) }
 }
 pub(crate) fn ult<const N: usize>(a: Field, b: Field) -> bool {
     unsafe { ffi::xark_ult(&a, &b, N as u32) }

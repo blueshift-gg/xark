@@ -139,6 +139,16 @@ pub fn __xark_or(_a: Field, _b: Field) -> Field {
     circuit_op!(crate::wasm::or(_a, _b), native::or(_a, _b))
 }
 
+/// Whether `x` is already known to be `0` or `1` (a constant bit, a bit of
+/// `to_bits`, a XOR/AND/OR of bits, a variable with a booleanity row), so `^` needs
+/// no booleanity row for it. Emits nothing. A constant other than `0` or `1` is a
+/// build error: `^` is boolean XOR, and `x ^ 3` was likely meant as a power. Outside
+/// a circuit nothing is known (`false`): `^` checks every operand.
+#[inline(never)]
+pub fn __xark_bit_operand(_x: Field) -> bool {
+    circuit_op!(crate::wasm::bit_operand(_x), false)
+}
+
 /// Field equality: returns a `bool` (`{0,1}` wire) that is `1` iff `a == b`.
 /// lowers via the equality-to-zero gadget on `a − b`
 /// (an inverse-or-zero hint plus two multiplication constraints and an equality

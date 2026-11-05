@@ -14,7 +14,8 @@
 use core::cmp::{Ordering, PartialOrd};
 use core::marker::PhantomData;
 use core::ops::{
-    Add, AddAssign, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub, SubAssign,
+    Add, AddAssign, BitXor, BitXorAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub,
+    SubAssign,
 };
 
 // The `__xark_*` intrinsics live in `crate::intrinsics`.
@@ -433,8 +434,9 @@ impl Field {
     ///
     /// Booleanity is **not** checked: the result is constrained to
     /// `self + rhs - 2·self·rhs` whatever the operands are, so for other values it
-    /// is not XOR (`x ^ Field::from(3u8)` is `3 - 5x`). Use it only on values
-    /// already constrained to 0 or 1, such as bits from `to_bits`.
+    /// is not XOR (`x.xor(Field::from(3u8))` is `3 - 5x`). Use it only on values
+    /// already constrained to 0 or 1, such as bits from `to_bits`; `^` is the
+    /// checked form, and costs the same on such values.
     #[inline(never)]
     #[crate::gadget]
     pub fn xor(self, rhs: Field) -> Field {
@@ -830,17 +832,32 @@ impl DivAssign for Field {
     }
 }
 
-/// Bitwise XOR `^` on `Field`, matching Rust's meaning: for `self, rhs ∈ {0,1}`
-/// this is boolean XOR, one fused R1CS constraint (sugar for [`Field::xor`]).
-/// Booleanity is not checked; for other operands the result is not XOR.
-/// Exponentiation is now [`Field::pow`] (`x.pow(3)`), *not* `^` — overloading `^`
-/// for powers silently reversed the meaning of valid-looking Rust.
+/// Boolean XOR `^` on `Field`: both operands must be `0` or `1`, and are checked to
+/// be. An operand the compiler already knows is a bit (a bit of `to_bits`, a XOR,
+/// AND or OR of bits, a variable with a booleanity row, a constant `0` or `1`) costs
+/// nothing; any other gets one booleanity row (`x·x = x`). With a constant operand
+/// there is no XOR row: `x ^ 0` is `x` and `x ^ 1` is `1 − x`. A constant other than
+/// `0` or `1` doesn't build (`x ^ 3` is not `x³`: that is [`Field::pow`], `x.pow(3)`).
+/// [`Field::xor`] is the unchecked form, for operands proven bits by other means.
 impl BitXor for Field {
     type Output = Field;
 
     #[inline(never)]
+    #[cfg_attr(not(xark), track_caller)]
     fn bitxor(self, rhs: Field) -> Field {
+        for x in [self, rhs] {
+            if !__xark_bit_operand(x) {
+                x.require_bool();
+            }
+        }
         __xark_xor(self, rhs)
+    }
+}
+
+impl BitXorAssign for Field {
+    #[cfg_attr(not(xark), track_caller)]
+    fn bitxor_assign(&mut self, rhs: Field) {
+        *self = *self ^ rhs;
     }
 }
 
@@ -881,6 +898,26 @@ macro_rules! impl_field_int_ops {
         }
         impl DivAssign<$t> for Field {
             fn div_assign(&mut self, rhs: $t) { *self = *self / rhs; }
+        }
+        impl BitXor<$t> for Field {
+            type Output = Field;
+            #[cfg_attr(not(xark), track_caller)]
+            fn bitxor(self, rhs: $t) -> Field {
+                self ^ Field::from(rhs)
+            }
+        }
+        impl BitXor<Field> for $t {
+            type Output = Field;
+            #[cfg_attr(not(xark), track_caller)]
+            fn bitxor(self, rhs: Field) -> Field {
+                Field::from(self) ^ rhs
+            }
+        }
+        impl BitXorAssign<$t> for Field {
+            #[cfg_attr(not(xark), track_caller)]
+            fn bitxor_assign(&mut self, rhs: $t) {
+                *self = *self ^ Field::from(rhs);
+            }
         }
     )+};
 }

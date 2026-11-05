@@ -445,10 +445,14 @@ verification starter, and the `xark-client` npm package is removed.
 - Two `#[circuit]` functions in one crate fail with "the crate has 2 #[circuit]
   functions (src/lib.rs:2, …); xark builds one circuit per crate", not a clash of the
   internal `__xark_main` / `__XARK_ENTRY` symbols. The rule is now documented.
-- The `xark` crate docs said `^` on `Field` is exponentiation. It is boolean XOR, and
-  it doesn't check that its operands are 0 or 1, so `x ^ Field::from(3u8)` built and
+- The `xark` crate docs said `^` on `Field` is exponentiation. It is boolean XOR, but
+  it didn't check that its operands are 0 or 1, so `x ^ Field::from(3u8)` built and
   constrained `3 - 5x`, not `x³`. The example now uses `x.pow(3)` and is compiled as a
-  doctest, and the `^` / `Field::xor` docs say booleanity is unchecked.
+  doctest. `^` now checks each operand is a bit: free when the compiler already knows
+  it is one (a bit of `to_bits`, a XOR/AND/OR of bits, a constant 0 or 1), one row
+  otherwise. A constant other than 0 or 1 is a build error that points to `uN` or
+  `to_bits` for bitwise XOR and to `pow` for a power. `^=` and `^` with an integer
+  literal work too. `Field::xor` stays unchecked. No example's rows change.
 - `xark build` checks that the `circuit.xbc` it writes expands to exactly the
   circuit it lowered, and fails before writing anything if not. The check used to
   run only in xark's own tests, so a compaction bug on a user's circuit would have

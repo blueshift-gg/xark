@@ -139,8 +139,9 @@ This gives const-generic methods the same amortization a `U<N>` wrapper would �
   a width; would need a hidden default (footgun).
 * **`Eq`/`Ord` markers** — a circuit `==` yields a *wire*, not a total relation; these would wrongly
   imply `Field` is a valid map key / sortable.
-* **`^` as a power** — `^` is boolean XOR (`BitXor<Field>`, sugar for `.xor()`), matching Rust's
-  meaning; exponentiation is `.pow(n)`. An earlier `BitXor<u64>`-as-pow overload was removed because
+* **`^` as a power** — `^` is boolean XOR (`BitXor<Field>`), matching Rust's meaning; it checks
+  that each operand is 0 or 1 (free for known bits, one row otherwise), and a constant other than
+  0 or 1 doesn't build. Exponentiation is `.pow(n)`; bitwise XOR of integers is `^` on `uN`. An earlier `BitXor<u64>`-as-pow overload was removed because
   it silently reversed the meaning of valid-looking Rust.
 * **`U<N>`/`I<N>` typed wrappers** — shipped in PR #8, then **removed**. Their only edges were
   (a) operator sugar for `Field`-vs-`Field` and (b) cached bits; (b) is the memo table, (a) is served

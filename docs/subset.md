@@ -37,7 +37,8 @@ pub fn cube(secret: Private<Field>, result: Public<Field>) {
   A parameter is any `xark::Input` type: these, `#[input]` structs of them, the standard
   types (`Timestamp`, `Days<FROM, TO>`, `Text`, `Choice<E>`, `Bitfield<E>`) and gadget types.
 - **`Field` arithmetic:** `+`, `-`, `*`, `/`, unary `-`, compound assignment (`+=`, …), `.pow(n)`
-  (exponentiation by a **constant** `n`). `^` is boolean XOR (`.xor()`), not a power.
+  (exponentiation by a **constant** `n`). `^` is boolean XOR, not a power: each operand is checked
+  to be 0 or 1 (free for known bits), and `.xor()` is the unchecked form.
   Multiplication by a constant is free (folds into a linear combination); only `var * var` emits a
   gate. `a == b` / `a != b` give a circuit `bool` (`Field::from(b)` turns it back into a `{0,1}`
   field value).

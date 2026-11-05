@@ -3344,6 +3344,79 @@ fn require_eq_of_unequal_constants_is_rejected() {
     assert!(c.stderr.contains("can never hold"), "{}", c.stderr);
 }
 
+/// **`^` on `Field` is boolean XOR, checked** (issue 14). Unknown operands get a
+/// booleanity row each, so `2 ^ 0` no longer silently solves to `2`; operands
+/// already known to be bits (`to_bits`, a constant `0`/`1`) cost nothing more than
+/// the unchecked `xor`; `x ^ 1` folds to `1 − x` (only `x`'s booleanity row); and a
+/// constant that isn't a bit doesn't build.
+#[test]
+fn field_xor_checks_booleanity() {
+    let case = |name: &str, params: &str, body: &str| {
+        let src = format!(
+            "#![no_std]\nuse xark::{{require_eq, Field, Private, Public}};\n\
+             pub fn circuit({params}) {{\n{body}\n}}\n"
+        );
+        compile_with_field(&write_case(name, &src), name, "bn254")
+    };
+    let s = |v: &str| v.to_string();
+
+    // Two unknown operands: two booleanity rows and the XOR row.
+    let raw = case(
+        "xor_raw",
+        "x: Private<Field>, y: Private<Field>, out: Public<Field>",
+        "require_eq(x ^ y, out);",
+    );
+    assert!(raw.status_success, "{}", raw.stderr);
+    assert_eq!(raw.mul_gate_count(), 3);
+    for (x, y, out, ok) in [
+        ("1", "0", "1", true),
+        ("1", "1", "0", true),
+        ("2", "0", "2", false),
+    ] {
+        let inputs = [("x", s(x)), ("y", s(y)), ("out", s(out))];
+        assert_eq!(unique_or_none(&raw, &inputs), ok, "{x} ^ {y} = {out}");
+    }
+
+    // Known bits: `^` costs what the unchecked `xor` does.
+    let bits = |name: &str, op: &str| {
+        case(
+            name,
+            "x: Private<Field>, y: Private<Field>, out: Public<Field>",
+            &format!(
+                "let a = x.to_bits::<1>()[0];\nlet b = y.to_bits::<1>()[0];\n\
+                 require_eq({op}, out);"
+            ),
+        )
+    };
+    let checked = bits("xor_bits_checked", "a ^ b");
+    let unchecked = bits("xor_bits_unchecked", "a.xor(b)");
+    assert!(checked.status_success, "{}", checked.stderr);
+    assert!(unchecked.status_success, "{}", unchecked.stderr);
+    assert_eq!(checked.mul_gate_count(), unchecked.mul_gate_count());
+
+    // A constant bit folds: `x ^ 1` is `1 − x`, plus `x`'s booleanity row.
+    let one = case(
+        "xor_one",
+        "x: Private<Field>, out: Public<Field>",
+        "let mut v = x ^ 1u8;\nv ^= Field::from(0u8);\nrequire_eq(v, out);",
+    );
+    assert!(one.status_success, "{}", one.stderr);
+    assert_eq!(one.mul_gate_count(), 1);
+    assert!(unique_or_none(&one, &[("x", s("1")), ("out", s("0"))]));
+    assert!(!unique_or_none(&one, &[("x", s("2")), ("out", s("-1"))]));
+
+    // A constant that isn't a bit is refused, pointing at what was meant.
+    let three = case(
+        "xor_three",
+        "x: Private<Field>, out: Public<Field>",
+        "require_eq(x ^ 3u8, out);",
+    );
+    assert!(!three.status_success, "must be rejected");
+    for needle in ["isn't a bit", "x.pow(3)", "to_bits"] {
+        assert!(three.stderr.contains(needle), "{needle}: {}", three.stderr);
+    }
+}
+
 /// **Poseidon2 sponge — lowering.** Variable-length `hash::<N>` (5 elements → 3
 /// permutations) compiles cleanly.
 #[test]
