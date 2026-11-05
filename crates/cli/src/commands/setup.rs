@@ -166,62 +166,42 @@ impl RngCore for SetupRng {
 
 impl CryptoRng for SetupRng {}
 
-/// The circuit the key is generated for, the form's metadata name, and why.
-/// `prog` is the template-reduced R1CS (or a debug flat build's, which is always
-/// minimized).
-fn keyed_circuit(
-    prog: &xark_ir::R1csProgram,
+/// For `minimized`, or `auto` below 2^20 rows: the boundary-minimized circuit to
+/// key and why, or `None` (and why) when `auto` finds the minimize not worth it,
+/// so the caller keys the template-reduced rows straight from `circuit.xbc`.
+/// Takes `prog`, the template-reduced R1CS, by value: no copy of it outlives the
+/// minimize (aes256_gcm's 1M rows are GBs).
+fn minimized(
+    prog: xark_ir::R1csProgram,
     form: R1csForm,
-    flat: bool,
     kind: xark_groth16::DomainKind,
-) -> (XarkCircuit, &'static str, String) {
-    let domain =
-        |p: &xark_ir::R1csProgram| kind.size(p.constraints.len() + num_public_inputs(p) + 1);
-    let reduced = || XarkCircuit::for_setup_preminimized(prog.clone());
-    match form {
-        _ if flat => (
-            XarkCircuit::for_setup(prog.clone()),
-            "minimized",
-            "debug flat build".into(),
-        ),
-        R1csForm::Reduced => (reduced(), "reduced", "requested".into()),
-        R1csForm::Minimized => (
-            XarkCircuit::for_setup(prog.clone()),
-            "minimized",
-            "requested".into(),
-        ),
-        R1csForm::Auto if prog.constraints.len() >= AUTO_REDUCED_ROWS => (
-            reduced(),
-            "reduced",
-            format!(
-                "{} constraints ≥ 2^20: the global minimize isn't worth its setup memory",
-                prog.constraints.len()
-            ),
-        ),
-        R1csForm::Auto => {
-            let min = XarkCircuit::for_setup(prog.clone());
-            let (r, m) = (prog, min.prog());
-            let saved = |a: usize, b: usize| 1.0 - b as f64 / a.max(1) as f64;
-            let rows = saved(r.constraints.len(), m.constraints.len());
-            let vars = saved(r.variables.len(), m.variables.len());
-            let smaller_domain = domain(m) < domain(r);
-            let why = format!(
-                "minimize saves {:.1}% rows, {:.1}% variables{}",
-                rows * 100.0,
-                vars * 100.0,
-                if smaller_domain {
-                    ", shrinks the FFT domain"
-                } else {
-                    ""
-                }
-            );
-            if smaller_domain || rows.max(vars) >= AUTO_MIN_SAVING {
-                (min, "minimized", why)
-            } else {
-                (reduced(), "reduced", why)
-            }
-        }
+) -> (Option<XarkCircuit>, String) {
+    if form != R1csForm::Auto {
+        return (Some(XarkCircuit::for_setup(prog)), "requested".into());
     }
+    let size = |p: &xark_ir::R1csProgram| {
+        let domain = kind.size(p.constraints.len() + num_public_inputs(p) + 1);
+        (p.constraints.len(), p.variables.len(), domain)
+    };
+    let (r_rows, r_vars, r_domain) = size(&prog);
+    let min = XarkCircuit::for_setup(prog);
+    let (m_rows, m_vars, m_domain) = size(min.prog());
+    let saved = |a: usize, b: usize| 1.0 - b as f64 / a.max(1) as f64;
+    let rows = saved(r_rows, m_rows);
+    let vars = saved(r_vars, m_vars);
+    let smaller_domain = m_domain < r_domain;
+    let why = format!(
+        "minimize saves {:.1}% rows, {:.1}% variables{}",
+        rows * 100.0,
+        vars * 100.0,
+        if smaller_domain {
+            ", shrinks the FFT domain"
+        } else {
+            ""
+        }
+    );
+    let keep = smaller_domain || rows.max(vars) >= AUTO_MIN_SAVING;
+    (keep.then_some(min), why)
 }
 
 /// Write `r1cs.stream` (the keyed circuit, row-file encoded) for a `minimized`
@@ -307,21 +287,37 @@ fn plan_keyed(
                 let prog = xark_ir::function_decode::expand_function_blob_reduced(&bytes)
                     .map_err(|e| anyhow::anyhow!(e))?
                     .into_r1cs();
-                let (circuit, name, why) = keyed_circuit(&prog, form, false, kind);
-                if name == "reduced" {
-                    reduced(why)
-                } else {
-                    Ok((Keyed::Program(circuit), name, why, hash, rows, num_pi, kind))
+                match minimized(prog, form, kind) {
+                    (Some(circuit), why) => Ok((
+                        Keyed::Program(circuit),
+                        "minimized",
+                        why,
+                        hash,
+                        rows,
+                        num_pi,
+                        kind,
+                    )),
+                    (None, why) => reduced(why),
                 }
             }
         };
     }
-    // A debug flat build (`XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE`): materialized.
+    // A debug flat build (`XARK_FLAT_MINIMIZE` / `XARK_NO_MINIMIZE`): materialized,
+    // and always minimized.
     let (prog, hash) = load_backend_r1cs(&xbc)?;
     let (rows, num_pi) = (prog.constraints.len(), num_public_inputs(&prog));
     let kind = args.domain.resolve(ptau);
-    let (circuit, name, why) = keyed_circuit(&prog, form, true, kind);
-    Ok((Keyed::Program(circuit), name, why, hash, rows, num_pi, kind))
+    let circuit = XarkCircuit::for_setup(prog);
+    let why = "debug flat build".into();
+    Ok((
+        Keyed::Program(circuit),
+        "minimized",
+        why,
+        hash,
+        rows,
+        num_pi,
+        kind,
+    ))
 }
 
 pub fn run(args: SetupArgs) -> Result<()> {

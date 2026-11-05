@@ -315,7 +315,7 @@ pub fn build_crate(
     crate_dir: &std::path::Path,
     target_dir: &std::path::Path,
 ) -> Result<Vec<u8>, String> {
-    build_crate_with(crate_dir, target_dir, &BuildOptions::default())
+    build_crate_with(crate_dir, target_dir, &BuildOptions::default()).map(|b| b.wasm)
 }
 
 /// Options for [`build_crate_with`].
@@ -425,19 +425,13 @@ fn package_name(crate_dir: &std::path::Path) -> Result<String, String> {
         .ok_or_else(|| "no package name in Cargo.toml".into())
 }
 
-/// Every local source file the last [`build_crate_with`] into `target_dir` read: the
-/// circuit crate's, its path dependencies' (gadgets, `xark` itself), from cargo's
-/// dep-info. (Registry crates don't change in place, so cargo leaves them out.)
-pub fn circuit_sources(
-    crate_dir: &std::path::Path,
-    target_dir: &std::path::Path,
-) -> Result<Vec<std::path::PathBuf>, String> {
-    let name = package_name(crate_dir)?.replace('-', "_");
-    let d = target_dir
-        .join("wasm32-unknown-unknown/release")
-        .join(format!("{name}.d"));
-    let text = std::fs::read_to_string(&d).map_err(|e| format!("reading {}: {e}", d.display()))?;
-    Ok(parse_dep_info(&text))
+/// A circuit crate built for wasm32 by [`build_crate_with`].
+pub struct Built {
+    pub wasm: Vec<u8>,
+    /// Every local source file the build read: the circuit crate's, its path
+    /// dependencies' (gadgets, `xark` itself), from cargo's dep-info. (Registry
+    /// crates don't change in place, so cargo leaves them out.)
+    pub sources: Vec<std::path::PathBuf>,
 }
 
 /// The prerequisites of a make-style dep-info file (`out: a b\ c`), unescaped.
@@ -467,7 +461,7 @@ pub fn build_crate_with(
     crate_dir: &std::path::Path,
     target_dir: &std::path::Path,
     opts: &BuildOptions,
-) -> Result<Vec<u8>, String> {
+) -> Result<Built, String> {
     let name = package_name(crate_dir)?;
     ensure_wasm_target(crate_dir)?;
     let _lock = lock_build(target_dir)?;
@@ -551,10 +545,15 @@ pub fn build_crate_with(
         }
         return Err("cargo build of the circuit failed".into());
     }
-    let wasm = target_dir
-        .join("wasm32-unknown-unknown/release")
-        .join(format!("{}.wasm", name.replace('-', "_")));
-    std::fs::read(&wasm).map_err(|e| format!("reading {}: {e}", wasm.display()))
+    let out = target_dir.join("wasm32-unknown-unknown/release");
+    let file = name.replace('-', "_");
+    let d = out.join(format!("{file}.d"));
+    let sources = std::fs::read_to_string(&d)
+        .map(|text| parse_dep_info(&text))
+        .map_err(|e| format!("reading {}: {e}", d.display()))?;
+    let wasm = out.join(format!("{file}.wasm"));
+    let wasm = std::fs::read(&wasm).map_err(|e| format!("reading {}: {e}", wasm.display()))?;
+    Ok(Built { wasm, sources })
 }
 
 /// Where `crate_dir`'s sources put a `#[circuit]` attribute, as `src/lib.rs:3`.

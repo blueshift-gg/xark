@@ -243,7 +243,8 @@ fn calls(
         };
         let sub = if markers { "marked" } else { "plain" };
         let wasm = xark_frontend::build_crate_with(dir, &target.join(sub), &opts)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .wasm;
         let field = xark_ir::FieldSpec::bn254();
         let out = if markers {
             xark_frontend::lower_recording_gadgets(&wasm, field)

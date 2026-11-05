@@ -293,88 +293,9 @@ fn subst_out(v: u32, s: &Subst) -> u32 {
         Image::Lc(p) => p.terms[0].var,
     }
 }
-fn subst_witness(w: &mut WitnessGen, s: &Subst) {
-    let ids = |v: &mut [VarId]| {
-        for x in v {
-            *x = subst_out(*x, s);
-        }
-    };
-    let lcs = |v: &mut [LinearCombination]| {
-        for l in v {
-            *l = subst_lc(l, s);
-        }
-    };
-    match w {
-        WitnessGen::Product { out, left, right } => {
-            *out = subst_out(*out, s);
-            *left = subst_lc(left, s);
-            *right = subst_lc(right, s);
-        }
-        WitnessGen::Linear { out, lc: l } => {
-            *out = subst_out(*out, s);
-            *l = subst_lc(l, s);
-        }
-        WitnessGen::Xor { out, a, b } | WitnessGen::Or { out, a, b } => {
-            *out = subst_out(*out, s);
-            *a = subst_lc(a, s);
-            *b = subst_lc(b, s);
-        }
-        WitnessGen::Inverse { out, input } | WitnessGen::InverseOrZero { out, input } => {
-            *out = subst_out(*out, s);
-            *input = subst_lc(input, s);
-        }
-        WitnessGen::Bit { out, input, .. } => {
-            *out = subst_out(*out, s);
-            *input = subst_lc(input, s);
-        }
-        WitnessGen::Bits { outs, input } => {
-            ids(outs);
-            *input = subst_lc(input, s);
-        }
-        WitnessGen::DivRem { q, r, num, den } => {
-            *q = subst_out(*q, s);
-            *r = subst_out(*r, s);
-            *num = subst_lc(num, s);
-            *den = subst_lc(den, s);
-        }
-        WitnessGen::MulModDivMod {
-            q,
-            r,
-            a,
-            b,
-            modulus,
-            ..
-        } => {
-            ids(q);
-            ids(r);
-            lcs(a);
-            lcs(b);
-            lcs(modulus);
-        }
-        WitnessGen::ModInverse {
-            out, a, modulus, ..
-        } => {
-            ids(out);
-            lcs(a);
-            lcs(modulus);
-        }
-        WitnessGen::Sub2 {
-            qabs,
-            r,
-            a,
-            b,
-            c,
-            modulus,
-            ..
-        } => {
-            *qabs = subst_out(*qabs, s);
-            ids(r);
-            lcs(a);
-            lcs(b);
-            lcs(c);
-            lcs(modulus);
-        }
-    }
+/// `w` under `s`.
+fn subst_witness(w: &WitnessGen, s: &Subst) -> WitnessGen {
+    w.map(|l| subst_lc(l, s), |&v| subst_out(v, s))
 }
 
 /// Build the substitution for a CALL: plug var → caller's (already
@@ -948,10 +869,7 @@ pub fn stream_solve_dense(
     let c = decode_core(b);
     let modulus = num_bigint::BigUint::parse_bytes(c.field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    crate::solver::solve_witness_streamed_dense(&c.inputs, c.num_vars, &modulus, inputs, |sink| {
-        expand_w_visit(&c.defs, &c.top_w, &IDENTITY, &mut |op| sink(op));
-    })
-    .map_err(|e| format!("solve: {e:?}"))
+    solve_streamed(&c.inputs, c.num_vars, &c.defs, &c.top_w, &modulus, inputs)
 }
 
 /// **Streaming constraint check** — solve the witness, then verify every R1CS row
@@ -966,7 +884,7 @@ pub fn stream_check(
     let (field, vars, defs, top_c, top_w, _keep, _num_inputs) = decode_compact(b);
     let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    let assign = solve_streamed(&vars, &defs, &top_w, &modulus, inputs)?;
+    let assign = solve_streamed(&vars, vars.len(), &defs, &top_w, &modulus, inputs)?;
     // Each top-level item is an independent constraint shard (absolute var ids),
     // so evaluate them in parallel against the shared read-only assignment,
     // streaming+dropping rows within each shard. Short-circuits on first failure.
@@ -979,7 +897,7 @@ pub fn stream_check(
             &IDENTITY,
             &mut |row: R1csRow| {
                 if shard_ok
-                    && !crate::solver::row_satisfied(&row.a, &row.b, &row.c, &assign, &modulus)
+                    && !crate::solver::row_satisfied(&row.a, &row.b, &row.c, &assign[..], &modulus)
                 {
                     shard_ok = false;
                 }
@@ -1004,7 +922,7 @@ pub fn first_failing_row(b: &[u8], slots: &[Option<crate::solver::Fp>]) -> Optio
     let (mut i, mut failed) = (0usize, None);
     expand_c_visit(&defs, &top_c, &IDENTITY, &mut |row: R1csRow| {
         if failed.is_none()
-            && !crate::solver::row_satisfied_dense(&row.a, &row.b, &row.c, slots, &modulus)
+            && !crate::solver::row_satisfied(&row.a, &row.b, &row.c, slots, &modulus)
         {
             failed = Some(i);
         }
@@ -1024,7 +942,8 @@ pub fn stream_solve(
     let (field, vars, defs, _top_c, top_w, _keep, _num_inputs) = decode_compact(b);
     let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    solve_streamed(&vars, &defs, &top_w, &modulus, inputs)
+    solve_streamed(&vars, vars.len(), &defs, &top_w, &modulus, inputs)
+        .map(crate::solver::slots_into_map)
 }
 
 /// Decode just the variable table (roles + names) from a function blob, without
@@ -1052,20 +971,12 @@ const F_PINNED: u8 = 4; // some referencing row is linear in the var (a=0, b≠0
 /// parallel shards in any order.
 fn apply_row_flags(
     row: &R1csRow,
-    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     flags: &[std::sync::atomic::AtomicU8],
 ) {
     use std::sync::atomic::Ordering;
-    // Distinct vars in this row (a var in several LCs reduces once).
-    let mut seen = std::collections::BTreeSet::new();
-    for lc in [&row.a, &row.b, &row.c] {
-        for t in &lc.terms {
-            seen.insert(t.var);
-        }
-    }
-    for v in seen {
-        let (a, b, _c) = crate::solver::univariate_r1cs(row, v, assign, modulus);
+    for (v, (a, b, _c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
         let mut bits = F_SEEN;
         if !(a.is_zero() && b.is_zero()) {
             bits |= F_RESTRICTED;
@@ -1091,7 +1002,7 @@ fn apply_row_flags(
 fn classify_and_check(
     defs: &[GDef],
     top_c: &[CItem],
-    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     num_vars: usize,
     check_sat: bool,
@@ -1131,7 +1042,7 @@ fn classify_and_check(
 fn two_valued_suspects(
     defs: &[GDef],
     top_c: &[CItem],
-    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     suspects: &std::collections::BTreeSet<u32>,
 ) -> std::collections::BTreeSet<u32> {
@@ -1140,19 +1051,14 @@ fn two_valued_suspects(
     let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
         suspects.iter().map(|&v| (v, Vec::new())).collect();
     expand_c_visit(defs, top_c, &IDENTITY, &mut |row: R1csRow| {
-        let mut seen = std::collections::BTreeSet::new();
-        for lc in [&row.a, &row.b, &row.c] {
-            for t in &lc.terms {
-                if suspects.contains(&t.var) {
-                    seen.insert(t.var);
-                }
-            }
+        let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
+        if !terms.any(|t| suspects.contains(&t.var)) {
+            return;
         }
-        for v in seen {
-            polys
-                .get_mut(&v)
-                .unwrap()
-                .push(crate::solver::univariate_r1cs(&row, v, assign, modulus));
+        for (v, poly) in crate::solver::univariate_r1cs_row(&row, assign, modulus) {
+            if let Some(ps) = polys.get_mut(&v) {
+                ps.push(poly);
+            }
         }
     });
     two_valued_from_polys(&polys, assign, modulus)
@@ -1167,7 +1073,7 @@ fn two_valued_from_polys(
         u32,
         Vec<(crate::solver::Fp, crate::solver::Fp, crate::solver::Fp)>,
     >,
-    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
 ) -> std::collections::BTreeSet<u32> {
     use crate::solver::Fp;
@@ -1175,7 +1081,11 @@ fn two_valued_from_polys(
     polys
         .par_iter()
         .filter_map(|(&v, ps)| {
-            let alpha = assign.get(&v).cloned().unwrap_or_else(|| Fp::zero(modulus));
+            let alpha = assign
+                .get(v as usize)
+                .cloned()
+                .flatten()
+                .unwrap_or_else(|| Fp::zero(modulus));
             let mut candidates: Vec<Fp> = Vec::new();
             for (a, b, _c) in ps {
                 if a.is_zero() {
@@ -1211,7 +1121,7 @@ fn stream_underconstrained(
     top_c: &[CItem],
     vars: &[Var],
     keep_extra: &std::collections::BTreeSet<u32>,
-    assign: &std::collections::BTreeMap<u32, crate::solver::Fp>,
+    assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     check_sat: bool,
 ) -> (bool, Vec<crate::solver::UnderConstrained>) {
@@ -1299,7 +1209,7 @@ pub fn stream_analyze(
     let (field, vars, defs, top_c, top_w, keep_extra, _num_inputs) = decode_compact(b);
     let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    let assign = solve_streamed(&vars, &defs, &top_w, &modulus, inputs)?;
+    let assign = solve_streamed(&vars, vars.len(), &defs, &top_w, &modulus, inputs)?;
     let (_sat, out) =
         stream_underconstrained(&defs, &top_c, &vars, &keep_extra, &assign, &modulus, false);
     Ok(out)
@@ -1344,13 +1254,13 @@ pub fn stream_solve_verify(
     let (field, vars, defs, top_c, top_w, keep_extra, _num_inputs) = decode_compact(b);
     let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    let assign = solve_streamed(&vars, &defs, &top_w, &modulus, inputs)?;
+    let assign = solve_streamed(&vars, vars.len(), &defs, &top_w, &modulus, inputs)?;
     let (sat_ok, out) =
         stream_underconstrained(&defs, &top_c, &vars, &keep_extra, &assign, &modulus, true);
     if !sat_ok {
         return Err("a constraint is unsatisfied".to_string());
     }
-    Ok((assign, out))
+    Ok((crate::solver::slots_into_map(assign), out))
 }
 
 /// Count the R1CS constraints by **streaming** them out of the compact bytecode
@@ -1633,15 +1543,11 @@ fn expand_w(defs: &[GDef], items: &[WItem], subst: &Subst, out: &mut Vec<Witness
     for it in items {
         match it {
             WItem::Row(w) => {
-                let mut w = w.clone();
-                subst_witness(&mut w, subst);
-                out.push(w);
+                out.push(subst_witness(w, subst));
             }
             WItem::Rolled(wits) => {
                 for w in wits {
-                    let mut w = w.clone();
-                    subst_witness(&mut w, subst);
-                    out.push(w);
+                    out.push(subst_witness(w, subst));
                 }
             }
             WItem::Call(d, base, plugs) => {
@@ -1665,15 +1571,11 @@ fn expand_w_visit(defs: &[GDef], items: &[WItem], subst: &Subst, emit: &mut dyn 
     for it in items {
         match it {
             WItem::Row(w) => {
-                let mut w = w.clone();
-                subst_witness(&mut w, subst);
-                emit(w);
+                emit(subst_witness(w, subst));
             }
             WItem::Rolled(wits) => {
                 for w in wits {
-                    let mut w = w.clone();
-                    subst_witness(&mut w, subst);
-                    emit(w);
+                    emit(subst_witness(w, subst));
                 }
             }
             WItem::Call(d, base, plugs) => {
@@ -1688,22 +1590,33 @@ fn expand_w_visit(defs: &[GDef], items: &[WItem], subst: &Subst, emit: &mut dyn 
     }
 }
 
-/// Solve the witness by **streaming** the hint program: expand the top-level
-/// witness items op-by-op (topological order) and feed them to the batched
-/// solver, which never holds more than one batch of ops at a time. Produces the
+/// Solve the witness into dense slots (`slots[id]`, `n` presized) without
+/// materializing the flat hint program: over BN254 by running each template's
+/// compiled ops against its calls ([`eval::solve_witness`]); over another field
+/// by expanding the ops one by one into the batched solver. Produces the
 /// identical assignment to `expand_w_top` + `solve`, at a fraction of the peak
 /// (the full expanded `Vec<WitnessGen>` is the bulk of a heavy EC circuit's RSS).
 fn solve_streamed(
     vars: &[Var],
+    n: usize,
     defs: &[GDef],
     top_w: &[WItem],
     modulus: &num_bigint::BigUint,
     inputs: &BTreeMap<u32, String>,
-) -> Result<BTreeMap<u32, crate::solver::Fp>, String> {
-    crate::solver::solve_witness_streamed(vars, modulus, inputs, |sink| {
-        expand_w_visit(defs, top_w, &IDENTITY, &mut |op| sink(op));
-    })
-    .map_err(|e| format!("solve: {e:?}"))
+) -> Result<Vec<Option<crate::solver::Fp>>, String> {
+    if !crate::solver::is_bn254(modulus) {
+        return crate::solver::solve_witness_streamed_dense(vars, n, modulus, inputs, |sink| {
+            expand_w_visit(defs, top_w, &IDENTITY, &mut |op| sink(op));
+        })
+        .map_err(|e| format!("solve: {e:?}"));
+    }
+    let w = eval::solve_witness(defs, top_w, vars, n, modulus, inputs)
+        .map_err(|e| format!("solve: {e:?}"))?;
+    Ok(w.vals
+        .into_iter()
+        .zip(w.set)
+        .map(|(v, set)| set.then_some(crate::solver::Fp::Bn254(v)))
+        .collect())
 }
 
 /// Parse an `XBC` (version 2) container and expand it to a full `CircuitProgram`.
@@ -2232,13 +2145,16 @@ impl ReducedRowStream {
 /// Numeric template evaluation (see [`ReducedRowStream::eval_items`]).
 mod eval {
     use super::{CItem, GDef, R1csRow};
-    use crate::field::FieldConst;
     use crate::linear_combination::LinearCombination;
+    use crate::primitive::{Var, VarRole, WitnessGen};
+    use crate::solver::{Fp, SolveError, exec_witness_op};
     use ark_bn254::Fr;
-    use ark_ff::{PrimeField, Zero};
+    use ark_ff::Zero;
+    use num_bigint::BigUint;
+    use std::collections::BTreeMap;
 
     /// A variable as seen from inside a template body.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq)]
     pub enum VRef {
         /// A fresh internal: `call base + offset`.
         Internal(u32),
@@ -2248,6 +2164,7 @@ mod eval {
         Global(u32),
     }
 
+    #[derive(PartialEq)]
     pub struct Lc {
         k: Fr,
         terms: Vec<(VRef, Fr)>,
@@ -2273,25 +2190,12 @@ mod eval {
         pub plugs: &'a [Fr],
     }
 
-    fn fr(fc: &FieldConst) -> Fr {
-        if let Some(n) = fc.as_i64() {
-            let m = Fr::from(n.unsigned_abs());
-            return if n < 0 { -m } else { m };
-        }
-        let (sign, bytes) = fc.big().to_bytes_le();
-        let m = Fr::from_le_bytes_mod_order(&bytes);
-        if sign == num_bigint::Sign::Minus {
-            -m
-        } else {
-            m
-        }
-    }
-
     fn resolve(v: u32, def: Option<&GDef>) -> VRef {
         match def {
             None => VRef::Global(v),
             Some(d) if v >= d.base_var => VRef::Internal(v - d.base_var),
-            Some(d) => match d.plugs.iter().position(|&p| p == v) {
+            // A repeated plug var keeps its last expression, as in `call_subst`.
+            Some(d) => match d.plugs.iter().rposition(|&p| p == v) {
                 Some(i) => VRef::Plug(i as u32),
                 None => VRef::Global(v),
             },
@@ -2300,11 +2204,11 @@ mod eval {
 
     fn lc(l: &LinearCombination, def: Option<&GDef>) -> Lc {
         Lc {
-            k: fr(&l.constant),
+            k: l.constant.to_bn254_fr(),
             terms: l
                 .terms
                 .iter()
-                .map(|t| (resolve(t.var, def), fr(&t.coeff)))
+                .map(|t| (resolve(t.var, def), t.coeff.to_bn254_fr()))
                 .collect(),
         }
     }
@@ -2478,6 +2382,286 @@ mod eval {
             }
         }
     }
+
+    /// A witness op with template-local variable references and `Fr` coefficients.
+    type WOp = WitnessGen<Lc, VRef>;
+
+    /// A compiled witness item. An op's flag marks a `Bit` on the same input as
+    /// the `Bit` just before it, which reads no output of that op, so the input's
+    /// value carries over (see [`run`]).
+    enum WItem {
+        Op(WOp, bool),
+        Call {
+            def: u32,
+            base: VRef,
+            plugs: Vec<Lc>,
+        },
+    }
+
+    fn w_items(src: &[super::WItem], def: Option<&GDef>) -> Vec<WItem> {
+        let mut out: Vec<WItem> = Vec::new();
+        let push_op = |out: &mut Vec<WItem>, op: &WitnessGen| {
+            let op = op.map(|l| lc(l, def), |&v| resolve(v, def));
+            let same = match (out.last(), &op) {
+                (
+                    Some(WItem::Op(
+                        WitnessGen::Bit {
+                            out, input: prev, ..
+                        },
+                        _,
+                    )),
+                    WitnessGen::Bit { input, .. },
+                ) => {
+                    // In a template an absolute variable might be one of the call's
+                    // internals at run time, so the input must have none.
+                    input == prev
+                        && input.terms.iter().all(|&(r, _)| {
+                            r != *out && (def.is_none() || !matches!(r, VRef::Global(_)))
+                        })
+                }
+                _ => false,
+            };
+            out.push(WItem::Op(op, same));
+        };
+        for it in src {
+            match it {
+                super::WItem::Row(op) => push_op(&mut out, op),
+                super::WItem::Rolled(ops) => ops.iter().for_each(|op| push_op(&mut out, op)),
+                super::WItem::Call(d, base, plugs) => out.push(WItem::Call {
+                    def: *d,
+                    base: resolve(*base, def),
+                    plugs: plugs.iter().map(|p| lc(p, def)).collect(),
+                }),
+            }
+        }
+        out
+    }
+
+    /// Whether some op under template `d` writes a variable that isn't one of its
+    /// call's fresh internals (an absolute output, or a call at an absolute base).
+    fn escapes(defs: &[Vec<WItem>], d: usize, memo: &mut [Option<bool>]) -> bool {
+        if let Some(e) = memo[d] {
+            return e;
+        }
+        let mut e = false;
+        for it in &defs[d] {
+            e |= match it {
+                WItem::Op(op, _) => {
+                    let mut out = false;
+                    op.map(|_| (), |v| out |= !matches!(v, VRef::Internal(_)));
+                    out
+                }
+                WItem::Call { def, base, .. } => {
+                    !matches!(base, VRef::Internal(_)) || escapes(defs, *def as usize, memo)
+                }
+            };
+        }
+        memo[d] = Some(e);
+        e
+    }
+
+    struct WProgram {
+        defs: Vec<Vec<WItem>>,
+        /// Per template: [`escapes`].
+        escapes: Vec<bool>,
+        top: Vec<WItem>,
+    }
+
+    /// A BN254 witness: values by var id, and which ids an input or an op
+    /// assigned. An unassigned id reads as zero, as in the substituting solver.
+    pub struct Witness {
+        pub vals: Vec<Fr>,
+        pub set: Vec<bool>,
+    }
+
+    impl Witness {
+        fn get(&self, id: u32) -> Fr {
+            self.vals.get(id as usize).copied().unwrap_or_default()
+        }
+
+        fn put(&mut self, id: u32, v: Fr) {
+            let i = id as usize;
+            if i >= self.vals.len() {
+                self.vals.resize(i + 1, Fr::zero());
+                self.set.resize(i + 1, false);
+            }
+            self.vals[i] = v;
+            self.set[i] = true;
+        }
+    }
+
+    /// A call's frame: the base of its fresh internals, and its plugs as LCs over
+    /// absolute variables (`Global` terms only).
+    struct WFrame {
+        base: u32,
+        plugs: Vec<Lc>,
+        /// The plugs' values, when nothing the call writes can change them and
+        /// it writes only its own internals (always, at the top level).
+        vals: Option<Vec<Fr>>,
+    }
+
+    const ONE: Fr = ark_ff::MontFp!("1");
+
+    impl WFrame {
+        fn var(&self, r: VRef, w: &Witness) -> Fr {
+            match r {
+                VRef::Internal(o) => w.get(self.base + o),
+                VRef::Global(id) => w.get(id),
+                VRef::Plug(i) => match &self.vals {
+                    Some(vals) => vals[i as usize],
+                    // Read through the plug's expression now, as the substituted
+                    // op would.
+                    None => self.lc(&self.plugs[i as usize], w),
+                },
+            }
+        }
+
+        fn lc(&self, l: &Lc, w: &Witness) -> Fr {
+            let mut acc = l.k;
+            for &(r, c) in &l.terms {
+                let x = self.var(r, w);
+                acc += if c == ONE { x } else { x * c };
+            }
+            acc
+        }
+
+        /// The absolute variable an op output or call base names: always a fresh
+        /// var, never a plug (`subst_out` relies on the same).
+        fn out(&self, r: VRef) -> u32 {
+            match r {
+                VRef::Internal(o) => self.base + o,
+                VRef::Global(id) => id,
+                VRef::Plug(_) => unreachable!("an op output is always a fresh var"),
+            }
+        }
+
+        /// The frame of a call to a template that does or doesn't `escape`.
+        fn call(&self, base: VRef, plugs: &[Lc], escapes: bool, w: &Witness) -> WFrame {
+            let base = self.out(base);
+            let plugs: Vec<Lc> = plugs.iter().map(|l| self.absolute(l)).collect();
+            // The call writes only its internals, from `base` on, so plugs reading
+            // variables below `base` keep their values throughout it.
+            let fixed = !escapes
+                && plugs
+                    .iter()
+                    .flat_map(|l| &l.terms)
+                    .all(|&(r, _)| matches!(r, VRef::Global(id) if id < base));
+            let mut f = WFrame {
+                base,
+                plugs,
+                vals: None,
+            };
+            if fixed {
+                f.vals = Some(f.plugs.iter().map(|l| f.lc(l, w)).collect());
+            }
+            f
+        }
+
+        /// `l` (an LC in this frame) over absolute variables.
+        fn absolute(&self, l: &Lc) -> Lc {
+            let mut k = l.k;
+            let mut terms = Vec::with_capacity(l.terms.len());
+            for &(r, c) in &l.terms {
+                match (r, &self.vals) {
+                    (VRef::Plug(i), Some(vals)) => k += vals[i as usize] * c,
+                    (VRef::Plug(i), None) => {
+                        let p = &self.plugs[i as usize];
+                        k += p.k * c;
+                        terms.extend(p.terms.iter().map(|&(t, pc)| (t, pc * c)));
+                    }
+                    _ => terms.push((VRef::Global(self.out(r)), c)),
+                }
+            }
+            Lc { k, terms }
+        }
+    }
+
+    fn run(
+        p: &WProgram,
+        items: &[WItem],
+        f: &WFrame,
+        w: &mut Witness,
+        modulus: &BigUint,
+        outs: &mut Vec<(u32, Fp)>,
+    ) -> Result<(), SolveError> {
+        // A carried input stays current only if nothing it reads can change:
+        // fixed plugs, and a template that writes only its own internals.
+        let fixed = f.vals.is_some();
+        let last = std::cell::Cell::new(None);
+        for it in items {
+            match it {
+                WItem::Op(op, same) => {
+                    let carried = last.get().filter(|_| *same && fixed);
+                    let eval = |l: &Lc| {
+                        let x = carried.unwrap_or_else(|| f.lc(l, w));
+                        last.set(Some(x));
+                        Fp::Bn254(x)
+                    };
+                    // Outputs land after the op has read all its inputs, as in
+                    // `solve_witness_sequential`.
+                    exec_witness_op(op, eval, modulus, &mut |r, x| outs.push((f.out(r), x)))?;
+                    for (id, x) in outs.drain(..) {
+                        w.put(
+                            id,
+                            x.as_bn254_fr().expect("a BN254 op yields a BN254 value"),
+                        );
+                    }
+                }
+                WItem::Call { def, base, plugs } => {
+                    let d = *def as usize;
+                    let inner = f.call(*base, plugs, p.escapes[d], w);
+                    run(p, &p.defs[d], &inner, w, modulus, outs)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Solve the hint program over BN254 without expanding it: each template's
+    /// ops are compiled once (`Fr` coefficients, template-local variables) and run
+    /// against each call's frame into a dense witness of `n` slots. The same
+    /// witness as `solve_witness_streamed_dense` over [`super::expand_w_visit`]:
+    /// the ops run in the same order, and a plug's expression or a carried `Bit`
+    /// input has the value the substituted op would read.
+    pub fn solve_witness(
+        defs: &[GDef],
+        top: &[super::WItem],
+        vars: &[Var],
+        n: usize,
+        modulus: &BigUint,
+        inputs: &BTreeMap<u32, String>,
+    ) -> Result<Witness, SolveError> {
+        let mut w = Witness {
+            vals: vec![Fr::zero(); n],
+            set: vec![false; n],
+        };
+        for var in vars {
+            if matches!(var.role, VarRole::PublicInput | VarRole::PrivateInput) {
+                let decimal = inputs
+                    .get(&var.id)
+                    .ok_or(SolveError::MissingInput(var.id))?;
+                let v = Fp::from_decimal(decimal, modulus);
+                w.put(var.id, v.as_bn254_fr().expect("BN254 modulus"));
+            }
+        }
+        let defs: Vec<Vec<WItem>> = defs.iter().map(|d| w_items(&d.w_items, Some(d))).collect();
+        let mut memo = vec![None; defs.len()];
+        let escapes = (0..defs.len())
+            .map(|d| escapes(&defs, d, &mut memo))
+            .collect();
+        let p = WProgram {
+            defs,
+            escapes,
+            top: w_items(top, None),
+        };
+        let top = WFrame {
+            base: 0,
+            plugs: Vec::new(),
+            vals: Some(Vec::new()),
+        };
+        run(&p, &p.top, &top, &mut w, modulus, &mut Vec::new())?;
+        Ok(w)
+    }
 }
 
 #[cfg(test)]
@@ -2598,6 +2782,10 @@ mod tests {
         modulus: &num_bigint::BigUint,
     ) -> Vec<crate::solver::UnderConstrained> {
         use std::sync::atomic::AtomicU8;
+        let assign: Vec<Option<Fp>> = (0..vars.len() as u32)
+            .map(|id| assign.get(&id).cloned())
+            .collect();
+        let assign = &assign[..];
         let flags: Vec<AtomicU8> = (0..vars.len()).map(|_| AtomicU8::new(0)).collect();
         for r in rows {
             apply_row_flags(r, assign, modulus, &flags);
@@ -2606,19 +2794,10 @@ mod tests {
         let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
             suspects.iter().map(|&v| (v, Vec::new())).collect();
         for r in rows {
-            let mut seen = std::collections::BTreeSet::new();
-            for lc in [&r.a, &r.b, &r.c] {
-                for t in &lc.terms {
-                    if suspects.contains(&t.var) {
-                        seen.insert(t.var);
-                    }
+            for (v, poly) in crate::solver::univariate_r1cs_row(r, assign, modulus) {
+                if let Some(ps) = polys.get_mut(&v) {
+                    ps.push(poly);
                 }
-            }
-            for v in seen {
-                polys
-                    .get_mut(&v)
-                    .unwrap()
-                    .push(crate::solver::univariate_r1cs(r, v, assign, modulus));
             }
         }
         let two_valued = two_valued_from_polys(&polys, assign, modulus);
@@ -2645,7 +2824,10 @@ mod tests {
     /// a circuit with all three verdicts: a linearly-pinned product (fine), a
     /// booleanity-only bit (two-valued — forgeable), and a dangling advice var
     /// (unreferenced). `tiny` only exercises the pinned case, so this is the real
-    /// soundness-equivalence test.
+    /// soundness-equivalence test. Two more rows guard the one-pass row reduction:
+    /// `q`'s two terms in `a` cancel, so it is free only if duplicate coefficients
+    /// are summed; `r·2r = 2r` with `r = 1` is two-valued only if each var's own
+    /// share, with its own LC's coefficient, is subtracted from the full row value.
     #[test]
     fn streaming_core_matches_flat_on_underconstrained() {
         let m = bn254_modulus();
@@ -2659,8 +2841,14 @@ mod tests {
             dvar(2, "p", VarRole::Derived),
             dvar(3, "bit", VarRole::Derived),
             dvar(4, "dangling", VarRole::Derived),
+            dvar(5, "q", VarRole::Derived),
+            dvar(6, "r", VarRole::Derived),
         ];
-        // r0: a·b = p ; r1: bit·(bit−1) = 0
+        // r0: a·b = p ; r1: bit·(bit−1) = 0 ; r2: (q − q + a)·1 = a ; r3: r·2r = 2r
+        let term = |coeff: i64, var: u32| Term {
+            coeff: FieldConst::from_i64(coeff),
+            var,
+        };
         let bit_minus_one = LinearCombination {
             constant: FieldConst::from_i64(-1),
             terms: vec![Term {
@@ -2685,6 +2873,27 @@ mod tests {
                 c: zero,
                 note: None,
             },
+            R1csRow {
+                a: LinearCombination {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![term(1, 5), term(-1, 5), term(1, 0)],
+                },
+                b: LinearCombination::constant("1"),
+                c: LinearCombination::var(0),
+                note: None,
+            },
+            R1csRow {
+                a: LinearCombination::var(6),
+                b: LinearCombination {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![term(2, 6)],
+                },
+                c: LinearCombination {
+                    constant: FieldConst::from_i64(0),
+                    terms: vec![term(2, 6)],
+                },
+                note: None,
+            },
         ];
         // Satisfying witness: 3·4 = 12, bit = 0, dangling = 0.
         let assign: std::collections::BTreeMap<u32, Fp> = [
@@ -2693,6 +2902,8 @@ mod tests {
             (2, fp(12)),
             (3, fp(0)),
             (4, fp(0)),
+            (5, fp(12)),
+            (6, fp(1)),
         ]
         .into_iter()
         .collect();
@@ -2732,6 +2943,12 @@ mod tests {
             stream
                 .iter()
                 .any(|(v, r)| *v == 4 && r.contains("no constraint"))
+        );
+        assert!(stream.iter().any(|(v, r)| *v == 5 && r.contains("free")));
+        assert!(
+            stream
+                .iter()
+                .any(|(v, r)| *v == 6 && r.contains("two-valued"))
         );
         assert!(
             !stream.iter().any(|(v, _)| *v == 2),

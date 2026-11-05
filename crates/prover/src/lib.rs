@@ -796,7 +796,8 @@ impl Circuit {
 
     /// [`Self::check`], and also that the inputs leave no witness variable free:
     /// [`solver::analyze_underconstrained`] finds no variable that could take a
-    /// second value with everything else fixed. A necessary soundness check (it
+    /// second value with everything else fixed, except a variable no constraint
+    /// references (witness-only scratch), which can't change any row or output. A necessary soundness check (it
     /// catches the common "forgot to constrain a hint" bug, not every
     /// under-constraint); use it on a few representative inputs.
     pub fn check_constrained<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
@@ -808,7 +809,12 @@ impl Circuit {
                 self.sources.as_ref(),
             ))
         })?;
-        let holes = solver::analyze_underconstrained(&self.prim, &assign);
+        // A var no constraint references (witness-only scratch) alters no row and no
+        // output, so it is no forgery vector: ignored, as the test harness does.
+        let holes: Vec<_> = solver::analyze_underconstrained(&self.prim, &assign)
+            .into_iter()
+            .filter(|u| u.reason != "no constraint references this variable")
+            .collect();
         if holes.is_empty() {
             return Ok(());
         }

@@ -6,7 +6,8 @@
 //!
 //! 1. `A`, `B₁`, `B₂` MSMs — key points streamed in chunks; each chunk's scalars are
 //!    converted from the witness on the fly.
-//! 2. `h` — rows streamed twice from the [`ConstraintSource`]; blocked FFT.
+//! 2. `h` — rows streamed twice from the [`ConstraintSource`]; blocked FFT. Without
+//!    an accelerator it is computed on the thread pool while 1. runs.
 //! 3. `H`, `L` MSMs — streamed the same way; `h` is dropped right after `H`.
 
 use crate::types::Proof;
@@ -266,7 +267,7 @@ where
     S: ConstraintSource + ?Sized,
     P: PkSource + ?Sized,
 {
-    prove_accelerated(src, z, pk, r, s, cfg, probe, &mut Local)
+    prove_impl(src, z, pk, r, s, cfg, probe, None)
 }
 
 /// [`prove_with_randomness`], routing FFT sweeps and MSM chunks through `accel`.
@@ -285,6 +286,32 @@ where
     S: ConstraintSource + ?Sized,
     P: PkSource + ?Sized,
 {
+    prove_impl(src, z, pk, r, s, cfg, probe, Some(accel))
+}
+
+/// With no accelerator and no `cfg.spill_dir`, `h` is computed on the thread pool
+/// while this thread streams the A, B₁, B₂ MSMs; an accelerator may own the workers
+/// (and is not `Send`), and spilling caps peak memory, so then the steps run in turn.
+#[allow(clippy::too_many_arguments)]
+fn prove_impl<S, P>(
+    src: &S,
+    z: &[Fr],
+    pk: &mut P,
+    r: Fr,
+    s: Fr,
+    cfg: &ProverConfig,
+    probe: &mut dyn Probe,
+    accel: Option<&mut dyn Accelerator>,
+) -> Result<Proof<Bn254>, ProveError>
+where
+    S: ConstraintSource + ?Sized,
+    P: PkSource + ?Sized,
+{
+    let mut local = Local;
+    let (concurrent, accel) = match accel {
+        Some(a) => (false, a),
+        None => (cfg.spill_dir.is_none(), &mut local as &mut dyn Accelerator),
+    };
     probe.mark("start");
     let dom = qap::key_domain(src, pk.header().h_len, cfg.fft).map_err(ProveError::KeyMismatch)?;
     if let Some(n) = pk.header().domain
@@ -311,20 +338,33 @@ where
     let aux_sc = |off: usize, len: usize| z_sc(ninst + off, len);
 
     // 1) A, B₁, B₂ (key file order). Each `query[0]` pairs with z[0] = 1.
-    let a_acc = stream_msm_g1(pk, accel, G1Query::A, chunk, &z_sc)?;
-    probe.mark("msm_a");
-    let b1_acc = if r.is_zero() {
-        G1Projective::zero()
-    } else {
-        stream_msm_g1(pk, accel, G1Query::BG1, chunk, &z_sc)?
+    let witness_msms = |pk: &mut P, accel: &mut dyn Accelerator| {
+        let a = stream_msm_g1(pk, accel, G1Query::A, chunk, &z_sc)?;
+        let b1 = if r.is_zero() {
+            G1Projective::zero()
+        } else {
+            stream_msm_g1(pk, accel, G1Query::BG1, chunk, &z_sc)?
+        };
+        let b2 = stream_msm_g2(pk, accel, chunk, &z_sc)?;
+        Ok::<_, PkError>((a, b1, b2))
     };
-    probe.mark("msm_b_g1");
-    let b2_acc = stream_msm_g2(pk, accel, chunk, &z_sc)?;
-    probe.mark("msm_b_g2");
-
-    // 2) h.
-    let h = quotient_for(src, z, &dom, cfg, accel, probe)?;
-    probe.mark("qap_h");
+    // 2) h. Alone, 1) leaves cores idle (key reads, small digit classes, the
+    // tail of each chunk), which the quotient's work fills.
+    let ((a_acc, b1_acc, b2_acc), h) = if concurrent {
+        let mut h = None;
+        let abc = rayon::in_place_scope(|sc| {
+            sc.spawn(|_| h = Some(quotient_for(src, z, &dom, cfg, &mut Local, &mut ())));
+            witness_msms(pk, accel)
+        });
+        probe.mark("msm_ab+qap_h");
+        (abc?, h.expect("the scope joined the quotient")?)
+    } else {
+        let abc = witness_msms(pk, accel)?;
+        probe.mark("msm_ab");
+        let h = quotient_for(src, z, &dom, cfg, accel, probe)?;
+        probe.mark("qap_h");
+        (abc, h)
+    };
 
     // 3) H, L.
     let h_acc = stream_msm_g1(pk, accel, G1Query::H, chunk, &|off, len| h.chunk(off, len))?;

@@ -8,15 +8,35 @@ use std::process::Command;
 
 /// `xark <args>` in `dir`: success, and stderr.
 fn xark(dir: &Path, args: &[&str]) -> (bool, String) {
-    let o = Command::new(xark_bin())
+    run(Command::new(xark_bin()).args(args).current_dir(dir))
+}
+
+/// [`xark`] with its wasm build cache in `cache` (`XARK_CACHE_DIR`).
+fn xark_cached(dir: &Path, cache: &Path, args: &[&str]) -> (bool, String) {
+    run(Command::new(xark_bin())
         .args(args)
         .current_dir(dir)
-        .output()
-        .expect("invoke xark");
+        .env("XARK_CACHE_DIR", cache))
+}
+
+fn run(c: &mut Command) -> (bool, String) {
+    let o = c.output().expect("invoke xark");
     (
         o.status.success(),
         String::from_utf8_lossy(&o.stderr).into_owned(),
     )
+}
+
+/// Every file of a build directory, by name.
+fn outputs(dir: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .map(|p| {
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read(&p).unwrap())
+        })
+        .collect()
 }
 
 /// A copy of `examples/cube` in `tmp`.
@@ -59,6 +79,59 @@ fn profile_rebuilds_only_after_a_change() {
     edit(&dir, "pub fn cube", "// edited\npub fn cube");
     let (ok, err) = xark(&dir, &["profile"]);
     assert!(ok && err.contains("building circuit"), "{err}");
+}
+
+const UNCHANGED: &str = "unchanged since the last build";
+
+/// A build of an unchanged crate reuses the last lowering, byte for byte; a change
+/// to a source file (even a comment, which `sources.json` shows), the field or the
+/// `xark` binary lowers it again.
+#[test]
+fn an_unchanged_build_reuses_the_last_lowering() {
+    let tmp = tempdir();
+    let dir = cube(tmp.path());
+    let cache = tmp.path().join("cache");
+    let out = dir.join("target/xark/cube");
+    let build = |args: &[&str]| {
+        let (ok, err) = xark_cached(&dir, &cache, args);
+        assert!(ok, "{err}");
+        err
+    };
+    let err = build(&["build", ".", "--emit-json"]);
+    assert!(!err.contains(UNCHANGED), "{err}");
+    let first = outputs(&out);
+    let err = build(&["build", ".", "--emit-json"]);
+    assert!(err.contains(UNCHANGED), "{err}");
+    assert_eq!(outputs(&out), first, "a reused build changed its outputs");
+
+    // A comment on the constraint's line: the statement text in sources.json.
+    edit(&dir, "result);", "result); // cubed");
+    let err = build(&["build", ".", "--emit-json"]);
+    assert!(!err.contains(UNCHANGED), "{err}");
+    let sources = std::fs::read_to_string(out.join("sources.json")).unwrap();
+    assert!(sources.contains("// cubed"), "{sources}");
+
+    build(&["build", "."]);
+    let goldilocks = "18446744069414584321";
+    let err = build(&["build", ".", "--field", goldilocks]);
+    assert!(!err.contains(UNCHANGED), "{err}");
+    let err = build(&["build", "."]);
+    assert!(!err.contains(UNCHANGED), "{err}");
+    let field = std::fs::read(out.join("circuit.xbc")).unwrap();
+    let field = xark_ir::function_decode::stream_field(&field).unwrap();
+    assert_eq!(field.name, "bn254");
+
+    // Another xark (here the same one with a byte appended) may lower differently.
+    let other = tmp.path().join("xark-other");
+    let mut bin = std::fs::read(xark_bin()).unwrap();
+    bin.push(0);
+    std::fs::write(&other, bin).unwrap();
+    std::fs::set_permissions(&other, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let (ok, err) = run(Command::new(&other)
+        .args(["build", "."])
+        .current_dir(&dir)
+        .env("XARK_CACHE_DIR", &cache));
+    assert!(ok && !err.contains(UNCHANGED), "{err}");
 }
 
 #[test]

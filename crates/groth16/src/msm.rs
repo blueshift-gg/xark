@@ -59,8 +59,9 @@ const BATCH: usize = 512;
 /// Affine buckets filled by batch-affine additions: each `(bucket, point)` addition
 /// costs ~5M+1S (vs 8M+2S for an XYZZ mixed add); one field inversion is shared
 /// by a whole batch (Montgomery's trick). A bucket may appear once per batch; a
-/// conflicting addition goes into that bucket's XYZZ side accumulator instead (the
-/// plain path's cost), so skewed digit distributions never stall on deferrals.
+/// conflicting addition waits in a queue that is offered to the next batch. Only
+/// if the queue stays full (skewed digits: a few hot buckets) does what is left
+/// go to XYZZ side buckets, allocated then, so batches never stall.
 struct AffineBuckets<G: SwCurve> {
     x: Vec<G::BaseField>,
     y: Vec<G::BaseField>,
@@ -69,6 +70,8 @@ struct AffineBuckets<G: SwCurve> {
     stamp: Vec<u32>,
     epoch: u32,
     batch: Vec<(u32, G::BaseField, G::BaseField)>,
+    queue: Vec<(u32, G::BaseField, G::BaseField)>,
+    /// Empty until the queue first overflows.
     side: Vec<G::Bucket>,
     den: Vec<G::BaseField>,
     pre: Vec<G::BaseField>,
@@ -83,25 +86,24 @@ impl<G: SwCurve> AffineBuckets<G> {
             stamp: vec![0; nb],
             epoch: 1,
             batch: Vec::with_capacity(BATCH),
-            side: vec![G::ZERO_BUCKET; nb],
+            queue: Vec::with_capacity(BATCH),
+            side: Vec::new(),
             den: Vec::with_capacity(BATCH),
             pre: Vec::with_capacity(BATCH),
         }
     }
 
+    /// Add `(px, py)` to bucket `b` now, or batch it; `false` if the bucket is
+    /// already in this batch.
     #[inline(always)]
-    fn add(&mut self, b: u32, p: &G::Affine, px: G::BaseField, py: G::BaseField, neg: bool) {
+    fn place(&mut self, b: u32, px: G::BaseField, py: G::BaseField) -> bool {
         let bi = b as usize;
         if !self.used[bi] {
             self.x[bi] = px;
             self.y[bi] = py;
             self.used[bi] = true;
         } else if self.stamp[bi] == self.epoch {
-            if neg {
-                self.side[bi] -= p;
-            } else {
-                self.side[bi] += p;
-            }
+            return false;
         } else {
             self.stamp[bi] = self.epoch;
             self.batch.push((b, px, py));
@@ -109,6 +111,42 @@ impl<G: SwCurve> AffineBuckets<G> {
                 self.flush();
             }
         }
+        true
+    }
+
+    #[inline(always)]
+    fn add(&mut self, b: u32, px: G::BaseField, py: G::BaseField) {
+        let epoch = self.epoch;
+        if !self.place(b, px, py) {
+            self.queue.push((b, px, py));
+            if self.queue.len() == BATCH {
+                self.flush();
+                self.drain();
+                if self.queue.len() > BATCH / 2 {
+                    self.spill();
+                }
+            }
+        } else if self.epoch != epoch {
+            self.drain();
+        }
+    }
+
+    /// Offer the queued additions to the current batch.
+    fn drain(&mut self) {
+        let mut q = std::mem::take(&mut self.queue);
+        q.retain(|&(b, px, py)| !self.place(b, px, py));
+        self.queue = q;
+    }
+
+    /// Add what is still queued to the XYZZ side buckets.
+    fn spill(&mut self) {
+        if self.side.is_empty() {
+            self.side = vec![G::ZERO_BUCKET; self.x.len()];
+        }
+        for &(b, px, py) in &self.queue {
+            self.side[b as usize] += &G::from_xy(px, py);
+        }
+        self.queue.clear();
     }
 
     fn flush(&mut self) {
@@ -153,7 +191,8 @@ impl<G: SwCurve> AffineBuckets<G> {
         self.epoch = self.epoch.wrapping_add(1).max(1);
     }
 
-    /// Finish the last batch; each bucket is its affine part plus its side sum.
+    /// Finish the batches (the queue's last few go to the side buckets); each
+    /// bucket is its affine part plus its side sum, if any.
     #[allow(clippy::type_complexity)]
     fn finish(
         mut self,
@@ -164,6 +203,16 @@ impl<G: SwCurve> AffineBuckets<G> {
         Vec<G::Bucket>,
     ) {
         self.flush();
+        for _ in 0..2 {
+            if self.queue.is_empty() {
+                break;
+            }
+            self.drain();
+            self.flush();
+        }
+        if !self.queue.is_empty() {
+            self.spill();
+        }
         (self.x, self.y, self.used, self.side)
     }
 }
@@ -378,13 +427,7 @@ fn pippenger<G: SwCurve>(
                     }
                     let p = base_of(k);
                     if let Some((x, y)) = G::xy(p) {
-                        ab.add(
-                            (d.unsigned_abs() - 1) as u32,
-                            p,
-                            x,
-                            if d < 0 { -y } else { y },
-                            d < 0,
-                        );
+                        ab.add((d.unsigned_abs() - 1) as u32, x, if d < 0 { -y } else { y });
                     }
                 }
                 let (bx, by, used, side) = ab.finish();
@@ -394,7 +437,9 @@ fn pippenger<G: SwCurve>(
                     if used[j] {
                         running += &G::from_xy(bx[j], by[j]);
                     }
-                    running += &side[j];
+                    if let Some(b) = side.get(j) {
+                        running += b;
+                    }
                     res += &running;
                 }
                 return res.into();

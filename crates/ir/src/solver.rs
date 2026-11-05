@@ -28,7 +28,7 @@ pub enum Fp {
 }
 
 /// Is `modulus` the BN254 scalar-field prime (the field xark's `Field` is)?
-fn is_bn254(modulus: &BigUint) -> bool {
+pub(crate) fn is_bn254(modulus: &BigUint) -> bool {
     static M: std::sync::OnceLock<BigUint> = std::sync::OnceLock::new();
     modulus == M.get_or_init(|| BigUint::from_bytes_le(&Fr::MODULUS.to_bytes_le()))
 }
@@ -175,18 +175,20 @@ impl Fp {
         }
     }
 
-    /// The `i`-th bit of the canonical representative, as a field `0`/`1`.
-    fn bit(&self, i: usize) -> Fp {
-        let set = match self {
-            Fp::Bn254(a) => a.into_bigint().get_bit(i),
-            Fp::Generic { value, .. } => (value >> i) & BigUint::one() == BigUint::one(),
+    /// Bit `i` of the canonical representative, as a field `0`/`1`, for each `i`
+    /// asked; the representative is computed once.
+    fn bits(&self) -> impl Fn(usize) -> Fp + '_ {
+        let bn254 = match self {
+            Fp::Bn254(a) => Some(a.into_bigint()),
+            Fp::Generic { .. } => None,
         };
-        match self {
-            Fp::Bn254(_) => Fp::Bn254(Fr::from(u64::from(set))),
-            Fp::Generic { modulus, .. } => Fp::Generic {
-                value: if set { BigUint::one() } else { BigUint::zero() },
+        move |i| match (self, &bn254) {
+            (Fp::Bn254(_), Some(b)) => Fp::Bn254(if b.get_bit(i) { Fr::one() } else { Fr::zero() }),
+            (Fp::Generic { value, modulus }, _) => Fp::Generic {
+                value: (value >> i) & BigUint::one(),
                 modulus: modulus.clone(),
             },
+            (Fp::Bn254(_), None) => unreachable!("a BN254 value has its representative"),
         }
     }
 
@@ -258,11 +260,19 @@ fn modulus_of_field(field: &crate::primitive::FieldSpec) -> Result<BigUint, Solv
     Ok(m)
 }
 
-/// Read access to a variable assignment. The witness solve uses dense
-/// [`DenseAssign`] (O(1) lookups); check/analysis keep the sparse `BTreeMap`.
-/// Both flow through the same generic `eval_*` code.
-trait Assignment {
+/// Read access to a variable assignment. The witness solves and the streaming
+/// check/analysis use dense slots (O(1) lookups); the flat check/analysis keep
+/// the sparse `BTreeMap`. All flow through the same generic `eval_*` code.
+pub(crate) trait Assignment {
     fn get_fp(&self, var: VarId) -> Option<&Fp>;
+}
+
+/// Dense slots indexed by `VarId`, as the streaming solve produces them.
+impl Assignment for [Option<Fp>] {
+    #[inline]
+    fn get_fp(&self, var: VarId) -> Option<&Fp> {
+        self.get(var as usize).and_then(|o| o.as_ref())
+    }
 }
 
 impl Assignment for BTreeMap<VarId, Fp> {
@@ -311,7 +321,7 @@ impl Assignment for DenseAssign {
     }
 }
 
-fn eval_lc(lc: &LinearCombination, assign: &impl Assignment, modulus: &BigUint) -> Fp {
+fn eval_lc(lc: &LinearCombination, assign: &(impl Assignment + ?Sized), modulus: &BigUint) -> Fp {
     let mut acc = Fp::from_const(&lc.constant, modulus);
     for term in &lc.terms {
         let coeff = Fp::from_const(&term.coeff, modulus);
@@ -405,31 +415,21 @@ fn solve_witness(
     Ok(assign.into_btreemap())
 }
 
-/// Solve the witness by **streaming** the hint program in bounded batches: the
-/// caller's `feed` closure emits ops one at a time (in topological order); we
-/// accumulate up to `BATCH` of them, level-solve that batch in parallel, apply
-/// its outputs, and drop it before taking the next. Because ops are topologically
-/// ordered, any op depends only on outputs already in `assign` (earlier batch) or
-/// earlier in its own batch — so the result is identical to solving the whole
-/// program at once, but peak memory is one batch of `WitnessGen` instead of the
-/// full expanded `Vec` (the dominant footprint on heavy non-native EC circuits).
-pub(crate) fn solve_witness_streamed(
-    vars: &[crate::primitive::Var],
-    modulus: &BigUint,
-    inputs: &BTreeMap<VarId, String>,
-    feed: impl FnOnce(&mut dyn FnMut(WitnessGen)),
-) -> Result<BTreeMap<VarId, Fp>, SolveError> {
-    let n = vars
-        .iter()
-        .map(|v| v.id as usize)
-        .max()
-        .map_or(0, |m| m + 1);
-    let slots = solve_witness_streamed_dense(vars, n, modulus, inputs, feed)?;
-    Ok(DenseAssign { slots }.into_btreemap())
+/// Dense slots (`slots[id]`) as the map the public API returns.
+pub(crate) fn slots_into_map(slots: Vec<Option<Fp>>) -> BTreeMap<VarId, Fp> {
+    DenseAssign { slots }.into_btreemap()
 }
 
-/// [`solve_witness_streamed`] returning the dense slots (`slots[id]`). `vars` need
-/// only contain the inputs (the ops produce everything else); `n` presizes.
+/// Solve the witness by **streaming** the hint program in bounded batches: the
+/// caller's `feed` closure emits ops one at a time (in topological order); we
+/// accumulate up to `BATCH` of them, solve that batch, apply its outputs, and
+/// drop it before taking the next. Because ops are topologically ordered, any op
+/// depends only on outputs already in `assign` (earlier batch) or earlier in its
+/// own batch — so the result is identical to solving the whole program at once,
+/// but peak memory is one batch of `WitnessGen` instead of the full expanded
+/// `Vec` (the dominant footprint on heavy non-native EC circuits). Returns the
+/// dense slots (`slots[id]`); `vars` need only contain the inputs (the ops
+/// produce everything else); `n` presizes.
 pub(crate) fn solve_witness_streamed_dense(
     vars: &[crate::primitive::Var],
     n: usize,
@@ -483,66 +483,68 @@ pub(crate) fn solve_witness_streamed_dense(
     Ok(assign.slots)
 }
 
-/// Execute one witness-gen op against the immutable assignment, reporting each
-/// output via `emit`. Pure over its inputs, so independent ops run concurrently.
-fn exec_witness_op(
-    op: &WitnessGen,
-    assign: &impl Assignment,
+/// Execute one witness-gen op, reading each input LC's value through `eval_lc`
+/// and reporting each output via `emit`. Pure over its inputs, so independent
+/// ops run concurrently.
+pub(crate) fn exec_witness_op<L, V: Copy>(
+    op: &WitnessGen<L, V>,
+    eval_lc: impl Fn(&L) -> Fp,
     modulus: &BigUint,
-    emit: &mut impl FnMut(VarId, Fp),
+    emit: &mut impl FnMut(V, Fp),
 ) -> Result<(), SolveError> {
     match op {
         WitnessGen::Product { out, left, right } => {
-            let l = eval_lc(left, assign, modulus);
-            let r = eval_lc(right, assign, modulus);
+            let l = eval_lc(left);
+            let r = eval_lc(right);
             emit(*out, l.mul(&r));
         }
         WitnessGen::Linear { out, lc } => {
-            let v = eval_lc(lc, assign, modulus);
+            let v = eval_lc(lc);
             emit(*out, v);
         }
         WitnessGen::Xor { out, a, b } => {
-            let av = eval_lc(a, assign, modulus);
-            let bv = eval_lc(b, assign, modulus);
+            let av = eval_lc(a);
+            let bv = eval_lc(b);
             let ab = av.mul(&bv);
             // a + b - 2ab
-            let v = av.add(&bv).add(&ab.mul(&Fp::from_decimal("-2", modulus)));
+            let v = av.add(&bv).sub(&ab.add(&ab));
             emit(*out, v);
         }
         WitnessGen::Or { out, a, b } => {
-            let av = eval_lc(a, assign, modulus);
-            let bv = eval_lc(b, assign, modulus);
+            let av = eval_lc(a);
+            let bv = eval_lc(b);
             let ab = av.mul(&bv);
             // a + b - ab
-            let v = av.add(&bv).add(&ab.mul(&Fp::from_decimal("-1", modulus)));
+            let v = av.add(&bv).sub(&ab);
             emit(*out, v);
         }
         WitnessGen::Inverse { out, input } => {
-            let v = eval_lc(input, assign, modulus);
+            let v = eval_lc(input);
             // Inverse-or-zero: 0 maps to 0 (the is_zero convention).
             let inv = v.inverse().unwrap_or_else(|| Fp::zero(modulus));
             emit(*out, inv);
         }
         WitnessGen::InverseOrZero { out, input } => {
             // `x⁻¹` when `x ≠ 0`, else `0` (unconstrained at 0)
-            let v = eval_lc(input, assign, modulus);
+            let v = eval_lc(input);
             let inv = v.inverse().unwrap_or_else(|| Fp::zero(modulus));
             emit(*out, inv);
         }
         WitnessGen::Bit { out, input, index } => {
-            let v = eval_lc(input, assign, modulus);
-            emit(*out, v.bit(*index as usize));
+            let v = eval_lc(input);
+            emit(*out, v.bits()(*index as usize));
         }
         WitnessGen::Bits { outs, input } => {
             // Batched form of `Bit`: `outs[i]` is bit `i` of the input.
-            let v = eval_lc(input, assign, modulus);
+            let v = eval_lc(input);
+            let bit = v.bits();
             for (i, out) in outs.iter().enumerate() {
-                emit(*out, v.bit(i));
+                emit(*out, bit(i));
             }
         }
         WitnessGen::DivRem { q, r, num, den } => {
-            let n = eval_lc(num, assign, modulus);
-            let d = eval_lc(den, assign, modulus);
+            let n = eval_lc(num);
+            let d = eval_lc(den);
             if d.is_zero() {
                 return Err(SolveError::DivisionByZero);
             }
@@ -564,10 +566,10 @@ fn exec_witness_op(
             if *limb_bits > MAX_LIMB_BITS {
                 return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
             }
-            let recompose = |limbs: &[LinearCombination]| -> BigUint {
+            let recompose = |limbs: &[L]| -> BigUint {
                 let mut acc = BigUint::zero();
                 for (i, lc) in limbs.iter().enumerate() {
-                    let v = eval_lc(lc, assign, modulus).to_biguint();
+                    let v = eval_lc(lc).to_biguint();
                     acc += v << (*limb_bits as usize * i);
                 }
                 acc
@@ -600,10 +602,10 @@ fn exec_witness_op(
             if *limb_bits > MAX_LIMB_BITS {
                 return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
             }
-            let recompose = |limbs: &[LinearCombination]| -> BigUint {
+            let recompose = |limbs: &[L]| -> BigUint {
                 let mut acc = BigUint::zero();
                 for (i, lc) in limbs.iter().enumerate() {
-                    let v = eval_lc(lc, assign, modulus).to_biguint();
+                    let v = eval_lc(lc).to_biguint();
                     acc += v << (*limb_bits as usize * i);
                 }
                 acc
@@ -638,10 +640,10 @@ fn exec_witness_op(
             if *limb_bits > MAX_LIMB_BITS {
                 return Err(SolveError::MalformedHint("limb_bits exceeds MAX_LIMB_BITS"));
             }
-            let recompose = |limbs: &[LinearCombination]| -> BigUint {
+            let recompose = |limbs: &[L]| -> BigUint {
                 let mut acc = BigUint::zero();
                 for (i, lc) in limbs.iter().enumerate() {
-                    let v = eval_lc(lc, assign, modulus).to_biguint();
+                    let v = eval_lc(lc).to_biguint();
                     acc += v << (*limb_bits as usize * i);
                 }
                 acc
@@ -691,7 +693,12 @@ fn solve_witness_sequential(
     let mut outs: Vec<(VarId, Fp)> = Vec::new();
     for op in witness_gen {
         outs.clear();
-        exec_witness_op(op, assign, modulus, &mut |v, val| outs.push((v, val)))?;
+        exec_witness_op(
+            op,
+            |lc| eval_lc(lc, assign, modulus),
+            modulus,
+            &mut |v, val| outs.push((v, val)),
+        )?;
         for (v, val) in outs.drain(..) {
             assign.set(v, val);
         }
@@ -748,9 +755,12 @@ fn solve_witness_parallel(
         if level_ops.len() < PAR_LEVEL {
             for &idx in level_ops {
                 outs.clear();
-                exec_witness_op(&witness_gen[idx], assign, modulus, &mut |v, val| {
-                    outs.push((v, val))
-                })?;
+                exec_witness_op(
+                    &witness_gen[idx],
+                    |lc| eval_lc(lc, assign, modulus),
+                    modulus,
+                    &mut |v, val| outs.push((v, val)),
+                )?;
                 for (v, val) in outs.drain(..) {
                     assign.set(v, val);
                 }
@@ -763,9 +773,12 @@ fn solve_witness_parallel(
             .map(|chunk| {
                 let mut out = Vec::new();
                 for &idx in chunk {
-                    exec_witness_op(&witness_gen[idx], snapshot, modulus, &mut |v, val| {
-                        out.push((v, val))
-                    })?;
+                    exec_witness_op(
+                        &witness_gen[idx],
+                        |lc| eval_lc(lc, snapshot, modulus),
+                        modulus,
+                        &mut |v, val| out.push((v, val)),
+                    )?;
                 }
                 Ok::<_, SolveError>(out)
             })
@@ -928,29 +941,10 @@ pub(crate) fn row_satisfied(
     a: &LinearCombination,
     b: &LinearCombination,
     c: &LinearCombination,
-    assign: &BTreeMap<VarId, Fp>,
+    assign: &(impl Assignment + ?Sized),
     modulus: &BigUint,
 ) -> bool {
     eval_lc(a, assign, modulus).mul(&eval_lc(b, assign, modulus)) == eval_lc(c, assign, modulus)
-}
-
-/// [`row_satisfied`] against dense slots (index = `VarId`), as
-/// [`crate::function_decode::stream_solve_dense`] returns them.
-pub(crate) fn row_satisfied_dense(
-    a: &LinearCombination,
-    b: &LinearCombination,
-    c: &LinearCombination,
-    slots: &[Option<Fp>],
-    modulus: &BigUint,
-) -> bool {
-    struct Slots<'a>(&'a [Option<Fp>]);
-    impl Assignment for Slots<'_> {
-        fn get_fp(&self, var: VarId) -> Option<&Fp> {
-            self.0.get(var as usize).and_then(|o| o.as_ref())
-        }
-    }
-    let s = Slots(slots);
-    eval_lc(a, &s, modulus).mul(&eval_lc(b, &s, modulus)) == eval_lc(c, &s, modulus)
 }
 
 // Under-constraint (soundness smoke-test) analyzer.
@@ -1169,6 +1163,42 @@ pub(crate) fn univariate_r1cs(
     let b = av.mul(&b0).add(&a0.mul(&bv)).sub(&cv);
     let c = a0.mul(&b0).sub(&c0);
     (a, b, c)
+}
+
+/// [`univariate_r1cs`] for every distinct variable of `row`, in ascending var
+/// order, from one evaluation of `a`, `b`, `c`: each var's rest is the full value
+/// minus its own share (`a₀ = a − aᵥ·xᵥ`, likewise `b₀`, `c₀`), which is the same
+/// field element, so a row costs O(width) instead of O(width²).
+pub(crate) fn univariate_r1cs_row(
+    row: &crate::circuit::R1csRow,
+    assign: &(impl Assignment + ?Sized),
+    modulus: &BigUint,
+) -> Vec<(VarId, (Fp, Fp, Fp))> {
+    let zero = Fp::zero(modulus);
+    let zeros = || std::array::from_fn::<Fp, 3, _>(|_| zero.clone());
+    let mut full = zeros();
+    let mut coeffs: BTreeMap<VarId, [Fp; 3]> = BTreeMap::new();
+    for (i, lc) in [&row.a, &row.b, &row.c].into_iter().enumerate() {
+        full[i] = Fp::from_const(&lc.constant, modulus);
+        for t in &lc.terms {
+            let coeff = Fp::from_const(&t.coeff, modulus);
+            full[i] = full[i].add(&coeff.mul(assign.get_fp(t.var).unwrap_or(&zero)));
+            let own = &mut coeffs.entry(t.var).or_insert_with(zeros)[i];
+            *own = own.add(&coeff);
+        }
+    }
+    coeffs
+        .into_iter()
+        .map(|(v, [av, bv, cv])| {
+            let x = assign.get_fp(v).unwrap_or(&zero);
+            let a0 = full[0].sub(&av.mul(x));
+            let b0 = full[1].sub(&bv.mul(x));
+            let c0 = full[2].sub(&cv.mul(x));
+            let a = av.mul(&bv);
+            let b = av.mul(&b0).add(&a0.mul(&bv)).sub(&cv);
+            (v, (a, b, a0.mul(&b0).sub(&c0)))
+        })
+        .collect()
 }
 
 /// [`analyze_underconstrained`] over R1CS rows (`a·b = c`) directly.

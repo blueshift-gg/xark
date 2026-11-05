@@ -620,8 +620,16 @@ pub fn stream_soundness(
     }
 }
 
-/// `bail!` with the shared under-constraint diagnostic if any hole was found.
+/// `bail!` with the shared under-constraint diagnostic if any hole was found
+/// (`xark prove` and `xark check --inputs`). A var no constraint references alters
+/// no row and no output, so it is no forgery vector, and is ignored: the frontend's
+/// `check_pinning` already rejects an unpinned hint output at build time, so the
+/// only such vars left are witness-only scratch.
 fn report_underconstrained(holes: Vec<xark_ir::solver::UnderConstrained>) -> Result<()> {
+    let holes: Vec<_> = holes
+        .into_iter()
+        .filter(|h| h.reason != "no constraint references this variable")
+        .collect();
     if !holes.is_empty() {
         let mut msg = crate::style::err(
             "circuit is under-constrained: a malicious prover could forge the \
