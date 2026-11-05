@@ -591,3 +591,28 @@ fn next_steps_can_be_followed() {
     let ts = std::fs::read_to_string(dir.join("target/xark/my-cube/cube.ts")).unwrap();
     assert!(!ts.contains("target/xark/cube/"), "{ts}");
 }
+
+/// With no `--out`, `export` writes `<crate>/<name>-verifier/`, beside the circuit's
+/// sources rather than under `target/` (gitignored, and gone after `cargo clean`),
+/// and the circuit crate still builds with it there.
+#[test]
+fn export_defaults_beside_the_crate() {
+    let tmp = tempdir();
+    let dir = copy_example(tmp.path(), "arithmetic_square");
+    let (ok, out) = run_in(&dir, &["build", "."]);
+    assert!(ok, "build failed:\n{out}");
+    let (ok, out) = run_in(&dir, &["setup", ".", "--insecure-dev-mode"]);
+    assert!(ok, "setup failed:\n{out}");
+    let (ok, out) = run_in(&dir, &["export", ".", "--allow-insecure"]);
+    assert!(ok, "export failed:\n{out}");
+    let verifier = dir.join("arithmetic_square-verifier");
+    let manifest = std::fs::read_to_string(verifier.join("Cargo.toml")).unwrap();
+    assert!(
+        manifest.contains("name = \"arithmetic-square-verifier\""),
+        "{manifest}"
+    );
+    assert!(out.contains("arithmetic_square-verifier"), "{out}");
+    assert!(!dir.join("target/xark/arithmetic_square/verifier").exists());
+    let (ok, out) = run_in(&dir, &["build", "."]);
+    assert!(ok, "the circuit crate no longer builds:\n{out}");
+}

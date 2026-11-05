@@ -59,7 +59,9 @@ pub struct ExportArgs {
     pub public_inputs: Option<PathBuf>,
     /// Output directory — the root of the generated verifier crate (a warning if it
     /// isn't empty; a `Cargo.toml` or `src/lib.rs` it didn't write is never
-    /// replaced). Inferred as `target/xark/<name>/verifier`.
+    /// replaced). Defaults to `<crate>/<name>-verifier/`, beside the circuit's
+    /// sources (tracked by git, kept by `cargo clean`); for a build output outside
+    /// a crate's `target/`, its `verifier/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Name for the generated crate. Defaults to the `--out` directory name.

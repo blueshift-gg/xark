@@ -205,6 +205,7 @@ xark verify examples/cube
 # Generate the Solana verifier crate (the key embedded; the proof, if there is one,
 # bundled as its self-test). Refuses a dev key unless you pass --allow-insecure.
 xark export examples/cube
+# → examples/cube/cube-verifier/, beside the circuit's sources (--out to choose)
 
 # Validate a circuit WITHOUT emitting artifacts — subset violations as rustc
 # diagnostics with source spans (great for editors / CI).

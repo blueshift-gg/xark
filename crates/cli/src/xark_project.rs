@@ -54,9 +54,23 @@ impl XarkProject {
         self.xark_dir.join("public_inputs.bin")
     }
 
-    /// Default output directory for `xark export`'s generated verifier crate.
+    /// The crate a `target/xark/<name>/` directory belongs to (`None` for a build
+    /// output elsewhere, e.g. `xark build --out`).
+    pub fn crate_dir(&self) -> Option<PathBuf> {
+        let target = self.xark_dir.parent()?.parent()?;
+        (target.file_name()? == "target").then(|| target.parent().map(PathBuf::from))?
+    }
+
+    /// Default output directory for `xark export`'s generated verifier crate:
+    /// `<crate>/<name>-verifier/`, beside the circuit's sources (a nested crate with
+    /// its own `[workspace]`, so the circuit crate neither builds nor packages it),
+    /// where git tracks it and `cargo clean` leaves it. A build output outside a
+    /// crate's `target/` keeps it there, as `verifier/`.
     pub fn export_dir(&self) -> PathBuf {
-        self.xark_dir.join("verifier")
+        match (self.crate_dir(), self.xark_dir.file_name()) {
+            (Some(krate), Some(name)) => krate.join(format!("{}-verifier", name.to_string_lossy())),
+            _ => self.xark_dir.join("verifier"),
+        }
     }
 
     /// Auto-detect a Powers-of-Tau (`.ptau`) transcript for production setup.

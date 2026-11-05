@@ -291,6 +291,12 @@ verification starter, and the `xark-client` npm package is removed.
 
 #### The CLI
 
+- `xark export` writes the verifier crate to `<crate>/<name>-verifier/` by
+  default, named `<name>-verifier`, instead of `target/xark/<name>/verifier`, a
+  crate named `verifier` that git ignored and `cargo clean` deleted. It is a nested
+  crate with its own `[workspace]`, so the circuit crate neither builds nor
+  packages it. `--out` still chooses; a build output outside a crate's `target/`
+  keeps `verifier/` inside it.
 - `xark build` reuses an unchanged build: when the `xark` binary, the options, the
   `XARK_*` variables, the compiled module and every source file are the same as for
   the outputs in `target/xark/<name>/` (and those are untouched), it says so and
