@@ -337,7 +337,9 @@ mod tests {
     #[ignore = "needs lake and formal/'s packages; lean.yml runs it"]
     fn the_checker_refuses_a_mutated_minimizer() {
         let checker = build_checker().unwrap();
-        let name = "sha256";
+        // The smallest example whose global pass still eliminates (bits and hashes
+        // rows since #40 leave sha256 with nothing to eliminate).
+        let name = "sub2";
         let xbc = crate::digests::build(
             &crate::root().join("examples").join(name),
             &crate::target_dir().join("minimize-check-test").join(name),
