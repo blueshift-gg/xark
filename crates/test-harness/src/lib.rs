@@ -323,11 +323,36 @@ fn built_wasm() -> &'static (PathBuf, PathBuf) {
     })
 }
 
+/// `target/test-out/<out_name>`, this process's until it exits: the caller reads the
+/// out dir after compiling into it, so a runner that gives each test its own process
+/// (`cargo nextest`) would otherwise let another test rewrite it meanwhile. If another
+/// process holds it, this one gets `<out_name>-<pid>` instead (never waiting, so two
+/// tests can't deadlock on two names).
+fn claim_out_dir(test_out: &Path, out_name: &str) -> PathBuf {
+    static HELD: Mutex<Vec<(String, PathBuf, std::fs::File)>> = Mutex::new(Vec::new());
+    let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, dir, _)) = held.iter().find(|(n, ..)| n == out_name) {
+        return dir.clone();
+    }
+    std::fs::create_dir_all(test_out).expect("create target/test-out");
+    let path = test_out.join(format!("{out_name}.lock"));
+    let file = std::fs::File::create(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let dir = match file.try_lock() {
+        Ok(()) => test_out.join(out_name),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            test_out.join(format!("{out_name}-{}", std::process::id()))
+        }
+        Err(std::fs::TryLockError::Error(e)) => panic!("locking {}: {e}", path.display()),
+    };
+    held.push((out_name.to_string(), dir.clone(), file));
+    dir
+}
+
 fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let (deps, host_deps) = built_wasm();
     let root = workspace_root();
-    let out_dir = root.join("target/test-out").join(out_name);
+    let out_dir = claim_out_dir(&root.join("target/test-out"), out_name);
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).expect("create out dir");
     let wasm = out_dir.join("circuit.wasm");
