@@ -7,6 +7,7 @@ mod xark_project;
 
 /// Run the regular `xark` command-line interface.
 pub fn entrypoint() {
+    cli::EXE.get_or_init(|| std::env::current_exe().and_then(std::fs::File::open).ok());
     if std::env::args().len() == 1 {
         print_roadmap();
     } else {
