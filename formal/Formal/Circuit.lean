@@ -4,6 +4,9 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Template
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Lift
 
 set_option linter.style.header false
 -- `Xark.Circuit.Circuit`: the type is named after its namespace, as `Template` is.
@@ -151,17 +154,17 @@ variable, merged, zeros dropped) and hashed with FNV-1a 64; the exporter renders
 compiler's rows the same way. A drift gate, not a commitment: whoever controls the
 exporter controls both sides. -/
 
-/-- `t` inserted into a term list sorted by variable, merging an equal variable. -/
-def insertTerm (t : F × ℕ) : List (F × ℕ) → List (F × ℕ)
+/-- `t` before a term list sorted by variable, merged into its head if the variable is
+the same. -/
+def consTerm (t : F × ℕ) : List (F × ℕ) → List (F × ℕ)
+  | u :: l => if t.2 = u.2 then (t.1 + u.1, u.2) :: l else t :: u :: l
   | [] => [t]
-  | u :: l =>
-    if t.2 < u.2 then t :: u :: l
-    else if t.2 = u.2 then (t.1 + u.1, u.2) :: l
-    else u :: insertTerm t l
 
-/-- Terms sorted by variable, merged, zero coefficients dropped. -/
+/-- Terms sorted by variable, merged, zero coefficients dropped. A merge sort: some rows
+have thousands of terms. -/
 def norm (l : GLC) : GLC :=
-  ⟨l.const, (l.terms.foldr insertTerm []).filter fun t => t.1 ≠ 0⟩
+  ⟨l.const, ((l.terms.mergeSort fun a b => a.2 ≤ b.2).foldr consTerm []).filter
+    fun t => t.1 ≠ 0⟩
 
 def renderLC (l : GLC) : String :=
   let l := norm l
@@ -183,22 +186,27 @@ def hashRows (rows : List GRow) : String :=
 /-- The circuit's hash. -/
 def hash (C : Circuit) : String := hashRows (rows C)
 
-/-- Each segment's hash: `check` names the first segment that differs. -/
-def segHashes (C : Circuit) : List String := C.map fun s => hashRows s.rows
+/-- Each segment's hash and row count, the segments hashed side by side (one `Task` each):
+`check` compares them with the compiler's. -/
+def segHashes (C : Circuit) : List (String × Nat) :=
+  (C.map fun s => Task.spawn fun _ => let r := s.rows; (hashRows r, r.length)).map Task.get
 
 /-- `CircuitHash.lean`'s check of one circuit against the exporter's hashes: throws, naming
-the first segment whose rows differ, unless the composition's rows are the compiler's. -/
+the first segment whose rows differ, unless the composition's rows are the compiler's.
+It compares the segments' hashes, in order: equal, they pin every row, so the whole
+circuit's hash (`expected`, over the same rows) is printed, not recomputed. -/
 def check (name : String) (c : Circuit) (expected : String) (expectedSegs : List String) :
     IO Unit := do
-  let got := hash c
-  if got != expected then
-    let segs := segHashes c
-    let bad := (List.range (max segs.length expectedSegs.length)).find? fun i =>
-      segs.getD i "" != expectedSegs.getD i ""
+  let segs := segHashes c
+  let got := segs.map (·.1)
+  if got != expectedSegs then
+    let bad := (List.range (max got.length expectedSegs.length)).find? fun i =>
+      got.getD i "" != expectedSegs.getD i ""
     let i := bad.getD 0
-    throw (IO.userError s!"{name}: the Lean composition's rows hash to {got}, the compiler's \
-      to {expected}; first differing segment: s{i} (Lean {segs.getD i "none"}, \
+    throw (IO.userError s!"{name}: the Lean composition's rows differ from the compiler's \
+      ({expected}); first differing segment: s{i} (Lean {got.getD i "none"}, \
       compiler {expectedSegs.getD i "none"})")
-  IO.println s!"{name}: {got} ({(rows c).length} rows, {c.length} segments)"
+  let rows := (segs.map (·.2)).foldl (· + ·) 0
+  IO.println s!"{name}: {expected} ({rows} rows, {c.length} segments)"
 
 end Xark.Circuit

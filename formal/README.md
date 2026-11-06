@@ -351,9 +351,9 @@ order, each a run of glue rows outside every `#[gadget]` call, a `Call` of a pro
 template (the combinations its plugs carry over the circuit's variables, and the first
 variable it allocated), or a `folded` call the frontend shortened at constant plugs
 (its rows as emitted, which no template proof covers yet). `Circuit.rows` spells the
-segments out, and `CircuitHash.lean` (the `lean` CI job) fails unless they hash to the
-hash the exporter took of the compiler's rows, so `Sat circuit σ` is about the production
-circuit; `--check` re-exports each committed circuit, and `lean.yml` runs the mutation test
+segments out, and `CircuitHash.lean` (the `lean` CI job) fails unless each segment's rows
+hash to the hash the exporter took of the compiler's rows for it, in order, so `Sat circuit
+σ` is about the production circuit; `--check` re-exports each committed circuit, and `lean.yml` runs the mutation test
 `the_hash_check_refuses_a_mutated_circuit` (a bumped coefficient is refused, naming its
 segment). `sat_call` hands every call's
 template its satisfying assignment, so each template's `soundness` applies to its call

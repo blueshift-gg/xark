@@ -83,8 +83,8 @@ jobs:
   lean:
     name: prove (gadget soundness)
     runs-on: ubuntu-latest
-    # The proofs alone take 19-30 min on a hosted runner (same sources), and the
-    # circuit-hash and mutation checks a further 6.
+    # A clean build of the proofs took 19-32 min on a hosted runner when every module
+    # imported all of Mathlib; with narrow imports and the build cache below, far less.
     timeout-minutes: 60
     defaults:
       run:
@@ -99,6 +99,15 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch mathlib cache
         run: lake exe cache get
+      - name: Cache the proofs' build
+        # Lake checks each module by content hash, so a restored build skips every
+        # module whose source and imports are unchanged (the newest build of any
+        # source when this exact one isn't cached).
+        uses: actions/cache@v4
+        with:
+          path: formal/.lake/build
+          key: formal-${{ hashFiles('formal/lean-toolchain', 'formal/lake-manifest.json') }}-${{ hashFiles('formal/**/*.lean') }}
+          restore-keys: formal-${{ hashFiles('formal/lean-toolchain', 'formal/lake-manifest.json') }}-
       - name: Build proofs
         run: lake build
       - name: Every harness proven; standard axioms only
