@@ -70,19 +70,15 @@ jobs:
         # The `sbpf` and `differential_alt_bn128` integration tests under
         # `gadgets/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
         # they need the Anza toolchain and run in `solana-ci.yml`.
-        # Build one xark-tests test list excluding those, then test. nextest runs the
-        # test binaries side by side (cargo test runs them one at a time); it skips
-        # doctests, which `cargo test --doc` runs.
+        # One nextest run over the workspace (a second `-p xark-tests` run unified
+        # features differently and rebuilt for 3+ min), its test binaries side by
+        # side; the filter leaves out those two. nextest skips doctests, which
+        # `cargo test --doc` runs.
         run: |
-          tests_args=()
-          for t in $(ls gadgets/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
-                      | grep -vE '^(sbpf|differential_alt_bn128)'); do
-            tests_args+=(--test "$t")
-          done
-          cargo nextest run --release --no-fail-fast --workspace --exclude xark-tests \
-            --exclude xark-ed25519 --exclude xark-secp256k1 --exclude xark-secp256r1
-          cargo nextest run --release --no-fail-fast -p xark-tests --lib "${tests_args[@]}"
-          cargo test --release --doc --workspace --exclude xark-tests --exclude xark-ed25519 \
+          cargo nextest run --release --no-fail-fast --workspace --exclude xark-ed25519 \
+            --exclude xark-secp256k1 --exclude xark-secp256r1 \
+            -E 'not (binary(sbpf) | binary(differential_alt_bn128))'
+          cargo test --release --doc --workspace --exclude xark-ed25519 \
             --exclude xark-secp256k1 --exclude xark-secp256r1
 
   reproducible:
