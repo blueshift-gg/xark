@@ -76,9 +76,9 @@ pub fn run(args: Args) -> Result<()> {
         .join(version.replace(' ', "_"));
     let digests = Mutex::new(BTreeMap::new());
     let clients = Mutex::new(Vec::new());
-    crate::parallel(crate::circuits()?, args.jobs, |name| {
+    crate::parallel(crate::circuits()?, args.jobs, |worker, name| {
         let dir = crate::root().join("examples").join(&name);
-        let digest = digest(&dir, &target.join(&name)).unwrap_or_else(|e| {
+        let digest = digest(&dir, &crate::build_dir(false, worker)).unwrap_or_else(|e| {
             eprintln!("{name}: {e}");
             ("BUILD-FAILED".into(), "BUILD-FAILED".into())
         });

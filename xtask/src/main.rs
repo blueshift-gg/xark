@@ -109,21 +109,38 @@ pub fn cargo_build(args: &[&str]) -> Result<()> {
         .current_dir(root()))
 }
 
-/// Run `f` on every item, `jobs` at a time.
-pub fn parallel<T: Send>(items: Vec<T>, jobs: usize, f: impl Fn(T) + Sync) {
+/// Run `f` on every item, `jobs` at a time. `f` also gets the number of the worker
+/// running it (`0..jobs`), for [`build_dir`].
+pub fn parallel<T: Send>(items: Vec<T>, jobs: usize, f: impl Fn(usize, T) + Sync) {
     let queue = Mutex::new(items.into_iter());
     std::thread::scope(|s| {
-        for _ in 0..jobs.max(1) {
-            s.spawn(|| {
+        for worker in 0..jobs.max(1) {
+            let (queue, f) = (&queue, &f);
+            s.spawn(move || {
                 loop {
                     // Take the next item, releasing the lock before running it.
                     let next = queue.lock().unwrap().next();
                     let Some(item) = next else { break };
-                    f(item);
+                    f(worker, item);
                 }
             });
         }
     });
+}
+
+/// The build directory worker `worker` builds circuit crates in, with (`marked`) or
+/// without the gadget markers. Crates share it, so their common dependencies (`xark`,
+/// the gadget crates) compile once per worker, not once per crate, and each step
+/// reuses the builds of the ones before (digests, minimize-check and coverage build
+/// the same examples). One per worker, so parallel builds don't wait on one lock.
+/// Package names are unique across `examples/` and `formal/templates/`, so each
+/// crate's wasm is its own file.
+pub fn build_dir(marked: bool, worker: usize) -> PathBuf {
+    let kind = if marked { "marked" } else { "plain" };
+    target_dir()
+        .join("circuit-builds")
+        .join(kind)
+        .join(worker.to_string())
 }
 
 /// Half the cores, at most 4: what a machine running heavy builds can take.

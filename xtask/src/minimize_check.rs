@@ -56,10 +56,9 @@ pub fn run(args: Args) -> Result<()> {
     } else {
         args.names
     };
-    let target = crate::target_dir().join("minimize-check");
     let results = Mutex::new(BTreeMap::new());
-    crate::parallel(names, args.jobs, |name| {
-        let r = certify(&checker, &name, &target.join(&name));
+    crate::parallel(names, args.jobs, |worker, name| {
+        let r = certify(&checker, &name, &crate::build_dir(false, worker));
         results.lock().unwrap().insert(name, r);
     });
     let mut failed = Vec::new();

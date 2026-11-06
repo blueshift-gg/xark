@@ -148,7 +148,7 @@ pub(crate) fn harness(gadget: &str) -> Result<GadgetTemplate> {
             dir.display()
         );
     }
-    let target = crate::target_dir().join("lean-export").join(gadget);
+    let target = crate::build_dir(true, 0);
     let opts = xark_frontend::BuildOptions {
         gadget_markers: true,
         ..Default::default()
@@ -298,7 +298,7 @@ fn export_circuit(example: &str) -> Result<(String, Vec<(PathBuf, String)>)> {
         .find_map(|l| l.strip_prefix(&format!("{example} ")))
         .map(|d| d.rsplit(' ').next().unwrap_or(d).to_owned());
     let dir = crate::root().join("examples").join(example);
-    let rec = crate::coverage::calls(&dir, example, Some(want), &proven)?;
+    let rec = crate::coverage::calls(&dir, Some(want), &proven, 0)?;
     let mut calls: Vec<&crate::coverage::Call> = rec
         .calls
         .iter()

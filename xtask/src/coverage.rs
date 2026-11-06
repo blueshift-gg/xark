@@ -158,10 +158,10 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
     let failures = Mutex::new(Vec::new());
     let listed = allowlist()?;
     let allowed = |k: &str| listed.contains_key(k);
-    crate::parallel(targets, crate::default_jobs(), |dir| {
+    crate::parallel(targets, crate::default_jobs(), |worker, dir| {
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         let want = examples.then(|| digests.get(name.as_str()).map(|d| d.to_string()));
-        match calls(&dir, &name, want, &proven) {
+        match calls(&dir, want, &proven, worker) {
             Ok(Recorded { mut calls, .. }) => {
                 inside_accepted(&mut calls, &name, &allowed);
                 let (mut g, mut v) = (groups.lock().unwrap(), vectors.lock().unwrap());
@@ -311,18 +311,16 @@ pub(crate) fn proven() -> Result<BTreeMap<String, Vec<Proven>>> {
 /// of the same crate built without markers.
 pub(crate) fn calls(
     dir: &Path,
-    name: &str,
     want: Option<Option<String>>,
     proven: &BTreeMap<String, Vec<Proven>>,
+    worker: usize,
 ) -> Result<Recorded> {
-    let target = crate::target_dir().join("coverage").join(name);
     let lower = |markers: bool| -> Result<xark_frontend::LowerOutput> {
         let opts = xark_frontend::BuildOptions {
             gadget_markers: markers,
             ..Default::default()
         };
-        let sub = if markers { "marked" } else { "plain" };
-        let wasm = xark_frontend::build_crate_with(dir, &target.join(sub), &opts)
+        let wasm = xark_frontend::build_crate_with(dir, &crate::build_dir(markers, worker), &opts)
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .wasm;
         let field = xark_ir::FieldSpec::bn254();

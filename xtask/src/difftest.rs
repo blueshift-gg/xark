@@ -117,7 +117,7 @@ pub fn run(args: Args) -> Result<()> {
             .collect();
     }
     let results = Mutex::new(Vec::new());
-    crate::parallel(names.clone(), args.jobs, |name| {
+    crate::parallel(names.clone(), args.jobs, |_, name| {
         let (outcome, message) = sweep
             .one(&name)
             .unwrap_or_else(|e| (Outcome::Fail, format!("FAILED — {e}")));
