@@ -104,7 +104,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Sweep this shard's examples
-        run: cargo xtask difftest --shard ${{ matrix.shard }}/4 --jobs 2
+        # ed25519 is left out here: on these runners every one of its searches ran
+        # out of time (undecided) and held a worker for ~20 min. The weekly run
+        # (scheduled.yml) sweeps it alone, with time to decide.
+        run: cargo xtask difftest --shard ${{ matrix.shard }}/4 --jobs 2 --skip ed25519
 
   host-examples:
     # The two examples that aren't circuits, so the sweep skips them: the Nova

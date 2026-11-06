@@ -20,6 +20,9 @@ use anyhow::{Result, bail};
 pub struct Args {
     /// Examples to sweep (default: every circuit under `--max-rows`).
     examples: Vec<String>,
+    /// Leave these examples out (comma-separated), as skipped.
+    #[arg(long, value_delimiter = ',')]
+    skip: Vec<String>,
     /// Skip circuits with more R1CS rows than this.
     #[arg(long, default_value_t = 2_500_000)]
     max_rows: u64,
@@ -61,8 +64,10 @@ const BLINDSPOT: &[&str] = &["ec_incomplete", "ec_incomplete_r1"];
 /// The ECDSA circuits are made of those inverses: skipped. Their blocks are searched
 /// instead (`signature_blocks_are_sound`).
 const UNSEARCHABLE: &[&str] = &["secp256k1_ecdsa", "secp256r1_ecdsa"];
-/// Per-search time limits (seconds) for examples that need more than the default
-/// (`XARK_SEARCH_SECS`, else 20): ed25519 is searched whole (2.4M rows, ~35 s a search).
+/// Per-search time limits (seconds) for examples that need more than the default (20),
+/// unless `XARK_SEARCH_SECS` is set: ed25519 is searched whole (2.4M rows, ~35 s a
+/// search here, more than 180 s on a CI runner, so pull requests `--skip` it and the
+/// weekly run sweeps it alone).
 const SLOW: &[(&str, u32)] = &[("ed25519", 180)];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -108,6 +113,7 @@ pub fn run(args: Args) -> Result<()> {
     } else {
         args.examples
     };
+    names.retain(|n| !args.skip.contains(n));
     if let Some((k, n)) = args.shard {
         names = names
             .into_iter()
@@ -219,10 +225,10 @@ impl Sweep {
             if search {
                 cmd.arg("--search");
             }
-            if let Some((_, secs)) = SLOW.iter().find(|(s, _)| *s == n) {
+            // `XARK_SEARCH_SECS` set by the caller wins (the weekly ed25519 sweep).
+            if std::env::var_os("XARK_SEARCH_SECS").is_none() {
+                let secs = SLOW.iter().find(|(s, _)| *s == n).map_or(20, |(_, s)| *s);
                 cmd.env("XARK_SEARCH_SECS", secs.to_string());
-            } else if std::env::var_os("XARK_SEARCH_SECS").is_none() {
-                cmd.env("XARK_SEARCH_SECS", "20");
             }
             let status = logged(&mut cmd, &log("diff"))?;
             Ok((

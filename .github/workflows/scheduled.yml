@@ -37,6 +37,27 @@ jobs:
           XARK_FUZZ_SEED: ${{ github.run_id }}
         run: cd crates/lang && cargo test --release --test semantics_fuzz -- --nocapture
 
+  ed25519-sweep:
+    # The adversarial sweep (`cargo xtask difftest`) of ed25519 alone, which pull
+    # requests skip (slow.yml): a whole-circuit search takes minutes on a runner, so
+    # each gets 10 (`XARK_SEARCH_SECS`). Peaks near 7 GB.
+    name: adversarial sweep of ed25519
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Sweep ed25519
+        env:
+          XARK_SEARCH_SECS: "600"
+        run: cargo xtask difftest ed25519 --jobs 1
+
   toolchain-drift:
     # Early warning for a Rust release that would change a circuit (and so break
     # every key made for it): rebuild every example with this week's stable and
