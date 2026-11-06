@@ -50,7 +50,28 @@ pub fn xark_bin() -> std::path::PathBuf {
             .status()
             .expect("spawn cargo build for the xark CLI binary");
         assert!(status.success(), "failed to build the `xark` CLI binary");
-        workspace_root.join("target").join("release").join(exe)
+        // A copy of its own, named for this build: another test process's cargo
+        // relinks `target/release/xark` (a build without `debug`), and a test
+        // starting it mid-relink got "No such file or directory".
+        let built = workspace_root.join("target").join("release").join(exe);
+        let meta = std::fs::metadata(&built).expect("the built `xark`");
+        let stamp = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        // Still called `xark`: its usage text names it.
+        let dir = workspace_root
+            .join("target/xark-test-bin")
+            .join(format!("{}-{stamp}", meta.len()));
+        let copy = dir.join(exe);
+        if !copy.exists() {
+            std::fs::create_dir_all(&dir).expect("create target/xark-test-bin");
+            let tmp = dir.join(format!("{exe}.{}.tmp", std::process::id()));
+            std::fs::copy(&built, &tmp).expect("copy the built `xark`");
+            std::fs::rename(&tmp, &copy).expect("place the copy of `xark`");
+        }
+        copy
     })
     .clone()
 }
