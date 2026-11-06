@@ -411,8 +411,10 @@ its rows, a witness branch guards it. `cargo xtask lean-export --coverage` (the
   `cargo xtask minimize-check` certifies.
 * For each gadget with a harness (whose template must still be the committed
   `Formal/Templates/*.lean`), it classifies every call, one line per gadget,
-  example, call site (the calling function and its `file:line:col`) and
-  classification, with a count:
+  example, call site and classification, with a count. A call site is the calling
+  function, its file and `#k`, the k-th source position of that gadget's calls in
+  that function (so an edit elsewhere in the file renames nothing; the allowlist and
+  the circuit exports use this name); the report adds its `file:line:col`:
   * **covered**: its template, renamed as the export renames it, hashes to the
     proven one.
   * **covered with constant plugs**: it is the proven template with some input

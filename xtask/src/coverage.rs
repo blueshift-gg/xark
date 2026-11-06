@@ -101,7 +101,10 @@ pub(crate) struct Call {
     pub(crate) gadget: String,
     /// The harness whose template it was classified against.
     pub(crate) harness: String,
+    /// Where it is, as the allowlist and the circuit exports name it ([`Sites`]).
     pub(crate) site: String,
+    /// Its source position, `path:line:column`, for people reading a report.
+    pub(crate) at: String,
     pub(crate) class: String,
     consts: Option<Vec<(u32, String)>>,
     /// The call's inputs and outputs over the circuit's variables, and how many rows
@@ -153,6 +156,8 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         .collect();
 
     let groups = Mutex::new(BTreeMap::<Group, usize>::new());
+    // Each (gadget, circuit, site)'s source position, for the report.
+    let ats = Mutex::new(BTreeMap::<(String, String, String), String>::new());
     // Keyed by harness: a generic gadget has one per instantiation.
     let vectors = Mutex::new(BTreeMap::<String, Vectors>::new());
     let failures = Mutex::new(Vec::new());
@@ -170,6 +175,9 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
                         let users = v.entry(c.harness.clone()).or_default().entry(k);
                         users.or_default().insert(name.clone());
                     }
+                    ats.lock()
+                        .unwrap()
+                        .insert((c.gadget.clone(), name.clone(), c.site.clone()), c.at);
                     *g.entry((c.gadget, name.clone(), c.site, c.class))
                         .or_default() += 1;
                 }
@@ -178,6 +186,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         }
     });
     let groups = groups.into_inner().unwrap();
+    let ats = ats.into_inner().unwrap();
     let vectors = vectors.into_inner().unwrap();
     let mut failures = failures.into_inner().unwrap();
 
@@ -204,6 +213,9 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
     let mut allow = allowlist()?;
     for ((gadget, circuit, site, class), n) in &groups {
         let calls = if *n == 1 { "call" } else { "calls" };
+        let at = ats
+            .get(&(gadget.clone(), circuit.clone(), site.clone()))
+            .map_or(String::new(), |a| format!(" at {a}"));
         // A refused call's rows are unknown: its entry also pins how many there are.
         let class = &match class.strip_prefix("refused: ") {
             Some(why) => format!("refused ({n} {calls}): {why}"),
@@ -215,10 +227,10 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
             *used = true;
             format!(" — allowlisted: {reason}")
         } else {
-            failures.push(format!("{gadget} in {circuit} at {site}: {class}"));
+            failures.push(format!("{gadget} in {circuit} at {site}{at}: {class}"));
             " — not allowlisted".into()
         };
-        println!("{gadget}  {circuit}  {site}: {n} {calls} {class}{verdict}");
+        println!("{gadget}  {circuit}  {site}{at}: {n} {calls} {class}{verdict}");
     }
     if examples {
         for (k, (_, used)) in &allow {
@@ -374,6 +386,12 @@ pub(crate) fn calls(
         .map(|v| inv[v.id as usize])
         .collect();
     let root = format!("{}/", crate::root().display());
+    let sites = Sites::new(
+        out.gadgets
+            .iter()
+            .map(|c| (c.name.as_str(), c.site.as_str())),
+        &root,
+    );
     // Against each instantiation's template, keeping the closest match.
     let rank = |class: &str| match class {
         "covered" => 0,
@@ -389,7 +407,7 @@ pub(crate) fn calls(
     for c in out.gadgets {
         let Some(ps) = proven.get(&c.name) else {
             // Every recorded call is of a `#[gadget]`; this one has no harness, so no proof.
-            unproven.insert(format!("`{}` at {}", c.name, c.site.replace(&root, "")));
+            unproven.insert(format!("`{}` at {}", c.name, sites.get(&c.name, &c.site).1));
             index.push(None);
             continue;
         };
@@ -399,10 +417,12 @@ pub(crate) fn calls(
             .map(|p| (p, classify(c.template.clone(), p)))
             .min_by_key(|(_, (class, _))| rank(class))
             .expect("a gadget has a harness");
+        let (site, at) = sites.get(&c.name, &c.site);
         calls.push(Call {
             harness: p.harness.clone(),
             gadget: c.name,
-            site: c.site.replace(&root, ""),
+            site,
+            at,
             class,
             consts,
             inputs: c.inputs,
@@ -914,6 +934,72 @@ fn refusal(why: &str) -> String {
     out
 }
 
+/// Call sites as the allowlist and the circuit exports name them: `f (path:L:C)`, the
+/// recorder's, is `f (path) #k`, the `k`-th source position of a call of that gadget
+/// in `f` in that file (calls from one position, as in a loop, share it). An edit
+/// elsewhere in the file renames nothing; only adding or moving that gadget's calls in
+/// `f` does.
+struct Sites(BTreeMap<String, String>);
+
+impl Sites {
+    fn new<'a>(calls: impl Iterator<Item = (&'a str, &'a str)>, root: &str) -> Self {
+        // (gadget, `f (path`) -> its calls' distinct (line, column)s.
+        let mut at = BTreeMap::<(String, String), BTreeSet<(u32, u32)>>::new();
+        let mut raw = Vec::new();
+        for (gadget, site) in calls {
+            let site = site.replace(root, "");
+            if let Some((head, l, c)) = split_site(&site) {
+                at.entry((gadget.to_string(), head.to_string()))
+                    .or_default()
+                    .insert((l, c));
+            }
+            raw.push((gadget.to_string(), site));
+        }
+        let mut names = BTreeMap::new();
+        for (gadget, site) in raw {
+            let name = match split_site(&site) {
+                Some((head, l, c)) => {
+                    let k = at[&(gadget.clone(), head.to_string())]
+                        .iter()
+                        .position(|&p| p == (l, c))
+                        .expect("recorded above")
+                        + 1;
+                    format!("{head}) #{k}")
+                }
+                None => site.clone(),
+            };
+            names.insert(format!("{gadget}\0{site}"), name);
+        }
+        Sites(names)
+    }
+
+    /// The site's name, and its `path:line:column`.
+    fn get(&self, gadget: &str, site: &str) -> (String, String) {
+        let site = site.replace(&format!("{}/", crate::root().display()), "");
+        let at = split_site(&site).map_or_else(
+            || site.clone(),
+            |(head, l, c)| {
+                let path = head.rsplit_once(" (").map_or(head, |(_, p)| p);
+                format!("{path}:{l}:{c}")
+            },
+        );
+        let name = self
+            .0
+            .get(&format!("{gadget}\0{site}"))
+            .cloned()
+            .unwrap_or(site);
+        (name, at)
+    }
+}
+
+/// `f (path:L:C)` as (`f (path`, L, C).
+fn split_site(site: &str) -> Option<(&str, u32, u32)> {
+    let inner = site.strip_suffix(')')?;
+    let (rest, c) = inner.rsplit_once(':')?;
+    let (head, l) = rest.rsplit_once(':')?;
+    Some((head, l.parse().ok()?, c.parse().ok()?))
+}
+
 fn key(gadget: &str, circuit: &str, site: &str, class: &str) -> String {
     format!("{gadget} | {circuit} | {site} | {class}")
 }
@@ -957,6 +1043,7 @@ mod tests {
             gadget: "xark::lang::to_bits".into(),
             harness: "to_bits".into(),
             site: String::new(),
+            at: String::new(),
             class: class.into(),
             consts: None,
             inputs: vec![var(input)],
