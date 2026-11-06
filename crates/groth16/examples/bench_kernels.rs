@@ -2,11 +2,11 @@
 //! plain radix-2 vs ark-poly), the tiled transpose, and our MSM vs arkworks', each
 //! single-threaded and on all cores.
 //!
-//! `cargo run --release -p xark-groth16 --example bench_kernels [fft|msm]`
+//! `cargo run --release -p xark-groth16 --example bench_kernels [fft|msm|g2]`
 
 use std::time::Instant;
 
-use ark_bn254::{Fr, G1Affine, G1Projective};
+use ark_bn254::{Fr, G1Affine, G1Projective, G2Projective};
 use ark_ec::{CurveGroup, VariableBaseMSM};
 use ark_ff::{FftField, PrimeField, UniformRand, Zero};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
@@ -125,6 +125,44 @@ fn msm_bench(threads: usize) {
     });
 }
 
+fn g2_msm_bench(threads: usize) {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        let mut rng = ChaCha20Rng::seed_from_u64(0x5841_524b_4732);
+        for log in [12u32, 14, 16] {
+            let n = 1usize << log;
+            let projective: Vec<G2Projective> =
+                (0..n).map(|_| G2Projective::rand(&mut rng)).collect();
+            let bases = G2Projective::normalize_batch(&projective);
+            let scalars: Vec<_> = (0..n)
+                .map(|_| Fr::rand(&mut rng).into_bigint())
+                .collect();
+
+            let mut ark_result = G2Projective::zero();
+            let ark_ms = time(3, || {
+                ark_result = std::hint::black_box(G2Projective::msm_bigint(
+                    std::hint::black_box(&bases),
+                    std::hint::black_box(&scalars),
+                ))
+            });
+            let mut xark_result = G2Projective::zero();
+            let xark_ms = time(3, || {
+                xark_result = std::hint::black_box(msm::<G2Projective>(
+                    std::hint::black_box(&bases),
+                    std::hint::black_box(&scalars),
+                ))
+            });
+            assert!(same_point(&ark_result, &xark_result));
+            println!(
+                "{{\"group\":\"g2\",\"threads\":{threads},\"log\":{log},\"n\":{n},\"arkworks_ms\":{ark_ms:.1},\"xark_cpu_ms\":{xark_ms:.1}}}"
+            );
+        }
+    });
+}
+
 fn main() {
     let what = std::env::args().nth(1).unwrap_or_else(|| "all".into());
     let all = std::thread::available_parallelism().map_or(1, |n| n.get());
@@ -134,6 +172,9 @@ fn main() {
         }
         if what == "all" || what == "msm" {
             msm_bench(threads);
+        }
+        if what == "all" || what == "g2" {
+            g2_msm_bench(threads);
         }
     }
 }

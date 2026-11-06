@@ -2,8 +2,8 @@
 //! under-constrained soundness check.
 //!
 //! Bare `xark check` (no `--inputs`) stays the fast, artifact-free `cargo check`
-//! validator in [`crate::cli::cmd_check`]. When `--inputs` is supplied, we opt
-//! into the same soundness gate `xark prove` runs, but **without** the expensive
+//! validator. When `--inputs` is supplied, it uses the same soundness gate as
+//! `xark prove`, but **without** the expensive
 //! `setup` + `prove` steps: build the circuit, solve
 //! the witness from the `--inputs` values, and run
 //! [`xark_ir::solver::analyze_underconstrained`]. It reports any derived

@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "xark-groth16-opencl"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+publish = false
+
+[dependencies]
+xark-groth16 = { path = "../groth16" }
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-ec = { version = "0.6", default-features = false, features = ["std"] }
+ark-ff = { version = "0.6", default-features = false, features = ["std"] }
+ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
+opencl3 = { version = "0.12.3", features = ["CL_VERSION_1_1", "CL_VERSION_1_2"] }
+
+[dev-dependencies]
+rand = "0.8"
+rand_chacha = { version = "0.3", default-features = false }
+xark-ir = { path = "../ir" }
