@@ -340,6 +340,11 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Added
 
+- `Bignum` up to 32 limbs (2752 bits at 86-bit limbs), enough for RSA-2048 (24
+  limbs) and RSA-2560. Above 16 limbs a multiply's carries get one more bit of
+  headroom (about 230 constraints per 24-limb multiply); up to 16 limbs the rows are
+  unchanged. `xark_sha256::compress` and `h0` are public, for messages padded by the
+  caller. The `bignum_wide` example is a 24-limb `mod_mul`.
 - `Field::to_bits_canonical()`: the 254 bits of the canonical representative
   (in `[0, r)`), with a comparison against `r − 1`, so a value has one decomposition.
 - `xark_merkle::cond_swap(bit, a, b)`: a conditional swap in one product.
@@ -414,6 +419,13 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- Malformed input is an error, not a panic: a row-file window index out of range,
+  a malformed or wrongly laid out row stream, a proving key whose lengths overflow,
+  and an MSM work item or accelerator result of the wrong size or with points that
+  don't decode.
+- `xark` found a directory named `*.ptau` as a powers-of-tau file; it now looks at
+  files only. A crate whose `name = "…"` line ends in a comment got the comment
+  in its build directory's name.
 - `xark prove` and `xark check --inputs` refused a circuit with witness-only scratch
   variables no constraint references (the `secp256k1_ecdsa` example's GLV
   decomposition) as under-constrained, while `xark check` passed it. Such a variable
