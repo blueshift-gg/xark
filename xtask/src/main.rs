@@ -1,5 +1,6 @@
 //! xark's repository tasks, run as `cargo xtask <task>` (`.cargo/config.toml`):
 //!
+//! * `ci`: every check a pull request gets, on this machine, side by side;
 //! * `digests`: every example circuit's R1CS digest, against `tests/stable-digests.txt`;
 //! * `difftest`: every example on its own test inputs, adversarially;
 //! * `lean-export`: a `#[gadget]`'s exact R1CS as Lean, for `formal/`'s proofs;
@@ -7,6 +8,7 @@
 //! * `publish`: the crates in dependency order: checked, rehearsed, or uploaded;
 //! * `wasm`: xark-wasm's JavaScript packages, into `crates/wasm/dist/`.
 
+mod ci;
 mod coverage;
 mod difftest;
 mod digests;
@@ -31,6 +33,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Task {
+    /// Every check a pull request gets, on this machine, side by side (logs in
+    /// target/ci/).
+    Ci(ci::Args),
     /// Every example circuit's R1CS digest, against tests/stable-digests.txt.
     Digests(digests::Args),
     /// Every example on its own test inputs, decided by exhaustive witness search.
@@ -51,6 +56,7 @@ enum Task {
 
 fn main() -> Result<()> {
     match Cli::parse().task {
+        Task::Ci(a) => ci::run(a),
         Task::Digests(a) => digests::run(a),
         Task::Difftest(a) => difftest::run(a),
         Task::LeanExport(a) => lean::run(a),

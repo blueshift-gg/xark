@@ -395,7 +395,9 @@ verification starter, and the `xark-client` npm package is removed.
   weekly run keeps what can fail with no code change: the digest check on Rust
   stable and beta, and a long fuzz run. Generated clients and xark-wasm's streaming
   prover are tested in CI. Repository tasks are `cargo xtask` (`digests`,
-  `difftest`, `publish`, and `wasm`, which builds xark-wasm's packages).
+  `difftest`, `publish`, and `wasm`, which builds xark-wasm's packages); `cargo xtask
+  ci` runs every check a pull request gets on your machine, side by side (about 7
+  minutes on 16 cores).
 
 ### Removed
 
