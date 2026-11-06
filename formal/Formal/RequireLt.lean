@@ -17,12 +17,12 @@ set_option linter.style.header false
 differing limb; the limbs above it equal; and `m₋₁[k] − 1 − x[k]` there a `B`-bit number.
 
 The model takes `m₋₁`'s limbs as linear combinations `mv`. The exported templates are the
-harness calls `require_lt::<3, 86>`, `<3, 85>` and `<4, 64>` on fresh `x` and `m₋₁`
-(`mv = plugM L`); `Formal/RequireLt{3x86,3x85,4x64}.lean` show each equal to the model by
-`decide +kernel` and state its theorems. Production passes `m₋₁` as a constant, so its rows
+harness calls `require_lt::<3, 86>`, `<3, 85>`, `<4, 64>`, `<8, 32>` and `<24, 86>` on fresh
+`x` and `m₋₁` (`mv = plugM L`); `Formal/RequireLt{3x86,3x85,4x64,8x32,24x86}.lean` show each
+equal to the model by `decide +kernel` and state its theorems. Production passes `m₋₁` as a constant, so its rows
 are those templates with constant plugs (`Template.soundness_inst`, checked by
-`cargo xtask lean-export --coverage`). The generic theorems hold for any `L ≤ 16`,
-`B + 3 < 253`, but bind the gadget only at those three widths:
+`cargo xtask lean-export --coverage`). The generic theorems hold for any `L ≤ 32`,
+`B + 3 < 253`, but bind the gadget only at those widths:
 
 * **soundness**: if `x`'s limbs are below `2^B`, every assignment satisfying the rows has
   `x ≤ m₋₁`. Nothing is assumed about `m₋₁`: the rows pin its limbs at and above the
@@ -163,7 +163,7 @@ theorem two_pow_lt_r' {e : ℕ} (he : e ≤ 253) : 2 ^ e < r :=
 
 /-- What the rows say, read as equations between field values, implies `x ≤ m₋₁`:
 `n` the difference flags (`n L = 0`), `P` the selected products, `b` the difference's bits. -/
-theorem core_sound {L B : ℕ} (hL : L ≤ 16) (hB : B + 3 < 253) (X M n P b : ℕ → F)
+theorem core_sound {L B : ℕ} (hL : L ≤ 32) (hB : B + 3 < 253) (X M n P b : ℕ → F)
     (hn : n L = 0) (hx : ∀ j < L, (X j).val < 2 ^ B)
     (hf : ∀ k < L, (n k - n (k + 1)) * (n k - n (k + 1)) = n k - n (k + 1))
     (h0 : n 0 * n 0 = n 0)
@@ -184,7 +184,7 @@ theorem core_sound {L B : ℕ} (hL : L ≤ 16) (hB : B + 3 < 253) (X M n P b : �
     calc _ ≤ ∑ _k ∈ Finset.range L, 1 :=
           Finset.sum_le_sum fun k hk => isBit_val (fbit k (Finset.mem_range.mp hk))
       _ = L := by simp
-  have hr : 16 < r := lt_of_lt_of_le (by norm_num) (two_pow_lt_r' (e := 5) (by norm_num)).le
+  have hr : 32 < r := lt_of_lt_of_le (by norm_num) (two_pow_lt_r' (e := 6) (by norm_num)).le
   have hsum01 : ∑ k ∈ Finset.range L, (f k).val = 0 ∨ ∑ k ∈ Finset.range L, (f k).val = 1 := by
     rcases isBit_of_mul_self h0 with h | h
     · left; exact nat_eq_of_cast (by omega) (by omega) (by rw [← hcast, ← hn0, h]; simp)
@@ -376,14 +376,14 @@ theorem spec_iff {t : Template} (ht : Is L B mv t) (σ : TVar → F) :
 
 /-- **Soundness.** If `x`'s limbs are below `2^B`, every assignment satisfying the rows has
 `x ≤ m₋₁`. -/
-theorem soundness {t : Template} (ht : Is L B mv t) (hL : 0 < L) (hL16 : L ≤ 16)
+theorem soundness {t : Template} (ht : Is L B mv t) (hL : 0 < L) (hL32 : L ≤ 32)
     (hB : B + 3 < 253)
     (σ : TVar → F) (ha : Assumptions L B (t.ins σ)) (h : t.Sat σ) : Spec L B (t.ins σ) := by
   have hrow := sat_rows ht h
   rw [spec_iff ht]
   have lists : ∀ {α} (l : List α) (f : α → Row) (a : α), a ∈ l → f a ∈ l.map f :=
     fun l f a ha => List.mem_map_of_mem ha
-  refine core_sound hL16 hB (fun j => σ (.plug j)) (fun j => (mv j).eval σ) (nval L σ)
+  refine core_sound hL32 hB (fun j => σ (.plug j)) (fun j => (mv j).eval σ) (nval L σ)
     (fun k => σ (pv L k)) (fun i => σ (bv L i)) (by simp [nval])
     (fun j hj => by rw [← ins_x ht σ hj]; exact ha j hj) ?_ ?_ ?_ ?_ ?_ ?_
   · intro k hk

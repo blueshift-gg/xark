@@ -53,7 +53,7 @@ gadgets now check more:
 - **A streaming Groth16 prover** (`xark-groth16`) that never holds the whole
   constraint system or key in memory, with arkworks' Groth16 removed.
 - **Failing checks name their source line**, everywhere inputs are checked.
-- **Gadgets proven in Lean over the rows they emit.** 62 gadget templates (bits,
+- **Gadgets proven in Lean over the rows they emit.** 63 gadget templates (bits,
   hashes, AES, ECDSA, EdDSA, Grumpkin, Pedersen) are exported from the compiler and
   proven sound in `formal/`; CI fails when the code stops emitting a proven
   template or a production call isn't covered, and the secp256k1 ECDSA circuit is
