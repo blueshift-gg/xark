@@ -5,6 +5,9 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.DoubleAdd
 import Formal.Secp256r1Group
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.FieldTheory.Finite.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

@@ -3,9 +3,7 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Ecdsa
-import Formal.NonNative
-import Mathlib
+import Mathlib.Data.ZMod.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

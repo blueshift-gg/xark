@@ -6,6 +6,15 @@ Authors: Blueshift Labs Limited
 import Formal.Templates.MulCertR1
 import Formal.CertCall
 import Formal.Secp256r1Group
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Tactic.Lift
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

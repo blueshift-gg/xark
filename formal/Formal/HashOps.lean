@@ -8,6 +8,8 @@ import Formal.Templates.Maj3
 import Formal.Templates.Chi
 import Formal.Templates.Ch
 import Formal.Add32
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
 
 set_option linter.style.header false
 

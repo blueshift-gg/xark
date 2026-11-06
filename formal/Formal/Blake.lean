@@ -3,11 +3,15 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Sha256
-import Formal.Wrappers
 import Formal.Arith
-import Formal.Gadgets
-import Mathlib
+import Formal.Wrappers
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.setOption false
 set_option linter.style.header false

@@ -3,10 +3,14 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
-import Formal.Rewrites
 import Formal.GrumpkinGroup
 import Formal.Minimize.Check
+import Formal.Rewrites
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Set
+import Mathlib.Tactic.ByContra
+import Mathlib.Tactic.Bound
 
 set_option linter.style.header false
 

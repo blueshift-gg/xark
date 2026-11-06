@@ -3,7 +3,12 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
+import Mathlib.Algebra.Order.Ring.Star
+import Mathlib.RingTheory.Henselian
+import Mathlib.RingTheory.RegularLocalRing.Defs
+import Mathlib.RingTheory.SimpleRing.Principal
+import Mathlib.Tactic.NormNum
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 -- We disable a few style/lint checks that flag this file's proof style. None of
 -- them are correctness lints; they are pinned-simp / unscoped-set-option

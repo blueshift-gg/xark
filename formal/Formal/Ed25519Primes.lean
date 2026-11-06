@@ -4,6 +4,8 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Pratt
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Prime
 
 set_option linter.style.header false
 

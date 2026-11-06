@@ -4,6 +4,11 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.CertBits
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

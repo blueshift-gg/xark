@@ -6,6 +6,13 @@ Authors: Blueshift Labs Limited
 import Formal.Templates.Sbox
 import Formal.TemplateSolve
 import Formal.ToBits
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.Set
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

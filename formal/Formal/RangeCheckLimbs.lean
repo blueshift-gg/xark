@@ -3,8 +3,10 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Template
 import Formal.ToBits
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 

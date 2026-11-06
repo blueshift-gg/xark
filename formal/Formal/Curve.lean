@@ -3,7 +3,10 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
+import Mathlib.RingTheory.SimpleRing.Principal
+import Mathlib.Tactic.LinearCombination.Lemmas
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
 
 -- The `style.header` linter hard-codes mathlib's Apache license string; this is
 -- an MIT project, so disable that house-style check (it is not a correctness lint).

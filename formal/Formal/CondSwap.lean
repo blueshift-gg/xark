@@ -5,6 +5,8 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.CondSwap
 import Formal.GrumpkinGroup
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
 
 set_option linter.style.header false
 

@@ -8,6 +8,11 @@ import Formal.Templates.Unpack4
 import Formal.Templates.Unpack8K1
 import Formal.Templates.Unpack8R1
 import Formal.RangeCheckLimbs
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

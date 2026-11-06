@@ -7,6 +7,13 @@ import Formal.Templates.PedersenHash
 import Formal.PedersenData
 import Formal.GrumpkinOrder
 import Formal.Add32
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

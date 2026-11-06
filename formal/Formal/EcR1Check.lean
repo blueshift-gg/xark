@@ -3,13 +3,19 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
+import Formal.EcR1
+import Formal.MulCertR1
+import Formal.RequireLt8x32
 import Formal.Templates.EcAddR1Check
 import Formal.Templates.EcDoubleAddR1Check
 import Formal.Templates.OnCurveR1Check
-import Formal.MulCertR1
-import Formal.EcR1
-import Formal.CertCall
-import Formal.RequireLt8x32
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Tactic.Set
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

@@ -4,6 +4,10 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.DoubleAdd
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.Abel
+import Mathlib.Tactic.Positivity
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

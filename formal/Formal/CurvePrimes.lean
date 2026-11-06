@@ -1,4 +1,6 @@
 import Formal.Pratt
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Prime
 
 /-!
 # Primality of the curve constants

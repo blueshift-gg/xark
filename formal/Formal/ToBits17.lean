@@ -5,6 +5,7 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.ToBits17
 import Formal.ToBits
+import Mathlib.Tactic.NormNum
 
 set_option linter.style.header false
 

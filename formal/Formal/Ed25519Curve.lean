@@ -5,6 +5,11 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Ed25519Primes
 import Formal.Edwards
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.Set
+import Mathlib.FieldTheory.Finite.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

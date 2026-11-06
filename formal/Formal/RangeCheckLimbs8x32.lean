@@ -5,6 +5,7 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.RangeCheckLimbs8x32
 import Formal.RangeCheckLimbs
+import Mathlib.Tactic.NormNum
 
 set_option linter.style.header false
 

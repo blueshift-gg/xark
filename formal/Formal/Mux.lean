@@ -3,11 +3,12 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
+import Formal.Add32
+import Formal.Templates.Mux
 import Formal.Templates.MuxpK1
 import Formal.Templates.MuxpR1
-import Formal.Templates.Mux
-import Formal.Template
-import Formal.Add32
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 

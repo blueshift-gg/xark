@@ -17,9 +17,11 @@ import Formal.Poseidon2Bn254T3
 import Formal.GF128
 import Formal.TemplateSolve
 import Formal.Gadgets
+import Formal.Secp256k1
 import Formal.Secp256k1Group
 import Formal.Edwards
 
+import Formal.Secp256r1
 import Formal.Secp256r1Group
 import Formal.GrumpkinGroup
 

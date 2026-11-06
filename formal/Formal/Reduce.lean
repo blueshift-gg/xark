@@ -8,6 +8,11 @@ import Formal.Templates.Reduce34
 import Formal.Templates.Reduce35
 import Formal.Templates.Reduce36
 import Formal.ToBits
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.header false
 

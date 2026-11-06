@@ -6,6 +6,8 @@ Authors: Blueshift Labs Limited
 import Formal.Templates.Xor
 import Formal.Templates.Or
 import Formal.GrumpkinGroup
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
 
 set_option linter.style.header false
 

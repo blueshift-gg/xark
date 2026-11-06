@@ -3,8 +3,22 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Wrappers
-import Mathlib
+import Mathlib.Algebra.Order.BigOperators.Group.Finset
+import Mathlib.Algebra.Order.Ring.Star
+import Mathlib.Algebra.Ring.GeomSum
+import Mathlib.Data.Int.ConditionallyCompleteOrder
+import Mathlib.Data.Int.Star
+import Mathlib.Data.LawfulXor.Basic
+import Mathlib.Tactic.Linarith.Lemmas
+import Mathlib.Tactic.NormNum.Ineq
+import Mathlib.Tactic.Positivity.Core
+import Mathlib.Tactic.Ring.Basic
+import Mathlib.Tactic.Zify
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.Positivity
+import Mathlib.Tactic.NormNum
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.setOption false
 set_option linter.style.header false

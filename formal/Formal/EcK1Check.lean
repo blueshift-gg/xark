@@ -9,6 +9,13 @@ import Formal.Templates.OnCurveK1Check
 import Formal.MulCertK1
 import Formal.EcK1
 import Formal.RequireLt8x32
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Tactic.Set
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

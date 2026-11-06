@@ -3,7 +3,8 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
+import Mathlib.Tactic.Ring.Basic
+import Mathlib.Tactic.Ring
 
 set_option linter.style.header false
 

@@ -5,6 +5,12 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.Add32
 import Formal.GrumpkinGroup
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 

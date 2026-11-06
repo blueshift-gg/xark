@@ -3,8 +3,9 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
 import Formal.CurvePrimes
+import Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point
+import Mathlib.Tactic.NormNum
 
 set_option linter.style.header false
 set_option linter.style.longLine false

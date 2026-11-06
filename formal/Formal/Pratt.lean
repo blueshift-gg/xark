@@ -1,5 +1,5 @@
 import Mathlib.NumberTheory.LucasPrimality
-import Mathlib.Data.List.Prime
+import Mathlib.Tactic.NormNum
 import Mathlib.Tactic.NormNum.Prime
 
 /-!

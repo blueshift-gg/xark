@@ -3,10 +3,11 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Ecdsa
-import Formal.Curve
 import Formal.Bookkeeping
-import Mathlib
+import Formal.Ecdsa
+import Mathlib.Tactic.Abel
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.Fintype.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

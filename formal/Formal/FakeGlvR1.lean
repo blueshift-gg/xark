@@ -3,9 +3,15 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Templates.FakeGlvCheckR1
 import Formal.FakeGlvK1
-import Formal.CurvePrimes
+import Formal.Templates.FakeGlvCheckR1
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.Zify
+import Mathlib.Tactic.Tauto
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

@@ -5,6 +5,10 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.ScalarMul
 import Formal.SignedMul
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.NormNum
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.List.GetD
 
 set_option linter.style.header false
 set_option linter.style.longLine false

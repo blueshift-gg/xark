@@ -3,8 +3,10 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.MemoryVarIndex
-import Mathlib
+import Mathlib.Algebra.Field.Defs
+import Mathlib.Algebra.Group.Nat.Defs
+import Mathlib.Data.Nat.Basic
+import Mathlib.Order.RelClasses
 
 set_option linter.style.header false
 set_option linter.style.longLine false

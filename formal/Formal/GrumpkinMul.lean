@@ -3,10 +3,14 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
+import Formal.Add32
 import Formal.DoubleAdd
 import Formal.GrumpkinOrder
-import Formal.Pratt
-import Formal.Add32
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.FieldTheory.Finite.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false

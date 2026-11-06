@@ -3,10 +3,12 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Template
-import Formal.ToBits
-import Formal.Add32
 import Formal.RequireLt
+import Formal.ToBits
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Tactic.Lift
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.header false
 

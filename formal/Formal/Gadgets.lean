@@ -3,7 +3,19 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
+import Mathlib.Algebra.BigOperators.Fin
+import Mathlib.Algebra.Order.Ring.Star
+import Mathlib.Algebra.Ring.GeomSum
+import Mathlib.Data.ZMod.Basic
+import Mathlib.Tactic.NormNum.Ineq
+import Mathlib.Tactic.Ring.Basic
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.GCongr
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Tactic.Set
+import Mathlib.Tactic.Bound
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 -- The `style.header` linter hard-codes mathlib's Apache license string; this is
 -- an MIT project, so disable that house-style check (it is not a correctness lint).

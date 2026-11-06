@@ -9,6 +9,8 @@ import Formal.Templates.EdOnCurveCheck
 import Formal.Templates.EdDoubleCheck
 import Formal.Templates.EdAddCheck
 import Formal.Templates.EdTorsionCheck
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.NormNum
 
 set_option linter.style.header false
 set_option linter.style.longLine false

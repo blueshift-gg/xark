@@ -3,15 +3,10 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Sha256
-import Formal.Bitwise
 import Formal.Curve
-import Formal.Ecdsa
 import Formal.EcdsaVerify
-import Formal.Poseidon
-import Formal.Secp256k1
-import Formal.Secp256r1
-import Mathlib
+import Formal.Sha256
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false
