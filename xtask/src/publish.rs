@@ -4,7 +4,9 @@
 //! * `--dry-run`: package every crate and build each from its own `.crate`, as
 //!   crates.io will see it, uploading nothing;
 //! * `--execute`: the real release (needs `cargo login`). `cargo publish` waits for
-//!   each crate to index before the next, so its dependencies are always there.
+//!   each crate to index before the next, so its dependencies are always there;
+//!   `--skip-published` skips the crates already at this version, so a re-run after a
+//!   failed publish resumes instead of stopping at the first published crate.
 //!
 //! A crate is publishable unless its manifest says `publish = false`. Every
 //! dependency of a publishable crate on another local crate (dev-dependencies
@@ -22,7 +24,12 @@ use serde_json::Value;
 const SEPARATE: &str = "crates/lang";
 
 #[derive(clap::Args)]
-#[group(required = true, multiple = false)]
+#[command(group(
+    clap::ArgGroup::new("mode")
+        .required(true)
+        .multiple(false)
+        .args(["plan", "dry_run", "execute"]),
+))]
 pub struct Args {
     /// Check every crate can publish, and print the order.
     #[arg(long)]
@@ -33,27 +40,52 @@ pub struct Args {
     /// Publish every crate to crates.io.
     #[arg(long)]
     execute: bool,
+    /// With --execute: skip the crates already on crates.io at this version.
+    #[arg(long)]
+    skip_published: bool,
+}
+
+/// A crate to publish, and the version being published.
+struct Publication {
+    name: String,
+    version: String,
+    /// `Some` when the crate publishes from its own workspace (`crates/lang`).
+    dir: Option<PathBuf>,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    // `requires = "execute"` would be tidier, but clap treats a bool flag's default as
+    // present, so the requirement is never enforced.
+    if args.skip_published && !args.execute {
+        bail!("--skip-published needs --execute");
+    }
     let order = plan()?;
     if args.plan {
         println!("{} crates, in publish order:", order.len());
-        for (name, _) in &order {
-            println!("  {name}");
+        for publication in &order {
+            println!("  {}", publication.name);
         }
     } else if args.dry_run {
         dry_run()?;
     } else {
-        for (name, dir) in &order {
-            println!(">>> publishing {name}");
+        for publication in &order {
+            if args.skip_published && published(&publication.name, &publication.version) {
+                println!(
+                    ">>> {} {} is already on crates.io; skipped",
+                    publication.name, publication.version
+                );
+                continue;
+            }
+            println!(">>> publishing {}", publication.name);
             let mut cmd = Command::new("cargo");
-            match dir {
+            match &publication.dir {
                 Some(dir) => cmd.arg("publish").current_dir(dir),
-                None => cmd.args(["publish", "-p", name]).current_dir(crate::root()),
+                None => cmd
+                    .args(["publish", "-p", publication.name.as_str()])
+                    .current_dir(crate::root()),
             };
             if !cmd.status()?.success() {
-                bail!("publishing {name} failed");
+                bail!("publishing {} failed", publication.name);
             }
         }
         println!("All {} crates published.", order.len());
@@ -61,9 +93,21 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
+/// Whether `name@version` is already on crates.io. `cargo info` asks the index, the
+/// same one `cargo publish` checks; a failure of any kind (a network one included)
+/// reads as "not published", and the publish then reports the real problem.
+fn published(name: &str, version: &str) -> bool {
+    Command::new("cargo")
+        .args(["info", "-q", &format!("{name}@{version}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 /// The publishable crates in dependency order, each with its directory when it
 /// publishes from there (its own workspace).
-fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
+fn plan() -> Result<Vec<Publication>> {
     let root = crate::root();
     let mut pkgs: BTreeMap<String, Value> = BTreeMap::new();
     for dir in [root.clone(), root.join(SEPARATE)] {
@@ -133,9 +177,16 @@ fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
     Ok(order
         .into_iter()
         .map(|n| {
-            let dir = Path::new(pkgs[n]["manifest_path"].as_str().unwrap_or_default()).parent();
-            let own = dir.filter(|d| *d == separate).map(Path::to_path_buf);
-            (n.to_string(), own)
+            let package = &pkgs[n];
+            let dir = Path::new(package["manifest_path"].as_str().unwrap_or_default())
+                .parent()
+                .filter(|dir| *dir == separate)
+                .map(Path::to_path_buf);
+            Publication {
+                name: n.to_string(),
+                version: package["version"].as_str().unwrap_or_default().to_string(),
+                dir,
+            }
         })
         .collect())
 }
