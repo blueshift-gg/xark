@@ -9,6 +9,9 @@
 //! need the Lean build). Steps whose tools aren't installed (`lake`, `npm`,
 //! `cargo build-sbf`) are skipped and say so. Keyed rows are pinned under one rustc
 //! ([`KEYED_TOOLCHAIN`], as CI's `keyed-rows` job), so those steps run under it.
+//!
+//! `--since <REF>` runs only the steps the files changed since `REF` (committed or
+//! not, and untracked ones) can affect ([`affected`]); fmt and clippy always run.
 
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -34,6 +37,131 @@ pub struct Args {
     /// Name the steps and exit.
     #[arg(long)]
     list: bool,
+    /// Only the steps the files changed since this git ref can affect (`HEAD`: the
+    /// uncommitted changes).
+    #[arg(long, value_name = "REF")]
+    since: Option<String>,
+}
+
+/// Every step after the build ones.
+const ALL: &[&str] = &[
+    "workspace",
+    "lang",
+    "sbpf",
+    "digests",
+    "lean-check",
+    "coverage",
+    "minimize",
+    "publish",
+    "wasm32",
+    "clients",
+    "lake",
+    "xtask-ignored",
+];
+
+/// The steps a change to `path` can affect. What compiles circuits (the language,
+/// the frontend, the IR, the macros, the gadgets, the examples) affects nearly all of
+/// them; the prover side the tests, the wasm build, the clients and the on-chain
+/// tests; `formal/` the Lean steps; xtask its own tasks. Docs affect none; anything
+/// not listed, all.
+fn affected(path: &str) -> &'static [&'static str] {
+    const CIRCUITS: &[&str] = &[
+        "workspace",
+        "lang",
+        "digests",
+        "lean-check",
+        "coverage",
+        "minimize",
+        "wasm32",
+        "clients",
+        "sbpf",
+        "publish",
+    ];
+    const PROVER: &[&str] = &["workspace", "wasm32", "clients", "sbpf", "publish"];
+    const LEAN: &[&str] = &[
+        "lake",
+        "xtask-ignored",
+        "lean-check",
+        "coverage",
+        "minimize",
+    ];
+    const XTASK: &[&str] = &[
+        "workspace",
+        "digests",
+        "lean-check",
+        "coverage",
+        "minimize",
+        "publish",
+        "lake",
+        "xtask-ignored",
+    ];
+    let top = |p: &str| path.starts_with(p);
+    if path.ends_with(".md") || top("docs/") || top("LICENSE") || top(".github/") {
+        &[]
+    } else if [
+        "crates/lang/",
+        "crates/frontend/",
+        "crates/ir/",
+        "crates/macros/",
+    ]
+    .iter()
+    .any(|p| top(p))
+        || top("gadgets/")
+        || top("examples/")
+        || top("tests/stable-digests.txt")
+    {
+        CIRCUITS
+    } else if [
+        "crates/backend/",
+        "crates/cli/",
+        "crates/groth16/",
+        "crates/prover/",
+        "crates/schema/",
+        "crates/verifier/",
+        "crates/wasm/",
+    ]
+    .iter()
+    .any(|p| top(p))
+    {
+        PROVER
+    } else if top("crates/test-harness/") {
+        // The gadget crates' and crates/lang's tests compile through it.
+        &["workspace", "lang"]
+    } else if top("formal/") {
+        LEAN
+    } else if top("xtask/") {
+        XTASK
+    } else if top("clients/") {
+        &["clients"]
+    } else {
+        ALL
+    }
+}
+
+/// The files changed since `base`: committed, staged, unstaged and untracked.
+fn changed_since(base: &str) -> Result<Vec<String>> {
+    let git = |args: &[&str]| -> Result<Vec<String>> {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(crate::root())
+            .output()?;
+        if !out.status.success() {
+            bail!(
+                "git {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8(out.stdout)?
+            .lines()
+            .map(str::to_string)
+            .collect())
+    };
+    let mut files = git(&["diff", "--name-only", base])?;
+    files.extend(git(&["ls-files", "--others", "--exclude-standard"])?);
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 /// One step: a shell command run from the repository root, `after` another step.
@@ -153,12 +281,28 @@ fn steps() -> Vec<Step> {
 
 pub fn run(args: Args) -> Result<()> {
     let all = steps();
-    if args.list {
-        for s in &all {
-            println!("{:14} {}", s.name, s.what);
+    let since: Option<Vec<&str>> = match &args.since {
+        Some(base) => {
+            let files = changed_since(base)?;
+            let mut steps: Vec<&str> = files
+                .iter()
+                .flat_map(|f| affected(f).iter().copied())
+                .collect();
+            steps.sort();
+            steps.dedup();
+            println!(
+                "{} files changed since {base}: {}",
+                files.len(),
+                if steps.is_empty() {
+                    "fmt and clippy only".to_string()
+                } else {
+                    steps.join(", ")
+                }
+            );
+            Some(steps)
         }
-        return Ok(());
-    }
+        None => None,
+    };
     for n in args.only.iter().chain(&args.skip) {
         if !all.iter().any(|s| s.name == n) {
             bail!("no step `{n}` (`cargo xtask ci --list` names them)");
@@ -168,7 +312,14 @@ pub fn run(args: Args) -> Result<()> {
         .into_iter()
         .filter(|s| args.only.is_empty() || args.only.iter().any(|n| n == s.name))
         .filter(|s| !args.skip.iter().any(|n| n == s.name))
+        .filter(|s| since.as_ref().is_none_or(|st| st.contains(&s.name)))
         .collect();
+    if args.list {
+        for s in &chosen {
+            println!("{:14} {}", s.name, s.what);
+        }
+        return Ok(());
+    }
     let logs = crate::target_dir().join("ci");
     std::fs::create_dir_all(&logs)?;
     let t0 = Instant::now();
@@ -358,4 +509,41 @@ fn has_toolchain(t: &str) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ALL, affected, steps};
+
+    #[test]
+    fn all_names_every_step() {
+        let names: Vec<&str> = steps().iter().map(|s| s.name).collect();
+        assert_eq!(names, ALL);
+        for path in [
+            "crates/lang/src/lang.rs",
+            "formal/Formal.lean",
+            "xtask/src/ci.rs",
+            "x",
+        ] {
+            for s in affected(path) {
+                assert!(ALL.contains(s), "{path}: {s}");
+            }
+        }
+    }
+
+    #[test]
+    fn changes_pick_their_steps() {
+        assert!(affected("docs/subset.md").is_empty());
+        assert!(affected("gadgets/xark-sha256/README.md").is_empty());
+        assert!(affected("gadgets/xark-bignum/src/lib.rs").contains(&"coverage"));
+        assert!(affected("crates/groth16/src/accel.rs").contains(&"wasm32"));
+        assert!(!affected("crates/groth16/src/accel.rs").contains(&"lake"));
+        assert_eq!(affected("formal/Formal/RequireLt.lean")[0], "lake");
+        assert_eq!(affected("clients/check/zkyc/zkyc.test.ts"), ["clients"]);
+        assert_eq!(
+            affected("crates/test-harness/src/lib.rs"),
+            ["workspace", "lang"]
+        );
+        assert_eq!(affected("rust-toolchain.toml"), ALL);
+    }
 }
