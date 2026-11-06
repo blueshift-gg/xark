@@ -54,6 +54,11 @@ jobs:
           cargo doc --no-deps --workspace --exclude xark-wasm
           cargo doc --no-deps --manifest-path crates/lang/Cargo.toml
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
       - name: cargo test (release)
         # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
         # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
@@ -65,17 +70,20 @@ jobs:
         # The `sbpf` and `differential_alt_bn128` integration tests under
         # `gadgets/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
         # they need the Anza toolchain and run in `solana-ci.yml`.
-        # Build one xark-tests test list excluding those, then test.
+        # Build one xark-tests test list excluding those, then test. nextest runs the
+        # test binaries side by side (cargo test runs them one at a time); it skips
+        # doctests, which `cargo test --doc` runs.
         run: |
-          cargo test --workspace --release --exclude xark-tests --exclude xark-ed25519 \
-            --exclude xark-secp256k1 --exclude xark-secp256r1
-          cargo test -p xark-tests --release --lib
           tests_args=()
           for t in $(ls gadgets/tests/tests/*.rs | xargs -n1 basename | sed 's/\.rs$//' \
                       | grep -vE '^(sbpf|differential_alt_bn128)'); do
             tests_args+=(--test "$t")
           done
-          cargo test -p xark-tests --release "${tests_args[@]}"
+          cargo nextest run --release --no-fail-fast --workspace --exclude xark-tests \
+            --exclude xark-ed25519 --exclude xark-secp256k1 --exclude xark-secp256r1
+          cargo nextest run --release --no-fail-fast -p xark-tests --lib "${tests_args[@]}"
+          cargo test --release --doc --workspace --exclude xark-tests --exclude xark-ed25519 \
+            --exclude xark-secp256k1 --exclude xark-secp256r1
 
   reproducible:
     # A circuit is identical (same R1CS digest) under every supported rustc. Rebuild every example with the oldest supported
@@ -166,12 +174,20 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/lang
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: cargo test (snapshots, semantics fuzz, input and host tests)
         # Every test in the crate: naming files here let the others go stale
-        # unnoticed. The heavy KAT vectors are `#[ignore]`d (slow.yml).
+        # unnoticed. The heavy KAT vectors are `#[ignore]`d (slow.yml). nextest
+        # runs the test binaries side by side; `cargo test --doc` the doctests.
         env:
           XARK_FUZZ_CASES: "200"
-        run: cd crates/lang && cargo test --release --no-fail-fast
+        run: |
+          cd crates/lang
+          cargo nextest run --release --no-fail-fast
+          cargo test --release --doc
 
   wasm-smoke:
     # The xark-wasm prover package (`npm test` in crates/wasm): against host
