@@ -256,7 +256,13 @@ fn steps() -> Vec<Step> {
         step(
             "clients",
             "generated TypeScript clients",
-            "cd clients/check && npm test".into(),
+            // Its setup builds `xark` with `-p xark-cli`, whose features differ from the
+            // workspace build's: in the shared `target/` it would relink the binary the
+            // workspace tests are running (`spawn xark: No such file`).
+            format!(
+                "cd clients/check && CARGO_TARGET_DIR={} npm test",
+                crate::target_dir().join("ci-clients").display()
+            ),
             Some("npm"),
             None,
         ),
