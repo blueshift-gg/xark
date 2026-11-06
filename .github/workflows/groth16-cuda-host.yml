@@ -36,6 +36,7 @@ jobs:
   host-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The pinned ICICLE program header uses uint32_t without including stdint.h.
     env:
       CXXFLAGS: -include stdint.h
     steps:
