@@ -36,7 +36,9 @@ on:
 
 jobs:
   pocl-correctness:
-    runs-on: ubuntu-latest
+    # Keep the host stable and use its preinstalled Clang instead of downloading
+    # the latest Clang/LLVM stack on every run.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -44,8 +46,16 @@ jobs:
 
       - name: Install OpenCL CPU runtime
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang ocl-icd-libopencl1 pocl-opencl-icd
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install --yes --no-install-recommends ocl-icd-libopencl1 pocl-opencl-icd
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
