@@ -75,10 +75,10 @@ jobs:
         # side; the filter leaves out those two. nextest skips doctests, which
         # `cargo test --doc` runs.
         run: |
-          cargo nextest run --release --no-fail-fast --workspace --exclude xark-ed25519 \
-            --exclude xark-secp256k1 --exclude xark-secp256r1 \
+          cargo nextest run --cargo-profile ci --no-fail-fast --workspace \
+            --exclude xark-ed25519 --exclude xark-secp256k1 --exclude xark-secp256r1 \
             -E 'not (binary(sbpf) | binary(differential_alt_bn128))'
-          cargo test --release --doc --workspace --exclude xark-ed25519 \
+          cargo test --profile ci --doc --workspace --exclude xark-ed25519 \
             --exclude xark-secp256k1 --exclude xark-secp256r1
 
   reproducible:

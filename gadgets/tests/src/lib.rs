@@ -35,10 +35,18 @@ pub fn xark_bin() -> std::path::PathBuf {
         // diagnostic markers (`cached=`, timing). cargo cache-hits when it's already
         // debug-built, so this only recompiles after a non-debug workspace build.
         let exe = "xark";
+        // The profile this test was built with (`target/<profile>/deps/<test>`):
+        // `release`, or CI's `ci`. A debug test build still gets a release `xark`.
+        let profile = std::env::current_exe()
+            .ok()
+            .and_then(|p| Some(p.parent()?.parent()?.file_name()?.to_str()?.to_string()))
+            .filter(|p| p != "debug")
+            .unwrap_or_else(|| "release".into());
         let status = std::process::Command::new(env!("CARGO"))
             .args([
                 "build",
-                "--release",
+                "--profile",
+                &profile,
                 "--features",
                 "debug",
                 "-p",
@@ -53,7 +61,7 @@ pub fn xark_bin() -> std::path::PathBuf {
         // A copy of its own, named for this build: another test process's cargo
         // relinks `target/release/xark` (a build without `debug`), and a test
         // starting it mid-relink got "No such file or directory".
-        let built = workspace_root.join("target").join("release").join(exe);
+        let built = workspace_root.join("target").join(&profile).join(exe);
         let meta = std::fs::metadata(&built).expect("the built `xark`");
         let stamp = meta
             .modified()
