@@ -44,7 +44,7 @@ fn opencl_g1_msm_matches_xark_cpu() {
         point.serialize_compressed(&mut encoded).unwrap();
     }
 
-    let mut opencl = OpenClMsm::with_device_kind(OpenClDeviceKind::Any);
+    let mut opencl = OpenClMsm::with_device_index(OpenClDeviceKind::Any, 0);
     let Some(actual) = opencl.msm(false, &encoded, true, &scalars) else {
         if std::env::var_os("XARK_OPENCL_REQUIRED").is_some() {
             panic!("OpenCL runtime declined a valid G1 MSM");
@@ -54,6 +54,7 @@ fn opencl_g1_msm_matches_xark_cpu() {
         );
         return;
     };
+    assert_eq!(opencl.device_info().map(|device| device.index), Some(0));
 
     let expected_point = msm::<G1Projective>(&bases, &scalars).into_affine();
     let mut expected = Vec::new();

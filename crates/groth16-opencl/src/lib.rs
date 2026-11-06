@@ -8,6 +8,9 @@
 //! `cargo run --release --example msm_bench
 //! --manifest-path crates/groth16-opencl/Cargo.toml` on the target GPU before
 //! treating it as a performance choice. Both kernels are variable-time.
+//! The benchmark's `XARK_OPENCL_DEVICE_INDEX` selects a zero-based OpenCL GPU
+//! in platform enumeration order and defaults to 0; it prints device identity
+//! with every benchmark report.
 //!
 //! OpenCL dispatch uses a per-device, in-process admission queue. By default it
 //! permits one active MSM, up to eight waiting chunks, and reserves at most 75%
@@ -64,12 +67,14 @@ const BUCKET_THRESHOLD: usize = 256;
 /// `with_any_device` also permits CPU OpenCL runtimes for correctness testing.
 pub struct OpenClMsm {
     device_type: cl_device_type,
+    device_index: usize,
     runtime: Option<Runtime>,
 }
 
 /// Identifies the OpenCL device used by an initialized backend.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OpenClDeviceInfo {
+    pub index: usize,
     pub name: String,
     pub vendor: String,
     pub version: String,
@@ -106,12 +111,19 @@ impl OpenClMsm {
 
     /// Select the first available device of the requested kind.
     pub fn with_device_kind(kind: OpenClDeviceKind) -> Self {
+        Self::with_device_index(kind, 0)
+    }
+
+    /// Select a zero-based device among available devices of the requested kind.
+    /// Enumeration follows OpenCL platform order, then each platform's device order.
+    pub fn with_device_index(kind: OpenClDeviceKind, device_index: usize) -> Self {
         let device_type = match kind {
             OpenClDeviceKind::Gpu => CL_DEVICE_TYPE_GPU,
             OpenClDeviceKind::Any => CL_DEVICE_TYPE_ALL,
         };
         Self {
             device_type,
+            device_index,
             runtime: None,
         }
     }
@@ -129,7 +141,7 @@ impl OpenClMsm {
 
     fn runtime(&mut self) -> Option<&mut Runtime> {
         if self.runtime.is_none() {
-            self.runtime = Runtime::new(self.device_type);
+            self.runtime = Runtime::new(self.device_type, self.device_index);
         }
         self.runtime.as_mut()
     }
@@ -137,7 +149,7 @@ impl OpenClMsm {
 
 impl Accelerator for OpenClMsm {
     fn wants_msm(&self) -> bool {
-        find_device(self.device_type).is_some()
+        find_device(self.device_type, self.device_index).is_some()
     }
 
     fn msm(
@@ -185,8 +197,8 @@ struct Runtime {
 }
 
 impl Runtime {
-    fn new(device_type: cl_device_type) -> Option<Self> {
-        let (device, device_id) = find_device(device_type)?;
+    fn new(device_type: cl_device_type, device_index: usize) -> Option<Self> {
+        let (device, device_id) = find_device(device_type, device_index)?;
         let context = Context::from_device(&device).ok()?;
         let queue = CommandQueue::create_default(&context, 0).ok()?;
         let program =
@@ -195,6 +207,7 @@ impl Runtime {
         let global_mem_bytes = usize::try_from(device.global_mem_size().ok()?).ok()?;
         let scheduler = scheduler::for_device(device_id, global_mem_bytes)?;
         let device_info = OpenClDeviceInfo {
+            index: device_index,
             name: device.name().ok()?,
             vendor: device.vendor().ok()?,
             version: device.version().ok()?,
@@ -647,8 +660,9 @@ fn estimated_host_chunk_bytes(point_bytes: usize, scalar_count: usize) -> Option
         .checked_add(prepared_bytes)
 }
 
-fn find_device(device_type: cl_device_type) -> Option<(Device, usize)> {
+fn find_device(device_type: cl_device_type, device_index: usize) -> Option<(Device, usize)> {
     let platforms = get_platforms().ok()?;
+    let mut matching_index = 0;
     for platform in platforms {
         let Ok(devices) = platform.get_devices(device_type) else {
             continue;
@@ -656,7 +670,10 @@ fn find_device(device_type: cl_device_type) -> Option<(Device, usize)> {
         for id in devices {
             let device = Device::new(id);
             if device.available().unwrap_or(false) && device.compiler_available().unwrap_or(false) {
-                return Some((device, id as usize));
+                if matching_index == device_index {
+                    return Some((device, id as usize));
+                }
+                matching_index += 1;
             }
         }
     }

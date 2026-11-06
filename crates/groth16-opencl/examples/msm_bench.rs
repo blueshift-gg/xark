@@ -9,7 +9,7 @@ use rand_chacha::ChaCha20Rng;
 use xark_groth16::{Accelerator, msm::msm};
 use xark_groth16_opencl::{OpenClDeviceInfo, OpenClDeviceKind, OpenClMsm};
 
-const CSV_HEADER: &str = "record,n,seed,repeat,cpu_pippenger_ms,cpu_decode_ms,cpu_chunk_ms,opencl_total_ms,device_vendor,device_name,opencl_version,driver_version,compute_units,global_memory_bytes";
+const CSV_HEADER: &str = "record,n,seed,repeat,cpu_pippenger_ms,cpu_decode_ms,cpu_chunk_ms,opencl_total_ms,device_vendor,device_name,opencl_version,driver_version,compute_units,global_memory_bytes,device_index";
 
 fn main() {
     if let Err(error) = run() {
@@ -33,7 +33,10 @@ fn run() -> Result<(), String> {
         .unwrap_or_else(|_| "6361401094495923533".into())
         .parse::<u64>()
         .map_err(|error| format!("invalid XARK_OPENCL_MSM_SEED: {error}"))?;
-    let mut accelerator = OpenClMsm::with_device_kind(OpenClDeviceKind::Gpu);
+    let configured_device_index =
+        env::var("XARK_OPENCL_DEVICE_INDEX").unwrap_or_else(|_| "0".into());
+    let device_index = parse_device_index(&configured_device_index)?;
+    let mut accelerator = OpenClMsm::with_device_index(OpenClDeviceKind::Gpu, device_index);
     if !accelerator.initialize() {
         return Err("no available OpenCL GPU/compiler; benchmark requires a GPU device".into());
     }
@@ -104,7 +107,7 @@ fn run() -> Result<(), String> {
                 return Err(format!("OpenCL result differs from CPU Pippenger at n={n}"));
             }
             println!(
-                "sample,{n},{seed},{repeat},{:.3},{:.3},{:.3},{:.3},,,,,,",
+                "sample,{n},{seed},{repeat},{:.3},{:.3},{:.3},{:.3},,,,,,,",
                 cpu_msm_elapsed.as_secs_f64() * 1_000.0,
                 cpu_decode_elapsed.as_secs_f64() * 1_000.0,
                 cpu_chunk_elapsed.as_secs_f64() * 1_000.0,
@@ -134,21 +137,28 @@ fn csv_field(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
 
+fn parse_device_index(value: &str) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid XARK_OPENCL_DEVICE_INDEX: {error}"))
+}
+
 fn device_csv_record(device: &OpenClDeviceInfo) -> String {
     format!(
-        "device,,,,,,,,{},{},{},{},{},{}",
+        "device,,,,,,,,{},{},{},{},{},{},{}",
         csv_field(&device.vendor),
         csv_field(&device.name),
         csv_field(&device.version),
         csv_field(&device.driver_version),
         device.compute_units,
         device.global_memory_bytes,
+        device.index,
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CSV_HEADER, csv_field, device_csv_record};
+    use super::{CSV_HEADER, csv_field, device_csv_record, parse_device_index};
     use xark_groth16_opencl::OpenClDeviceInfo;
 
     #[test]
@@ -160,6 +170,7 @@ mod tests {
     #[test]
     fn device_record_matches_csv_header_column_count() {
         let device = OpenClDeviceInfo {
+            index: 0,
             name: "GPU".into(),
             vendor: "Vendor".into(),
             version: "OpenCL 1.2".into(),
@@ -171,5 +182,12 @@ mod tests {
             device_csv_record(&device).split(',').count(),
             CSV_HEADER.split(',').count()
         );
+    }
+
+    #[test]
+    fn device_index_defaults_and_rejects_invalid_values() {
+        assert_eq!(parse_device_index("0").unwrap(), 0);
+        assert_eq!(parse_device_index("2").unwrap(), 2);
+        assert!(parse_device_index("gpu").is_err());
     }
 }
