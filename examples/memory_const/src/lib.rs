@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 // memory_const: arr = [x, x*2, x*3]; require(arr sum == y),
@@ -16,11 +14,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // 6·5 = 30
-        memory_const("5".into(), "30".into()).unwrap();
+        memory_const(5, 30).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(memory_const("5".into(), "31".into()).is_err());
+        assert!(memory_const(5, 31).is_err());
     }
 }

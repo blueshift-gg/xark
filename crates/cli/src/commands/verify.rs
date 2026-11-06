@@ -6,20 +6,24 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ark_bn254::Fr;
 use clap::Args;
 
 use xark_backend::serialization::read_public_inputs;
 use xark_backend::{keys::Groth16Keys, proof::ProofBundle, verify};
 
-use super::{load_backend_r1cs, parse_inputs_arg, public_inputs_from_inputs};
 use crate::xark_project::XarkProject;
+
+/// When `path` was last written, if it can be read.
+fn fs_modified(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
 
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
-    /// Circuit crate directory (or its `target/xark/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/`.
+    /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
+    /// the current directory; paths are inferred from `target/xark/<name>/`.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
@@ -29,19 +33,15 @@ pub struct VerifyArgs {
     #[arg(long = "inputs", value_name = "JSON|FILE")]
     pub inputs: Option<String>,
 
-    /// Verifying key. Inferred as `target/xark/vk.bin` when omitted.
+    /// Verifying key. Inferred as `target/xark/<name>/vk.bin` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
-    /// Proof file. Inferred as `target/xark/proof.bin` when omitted.
+    /// Proof file. Inferred as `target/xark/<name>/proof.bin` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
-    /// Public inputs file. Inferred as `target/xark/public_inputs.bin`.
+    /// Public inputs file. Inferred as `target/xark/<name>/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
-    /// Path to `r1cs.json` (used to order `--inputs` public values). Inferred
-    /// from `target/xark/` when omitted.
-    #[arg(long, value_hint = clap::ValueHint::FilePath)]
-    pub r1cs: Option<PathBuf>,
 }
 
 pub fn run(args: VerifyArgs) -> Result<()> {
@@ -52,14 +52,21 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         .unwrap_or_else(|| project.verifying_key());
     let proof_path = args.proof.clone().unwrap_or_else(|| project.proof());
 
-    let vk = Groth16Keys::read_verifying_key(&vk_path).with_context(|| {
-        format!(
-            "reading verifying key {} (run `xark setup` first?)",
-            vk_path.display()
-        )
-    })?;
-    let proof = ProofBundle::read_proof(&proof_path)
-        .with_context(|| format!("reading proof {}", proof_path.display()))?;
+    let vk = super::read_artifact(
+        &vk_path,
+        "verifying key",
+        "xark setup",
+        "run `xark setup` first?",
+        || Groth16Keys::read_verifying_key(&vk_path),
+    )?;
+    super::ensure_key_matches_circuit(&vk_path, &project.circuit_xbc())?;
+    let proof = super::read_artifact(
+        &proof_path,
+        "proof",
+        "xark prove",
+        "run `xark prove` first?",
+        || ProofBundle::read_proof(&proof_path),
+    )?;
 
     // Public inputs: from `--inputs` values (recomputed) when given, else from
     // the `public_inputs.bin` the prover wrote.
@@ -69,23 +76,18 @@ pub fn run(args: VerifyArgs) -> Result<()> {
                 .public_inputs
                 .clone()
                 .unwrap_or_else(|| project.public_inputs());
-            read_public_inputs(&path).with_context(|| {
-                format!(
-                    "reading {} (pass --inputs <JSON|FILE> or run `xark prove` first)",
-                    path.display()
-                )
-            })?
+            super::read_artifact(
+                &path,
+                "public inputs file",
+                "xark prove",
+                "pass --inputs <JSON|FILE> or run `xark prove` first",
+                || read_public_inputs(&path),
+            )?
         }
-        Some(arg) => {
-            let r1cs_path = args.r1cs.clone().unwrap_or_else(|| project.r1cs_json());
-            let (prog, _) =
-                load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
-            let inputs = parse_inputs_arg(arg)?;
-            public_inputs_from_inputs(&prog, &inputs)?
-        }
+        Some(arg) => super::read_public_inputs(&project.xark_dir, arg)?,
     };
 
-    let ok = verify(&vk, &proof, &public).map_err(super::synth_err)?;
+    let ok = verify(&vk, &proof, &public)?;
     println!(
         "{}",
         if ok {
@@ -95,6 +97,17 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         }
     );
     if !ok {
+        // The usual cause: keys remade (`xark setup`) since this proof.
+        if let (Some(proved), Some(keyed)) = (fs_modified(&proof_path), fs_modified(&vk_path))
+            && proved < keyed
+        {
+            eprintln!(
+                "{} {} is older than {} (made before the last `xark setup`?): run `xark prove` again",
+                crate::style::warn("hint:"),
+                proof_path.display(),
+                vk_path.display()
+            );
+        }
         std::process::exit(2);
     }
     let p = super::path_arg(&args.path);
@@ -107,7 +120,7 @@ pub fn run(args: VerifyArgs) -> Result<()> {
             ),
             (
                 format!("xark client {p}"),
-                "scaffold a TypeScript client (verify + calldata)",
+                "generate a typed TypeScript client (prove + verify in JS)",
             ),
         ])
     );

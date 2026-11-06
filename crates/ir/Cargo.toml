@@ -6,6 +6,7 @@ categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -30,9 +31,6 @@ serde_json = "1"
 num-bigint = "0.4"
 num-traits = "0.2"
 rayon = "1"
-# Fast bincode-compatible binary codec (placement-init reads) for the on-disk
-# minimized-R1CS cache that `xark setup` writes and `xark prove` reloads.
-wincode = { version = "0.5", features = ["derive"] }
 # Fast fixed-width BN254 scalar field (Montgomery) for the reference solver's
 # hot path; the `num-bigint` fallback stays for arbitrary-modulus programs.
 ark-bn254 = { workspace = true }

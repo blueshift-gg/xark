@@ -33,7 +33,7 @@ fn fold(a: &Inst, b: &Inst, t: &Affine, z_next: Base) -> Inst {
         a.cw.x, a.cw.y, a.ce.x, a.ce.y, a.u, a.x, b.cw.x, b.cw.y, b.ce.x, b.ce.y, b.u, b.x, t.x,
         t.y, z_next,
     ];
-    let h = poseidon2::hash(tr);
+    let h = xark_poseidon2::native::hash(tr);
     let hbig = BigUint::from_bytes_le(&h.into_bigint().to_bytes_le());
     let r_big = &hbig & &((BigUint::from(1u8) << 128u32) - 1u8);
     let r_s = Scalar::from(r_big.clone());
@@ -47,7 +47,7 @@ fn fold(a: &Inst, b: &Inst, t: &Affine, z_next: Base) -> Inst {
 }
 
 fn io_hash(i: u64, z0: Base, z: Base, inst: &Inst) -> Base {
-    poseidon2::hash([
+    xark_poseidon2::native::hash([
         Base::from(i),
         z0,
         z,

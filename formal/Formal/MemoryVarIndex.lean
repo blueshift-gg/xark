@@ -3,8 +3,11 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Gadgets
-import Mathlib
+import Mathlib.RingTheory.SimpleRing.Principal
+import Mathlib.Tactic.LinearCombination.Lemmas
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -12,7 +15,7 @@ set_option linter.style.longLine false
 /-!
 # Variable-index memory-op soundness
 
-Mirrors the xark compiler's array-indexing lowering (`crates/lang/src/lower_mir.rs`).
+Mirrors the xark compiler's array-indexing lowering (`crates/frontend`).
 For an `n`-slot block under a variable index the gadget allocates:
 
 * booleans `s_j ∈ {0, 1}` for `j ∈ [0, n)`,

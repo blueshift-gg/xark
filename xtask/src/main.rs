@@ -1,0 +1,204 @@
+//! xark's repository tasks, run as `cargo xtask <task>` (`.cargo/config.toml`):
+//!
+//! * `ci`: every check a pull request gets, on this machine, side by side;
+//! * `digests`: every example circuit's R1CS digest, against `tests/stable-digests.txt`;
+//! * `difftest`: every example on its own test inputs, adversarially;
+//! * `lean-export`: a `#[gadget]`'s exact R1CS as Lean, for `formal/`'s proofs;
+//! * `minimize-check`: every example's minimizer runs, certified by the Lean checker;
+//! * `publish`: the crates in dependency order: checked, rehearsed, or uploaded;
+//! * `wasm`: xark-wasm's JavaScript packages, into `crates/wasm/dist/`.
+
+mod ci;
+mod coverage;
+mod difftest;
+mod digests;
+mod lean;
+mod minimize_check;
+mod publish;
+mod wasm;
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Mutex;
+
+use anyhow::{Context, Result, bail};
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(about = "xark's repository tasks")]
+struct Cli {
+    #[command(subcommand)]
+    task: Task,
+}
+
+#[derive(Subcommand)]
+enum Task {
+    /// Every check a pull request gets, on this machine, side by side (logs in
+    /// target/ci/).
+    Ci(ci::Args),
+    /// Every example circuit's R1CS digest, against tests/stable-digests.txt.
+    Digests(digests::Args),
+    /// Every example on its own test inputs, decided by exhaustive witness search.
+    Difftest(difftest::Args),
+    /// A `#[gadget]`'s exact R1CS as Lean (formal/Formal/Templates/), or with
+    /// --check, every proven gadget's against its committed template.
+    LeanExport(lean::Args),
+    /// Every minimizer run on every example's keyed path, certified by the Lean
+    /// checker (formal/MinimizeCheck.lean).
+    MinimizeCheck(minimize_check::Args),
+    /// The crates in dependency order: checked (--plan), rehearsed (--dry-run) or
+    /// uploaded (--execute).
+    Publish(publish::Args),
+    /// xark-wasm's JavaScript packages (nodejs, web, bundler, module, or all of
+    /// them), into crates/wasm/dist/.
+    Wasm(wasm::Args),
+}
+
+fn main() -> Result<()> {
+    match Cli::parse().task {
+        Task::Ci(a) => ci::run(a),
+        Task::Digests(a) => digests::run(a),
+        Task::Difftest(a) => difftest::run(a),
+        Task::LeanExport(a) => lean::run(a),
+        Task::MinimizeCheck(a) => minimize_check::run(a),
+        Task::Publish(a) => publish::run(a),
+        Task::Wasm(a) => wasm::run(a),
+    }
+}
+
+/// The repository root.
+pub fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask/ is in the root")
+        .to_path_buf()
+}
+
+/// The workspace's cargo target directory.
+pub fn target_dir() -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), PathBuf::from)
+}
+
+/// Every example that is a circuit (its `src/lib.rs` has a `#[circuit]`), sorted.
+pub fn circuits() -> Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(root().join("examples"))? {
+        let dir = entry?.path();
+        let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap_or_default();
+        if lib.contains("#[circuit]") {
+            names.push(dir.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// Run `cmd` to completion; an error carries what it printed.
+pub fn run(cmd: &mut Command) -> Result<()> {
+    let out = cmd.output().with_context(|| format!("running {cmd:?}"))?;
+    if !out.status.success() {
+        bail!(
+            "{cmd:?} failed ({})\n{}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// `cargo build -q --release <args>` in the workspace.
+pub fn cargo_build(args: &[&str]) -> Result<()> {
+    run(Command::new("cargo")
+        .args(["build", "-q", "--release"])
+        .args(args)
+        .current_dir(root()))
+}
+
+/// Run `f` on every item, `jobs` at a time. `f` also gets the number of the worker
+/// running it (`0..jobs`), for [`build_dir`].
+pub fn parallel<T: Send>(items: Vec<T>, jobs: usize, f: impl Fn(usize, T) + Sync) {
+    let queue = Mutex::new(items.into_iter());
+    std::thread::scope(|s| {
+        for worker in 0..jobs.max(1) {
+            let (queue, f) = (&queue, &f);
+            s.spawn(move || {
+                loop {
+                    // Take the next item, releasing the lock before running it.
+                    let next = queue.lock().unwrap().next();
+                    let Some(item) = next else { break };
+                    f(worker, item);
+                }
+            });
+        }
+    });
+}
+
+/// The build directory worker `worker` builds circuit crates in, with (`marked`) or
+/// without the gadget markers. Crates share it, so their common dependencies (`xark`,
+/// the gadget crates) compile once per worker, not once per crate, and each step
+/// reuses the builds of the ones before (digests, minimize-check and coverage build
+/// the same examples). One per worker, so parallel builds don't wait on one lock.
+/// Package names are unique across `examples/` and `formal/templates/`, so each
+/// crate's wasm is its own file.
+pub fn build_dir(marked: bool, worker: usize) -> PathBuf {
+    let kind = if marked { "marked" } else { "plain" };
+    target_dir()
+        .join("circuit-builds")
+        .join(kind)
+        .join(worker.to_string())
+}
+
+/// Half the cores, at most 4: what a machine running heavy builds can take.
+pub fn default_jobs() -> usize {
+    // `XARK_JOBS` caps it: CI's 16 GB runner holds one marked build of the largest
+    // example, not two.
+    if let Some(n) = std::env::var("XARK_JOBS").ok().and_then(|s| s.parse().ok()) {
+        return n;
+    }
+    let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+    (cores / 2).clamp(1, 4)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Crates sharing a [`super::build_dir`] must have distinct library names: cargo
+    /// writes a cdylib to `<name>.wasm`, so two crates with one name would read each
+    /// other's circuit, silently.
+    #[test]
+    fn shared_build_dirs_hold_distinct_crate_names() {
+        let mut seen = std::collections::BTreeMap::new();
+        for dir in ["examples", "formal/templates"] {
+            for entry in std::fs::read_dir(super::root().join(dir)).unwrap() {
+                let path = entry.unwrap().path();
+                let Ok(manifest) = std::fs::read_to_string(path.join("Cargo.toml")) else {
+                    continue;
+                };
+                let name_in = |section: &str| {
+                    manifest
+                        .lines()
+                        .skip_while(|l| l.trim() != section)
+                        .skip(1)
+                        .take_while(|l| !l.trim_start().starts_with('['))
+                        .find_map(|l| {
+                            let v = l
+                                .trim()
+                                .strip_prefix("name")?
+                                .trim_start()
+                                .strip_prefix('=')?;
+                            Some(v.trim().trim_matches('"').replace('-', "_"))
+                        })
+                };
+                let name = name_in("[lib]").or_else(|| name_in("[package]")).unwrap();
+                if let Some(other) = seen.insert(name.clone(), path.clone()) {
+                    panic!(
+                        "{} and {} are both `{name}`",
+                        other.display(),
+                        path.display()
+                    );
+                }
+            }
+        }
+        assert!(seen.len() > 100, "found only {} crates", seen.len());
+    }
+}

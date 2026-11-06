@@ -28,7 +28,9 @@ Two constraints force the aggregator shape:
 
 The `xark_bin()` helper in `src/lib.rs` locates (and, if needed, builds) the
 `xark` binary so the CLI integration tests can shell out to it without relying
-on `CARGO_BIN_EXE_xark` (which is only set for tests inside the `cli` crate).
+on `CARGO_BIN_EXE_xark` (which is only set for tests inside the `cli` crate). It
+returns a copy under `target/xark-test-bin/`, so a rebuild of `target/release/xark`
+by another test process can't pull the file out from under a running test.
 
 ## Layout
 
@@ -37,8 +39,6 @@ on `CARGO_BIN_EXE_xark` (which is only set for tests inside the `cli` crate).
  `keccak`, `poseidon`, …), the on-chain `sbpf` suite, public-input `binding`,
  `fuzz`, backend `ptau` / `serialization` / `solana_format` / `soundness`.
 - `benches/groth16.rs` — proving/verifying benchmarks (`harness = false`).
-- `examples/to_snarkjs.rs` — exports fixtures into snarkjs-compatible JSON for
- differential testing.
 
 Fixtures live under `gadgets/tests/fixtures/groth16/` and are
 embedded with `include_bytes!`; regenerate them with `xark export`.

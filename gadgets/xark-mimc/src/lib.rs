@@ -15,8 +15,8 @@
 //! ```
 
 #![no_std]
-// The xark compiler rejects compound assignment on `Field`, so `x = x + y` is
-// required in place of `x += y`.
+// Gadget code keeps the `x = x + y` style it was written in (the old compiler
+// rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
 use xark::Field;

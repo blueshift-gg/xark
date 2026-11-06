@@ -24,16 +24,14 @@ impl XarkProject {
     /// directory to the nearest crate root).
     pub fn resolve(path: Option<PathBuf>) -> Result<Self> {
         let base = match path {
-            Some(p) => p,
+            Some(p) if !p.exists() => bail!("no such directory: {}", p.display()),
+            // Absolute, so the walk up to the crate root below can leave it.
+            Some(p) => p.canonicalize().unwrap_or(p),
             None => std::env::current_dir().context("resolving current directory")?,
         };
         Ok(Self {
             xark_dir: resolve_xark_dir(&base)?,
         })
-    }
-
-    pub fn r1cs_json(&self) -> PathBuf {
-        self.xark_dir.join("r1cs.json")
     }
 
     pub fn circuit_xbc(&self) -> PathBuf {
@@ -56,50 +54,29 @@ impl XarkProject {
         self.xark_dir.join("public_inputs.bin")
     }
 
-    /// The circuit's name — the `target/xark/<name>/` subdirectory name, which
-    /// `xark build` scopes to the crate's `[package] name`. Falls back to
-    /// `"circuit"` when the output dir has no usable file name.
-    pub fn circuit_name(&self) -> String {
-        self.xark_dir
-            .file_name()
-            .and_then(|s| s.to_str())
-            .filter(|s| !s.is_empty() && *s != "xark")
-            .unwrap_or("circuit")
-            .to_string()
+    /// The crate a `target/xark/<name>/` directory belongs to (`None` for a build
+    /// output elsewhere, e.g. `xark build --out`).
+    pub fn crate_dir(&self) -> Option<PathBuf> {
+        let target = self.xark_dir.parent()?.parent()?;
+        (target.file_name()? == "target").then(|| target.parent().map(PathBuf::from))?
     }
 
-    /// The circuit's entry function name, from the `entry` marker `xark build`
-    /// writes beside the artifacts. Names the proof bundle and generated
-    /// `<Fn>Inputs` struct. Falls back to the crate name when the marker is
-    /// absent or the entry is the generic `circuit`.
-    pub fn entry_name(&self) -> String {
-        std::fs::read_to_string(self.xark_dir.join("entry"))
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty() && s != "circuit")
-            .unwrap_or_else(|| self.circuit_name())
-    }
-
-    /// snarkjs verifying key (`snarkjs-verification_key.json`) written by setup —
-    /// the file a JS/snarkjs client (or `xark-client`) verifies against.
-    pub fn snarkjs_vk(&self) -> PathBuf {
-        self.xark_dir.join("snarkjs-verification_key.json")
-    }
-
-    /// Default output directory for `xark export`'s generated verifier crate.
+    /// Default output directory for `xark export`'s generated verifier crate:
+    /// `<crate>/<name>-verifier/`, beside the circuit's sources (a nested crate with
+    /// its own `[workspace]`, so the circuit crate neither builds nor packages it),
+    /// where git tracks it and `cargo clean` leaves it. A build output outside a
+    /// crate's `target/` keeps it there, as `verifier/`.
     pub fn export_dir(&self) -> PathBuf {
-        self.xark_dir.join("verifier")
-    }
-
-    /// Default output directory for `xark client`'s generated TypeScript client.
-    pub fn client_dir(&self) -> PathBuf {
-        self.xark_dir.join("client")
+        match (self.crate_dir(), self.xark_dir.file_name()) {
+            (Some(krate), Some(name)) => krate.join(format!("{}-verifier", name.to_string_lossy())),
+            _ => self.xark_dir.join("verifier"),
+        }
     }
 
     /// Auto-detect a Powers-of-Tau (`.ptau`) transcript for production setup.
     ///
-    /// Searches `target/xark/`, `target/xark/ptau/`, the crate root, and
-    /// `<root>/ptau/`, returning the first `*.ptau` found.
+    /// Searches `target/xark/<name>/`, `target/xark/`, and the crate root, each
+    /// with its `ptau/` subdir, returning the first `*.ptau` found.
     pub fn find_ptau(&self) -> Option<PathBuf> {
         let mut dirs = vec![self.xark_dir.clone(), self.xark_dir.join("ptau")];
         // `target/xark/<pkg>/` → the shared `target/xark/` is one level up …
@@ -116,7 +93,7 @@ impl XarkProject {
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "ptau") {
+                    if path.extension().is_some_and(|e| e == "ptau") && path.is_file() {
                         return Some(path);
                     }
                 }
@@ -131,12 +108,8 @@ impl XarkProject {
 /// writes.
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
     // 1. `base` is already a scoped output dir (a `target/xark/<name>/` holding
-    //    circuit.xbc — the artifact every build writes — or the `--emit-json`
-    //    JSON siblings) — use it directly.
-    if base.join("circuit.xbc").is_file()
-        || base.join("r1cs.json").is_file()
-        || base.join("circuit.json").is_file()
-    {
+    //    circuit.xbc, the artifact every build writes) — use it directly.
+    if base.join("circuit.xbc").is_file() {
         return Ok(base.to_path_buf());
     }
     // 2. `base` is a crate dir → `target/xark/<pkg-name>/`.
@@ -163,7 +136,7 @@ fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
         }
     }
     // 5. Fallback: treat `base` itself as the output dir (setup will surface a
-    //    clear "missing r1cs.json" error if it is wrong).
+    //    clear "run `xark build` first" error if it is wrong).
     Ok(base.to_path_buf())
 }
 
@@ -183,7 +156,7 @@ fn scoped_dir(crate_dir: &Path) -> PathBuf {
 }
 
 /// When `base` is a bare `target/xark/`, find the single circuit subdir under
-/// it (a `<name>/` holding r1cs.json / circuit.json). Returns `Ok(None)` if
+/// it (a `<name>/` holding `circuit.xbc`). Returns `Ok(None)` if
 /// there are none; errors if there is more than one (the user must name one).
 fn single_named_subdir(base: &Path) -> Result<Option<PathBuf>> {
     if !base.is_dir() {
@@ -193,11 +166,7 @@ fn single_named_subdir(base: &Path) -> Result<Option<PathBuf>> {
     if let Ok(entries) = std::fs::read_dir(base) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.is_dir()
-                && (p.join("circuit.xbc").is_file()
-                    || p.join("r1cs.json").is_file()
-                    || p.join("circuit.json").is_file())
-            {
+            if p.is_dir() && p.join("circuit.xbc").is_file() {
                 candidates.push(p);
             }
         }
@@ -238,7 +207,14 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
         if in_package && let Some(rest) = line.strip_prefix("name") {
             let rest = rest.trim_start();
             if let Some(val) = rest.strip_prefix('=') {
-                let val = val.trim().trim_matches('"').trim_matches('\'');
+                let val = val.trim();
+                let val = if let Some(rest) = val.strip_prefix('"') {
+                    rest.split_once('"').map(|(name, _)| name)?
+                } else {
+                    val.strip_prefix('\'')?
+                        .split_once('\'')
+                        .map(|(name, _)| name)?
+                };
                 if !val.is_empty() {
                     return Some(val.to_string());
                 }
@@ -246,4 +222,113 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::XarkProject;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("xark-ptau-discovery-{}-{id}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn xark_dir(&self) -> PathBuf {
+            let path = self.0.join("target/xark/circuit");
+            fs::create_dir_all(&path).unwrap();
+            path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn skips_directory_before_searching_ptau_subdirectory() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        fs::create_dir(xark_dir.join("fake.ptau")).unwrap();
+        let real_file = xark_dir.join("ptau/ceremony.ptau");
+        fs::create_dir_all(real_file.parent().unwrap()).unwrap();
+        fs::write(&real_file, b"transcript").unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
+
+    #[test]
+    fn ignores_directory_when_no_transcript_file_exists() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        fs::create_dir(xark_dir.join("fake.ptau")).unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), None);
+    }
+
+    #[test]
+    fn skips_shared_directory_before_searching_crate_root() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        fs::create_dir(xark_dir.parent().unwrap().join("fake.ptau")).unwrap();
+        let real_file = temp.0.join("ceremony.ptau");
+        fs::write(&real_file, b"transcript").unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
+
+    #[test]
+    fn still_finds_a_ptau_file_in_the_first_search_directory() {
+        let temp = TestDir::new();
+        let xark_dir = temp.xark_dir();
+        let real_file = xark_dir.join("ceremony.ptau");
+        fs::write(&real_file, b"transcript").unwrap();
+
+        assert_eq!(XarkProject { xark_dir }.find_ptau(), Some(real_file));
+    }
+
+    #[test]
+    fn package_name_with_inline_comment_scopes_build_output_correctly() {
+        let temp = TestDir::new();
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[package]\nname = \"example-circuit\" # comment after the value\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let project = XarkProject::resolve(Some(temp.0.clone())).unwrap();
+        let crate_dir = temp.0.canonicalize().unwrap();
+
+        assert_eq!(
+            project.xark_dir,
+            crate_dir.join("target/xark/example-circuit")
+        );
+    }
+
+    #[test]
+    fn package_name_accepts_a_toml_literal_string() {
+        let temp = TestDir::new();
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[package]\nname = 'example-circuit' # comment\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            super::read_pkg_name(&temp.0).as_deref(),
+            Some("example-circuit")
+        );
+    }
 }

@@ -3,11 +3,15 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Sha256
-import Formal.Wrappers
 import Formal.Arith
-import Formal.Gadgets
-import Mathlib
+import Formal.Wrappers
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 set_option linter.style.setOption false
 set_option linter.style.header false
@@ -401,7 +405,9 @@ private theorem toNat_add3Mod32 (a b c : Word32) :
 /-- **3-input `addMod32` per-bit gadget soundness.** Same shape as
 `addMod32_bit_sound`, but the gadget sums three input words and decomposes the
 `< 2³⁴` total with two carry bits — so a single `reduce::<34>` replaces two
-chained `add32`s. -/
+chained `add32`s. This is the arithmetic model; `add3` now emits `reduce::<34>`'s
+rows (33 bits and one `t·(t − 2³³) = 0` top row), which `Reduce34.soundness` in
+`Reduce.lean` proves. -/
 theorem add3Mod32_bit_sound (a b c : Word32)
     (wa wb wc wsum : Fin 32 → ZMod r) (wcarry0 wcarry1 : ZMod r)
     (ha : ∀ i, BitOf (wa i) (a i)) (hb : ∀ i, BitOf (wb i) (b i))

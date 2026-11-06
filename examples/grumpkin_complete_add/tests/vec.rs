@@ -2,16 +2,9 @@
 //! across all exceptional cases: P+∞, ∞+Q, P+(−P)=∞, P+P (doubling), generic
 //! P+Q, and ∞+∞=∞. Each case must solve; a wrong sum must be rejected.
 
-use std::collections::BTreeMap;
 use std::path::Path;
-use xark_ir::{primitive, solver};
 
-fn load() -> primitive::PrimitiveProgram {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
-    let c = xark_test_harness::compile_file(&src, "grumpkin_complete_add", "bn254");
-    assert!(c.status_success, "compile failed:\n{}", c.stderr);
-    c.program()
-}
+use grumpkin_complete_add::{GrumpkinCompleteAddInputs, grumpkin_complete_add};
 
 // ark-grumpkin reference (scratchpad `cadd.rs`), P=7·G, Q=9·G.
 type Pt = (&'static str, &'static str, &'static str);
@@ -22,28 +15,18 @@ const ZERO: Pt = ("0", "0", "1");
 const P_PLUS_P: Pt = ("12129716857924429340218542075908212533496677097166424713975580824254252046442", "11162489639683440471287028718798944516272846750856846865789391746548932089300", "0");
 const P_PLUS_Q: Pt = ("10048396645591090210938223153773661969273778423700515767537776857572940140693", "11191650190137620699484062530470068897361843000224931459139859184792496975033", "0");
 
-fn ids(program: &primitive::PrimitiveProgram) -> impl Fn(&str) -> u32 + '_ {
-    move |name: &str| {
-        program.vars.iter().find(|v| v.name == name).unwrap_or_else(|| panic!("no var {name}")).id
+fn inputs(p: Pt, q: Pt, r: Pt) -> GrumpkinCompleteAddInputs {
+    let s = |v: &str| v.into();
+    GrumpkinCompleteAddInputs {
+        px: s(p.0), py: s(p.1), pinf: s(p.2),
+        qx: s(q.0), qy: s(q.1), qinf: s(q.2),
+        rx: s(r.0), ry: s(r.1), rinf: s(r.2),
     }
-}
-
-fn inputs(program: &primitive::PrimitiveProgram, p: Pt, q: Pt, r: Pt) -> BTreeMap<u32, String> {
-    let id = ids(program);
-    let mut m = BTreeMap::new();
-    for (n, v) in [
-        ("px", p.0), ("py", p.1), ("pinf", p.2),
-        ("qx", q.0), ("qy", q.1), ("qinf", q.2),
-        ("rx", r.0), ("ry", r.1), ("rinf", r.2),
-    ] {
-        m.insert(id(n), v.to_string());
-    }
-    m
 }
 
 #[test]
 fn complete_add_all_cases() {
-    let program = load();
+    let circuit = xark::prover::circuit("grumpkin_complete_add");
     let cases: [(&str, Pt, Pt, Pt); 6] = [
         ("P + 0 = P", P, ZERO, P),
         ("0 + Q = Q", ZERO, Q, Q),
@@ -53,19 +36,20 @@ fn complete_add_all_cases() {
         ("0 + 0 = inf", ZERO, ZERO, ZERO),
     ];
     for (name, p, q, r) in cases {
-        let m = inputs(&program, p, q, r);
-        let assign = solver::solve_and_check(&program, &m)
-            .unwrap_or_else(|e| panic!("case `{name}` must verify: {e:?}"));
-        let holes = solver::analyze_underconstrained(&program, &assign);
-        assert!(holes.is_empty(), "case `{name}` under-constrained: {holes:?}");
+        circuit
+            .check_constrained(inputs(p, q, r))
+            .unwrap_or_else(|e| panic!("case `{name}`: {e}"));
     }
 
-    // a wrong sum is rejected.
-    let program2 = &program;
-    let mut bad = inputs(program2, P, Q, P_PLUS_P); // claim P+Q == 2P
-    let _ = &mut bad;
+    // a wrong sum is rejected: claim P+Q == 2P.
+    let (p, q, r) = (P, Q, P_PLUS_P);
     assert!(
-        solver::solve_and_check(program2, &bad).is_err(),
+        grumpkin_complete_add(
+            p.0, p.1, p.2,
+            q.0, q.1, q.2,
+            r.0, r.1, r.2,
+        )
+        .is_err(),
         "wrong sum must be rejected"
     );
 }

@@ -166,34 +166,6 @@ impl LeafInput for Point {
     }
 }
 
-/// An ECDSA signature `(r, s)` in the default 3×86 limb layout — `prefix.r.limbs[..]`
-/// then `prefix.s.limbs[..]` (secp256r1's `Signature` compound; secp256k1's 2×128
-/// one is [`SignaturePacked`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Signature {
-    pub r: Uint256,
-    pub s: Uint256,
-}
-
-impl Signature {
-    /// From a 64-byte big-endian `r ‖ s`.
-    pub fn from_rs(bytes: &[u8]) -> Self {
-        assert_eq!(bytes.len(), 64, "Signature::from_rs expects 64 bytes");
-        Self {
-            r: Uint256::from_bytes_be(&bytes[..32]),
-            s: Uint256::from_bytes_be(&bytes[32..]),
-        }
-    }
-}
-
-impl LeafInput for Signature {
-    fn leaves(&self, prefix: &str) -> Vec<(String, String)> {
-        let mut out = self.r.leaves(&format!("{prefix}.r"));
-        out.extend(self.s.leaves(&format!("{prefix}.s")));
-        out
-    }
-}
-
 /// An affine point whose coordinates flatten as **3×85-bit** limbs — the layout of
 /// the lazy Ed25519 path's `PointL`, distinct from the default 3×86 [`Point`].
 #[derive(Clone, Debug, PartialEq, Eq)]

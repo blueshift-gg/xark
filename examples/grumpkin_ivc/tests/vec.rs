@@ -3,17 +3,13 @@
 //! Accept / analyzer-clean / tamper-reject (both the computation and the
 //! accumulator) / Groth16.
 
-use std::collections::BTreeMap;
 use std::path::Path;
-use xark_ir::{primitive, solver};
+
+use grumpkin_ivc::GrumpkinIvcInputs;
+use xark_grumpkin::Instance;
 
 fn src() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")
-}
-fn load() -> primitive::PrimitiveProgram {
-    let c = xark_test_harness::compile_file(&src(), "grumpkin_ivc", "bn254");
-    assert!(c.status_success, "compiling grumpkin_ivc failed:\n{}", c.stderr);
-    c.program()
 }
 
 // --- host reference (scratchpad `ivc.rs`), z0=3 → z1=14 → z2=201 ---
@@ -48,55 +44,42 @@ const U2_X: &str = "2800240808433720351539188551067984909022";
 const Z0: &str = "3";
 const Z2: &str = "201";
 
-fn honest(program: &primitive::PrimitiveProgram) -> BTreeMap<u32, String> {
-    let id = |name: &str| {
-        program
-            .vars
-            .iter()
-            .find(|v| v.name == name)
-            .unwrap_or_else(|| panic!("missing circuit var `{name}`"))
-            .id
-    };
-    let mut m = BTreeMap::new();
-    for (n, v) in [
-        ("u0_cw.x", U0_CWX), ("u0_cw.y", U0_CWY), ("u0_ce.x", U0_CEX), ("u0_ce.y", U0_CEY),
-        ("u0_u", U0_U), ("u0_x", U0_X),
-        ("s0_cw.x", S0_CWX), ("s0_cw.y", S0_CWY), ("s0_ce.x", S0_CEX), ("s0_ce.y", S0_CEY),
-        ("s0_u", S0_U), ("s0_x", S0_X),
-        ("t0.x", T0X), ("t0.y", T0Y),
-        ("s1_cw.x", S1_CWX), ("s1_cw.y", S1_CWY), ("s1_ce.x", S1_CEX), ("s1_ce.y", S1_CEY),
-        ("s1_u", S1_U), ("s1_x", S1_X),
-        ("t1.x", T1X), ("t1.y", T1Y),
-        ("u2_cw.x", U2_CWX), ("u2_cw.y", U2_CWY), ("u2_ce.x", U2_CEX), ("u2_ce.y", U2_CEY),
-        ("u2_u", U2_U), ("u2_x", U2_X),
-        ("z0", Z0), ("z2", Z2),
-    ] {
-        m.insert(id(n), v.to_string());
+/// An instance from its commitments' coordinates and `u`, `x`.
+fn inst(cw: (&str, &str), ce: (&str, &str), u: &str, x: &str) -> Instance {
+    Instance {
+        cw: cw.into(),
+        ce: ce.into(),
+        u: u.into(),
+        x: x.into(),
     }
-    m
+}
+
+fn honest() -> GrumpkinIvcInputs {
+    GrumpkinIvcInputs {
+        u0: inst((U0_CWX, U0_CWY), (U0_CEX, U0_CEY), U0_U, U0_X),
+        s0: inst((S0_CWX, S0_CWY), (S0_CEX, S0_CEY), S0_U, S0_X),
+        t0: (T0X, T0Y).into(),
+        s1: inst((S1_CWX, S1_CWY), (S1_CEX, S1_CEY), S1_U, S1_X),
+        t1: (T1X, T1Y).into(),
+        u2: inst((U2_CWX, U2_CWY), (U2_CEX, U2_CEY), U2_U, U2_X),
+        z0: Z0.into(),
+        z2: Z2.into(),
+    }
 }
 
 #[test]
 fn ivc_2step_verifies() {
-    let program = load();
-    let base = honest(&program);
+    let circuit = xark::prover::circuit("grumpkin_ivc");
+    // satisfiable on the honest vector, with no under-constrained (forgeable)
+    // witness variable.
+    circuit.check_constrained(honest()).expect("grumpkin_ivc must verify the honest 2-step run");
 
-    let assign = solver::solve_and_check(&program, &base)
-        .expect("grumpkin_ivc must verify the honest 2-step run");
-    let holes = solver::analyze_underconstrained(&program, &assign);
-    assert!(holes.is_empty(), "under-constrained: {holes:?}");
-
-    let id = |name: &str| program.vars.iter().find(|v| v.name == name).unwrap().id;
-
-    // tamper the computation output → rejected (z2 must equal F(F(z0))).
-    let mut bad_z = base.clone();
-    bad_z.insert(id("z2"), "202".to_string());
-    assert!(solver::solve_and_check(&program, &bad_z).is_err(), "wrong z2 must reject");
-
-    // tamper the final accumulator → rejected (fold chain is FS-bound).
-    let mut bad_u = base.clone();
-    bad_u.insert(id("u2_u"), "123".to_string());
-    assert!(solver::solve_and_check(&program, &bad_u).is_err(), "wrong U2 must reject");
+    let mut bad = honest();
+    bad.z2 = 202.into();
+    assert!(circuit.check(bad).is_err(), "wrong z2 must reject");
+    let mut bad = honest();
+    bad.u2.u = 123.into();
+    assert!(circuit.check(bad).is_err(), "wrong U2 must reject");
 }
 
 #[test]
@@ -110,14 +93,8 @@ fn report_constraint_count() {
 
 #[test]
 fn groth16_setup_prove_verify() {
-    let c = xark_test_harness::compile_file(&src(), "grumpkin_ivc", "bn254");
-    assert!(c.status_success, "{}", c.stderr);
-    let xbc = std::fs::read(c.out_dir.join("circuit.xbc")).expect("read circuit.xbc");
-    let cp = xark_ir::function_decode::expand_function_blob(&xbc).expect("expand circuit.xbc");
-    let r1cs = cp.to_r1cs();
-    let prim = cp.to_primitive();
-    let inputs = honest(&prim);
-    let ok = xark_prover::prove_and_verify(&r1cs, &prim, &inputs)
-        .expect("groth16 setup/prove/verify");
-    assert!(ok, "the Groth16 proof of the 2-step IVC must verify");
+    // solve → dev-mode Groth16 setup → prove → verify, on the built circuit.
+    xark::prover::circuit("grumpkin_ivc")
+        .prove_dev(honest())
+        .expect("the Groth16 proof must verify");
 }

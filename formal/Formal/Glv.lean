@@ -3,8 +3,10 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Ecdsa
-import Mathlib
+import Mathlib.Algebra.Module.NatInt
+import Mathlib.Data.Nat.ModEq
+import Mathlib.Tactic.Ring.RingNF
+import Mathlib.Tactic.Ring
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -134,11 +136,8 @@ theorem isEndomorphism_of_eigenvalue_at_generator {G : Type*} [AddCommGroup G]
 /-! ## Endomorphism correctness for secp256k1
 
 The concrete secp256k1 endomorphism is `φ(x, y) = (β · x mod p, y)` where
-`β` is a specific cube root of unity mod `p`. The statement
-`∀ P ∈ secp256k1, φ(P) = λ · P` is discharged in
-`Formal.Secp256k1Group` (`secp256k1_phi_hom`,
-`secp256k1_phi_eigenvalue_at_G`, `secp256k1_phi_acts_as_lambda`) against
-the `Secp256k1Point` `AddCommGroup` instance. -/
+`β` is a specific cube root of unity mod `p`. The concrete instance of
+`∀ P ∈ secp256k1, φ(P) = λ · P` went with the 0.3.0 GLV gadget it was about. -/
 
 /-- **secp256k1 GLV-relation soundness (algebraic).** The prover supplies
 `(k₁, k₂)` such that `k₁ + λ · k₂ ≡ k (mod n)` over ℤ where `n` is the

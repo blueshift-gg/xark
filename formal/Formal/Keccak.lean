@@ -3,9 +3,9 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Sha256
 import Formal.Wrappers
-import Mathlib
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.Choose
 
 -- We disable the same set of house-style lints as `Formal.Sha256` for the
 -- same reasons: branch-uniform `cases <;> simp` driver; the `flexible`

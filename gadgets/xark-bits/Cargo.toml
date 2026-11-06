@@ -6,6 +6,7 @@ categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -14,4 +15,16 @@ name = "xark_bits"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
+xark = { path = "../../crates/lang", version = "0.3.0" }
+
+[dev-dependencies]
+xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
+xark-ir = { path = "../../crates/ir", version = "0.3.0" }
+num-bigint.workspace = true
+sha2.workspace = true
+sha3 = "0.10"
+blake2 = "0.10"
+blake3 = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

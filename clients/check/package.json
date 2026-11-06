@@ -1,0 +1,15 @@
+{
+  "name": "xark-client-check",
+  "private": true,
+  "description": "The generated TypeScript clients of the representative examples: checked current, typechecked, and run (npm test).",
+  "scripts": {
+    "test": "tsc --noEmit && vitest run",
+    "update": "vitest run -u"
+  },
+  "devDependencies": {
+    "@blueshift-gg/xark-wasm": "file:../../crates/wasm",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.7"
+  }
+}

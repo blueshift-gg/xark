@@ -9,6 +9,9 @@
 //!   public inputs. When the VK is loaded from an account the program **must**
 //!   authenticate it (e.g. pin its hash).
 //!
+//! [`verify_groth16_batch`] checks several proofs of one VK with a single
+//! pairing call, for programs that settle many proofs per transaction.
+//!
 //! Both paths use the LE wire format documented in [`verifier`]. Curve arithmetic
 //! comes from [`solana_nostd_alt_bn128`], which routes through the `alt_bn128`
 //! syscalls on-chain and Arkworks off-chain. The crate is `no_std` on the Solana

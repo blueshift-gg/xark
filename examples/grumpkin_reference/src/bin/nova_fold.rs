@@ -35,11 +35,11 @@ fn main() {
     let x2 = Base::from(17u64);
     let ct = pt(55);
 
-    // r = low128(Poseidon2(transcript)), same host crate as the in-circuit gadget
+    // r = low128(Poseidon2(transcript)), the in-circuit gadget's own code
     let transcript: [Base; 14] = [
         cw1.x, cw1.y, ce1.x, ce1.y, u1, x1, cw2.x, cw2.y, ce2.x, ce2.y, u2, x2, ct.x, ct.y,
     ];
-    let h = poseidon2::hash(transcript);
+    let h = xark_poseidon2::native::hash(transcript);
     let hbig = BigUint::from_bytes_le(&h.into_bigint().to_bytes_le());
     let r_big = &hbig & &((BigUint::from(1u8) << 128u32) - 1u8);
     let r_s = Scalar::from(r_big.clone()); // Grumpkin scalar

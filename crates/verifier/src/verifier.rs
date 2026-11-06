@@ -40,7 +40,7 @@
 //! Arkworks reference off-chain, so the same [`verify_groth16`] runs unchanged
 //! in host tests and on-chain; only `core` is linked into the SBF build.
 
-use solana_nostd_alt_bn128::{AltBn128Error, G1Point, G2Point, pairing};
+use solana_nostd_alt_bn128::{AltBn128Error, G1Point, G2Point, pairing, pairing_bytes};
 use solana_program_error::ProgramError;
 
 // -- byte-layout constants ----------------------------------------------------
@@ -81,7 +81,7 @@ const FR_MODULUS_LE: [u8; FR_BYTES] = [
 /// value with the unused top bits flipped all decode to the *same* point and
 /// verify against the same proof — proof/VK encoding malleability, where a
 /// third party mangles a valid proof's bytes and it still verifies. The
-/// `*_strict` entry points reject it.
+/// `*_strict` entry points reject it (encoding only: proofs stay re-randomizable).
 const FQ_MODULUS_LE: [u8; FR_BYTES] = [
     0x47, 0xfd, 0x7c, 0xd8, 0x16, 0x8c, 0x20, 0x3c, 0x8d, 0xca, 0x71, 0x68, 0x91, 0x6a, 0x81, 0x97,
     0x5d, 0x58, 0x81, 0x81, 0xb6, 0x45, 0x50, 0xb8, 0x29, 0xa0, 0x31, 0xe1, 0x72, 0x4e, 0x64, 0x30,
@@ -120,7 +120,7 @@ pub(crate) fn fq_is_canonical(c: &[u8; FR_BYTES]) -> bool {
 /// the structural checks in [`verify_groth16`].
 pub(crate) fn coords_canonical(bytes: &[u8]) -> bool {
     let mut c = [0u8; FR_BYTES];
-    for chunk in bytes.chunks_exact(FR_BYTES) {
+    for chunk in bytes.as_chunks::<FR_BYTES>().0 {
         c.copy_from_slice(chunk);
         if !fq_is_canonical(&c) {
             return false;
@@ -167,6 +167,12 @@ pub enum VerifierError {
     /// bits is set). Only the `*_strict` entry points reject this; it prevents
     /// proof/VK encoding malleability, since the syscall masks those bits.
     NonCanonicalCoordinate,
+    /// A batch for [`verify_groth16_batch`] is empty, or not a whole number of
+    /// `proof || public_inputs` entries of `entry` bytes each.
+    BatchLength { entry: usize, actual: usize },
+    /// The `scratch` given to [`verify_groth16_batch`] holds fewer than `M + 3`
+    /// pairing operands for a batch of `M` proofs.
+    ScratchTooSmall { expected: usize, actual: usize },
     /// The BN254 backend (an `alt_bn128` syscall, or its host reference)
     /// rejected an operand or pairing input.
     Syscall,
@@ -208,6 +214,14 @@ impl core::fmt::Display for VerifierError {
             ),
             VerifierError::NonCanonicalCoordinate => f.write_str(
                 "a VK or proof coordinate is not a canonical Fq encoding (>= the base field order q)",
+            ),
+            VerifierError::BatchLength { entry, actual } => write!(
+                f,
+                "batch must be one or more {entry}-byte proof || public_inputs entries; got {actual} B"
+            ),
+            VerifierError::ScratchTooSmall { expected, actual } => write!(
+                f,
+                "batch scratch must hold at least {expected} pairing operands; got {actual}"
             ),
             VerifierError::Syscall => f.write_str("alt_bn128 backend rejected an operand"),
         }
@@ -289,6 +303,117 @@ fn g16_assemble_pairs(
     [(a, b), (alpha, beta), (vk_x, gamma), (c, delta)]
 }
 
+// -- small-scalar fast path ---------------------------------------------------
+//
+// The `alt_bn128` syscalls are fixed-price: the runtime charges the same for
+// `1 · P` as for a full 254-bit scalar mul. Measured all-in (mollusk-svm,
+// sbpf v3, LE syscalls, `overflow-checks` + `lto = "fat"`), five inputs:
+//
+// ```text
+// g1_add          539 CU
+// g1_scalar_mul 4,016 CU     -> one mul is worth 7.45 adds
+// ```
+//
+// Three scalars are therefore overpaying, and each substitution below is a
+// group identity rather than an approximation:
+//
+// ```text
+// k == 0   0·P is the identity and acc + identity == acc   -> skip both ops
+// k == 1   1·P == P                                        -> skip the mul
+// k small  double-and-add costs (add_count(k) + 1) adds    -> skip the mul
+// ```
+//
+// A Rust-derived circuit hits this constantly: `bool` flags, enum
+// discriminants, loop counts and array indices all reach the verifier as
+// public inputs equal to 0, 1, or a single digit.
+
+/// Largest number of group additions the double-and-add substitution may spend
+/// before the mul syscall becomes the cheaper option.
+///
+/// One mul-path input costs `g1_scalar_mul + g1_add`; one addition-path input
+/// costs `add_count(k) + 1` `g1_add`s. Measured over five inputs, against
+/// 22,773 CU for the mul path:
+///
+/// ```text
+/// add_count = 7  (k = 128)   20,780 CU   -> win by 1,993
+/// add_count = 8  (k = 192)   23,165 CU   -> loss by 392
+/// ```
+const MAX_ADDS: u32 = 7;
+
+/// Largest scalar the fast path accepts.
+///
+/// `add_count(k) >= msb(k)`, so `add_count(k) <= MAX_ADDS` already implies
+/// `k <= 2^MAX_ADDS`. Naming the bound separately lets [`mul_small`] iterate
+/// over a *compile-time* number of bit positions, which keeps the loop
+/// statically bounded for Kani's unwinding.
+const MAX_SMALL_SCALAR: u64 = 1 << MAX_ADDS;
+
+/// Group additions left-to-right double-and-add needs for `k >= 1`: one
+/// doubling per bit position below the MSB, plus one add per set bit below the
+/// MSB. Returns `0` for `k == 0`, which the caller never passes.
+#[inline(always)]
+const fn add_count(k: u64) -> u32 {
+    if k == 0 {
+        return 0;
+    }
+    let msb = 63 - k.leading_zeros();
+    msb + (k.count_ones() - 1)
+}
+
+/// `Some(k)` when the 32-byte LE scalar encodes exactly the integer `k`, and
+/// double-and-add is cheaper for it than the mul syscall. `None` means "use
+/// `g1_scalar_mul`".
+///
+/// The `Some` case asserts the scalar's *whole* 32 bytes are the LE encoding of
+/// `k` — the fast path must never fire on a scalar that merely looks small in
+/// its low limb.
+#[inline(always)]
+fn small_scalar(s: &[u8; FR_BYTES]) -> Option<u64> {
+    // Everything at or above 2^64 is far past the break-even. Bail before the
+    // limb read so the common (large-scalar) case exits after one byte.
+    let mut i = 8;
+    while i < FR_BYTES {
+        if s[i] != 0 {
+            return None;
+        }
+        i += 1;
+    }
+    let mut limb = [0u8; 8];
+    limb.copy_from_slice(&s[..8]);
+    let k = u64::from_le_bytes(limb);
+    if k == 0 || k > MAX_SMALL_SCALAR || add_count(k) > MAX_ADDS {
+        return None;
+    }
+    Some(k)
+}
+
+/// `k · p` by left-to-right double-and-add, for `1 <= k <= MAX_SMALL_SCALAR`.
+///
+/// The bit loop runs over the fixed range `MAX_ADDS-1 ..= 0` and skips
+/// positions at or above the MSB, so it performs exactly `msb(k)` doublings
+/// while keeping its trip count a compile-time constant.
+///
+/// `k >= 1` means `acc` starts at `p` and is never the identity, so the only
+/// unusual operand pattern is the doubling `acc + acc`, which the `alt_bn128`
+/// addition handles.
+#[inline]
+fn mul_small(p: G1Point, k: u64) -> Result<G1Point, AltBn128Error> {
+    let msb = 63 - k.leading_zeros();
+    let mut acc = p;
+    let mut bit = MAX_ADDS;
+    while bit > 0 {
+        bit -= 1;
+        if bit >= msb {
+            continue; // above the MSB: contributes nothing
+        }
+        acc = g1_add(acc, acc)?;
+        if (k >> bit) & 1 == 1 {
+            acc = g1_add(acc, p)?;
+        }
+    }
+    Ok(acc)
+}
+
 // -- core verifier ------------------------------------------------------------
 
 /// Verify a Groth16 proof. The curve arithmetic resolves to the `alt_bn128`
@@ -300,29 +425,7 @@ pub fn verify_groth16(
     proof_bytes: &[u8],
     public_inputs: &[u8],
 ) -> Result<bool, VerifierError> {
-    // ---- Parse VK ----------------------------------------------------------
-    // VK = alpha(G1) | beta(G2) | gamma(G2) | delta(G2) | (N+1) × G1 (IC).
-    // The IC count is *implied by length* — there is no ic_count field on the
-    // wire — so it can never disagree with the actual bytes.
-    if vk_bytes.len() < VK_FIXED_PREFIX_BYTES + G1_BYTES {
-        return Err(VerifierError::TruncatedVk {
-            expected: VK_FIXED_PREFIX_BYTES + G1_BYTES,
-            actual: vk_bytes.len(),
-        });
-    }
-    let alpha = g1_at(vk_bytes, 0);
-    let beta = g2_at(vk_bytes, G1_BYTES);
-    let gamma = g2_at(vk_bytes, G1_BYTES + G2_BYTES);
-    let delta = g2_at(vk_bytes, G1_BYTES + 2 * G2_BYTES);
-
-    let ic_slice = &vk_bytes[VK_FIXED_PREFIX_BYTES..];
-    if ic_slice.len() % G1_BYTES != 0 {
-        return Err(VerifierError::IcLengthMismatch {
-            expected: (ic_slice.len() / G1_BYTES) * G1_BYTES,
-            actual: ic_slice.len(),
-        });
-    }
-    let ic_count = (ic_slice.len() / G1_BYTES) as u32;
+    let vk = parse_vk(vk_bytes)?;
 
     // ---- Parse proof -------------------------------------------------------
     if proof_bytes.len() != PROOF_BYTES {
@@ -336,8 +439,58 @@ pub fn verify_groth16(
     let proof_b = g2_at(proof_bytes, G1_BYTES);
     let proof_c = g1_at(proof_bytes, G1_BYTES + G2_BYTES);
 
-    // ---- Parse public inputs ----------------------------------------------
-    if public_inputs.len() % FR_BYTES != 0 {
+    let vk_x = vk_x(vk.ic, public_inputs)?;
+
+    // ---- Pairing check -----------------------------------------------------
+    groth16_pairing_check(
+        proof_a, proof_b, vk.alpha, vk.beta, vk_x, vk.gamma, proof_c, vk.delta,
+    )
+}
+
+/// A VK's parts, borrowed from its wire bytes.
+struct VkParts<'a> {
+    alpha: G1Point,
+    beta: G2Point,
+    gamma: G2Point,
+    delta: G2Point,
+    /// The IC region: `ic_count` G1 points.
+    ic: &'a [u8],
+}
+
+/// Split a VK into its parts, checking its length.
+#[inline(always)]
+fn parse_vk(vk_bytes: &[u8]) -> Result<VkParts<'_>, VerifierError> {
+    // VK = alpha(G1) | beta(G2) | gamma(G2) | delta(G2) | (N+1) × G1 (IC).
+    // The IC count is *implied by length* — there is no ic_count field on the
+    // wire — so it can never disagree with the actual bytes.
+    if vk_bytes.len() < VK_FIXED_PREFIX_BYTES + G1_BYTES {
+        return Err(VerifierError::TruncatedVk {
+            expected: VK_FIXED_PREFIX_BYTES + G1_BYTES,
+            actual: vk_bytes.len(),
+        });
+    }
+    let ic = &vk_bytes[VK_FIXED_PREFIX_BYTES..];
+    if !ic.len().is_multiple_of(G1_BYTES) {
+        return Err(VerifierError::IcLengthMismatch {
+            expected: (ic.len() / G1_BYTES) * G1_BYTES,
+            actual: ic.len(),
+        });
+    }
+    Ok(VkParts {
+        alpha: g1_at(vk_bytes, 0),
+        beta: g2_at(vk_bytes, G1_BYTES),
+        gamma: g2_at(vk_bytes, G1_BYTES + G2_BYTES),
+        delta: g2_at(vk_bytes, G1_BYTES + 2 * G2_BYTES),
+        ic,
+    })
+}
+
+/// `vk_x = ic[0] + Σ inputs[i] · ic[i+1]`, after checking the inputs' length,
+/// arity and canonicity. `ic` is a whole number of G1 points ([`parse_vk`]).
+#[inline(always)]
+fn vk_x(ic: &[u8], public_inputs: &[u8]) -> Result<G1Point, VerifierError> {
+    let ic_count = (ic.len() / G1_BYTES) as u32;
+    if !public_inputs.len().is_multiple_of(FR_BYTES) {
         return Err(VerifierError::PublicInputsLength {
             fr: FR_BYTES,
             expected: (public_inputs.len() / FR_BYTES) * FR_BYTES,
@@ -353,21 +506,49 @@ pub fn verify_groth16(
         });
     }
 
-    // ---- Compute vk_x = ic[0] + Σ inputs[i] · ic[i+1] ----------------------
-    let mut acc = g1_at(ic_slice, 0);
+    let mut acc = g1_at(ic, 0);
     for i in 0..num_inputs as usize {
-        let ic_i = g1_at(ic_slice, (i + 1) * G1_BYTES);
-        let mut scalar = [0u8; FR_BYTES];
-        scalar.copy_from_slice(&public_inputs[i * FR_BYTES..(i + 1) * FR_BYTES]);
-        if !scalar_is_canonical(&scalar) {
-            return Err(VerifierError::NonCanonicalPublicInput { index: i as u32 });
-        }
-        let term = g1_scalar_mul(ic_i, &scalar)?;
-        acc = g1_add(acc, term)?;
+        // In bounds: the lengths are checked above.
+        let s: &[u8; FR_BYTES] = public_inputs[i * FR_BYTES..][..FR_BYTES]
+            .try_into()
+            .expect("checked");
+        let ic_i: &[u8; G1_BYTES] = ic[(i + 1) * G1_BYTES..][..G1_BYTES]
+            .try_into()
+            .expect("checked");
+        acc = add_input_term(acc, ic_i, s, i)?;
     }
+    Ok(acc)
+}
 
-    // ---- Pairing check -----------------------------------------------------
-    groth16_pairing_check(proof_a, proof_b, alpha, beta, acc, gamma, proof_c, delta)
+/// `acc + s · ic_i`: public input `index`'s term of `vk_x`, for both the byte and
+/// the typed [`Verifier`](crate::Verifier) paths. Rejects a non-canonical `s`;
+/// costs nothing for `s = 0`, and a small `s` takes additions, not the mul syscall.
+#[inline(always)]
+pub(crate) fn add_input_term(
+    acc: G1Point,
+    ic_i: &[u8; G1_BYTES],
+    s: &[u8; FR_BYTES],
+    index: usize,
+) -> Result<G1Point, VerifierError> {
+    if !scalar_is_canonical(s) {
+        return Err(VerifierError::NonCanonicalPublicInput {
+            index: index as u32,
+        });
+    }
+    // 0 · ic[i+1] is the identity and acc + identity == acc, so the whole
+    // term drops out. This also skips the mul syscall's incidental on-curve
+    // check of ic[i+1] — that operand comes from the VK, which is already
+    // trusted input (a caller who can choose the VK can prove anything).
+    if *s == [0u8; FR_BYTES] {
+        return Ok(acc);
+    }
+    let ic_i = G1Point::from_le_bytes(*ic_i);
+    let term = match small_scalar(s) {
+        // k == 1 returns ic_i with no syscall at all.
+        Some(k) => mul_small(ic_i, k)?,
+        None => g1_scalar_mul(ic_i, s)?,
+    };
+    Ok(g1_add(acc, term)?)
 }
 
 /// The final Groth16 pairing check, shared by the byte-slice
@@ -419,10 +600,10 @@ pub fn verify_proof_only(vk_bytes: &[u8], instruction_data: &[u8]) -> Result<boo
 ///
 /// The `alt_bn128` syscall **masks** those bits, so a plain [`verify_groth16`]
 /// accepts byte-distinct encodings of the same point — i.e. a third party can
-/// mutate a valid proof's bytes and it still verifies. Use this when the
-/// *exact bytes* must be canonical: when a proof's bytes are hashed, signed, or
-/// used as a replay/dedup key. (Public inputs are `Fr` and are already rejected
-/// when non-canonical by both variants — see [`VerifierError::NonCanonicalPublicInput`].)
+/// mutate a valid proof's bytes and it still verifies; this rejects that. It does **not** make
+/// proof bytes unique: Groth16 proofs are re-randomizable, so never use them (or their hash) as a
+/// replay or dedup key; bind a nullifier, nonce or signer into the public inputs instead.
+/// (Non-canonical public inputs are rejected by both variants: [`VerifierError::NonCanonicalPublicInput`].)
 pub fn verify_groth16_strict(
     vk_bytes: &[u8],
     proof_bytes: &[u8],
@@ -448,6 +629,172 @@ pub fn verify_proof_only_strict(
     }
     let (proof, public_inputs) = instruction_data.split_at(PROOF_BYTES);
     verify_groth16_strict(vk_bytes, proof, public_inputs)
+}
+
+// -- batch verification -------------------------------------------------------
+//
+// M proofs against one VK in a single pairing call. Each proof's check
+// `e(-Aᵢ, Bᵢ)·e(α, β)·e(vk_xᵢ, γ)·e(Cᵢ, δ) = 1` is raised to a weight rᵢ and the
+// M checks multiplied; the shared α, β, γ, δ let the last three terms merge:
+//
+//   Πᵢ e(rᵢ·(-Aᵢ), Bᵢ) · e((Σrᵢ)·α, β) · e(Σ rᵢ·vk_xᵢ, γ) · e(Σ rᵢ·Cᵢ, δ) = 1
+//
+// M + 3 pairs instead of 4M. Without the weights, invalid proofs could be made
+// to cancel each other out. With them, if proof j is invalid the batch passes only
+// when rⱼ hits the one value (mod r) that cancels the rest: r₀ = 1, and each other
+// rᵢ is 252 bits of SHA-256 over the domain tag, the VK (length-prefixed) and the
+// whole batch,
+// so they're fixed only once everything they weigh is. The weights are public, so
+// a prover can grind: each new batch is a fresh try at about 2⁻²⁵² (full-width
+// weights cost the same as narrow ones: a scalar mul is fixed-price).
+//
+// Strict, like `verify_groth16_strict`: one encoding per point.
+
+/// Domain tag for the batch weights' hash.
+const BATCH_DOMAIN: &[u8] = b"xark-groth16-batch-v1";
+
+/// SHA-256 of the concatenated `vals` (the `sol_sha256` syscall on-chain).
+#[inline(always)]
+fn batch_hash(vals: &[&[u8]]) -> [u8; 32] {
+    solana_sha256_hasher::hashv(vals).to_bytes()
+}
+
+#[inline(always)]
+fn g16_pairing_bytes(input: &[u8]) -> Result<[u8; 32], AltBn128Error> {
+    pairing_bytes(input)
+}
+
+/// Weight `rᵢ` (`i ≥ 1`): `SHA-256(seed || i)` as a 32-byte LE scalar in
+/// `[2²⁵², 2²⁵³)`: bits 253..255 cleared and bit 252 set, so it's never 0 and
+/// canonical (`2²⁵³ < r`), with 252 bits from the hash.
+#[inline(always)]
+fn batch_weight(seed: &[u8; 32], i: u64) -> [u8; FR_BYTES] {
+    let mut r = batch_hash(&[seed, &i.to_le_bytes()]);
+    r[31] = (r[31] & 0x0f) | 0x10;
+    r
+}
+
+/// `acc = (acc + x) mod r` for canonical `acc, x < r`, on 256-bit LE integers:
+/// the sum is below `2r < 2²⁵⁵`, so one conditional subtraction reduces it.
+#[inline(always)]
+fn add_mod_r(acc: &mut [u8; FR_BYTES], x: &[u8; FR_BYTES]) {
+    let mut carry = 0u16;
+    for i in 0..FR_BYTES {
+        let t = acc[i] as u16 + x[i] as u16 + carry;
+        acc[i] = t as u8;
+        carry = t >> 8;
+    }
+    if !le_lt(acc, &FR_MODULUS_LE) {
+        let mut borrow = 0i16;
+        for i in 0..FR_BYTES {
+            let t = acc[i] as i16 - FR_MODULUS_LE[i] as i16 - borrow;
+            acc[i] = t as u8;
+            borrow = (t < 0) as i16;
+        }
+    }
+}
+
+/// Verify several proofs against one VK with a single pairing call: `M + 3`
+/// pairs instead of `4M`. `batch` is `M ≥ 1` entries, each a proof followed by
+/// its public inputs — the `instruction_data` [`verify_proof_only`] takes,
+/// repeated. `scratch` holds the pairing operands, at least `M + 3` of them (one
+/// per proof, plus three): on the stack for a small batch (192 bytes each; a Solana stack
+/// frame is 4 KB, so up to about 16 proofs), or on the heap or in account data:
+///
+/// ```ignore
+/// let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 4 + 3];
+/// let ok = verify_groth16_batch(VK_BYTES, instruction_data, &mut scratch)?;
+/// ```
+///
+/// `Ok(true)` means every proof verifies (except with probability about 2⁻²⁵² per
+/// batch an attacker tries);
+/// `Ok(false)` means at least one doesn't, but not which: verify them one by one
+/// to find it. Coordinates must be canonical, as in [`verify_groth16_strict`].
+///
+/// A batch can hold the same statement twice (proofs can be copied or
+/// re-randomized): reject duplicate nullifiers *within* the batch as well as
+/// against storage, and read each entry's public inputs from this same `batch`.
+/// See the crate README's "Using batches safely".
+pub fn verify_groth16_batch(
+    vk_bytes: &[u8],
+    batch: &[u8],
+    scratch: &mut [[u8; PAIRING_PAIR_BYTES]],
+) -> Result<bool, VerifierError> {
+    if !coords_canonical(vk_bytes) {
+        return Err(VerifierError::NonCanonicalCoordinate);
+    }
+    let vk = parse_vk(vk_bytes)?;
+    let num_inputs = vk.ic.len() / G1_BYTES - 1;
+    let entry = PROOF_BYTES + num_inputs * FR_BYTES;
+    if batch.is_empty() || !batch.len().is_multiple_of(entry) {
+        return Err(VerifierError::BatchLength {
+            entry,
+            actual: batch.len(),
+        });
+    }
+    let n = batch.len() / entry;
+    let need = n + 3;
+    if scratch.len() < need {
+        return Err(VerifierError::ScratchTooSmall {
+            expected: need,
+            actual: scratch.len(),
+        });
+    }
+    // Every proof's coordinates canonical before the hash sees them.
+    for e in batch.chunks_exact(entry) {
+        if !coords_canonical(&e[..PROOF_BYTES]) {
+            return Err(VerifierError::NonCanonicalCoordinate);
+        }
+    }
+
+    // One proof needs no weights (r₀ = 1): skip the hash, and `α · 1` below.
+    let seed = if n > 1 {
+        batch_hash(&[
+            BATCH_DOMAIN,
+            &(vk_bytes.len() as u64).to_le_bytes(),
+            vk_bytes,
+            batch,
+        ])
+    } else {
+        [0u8; 32]
+    };
+    let mut sum_r = [0u8; FR_BYTES];
+    sum_r[0] = 1; // r₀
+    let (mut vk_x_acc, mut c_acc) = (G1Point([0; G1_BYTES]), G1Point([0; G1_BYTES]));
+    for (i, e) in batch.chunks_exact(entry).enumerate() {
+        let (proof, public_inputs) = e.split_at(PROOF_BYTES);
+        let a = g1_at(proof, 0);
+        let c = g1_at(proof, G1_BYTES + G2_BYTES);
+        let x = vk_x(vk.ic, public_inputs)?;
+        let a = if i == 0 {
+            (vk_x_acc, c_acc) = (x, c);
+            a
+        } else {
+            let r = batch_weight(&seed, i as u64);
+            add_mod_r(&mut sum_r, &r);
+            vk_x_acc = g1_add(vk_x_acc, g1_scalar_mul(x, &r)?)?;
+            c_acc = g1_add(c_acc, g1_scalar_mul(c, &r)?)?;
+            g1_scalar_mul(a, &r)?
+        };
+        let slot = &mut scratch[i];
+        slot[..G1_BYTES].copy_from_slice(&a.0);
+        slot[G1_BYTES..].copy_from_slice(&proof[G1_BYTES..G1_BYTES + G2_BYTES]); // B
+    }
+    let alpha = if n > 1 {
+        g1_scalar_mul(vk.alpha, &sum_r)?
+    } else {
+        vk.alpha
+    };
+    for (k, (g1, g2)) in [(alpha, vk.beta), (vk_x_acc, vk.gamma), (c_acc, vk.delta)]
+        .into_iter()
+        .enumerate()
+    {
+        let slot = &mut scratch[n + k];
+        slot[..G1_BYTES].copy_from_slice(&g1.0);
+        slot[G1_BYTES..].copy_from_slice(&g2.0);
+    }
+    let result = g16_pairing_bytes(scratch[..need].as_flattened())?;
+    Ok(result[0] == 1 && result[1..].iter().all(|b| *b == 0))
 }
 
 #[cfg(test)]
@@ -517,6 +864,115 @@ mod tests {
         assert!(coords_canonical(&buf));
         buf[2 * FR_BYTES + (FR_BYTES - 1)] = 0xFF; // make the 3rd chunk >= q
         assert!(!coords_canonical(&buf));
+    }
+
+    /// `add_mod_r` wraps at `r`, and weights are full
+    /// width, nonzero and canonical.
+    #[test]
+    fn batch_weights_and_their_sum() {
+        let mut r_minus_1 = FR_MODULUS_LE;
+        r_minus_1[0] -= 1;
+        let mut s = r_minus_1;
+        add_mod_r(&mut s, &r_minus_1); // r - 2
+        let mut two = [0u8; FR_BYTES];
+        two[0] = 2;
+        add_mod_r(&mut s, &two);
+        assert_eq!(s, [0u8; FR_BYTES], "(r-1) + (r-1) + 2 = 2r = 0");
+        let mut one = [0u8; FR_BYTES];
+        one[0] = 1;
+        let mut s = one;
+        add_mod_r(&mut s, &one);
+        assert_eq!(s[0], 2);
+
+        for i in 1..64 {
+            let w = batch_weight(&[7u8; 32], i);
+            assert!(scalar_is_canonical(&w));
+            assert_eq!(w[31] >> 4, 1, "w in [2^252, 2^253)");
+        }
+    }
+
+    /// BN254's G1 generator in the LE wire format: `x = 1`, `y = 2`.
+    fn g1_generator() -> G1Point {
+        let mut bytes = [0u8; G1_BYTES];
+        bytes[0] = 1;
+        bytes[G1_BYTES / 2] = 2;
+        G1Point(bytes)
+    }
+
+    /// `add_count` counts one doubling per bit below the MSB plus one add per
+    /// set bit below it.
+    #[test]
+    fn add_count_boundaries() {
+        assert_eq!(add_count(0), 0, "k = 0 never reaches the adder");
+        assert_eq!(add_count(1), 0, "1 * P is P, no group op");
+        assert_eq!(add_count(2), 1, "one doubling");
+        assert_eq!(add_count(3), 2, "one doubling, one add");
+        assert_eq!(add_count(5), 3, "0b101: two doublings, one add");
+        assert_eq!(add_count(128), 7, "0b1000_0000: seven doublings, no adds");
+        assert_eq!(add_count(192), 8, "0b1100_0000: seven doublings, one add");
+    }
+
+    /// The fast path accepts exactly the scalars whose double-and-add fits the
+    /// measured budget, and nothing that merely looks small in its low limb.
+    #[test]
+    fn small_scalar_domain() {
+        let le = |k: u64| {
+            let mut s = [0u8; FR_BYTES];
+            s[..8].copy_from_slice(&k.to_le_bytes());
+            s
+        };
+        assert_eq!(small_scalar(&le(1)), Some(1));
+        assert_eq!(small_scalar(&le(5)), Some(5));
+        assert_eq!(
+            small_scalar(&le(MAX_SMALL_SCALAR)),
+            Some(MAX_SMALL_SCALAR),
+            "2^MAX_ADDS costs exactly MAX_ADDS doublings"
+        );
+        assert_eq!(small_scalar(&le(0)), None, "zero is handled by the caller");
+        assert_eq!(
+            small_scalar(&le(MAX_SMALL_SCALAR + 1)),
+            None,
+            "past the budget"
+        );
+        assert_eq!(small_scalar(&le(192)), None, "add_count 8 > MAX_ADDS");
+
+        // Small low limb, non-zero high limb: must not be mistaken for small.
+        let mut spoofed = le(5);
+        spoofed[FR_BYTES - 1] = 1;
+        assert_eq!(small_scalar(&spoofed), None, "high limbs are not ignored");
+    }
+
+    /// Exhaustive over the whole fast-path domain: `mul_small` is bit-identical
+    /// to the reference scalar mul for every `k` the fast path accepts.
+    #[test]
+    fn mul_small_matches_reference_mul_over_the_whole_domain() {
+        let g = g1_generator();
+        let mut checked = 0;
+        for k in 1..=MAX_SMALL_SCALAR {
+            let mut s = [0u8; FR_BYTES];
+            s[..8].copy_from_slice(&k.to_le_bytes());
+            if small_scalar(&s).is_none() {
+                continue;
+            }
+            let want = g1_scalar_mul(g, &s).expect("reference mul");
+            let got = mul_small(g, k).expect("double-and-add");
+            assert_eq!(got.0, want.0, "k = {k}");
+            checked += 1;
+        }
+        assert!(checked > 0, "the domain must not be empty");
+    }
+
+    /// The `k == 0` skip relies on `0 · P` being the additive identity: adding
+    /// it back leaves the accumulator unchanged.
+    #[test]
+    fn zero_scalar_term_is_the_additive_identity() {
+        let g = g1_generator();
+        let zero_term = g1_scalar_mul(g, &[0u8; FR_BYTES]).expect("0 * G");
+        assert_eq!(
+            g1_add(g, zero_term).expect("G + O").0,
+            g.0,
+            "acc + 0*P must equal acc"
+        );
     }
 }
 
@@ -1037,5 +1493,146 @@ mod proofs {
             flat[i * PAIRING_PAIR_BYTES..(i + 1) * PAIRING_PAIR_BYTES].copy_from_slice(slot);
         }
         assert!(flat == expected);
+    }
+
+    /// **The fast path only fires on a scalar that *is* the integer it
+    /// reports.** If `small_scalar` returns `Some(k)` then the full 32-byte
+    /// input equals the little-endian encoding of `k`, and `k` sits inside the
+    /// budgeted domain. This is what stops a large scalar with a small low limb
+    /// from being routed through `mul_small` and multiplied by the wrong value.
+    #[kani::proof]
+    fn small_scalar_is_exact_and_budgeted() {
+        let s: [u8; FR_BYTES] = kani::any();
+        if let Some(k) = small_scalar(&s) {
+            assert!(k >= 1 && k <= MAX_SMALL_SCALAR);
+            assert!(add_count(k) <= MAX_ADDS);
+            let mut expect = [0u8; FR_BYTES];
+            expect[..8].copy_from_slice(&k.to_le_bytes());
+            assert!(s == expect, "Some(k) implies the scalar is exactly k");
+        }
+    }
+
+    fn stub_g16_pairing_bytes(_input: &[u8]) -> Result<[u8; 32], AltBn128Error> {
+        if kani::any() {
+            Ok(kani::any())
+        } else {
+            Err(AltBn128Error::GroupError)
+        }
+    }
+
+    fn stub_batch_hash(_vals: &[&[u8]]) -> [u8; 32] {
+        kani::any()
+    }
+
+    /// **Fail-closed: an empty batch is `Err(BatchLength)`**, never `Ok(true)`
+    /// over zero proofs.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing_bytes, stub_g16_pairing_bytes)]
+    #[kani::stub(super::batch_hash, stub_batch_hash)]
+    fn batch_empty_rejected() {
+        let vk = [0u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES]; // canonical
+        let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 1 + 3];
+        let r = verify_groth16_batch(&vk, &[], &mut scratch);
+        assert!(matches!(r, Err(VerifierError::BatchLength { .. })));
+    }
+
+    /// **Fail-closed: a batch that isn't a whole number of entries is
+    /// `Err(BatchLength)`** (one input ⇒ 288-byte entries; one byte over).
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing_bytes, stub_g16_pairing_bytes)]
+    #[kani::stub(super::batch_hash, stub_batch_hash)]
+    fn batch_partial_entry_rejected() {
+        let vk = [0u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES];
+        let batch: [u8; PROOF_BYTES + FR_BYTES + 1] = kani::any();
+        let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 2 + 3];
+        let r = verify_groth16_batch(&vk, &batch, &mut scratch);
+        assert!(matches!(r, Err(VerifierError::BatchLength { .. })));
+    }
+
+    /// **Fail-closed: a scratch under `M + 3` pairing operands is
+    /// `Err(ScratchTooSmall)`**, before anything is written to it.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing_bytes, stub_g16_pairing_bytes)]
+    #[kani::stub(super::batch_hash, stub_batch_hash)]
+    fn batch_scratch_too_small_rejected() {
+        let vk = [0u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES];
+        let batch: [u8; 2 * (PROOF_BYTES + FR_BYTES)] = kani::any();
+        let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 2 + 3 - 1];
+        let r = verify_groth16_batch(&vk, &batch, &mut scratch);
+        assert!(matches!(r, Err(VerifierError::ScratchTooSmall { .. })));
+    }
+
+    /// **Totality of `verify_groth16_batch`** over two one-input proofs: no
+    /// panic, out-of-bounds or overflow on any path (curve ops, the hash and the
+    /// pairing stubbed, both outcomes of each explored).
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing_bytes, stub_g16_pairing_bytes)]
+    #[kani::stub(super::batch_hash, stub_batch_hash)]
+    fn totality_verify_groth16_batch() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let batch: [u8; 2 * (PROOF_BYTES + FR_BYTES)] = kani::any();
+        let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 2 + 3];
+        let _ = verify_groth16_batch(&vk, &batch, &mut scratch);
+    }
+
+    /// Totality with one proof: the `M == 1` path (no hash, `α` unscaled).
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing_bytes, stub_g16_pairing_bytes)]
+    #[kani::stub(super::batch_hash, stub_batch_hash)]
+    fn totality_verify_groth16_batch_m1() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + 2 * G1_BYTES] = kani::any();
+        let batch: [u8; PROOF_BYTES + FR_BYTES] = kani::any();
+        let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 1 + 3];
+        let _ = verify_groth16_batch(&vk, &batch, &mut scratch);
+    }
+
+    /// Totality with no public inputs (`N == 0`, 256-byte entries), two proofs.
+    #[kani::proof]
+    #[kani::stub(super::g1_scalar_mul, stub_g1_scalar_mul)]
+    #[kani::stub(super::g1_add, stub_g1_add)]
+    #[kani::stub(super::g16_pairing_bytes, stub_g16_pairing_bytes)]
+    #[kani::stub(super::batch_hash, stub_batch_hash)]
+    fn totality_verify_groth16_batch_n0() {
+        let vk: [u8; VK_FIXED_PREFIX_BYTES + G1_BYTES] = kani::any();
+        let batch: [u8; 2 * PROOF_BYTES] = kani::any();
+        let mut scratch = [[0u8; PAIRING_PAIR_BYTES]; 2 + 3];
+        let _ = verify_groth16_batch(&vk, &batch, &mut scratch);
+    }
+
+    /// `add_mod_r` is addition mod `r` for every canonical `a, b < r`: the
+    /// result is canonical and equals `a + b` or `a + b - r` (checked with
+    /// independent u128 limb arithmetic).
+    #[kani::proof]
+    fn add_mod_r_is_mod_add() {
+        let a: [u8; FR_BYTES] = kani::any();
+        let b: [u8; FR_BYTES] = kani::any();
+        kani::assume(u256_lt_le(&a, &FR_MODULUS_LE) && u256_lt_le(&b, &FR_MODULUS_LE));
+        let mut s = a;
+        add_mod_r(&mut s, &b);
+        assert!(u256_lt_le(&s, &FR_MODULUS_LE));
+        // a + b and s + (r or 0) as (hi, lo) u128 pairs; no carry out of hi,
+        // since everything is below 2r < 2^255.
+        let limbs = |x: &[u8; FR_BYTES]| {
+            (
+                u128::from_le_bytes(x[16..].try_into().unwrap()),
+                u128::from_le_bytes(x[..16].try_into().unwrap()),
+            )
+        };
+        let add = |(xh, xl): (u128, u128), (yh, yl): (u128, u128)| {
+            let (lo, c) = xl.overflowing_add(yl);
+            (xh + yh + c as u128, lo)
+        };
+        let want = add(limbs(&a), limbs(&b));
+        assert!(add(limbs(&s), (0, 0)) == want || add(limbs(&s), limbs(&FR_MODULUS_LE)) == want);
     }
 }

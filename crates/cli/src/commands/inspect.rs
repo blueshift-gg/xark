@@ -1,6 +1,5 @@
-//! `xark inspect` — print statistics about a built circuit (`circuit.json` +
-//! `r1cs.json`): variable counts by visibility, constraint count, and public
-//! inputs.
+//! `xark inspect` — print statistics about a built circuit (`circuit.xbc`):
+//! variable counts by visibility, constraint count, and public inputs.
 
 use std::path::PathBuf;
 
@@ -10,7 +9,7 @@ use clap::Args;
 use xark_ir::Visibility;
 use xark_ir::primitive::VarRole;
 
-use super::{load_backend_r1cs, load_circuit_auto};
+use super::{load_backend_r1cs, load_primitive};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -20,13 +19,6 @@ pub struct InspectArgs {
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
-    /// Path to `r1cs.json`. Inferred from `target/xark/` when omitted.
-    #[arg(long, value_hint = clap::ValueHint::FilePath)]
-    pub r1cs: Option<PathBuf>,
-    /// Path to `circuit.json`. Inferred from `target/xark/` when omitted.
-    #[arg(long, value_hint = clap::ValueHint::FilePath)]
-    pub circuit: Option<PathBuf>,
-
     /// Emit machine-readable JSON instead of human-readable text.
     #[arg(long, default_value_t = false)]
     pub json: bool,
@@ -34,17 +26,14 @@ pub struct InspectArgs {
 
 pub fn run(args: InspectArgs) -> Result<()> {
     let project = XarkProject::resolve(args.path.clone())?;
-    let r1cs_path = args.r1cs.clone().unwrap_or_else(|| project.r1cs_json());
-    let circuit_path = args
-        .circuit
-        .clone()
-        .unwrap_or_else(|| project.circuit_xbc());
-
-    // Prefer the self-contained `circuit.xbc` (deriving the R1CS + fingerprint
-    // from it); fall back to `r1cs.json` for `--r1cs` / `--emit-json` builds.
-    let (prog, fingerprint) =
-        load_backend_r1cs(&project.circuit_xbc(), args.r1cs.as_deref(), &r1cs_path)?;
-    let prim = load_circuit_auto(&circuit_path).ok();
+    crate::cli::build_if_needed(&project.xark_dir, false)?;
+    let (prog, fingerprint) = load_backend_r1cs(&project.circuit_xbc())?;
+    let prim = load_primitive(&project.circuit_xbc()).ok();
+    // Two fingerprints: the constraint system's (`xark build` prints it; a key fits
+    // every build with it), and this build's file's. Keys record both.
+    let digest = std::fs::read(project.circuit_xbc())
+        .ok()
+        .map(|b| format!("{:032x}", xark_ir::function_decode::stream_digest(&b)));
 
     let num_internal = prog
         .variables
@@ -113,14 +102,38 @@ pub fn run(args: InspectArgs) -> Result<()> {
             "public_inputs": public_names,
             "private_inputs": private_names,
             "derived_witnesses": derived_names,
+            "digest": digest,
             "circuit_hash": fingerprint,
         });
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("Field:                {}", prog.field.name);
         println!("Variables:            {}", prog.variables.len());
-        println!("  public inputs:      {num_public} {public_names:?}");
-        println!("  private inputs:     {num_private} {private_names:?}");
+        // Declared inputs by name and type (from `schema.json`), not leaf by leaf.
+        let summary = super::load_schema(&project.xark_dir).map(|s| s.summary());
+        let line = |public: bool, n: usize, names: &[&str]| match &summary {
+            Some(inputs) => {
+                let parts: Vec<String> = inputs
+                    .iter()
+                    .filter(|i| i.public == public)
+                    .map(|i| format!("{}: {}", i.name, i.ty))
+                    .collect();
+                let leaves = if n == 1 { "leaf" } else { "leaves" };
+                match parts.is_empty() {
+                    true => "none".to_string(),
+                    false => format!("{} ({n} {leaves})", parts.join(", ")),
+                }
+            }
+            None => format!("{n} {names:?}"),
+        };
+        println!(
+            "  public inputs:      {}",
+            line(true, num_public, &public_names)
+        );
+        println!(
+            "  private inputs:     {}",
+            line(false, num_private, &private_names)
+        );
         println!("  internal:           {num_internal}");
         if let Some(names) = &derived_names {
             println!(
@@ -133,7 +146,10 @@ pub fn run(args: InspectArgs) -> Result<()> {
         if let Some(w) = num_witness_gen {
             println!("Witness-gen ops:      {w}");
         }
-        println!("Circuit hash (sha256): {fingerprint}");
+        if let Some(d) = &digest {
+            println!("Circuit digest:       {d}  (the R1CS, as `xark build` prints it)");
+        }
+        println!("circuit.xbc sha256:   {fingerprint}  (this build's file)");
     }
     Ok(())
 }

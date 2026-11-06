@@ -1,6 +1,6 @@
 //! `xark-hash` — shared 256-bit digest types for the hash gadgets.
 //!
-//! [`Hash`] packs a 256-bit digest into two field elements (a compact 2-input
+//! [`Hash`](struct@Hash) packs a 256-bit digest into two field elements (a compact 2-input
 //! public form); [`Digest`] keeps all 256 bits (bit-exact). Both, and the
 //! `RequireEqCircuit<…>` impls comparing a raw gadget output against them, live
 //! here (not in the `xark` core) because coherence requires them where `Hash` is
@@ -8,7 +8,8 @@
 //! blake crates, built on the public [`Hash::pack`] primitive.
 #![no_std]
 
-use xark::{Field, RequireEqCircuit};
+use xark::input::{Bytes, Encoding, Layout, Member, Reader, Type, Writer};
+use xark::{Field, Input, RequireEqCircuit};
 
 pub mod digest;
 pub use digest::Digest;
@@ -17,13 +18,43 @@ pub use digest::Digest;
 /// 16 bytes, each read big-endian (so the hash is `hi · 2¹²⁸ + lo`). Used as a
 /// `Public<Hash>` so a digest costs 2 public inputs, not 256. The two fields
 /// flatten to `<param>.hi` / `<param>.lo`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Hash {
     hi: Field,
     lo: Field,
 }
 
+/// A circuit input given as the hash's 32 bytes (`0x…` in a client), split into its
+/// two 16-byte halves.
+impl Input for Hash {
+    const TYPE: Type = Type::Named(
+        &Type::named(
+            "Hash",
+            Layout::fields(&[
+                Member::new("hi", Type::Field),
+                Member::new("lo", Type::Field),
+            ]),
+        )
+        .encoded(Encoding::Bytes(Bytes::Split(&[16, 16]))),
+    );
+    fn read(r: &mut Reader<'_>) -> Self {
+        Hash {
+            hi: r.field(),
+            lo: r.field(),
+        }
+    }
+    fn write(&self, w: &mut Writer<'_>) {
+        w.field(self.hi);
+        w.field(self.lo);
+    }
+}
+
 impl Hash {
+    /// Its two field elements, `[hi, lo]`, in input order: to hash it, or `bind` it.
+    pub fn to_fields(&self) -> [Field; 2] {
+        [self.hi, self.lo]
+    }
+
     /// Recompose 256 weighted bits into the packed pair `hi · 2¹²⁸ + lo`: `bits[i]`
     /// is bit `i` of the hash as a big-endian integer (weight `2ⁱ`), so bits
     /// `0..128` form `lo` and `128..256` form `hi`. Pure linear recomposition; each
@@ -99,32 +130,30 @@ impl RequireEqCircuit<Hash> for [[Field; 64]; 4] {
     }
 }
 
-// Host-side `NativeInput`: a `Hash` input is a 32-byte hash split into its two
-// 128-bit halves `hi`/`lo` (big-endian) as `<name>.hi` / `<name>.lo` leaves.
-// `std` is pulled in inside an anonymous const because this crate is `#![no_std]`.
+// Host side: a `Hash` value comes from the hash's 32 bytes (`From<[u8; 32]>`), split
+// into its two 128-bit halves `hi`/`lo` (big-endian).
 #[cfg(not(xark))]
 const _: () = {
-    extern crate std;
-    use std::string::{String, ToString};
-    use std::vec::Vec;
-    impl xark_prover::NativeInput for Hash {
-        type Native = [u8; 32];
-        fn leaves(native: &Self::Native, prefix: &str) -> Vec<(String, String)> {
-            let mut hi = 0u128;
-            let mut k = 0usize;
-            while k < 16usize {
-                hi = (hi << 8) | (native[k] as u128);
-                k += 1;
+    impl xark::host::FromBeBytes for Hash {
+        const BYTES: usize = 32;
+        fn from_be_bytes(bytes: &[u8]) -> Self {
+            assert_eq!(bytes.len(), 32, "a hash is 32 bytes");
+            let half = |b: &[u8]| {
+                let mut le = [0u8; 16];
+                le.copy_from_slice(b);
+                le.reverse();
+                Field::from_le_bytes(&le)
+            };
+            Hash {
+                hi: half(&bytes[..16]),
+                lo: half(&bytes[16..]),
             }
-            let mut lo = 0u128;
-            while k < 32usize {
-                lo = (lo << 8) | (native[k] as u128);
-                k += 1;
-            }
-            std::vec![
-                (std::format!("{prefix}.hi"), hi.to_string()),
-                (std::format!("{prefix}.lo"), lo.to_string()),
-            ]
+        }
+    }
+    /// From the hash's 32 bytes.
+    impl From<[u8; 32]> for Hash {
+        fn from(bytes: [u8; 32]) -> Self {
+            <Self as xark::host::FromBeBytes>::from_be_bytes(&bytes)
         }
     }
 };

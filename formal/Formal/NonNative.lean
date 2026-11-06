@@ -3,8 +3,13 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
 import Formal.Gadgets
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.Positivity
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 -- The `style.header` linter hard-codes mathlib's Apache license string; this is
 -- an MIT project, so disable that house-style check (it is not a correctness lint).
@@ -277,7 +282,6 @@ theorem colSum_eq (a b : ℕ → ℕ) (n β : ℕ)
     ?_ ?_ ?_ ?_ ?_
   · -- Forward: p ∈ fiber → p.1 ∈ range (k+1) ∩ (p.1 < n ∧ k - p.1 < n).
     intro p hp
-    simp only at *
     rw [Finset.mem_filter, Finset.mem_product, Finset.mem_range, Finset.mem_range] at hp
     obtain ⟨⟨hp1, hp2⟩, hp3⟩ := hp
     rw [Finset.mem_filter, Finset.mem_range]
@@ -286,7 +290,6 @@ theorem colSum_eq (a b : ℕ → ℕ) (n β : ℕ)
     · omega
   · -- Backward: i ∈ range filter → (i, k - i) ∈ fiber.
     intro i hi
-    simp only at *
     rw [Finset.mem_filter, Finset.mem_range] at hi
     obtain ⟨hi1, hi2, hi3⟩ := hi
     rw [Finset.mem_filter, Finset.mem_product, Finset.mem_range, Finset.mem_range]
@@ -294,7 +297,6 @@ theorem colSum_eq (a b : ℕ → ℕ) (n β : ℕ)
     omega
   · -- Left-inverse: p ↦ p.1 ↦ (p.1, k - p.1) = p (since p.1 + p.2 = k).
     intro p hp
-    simp only at *
     rw [Finset.mem_filter] at hp
     have hkk : p.1 + p.2 = k := hp.2
     ext
@@ -305,7 +307,6 @@ theorem colSum_eq (a b : ℕ → ℕ) (n β : ℕ)
     intros; rfl
   · -- Function values match: a p.1 * b p.2 = a p.1 * b (k - p.1) (since p.1 + p.2 = k).
     intro p hp
-    simp only at *
     rw [Finset.mem_filter] at hp
     have hkk : p.1 + p.2 = k := hp.2
     have : k - p.1 = p.2 := by omega

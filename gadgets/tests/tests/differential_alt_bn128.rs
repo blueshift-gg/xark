@@ -3239,3 +3239,102 @@ mod host_fuzz {
         }
     }
 }
+
+// =============================================================================
+// Malformed points: the backend must reject them.
+//
+// The verifier does no curve or subgroup checks of its own (its `*_strict`
+// entry points add only an encoding check): it relies on the `alt_bn128`
+// syscalls (and the Arkworks fallback off-chain) to refuse a point that is off
+// the curve, has a coordinate `>= q`, or (for G2, in a pairing) is outside the
+// prime-order subgroup, and turns that refusal into a rejected proof. These pin that. A backend that accepted an off-subgroup G2 point would
+// let a forged proof through.
+// =============================================================================
+
+/// `(1, 3)`: not on `y² = x³ + 3`.
+pub const G1_OFF_CURVE: G1Point = G1Point([
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
+
+/// The generator `(1, 2)` with `x` written as `q + 1`. The two top bits, which
+/// the syscall masks as flags, stay clear.
+pub const G1_NON_CANONICAL: G1Point = G1Point([
+    72, 253, 124, 216, 22, 140, 32, 60, 141, 202, 113, 104, 145, 106, 129, 151, 93, 88, 129, 129,
+    182, 69, 80, 184, 41, 160, 49, 225, 114, 78, 100, 48, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
+
+/// The G1 generator `(1, 2)`, the valid control for the two above.
+pub const G1_GENERATOR: G1Point = G1Point([
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
+
+/// A point on the G2 twist with `x = 1` (in `Fq2`) that is not in the
+/// prime-order subgroup (checked by `off_subgroup_g2_is_on_the_twist`).
+pub const G2_OFF_SUBGROUP: G2Point = G2Point([
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    187, 241, 49, 5, 28, 135, 75, 171, 233, 48, 152, 44, 229, 112, 221, 170, 81, 90, 130, 219, 143,
+    114, 226, 248, 114, 240, 129, 83, 29, 17, 105, 40, 164, 72, 224, 45, 168, 141, 127, 27, 81,
+    215, 180, 12, 121, 127, 140, 153, 135, 65, 147, 161, 112, 110, 132, 54, 8, 234, 217, 62, 149,
+    113, 18, 13,
+]);
+
+/// A valid Groth16-shaped pairing input with its first G1 replaced by `p`.
+fn pairing_with_g1(p: G1Point) -> [(G1Point, G2Point); 2] {
+    let (mut pairs, _) = PAIRING_2_VECTORS[0];
+    pairs[0].0 = p;
+    pairs
+}
+
+/// A valid pairing input with its second G2 replaced by `q`.
+fn pairing_with_g2(q: G2Point) -> [(G1Point, G2Point); 2] {
+    let (mut pairs, _) = PAIRING_2_VECTORS[0];
+    pairs[1].1 = q;
+    pairs
+}
+
+#[test]
+fn off_subgroup_g2_is_on_the_twist() {
+    use ark_bn254::{Fq, Fq2, G2Affine};
+    use ark_serialize::CanonicalDeserialize;
+    let b = &G2_OFF_SUBGROUP.0;
+    let x = Fq2::deserialize_uncompressed(&b[..64]).unwrap();
+    let y = Fq2::deserialize_uncompressed(&b[64..]).unwrap();
+    assert_eq!(x, Fq2::new(Fq::from(1u64), Fq::from(0u64)));
+    let p = G2Affine::new_unchecked(x, y);
+    assert!(p.is_on_curve());
+    assert!(!p.is_in_correct_subgroup_assuming_on_curve());
+}
+
+#[svm_test]
+fn malformed_points_onchain_are_rejected() {
+    assert!(pairing(&pairing_with_g1(G1_GENERATOR)).is_ok());
+    assert!(pairing(&pairing_with_g1(G1_OFF_CURVE)).is_err());
+    assert!(pairing(&pairing_with_g1(G1_NON_CANONICAL)).is_err());
+    assert!(pairing(&pairing_with_g2(G2_OFF_SUBGROUP)).is_err());
+    let s = G1_MUL_VECTORS[0].1;
+    assert!((G1_GENERATOR + G1_GENERATOR).is_ok());
+    assert!((G1_OFF_CURVE + G1_GENERATOR).is_err());
+    assert!((G1_NON_CANONICAL + G1_GENERATOR).is_err());
+    assert!((G1_GENERATOR * s).is_ok());
+    assert!((G1_OFF_CURVE * s).is_err());
+    assert!((G1_NON_CANONICAL * s).is_err());
+}
+
+#[test]
+fn malformed_points_host_are_rejected() {
+    assert!(pairing(&pairing_with_g1(G1_GENERATOR)).is_ok());
+    assert!(pairing(&pairing_with_g1(G1_OFF_CURVE)).is_err());
+    assert!(pairing(&pairing_with_g1(G1_NON_CANONICAL)).is_err());
+    assert!(pairing(&pairing_with_g2(G2_OFF_SUBGROUP)).is_err());
+    let s = G1_MUL_VECTORS[0].1;
+    assert!((G1_GENERATOR + G1_GENERATOR).is_ok());
+    assert!((G1_OFF_CURVE + G1_GENERATOR).is_err());
+    assert!((G1_NON_CANONICAL + G1_GENERATOR).is_err());
+    assert!((G1_GENERATOR * s).is_ok());
+    assert!((G1_OFF_CURVE * s).is_err());
+    assert!((G1_NON_CANONICAL * s).is_err());
+}

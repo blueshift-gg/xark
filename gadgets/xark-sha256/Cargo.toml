@@ -6,6 +6,7 @@ categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -14,6 +15,6 @@ name = "xark_sha256"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.2.1", default-features = false }
-xark-bits = { path = "../xark-bits", version = "0.2.1" }
-xark-hash = { path = "../xark-hash", version = "0.2.1" }
+xark = { path = "../../crates/lang", version = "0.3.0" }
+xark-bits = { path = "../xark-bits", version = "0.3.0" }
+xark-hash = { path = "../xark-hash", version = "0.3.0" }

@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
@@ -14,11 +12,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // (5+3)·(5−3) = 8·2 = 16
-        difference_of_squares("5".into(), "3".into(), "16".into()).unwrap();
+        difference_of_squares(5, 3, 16).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(difference_of_squares("5".into(), "3".into(), "17".into()).is_err());
+        assert!(difference_of_squares(5, 3, 17).is_err());
     }
 }

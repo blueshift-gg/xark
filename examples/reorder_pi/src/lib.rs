@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 // reorder_pi: main(a: pub, b: priv, c: pub) { require(b*b == a+c) }.
@@ -15,11 +13,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // 5² = 25 = 10 + 15
-        reorder_pi("10".into(), "5".into(), "15".into()).unwrap();
+        reorder_pi(10, 5, 15).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(reorder_pi("10".into(), "5".into(), "16".into()).is_err());
+        assert!(reorder_pi(10, 5, 16).is_err());
     }
 }

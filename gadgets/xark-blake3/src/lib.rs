@@ -15,8 +15,8 @@
 
 #![no_std]
 // Circuit-lowered gadget code: the block count is const-folded from a native
-// `usize`; `(N + 63) / 64` keeps the exact MIR the compiler lowers (a `div_ceil`
-// method call is not part of the accepted circuit subset).
+// `usize`; `(N + 63) / 64` is a compile-time constant either way (`div_ceil` would
+// do too; the explicit form is kept).
 #![allow(clippy::manual_div_ceil)]
 
 use xark::Field;

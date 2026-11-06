@@ -1,12 +1,10 @@
-//! secp256k1 ECDSA verification as a `#[circuit]` via the GLV gadget (128-window
-//! 4-dim Shamir over the λ-endomorphism), ~1.64M constraints. Inputs are
-//! transparent compound types: `Point` = `[u8; 64]` `x ‖ y`, `Signature` = `[u8;
-//! 64]` `r ‖ s`, `Scalar` = digest `int(hash(msg)) mod n` (`[u8; 32]`). The GLV
-//! endomorphism decomposition is derived inside the circuit (a `witness_only`
-//! region at zero constraint cost, pinned by `glv_decomp`), so the caller supplies
-//! only the signature.
-#![cfg_attr(xark, no_std)]
-
+//! secp256k1 ECDSA verification as a `#[circuit]` by fake GLV (ePrint 2025/933: 65
+//! fused double-and-add steps over `Q ± φQ ± R ± φR` plus a fixed-base comb for `G`),
+//! ~0.27M constraints. Inputs are transparent compound types: `Point` = `[u8; 64]`
+//! `x ‖ y`, `Signature` = `[u8; 64]` `r ‖ s`, `Scalar` = digest `int(hash(msg)) mod n`
+//! (`[u8; 32]`). The hinted point `R` and the lattice decomposition are derived inside
+//! the circuit (a `witness_only` region at zero constraint cost, pinned by
+//! `fake_glv_check_k1` and the curve checks), so the caller supplies only the signature.
 use xark_secp256k1::prelude::*;
 
 #[circuit]

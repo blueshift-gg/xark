@@ -4,6 +4,10 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Gadgets
+import Mathlib.Tactic.NormNum
+import Mathlib.Tactic.NormNum.Basic
+import Mathlib.Tactic.Set
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 -- The `style.header` linter hard-codes mathlib's Apache license string; this is
 -- an MIT project, so disable that house-style check (it is not a correctness lint).

@@ -1,5 +1,5 @@
 //! **Intentionally unsound** circuit: a witness-based under-constraint the
-//! structural build-time pin check (`lower_mir::check_pinning`) cannot catch.
+//! structural build-time pinning gate (`xark-frontend`'s `check_pinning`) cannot catch.
 //!
 //! `b` is hinted to bit 0 of `x` and only pinned boolean (`b*b == b`). That
 //! constraint references `b` so the structural gate is satisfied, but booleanity
@@ -9,8 +9,6 @@
 //!
 //! Contrast `examples/to_bits`, which recomposes the bits (`Σ bitᵢ·2ⁱ == x`) —
 //! that recomposition pins every bit and proves clean.
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 #[circuit]
@@ -22,13 +20,26 @@ pub fn underconstrained_bit(x: Private<Field>, out: Public<Field>) {
 
 #[cfg(test)]
 mod tests {
-    use super::underconstrained_bit;
+    use super::{UnderconstrainedBitInputs, underconstrained_bit};
 
-    // `check` verifies constraint satisfaction, not uniqueness (the under-constraint
-    // is caught by `xark prove`; see the module doc). This test only asserts that a
-    // mismatched output still fails — the expected rejection.
+    // `check` (what `underconstrained_bit(..)` runs) verifies constraint
+    // satisfaction, not uniqueness: honest inputs pass it.
     #[test]
     fn rejects_mismatched_output() {
-        assert!(underconstrained_bit("5".into(), "6".into()).is_err());
+        assert!(underconstrained_bit(5, 5).is_ok());
+        assert!(underconstrained_bit(5, 6).is_err());
+    }
+
+    // `check_constrained` also looks for free witness variables, and finds `b`.
+    #[test]
+    fn check_constrained_finds_the_free_bit() {
+        let inputs = UnderconstrainedBitInputs {
+            x: 5.into(),
+            out: 5.into(),
+        };
+        let err = xark::prover::circuit("underconstrained_bit")
+            .check_constrained(inputs)
+            .expect_err("`b` is two-valued");
+        assert!(err.to_string().contains("under-constrained"), "{err}");
     }
 }

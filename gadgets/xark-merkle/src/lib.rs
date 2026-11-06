@@ -6,26 +6,31 @@
 //! and returns the root. [`merkle_verify`] additionally asserts it equals an
 //! expected root.
 //!
-//! Soundness: every `index_bits[i]` is boolean-constrained (`b·b == b`), so a
-//! prover cannot smuggle a non-`{0,1}` selector; given a boolean bit the sibling
-//! ordering is a sound linear mux, and the final `require_eq` pins the fold to
-//! the claimed root.
+//! Soundness: each level orders its pair with [`cond_swap`], which constrains
+//! `index_bits[i]` boolean (`b·b == b`) itself, so a prover cannot smuggle a
+//! non-`{0,1}` selector; the final `require_eq` pins the fold to the claimed root.
 #![no_std]
 
-use xark::{Field, require_eq};
+use xark::{Field, gadget, require_eq};
 use xark_poseidon::hash2;
 
-/// Boolean-gated select `bit ? if_true : if_false`. `bit` **must** already be
-/// constrained boolean (callers do so once per level before selecting).
-fn select(bit: Field, if_true: Field, if_false: Field) -> Field {
-    if_false + bit * (if_true - if_false)
+/// `bit ? (b, a) : (a, b)`, with `bit` constrained boolean: one booleanity row and
+/// one product, `a' = a + bit·(b − a)`, `b' = a + b − a'` (halo2's `cond_swap`,
+/// <https://github.com/zcash/halo2/blob/3442dd33754ae0d44b8970e5a4eea79b0c3360bf/halo2_gadgets/src/utilities/cond_swap.rs#L256-L284>).
+/// The rows it emits on fresh inputs are proven sound and complete in
+/// `formal/Formal/CondSwap.lean` (`cargo xtask lean-export cond_swap`).
+#[gadget]
+pub fn cond_swap(bit: Field, a: Field, b: Field) -> (Field, Field) {
+    bit.require_bool();
+    let swapped_a = a + bit * (b - a);
+    (swapped_a, a + b - swapped_a)
 }
 
 /// Fold an authentication path to its Merkle root.
 ///
 /// `siblings[i]` is the sibling hash and `index_bits[i]` the position bit at
 /// level `i` (`0` = running node is left child, `1` = right). Each bit is
-/// boolean-constrained in place. Returns the computed root (use
+/// boolean-constrained by [`cond_swap`]. Returns the computed root (use
 /// [`merkle_verify`] for the common equality check).
 pub fn merkle_root<const DEPTH: usize>(
     leaf: Field,
@@ -35,12 +40,8 @@ pub fn merkle_root<const DEPTH: usize>(
     let mut node = leaf;
     let mut i = 0usize;
     while i < DEPTH {
-        let bit = index_bits[i];
-        bit.require_bool();
-        let sib = siblings[i];
         // bit selects child order: 0 → (node, sib), 1 → (sib, node).
-        let left = select(bit, sib, node);
-        let right = select(bit, node, sib);
+        let (left, right) = cond_swap(index_bits[i], node, siblings[i]);
         node = hash2(left, right);
         i += 1;
     }

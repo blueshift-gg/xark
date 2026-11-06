@@ -17,8 +17,8 @@
 //! control flow and is rejected. `T` is used only as an array length.
 
 #![no_std]
-// Circuit-lowered gadget code: the xark compiler rejects compound assignment on
-// `Field` (`+=`/`-=`/`*=`), so `x = x + y` is required — not a clippy oversight.
+// Gadget code keeps the `x = x + y` style it was written in (the old compiler
+// rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 // The round-schedule branch `r < 4 || r >= 60` must stay an explicit comparison
 // the unroller resolves at compile time; `(4..60).contains(&r)` is a runtime call.

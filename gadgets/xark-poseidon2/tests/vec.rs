@@ -105,3 +105,45 @@ fn poseidon2_perm_zero_input() {
         "Poseidon2 under-constrained"
     );
 }
+
+/// `native` (host, `ark_bn254::Fr`) computes the same reference vectors.
+#[test]
+fn native_perm_matches_reference_vectors() {
+    use ark_ff::PrimeField;
+    use xark_poseidon2::native::{Fr, poseidon2_perm};
+    let dec = |s: [Fr; 3]| s.map(|x| x.into_bigint().to_string());
+    let out = poseidon2_perm([Fr::from(1u64), Fr::from(2u64), Fr::from(3u64)]);
+    assert_eq!(dec(out), OUT_123.map(String::from));
+    let out = poseidon2_perm([Fr::from(0u64); 3]);
+    assert_eq!(dec(out), OUT_000.map(String::from));
+}
+
+/// The circuit and `native` agree: the circuit accepts exactly the digest
+/// `native` computes, for `hash2` and an odd-length `hash` (a padded block).
+#[test]
+fn native_matches_the_circuit() {
+    use ark_ff::PrimeField;
+    use xark_poseidon2::native::{self, Fr};
+    let p = compile(
+        "native_agree",
+        "#![no_std]\n\
+         use xark::{require_eq, Field, Private, Public};\n\
+         use xark_poseidon2::{hash, hash2};\n\
+         pub fn circuit(a: Private<Field>, b: Private<Field>, c: Private<Field>,\n\
+           h2: Public<Field>, h3: Public<Field>) {\n\
+           require_eq(hash2(a, b), h2);\n\
+           require_eq(hash([a, b, c]), h3);\n\
+         }\n",
+    );
+    let (a, b, c) = (Fr::from(7u64), Fr::from(11u64), -Fr::from(1u64));
+    let dec = |x: Fr| x.into_bigint().to_string();
+    let h2 = native::hash2(a, b);
+    let h3 = native::hash([a, b, c]);
+    let mut inputs = BTreeMap::new();
+    for (name, v) in [("a", a), ("b", b), ("c", c), ("h2", h2), ("h3", h3)] {
+        inputs.insert(id_of(&p, name), dec(v));
+    }
+    solver::solve_and_check(&p, &inputs).expect("the circuit accepts native's digests");
+    inputs.insert(id_of(&p, "h3"), dec(h3 + Fr::from(1u64)));
+    assert!(solver::solve_and_check(&p, &inputs).is_err());
+}

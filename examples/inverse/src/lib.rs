@@ -1,5 +1,3 @@
-#![cfg_attr(xark, no_std)]
-
 use xark::{circuit, require_eq, Field, Private, Public};
 
 /// Field inverse as an *advice* gadget.
@@ -26,11 +24,11 @@ mod tests {
     #[test]
     fn accepts_valid() {
         // 1⁻¹ = 1
-        inverse("1".into(), "1".into()).unwrap();
+        inverse(1, 1).unwrap();
     }
 
     #[test]
     fn rejects_wrong() {
-        assert!(inverse("1".into(), "2".into()).is_err());
+        assert!(inverse(1, 2).is_err());
     }
 }

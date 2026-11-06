@@ -36,7 +36,7 @@ pub struct R1csConstraint {
     pub debug: Option<DebugInfo>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldSpec {
     pub name: String,
     pub modulus_decimal: Option<String>,
@@ -62,6 +62,28 @@ impl FieldSpec {
         }
     }
 
+    /// A field as a user names it (`xark build --field`): `bn254` (or `bn128`), or a
+    /// prime modulus in decimal. Anything else is an error saying so.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let t = s.trim();
+        if matches!(t, "bn254" | "bn128") {
+            return Ok(FieldSpec::bn254());
+        }
+        let refuse = |why: &str| {
+            Err(format!(
+                "{s:?} {why}: name `bn254`, or give a prime modulus in decimal"
+            ))
+        };
+        if t.is_empty() || !t.bytes().all(|b| b.is_ascii_digit()) {
+            return refuse("isn't a field xark knows");
+        }
+        let p: num_bigint::BigUint = t.parse().expect("decimal digits");
+        if !is_probable_prime(&p) {
+            return refuse("isn't prime");
+        }
+        Ok(FieldSpec::named(&p.to_string()))
+    }
+
     /// Look up a named field, or treat the name as a raw decimal modulus.
     pub fn named(name: &str) -> Self {
         match name {
@@ -73,6 +95,47 @@ impl FieldSpec {
             },
         }
     }
+}
+
+/// Miller–Rabin with the first 20 primes as bases: exact below 3.3·10^24, and for
+/// larger moduli wrong with probability under 4^-20 (only ever a composite taken as
+/// prime).
+fn is_probable_prime(n: &num_bigint::BigUint) -> bool {
+    use num_bigint::BigUint;
+    use num_traits::{One, Zero};
+    const BASES: [u32; 20] = [
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+    ];
+    let two = BigUint::from(2u32);
+    if *n < two {
+        return false;
+    }
+    for b in BASES {
+        let b = BigUint::from(b);
+        if *n == b {
+            return true;
+        }
+        if (n % &b).is_zero() {
+            return false;
+        }
+    }
+    let n1 = n - BigUint::one();
+    let s = n1.trailing_zeros().unwrap_or(0);
+    let d = &n1 >> s;
+    'bases: for b in BASES {
+        let mut x = BigUint::from(b).modpow(&d, n);
+        if x.is_one() || x == n1 {
+            continue;
+        }
+        for _ in 1..s {
+            x = x.modpow(&two, n);
+            if x == n1 {
+                continue 'bases;
+            }
+        }
+        return false;
+    }
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,6 +200,40 @@ impl R1csConstraint {
                 source_span: None,
                 note: Some(note.to_string()),
             }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod field_parse_tests {
+    use super::FieldSpec;
+
+    #[test]
+    fn a_field_is_bn254_or_a_prime() {
+        assert_eq!(FieldSpec::parse("bn254").unwrap(), FieldSpec::bn254());
+        assert_eq!(FieldSpec::parse("bn128").unwrap(), FieldSpec::bn254());
+        assert_eq!(
+            FieldSpec::parse("7").unwrap().modulus_decimal.as_deref(),
+            Some("7")
+        );
+        // The Grumpkin/BN254 base field, and a Mersenne prime past 2^64.
+        for p in [
+            "21888242871839275222246405745257275088696311157297823662689037894645226208583",
+            "170141183460469231731687303715884105727",
+        ] {
+            assert!(FieldSpec::parse(p).is_ok(), "{p}");
+        }
+        for (s, why) in [
+            ("banana", "isn't a field xark knows"),
+            ("", "isn't a field xark knows"),
+            ("-7", "isn't a field xark knows"),
+            ("0x07", "isn't a field xark knows"),
+            ("1", "isn't prime"),
+            ("9", "isn't prime"),
+            ("3215031751", "isn't prime"), // a strong pseudoprime to bases 2, 3, 5, 7
+        ] {
+            let e = FieldSpec::parse(s).unwrap_err();
+            assert!(e.contains(why), "{s}: {e}");
         }
     }
 }

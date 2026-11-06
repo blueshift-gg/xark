@@ -3,10 +3,11 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Ecdsa
-import Formal.Curve
 import Formal.Bookkeeping
-import Mathlib
+import Formal.Ecdsa
+import Mathlib.Tactic.Abel
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
+import Mathlib.Data.Fintype.Basic
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -268,7 +269,7 @@ theorem alloc_state_pins_public_inputs {F : Type*} [Zero F]
 
 /-! ### Bridge between `buildInstance` and the xark lowering's PI construction
 
-The xark compiler's lowering (`crates/lang/src/lower_mir.rs`) populates the
+The xark compiler's lowering (`crates/frontend`) populates the
 constraint system's instance vector by walking the artifact's
 `public_inputs` list and reading the witness map at each slot. This is
 captured at the Lean level by `synthesizeInstance` below, which mirrors

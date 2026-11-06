@@ -24,21 +24,24 @@ crate-type = ["cdylib", "rlib"]
 # panic the prover.
 xark-ir = { path = "../ir", default-features = false }
 xark-prover = { path = "../prover", default-features = false }
-xark-snarkjs = { path = "../snarkjs" }
+xark-schema = { path = "../schema" }
+# The streaming prover (`proveStreaming`) and its worker kernels.
+xark-groth16 = { path = "../groth16" }
+# `poseidon2`: the gadget's hash, natively, so a client can hash as the circuit does.
+xark-poseidon2 = { path = "../../gadgets/xark-poseidon2" }
 
-# Only the arkworks crates actually named in `lib.rs`. `ark-ff` / `ark-ec` /
-# `ark-relations` / `ark-std` are pulled transitively (via `ark-groth16` etc.)
-# with the right features — the `parallel`-OFF guarantee comes from the `xark-*`
+# Only the arkworks crates actually named in `lib.rs`. `ark-ff` / `ark-ec` are
+# pulled transitively (via `xark-groth16` etc.) with the right features — the `parallel`-OFF guarantee comes from the `xark-*`
 # deps above being built `default-features = false`, not from pinning them here.
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
-ark-groth16 = { version = "0.6", default-features = false, features = ["std"] }
 ark-serialize = { version = "0.6", default-features = false, features = ["std"] }
-ark-snark = { version = "0.6", default-features = false }
-
-serde-wasm-bindgen = "0.6"
 
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 rand = "0.8"
+sha2 = "0.11"
+rand_chacha = { version = "0.3", default-features = false }
+ark-ff = { version = "0.6", default-features = false, features = ["std"] }
 console_error_panic_hook = "0.1"
+serde_json = "1"

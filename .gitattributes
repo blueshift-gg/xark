@@ -1,0 +1,2 @@
+# Written by `cargo xtask lean-export`; `lean-export --check` regenerates and compares them.
+formal/Formal/Templates/** linguist-generated=true

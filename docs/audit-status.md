@@ -59,8 +59,8 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`Formal.Curve / Secp256k1 / Secp256r1`).
 * **Concrete point groups** — `Secp256k1Point`, `Secp256r1Point`, `GrumpkinPoint`
   (`Formal.*Group`): all three are mathlib `WeierstrassCurve.Affine.Point` aliases
-  inheriting `AddCommGroup` via `inferInstance`. Three trusted primality axioms (one per
-  base field) — see "Trusted base additions".
+  inheriting `AddCommGroup` via `inferInstance`. The three base-field primes are proven
+  prime by kernel-checked Pratt certificates (`Formal.Pratt`, `Formal.CurvePrimes`).
 * **Poseidon2** — `poseidon_permutation_determined` (width-polymorphic) and
   `poseidon2_bn254_t3_determined` (the concrete `t = 3` instance the gadget implements)
   (`Formal.Poseidon` + `Formal.Poseidon2Bn254T3`).
@@ -69,35 +69,26 @@ depending on `sorryAx`. Coverage (theorem names → modules):
 * **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints` (4×64-bit) and
   `mul_mod_via_Fr_limbwise_constraints_3` (3×86-bit, matching the `mod_mul_3` gadget the
   secp curves use) — the full ℕ + Fr no-wrap chain (`Formal.NonNative`).
-* **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over `G : AddCommGroup`),
-  specialised to secp256k1/r1/Grumpkin (`Formal.EcdsaVerify` + per-curve `*Group`).
-* **GLV** — `glv_sum_eq`, `glv_via_endomorphism`, `glv_endomorphism_correct` (abstract),
-  `glv_endomorphism_correct_secp256k1` (concrete φ) (`Formal.Glv` + `Formal.Secp256k1Group`).
+* **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over `G : AddCommGroup`,
+  `Formal.EcdsaVerify`).
+* **GLV** — `glv_sum_eq`, `glv_via_endomorphism`, `glv_endomorphism_correct` (abstract,
+  `Formal.Glv`).
 * **Comb / Strauss-Shamir** — `windowed_scalar_mul_sound`, `joint_strauss_shamir_correct`
   (`Formal.AdvancedGadgets`).
 * **Bit-hash gadgets** — per-primitive bit-soundness (`rotr_sound`, `xor32_sound`,
   `Ch_bit_sound`, `and64_sound`, …) plus whole-compression round-step composition for
-  SHA-256, Keccak-f[1600], BLAKE2s, BLAKE3, AES-128, transcribed from FIPS/RFC
-  (`Formal.Sha256 / Keccak / Blake / Aes`, composed in `Formal.Wrappers`). The Keccak ρ·π
+  SHA-256, Keccak-f[1600], BLAKE2s, BLAKE3, transcribed from FIPS/RFC
+  (`Formal.Sha256 / Keccak / Blake`, composed in `Formal.Wrappers`). The Keccak ρ·π
   index was **corrected to `(X + 3Y) % 5`** to match the KAT-verified `xark-keccak` gadget
   across all 25 lanes.
-* **AES algebraic S-box** — `gf256_pow254_eq_inv` (`b²⁵⁴ = inv b` in GF(2⁸),
-  Itoh–Tsujii) and `aesSbox_pow_eq_table` prove the table-free `affine(b²⁵⁴) ⊕ 0x63` S-box
-  equals the AES lookup table for every byte (`Formal.GF256`).
 * **secp incomplete point-add** — `ec_add_incomplete_secp256k1_sound` /
   `_secp256r1_sound`: the flag-free 3-limb chord addition lands on the curve with a unique
   slope (no prover freedom), from the generic `Curve` algebra at `(a,b) = (0,7)` and
   `a = −3` (`Formal.Secp256k1 / Secp256r1`).
-* **Lazy non-native reduction** — `mul_lazy_25519_value_correct` / `mul_lazy_k1_value_correct`
-  and `weak_reduce_*_value_correct`: the quotient-free pseudo-Mersenne multiply/normalise
-  the ed25519/secp256k1 incomplete-add paths use compute `a·b mod p` correctly, via the
-  Mersenne relations (`2²⁵⁵ ≡ 19`, `2²⁵⁶ ≡ 2³²+977`); `lazy_t_no_wrap` bounds every
-  intermediate `< 2²⁵³ < r` so the `Fr` arithmetic lifts faithfully to ℕ
-  (`Formal.Lazy25519 / LazyK1`). Discharges the "non-native limb bridge" trust boundary
-  `Formal.Edwards` names for the lazy path.
-* **Merkle membership** — `merkle_level_swap_sound`: a boolean position bit makes the
-  per-level sibling mux a genuine conditional swap (no under-constraint, no off-pair value),
-  composed with Poseidon determinacy (`Formal.Merkle`).
+* **Merkle membership** — `Xark.Templates.CondSwap.soundness`, over `cond_swap`'s exported
+  rows: the template forces its position bit boolean and its output to be the input pair in
+  one of its two orders; `root_binds` composes the levels into the Merkle root, assuming
+  (not proven over its rows) that `hash2` computes a function (`Formal.CondSwap`).
 * **R1CS ↔ Lean bridge** — ten snapshot tests in `crates/lang/tests/snapshot.rs` pin each
   frontend gadget's multiplication-gate count to its Lean soundness model.
 * **Allocation bookkeeping** — `AllocState`, `alloc_witness_idempotent`,
@@ -111,65 +102,19 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`pairing_operand_assembly`); see `#[cfg(kani)] mod proofs` in
   `crates/verifier/src/verifier.rs` and `.github/workflows/kani.yml`.
 
-`lean.yml` enumerates **all** these theorem names and rejects any proof depending on
-`sorryAx`. Standard mathlib axioms (`propext`, `Classical.choice`, `Quot.sound`) are allowed.
+`lean.yml` builds with `lake build` and
+runs `formal/AxiomCheck.lean`: every harness under `formal/templates/` must have its
+`soundness` theorem, and every declaration in `Formal` may depend only on
+the standard axioms (`propext`, `Classical.choice`, `Quot.sound`). Anything else — a
+`sorryAx`, a declared `axiom`, a `native_decide` — fails CI.
 
-### Trusted base additions (axiomatised)
+### Trusted base additions
 
-Three axioms in `formal/`, each documented at its declaration site:
-
-| Axiom | Scope | Why |
-|---|---|---|
-| `secp256k1_p_prime : Fact (Nat.Prime secp256k1_p)` | 256-bit prime | Lean's kernel can't `decide` 256-bit primality; verifiable via `openssl prime`. |
-| `secp256r1_p_prime : Fact (Nat.Prime secp256r1_p)` | 256-bit prime | Same. |
-| `bn254_r_prime : Fact (Nat.Prime r)` | 254-bit prime | BN254 `Fr` modulus; used by `GrumpkinPoint` and field instances. |
-
-These are the only `axiom` declarations in `formal/`. No `sorry`/`sorryAx`. `lean.yml`
-prints `#print axioms` for every load-bearing theorem and fails CI on any `sorryAx`.
-
-### `native_decide` axioms
-
-The GF(2^8) infrastructure in `Formal.GF256` (AES S-box) verifies key identities by
-exhaustive computation over the 256-element byte range — `gf256_mul_inv` (`x·x⁻¹ = 1` for
-255 nonzero bytes), `gf256_inv_unique` (over 65 536 pairs), `aesSbox_algebraic_eq_table`
-(`Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]` over all 256). These use `native_decide`, adding
-`Lean.ofReduceBool`-style axioms — strictly weaker than `axiom`, since the propositions are
-pure computations the compiled bytecode deterministically evaluates.
-
-### AES S-box bit-level soundness
-
-The S-box gadget uses a GF(2^8) multiplicative-inverse trick + affine transform
-(`s_box_in_circuit` in `gadgets/xark-aes/src/lib.rs`): allocates `x_inv`/`is_zero` boolean
-wires, enforces the inverse identity via cross-product/XOR constraints, and emits the
-FIPS-197 affine transform as a per-bit XOR chain. The algebraic identities it relies on
-(cross-product/XOR chain = GF(2^8) mul; `gf256_mul x x_inv = 1` uniquely pins
-`x_inv = gf256_inv x`; `Affine(gf256_inv x) ⊕ 0x63 = SBOX[x]`) are **mechanically verified**
-in `Formal.GF256` by `native_decide`.
-
-The **per-row bridge** from the gadget's `Fr`-level constraint emission (64 cross-product
-linear constraints, 8 parity-decomposition carry chains, 8 affine XOR-chains) to those
-GF(2^8) statements is mechanised in `Formal.Aes`:
-
-* **`IsValidSBoxByteWitness`** (structure) — encodes the full per-byte constraint chain over
-  `Fr` (booleanness, `x·is_zero = 0`, `x_inv·is_zero = 0`, the 64 cross-products
-  `wP a b = wX a · wX_inv b`, 8 parity rows giving `prod_bits[k]`, `prod_bits[0] = 1 − is_zero`
-  and `prod_bits[k] = 0` for `k ≠ 0`, and the 8 affine XOR-with-`0x63` rows).
-* **`aesSbox_byte_constraint_sound`** (theorem) — from `IsValidSBoxByteWitness x`, concludes
-  `∀ j, BitOf (wOut j) ((aesSbox x) j)`, routing through
-  `byteWireToNat_wX_inv_eq_gf256_inv`, `gf256_bit_aesAffine_nat` + `gf256_bit_xor_byte`, and
-  `byteToNat_aesSbox` (the algebraic↔table identity from `Formal.GF256`).
-* **`aesSubBytes_constraint_sound`** (theorem) — the 16-byte lift to the full SubBytes layer.
-
-The `Fr → ℕ` no-wrap argument is the same shape as `Formal.Blake.addMod32_bit_sound`,
-applied at the per-byte cross-product/parity chain level. `aesRoundStep_bit_sound` consumes
-`IsValidSBoxByteWitness ×16` directly (via `aesSubBytes_constraint_sound`) — no
-canonical-lift/existential intermediate. Trust that the gadget's emitted R1CS *forces* the
-output wires to satisfy `IsValidSBoxByteWitness` rests on: the Rust exhaustive test
-`sbox_all_inputs_match_table` (`gadgets/xark-aes/src/lib.rs`); and the pure-Lean per-bit
-composition proofs in `Formal.Aes`, discharged against FIPS-197 through
-`aesSubBytes_constraint_sound`, `aesShiftRows_sound`, `aesMixColumns_sound`,
-`aesAddRoundKey_sound`, resting on the `Formal.GF256` S-box identities (`#print axioms` gated
-by `lean.yml`).
+There are no `axiom` declarations in `formal/`: the secp256k1, secp256r1 and BN254
+primes, once trusted axioms, are theorems proven by Pratt certificates
+(`Formal.CurvePrimes`, checked by the kernel with `decide`). No `sorry`/`sorryAx`.
+No `native_decide` either: the legacy AES / GF(2⁸) proofs, its last users, are deleted.
+Nothing is added to the kernel's trust.
 
 This is **not** an external audit. Until an external firm reviews the code, the README's
 "experimental — do not use in production" label stays.
@@ -197,9 +142,7 @@ The single largest soundness surface — every ECDSA proof depends on:
 * `enforce_in_range_one_to_n` — `r, s ∈ [1, n−1]`. Without it a malicious prover could
   exploit the `inv_mod(s)` step.
 * GLV decomposition (`glv_decompose_in_circuit`) — proves `k = k1 + λ·k2 (mod n)` with
-  `|k1|, |k2| < 2^129`. Kernel proven (`glv_via_endomorphism` + `glv_endomorphism_correct`);
-  concrete `secp256k1_phi`, homomorphism, and eigenvalue discharged in `Formal.Secp256k1Group`
-  (`secp256k1_phi_hom`, `secp256k1_phi_eigenvalue_at_G`, `secp256k1_phi_acts_as_lambda`).
+  `|k1|, |k2| < 2^129`. Kernel proven (`glv_via_endomorphism` + `glv_endomorphism_correct`).
 * Fixed-base comb tables for `u1·G` — core proven (`windowed_scalar_mul_sound`); the
   comb-row-2 doubling exception is in scope of the same proof.
 
@@ -215,9 +158,9 @@ so an unpinned hint output can't force a satisfying assignment. An auditor shoul
 * construct adversarial circuits where a hint output is **not** pinned and confirm
   `solve_and_check` still rejects a bad witness.
 
-### 3. xark-IR → R1CS lowering (`crates/ir/`, `crates/lang/src/lower_mir.rs`)
+### 3. xark-IR → R1CS lowering (`crates/ir/`, `crates/frontend/`)
 
-Deliberately small: **no opcode dispatch, no predication.** The accepted MIR subset lowers to
+Deliberately small: **no opcode dispatch.** The circuit's wasm lowers to
 `add`/`sub`/`mul`/`require_eq` + `hint_*`/advice, then directly to R1CS. Auditable points:
 
 * **Each primitive → its expected constraint.** Fixed, small footprint; FV bridge tests pin
@@ -229,7 +172,7 @@ Deliberately small: **no opcode dispatch, no predication.** The accepted MIR sub
 * **Hint/advice reproduction** — the solver reproduces each hint output; `solve_and_check`
   rejects any constraint-violating witness.
 
-### 4. Trusted-setup ceremony (`crates/backend/src/setup_phase2.rs`, `ceremony.rs`, `ptau.rs`)
+### 4. Trusted-setup ceremony (`crates/groth16/src/setup.rs`, `crates/backend/src/ceremony.rs`, `ptau.rs`)
 
 * `.ptau` admissibility — degree match, subgroup membership, pairing-consistency.
 * Phase-2 contribution — Schnorr PoK per δ contribution; chain verification.
@@ -254,6 +197,12 @@ stubs for `G1Point::Mul / Add / pairing`), and pairing operand assembly. The ref
 (`crates/verifier/reference-program/`) has a pinned SHA-256 in `expected.sha256` verified in CI
 by `.github/workflows/reproducible-build.yml`.
 
+`verify_groth16_batch` (several proofs of one VK in one pairing call) is new and
+has had no review beyond its own tests and Kani harnesses. An auditor should
+check the weight derivation (SHA-256 over the domain tag, the whole VK and the
+whole batch, 252-bit weights with `r₀ = 1`), that every value the pairing sees
+is covered by that hash, and the `Σ rᵢ` reduction mod `r` (`add_mod_r`).
+
 ## Out of scope
 
 * External audit cost/scoping — not yet engaged.
@@ -268,9 +217,10 @@ by `.github/workflows/reproducible-build.yml`.
 
 | Component | Mitigation |
 |---|---|
-| `rustc` MIR shape (nightly) | Pin the nightly, validate the accepted MIR subset and reject the rest, fuzz the lowering. |
-| `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test `gadgets/tests/tests/differential_alt_bn128.rs`: same fixed vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change; each new `G1_ADD`/`G1_MUL`/`G2_ADD`/`PAIRING_2` vector adds an anchor. Extending to OSS-Fuzz CPU-weeks is a follow-up. |
-| Arkworks Groth16 | Cite published Groth16 mechanisations (e.g. Microsoft's verified Groth16 in F*); no in-repo proof. |
+| `rustc` codegen (wasm32) | Circuit ops are opaque wasm imports, so the circuit is rustc-independent (CI compares every example's digest on 1.89 / stable / beta); witness branches are guarded (Lean `gated_sat` & co.); the lowering is fuzzed against native Rust with exhaustive witness search. |
+| `solana_nostd_alt_bn128` syscall ↔ Arkworks fallback | Differential test `gadgets/tests/tests/differential_alt_bn128.rs`: same fixed vectors via the Arkworks fallback (host `#[test]`s) and the on-chain syscall path (`#[svm_test]`s through Mollusk + cargo-build-sbf), asserting byte-identical results. Run under the `Solana E2E` CI workflow on every verifier change; each new `G1_ADD`/`G1_MUL`/`G2_ADD`/`PAIRING_2` vector adds an anchor. The verifier does no curve or subgroup checks of its own (its `*_strict` entry points add only an encoding check) and relies on the backend to refuse malformed points, so both paths are also tested to reject a G1 point off the curve or with a coordinate `>= q` (pairing, add, mul) and an off-subgroup G2 point (pairing). Extending to OSS-Fuzz CPU-weeks is a follow-up. |
+| Groth16 (`xark-groth16`: setup, prover, verifier) | In-repo, not mechanised (cite published Groth16 mechanisations, e.g. Microsoft's verified Groth16 in F*). Cross-checked in tests against `ark-groth16` as an independent implementation: byte-identical keys and proofs for the same randomness, the same verification verdicts, and phase-2 keys byte-identical to an arkworks-based reference. |
+| BN254 arithmetic (`ark-bn254`, `ark-ff`, `ark-ec`) | The field, curve and pairing operations everything above is built on. |
 | Lean kernel + mathlib | Trusted base; replace via Coq cross-check if needed. |
 | `rustc` / `cargo` / `lake` / `Kani` / CBMC | Toolchain trust. |
 

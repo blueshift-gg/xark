@@ -71,7 +71,8 @@ The genuinely rarer case; the `::<32>` keeps its cost honest. It lowers through 
 
 ## Semantics & constraint cost (per op, width `N`)
 
-All ops first obtain `bits = to_bits::<N>(x)` — `N` booleanity + 1 recomposition — **once per
+All ops first obtain `bits = to_bits::<N>(x)` — `N` rows: `N − 1` booleanity rows and one
+`b₀(b₀ − 1) = 0` for the bit computed from the others — **once per
 `(x, N)`**, then:
 
 * **`x == c` / `x != c`** — a bare equality needs no bits: `require`/`is_zero` on `x − c` (only
@@ -101,11 +102,11 @@ The single optimization that makes the above cheap across repeated use. The lowe
 local to a canonical `LinearCombination` (`simplified()` → sorted, merged terms). Add a memo table:
 
 ```rust
-bit_cache: BTreeMap<(CanonicalLc, usize /* width N */), Vec<VarId>>
+bit_cache: BTreeMap<(CanonicalLc, usize /* width N */), Vec<LinearCombination>>
 ```
 
-When an op needs `to_bits::<N>(x)`: **miss** → decompose, store bit vars under `(canonical(x), N)`;
-**hit** → reuse them, **skipping** the `N` booleanity + recomposition constraints. So
+When an op needs `to_bits::<N>(x)`: **miss** → decompose, store the bits under `(canonical(x), N)`;
+**hit** → reuse them, **skipping** the decomposition's `N` rows. So
 `x < 100u32; x >> 3u32; x & mask_u32` on the same `x` share **one** 32-bit decomposition.
 
 * **Soundness / invalidation:** circuit values are immutable in lowering (each local → a stable LC),
@@ -115,7 +116,7 @@ When an op needs `to_bits::<N>(x)`: **miss** → decompose, store bit vars under
 * **v1 granularity:** cache per exact `(LC, N)`. A later refinement can answer a narrower request
   from a wider cached split (reuse low bits of a 64-bit decomposition for a 32-bit op).
 * **Scope:** the automatic, general form of what `xark-bits` does by hand (threading `[Field; 32]`).
-  Self-contained pass in `lower_mir`; no IR or surface changes.
+  Self-contained lowering pass; no IR or surface changes.
 * **Not the solver:** caching in the witness solver would save prover *time* only; the constraint-
   count win is entirely at lowering.
 
@@ -138,8 +139,10 @@ This gives const-generic methods the same amortization a `U<N>` wrapper would �
   a width; would need a hidden default (footgun).
 * **`Eq`/`Ord` markers** — a circuit `==` yields a *wire*, not a total relation; these would wrongly
   imply `Field` is a valid map key / sortable.
-* **`BitXor<Field>`** — `^` already means *pow* (`BitXor<u64>`); overloading it to xor for a `Field`
-  RHS is a readability trap. Keep `.xor()` for that.
+* **`^` as a power** — `^` is boolean XOR (`BitXor<Field>`), matching Rust's meaning; it checks
+  that each operand is 0 or 1 (free for known bits, one row otherwise), and a constant other than
+  0 or 1 doesn't build. Exponentiation is `.pow(n)`; bitwise XOR of integers is `^` on `uN`. An earlier `BitXor<u64>`-as-pow overload was removed because
+  it silently reversed the meaning of valid-looking Rust.
 * **`U<N>`/`I<N>` typed wrappers** — shipped in PR #8, then **removed**. Their only edges were
   (a) operator sugar for `Field`-vs-`Field` and (b) cached bits; (b) is the memo table, (a) is served
   by `a.lt::<N>(b)`. Revisit only if a lot of word-heavy code makes a first-class bounded-int type

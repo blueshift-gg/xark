@@ -16,8 +16,10 @@ pub mod minimize;
 pub mod primitive;
 pub mod profile;
 pub mod r1cs;
-pub mod r1cs_cache;
+pub mod r1cs_stream;
 pub mod solver;
+pub mod sources;
+pub mod witness_search;
 
 pub use circuit::{CircuitProgram, R1csRow, expr_from_r1cs};
 pub use field::FieldConst;
@@ -27,6 +29,47 @@ pub use linear_combination::{LinearCombination, Term, VarId};
 pub use minimize::minimize;
 pub use profile::{ConstraintKind, ConstraintProfile, ProfileProgram};
 pub use r1cs::{DebugInfo, FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
+pub use sources::{Site, SourceMap};
+
+/// A version's major and minor parts, a pre-release or build suffix dropped:
+/// `0.3.1` and `0.3.0-rc.1` → `0.3`. What a dependency on this release pins.
+pub fn major_minor(v: &str) -> String {
+    let core = v.split(['-', '+']).next().unwrap_or_default();
+    core.splitn(3, '.').take(2).collect::<Vec<_>>().join(".")
+}
+
+/// Whether xark versions `a` and `b` are the same release, which build and read the
+/// same circuits: the same minor version before 1.0, the same major version after.
+/// A pre-release or build suffix (`0.3.0-rc.1`) doesn't count.
+pub fn same_release(a: &str, b: &str) -> bool {
+    let parts = |v: &str| {
+        let core = v.split(['-', '+']).next().unwrap_or_default();
+        let mut it = core.split('.').map(|n| n.parse::<u64>().ok());
+        (it.next().flatten(), it.next().flatten())
+    };
+    match (parts(a), parts(b)) {
+        ((Some(am), an), (Some(bm), bn)) => am == bm && (am > 0 || (an.is_some() && an == bn)),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::same_release;
+
+    #[test]
+    fn releases() {
+        assert!(same_release("0.3.0", "0.3.4"));
+        assert!(same_release("0.3.0-rc.1", "0.3.0"));
+        assert!(!same_release("0.3.0", "0.4.0"));
+        assert!(same_release("1.2.0", "1.3.1"));
+        assert!(!same_release("1.2.0", "2.0.0"));
+        assert!(!same_release("0.3.0", "nonsense"));
+        assert_eq!(super::major_minor("0.3.1"), "0.3");
+        assert_eq!(super::major_minor("0.3.0-rc.1"), "0.3");
+        assert_eq!(super::major_minor("1.2.0+build"), "1.2");
+    }
+}
 
 /// Developer-diagnostics env-flag probe. Only reads the environment when the
 /// `debug` feature is enabled; a normal release build compiles this to `false`

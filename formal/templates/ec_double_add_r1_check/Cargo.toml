@@ -1,0 +1,17 @@
+# The `ec_double_add_r1_check` harness: every input a fresh variable. Production passes points from producers named in formal/coverage-allowlist.txt.
+[package]
+name = "ec-double-add-r1-check-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark = { path = "../../../crates/lang", version = "0.3.0" }
+xark-bignum = { path = "../../../gadgets/xark-bignum", version = "0.3.0" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

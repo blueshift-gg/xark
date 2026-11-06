@@ -2,12 +2,12 @@
 //! backend → a *verified* proof, end to end within xark's own pipeline.
 //!
 //! The circuit (`cube`: prove knowledge of `a` with `a^3 = c`) was written in
-//! the Rust subset, compiled through rustc-MIR → xark-IR → R1CS by the xark
+//! the Rust subset, compiled through wasm32 → xark-IR → R1CS by the xark
 //! compiler, and committed as a fixture. Here we:
 //!   1. load the IR (`R1csProgram` + witness-gen `PrimitiveProgram`),
 //!   2. **solve the witness with xark's own solver**,
-//!   3. run xark's *real* production backend: `setup_from_ptau` (generic over
-//!      any `ConstraintSynthesizer`) → `Groth16::prove` → `xark_backend::verify`.
+//!   3. run xark's *real* production backend: `setup_from_ptau` (xark-groth16's
+//!      phase-2 setup) → `xark_groth16::prove` → `xark_backend::verify`.
 //!
 //! A green test is the whole thesis: gadgets live in the frontend, the backend
 //! is lean, and it proves our IR directly.
@@ -16,9 +16,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use ark_bn254::{Bn254, Fr};
-use ark_groth16::Groth16;
-use ark_snark::SNARK;
+use ark_bn254::Fr;
 
 use xark_backend::Groth16Keys;
 use xark_backend::ptau::{Phase2Error, parse_ptau, setup_from_ptau};
@@ -46,7 +44,12 @@ fn setup(r1cs: &R1csProgram, seed: &[u8; 32]) -> Groth16Keys {
     let mut power = 8u32;
     loop {
         let ptau = parse_ptau(&build_valid_ptau(power)).expect("synthetic ptau parses");
-        match setup_from_ptau(XarkCircuit::for_setup(r1cs.clone()), &ptau, seed) {
+        let circuit = XarkCircuit::for_setup(r1cs.clone());
+        match setup_from_ptau(
+            &xark_groth16::ProgramSource::new(circuit.prog()),
+            &ptau,
+            seed,
+        ) {
             Ok(keys) => return keys,
             Err(Phase2Error::PtauTooSmall {
                 required_domain_size,
@@ -89,8 +92,17 @@ fn cube_proves_and_verifies_through_xark_backend_no_acir() {
     assert_eq!(pi.len(), 1, "cube has one public input (c)");
 
     let mut rng = xark_backend::test_rng();
-    let proof =
-        Groth16::<Bn254>::prove(&keys.proving_key, circ, &mut rng).expect("prove via xark keys");
+    let src = xark_groth16::ProgramSource::new(circ.prog());
+    let z = xark_groth16::ConstraintSource::layout(&src)
+        .assignment(|id| circ.assignment().get(&id).copied());
+    let proof = xark_groth16::prove(
+        &src,
+        &z,
+        &mut xark_groth16::InMemoryPk::new(&keys.proving_key),
+        &mut rng,
+        &xark_groth16::ProverConfig::default(),
+    )
+    .expect("prove via xark keys");
 
     assert!(
         xark_backend::verify(&keys.verifying_key, &proof, &pi).expect("verify"),

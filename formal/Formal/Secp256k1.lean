@@ -4,8 +4,8 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Curve
-import Formal.EcdsaVerify
-import Mathlib
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.LinearCombination
 
 set_option linter.style.header false
 set_option linter.style.longLine false

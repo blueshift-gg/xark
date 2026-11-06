@@ -1,0 +1,5 @@
+# Run xark's subset validator on save so unsupported constructs show inline.
+# Needs `xark` on PATH. Replaces rust-analyzer's `cargo check`, which
+# `xark check` runs too.
+[check]
+overrideCommand = ["xark", "check", ".", "--message-format=json"]

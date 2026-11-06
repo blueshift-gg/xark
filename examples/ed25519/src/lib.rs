@@ -1,11 +1,10 @@
 //! Ed25519 signature verification as a `#[circuit]`: a succinct proof that the
-//! EdDSA equation `[S]·B == R + [k]·A` holds, via a sound lazy extended-coordinate
-//! path (~2.36M constraints vs the affine gadget's 4.55M). Inputs pass straight
+//! cofactored EdDSA equation `[8]·([S]·B − R − [k]·A) = O` holds (396,912 constraints:
+//! 8 × 32-bit field certificates, the complete affine law and fake GLV; was 2,355,986
+//! on the lazy extended-coordinate path). Inputs pass straight
 //! through: `PointL` = compressed 32-byte pubkey `A`, `Signature` = `(R, S)` as
 //! `[u8; 64]` (compressed `R ‖ big-endian S`), `Scalar` = the challenge
 //! `k = SHA-512(R ‖ A ‖ M) mod L` (a prover-supplied witness).
-#![cfg_attr(xark, no_std)]
-
 use xark_ed25519::prelude::*;
 
 #[circuit]

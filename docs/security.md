@@ -40,6 +40,18 @@ constrain into the R1CS is enforced; what we leave outside is unconstrained and 
 prover chooses freely.** So the soundness argument reduces to: *for every gadget, the
 emitted R1CS constraints imply the claimed input/output relation.*
 
+### Proofs are not unique (replay)
+
+A Groth16 proof attests to a statement (the public inputs), not to one byte
+string: anyone holding a valid proof can re-randomize it into a different valid
+proof of the same public inputs, without any secret. The verifier's `*_strict`
+entry points reject non-canonical *encodings* of the proof's points; they can't
+reject a re-randomized proof, which is canonical. So an application must never
+use proof bytes (or their hash) as a replay or "already used" key. Replay
+protection belongs in the public inputs: a nullifier or nonce the circuit
+derives from a secret, or the signer or context the proof is for, recorded by
+the application. The generated verifier crate's README says the same.
+
 ### Trusted setup
 
 We assume τ (Powers-of-Tau toxic waste) and the circuit-specific γ, δ were and remain
@@ -53,9 +65,10 @@ We are explicitly *not* defending against:
   assumes every `hint_*` output witness is pinned by surrounding R1CS constraints
   (see [§2.16](#216-hint-outputs-advice)); constraining every hint value is the
   author's/gadget's responsibility.
-* **A future Arkworks Groth16 regression.** We pin via Cargo.lock; bumping
-  `ark-groth16` requires re-verifying the serialization round-trip test
-  (`gadgets/tests/tests/serialization.rs`).
+* **A future arkworks BN254 regression.** We pin `ark-bn254` / `ark-ff` / `ark-ec`
+  via Cargo.lock; bumping them requires re-running the differential tests against
+  `ark-groth16` (`crates/groth16/tests/prover.rs`) and the serialization round
+  trip (`gadgets/tests/tests/serialization.rs`).
 * **Side-channel leakage in the prover.** No constant-time guarantees; do not run the
   prover on untrusted hardware.
 * **Side-channel leakage in trusted-setup randomness.** `OsRng` is a primitive; if
@@ -235,16 +248,18 @@ add via `conditional_select_point`. **KAT:** `ec_add_native_matches_arkworks`,
 
 `gadgets/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression
 (`xark-poseidon`) up an authentication path. **Relation:** `node₀ = leaf`,
-`nodeᵢ₊₁ = hash2(select bᵢ sᵢ nodeᵢ, select bᵢ nodeᵢ sᵢ)`, `merkle_verify` asserts
-`node_DEPTH == root`. **Argument:** each `bᵢ` is boolean-constrained (`bᵢ·bᵢ == bᵢ`)
-before gating the mux `select b t f = f + b·(t − f)`; a boolean bit makes this a genuine
-conditional swap (no third value reachable), so the only prover freedom is the position
-bit — the intended membership freedom. Compression determinacy is Poseidon's
-(field-native); the fold allocates no advice. **FV:** `formal/Formal/Merkle.lean`
-(`merkle_level_swap_sound`, `merkle_select_pair_preserved`) composed with
-`poseidon_permutation_determined`; bridge `merkle_matches_lean_model`. **KAT:**
+`nodeᵢ₊₁ = hash2(cond_swap(bᵢ, nodeᵢ, sᵢ))`, `merkle_verify` asserts
+`node_DEPTH == root`, with `DEPTH` a const generic. **Argument:** `cond_swap` (halo2's
+one-product swap) constrains `bᵢ·bᵢ == bᵢ` itself and outputs `a' = a + b·(s − a)`,
+`s' = s − b·(s − a)`; a boolean bit makes this a genuine conditional swap (no third
+value reachable), so the only prover freedom is the position bit — the intended
+membership freedom. Compression determinacy is Poseidon's (field-native). **FV:**
+`formal/Formal/CondSwap.lean`, over `cond_swap`'s exported rows: `soundness` (no input
+assumption), `completeness` (a bit selector), and `root_binds` (the levels compute
+`merkleRoot H leaf path`, assuming, not proving over `hash2`'s rows, that they compute a
+function `H`, and that each level emits the template's rows); bridge `merkle_matches_lean_model`. **KAT:**
 `xark-merkle`'s `tests/vec.rs` (honest path accepted; wrong root, tampered sibling,
-non-boolean bit each rejected).
+non-boolean bit, and each tampered witness value rejected).
 
 ### 2.14 xark-IR arithmetic → R1CS lowering
 
@@ -269,7 +284,7 @@ original expression as a field-element identity.
 inputs in the *exact same order* the prover provided; a mismatch would silently accept a
 proof for a different statement. **Argument:** the prover allocates public-input
 variables in signature order **before any arithmetic constraint is lowered**, so the
-Arkworks R1CS matches the verifier's expected order. The circuit hash folds public-input
+R1CS matches the verifier's expected order. The circuit hash folds public-input
 variable indices, so any reorder changes circuit identity. **Tests:**
 `lower::tests::circuit_hash_changes_with_public_input_order`. (A prior end-to-end
 public-input tamper matrix was removed on this branch; restoring it is a tracked
@@ -286,6 +301,22 @@ hint output must also be referenced by ≥1 surrounding R1CS constraint that pin
 hint output that is not subsequently constrained, that witness is free and the proof is
 unsound** — an explicit out-of-scope assumption per [§1](#1-threat-model): constraining
 every hint value is the author's/gadget's responsibility.
+
+### 2.17 Witness branches and witness-only regions
+
+**Where.** `crates/frontend/src/{interp,host,builder}.rs`; semantics in
+`crates/frontend/README.md` and [subset.md](subset.md#branches-on-witness-values).
+**Branches.** Both arms of a witness `if` run; an arm's requirements are emitted as
+`g · (a − b) = 0` and its hints pinned to 0 where it isn't taken (Lean: `gated_sat`,
+`guard_mul`, `pin_dead`, `select_taken`). A requirement inside an arm is therefore
+**vacuous when the arm isn't taken** — review that every check a circuit relies on
+unconditionally sits outside any witness branch. **Witness-only regions**
+(`witness_begin()`/`witness_end()`) emit no constraints at all: a value computed inside is
+free until pinned afterwards, and a requirement inside is not enforced. The frontend's
+memo tables — the bit-decomposition cache, select and product reuse, proven booleans,
+proven bounds — are **only fed by emitted rows**, so recomputing a value after the region
+constrains it afresh (`witness_regions_leave_no_proven_facts` in
+`crates/lang/tests/snapshot.rs`). Review each region's outputs for a pin.
 
 ## 3. Trusted setup
 
@@ -313,7 +344,7 @@ Option<String>`; `phase2_seed_hash: Option<String>` — SHA-256 of the seed used
 ### Dev-mode trapdoor lifecycle
 
 In `--insecure-dev-mode` the trapdoor exists transiently in process memory during
-`ark-groth16`'s `circuit_specific_setup`. The only durable artifacts are the proving key
+`xark-groth16`'s `dev_setup`. The only durable artifacts are the proving key
 (trapdoor *exponentiated into group elements*, not the scalar) and VK; recovering the
 trapdoor requires solving discrete log on BN254. Still insufficient for production: the
 operator is a single point of failure, there's no public transcript, and
@@ -322,8 +353,8 @@ operator is a single point of failure, there's no public transcript, and
 ### Production setup
 
 Requires a Powers-of-Tau transcript plus a phase-2 contribution. Both **implemented**:
-`ptau.rs` parses snarkjs `.ptau` (with admissibility checks), `setup_phase2.rs` derives a
-phase-2 setup, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
+`ptau.rs` parses snarkjs `.ptau` (with admissibility checks), `xark-groth16`'s
+`phase2_setup` derives the phase-2 keys, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
 δ-consistency), via `xark ceremony {init,contribute,verify,finalize}`. The
 `--insecure-dev-mode` path is local-only (`production_safe: false`). See
 [`docs/trusted-setup.md`](trusted-setup.md).
@@ -338,9 +369,25 @@ phase-2 setup, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
   mechanised in Lean (`formal/` — non-native field arithmetic, curve laws, ECDSA/EdDSA
   soundness, on-curve membership), and a cargo-fuzz harness
   (`gadgets/tests/tests/fuzz.rs`) covers the parsers and IR→R1CS lowering. But the
-  MIR→xark-IR→R1CS *pipeline itself* is not proof-assistant-verified; it rests on unit
-  tests, KAT cross-checks (`sha2`, `keccak`, `blake2`, `blake3`, `aes`, arkworks
-  Grumpkin), and adversarial forged-witness tests.
+  Rust→xark-IR→R1CS *pipeline itself* is not proof-assistant-verified (its
+  constraint-reducing rewrites and branch guards are, in `formal/Formal/Rewrites.lean`);
+  it rests on unit tests, KAT cross-checks (`sha2`, `keccak`, `blake2`, `blake3`,
+  `aes`, arkworks Grumpkin), adversarial forged-witness tests, a native-semantics
+  fuzzer whose every verdict is an exhaustive witness search
+  (`crates/lang/tests/semantics_fuzz.rs`, `xark_ir::witness_search`), and the same
+  search over every example's own test inputs and mutations of them
+  (`cargo xtask difftest`, on every pull request in `slow.yml`). That includes the
+  AES-CTR/GCM circuits and the whole **EdDSA** circuit (2.4M rows, scalar
+  multiplication included: every valid signature has exactly one witness, every
+  mutated input none), since none of them needs a non-native inverse. The
+  **ECDSA** circuits do (their incomplete-affine point operations hint `λ` modulo a
+  256-bit prime), which search can't decide, so they are checked in pieces: every
+  building block at full size against native references
+  (`signature_blocks_are_sound`, `aes_blocks_are_sound` in `snapshot.rs`), and the
+  inverse-based point operations over small fields for both curve shapes
+  (`small_field_curve_gadgets_are_sound`) and in Lean. What no search covers is how
+  the ECDSA blocks are chained in the scalar-multiplication loop (see
+  [§6](#6-recommended-audit-scope)); the known-answer and tamper tests cover it.
 * **Solana on-chain verifier.** `crates/verifier/` is tested in Mollusk on the real
   `alt_bn128` syscalls (`gadgets/tests/tests/sbpf.rs` — positive across every committed
   circuit plus on-chain negatives) and fuzzed (`fuzz.rs`). **Never deployed to mainnet**;
@@ -351,15 +398,15 @@ phase-2 setup, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
   Exhaustively cross-checked vs `aes` on all 256 inputs (`sbox_all_inputs_match_table`,
   `gf256_inv_roundtrips`, `sbox_zero_input_special_case`) but the algebraic uniqueness
   argument has **not been independently audited**.
-* **Grumpkin embedded-curve arithmetic.** Shipped `scalar_mul`/`multi_scalar_mul` use an
-  **offset double-and-add** accumulator over incomplete affine `ec_add`/`ec_double`
-  (`gadgets/xark-grumpkin`), sidestepping exceptional cases rather than a complete-add
-  selector. Curve algebra + on-curve membership mechanised in `formal/Formal/Curve.lean`
-  (`enforce_on_curve_grumpkin_sound`), inputs now range-/on-curve-checked
-  (`enforce_on_curve`); the offset construction is tested against reference vectors but
-  not separately proven.
+* **Grumpkin embedded-curve arithmetic.** `scalar_mul`, `wide_scalar_mul` and
+  `multi_scalar_mul` (`gadgets/xark-grumpkin`) use an **offset** accumulator with one
+  fused incomplete double-and-add per bit (signed digits; the MSM adds `±(P₀ ± P₁)` from a
+  shared table), sidestepping exceptional cases with x-guards rather than a complete-add
+  selector. Each is proven sound in Lean over its exact exported rows
+  (`formal/Formal/{ScalarMul,WideScalarMul,MultiScalarMul}.lean`), including the offset
+  corrections and, for `scalar_mul`, the booleanity of its bits.
 * **Trusted-setup ceremony.** Implemented end-to-end (ptau ingest, phase-2 derivation,
-  MPC driver) and cross-checked against snarkjs, but **not externally audited**; a real
+  MPC driver), but **not externally audited**; a real
   deployment's security still rests on off-chain conduct (honest participants, transcript
   integrity).
 * **`RecursiveAggregation`.** Rejected — BN254 doesn't form a cycle with itself.
@@ -370,9 +417,10 @@ phase-2 setup, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
 
 Walk through before tagging a production release of a circuit deployed via xark:
 
-* [ ] **Toolchain pinned.** The nightly the tool builds circuits with is pinned
-  (`rust-toolchain.toml`) and matches the one used for the deployed circuit — MIR
-  extraction is nightly-only and its shape can drift across nightlies.
+* [ ] **Keys match the circuit.** The digest `xark build` prints for the deployed
+  circuit is the one the keys were made from. It doesn't depend on the rustc
+  version (see the toolchain policy in [toolchain.md](toolchain.md#toolchain-policy));
+  `Cargo.lock` is committed so the xark version can't drift.
 * [ ] **All gadgets used have a KAT test.** Enumerate the gadget crates and
   cross-reference [§2](#2-per-gadget-soundness-sketches).
 * [ ] **`circuit_hash` recorded in deployed metadata** and matches what the verifier
@@ -382,7 +430,8 @@ Walk through before tagging a production release of a circuit deployed via xark:
 * [ ] **`deterministic_rng_seed` is `null` in production metadata.** Non-null means the
   operator chose reproducibility — dev/test only.
 * [ ] **Public input order matches the verifier's.** Run end-to-end verify against the
-  deployed verifier with the canonical `public_inputs.json`.
+  deployed verifier with the `instruction_data.bin` `xark export` writes (the proof
+  followed by the public inputs, in the circuit's order).
 * [ ] **Constraint count benchmarked vs a recorded baseline.** Sudden change without a
   source change indicates a backend or artifact regression.
 * [ ] **Tampered-input tests cover every public input.** For each `p_i`, a test flips it
@@ -396,7 +445,7 @@ Walk through before tagging a production release of a circuit deployed via xark:
 
 External auditors should focus first on:
 
-1. **The lowering layer** — `crates/ir/` and `crates/prover/` (MIR → xark-IR → R1CS)
+1. **The lowering layer** — `crates/frontend/`, `crates/ir/` and `crates/prover/` (wasm → xark-IR → R1CS)
    plus every gadget crate. A bug here is a soundness break in every downstream circuit.
    Load-bearing sub-claims: [§2.2](#22-decompose_into_bits-range-gadget) (253-bit
    boundary), [§2.11](#211-aes-128-encryption) (algebraic S-box),
@@ -407,6 +456,12 @@ External auditors should focus first on:
    The little-endian G2 `(c0, c1)` component order and the 32-byte LE limb encoding
    (`encode_g2_le` / `assemble_*_bytes_le`) are the easiest to get wrong; round-trip
    tests in `solana::tests` pin them.
-3. **The on-chain verifier** — `crates/verifier/src/verifier.rs`. The instruction-data
+3. **ECDSA scalar multiplication** — the secp256k1 (GLV) and secp256r1 verify loops
+   (`double_scalar_mul_incomplete` in `gadgets/xark-curve`, `ecdsa_verify_packed` in
+   `xark-secp256k1`). Each block is searched or proven, but not the loop as a whole:
+   review that the offset accumulator and correction constants keep every
+   incomplete addition away from its exceptional cases (`x₁ = x₂`) for every
+   scalar, and the GLV decomposition's bounds.
+4. **The on-chain verifier** — `crates/verifier/src/verifier.rs`. The instruction-data
    parser (`split_instruction_data`), pairing input assembly, and the pre-negated `A`
    convention should be reviewed against a concrete proof byte-for-byte.

@@ -1,7 +1,6 @@
 //! Variable-length hashing with the Poseidon2 **sponge** (`hash::<N>`). A circuit
 //! is fixed-size, so the element count `N` is a compile-time constant and the
 //! absorb loop unrolls. Here we hash 5 private inputs and expose the digest.
-#![cfg_attr(xark, no_std)]
 use xark_poseidon2::prelude::*;
 
 #[circuit]
@@ -24,12 +23,12 @@ mod tests {
     fn accepts_valid() {
         // poseidon2 sponge hash([1..5])
         poseidon2_sponge(
-            "1".into(),
-            "2".into(),
-            "3".into(),
-            "4".into(),
-            "5".into(),
-            "8828141863764826539393608139805007447022200187560478202710690249571019683634".into(),
+            1,
+            2,
+            3,
+            4,
+            5,
+            "8828141863764826539393608139805007447022200187560478202710690249571019683634",
         )
         .unwrap();
     }
@@ -37,12 +36,12 @@ mod tests {
     #[test]
     fn rejects_wrong() {
         assert!(poseidon2_sponge(
-            "1".into(),
-            "2".into(),
-            "3".into(),
-            "4".into(),
-            "5".into(),
-            "1".into()
+            1,
+            2,
+            3,
+            4,
+            5,
+            1
         )
         .is_err());
     }

@@ -14,12 +14,12 @@
 
 #![no_std]
 // Circuit-lowered gadget code: the block count is const-folded from a native
-// `usize`; `(N + 63) / 64` keeps the exact MIR the compiler lowers (a `div_ceil`
-// method call is not part of the accepted circuit subset).
+// `usize`; `(N + 63) / 64` is a compile-time constant either way (`div_ceil` would
+// do too; the explicit form is kept).
 #![allow(clippy::manual_div_ceil)]
 
 use xark::Field;
-use xark_bits::{add3, add32, read_n, rotr32, sha256_iv, xor32};
+use xark_bits::{add3, add32, read_n, rotr32, sha256_iv, xor3_32, xor32};
 
 // The circuit storage model can't read a whole inner `[Field; 32]` word out of a
 // nested array as a value (`arr[t]` copies a whole inner array, which the compiler
@@ -315,14 +315,14 @@ pub fn compress(
     let v15 = read_n(st, 15);
 
     // Feed-forward: h[i] = h[i] ^ v[i] ^ v[i+8].
-    let o0 = xor32(xor32(h0, v0), v8);
-    let o1 = xor32(xor32(h1, v1), v9);
-    let o2 = xor32(xor32(h2, v2), v10);
-    let o3 = xor32(xor32(h3, v3), v11);
-    let o4 = xor32(xor32(h4, v4), v12b);
-    let o5 = xor32(xor32(h5, v5), v13b);
-    let o6 = xor32(xor32(h6, v6), v14b);
-    let o7 = xor32(xor32(h7, v7), v15);
+    let o0 = xor3_32(h0, v0, v8);
+    let o1 = xor3_32(h1, v1, v9);
+    let o2 = xor3_32(h2, v2, v10);
+    let o3 = xor3_32(h3, v3, v11);
+    let o4 = xor3_32(h4, v4, v12b);
+    let o5 = xor3_32(h5, v5, v13b);
+    let o6 = xor3_32(h6, v6, v14b);
+    let o7 = xor3_32(h7, v7, v15);
 
     let mut out = [zero; 8];
     let mut j = 0usize;
@@ -478,7 +478,7 @@ pub fn blake2s<const N_BYTES: usize>(msg: [Field; N_BYTES]) -> [[Field; 32]; 8] 
             N_BYTES
         };
         let t_low = Field::from((t_total & 0xFFFFFFFFusize) as u64).to_bits::<32>();
-        let t_high = Field::from((t_total >> 32) as u64).to_bits::<32>();
+        let t_high = Field::from((t_total as u64) >> 32).to_bits::<32>();
 
         // Final-block flag: all-ones (0xFFFFFFFF) on the last block, else 0.
         let f_word = if blk + 1usize == n_blocks {

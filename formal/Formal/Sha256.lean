@@ -3,7 +3,12 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Mathlib
+import Mathlib.Algebra.Order.Ring.Star
+import Mathlib.RingTheory.Henselian
+import Mathlib.RingTheory.RegularLocalRing.Defs
+import Mathlib.RingTheory.SimpleRing.Principal
+import Mathlib.Tactic.NormNum
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 -- We disable a few style/lint checks that flag this file's proof style. None of
 -- them are correctness lints; they are pinned-simp / unscoped-set-option
@@ -454,5 +459,37 @@ theorem MessageScheduleStep_iff (W : Fin 64 → Word32) (t : Fin 64) (ht : 16 �
                 (W ⟨t.val - 7,  by omega⟩))
               (smallSigma1 (W ⟨t.val - 2,  by omega⟩)) :=
   Iff.rfl
+
+/-! ## How `compress` chains its reductions (zkGolf T6, T7)
+
+`xark_bits::reduce::<N>` (`Formal/Reduce.lean`) returns the low 32 bits of the integer
+its field sum carries, when that sum is below `2ᴺ`. `compress` passes sums of words of
+bits with nonnegative weights, so each is the integer it names; two of them are not the
+FIPS sums themselves, and these identities show they reduce to the same words:
+
+* `newA_of_newE`: `a' = (e' + (2³² − d) + T2) mod 2³²` where `e' = (d + T1) mod 2³²` is
+  FIPS's `(T1 + T2) mod 2³²`, and that sum is below `2³⁴` (`newA_lt`): `reduce::<34>`
+  (zkGolf fc10a3c9).
+* `feedForward_fused`: round 63's `a64 = T1 + T2` and `e64 = d + T1` are never reduced;
+  the output lanes `H₀ + a64` and `H₄ + e64` are reduced once, which is the same word as
+  reducing `a64` first (zkGolf 71f560c2). Their widths: `H₀ + T1 + T2 < 11·2³²` and
+  `H₄ + d + T1 < 10·2³²` with W63 unreduced (`< 2³⁴`), both `< 2³⁶`.
+-/
+
+theorem newA_of_newE (d t1 t2 : ℕ) (hd : d < 2 ^ 32) :
+    ((d + t1) % 2 ^ 32 + (2 ^ 32 - d) + t2) % 2 ^ 32 = (t1 + t2) % 2 ^ 32 := by
+  have h := Nat.mod_add_div (d + t1) (2 ^ 32)
+  have key : (d + t1) % 2 ^ 32 + (2 ^ 32 - d) + t2 + 2 ^ 32 * ((d + t1) / 2 ^ 32) =
+      (t1 + t2) + 2 ^ 32 * 1 := by omega
+  have := congrArg (· % 2 ^ 32) key
+  simpa [Nat.add_mul_mod_self_left] using this
+
+theorem newA_lt (d t1 t2 : ℕ) (hd : d < 2 ^ 32) (ht2 : t2 < 2 * 2 ^ 32) :
+    (d + t1) % 2 ^ 32 + (2 ^ 32 - d) + t2 < 2 ^ 34 := by
+  have := Nat.mod_lt (d + t1) (show 0 < 2 ^ 32 by norm_num)
+  omega
+
+theorem feedForward_fused (h x : ℕ) : (h + x) % 2 ^ 32 = (h + x % 2 ^ 32) % 2 ^ 32 := by
+  simp [Nat.add_mod]
 
 end Xark

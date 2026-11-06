@@ -39,6 +39,10 @@
 //!
 //! If at least one honest contributor discarded their `δ_i`, the final
 //! `δ` is information-theoretically hidden from any prover.
+//!
+//! The chain says nothing about the rest of the keys, which a coordinator ships:
+//! [`verify_keys_match_initial`] checks them against the keys `init` made, which
+//! anyone can recompute from the circuit, the `.ptau` and the recorded seed.
 
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
 use ark_ec::pairing::Pairing;
@@ -98,6 +102,11 @@ pub enum CeremonyError {
          (proving_key.delta_g1 ≠ the chain's final δ·G1, or vk.delta_g2 is inconsistent with it)"
     )]
     KeysDoNotMatchChain,
+    #[error(
+        "ceremony: the shipped keys' {part} differs from what the circuit and the .ptau \
+         give — only δ may change in a ceremony"
+    )]
+    KeysDoNotMatchCircuit { part: &'static str },
 }
 
 /// Apply this contributor's secret `δ_i` to `keys` in place, returning the
@@ -226,7 +235,58 @@ pub fn verify_keys_consistent_with_chain(
     {
         return Err(CeremonyError::KeysDoNotMatchChain);
     }
-    // completeness gap: doesn't re-check h_query/l_query δ-rescaling
+    Ok(())
+}
+
+/// Confirm the shipped keys are `initial` (the keys `init` made, recomputed from the
+/// circuit, the `.ptau` and the phase-2 seed) with only δ changed. Every part a
+/// contribution doesn't touch must be `initial`'s exactly: a coordinator could
+/// otherwise ship, say, `γ = δ`, which lets anyone prove anything (`A = α`, `B = β`,
+/// `C = −Σ xᵢ·ICᵢ`) behind an honest chain. The δ-scaled `h` and `l` queries must
+/// be `initial`'s times `δ₀/δ`, checked as one pairing over a random combination
+/// of them: `e(Σ rₖ·Pₖ, δ·G2) == e(Σ rₖ·P⁰ₖ, δ₀·G2)`. Call after
+/// [`verify_keys_consistent_with_chain`] (which ties `δ` to the chain).
+pub fn verify_keys_match_initial<R: RngCore>(
+    keys: &Groth16Keys,
+    initial: &Groth16Keys,
+    rng: &mut R,
+) -> Result<(), CeremonyError> {
+    use ark_ec::VariableBaseMSM;
+    let (pk, pk0) = (&keys.proving_key, &initial.proving_key);
+    let (vk, vk0) = (&keys.verifying_key, &initial.verifying_key);
+    let differs = |part: &'static str| Err(CeremonyError::KeysDoNotMatchCircuit { part });
+    if pk.vk != *vk {
+        return differs("the proving key's copy of the verifying key");
+    }
+    if vk.alpha_g1 != vk0.alpha_g1 {
+        return differs("α");
+    }
+    if vk.beta_g2 != vk0.beta_g2 || pk.beta_g1 != pk0.beta_g1 {
+        return differs("β");
+    }
+    if vk.gamma_g2 != vk0.gamma_g2 {
+        return differs("γ");
+    }
+    if vk.gamma_abc_g1 != vk0.gamma_abc_g1 {
+        return differs("the public-input points (γ_abc)");
+    }
+    if pk.a_query != pk0.a_query {
+        return differs("the A query");
+    }
+    if pk.b_g1_query != pk0.b_g1_query || pk.b_g2_query != pk0.b_g2_query {
+        return differs("the B query");
+    }
+    if pk.h_query.len() != pk0.h_query.len() || pk.l_query.len() != pk0.l_query.len() {
+        return differs("the H or L query's length");
+    }
+    let points: Vec<G1Affine> = pk.h_query.iter().chain(&pk.l_query).copied().collect();
+    let points0: Vec<G1Affine> = pk0.h_query.iter().chain(&pk0.l_query).copied().collect();
+    let r: Vec<Fr> = (0..points.len()).map(|_| Fr::rand(rng)).collect();
+    let sum = <Bn254 as Pairing>::G1::msm(&points, &r).expect("one scalar per point");
+    let sum0 = <Bn254 as Pairing>::G1::msm(&points0, &r).expect("one scalar per point");
+    if Bn254::pairing(sum, vk.delta_g2) != Bn254::pairing(sum0, vk0.delta_g2) {
+        return differs("the H or L query (not rescaled by the chain's δ alone)");
+    }
     Ok(())
 }
 
@@ -337,40 +397,54 @@ mod ark_fr_hex {
 mod tests {
     use super::*;
     use crate::keys::Groth16Keys;
-    use crate::setup_phase2;
-    use ark_bn254::{Bn254, Fr};
+    use ark_bn254::Fr;
     use ark_ec::CurveGroup;
     use ark_ec::PrimeGroup;
     use ark_ff::UniformRand;
-    use ark_groth16::Groth16;
-    use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
-    use ark_snark::SNARK;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
+    use xark_groth16::{ConstraintSource, InMemoryPk, ProgramSource, ProverConfig};
+    use xark_ir::LinearCombination;
+    use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
 
     /// A test circuit: `x · x = y` with `y` public.
-    #[derive(Clone)]
-    struct Square {
-        x: Option<Fr>,
-        y: Option<Fr>,
-    }
-
-    impl ConstraintSynthesizer<Fr> for Square {
-        fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-            use ark_ff::One;
-            let y = cs.new_input_variable(|| self.y.ok_or(SynthesisError::AssignmentMissing))?;
-            let x = cs.new_witness_variable(|| self.x.ok_or(SynthesisError::AssignmentMissing))?;
-            cs.enforce_r1cs_constraint(
-                || ark_relations::gr1cs::LinearCombination::from((Fr::one(), x)),
-                || ark_relations::gr1cs::LinearCombination::from((Fr::one(), x)),
-                || ark_relations::gr1cs::LinearCombination::from((Fr::one(), y)),
-            )?;
-            Ok(())
+    fn square() -> R1csProgram {
+        let var = |id, name: &str, visibility| Variable {
+            id,
+            name: name.into(),
+            visibility,
+        };
+        R1csProgram {
+            field: FieldSpec::bn254(),
+            variables: vec![
+                var(0, "y", Visibility::Public),
+                var(1, "x", Visibility::Private),
+            ],
+            constraints: vec![R1csConstraint::mul(
+                0,
+                LinearCombination::var(1),
+                LinearCombination::var(1),
+                0,
+                "x * x = y",
+            )],
         }
     }
 
-    /// Build a fake phase-2-ready Groth16Keys via setup_phase2 against a
-    /// synthetic ptau. Used as the starting point for ceremony tests.
+    /// Prove `x · x = y` with `keys` and verify it.
+    fn proves(keys: &Groth16Keys, x: u64, rng: &mut ChaCha20Rng) -> bool {
+        let prog = square();
+        let src = ProgramSource::new(&prog);
+        let y = Fr::from(x * x);
+        let z = src
+            .layout()
+            .assignment(|id| Some(if id == 0 { y } else { Fr::from(x) }));
+        let pk = &mut InMemoryPk::new(&keys.proving_key);
+        let proof = xark_groth16::prove(&src, &z, pk, rng, &ProverConfig::default()).unwrap();
+        xark_groth16::verify(&keys.verifying_key, &[y], &proof).unwrap()
+    }
+
+    /// Phase-2 keys for [`square`] from a synthetic ptau: the starting point for
+    /// the ceremony tests.
     fn fresh_phase2_keys() -> Groth16Keys {
         let mut rng = ChaCha20Rng::seed_from_u64(0xDEADBEEF);
         let tau = Fr::rand(&mut rng);
@@ -378,8 +452,7 @@ mod tests {
         let beta = Fr::rand(&mut rng);
         let ptau = fake_ptau(4, tau, alpha, beta);
         let seed = [7u8; 32];
-        let circuit_for_setup = Square { x: None, y: None };
-        setup_phase2::setup_from_ptau(circuit_for_setup, &ptau, &seed)
+        crate::ptau::setup_from_ptau(&ProgramSource::new(&square()), &ptau, &seed)
             .expect("phase-2 setup succeeds")
     }
 
@@ -421,13 +494,7 @@ mod tests {
         verify_chain(initial_delta_g1, &[c]).expect("verify chain");
 
         // The post-contribution keys still produce a valid proof.
-        let circuit = Square {
-            x: Some(Fr::from(9u64)),
-            y: Some(Fr::from(81u64)),
-        };
-        let proof = Groth16::<Bn254>::prove(&keys.proving_key, circuit, &mut rng).unwrap();
-        let ok = Groth16::<Bn254>::verify(&keys.verifying_key, &[Fr::from(81u64)], &proof).unwrap();
-        assert!(ok);
+        assert!(proves(&keys, 9, &mut rng));
     }
 
     #[test]
@@ -443,14 +510,7 @@ mod tests {
         verify_chain(initial_delta_g1, &contributions).expect("verify chain");
 
         // End-to-end proof still works.
-        let circuit = Square {
-            x: Some(Fr::from(11u64)),
-            y: Some(Fr::from(121u64)),
-        };
-        let proof = Groth16::<Bn254>::prove(&keys.proving_key, circuit, &mut rng).unwrap();
-        let ok =
-            Groth16::<Bn254>::verify(&keys.verifying_key, &[Fr::from(121u64)], &proof).unwrap();
-        assert!(ok);
+        assert!(proves(&keys, 11, &mut rng));
     }
 
     #[test]
@@ -548,5 +608,98 @@ mod tests {
             verify_keys_consistent_with_chain(&keys, initial, &[c]).unwrap_err(),
             CeremonyError::KeysDoNotMatchChain
         ));
+    }
+
+    /// Two contributions, then the shipped keys checked against freshly made initial
+    /// ones (what `init` recomputes from the circuit, `.ptau` and seed).
+    fn contributed() -> (Groth16Keys, Groth16Keys, ChaCha20Rng) {
+        let initial = fresh_phase2_keys();
+        let mut keys = initial.clone();
+        let mut rng = ChaCha20Rng::seed_from_u64(10);
+        let cs = vec![
+            contribute(&mut keys, "alice", &mut rng).unwrap(),
+            contribute(&mut keys, "bob", &mut rng).unwrap(),
+        ];
+        verify_chain(initial.proving_key.delta_g1, &cs).unwrap();
+        verify_keys_consistent_with_chain(&keys, initial.proving_key.delta_g1, &cs).unwrap();
+        (keys, initial, rng)
+    }
+
+    fn rejected(keys: &Groth16Keys, initial: &Groth16Keys, rng: &mut ChaCha20Rng) -> bool {
+        matches!(
+            verify_keys_match_initial(keys, initial, rng),
+            Err(CeremonyError::KeysDoNotMatchCircuit { .. })
+        )
+    }
+
+    #[test]
+    fn honest_keys_match_the_initial_ones() {
+        let (keys, initial, mut rng) = contributed();
+        verify_keys_match_initial(&keys, &initial, &mut rng).expect("only δ changed");
+        assert!(proves(&keys, 5, &mut rng));
+    }
+
+    /// A coordinator who ships `γ = δ` (no secret needed) lets anyone prove anything:
+    /// `A = α`, `B = β`, `C = −IC(x)`. The chain and its δ checks still pass; the
+    /// comparison with the initial keys doesn't.
+    #[test]
+    fn a_coordinator_setting_gamma_to_delta_is_caught() {
+        let (mut keys, initial, mut rng) = contributed();
+        keys.verifying_key.gamma_g2 = keys.verifying_key.delta_g2;
+        keys.proving_key.vk = keys.verifying_key.clone();
+        let vk = &keys.verifying_key;
+        // Any `y`: 3 isn't a square of an integer.
+        let y = Fr::from(3u64);
+        let ic = vk.gamma_abc_g1[0].into_group() + vk.gamma_abc_g1[1] * y;
+        let forged = xark_groth16::Proof {
+            a: vk.alpha_g1,
+            b: vk.beta_g2,
+            c: (-ic).into_affine(),
+        };
+        assert!(
+            xark_groth16::verify(vk, &[y], &forged).unwrap(),
+            "the forgery verifies under γ = δ"
+        );
+        assert!(rejected(&keys, &initial, &mut rng));
+    }
+
+    #[test]
+    fn any_other_changed_part_is_caught() {
+        let (keys, initial, mut rng) = contributed();
+        let g1 = G1Affine::generator();
+        let tweak = |f: &dyn Fn(&mut Groth16Keys)| {
+            let mut k = keys.clone();
+            f(&mut k);
+            k
+        };
+        let cases: Vec<(&str, Groth16Keys)> = vec![
+            (
+                "α",
+                tweak(&|k| {
+                    k.verifying_key.alpha_g1 = g1;
+                    k.proving_key.vk.alpha_g1 = g1;
+                }),
+            ),
+            (
+                "IC",
+                tweak(&|k| {
+                    k.verifying_key.gamma_abc_g1[1] = g1;
+                    k.proving_key.vk.gamma_abc_g1[1] = g1;
+                }),
+            ),
+            ("vk copy", tweak(&|k| k.verifying_key.gamma_abc_g1[0] = g1)),
+            ("A", tweak(&|k| k.proving_key.a_query[0] = g1)),
+            ("H", tweak(&|k| k.proving_key.h_query[0] = g1)),
+            (
+                "L",
+                tweak(&|k| {
+                    let l = &mut k.proving_key.l_query;
+                    l[0] = (l[0] * Fr::from(2u64)).into_affine();
+                }),
+            ),
+        ];
+        for (name, k) in cases {
+            assert!(rejected(&k, &initial, &mut rng), "a changed {name} passed");
+        }
     }
 }

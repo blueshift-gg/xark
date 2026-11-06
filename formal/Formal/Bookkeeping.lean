@@ -3,8 +3,10 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.MemoryVarIndex
-import Mathlib
+import Mathlib.Algebra.Field.Defs
+import Mathlib.Algebra.Group.Nat.Defs
+import Mathlib.Data.Nat.Basic
+import Mathlib.Order.RelClasses
 
 set_option linter.style.header false
 set_option linter.style.longLine false
@@ -132,7 +134,7 @@ For `Read`: the gadget emits `value = arr_pre[k]`, a direct copy.
 For `Write`: the gadget emits `arr_post[k] = new_value`, and
 `arr_post[j] = arr_pre[j]` for `j ≠ k`. Both reduce to one R1CS row each
 under the constant-index path in the xark compiler's array-indexing
-lowering (`crates/lang/src/lower_mir.rs`). -/
+lowering (`crates/frontend`). -/
 
 /-- **Const-index `MemoryOp::Read` soundness.** When the index `k` is a
 literal, the gadget skips the selector layer and emits `value = arr[k]`
