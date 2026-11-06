@@ -64,6 +64,9 @@ jobs:
       - name: Compile OpenCL MSM benchmark
         run: cargo check --manifest-path crates/groth16-opencl/Cargo.toml --example msm_bench
 
+      - name: Test OpenCL MSM benchmark CSV metadata
+        run: cargo test --manifest-path crates/groth16-opencl/Cargo.toml --example msm_bench
+
       - name: Run MSM and proof comparisons on POCL
         env:
           XARK_OPENCL_REQUIRED: "1"
