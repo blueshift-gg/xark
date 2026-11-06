@@ -212,14 +212,16 @@ pub fn xark_build(name: &str, out: &Path, target: &Path) -> (bool, String) {
     )
 }
 
-/// `xark setup <out-dir> --insecure-dev-mode` (generate proving & verifying keys).
-/// Uses the dev-mode setup with deterministic seed (1) for reproducibility.
-/// Returns `(success, stderr)`.
+/// `xark setup <out-dir> --insecure-dev-mode --uncompressed` (generate proving &
+/// verifying keys). Uses the dev-mode setup with deterministic seed (1) for
+/// reproducibility, and an uncompressed proving key so each prove skips point
+/// decompression (production's default, compressed, is
+/// `compressed_key_proves_and_verifies`). Returns `(success, stderr)`.
 pub fn xark_setup(out: &Path) -> (bool, String) {
-    xark_setup_opts(out, false)
+    xark_setup_opts(out, true)
 }
 
-/// As [`xark_setup`], writing an uncompressed proving key when `uncompressed`.
+/// As [`xark_setup`], writing a compressed proving key unless `uncompressed`.
 pub fn xark_setup_opts(out: &Path, uncompressed: bool) -> (bool, String) {
     let mut c = Command::new(xark_bin());
     c.arg("setup")

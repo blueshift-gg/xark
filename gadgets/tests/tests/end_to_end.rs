@@ -40,10 +40,11 @@ fn arithmetic_square_build_prove_verify() {
     );
 }
 
-/// An **uncompressed** proving key (`xark setup --uncompressed`) must prove and
-/// verify — `xark prove` auto-detects the key's compression from its header.
+/// A **compressed** proving key (`xark setup`'s default; the other tests' keys are
+/// uncompressed, for speed) must prove and verify — `xark prove` auto-detects the
+/// key's compression from its header.
 #[test]
-fn uncompressed_key_proves_and_verifies() {
+fn compressed_key_proves_and_verifies() {
     let tmp = tempdir();
     let out = tmp.path().join("out");
     let target = tmp.path().join("target");
@@ -51,14 +52,14 @@ fn uncompressed_key_proves_and_verifies() {
         xark_build("arithmetic_square", &out, &target).0,
         "build failed"
     );
-    let (ok, err) = xark_setup_opts(&out, true);
-    assert!(ok, "uncompressed setup failed: {err}");
+    let (ok, err) = xark_setup_opts(&out, false);
+    assert!(ok, "compressed setup failed: {err}");
 
     let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
-    assert!(ok, "prove on uncompressed key failed: {err}");
+    assert!(ok, "prove on compressed key failed: {err}");
     // A wrong output is still rejected.
     let (bad, _) = xark_prove(&out, &[("x", "3"), ("y", "10")]);
-    assert!(!bad, "uncompressed key must reject a wrong witness");
+    assert!(!bad, "compressed key must reject a wrong witness");
 }
 
 #[test]
