@@ -7,7 +7,9 @@ use ark_serialize::{CanonicalSerialize, Compress};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use xark_groth16::{Accelerator, msm::msm};
-use xark_groth16_opencl::{OpenClDeviceKind, OpenClMsm};
+use xark_groth16_opencl::{OpenClDeviceInfo, OpenClDeviceKind, OpenClMsm};
+
+const CSV_HEADER: &str = "record,n,seed,repeat,cpu_pippenger_ms,cpu_decode_ms,cpu_chunk_ms,opencl_total_ms,device_vendor,device_name,opencl_version,driver_version,compute_units,global_memory_bytes";
 
 fn main() {
     if let Err(error) = run() {
@@ -39,16 +41,8 @@ fn run() -> Result<(), String> {
     let device = accelerator
         .device_info()
         .ok_or_else(|| "OpenCL device metadata unavailable after initialization".to_string())?;
-    println!(
-        "device,{},{},{},{},{},{}",
-        csv_field(&device.vendor),
-        csv_field(&device.name),
-        csv_field(&device.version),
-        csv_field(&device.driver_version),
-        device.compute_units,
-        device.global_memory_bytes,
-    );
-    println!("record,n,seed,repeat,cpu_pippenger_ms,cpu_decode_ms,cpu_chunk_ms,opencl_total_ms");
+    println!("{}", device_csv_record(device));
+    println!("{CSV_HEADER}");
     for n in sizes {
         let mut rng = ChaCha20Rng::seed_from_u64(seed ^ n as u64);
         let mut bases = Vec::with_capacity(n);
@@ -110,7 +104,7 @@ fn run() -> Result<(), String> {
                 return Err(format!("OpenCL result differs from CPU Pippenger at n={n}"));
             }
             println!(
-                "sample,{n},{seed},{repeat},{:.3},{:.3},{:.3},{:.3}",
+                "sample,{n},{seed},{repeat},{:.3},{:.3},{:.3},{:.3},,,,,,",
                 cpu_msm_elapsed.as_secs_f64() * 1_000.0,
                 cpu_decode_elapsed.as_secs_f64() * 1_000.0,
                 cpu_chunk_elapsed.as_secs_f64() * 1_000.0,
@@ -140,13 +134,42 @@ fn csv_field(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
 
+fn device_csv_record(device: &OpenClDeviceInfo) -> String {
+    format!(
+        "device,,,,,,,,{},{},{},{},{},{}",
+        csv_field(&device.vendor),
+        csv_field(&device.name),
+        csv_field(&device.version),
+        csv_field(&device.driver_version),
+        device.compute_units,
+        device.global_memory_bytes,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::csv_field;
+    use super::{CSV_HEADER, csv_field, device_csv_record};
+    use xark_groth16_opencl::OpenClDeviceInfo;
 
     #[test]
     fn csv_field_quotes_delimiters_and_escapes_quotes() {
         assert_eq!(csv_field("AMD, Inc."), "\"AMD, Inc.\"");
         assert_eq!(csv_field("driver \"beta\""), "\"driver \"\"beta\"\"\"");
+    }
+
+    #[test]
+    fn device_record_matches_csv_header_column_count() {
+        let device = OpenClDeviceInfo {
+            name: "GPU".into(),
+            vendor: "Vendor".into(),
+            version: "OpenCL 1.2".into(),
+            driver_version: "1.0".into(),
+            compute_units: 8,
+            global_memory_bytes: 1024,
+        };
+        assert_eq!(
+            device_csv_record(&device).split(',').count(),
+            CSV_HEADER.split(',').count()
+        );
     }
 }
