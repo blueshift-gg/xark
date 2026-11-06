@@ -269,8 +269,10 @@ fn steps() -> Vec<Step> {
         step(
             "lake",
             "Lean proofs, axioms, circuit hashes",
-            "cd formal && lake build && lake env lean AxiomCheck.lean \
-             && lake env lean CircuitHash.lean"
+            // mathlib's prebuilt cache first (a fresh clone would build ~8,000 of its
+            // modules); offline, the build carries on without it.
+            "cd formal && (lake exe cache get || true) && lake build \
+             && lake env lean AxiomCheck.lean && lake env lean CircuitHash.lean"
                 .into(),
             Some("lake"),
             None,
