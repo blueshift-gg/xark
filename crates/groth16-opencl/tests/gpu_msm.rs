@@ -1,6 +1,6 @@
 use ark_bn254::{Fr, G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{PrimeField, UniformRand};
+use ark_ff::{Field, PrimeField, UniformRand};
 use ark_serialize::CanonicalSerialize;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -73,6 +73,12 @@ fn opencl_bucket_msm_matches_xark_cpu_at_the_large_batch_dispatch_boundary() {
         let msm_scalar = Fr::rand(&mut rng);
         bases.push((G1Affine::generator() * base_scalar).into_affine());
         scalars.push(msm_scalar.into_bigint());
+    }
+    // Exercise every bit position used by the 64 four-bit windows, including
+    // cross-limb boundaries. Random vectors alone can miss a digit extraction
+    // regression at a particular boundary.
+    for (bit, scalar) in scalars.iter_mut().take(254).enumerate() {
+        *scalar = Fr::from(2u64).pow([bit as u64]).into_bigint();
     }
     bases[0] = G1Affine::zero();
     scalars[0] = Fr::from(0u64).into_bigint();
