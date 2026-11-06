@@ -2,7 +2,21 @@ name: Groth16 CUDA adapter host checks
 
 on:
   push:
-    branches: [rowfile-window-bounds]
+    paths:
+      - .github/workflows/groth16-cuda-host.yml
+      - crates/groth16-cuda/**
+      - crates/groth16-gpu-cli/**
+      - crates/groth16/**
+      - crates/cli/**
+      - crates/ir/**
+      - crates/prover/**
+      - crates/backend/**
+      - Cargo.toml
+      - Cargo.lock
+      - .cargo/**
+      - rust-toolchain
+      - rust-toolchain.toml
+  pull_request:
     paths:
       - .github/workflows/groth16-cuda-host.yml
       - crates/groth16-cuda/**

@@ -2,7 +2,22 @@ name: Groth16 OpenCL host checks
 
 on:
   push:
-    branches: [rowfile-window-bounds]
+    paths:
+      - .github/workflows/groth16-opencl-host.yml
+      - crates/groth16-opencl/**
+      - crates/groth16-gpu-cli/**
+      - crates/groth16/opencl/**
+      - crates/groth16/**
+      - crates/cli/**
+      - crates/ir/**
+      - crates/prover/**
+      - crates/backend/**
+      - Cargo.toml
+      - Cargo.lock
+      - .cargo/**
+      - rust-toolchain
+      - rust-toolchain.toml
+  pull_request:
     paths:
       - .github/workflows/groth16-opencl-host.yml
       - crates/groth16-opencl/**
