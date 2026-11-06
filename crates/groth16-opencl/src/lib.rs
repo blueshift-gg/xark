@@ -67,6 +67,17 @@ pub struct OpenClMsm {
     runtime: Option<Runtime>,
 }
 
+/// Identifies the OpenCL device used by an initialized backend.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenClDeviceInfo {
+    pub name: String,
+    pub vendor: String,
+    pub version: String,
+    pub driver_version: String,
+    pub compute_units: u32,
+    pub global_memory_bytes: u64,
+}
+
 /// Device selection for an OpenCL MSM context.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpenClDeviceKind {
@@ -109,6 +120,11 @@ impl OpenClMsm {
     /// or compiler is unavailable, allowing callers to report a clean fallback.
     pub fn initialize(&mut self) -> bool {
         self.runtime().is_some()
+    }
+
+    /// Return metadata for the device selected during initialization.
+    pub fn device_info(&mut self) -> Option<&OpenClDeviceInfo> {
+        self.runtime().map(|runtime| &runtime.device_info)
     }
 
     fn runtime(&mut self) -> Option<&mut Runtime> {
@@ -165,6 +181,7 @@ struct Runtime {
     program: Program,
     max_alloc_bytes: usize,
     scheduler: std::sync::Arc<DeviceScheduler>,
+    device_info: OpenClDeviceInfo,
 }
 
 impl Runtime {
@@ -177,12 +194,21 @@ impl Runtime {
         let max_alloc_bytes = usize::try_from(device.max_mem_alloc_size().ok()?).ok()?;
         let global_mem_bytes = usize::try_from(device.global_mem_size().ok()?).ok()?;
         let scheduler = scheduler::for_device(device_id, global_mem_bytes)?;
+        let device_info = OpenClDeviceInfo {
+            name: device.name().ok()?,
+            vendor: device.vendor().ok()?,
+            version: device.version().ok()?,
+            driver_version: device.driver_version().ok()?,
+            compute_units: device.max_compute_units().ok()?,
+            global_memory_bytes: device.global_mem_size().ok()?,
+        };
         Some(Self {
             context,
             queue,
             program,
             max_alloc_bytes,
             scheduler,
+            device_info,
         })
     }
 

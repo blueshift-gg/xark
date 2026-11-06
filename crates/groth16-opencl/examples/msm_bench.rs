@@ -36,6 +36,18 @@ fn run() -> Result<(), String> {
         return Err("no available OpenCL GPU/compiler; benchmark requires a GPU device".into());
     }
 
+    let device = accelerator
+        .device_info()
+        .ok_or_else(|| "OpenCL device metadata unavailable after initialization".to_string())?;
+    println!(
+        "device,{},{},{},{},{},{}",
+        csv_field(&device.vendor),
+        csv_field(&device.name),
+        csv_field(&device.version),
+        csv_field(&device.driver_version),
+        device.compute_units,
+        device.global_memory_bytes,
+    );
     println!("record,n,seed,repeat,cpu_pippenger_ms,cpu_decode_ms,cpu_chunk_ms,opencl_total_ms");
     for n in sizes {
         let mut rng = ChaCha20Rng::seed_from_u64(seed ^ n as u64);
@@ -122,4 +134,19 @@ fn parse_sizes(value: String) -> Result<Vec<usize>, String> {
             Ok(size)
         })
         .collect()
+}
+
+fn csv_field(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::csv_field;
+
+    #[test]
+    fn csv_field_quotes_delimiters_and_escapes_quotes() {
+        assert_eq!(csv_field("AMD, Inc."), "\"AMD, Inc.\"");
+        assert_eq!(csv_field("driver \"beta\""), "\"driver \"\"beta\"\"\"");
+    }
 }
