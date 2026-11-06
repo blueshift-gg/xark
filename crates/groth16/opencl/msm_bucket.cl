@@ -1,9 +1,9 @@
 // Four-bit Pippenger-style bucket accumulation for BN254 G1.
 //
 // Each work item owns one (window, bucket) pair and scans the input once.
-// This avoids atomics on projective points. The layout is intentionally simple
-// for a first correct implementation; tuning the scan and window width needs
-// measurements on actual GPU devices.
+// Validation prepares each scalar's compact byte digits once, avoiding repeated
+// limb extraction across the 15 buckets in each window. This avoids atomics on
+// projective points. Tuning the scan and window width still needs GPU measurements.
 #define XARK_BUCKET_BITS 4u
 #define XARK_BUCKET_WINDOWS 64u
 #define XARK_BUCKET_COUNT 15u
@@ -51,13 +51,18 @@ __kernel void opencl_msm_validate_bucket_inputs(__global const uint *points,
                                                 __global const ulong *scalars,
                                                 const ulong scalar_count,
                                                 __global uint *prepared,
-                                                __global uint *valid) {
+                                                __global uint *valid,
+                                                __global uchar *digits) {
   const size_t index = get_global_id(0);
   if ((ulong)index >= scalar_count) return;
   G1Affine point;
   const int point_valid = point_from_words(points, index, &point);
   const int scalar_valid = scalar_is_canonical_words(scalars, scalar_count, index);
   valid[index] = (uint)(point_valid && scalar_valid);
+  for (uint window = 0; window < XARK_BUCKET_WINDOWS; ++window) {
+    digits[(size_t)window * (size_t)scalar_count + index] =
+        (uchar)scalar_digit_4(scalars, scalar_count, index, window);
+  }
   const size_t base = index * 17;
   for (uint limb = 0; limb < 8; ++limb) {
     prepared[base + limb] = point_valid ? point.x.limb[limb] : 0;
@@ -78,7 +83,7 @@ inline G1Affine load_bucket_affine(__global const uint *points, const size_t ind
 }
 
 __kernel void opencl_msm_buckets(__global const uint *points,
-                                 __global const ulong *scalars,
+                                 __global const uchar *digits,
                                  __global const uint *valid,
                                  const ulong scalar_count,
                                  __global uint *buckets) {
@@ -89,7 +94,8 @@ __kernel void opencl_msm_buckets(__global const uint *points,
 
   G1Jacobian sum = g1_infinity();
   for (size_t index = 0; (ulong)index < scalar_count; ++index) {
-    if (valid[index] != 0 && scalar_digit_4(scalars, scalar_count, index, window) == bucket) {
+    const size_t digit_index = (size_t)window * (size_t)scalar_count + index;
+    if (valid[index] != 0 && digits[digit_index] == bucket) {
       sum = g1_add_mixed(sum, load_bucket_affine(points, index));
     }
   }

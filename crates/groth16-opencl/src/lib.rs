@@ -1,8 +1,11 @@
 //! Optional OpenCL BN254 G1 MSM backend for Xark's Groth16 prover.
 //!
 //! Small inputs use independent scalar-point products. Inputs of 256 or more
-//! scalars use a 4-bit bucket MSM. The dispatch point is an initial heuristic,
-//! not a measured crossover; run `cargo run --release --example msm_bench
+//! scalars use a 4-bit bucket MSM. Input validation also materializes each
+//! scalar's 64 four-bit digits once in a compact byte table, which bucket scans
+//! reuse instead of extracting from scalar limbs for every bucket. The dispatch
+//! point is an initial heuristic, not a measured crossover; run
+//! `cargo run --release --example msm_bench
 //! --manifest-path crates/groth16-opencl/Cargo.toml` on the target GPU before
 //! treating it as a performance choice. Both kernels are variable-time.
 //!
@@ -228,7 +231,7 @@ impl Runtime {
     ) -> Option<G1Projective> {
         let bucket_bytes = estimated_chunk_bytes(scalars.len(), true);
         let use_buckets = scalars.len() >= BUCKET_THRESHOLD
-            && self.bucket_scratch_fits()
+            && self.bucket_scratch_fits(scalars.len())
             && bucket_bytes.is_some_and(|bytes| bytes <= self.scheduler.memory_budget_bytes());
         let host_bytes = estimated_host_chunk_bytes(point_bytes.len(), scalars.len())?;
         let _permit = self.scheduler.acquire(
@@ -394,12 +397,14 @@ impl Runtime {
         decode_result(&result_words).map(|point| point.into_group())
     }
 
-    fn bucket_scratch_fits(&self) -> bool {
-        BUCKET_WINDOWS
+    fn bucket_scratch_fits(&self, scalar_count: usize) -> bool {
+        let bucket_bytes = BUCKET_WINDOWS
             .checked_mul(BUCKET_COUNT)
             .and_then(|slots| slots.checked_mul(TERM_WORDS))
-            .and_then(|words| words.checked_mul(std::mem::size_of::<u32>()))
-            .is_some_and(|bytes| bytes <= self.max_alloc_bytes)
+            .and_then(|words| words.checked_mul(std::mem::size_of::<u32>()));
+        let digit_bytes = scalar_count.checked_mul(BUCKET_WINDOWS);
+        bucket_bytes.is_some_and(|bytes| bytes <= self.max_alloc_bytes)
+            && digit_bytes.is_some_and(|bytes| bytes <= self.max_alloc_bytes)
     }
 
     fn run_bucket_chunk(
@@ -411,6 +416,7 @@ impl Runtime {
         let (point_words, scalar_limbs) = prepare_inputs(point_bytes, encoding, scalars)?;
         let count = scalars.len();
         let bucket_slots = BUCKET_WINDOWS.checked_mul(BUCKET_COUNT)?;
+        let digit_count = count.checked_mul(BUCKET_WINDOWS)?;
         let bucket_words = bucket_slots.checked_mul(TERM_WORDS)?;
         let window_words = BUCKET_WINDOWS.checked_mul(TERM_WORDS)?;
         let mut result_words = [0u32; POINT_WORDS];
@@ -449,6 +455,15 @@ impl Runtime {
                 &self.context,
                 CL_MEM_READ_WRITE,
                 count,
+                std::ptr::null_mut(),
+            )
+        }
+        .ok()?;
+        let digits_buffer = unsafe {
+            Buffer::<u8>::create(
+                &self.context,
+                CL_MEM_READ_WRITE,
+                digit_count,
                 std::ptr::null_mut(),
             )
         }
@@ -503,6 +518,7 @@ impl Runtime {
                 .set_arg(&count_arg)
                 .set_arg(&prepared_buffer)
                 .set_arg(&valid_buffer)
+                .set_arg(&digits_buffer)
                 .set_global_work_size(count)
                 .enqueue_nd_range(&self.queue)
                 .ok()?;
@@ -512,7 +528,7 @@ impl Runtime {
         unsafe {
             ExecuteKernel::new(&buckets)
                 .set_arg(&prepared_buffer)
-                .set_arg(&scalar_buffer)
+                .set_arg(&digits_buffer)
                 .set_arg(&valid_buffer)
                 .set_arg(&count_arg)
                 .set_arg(&bucket_buffer)
@@ -571,6 +587,7 @@ fn estimated_chunk_bytes(count: usize, buckets: bool) -> Option<usize> {
                     .checked_mul(TERM_WORDS)?
                     .checked_mul(word_bytes)?,
             )?
+            .checked_add(count.checked_mul(BUCKET_WINDOWS)?)?
     } else {
         count
             .checked_mul(TERM_WORDS)?
