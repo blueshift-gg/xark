@@ -159,3 +159,46 @@ pub fn default_jobs() -> usize {
     let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
     (cores / 2).clamp(1, 4)
 }
+
+#[cfg(test)]
+mod tests {
+    /// Crates sharing a [`super::build_dir`] must have distinct library names: cargo
+    /// writes a cdylib to `<name>.wasm`, so two crates with one name would read each
+    /// other's circuit, silently.
+    #[test]
+    fn shared_build_dirs_hold_distinct_crate_names() {
+        let mut seen = std::collections::BTreeMap::new();
+        for dir in ["examples", "formal/templates"] {
+            for entry in std::fs::read_dir(super::root().join(dir)).unwrap() {
+                let path = entry.unwrap().path();
+                let Ok(manifest) = std::fs::read_to_string(path.join("Cargo.toml")) else {
+                    continue;
+                };
+                let name_in = |section: &str| {
+                    manifest
+                        .lines()
+                        .skip_while(|l| l.trim() != section)
+                        .skip(1)
+                        .take_while(|l| !l.trim_start().starts_with('['))
+                        .find_map(|l| {
+                            let v = l
+                                .trim()
+                                .strip_prefix("name")?
+                                .trim_start()
+                                .strip_prefix('=')?;
+                            Some(v.trim().trim_matches('"').replace('-', "_"))
+                        })
+                };
+                let name = name_in("[lib]").or_else(|| name_in("[package]")).unwrap();
+                if let Some(other) = seen.insert(name.clone(), path.clone()) {
+                    panic!(
+                        "{} and {} are both `{name}`",
+                        other.display(),
+                        path.display()
+                    );
+                }
+            }
+        }
+        assert!(seen.len() > 100, "found only {} crates", seen.len());
+    }
+}
