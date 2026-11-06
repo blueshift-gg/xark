@@ -8,7 +8,7 @@
 
 use num_bigint::BigUint;
 use p256::elliptic_curve::point::DecompressPoint;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{AffinePoint, ProjectivePoint, Scalar};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -38,7 +38,7 @@ fn hash_point(seed: &[u8]) -> ProjectivePoint {
 
 /// `x ‖ y` as sixteen little-endian 32-bit limbs.
 fn limbs(p: &ProjectivePoint) -> [u32; 16] {
-    let e = p.to_affine().to_encoded_point(false);
+    let e = p.to_affine().to_sec1_point(false);
     let mut out = [0u32; 16];
     for (k, c) in [e.x().unwrap(), e.y().unwrap()].iter().enumerate() {
         for l in 0..8 {

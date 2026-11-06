@@ -73,7 +73,7 @@ fn ecdsa_verify_matches_k256() {
     for sk in keys.iter().map(key) {
         for msg in msgs {
             let sig: Signature = sk.sign(msg);
-            let pubkey = Point::from_sec1(sk.verifying_key().to_encoded_point(false).as_bytes());
+            let pubkey = Point::from_sec1(sk.verifying_key().to_sec1_point(false).as_bytes());
             let sig_leaf = Sig::from_rs(sig.to_bytes().as_ref());
             let e = BigUint::from_bytes_be(&Sha256::digest(msg)) % &n;
             let digest = Scalar(Uint256::from(e.clone()));
@@ -109,7 +109,7 @@ fn ecdsa_verify_matches_k256() {
     let q = BigUint::from_bytes_be(&[0x42u8; 32]);
     let sk = key(&q);
     let vk = VerifyingKey::from(&sk);
-    let pubkey = Point::from_sec1(vk.to_encoded_point(false).as_bytes());
+    let pubkey = Point::from_sec1(vk.to_sec1_point(false).as_bytes());
     let h = Sha256::digest(b"xark secp256k1 ecdsa vector");
     let e = BigUint::from_bytes_be(&h) % &n;
     for mu in excluded.iter().flat_map(|m| [m.clone(), &n - m]) {
@@ -119,7 +119,7 @@ fn ecdsa_verify_matches_k256() {
         let s = k.modpow(&(&n - 2u8), &n) * (&e + &r * &q) % &n;
         // A low `s` (k256's rule) flips `R` to `−μ·Q`, still in the set.
         let sig = Signature::from_scalars(sc(&r).to_repr(), sc(&s).to_repr()).unwrap();
-        let sig = sig.normalize_s().unwrap_or(sig);
+        let sig = sig.normalize_s();
         vk.verify_prehash(&h, &sig)
             .expect("k256 accepts the signature");
         assert!(

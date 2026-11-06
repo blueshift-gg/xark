@@ -28,12 +28,12 @@ num-bigint = "0.4"
 # The fixed-base comb tables (`build.rs`).
 [build-dependencies]
 num-bigint = "0.4"
-p256 = "0.13"
+p256 = "0.14"
 sha2 = "0.10"
 
 [dev-dependencies]
 num-bigint = "0.4"
-p256 = "0.13"
+p256 = "0.14"
 sha2 = "0.10"
 xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
 
