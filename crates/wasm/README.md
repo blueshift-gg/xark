@@ -4,7 +4,7 @@ Generate and verify **Groth16 (BN254) zero knowledge proofs** in the browser
 or other JavaScript environments with [xark](https://github.com/blueshift-gg/xark).
 
 ```js
-import init, { prove, verify } from "@blueshift-gg/xark-wasm";
+import init, { prove, verify } from "@blueshift-gg/xark";
 
 await init();
 
@@ -44,7 +44,7 @@ proving key is keyed to)
 ### Browser
 
 ```js
-import init, { prove, verify } from "@blueshift-gg/xark-wasm";
+import init, { prove, verify } from "@blueshift-gg/xark";
 
 await init();
 
@@ -65,7 +65,7 @@ The Node build does not require a separate `init()` step.
 
 ```js
 import { readFileSync } from "node:fs";
-import { prove, verify } from "@blueshift-gg/xark-wasm";
+import { prove, verify } from "@blueshift-gg/xark";
 
 // `readFileSync` returns a Buffer, which is a Uint8Array — pass it straight in.
 const xbc = readFileSync("examples/cube/target/xark/cube/circuit.xbc");
@@ -113,8 +113,8 @@ By default setup picks `reduced` for large circuits (≥ 2²⁰ constraints) and
 main thread, and the key is never buffered anywhere:
 
 ```js
-import * as xark from "@blueshift-gg/xark-wasm";
-import { proveFromStream } from "@blueshift-gg/xark-wasm/stream";
+import * as xark from "@blueshift-gg/xark";
+import { proveFromStream } from "@blueshift-gg/xark/stream";
 
 const { proof, publicInputs } = await proveFromStream(
   xark, circuit, fetch("/circuit/pk.bin"), inputs,
@@ -132,7 +132,7 @@ square root per point every time it is read — ~95% of the witness MSMs in WASM
 result and prove from it on later visits (Ed25519 with 16 workers: 3.5× faster):
 
 ```js
-import { transcodeKey } from "@blueshift-gg/xark-wasm/stream";
+import { transcodeKey } from "@blueshift-gg/xark/stream";
 
 const root = await navigator.storage.getDirectory();
 const file = await root.getFileHandle("pk.decoded.bin", { create: true });
@@ -158,7 +158,7 @@ pool, whose workers decompress their chunks in parallel.
 **Threads (optional).**
 
 ```js
-const { createPool, parallelSupported } = await import("@blueshift-gg/xark-wasm/pool");
+const { createPool, parallelSupported } = await import("@blueshift-gg/xark/pool");
 const pool = parallelSupported() ? await createPool({ threads: 8 }) : undefined;
 proveStreaming(circuit, pk, inputs, { pool });   // also accepted by proveFromStream
 await pool?.terminate();
@@ -304,7 +304,7 @@ The circuit digest of a `circuit.xbc`, as `xark build` prints it: the same for e
 build of the circuit, whichever Rust compiled it. A client pins a prover to it with
 `prover(from, { digest })`.
 
-### Typed clients (`@blueshift-gg/xark-wasm/client`)
+### Typed clients (`@blueshift-gg/xark/client`)
 
 What every client `xark client` generates shares, as plain JavaScript with types:
 `Field` (a field element, checked when it's made), `Proof` (a proof and its public

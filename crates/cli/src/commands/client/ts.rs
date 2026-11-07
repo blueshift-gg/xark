@@ -1,5 +1,5 @@
 //! The TypeScript target: one `.ts` file holding what's specific to the circuit, over
-//! the shared runtime `@blueshift-gg/xark-wasm/client` (`Field`, `Proof`, `Circuit`).
+//! the shared runtime `@blueshift-gg/xark/client` (`Field`, `Proof`, `Circuit`).
 //!
 //! * per enum, its variants as constants and their type (`Country.US`, or `"US"`);
 //! * an interface per input struct, every value in its natural TypeScript form;
@@ -613,7 +613,7 @@ const TEXT: u64 = 31;
 const TUPLE: usize = 16;
 
 /// The module every generated client imports: `Field`, `Proof`, `Circuit`.
-const RUNTIME: &str = "@blueshift-gg/xark-wasm/client";
+const RUNTIME: &str = "@blueshift-gg/xark/client";
 
 #[cfg(test)]
 mod tests {
@@ -680,7 +680,7 @@ mod tests {
             "export interface KycCheckPublicValues {\n  bornBefore: Date;\n  allowed: Country[];\n  commitment: Field;\n}",
             "    bornBefore: new Date(v.bornBefore),",
             "    commitment: new Field(v.commitment),",
-            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark-wasm/client\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
+            "import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type I64, type Json, type Proof, type Prover, type U16, type U64, type Verifier } from \"@blueshift-gg/xark/client\";\nexport { CheckFailed, Field, InputError, fromHex, toHex };",
             "  name: \"kyc_check\",\n  schema,\n",
             "export interface KycCheckStructs {\n  Identity: Identity;\n}",
             "export const KycCheck = new Circuit<KycCheckInputs, KycCheckPublicInputs, KycCheckPublicValues, KycCheckStructs>({\n  name: \"kyc_check\",",

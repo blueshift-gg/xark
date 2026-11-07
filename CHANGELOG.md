@@ -63,6 +63,13 @@ gadgets now check more:
 
 ### Changed
 
+#### The npm package
+
+- **`@blueshift-gg/xark`.** The JS runtime is published as
+  `@blueshift-gg/xark`; imports move from `@blueshift-gg/xark-wasm` (and its
+  `/client`, `/pool`, `/stream` subpaths) to the same subpaths of the new name.
+  `@blueshift-gg/xark-wasm@0.2.x` stays published and is deprecated.
+
 #### The toolchain and the frontend
 
 - **Stable Rust only.** A circuit crate is compiled to wasm by the ambient stable
@@ -209,7 +216,7 @@ verification starter, and the `xark-client` npm package is removed.
 - **Proving and verifying:** `Zkyc.prover(source)` and `Zkyc.verifier(source)`,
   from a URL serving the build output or its bytes, each with only the methods it
   can run. They load xark-wasm themselves (node, web or workerd; `{ wasm }` passes
-  your own). `{ pool }` proves on a worker pool from `@blueshift-gg/xark-wasm/pool`. `prove` returns a `Proof`: `toBytes()` is the proof as an exported
+  your own). `{ pool }` proves on a worker pool from `@blueshift-gg/xark/pool`. `prove` returns a `Proof`: `toBytes()` is the proof as an exported
   Solana verifier reads it (256 bytes, `Proof::from_le_bytes` on chain), and
   `toBytesCompressed()` is half the size; `verifier.verify(bytes, required)` reads
   either and checks it proves the public inputs you require. A malformed verifying
@@ -253,7 +260,7 @@ verification starter, and the `xark-client` npm package is removed.
   `verify` is `false` for a bad proof and throws for public inputs that don't fit.
 - **Hashing as the circuit does:** `prover.fields("Identity", id)` gives a value's
   field elements and `prover.poseidon2(fields)` hashes them.
-- The shared code is xark-wasm's `@blueshift-gg/xark-wasm/client`, and every value
+- The shared code is xark-wasm's `@blueshift-gg/xark/client`, and every value
   is encoded by one Rust codec, `xark-schema`, shared with the CLI, so a client and
   `xark prove --inputs` can't disagree.
 

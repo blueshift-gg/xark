@@ -3,8 +3,8 @@
 // each chunk of points is folded into its MSM and dropped — and the witness and
 // quotient polynomial are computed before the first key byte is needed.
 //
-//   import * as xark from "@blueshift-gg/xark-wasm";
-//   import { proveFromStream } from "@blueshift-gg/xark-wasm/stream";
+//   import * as xark from "@blueshift-gg/xark";
+//   import { proveFromStream } from "@blueshift-gg/xark/stream";
 //   const out = await proveFromStream(xark, xbc, fetch("/circuit/pk.bin"), inputs);
 //
 // No SharedArrayBuffer or cross-origin isolation needed. Pass `options.pool` to
