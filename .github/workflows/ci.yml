@@ -51,7 +51,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: |
-          cargo doc --no-deps --workspace --exclude xark-wasm
+          cargo doc --no-deps --workspace --exclude xark-wasm --lib
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -179,9 +179,8 @@ jobs:
         env:
           XARK_FUZZ_CASES: "200"
         run: |
-          cd crates/lang
-          cargo nextest run --release --no-fail-fast
-          cargo test --release --doc
+          cargo nextest run --release --no-fail-fast -p xark
+          cargo test --release --doc -p xark
 
   wasm-smoke:
     # The xark-wasm prover package (`npm test` in crates/wasm): against host

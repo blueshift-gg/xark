@@ -116,7 +116,7 @@ export class Proof<PublicValues> {
   toBytesCompressed(): Uint8Array;
 }
 
-/** The parts of `@blueshift-gg/xark-wasm` a client uses (any of its builds). */
+/** The parts of `@blueshift-gg/xark` a client uses (any of its builds). */
 export interface Wasm {
   prove(circuit: Uint8Array, provingKey: Uint8Array, inputs: Record<string, string>, sources?: string): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit and its proving key, decoded once, for many proofs (`Prover.preload`). */
@@ -192,7 +192,7 @@ export interface LoadOptions {
   digest?: string;
   /**
    * A prover only: a worker pool to prove on (`createPool()` from
-   * `@blueshift-gg/xark-wasm/pool`), spreading the FFTs and MSMs over its threads
+   * `@blueshift-gg/xark/pool`), spreading the FFTs and MSMs over its threads
    * (about 4× faster with 8). It needs `SharedArrayBuffer`: in a browser, a
    * cross-origin isolated page (`parallelSupported()` says), proving off the main
    * thread. The pool is yours: `terminate()` it when done.

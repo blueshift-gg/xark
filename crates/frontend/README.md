@@ -188,7 +188,7 @@ wasm functions instead.
 cargo run -p xark-frontend --release --example stablec -- examples/ed25519 \
     [--compare other/circuit.xbc] [--out circuit.xbc]   # digest, sizes, timing; faithfulness check
 XARK_FRONTEND_TIME=1 …                     # phase timings
-cargo test --release --test snapshot                 # (in crates/lang) the snapshot suite
+cargo test --release -p xark --test snapshot         # the snapshot suite
 cargo run -p xark-frontend --release --example xbcstat -- a.xbc b.xbc   # sizes
 cargo xtask difftest                                 # examples' inputs, adversarially
 ```

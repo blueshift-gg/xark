@@ -61,7 +61,7 @@ with the same digest, says so, and its self-check confirms the proof.
   toolchain and example, and pin the operation through an intrinsic so the
   circuit (and its digest) goes back to what it was.
 - **The lowering changed on purpose** — run `cargo xtask digests --update`,
-  review the diff, re-check the snapshot suite (`cd crates/lang && cargo test
-  --release --test snapshot -- --include-ignored`) and the Lean-model bridges, and
+  review the diff, re-check the snapshot suite (`cargo test --release -p xark
+  --test snapshot -- --include-ignored`) and the Lean-model bridges, and
   regenerate any keys built from the old circuits. Name every changed circuit in
   CHANGELOG.md and bump the minor version (see the policy above).

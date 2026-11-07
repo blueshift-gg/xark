@@ -42,7 +42,7 @@ jobs:
       - name: cargo test (ignored KAT vectors)
         # Only the `#[ignore]`d known-answer vectors: ci.yml runs the rest of the
         # snapshot suite.
-        run: cd crates/lang && cargo test --release --test snapshot -- --ignored
+        run: cargo test --release -p xark --test snapshot -- --ignored
 
   ec-gadget-vectors:
     name: heavy EC gadget vectors (ed25519 + secp256k1/r1, release)

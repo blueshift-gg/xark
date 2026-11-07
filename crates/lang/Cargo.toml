@@ -2,8 +2,8 @@
 name = "xark"
 version.workspace = true
 edition = "2024"
-license = "MIT"
-repository = "https://github.com/blueshift-gg/xark"
+license.workspace = true
+repository.workspace = true
 description = "Write zero-knowledge circuits in Rust — the language prelude (no_std, stable)."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
