@@ -1,6 +1,6 @@
 [package]
 name = "xark"
-version = "0.3.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/blueshift-gg/xark"
@@ -10,7 +10,7 @@ categories = ["cryptography"]
 readme = "README.md"
 # Oldest rustc that compiles a circuit (let-chains); CI checks every example
 # circuit is identical on it, stable and beta (`cargo xtask digests`).
-rust-version = "1.89"
+rust-version.workspace = true
 
 # The language: `use xark::prelude::*;` in a circuit (no_std, stable).
 [lib]
@@ -59,9 +59,3 @@ num-bigint = "0.4"
 # lint (1.80+) stays quiet.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)', 'cfg(xark_client)', 'cfg(xark_gadgets)'] }
-
-# The frontend runs inside the test process: optimize it even in test builds.
-[profile.dev.package.xark-frontend]
-opt-level = 3
-[profile.dev.package.xark-ir]
-opt-level = 3

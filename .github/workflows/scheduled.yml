@@ -29,8 +29,6 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/lang
       - name: cargo test (semantics fuzz)
         env:
           XARK_FUZZ_CASES: "5000"
