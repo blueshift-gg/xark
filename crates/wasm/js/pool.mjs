@@ -2,7 +2,7 @@
 // FFT sweeps and MSM chunks across threads — in browsers (Web Workers) and Node
 // (worker_threads), from one implementation.
 //
-//   import { createPool, parallelSupported } from "@blueshift-gg/xark-wasm/pool";
+//   import { createPool, parallelSupported } from "@blueshift-gg/xark/pool";
 //   const pool = parallelSupported() ? await createPool({ threads: 8 }) : undefined;
 //   const out = proveStreaming(xbc, pk, inputs, { pool });   // pool is optional
 //   await pool?.terminate();

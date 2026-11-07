@@ -1,0 +1,121 @@
+name: Release
+
+# A release is triggered by a tag
+#
+#   git commit -am "chore: bump version to 0.3.1"
+#   git tag -a v0.3.1 -m "xark 0.3.1"
+#   git push origin master v0.3.1
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+run-name: Release ${{ github.ref_name }}
+
+jobs:
+  release:
+    name: Publish the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    environment: release
+    permissions:
+      contents: write   # for creating draft release
+      id-token: write   # for OIDC
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          cache: false
+          build-warnings: ""   # a release should not fail on a warning CI allows
+
+      - name: Verify the tag is the release version
+        run: |
+          set -euo pipefail
+          version=$(yq -e '.workspace.package.version' Cargo.toml)
+          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version v$version"
+            exit 1
+          fi
+          stale=$(git grep -n -E 'path = "[^"]+"' -- '*Cargo.toml' \
+            | grep -E 'version = "[^"]+"' | grep -vF "version = \"$version\"" || true)
+          if [[ -n "$stale" ]]; then
+            echo "::error::a path dependency still pins another version:"
+            printf '%s\n' "$stale"
+            exit 1
+          fi
+          cargo xtask publish --plan
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: wasm-pack
+
+      - name: Build every wasm target (release)
+        run: cargo xtask wasm all
+
+      - name: Verify shipped files exist
+        working-directory: crates/wasm
+        run: |
+          for dir in node web module; do
+            for file in xark_wasm.js xark_wasm_bg.wasm xark_wasm.d.ts; do
+              [[ -f "dist/$dir/$file" ]] || { echo "::error::missing dist/$dir/$file"; exit 1; }
+            done
+          done
+          echo "all shipped files present"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Skip a version already on npm
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ -n "$(npm view "@blueshift-gg/xark@$version" version 2>/dev/null || true)" ]]; then
+            echo "::notice::@blueshift-gg/xark@$version is already on npm; skipping"
+            echo "skip=true" >> "$GITHUB_ENV"
+          else
+            echo "publishing @blueshift-gg/xark@$version"
+          fi
+
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      - name: Publish every crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo xtask publish --execute --skip-published
+
+      - name: Publish the npm package
+        if: env.skip != 'true'
+        working-directory: crates/wasm
+        run: npm publish --access public
+
+      - name: Open the draft release unless one exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::notice::$TAG already has a release (draft or published); leaving it untouched"
+            exit 0
+          fi
+          gh release create "$TAG" --draft --verify-tag --generate-notes \
+            --title "xark ${TAG#v}"

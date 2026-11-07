@@ -4,7 +4,9 @@
 //! * `--dry-run`: package every crate and build each from its own `.crate`, as
 //!   crates.io will see it, uploading nothing;
 //! * `--execute`: the real release (needs `cargo login`). `cargo publish` waits for
-//!   each crate to index before the next, so its dependencies are always there.
+//!   each crate to index before the next, so its dependencies are always there;
+//!   `--skip-published` skips the crates already at this version, so a re-run after a
+//!   failed publish resumes instead of stopping at the first published crate.
 //!
 //! A crate is publishable unless its manifest says `publish = false`. Every
 //! dependency of a publishable crate on another local crate (dev-dependencies
@@ -12,17 +14,19 @@
 //! a `version`: a mistake fails here, not halfway through a release.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-/// `xark` (crates/lang) is its own workspace: published from its directory.
-const SEPARATE: &str = "crates/lang";
-
 #[derive(clap::Args)]
-#[group(required = true, multiple = false)]
+#[command(group(
+    clap::ArgGroup::new("mode")
+        .required(true)
+        .multiple(false)
+        .args(["plan", "dry_run", "execute"]),
+))]
 pub struct Args {
     /// Check every crate can publish, and print the order.
     #[arg(long)]
@@ -33,9 +37,17 @@ pub struct Args {
     /// Publish every crate to crates.io.
     #[arg(long)]
     execute: bool,
+    /// With --execute: skip the crates already on crates.io at this version.
+    #[arg(long)]
+    skip_published: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    // `requires = "execute"` would be tidier, but clap treats a bool flag's default as
+    // present, so the requirement is never enforced.
+    if args.skip_published && !args.execute {
+        bail!("--skip-published needs --execute");
+    }
     let order = plan()?;
     if args.plan {
         println!("{} crates, in publish order:", order.len());
@@ -45,14 +57,17 @@ pub fn run(args: Args) -> Result<()> {
     } else if args.dry_run {
         dry_run()?;
     } else {
-        for (name, dir) in &order {
+        for (name, version) in &order {
+            if args.skip_published && published(name, version) {
+                println!(">>> {name} {version} is already on crates.io; skipped");
+                continue;
+            }
             println!(">>> publishing {name}");
-            let mut cmd = Command::new("cargo");
-            match dir {
-                Some(dir) => cmd.arg("publish").current_dir(dir),
-                None => cmd.args(["publish", "-p", name]).current_dir(crate::root()),
-            };
-            if !cmd.status()?.success() {
+            let status = Command::new("cargo")
+                .args(["publish", "-p", name])
+                .current_dir(crate::root())
+                .status()?;
+            if !status.success() {
                 bail!("publishing {name} failed");
             }
         }
@@ -61,20 +76,24 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
-/// The publishable crates in dependency order, each with its directory when it
-/// publishes from there (its own workspace).
-fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
+/// Whether `name@version` is already on crates.io. `cargo info` asks the index, the
+/// same one `cargo publish` checks; a failure of any kind (a network one included)
+/// reads as "not published", and the publish then reports the real problem.
+fn published(name: &str, version: &str) -> bool {
+    Command::new("cargo")
+        .args(["info", "-q", &format!("{name}@{version}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// The publishable crates in dependency order, with the version being published.
+fn plan() -> Result<Vec<(String, String)>> {
     let root = crate::root();
     let mut pkgs: BTreeMap<String, Value> = BTreeMap::new();
-    for dir in [root.clone(), root.join(SEPARATE)] {
-        for p in metadata(&dir)? {
-            if p["manifest_path"]
-                .as_str()
-                .is_some_and(|m| Path::new(m).starts_with(&root))
-            {
-                pkgs.insert(p["name"].as_str().unwrap_or_default().to_string(), p);
-            }
-        }
+    for p in metadata(&root)? {
+        pkgs.insert(p["name"].as_str().unwrap_or_default().to_string(), p);
     }
     let publishable: BTreeSet<&str> = pkgs
         .iter()
@@ -129,18 +148,18 @@ fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
         }
         order.extend(ready);
     }
-    let separate = root.join(SEPARATE);
     Ok(order
         .into_iter()
         .map(|n| {
-            let dir = Path::new(pkgs[n]["manifest_path"].as_str().unwrap_or_default()).parent();
-            let own = dir.filter(|d| *d == separate).map(Path::to_path_buf);
-            (n.to_string(), own)
+            (
+                n.to_string(),
+                pkgs[n]["version"].as_str().unwrap_or_default().to_string(),
+            )
         })
         .collect())
 }
 
-/// The npm package `@blueshift-gg/xark-wasm` is released with the crates: its
+/// The npm package `@blueshift-gg/xark` is released with the crates: its
 /// `package.json` and its client runtime's `VERSION` (which checks a client's
 /// `schema.json` came from the same release) must carry the workspace's version.
 fn npm_version_errors(version: &str) -> Vec<String> {
@@ -189,9 +208,8 @@ fn metadata(dir: &Path) -> Result<Vec<Value>> {
 /// Package every crate and build each from its `.crate`. A plain `cargo publish
 /// --dry-run -p <crate>` can't, before a release: it resolves the crate's xark
 /// dependencies at the new version from crates.io, where they aren't yet. `cargo
-/// package --workspace` resolves them from the other local packages instead, but
-/// `xark` is its own workspace, so this runs in a copy of HEAD where it is a member.
-/// Uncommitted changes are not included.
+/// package --workspace` resolves them from the other local packages instead. This
+/// runs in a copy of HEAD so uncommitted changes are not included.
 fn dry_run() -> Result<()> {
     let root = crate::root();
     let copy = crate::target_dir().join("publish-dry");
@@ -210,17 +228,6 @@ fn dry_run() -> Result<()> {
     if !archive.wait()?.success() || !tar.success() {
         bail!("extracting HEAD into {}", copy.display());
     }
-    // `crates/lang` joins the copy's workspace: out of `exclude`, into `members`.
-    let manifest = copy.join("Cargo.toml");
-    let text = std::fs::read_to_string(&manifest)?;
-    let lang = format!("    \"{SEPARATE}\",\n");
-    let (members, rest) = text
-        .split_once("members = [\n")
-        .context("no `members = [` in Cargo.toml")?;
-    let rest = rest.replacen(&lang, "", 1);
-    std::fs::write(&manifest, format!("{members}members = [\n{lang}{rest}"))?;
-    let _ = std::fs::remove_file(copy.join(SEPARATE).join("Cargo.lock"));
-
     let mut cmd = Command::new("cargo");
     cmd.args(["package", "--workspace"])
         .current_dir(&copy)

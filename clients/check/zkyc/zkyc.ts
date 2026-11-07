@@ -10,7 +10,7 @@
 // schema (at the end of the imports), exactly as `xark prove
 // --inputs` does.
 
-import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type Json, type Proof, type Prover, type Text, type U16, type U64, type Verifier } from "@blueshift-gg/xark-wasm/client";
+import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type Json, type Proof, type Prover, type Text, type U16, type U64, type Verifier } from "@blueshift-gg/xark/client";
 export { CheckFailed, Field, InputError, fromHex, toHex };
 
 // The circuit's schema.json.
