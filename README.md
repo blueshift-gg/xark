@@ -474,10 +474,10 @@ cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 
-# `crates/lang` is its own workspace, so its suites run separately:
-cd crates/lang && cargo test --release
-cd crates/lang && cargo test --release --test snapshot -- --include-ignored  # + heavy KATs
-XARK_FUZZ_CASES=400 cargo test --release --test semantics_fuzz  # wider fuzzing
+# `crates/lang`'s test suites are heavy, so CI runs them in their own job:
+cargo test --release -p xark
+cargo test --release -p xark --test snapshot -- --include-ignored  # + heavy KATs
+XARK_FUZZ_CASES=400 cargo test --release -p xark --test semantics_fuzz  # wider fuzzing
 
 cargo xtask digests --check         # every example's circuit, unchanged
 ```

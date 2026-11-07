@@ -37,7 +37,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            crates/lang/target
           key: kats-${{ hashFiles('Cargo.lock') }}
 
       - name: cargo test (ignored KAT vectors)
@@ -65,7 +64,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            crates/lang/target
           key: ed25519-${{ hashFiles('Cargo.lock') }}
 
       - name: cargo test (heavy EC gadget vectors, release)
