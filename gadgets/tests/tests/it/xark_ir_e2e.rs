@@ -12,8 +12,6 @@
 //! A green test is the whole thesis: gadgets live in the frontend, the backend
 //! is lean, and it proves our IR directly.
 
-mod common;
-
 use std::collections::BTreeMap;
 
 use ark_bn254::Fr;
@@ -23,7 +21,7 @@ use xark_backend::ptau::{Phase2Error, parse_ptau, setup_from_ptau};
 use xark_ir::{R1csProgram, VarId, primitive, solver};
 use xark_prover::{XarkCircuit, fr_from_decimal};
 
-use common::build_valid_ptau;
+use crate::common::build_valid_ptau;
 
 fn fixture(name: &str) -> String {
     let p = format!(

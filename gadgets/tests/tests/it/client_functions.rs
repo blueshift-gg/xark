@@ -2,8 +2,7 @@
 //! a gadget's functions reach the client of every circuit whose inputs use its
 //! types, and nothing else.
 
-mod common;
-use common::{tempdir, xark_bin};
+use crate::common::{tempdir, xark_bin};
 use std::path::Path;
 use std::process::Command;
 

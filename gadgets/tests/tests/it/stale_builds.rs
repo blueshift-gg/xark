@@ -1,8 +1,7 @@
 //! Commands that build first reuse a build while no source of the circuit has
 //! changed since, and a command that uses the build rebuilds once one has.
 
-mod common;
-use common::{tempdir, xark_bin};
+use crate::common::{tempdir, xark_bin};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

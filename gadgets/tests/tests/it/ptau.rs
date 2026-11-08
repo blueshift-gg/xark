@@ -21,8 +21,7 @@ use rand_chacha::ChaCha20Rng;
 
 use xark_backend::ptau::{PtauError, parse_ptau};
 
-mod common;
-use common::build_valid_ptau;
+use crate::common::build_valid_ptau;
 
 // ---- happy-path test --------------------------------------------------------
 

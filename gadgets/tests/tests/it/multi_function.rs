@@ -7,8 +7,7 @@
 //! These tests confirm the whole build → solve → Groth16 prove/verify pipeline
 //! works for multi-function circuits.
 
-mod common;
-use common::{tempdir, xark_build, xark_prove, xark_setup};
+use crate::common::{tempdir, xark_build, xark_prove, xark_setup};
 
 #[test]
 fn multi_function_build_prove_verify() {

@@ -2,8 +2,7 @@
 //! refuse, a corrupt artifact. Each must stop with an error that names the
 //! problem, never fall back to something else.
 
-mod common;
-use common::{run, tempdir, xark_bin, xark_build, xark_prove, xark_setup};
+use crate::common::{run, tempdir, xark_bin, xark_build, xark_prove, xark_setup};
 use std::process::Command;
 
 /// `xark <args>` in `dir`, returning `(success, stdout + stderr)`.
@@ -63,7 +62,7 @@ fn missing_paths_are_reported() {
 #[test]
 fn build_names_the_package() {
     let tmp = tempdir();
-    let dir = common::circuit_crate("arithmetic_square");
+    let dir = crate::common::circuit_crate("arithmetic_square");
     let o = Command::new(xark_bin())
         .args(["build", "--out"])
         .arg(tmp.path().join("out"))
@@ -184,7 +183,7 @@ fn stale_proving_key_is_named() {
 #[test]
 fn commands_find_the_crate_from_a_subdirectory() {
     let tmp = tempdir();
-    let src = common::circuit_crate("arithmetic_square").join("src");
+    let src = crate::common::circuit_crate("arithmetic_square").join("src");
     let out = tmp.path().join("out");
     let o = Command::new(xark_bin())
         .args(["build", "--out"])
@@ -266,7 +265,7 @@ fn failed_setup_keeps_the_previous_keys() {
 
     // A transcript too small for any circuit: setup fails partway.
     let ptau = tmp.path().join("tiny.ptau");
-    std::fs::write(&ptau, common::build_valid_ptau(1)).unwrap();
+    std::fs::write(&ptau, crate::common::build_valid_ptau(1)).unwrap();
     let (ok, _, err) = run(&[
         "setup",
         out.to_str().unwrap(),
@@ -459,7 +458,7 @@ fn failed_build_removes_the_old_circuit() {
 
 /// Copy `examples/<name>` into `dir`, its path dependencies made absolute.
 fn copy_example(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let src = common::circuit_crate(name);
+    let src = crate::common::circuit_crate(name);
     let dst = dir.join(name);
     std::fs::create_dir_all(dst.join("src")).unwrap();
     std::fs::copy(src.join("src/lib.rs"), dst.join("src/lib.rs")).unwrap();

@@ -20,8 +20,6 @@
 //!     --test regen_fixtures -- --ignored --nocapture
 //! ```
 
-mod common;
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -33,7 +31,7 @@ use ark_snark::SNARK;
 
 // Fixtures are keyed with arkworks' own setup (fixed seeds), so regenerating them
 // reproduces the committed bytes.
-#[path = "../../../crates/groth16/tests/support/ark.rs"]
+#[path = "../../../../crates/groth16/tests/support/ark.rs"]
 mod ark;
 use ark::{ArkCircuit, convert};
 

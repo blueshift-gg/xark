@@ -1,8 +1,7 @@
 //! `xark init` scaffolds a crate whose own tests pass under `xark test` — the
 //! first thing a new user runs.
 
-mod common;
-use common::{run, tempdir};
+use crate::common::{run, tempdir};
 use std::path::Path;
 
 #[test]
@@ -47,7 +46,7 @@ fn init_then_test() {
     // A target shared across runs: the prover's dependencies build once.
     let target = root.join("target/init-test");
     let xark = |args: &[&str]| {
-        let o = std::process::Command::new(common::xark_bin())
+        let o = std::process::Command::new(crate::common::xark_bin())
             .args(args)
             .env("CARGO_TARGET_DIR", &target)
             .output()
@@ -81,7 +80,7 @@ fn init_then_test() {
     );
     assert_ne!(clean, broken, "the scaffold's tests changed shape");
     std::fs::write(&lib, broken).unwrap();
-    let o = std::process::Command::new(common::xark_bin())
+    let o = std::process::Command::new(crate::common::xark_bin())
         .args(["check", dir_s, "--message-format=json"])
         .env("CARGO_TARGET_DIR", &target)
         .output()
@@ -108,7 +107,7 @@ fn init_then_test() {
         .args(["test", "--release"])
         .current_dir(&dir)
         .env("CARGO_TARGET_DIR", &target)
-        .env("XARK", common::xark_bin())
+        .env("XARK", crate::common::xark_bin())
         .output()
         .expect("invoke cargo");
     let log = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
@@ -126,7 +125,7 @@ fn init_then_test() {
         .args(["test", "--release"])
         .current_dir(&dir)
         .env("CARGO_TARGET_DIR", &target)
-        .env("XARK", common::xark_bin())
+        .env("XARK", crate::common::xark_bin())
         .output()
         .expect("invoke cargo");
     let log = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
