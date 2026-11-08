@@ -770,45 +770,25 @@ impl Circuit {
         Ok(id_inputs)
     }
 
-    /// Check that `inputs` **satisfy the circuit**: solve the witness and verify it
-    /// meets every constraint. Returns `Ok(())`, or an actionable `Err` naming the
-    /// first failing constraint (and its source line).
+    /// Check that `inputs` **satisfy the circuit** and leave **no witness variable
+    /// free**: solve the witness, verify it meets every constraint, and run
+    /// [`solver::analyze_underconstrained`] for any variable that could take a
+    /// second value with everything else fixed (except a variable no constraint
+    /// references — witness-only scratch, which can't change any row or output).
+    /// Returns `Ok(())`, or an actionable `Err` naming the first failing
+    /// constraint (and its source line) or the free variables.
     ///
-    /// The fast, everyday circuit test — a satisfying witness *is* the proof the
-    /// relation holds, so the positive test is `c.check(good).unwrap()` and the
-    /// negative test is `assert!(c.check(bad).is_err())`. It deliberately does
-    /// **not** run Groth16 (that exercises the backend, not the circuit); use
-    /// [`Self::prove`] for the full pipeline. Panics only on malformed `inputs`.
+    /// The everyday circuit test, and where soundness is checked: `xark prove`
+    /// doesn't. The positive test is `c.check(good).unwrap()`, and the negative
+    /// test `assert!(c.check(bad).is_err())`. The analysis looks at the paths the
+    /// given inputs take, so test with inputs that cover the circuit's branches.
+    /// It catches the common "forgot to constrain a hint" bug, not every
+    /// under-constraint. It deliberately does **not** run Groth16 (that exercises
+    /// the backend, not the circuit); use [`Self::prove`] for the full pipeline.
+    /// Panics only on malformed `inputs`.
     pub fn check<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
         let id_inputs = self.resolve_inputs(inputs)?;
-        // An unsatisfiable witness means the stated relation is false; explain
-        // *which* constraint (and its source line)
-        // failed, via the shared diagnostic.
-        self.solve_and_check(&id_inputs).map_err(|e| {
-            ProveError(xark_ir::diagnose::describe_unsatisfied(
-                &e,
-                &self.r1cs,
-                self.sources.as_ref(),
-            ))
-        })?;
-        Ok(())
-    }
-
-    /// [`Self::check`], and also that the inputs leave no witness variable free:
-    /// [`solver::analyze_underconstrained`] finds no variable that could take a
-    /// second value with everything else fixed, except a variable no constraint
-    /// references (witness-only scratch), which can't change any row or output. A necessary soundness check (it
-    /// catches the common "forgot to constrain a hint" bug, not every
-    /// under-constraint); use it on a few representative inputs.
-    pub fn check_constrained<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
-        let id_inputs = self.resolve_inputs(inputs)?;
-        let assign = self.solve_and_check(&id_inputs).map_err(|e| {
-            ProveError(xark_ir::diagnose::describe_unsatisfied(
-                &e,
-                &self.r1cs,
-                self.sources.as_ref(),
-            ))
-        })?;
+        let assign = self.satisfied(&id_inputs)?;
         // A var no constraint references (witness-only scratch) alters no row and no
         // output, so it is no forgery vector: ignored, as the test harness does.
         let holes: Vec<_> = solver::analyze_underconstrained(&self.prim, &assign)
@@ -830,10 +810,38 @@ impl Circuit {
         )))
     }
 
+    /// [`Self::check`], kept under its earlier name.
+    pub fn check_constrained<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
+        self.check(inputs)
+    }
+
+    /// Only that `inputs` satisfy the circuit — [`Self::check`] without the
+    /// under-constraint analysis, for a quick test of the relation alone.
+    pub fn check_satisfied<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
+        let id_inputs = self.resolve_inputs(inputs)?;
+        self.satisfied(&id_inputs).map(|_| ())
+    }
+
+    /// Solve and check, explaining an unsatisfied witness by *which* constraint
+    /// (and its source line) failed.
+    fn satisfied(
+        &self,
+        id_inputs: &BTreeMap<VarId, String>,
+    ) -> Result<BTreeMap<VarId, Fp>, ProveError> {
+        self.solve_and_check(id_inputs).map_err(|e| {
+            ProveError(xark_ir::diagnose::describe_unsatisfied(
+                &e,
+                &self.r1cs,
+                self.sources.as_ref(),
+            ))
+        })
+    }
+
     /// Prove `inputs` with the built circuit and its proving key
     /// (`<dir>/pk.bin`, from `xark setup`) and return the proof — the same
     /// streaming prover and the same bytes as `xark prove`, without the CLI. The
-    /// inputs are checked first, with the same diagnostics as [`Self::check`].
+    /// inputs must satisfy the circuit, with the same diagnostics as
+    /// [`Self::check_satisfied`]; soundness is [`Self::check`]'s job.
     pub fn prove<I: ProveInputs>(&self, inputs: I) -> Result<CircuitProof, ProveError> {
         self.prove_with_key(self.dir.join("pk.bin"), inputs)
     }
@@ -849,13 +857,7 @@ impl Circuit {
         use xark_groth16::PkSource;
         let pk_path = pk_path.as_ref();
         let id_inputs = self.resolve_inputs(inputs)?;
-        let assign = self.solve_and_check(&id_inputs).map_err(|e| {
-            ProveError(xark_ir::diagnose::describe_unsatisfied(
-                &e,
-                &self.r1cs,
-                self.sources.as_ref(),
-            ))
-        })?;
+        let assign = self.satisfied(&id_inputs)?;
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             ProveError(format!("circuit `{}`: {what}: {e}", self.name))
         };
