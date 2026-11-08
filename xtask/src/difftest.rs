@@ -87,13 +87,15 @@ const SLOW: &[(&str, u32)] = &[
 /// minutes where the rest take seconds: dealt out first, one per shard, before the
 /// rest. From the per-example times of CI run 42195095843 (shards of 4, `--jobs 2`):
 /// grumpkin_ivc 6 min, on_curve_ed25519 3.7, grumpkin_ipa_fold 2.7, aes_gcm 2,
-/// grumpkin_augmented_step 2, grumpkin_nova_fold 2; every other example under a
-/// minute. Each run prints the times to check this against.
+/// grumpkin_augmented_step 2, grumpkin_nova_fold 2, and aes256_gcm 5 min of decided
+/// searches one at a time (PR #52's run); every other example under a minute. Each
+/// run prints the times to check this against.
 const HEAVY: &[&str] = &[
     "grumpkin_ivc",
     "on_curve_ed25519",
     "grumpkin_ipa_fold",
     "aes_gcm",
+    "aes256_gcm",
     "grumpkin_augmented_step",
     "grumpkin_nova_fold",
     "ed25519",

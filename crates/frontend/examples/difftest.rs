@@ -237,9 +237,10 @@ fn main() {
     }
     // Searches side by side: `XARK_SEARCH_THREADS` of them (default: the cores), or
     // one at a time on a large circuit, whose search can take gigabytes (a whole
-    // ed25519 search peaks near 7 GB). A search's time limit is wall time, so the
-    // caller sizes the threads to the cores it has (`cargo xtask difftest`).
-    let threads = if b.prog.constraints.len() > 100_000 {
+    // ed25519 search, 397k rows, peaks near 7 GB; aes256_gcm's, 210k rows, at 2 GB).
+    // A search's time limit is wall time, so the caller sizes the threads to the
+    // cores it has (`cargo xtask difftest`).
+    let threads = if b.prog.constraints.len() > 300_000 {
         1
     } else {
         std::env::var("XARK_SEARCH_THREADS")
