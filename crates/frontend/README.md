@@ -84,7 +84,8 @@ muxed. What an arm emits comes in three kinds:
   a range proof's bits recompose to `g · value`. Where the arm isn't taken every hint
   sees `0` (so an untaken `inv` of 0, `to_bits` of an out-of-range value or division
   by 0 still solves) and is forced to `0`, so every variable stays determined by the
-  inputs — what `xark prove`'s under-constraint gate checks. A division's hint divides
+  inputs — what the under-constraint check in a circuit's tests (and `xark check
+  --inputs`) looks for. A division's hint divides
   by `b + 1 − g`.
 
 The Lean side is `gated_sat`, `guard_mul`, `pin_dead` and `select_taken` in

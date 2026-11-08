@@ -138,13 +138,14 @@ fn range_basic_build_prove_verify() {
     );
 }
 
-/// **Under-constrained soundness gate.** `examples/underconstrained_bit` builds
-/// and *solves* fine, but its hint `b` is pinned only boolean (`b*b == b`) — a
-/// two-valued variable the witness-based `solver::analyze_underconstrained`
-/// flags. `xark prove` must refuse to prove it (a proof would be unsound),
-/// emitting the under-constraint error rather than a bogus proof.
+/// **Soundness is checked by the circuit's tests, not by `xark prove`.**
+/// `examples/underconstrained_bit` builds and *solves* fine, but its hint `b` is
+/// pinned only boolean (`b*b == b`) — a two-valued variable the witness-based
+/// `solver::analyze_underconstrained` flags. `Circuit::check` (what a circuit's
+/// tests and its generated validator call) rejects it; `xark prove` only solves,
+/// proves and self-verifies, so it proves it.
 #[test]
-fn underconstrained_circuit_is_rejected_by_prove() {
+fn soundness_is_checked_by_tests_not_prove() {
     let tmp = tempdir();
     let out = tmp.path().join("out");
     let target = tmp.path().join("target");
@@ -154,37 +155,54 @@ fn underconstrained_circuit_is_rejected_by_prove() {
     let (ok, err) = xark_build("underconstrained_bit", &out, &target);
     assert!(ok, "build failed: {err}");
 
-    let (ok, err) = xark_setup(&out);
-    assert!(ok, "setup failed: {err}");
-
     // x = 4 (even → bit 0 = 0), out = 4: the witness solves and satisfies every
     // constraint, so only the *witness-based* analyzer can catch the hole.
+    let inputs = || Named(vec![("x", 4), ("out", 4)]);
+    let circuit = xark_prover::circuit_at(&out);
+    let err = circuit
+        .check(inputs())
+        .expect_err("check passed an under-constrained circuit");
+    assert!(err.to_string().contains("under-constrained"), "{err}");
+    circuit
+        .check_satisfied(inputs())
+        .expect("the witness satisfies the circuit");
+
+    let (ok, err) = xark_setup(&out);
+    assert!(ok, "setup failed: {err}");
     let (ok, err) = xark_prove(&out, &[("x", "4"), ("out", "4")]);
-    assert!(
-        !ok,
-        "prove unexpectedly succeeded on an under-constrained circuit: {err}"
-    );
-    assert!(
-        err.contains("under-constrained"),
-        "expected an under-constraint rejection, got: {err}"
-    );
+    assert!(ok, "prove ran a soundness check: {err}");
 
     // Properly-pinned sibling: `examples/inverse` pins its hint with `x*w == 1`,
-    // so the analyzer is clean and it proves without complaint.
+    // so `check` passes.
     let out2 = tmp.path().join("out-inverse");
     let target2 = tmp.path().join("target-inverse");
     let (ok, err) = xark_build("inverse", &out2, &target2);
     assert!(ok, "build failed: {err}");
-    let (ok, err) = xark_setup(&out2);
-    assert!(ok, "setup failed: {err}");
     // x = 2, x_inv = 1/2 mod r = (r+1)/2.
     let half = "10944121435919637611123202872628637544274182200208017171849102093287904247809";
-    let (ok, err) = xark_prove(&out2, &[("x", "2"), ("x_inv", half)]);
-    assert!(ok, "pinned sibling failed to prove: {err}");
-    assert!(
-        err.contains("Proof produced and self-checked"),
-        "unexpected prove output: {err}"
-    );
+    let half = xark_prover::fr_from_decimal(half);
+    xark_prover::circuit_at(&out2)
+        .check(NamedFr(vec![("x", 2u64.into()), ("x_inv", half)]))
+        .expect("a pinned circuit passes check");
+}
+
+struct Named(Vec<(&'static str, u64)>);
+
+impl xark_prover::ProveInputs for Named {
+    fn into_inputs(self) -> Vec<(String, xark_prover::Fr)> {
+        self.0
+            .into_iter()
+            .map(|(n, v)| (n.into(), v.into()))
+            .collect()
+    }
+}
+
+struct NamedFr(Vec<(&'static str, xark_prover::Fr)>);
+
+impl xark_prover::ProveInputs for NamedFr {
+    fn into_inputs(self) -> Vec<(String, xark_prover::Fr)> {
+        self.0.into_iter().map(|(n, v)| (n.into(), v)).collect()
+    }
 }
 
 /// **`xark check --inputs` opt-in soundness check — rejection.** The same

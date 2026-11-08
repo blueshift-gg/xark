@@ -20,7 +20,7 @@ use xark_backend::serialization::write_public_inputs;
 use xark_groth16::{ConstraintSource, PkSource};
 use xark_prover::{XarkCircuit, fr_from_decimal};
 
-use super::{resolve_input_ids, setup, stream_soundness};
+use super::{explain_unsatisfied, resolve_input_ids, setup, stream_witness};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -260,7 +260,8 @@ fn prove_streaming(
             let vars = xark_ir::function_decode::decode_input_vars(&bytes);
             let id_inputs = resolve_input_ids(&vars, inputs)?;
             drop(vars);
-            stream_soundness(&bytes, sources, &id_inputs)
+            let assign = stream_witness(&bytes, sources, &id_inputs)?;
+            anyhow::Ok((assign, id_inputs))
         });
         let digest = super::recorded_digest(pk_path, &fingerprint);
         let built = row_source(args, &bytes, &fingerprint, digest.as_deref(), kind);
@@ -270,7 +271,7 @@ fn prove_streaming(
         (built, solved)
     });
     let (src, cached) = built?;
-    let assign_fp = solved?;
+    let (assign_fp, id_inputs) = solved?;
     let t_solve = t.elapsed();
     let z = src.layout().assignment(|id| {
         assign_fp.get(&id).map(|v| {
@@ -319,8 +320,15 @@ fn prove_streaming(
         }),
         ..xark_groth16::ProverConfig::default()
     };
-    let proof = xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg)
-        .map_err(|e| anyhow::anyhow!("streaming prove: {e}"))?;
+    let proof = match xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg) {
+        Ok(proof) => proof,
+        Err(e) => {
+            // A witness that doesn't satisfy the circuit fails the proof's
+            // self-verification: name the constraint (and source line) it breaks.
+            explain_unsatisfied(&bytes, sources, &id_inputs)?;
+            anyhow::bail!("streaming prove: {e}")
+        }
+    };
     if let Some(tmp) = tee_tmp {
         if pk.finish_tee()? {
             fs::rename(&tmp, &decoded).with_context(|| format!("writing {}", decoded.display()))?;

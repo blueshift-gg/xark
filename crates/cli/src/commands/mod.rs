@@ -552,10 +552,21 @@ pub fn soundness_check(
     sources: Option<&SourceMap>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
-    // Solve + check directly on the R1CS rows (no `to_primitive` flattening). On
-    // an unsatisfied witness, name *which* constraint (and its
-    // source line / function) failed — the same explanation `xark test` surfaces;
-    // the R1CS is materialized only here, on the (rare) error path.
+    let assign_fp = satisfaction_check(cp, sources, id_inputs)?;
+    let holes = xark_ir::solver::analyze_underconstrained_cp(cp, &assign_fp);
+    report_underconstrained(holes)?;
+    Ok(assign_fp)
+}
+
+/// Solve + check directly on the R1CS rows (no `to_primitive` flattening). On an
+/// unsatisfied witness, name *which* constraint (and its source line / function)
+/// failed — the same explanation `xark test` surfaces; the R1CS is materialized
+/// only here, on the (rare) error path.
+pub fn satisfaction_check(
+    cp: &xark_ir::CircuitProgram,
+    sources: Option<&SourceMap>,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<BTreeMap<VarId, Fp>> {
     let describe = |e| {
         let r1cs = cp.to_r1cs();
         anyhow::anyhow!(
@@ -563,65 +574,48 @@ pub fn soundness_check(
             xark_ir::diagnose::describe_unsatisfied(&e, &r1cs, sources)
         )
     };
-    let timing = dbg_flag("PROVE_TIME");
-    let t = std::time::Instant::now();
     let assign_fp = xark_ir::solver::solve_cp(cp, id_inputs).map_err(describe)?;
-    let t_solve = t.elapsed();
-    let t = std::time::Instant::now();
     xark_ir::solver::check_cp(cp, &assign_fp).map_err(describe)?;
-    let t_check = t.elapsed();
-    let t = std::time::Instant::now();
-    let holes = xark_ir::solver::analyze_underconstrained_cp(cp, &assign_fp);
-    if timing {
-        eprintln!(
-            "PROVE_TIME:   solve={:?}  check={:?}  analyze={:?}",
-            t_solve,
-            t_check,
-            t.elapsed()
-        );
-    }
-    report_underconstrained(holes)?;
     Ok(assign_fp)
 }
 
-/// **Streaming** witness solve + soundness gate for the default `xark prove`
-/// path, straight from the compact `circuit.xbc` bytes — never materializing the
-/// full flat program (`witness_gen` is the multi-GB bulk on non-native
-/// folding/IVC circuits). Returns the witness assignment for the Groth16 backend.
+/// **Streaming** witness solve for `xark prove`, straight from the compact
+/// `circuit.xbc` bytes — never materializing the full flat program
+/// (`witness_gen` is the multi-GB bulk on non-native folding/IVC circuits). No
+/// constraint check or soundness analysis: the proof self-verifies, and
+/// soundness is checked by the circuit's tests and `xark check --inputs`.
 ///
-/// The happy path holds only the witness + a flag byte per var. On the rare
-/// failure path (the witness does not satisfy the circuit, or solving fails) it
-/// re-expands the flat program once and defers to [`soundness_check`] for the
-/// precise which-constraint / source-line diagnostic — trading memory for a good
-/// error message exactly when a proof is going to fail anyway.
-pub fn stream_soundness(
+/// If solving fails, it re-expands the flat program once for the precise
+/// which-constraint / source-line diagnostic ([`explain_unsatisfied`]).
+pub fn stream_witness(
     bytes: &[u8],
     sources: Option<&SourceMap>,
     id_inputs: &BTreeMap<VarId, String>,
 ) -> Result<BTreeMap<VarId, Fp>> {
-    let timing = dbg_flag("PROVE_TIME");
-    let t = std::time::Instant::now();
-    match xark_ir::function_decode::stream_solve_verify(bytes, id_inputs) {
-        Ok((assign_fp, holes)) => {
-            if timing {
-                eprintln!("PROVE_TIME:   stream solve+check+analyze={:?}", t.elapsed());
-            }
-            report_underconstrained(holes)?;
-            Ok(assign_fp)
-        }
-        Err(_) => {
-            // Rare: unsatisfied/solve error. Re-expand flat for the rich diagnostic
-            // (same explanation `xark test` surfaces); on success (shouldn't differ
-            // from the stream) just return its assignment.
-            let cp = xark_ir::function_decode::expand_function_blob(bytes)
-                .map_err(|e| anyhow::anyhow!(e))?;
-            soundness_check(&cp, sources, id_inputs)
+    match xark_ir::function_decode::stream_solve(bytes, id_inputs) {
+        Ok(assign) => Ok(assign),
+        Err(e) => {
+            explain_unsatisfied(bytes, sources, id_inputs)?;
+            anyhow::bail!("solving the witness: {e}")
         }
     }
 }
 
+/// Re-expand `circuit.xbc` flat and solve + check `id_inputs` on it, for the
+/// which-constraint diagnostic when the streamed path fails (a solve error, or a
+/// proof that doesn't verify). `Ok` if the flat check finds nothing to explain.
+pub fn explain_unsatisfied(
+    bytes: &[u8],
+    sources: Option<&SourceMap>,
+    id_inputs: &BTreeMap<VarId, String>,
+) -> Result<()> {
+    let cp =
+        xark_ir::function_decode::expand_function_blob(bytes).map_err(|e| anyhow::anyhow!(e))?;
+    satisfaction_check(&cp, sources, id_inputs).map(|_| ())
+}
+
 /// `bail!` with the shared under-constraint diagnostic if any hole was found
-/// (`xark prove` and `xark check --inputs`). A var no constraint references alters
+/// (`xark check --inputs`). A var no constraint references alters
 /// no row and no output, so it is no forgery vector, and is ignored: the frontend's
 /// `check_pinning` already rejects an unpinned hint output at build time, so the
 /// only such vars left are witness-only scratch.

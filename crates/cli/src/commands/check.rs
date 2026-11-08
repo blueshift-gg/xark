@@ -3,8 +3,8 @@
 //!
 //! Bare `xark check` (no `--inputs`) stays the fast, artifact-free `cargo check`
 //! validator in [`crate::cli::cmd_check`]. When `--inputs` is supplied, we opt
-//! into the same soundness gate `xark prove` runs, but **without** the expensive
-//! `setup` + `prove` steps: build the circuit, solve
+//! into the soundness check a circuit's tests run (`xark_prover::Circuit::check`;
+//! `xark prove` doesn't), without writing a test: build the circuit, solve
 //! the witness from the `--inputs` values, and run
 //! [`xark_ir::solver::analyze_underconstrained`]. It reports any derived
 //! variable the constraints fail to pin (a value a malicious prover could
