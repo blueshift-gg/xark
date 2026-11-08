@@ -127,10 +127,21 @@ fn main() {
     // The searches are the slow part (up to the time limit each, and most of a
     // circuit's mutations on a non-native relation run it out): gathered here and
     // run across the cores after the sweep, their verdicts reported in order.
-    let mut jobs: Vec<(String, String, Vec<(String, String)>, bool)> = Vec::new();
+    struct Job {
+        name: String,
+        what: String,
+        inputs: Vec<(String, String)>,
+        honest: bool,
+    }
+    let mut jobs: Vec<Job> = Vec::new();
     let mut adversary = |name: &str, what: &str, inputs: &[(String, String)], honest: bool| {
         if search {
-            jobs.push((name.to_string(), what.to_string(), inputs.to_vec(), honest));
+            jobs.push(Job {
+                name: name.to_string(),
+                what: what.to_string(),
+                inputs: inputs.to_vec(),
+                honest,
+            });
         }
     };
 
@@ -244,10 +255,10 @@ fn main() {
                     let mut mine = Vec::new();
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some((_, _, inputs, _)) = jobs.get(i) else {
+                        let Some(job) = jobs.get(i) else {
                             break;
                         };
-                        mine.push((i, b.search(inputs)));
+                        mine.push((i, b.search(&job.inputs)));
                     }
                     mine
                 })
@@ -260,7 +271,13 @@ fn main() {
     });
     results.sort_by_key(|(i, _)| *i);
     let (mut searched, mut undecided) = (0usize, 0usize);
-    for ((name, what, _, honest), (_, result)) in jobs.iter().zip(results) {
+    for (
+        Job {
+            name, what, honest, ..
+        },
+        (_, result),
+    ) in jobs.iter().zip(results)
+    {
         searched += 1;
         match result {
             Ok(Some(v)) if v == *honest => {}
