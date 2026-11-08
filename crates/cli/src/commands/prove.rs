@@ -274,7 +274,7 @@ fn prove_streaming(
     let (assign_fp, id_inputs) = solved?;
     let t_solve = t.elapsed();
     let z = src.layout().assignment(|id| {
-        assign_fp.get(&id).map(|v| {
+        assign_fp.get(id as usize).and_then(Option::as_ref).map(|v| {
             v.as_bn254_fr()
                 .unwrap_or_else(|| fr_from_decimal(&v.to_decimal()))
         })
