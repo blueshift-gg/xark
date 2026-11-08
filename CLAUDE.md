@@ -19,8 +19,8 @@ Every pull request runs `.github/workflows/{ci,slow,lean,kani,solana-ci}.yml`.
 Locally, `cargo xtask ci --since origin/master` runs the steps your changed files
 can affect, side by side, logs in `target/ci/`; `cargo xtask ci --list` names them.
 Before opening a PR, `cargo xtask ci` (everything) must be green: fmt, clippy with
-`-D warnings`, the workspace tests under the `ci` profile, `crates/lang`'s snapshot
-suite, the digests, the Lean exports and coverage, the minimizer certificates and
+`-D warnings`, the workspace tests under the `ci` profile (the `xark` crate's compiler
+suite in release), the digests, the Lean exports and coverage, the minimizer certificates and
 the publish plan.
 
 ## Invariants the gates enforce
@@ -65,7 +65,7 @@ the publish plan.
    target: `PROVE_TIME=1 target/release/xark prove …` (a `--features debug`
    build) splits solve from prove; `cargo run --release -p xark-groth16 --example
    bench_prove -- solve <circuit.xbc> <pk> <inputs.json>` isolates the witness
-   phase, and `RAYON_NUM_THREADS=1` makes the number about the work rather than
+   solve and the soundness gate the tests run (`xark prove` runs no gate), and `RAYON_NUM_THREADS=1` makes the number about the work rather than
    the machine; the semantics fuzzer and `cargo xtask difftest` are the soundness
    oracles. For a profile, `samply record --save-only -o p.json.gz <binary> …`,
    then `atos -o <binary> -arch arm64 -offset <addr>` names the hot addresses.
