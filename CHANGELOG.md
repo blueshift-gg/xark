@@ -266,6 +266,13 @@ verification starter, and the `xark-client` npm package is removed.
 
 #### Proving and verifying
 
+- **Soundness is checked by tests, not by `xark prove`.** `Circuit::check`, which
+  every `#[circuit]` validator calls, now also searches for witness variables the
+  inputs leave free, so a circuit's tests fail on a "forgot to constrain a hint"
+  bug that used to pass them. `check_satisfied` checks satisfaction only.
+  `xark prove` only solves, proves and verifies the proof against the key: it no
+  longer refuses an under-constrained circuit (`xark check --inputs` still runs the
+  search). Proving ed25519 on an M3 Max takes 0.60 → 0.48 s.
 - **Faster setup and proving.** Setup multiplies fixed bases with signed windows
   and batched affine additions, and keeps no extra copy of the circuit while it
   picks a key form; proving solves witnesses from the compiled templates, builds
@@ -389,8 +396,9 @@ verification starter, and the `xark-client` npm package is removed.
   `solana-nostd-alt-bn128` 0.1.3.
 - `xark_poseidon2::native`: the Poseidon2 permutation and hashes on the host, from
   the same code as the gadget.
-- `xark_prover::Circuit::check_constrained(inputs)`: `check`, plus a search for
-  witness variables the inputs leave free (the "forgot to constrain a hint" bug).
+- `xark_prover::Circuit::check_satisfied(inputs)`: `check` without its search for
+  witness variables the inputs leave free. `check_constrained` is the same as
+  `check`.
 - `xark-schema`, `xark-frontend` and `xark-groth16` are published.
 - Exhaustive witness search (`xark_ir::witness_search`), and `cargo xtask difftest`
   on every pull request: each example must accept exactly the inputs it should,
@@ -435,7 +443,7 @@ verification starter, and the `xark-client` npm package is removed.
 - `xark` found a directory named `*.ptau` as a powers-of-tau file; it now looks at
   files only. A crate whose `name = "…"` line ends in a comment got the comment
   in its build directory's name.
-- `xark prove` and `xark check --inputs` refused a circuit with witness-only scratch
+- `xark check --inputs` refused a circuit with witness-only scratch
   variables no constraint references (the `secp256k1_ecdsa` example's GLV
   decomposition) as under-constrained, while `xark check` passed it. Such a variable
   changes no row and no output, so it is ignored, as the test harness already did.

@@ -244,8 +244,9 @@ fn circuit_impl(func: &ItemFn) -> syn::Result<TokenStream2> {
         /// Native-typed validator for this circuit, carrying the name you gave the `#[circuit]`
         /// fn. In host/test builds this *is* `<fn>` (the real `Field` body lives under a hidden
         /// name): it takes the entry's native inputs, loads the built circuit from
-        /// `target/xark/<package>/`, and returns `Ok(())` if they satisfy it. Dropped from the
-        /// `xark` build, where the hidden entry is what gets compiled to a circuit.
+        /// `target/xark/<package>/`, and returns `Ok(())` if they satisfy it and leave no
+        /// witness variable free (`xark::prover::Circuit::check`). Dropped from the `xark`
+        /// build, where the hidden entry is what gets compiled to a circuit.
         #[cfg(not(xark))]
         ::xark::__with_prover! {
             #(#attrs)*
