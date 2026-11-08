@@ -262,7 +262,8 @@ fn prove_streaming(
             drop(vars);
             stream_soundness(&bytes, sources, &id_inputs)
         });
-        let built = row_source(args, &bytes, &fingerprint, kind);
+        let digest = super::recorded_digest(pk_path, &fingerprint);
+        let built = row_source(args, &bytes, &fingerprint, digest.as_deref(), kind);
         let solved = solved
             .join()
             .unwrap_or_else(|e| std::panic::resume_unwind(e));
@@ -344,6 +345,7 @@ fn row_source(
     args: &ProveArgs,
     bytes: &[u8],
     fingerprint: &str,
+    digest: Option<&str>,
     kind: StreamKind,
 ) -> Result<(Box<dyn ConstraintSource>, bool)> {
     let mut cached = true;
@@ -356,11 +358,15 @@ fn row_source(
                 .map_err(|e| e.to_string())
                 .and_then(|rf| xark_groth16::RowFileSource::new(rf).map_err(|e| e.to_string()))
                 .and_then(|src| {
-                    if xark_ir::function_decode::row_file_fits(
-                        src.file().fingerprint(),
-                        fingerprint,
-                        bytes,
-                    ) {
+                    // Setup marks the rows with the circuit's digest: take the
+                    // key's record of it before re-expanding the circuit.
+                    if digest == Some(src.file().fingerprint())
+                        || xark_ir::function_decode::row_file_fits(
+                            src.file().fingerprint(),
+                            fingerprint,
+                            bytes,
+                        )
+                    {
                         Ok(src)
                     } else {
                         Err("written for a different circuit.xbc".into())

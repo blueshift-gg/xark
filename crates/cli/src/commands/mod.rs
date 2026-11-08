@@ -682,13 +682,24 @@ pub enum KeyFit {
     Different,
 }
 
+fn key_metadata(key: &std::path::Path) -> Option<serde_json::Value> {
+    key.parent()
+        .and_then(|dir| std::fs::read_to_string(dir.join("metadata.json")).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// The R1CS digest the key's `metadata.json` records, if that metadata was made
+/// from this very `circuit.xbc` (its `circuit_hash` is `xbc_sha256`): the digest
+/// without re-expanding the circuit.
+pub fn recorded_digest(key: &std::path::Path, xbc_sha256: &str) -> Option<String> {
+    let meta = key_metadata(key)?;
+    let field = |k: &str| meta.get(k)?.as_str().map(str::to_string);
+    (field("circuit_hash")? == xbc_sha256).then(|| field("digest"))?
+}
+
 /// Whether the key at `key` was made for the circuit in `xbc` (its bytes).
 pub fn key_fit(key: &std::path::Path, xbc: &[u8]) -> KeyFit {
-    let Some(meta) = key
-        .parent()
-        .and_then(|dir| std::fs::read_to_string(dir.join("metadata.json")).ok())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-    else {
+    let Some(meta) = key_metadata(key) else {
         return KeyFit::Same;
     };
     let field = |k: &str| meta.get(k).and_then(|v| v.as_str()).map(str::to_string);
@@ -723,7 +734,7 @@ pub fn circuit_hash(r1cs_json: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{inputs_hint, parse_input_text, read_inputs};
+    use super::{inputs_hint, parse_input_text, read_inputs, recorded_digest};
     use std::path::Path;
 
     #[test]
@@ -778,5 +789,25 @@ mod tests {
             inputs_hint(&["secret", "result"]),
             r#"--inputs '{"secret": <value>, "result": <value>}'"#
         );
+    }
+
+    /// The key's recorded digest is used only when its metadata was made from
+    /// this very `circuit.xbc`.
+    #[test]
+    fn recorded_digest_needs_the_same_circuit() {
+        let dir = std::env::temp_dir().join(format!("xark-digest-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = dir.join("pk.bin");
+        assert_eq!(recorded_digest(&key, "aa"), None, "no metadata");
+        std::fs::write(
+            dir.join("metadata.json"),
+            r#"{"circuit_hash": "aa", "digest": "d1"}"#,
+        )
+        .unwrap();
+        assert_eq!(recorded_digest(&key, "aa").as_deref(), Some("d1"));
+        assert_eq!(recorded_digest(&key, "bb"), None, "another circuit.xbc");
+        std::fs::write(dir.join("metadata.json"), r#"{"circuit_hash": "aa"}"#).unwrap();
+        assert_eq!(recorded_digest(&key, "aa"), None, "no digest recorded");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

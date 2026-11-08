@@ -983,6 +983,7 @@ fn apply_row_flags(
     assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     flags: &[std::sync::atomic::AtomicU8],
+    quadratic: &[Quadratic],
 ) {
     use std::sync::atomic::Ordering;
     for (v, (a, b, _c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
@@ -991,11 +992,16 @@ fn apply_row_flags(
             bits |= F_RESTRICTED;
             if a.is_zero() {
                 bits |= F_PINNED;
+            } else if let Some(q) = quadratic.get(v as usize) {
+                let _ = q.set((a, b));
             }
         }
         flags[v as usize].fetch_or(bits, Ordering::Relaxed);
     }
 }
+
+/// One row's `(a, b)` with `a ≠ 0` for a var — any of them (the first to land).
+type Quadratic = std::sync::OnceLock<(crate::solver::Fp, crate::solver::Fp)>;
 
 /// Streaming pass 1: classify every variable with a **dense flag byte** while
 /// (optionally) checking satisfiability, in a single parallel sweep of the
@@ -1015,10 +1021,16 @@ fn classify_and_check(
     modulus: &num_bigint::BigUint,
     num_vars: usize,
     check_sat: bool,
-) -> (Vec<std::sync::atomic::AtomicU8>, bool) {
+) -> (Vec<std::sync::atomic::AtomicU8>, bool, Vec<Quadratic>) {
     use rayon::prelude::*;
     use std::sync::atomic::AtomicU8;
     let flags: Vec<AtomicU8> = (0..num_vars).map(|_| AtomicU8::new(0)).collect();
+    // Only a satisfied witness can use them (see `two_valued_satisfied`).
+    let quadratic: Vec<Quadratic> = if check_sat {
+        (0..num_vars).map(|_| Quadratic::new()).collect()
+    } else {
+        Vec::new()
+    };
     let sat_ok = top_c
         .par_iter()
         .map(|item| {
@@ -1034,20 +1046,20 @@ fn classify_and_check(
                     {
                         shard_ok = false;
                     }
-                    apply_row_flags(&row, assign, modulus, &flags);
+                    apply_row_flags(&row, assign, modulus, &flags, &quadratic);
                 },
             );
             shard_ok
         })
         .reduce(|| true, |x, y| x && y);
-    (flags, sat_ok)
+    (flags, sat_ok, quadratic)
 }
 
-/// Streaming pass 2 (rare path): re-stream the constraints, gathering each
-/// *suspect* var's univariate `(a,b,c)` reductions, then run the exact flat
-/// two-valued test on that small set. Suspects are vars that survived pass 1
-/// restricted-but-unpinned — for a well-constrained circuit this set is empty
-/// and pass 2 never runs. Returns the subset that is genuinely two-valued.
+/// Streaming pass 2 for a witness not known to satisfy every row: re-stream the
+/// constraints, gathering each *suspect* var's univariate `(a,b,c)` reductions,
+/// then run the exact flat two-valued test on them. Suspects are vars that
+/// survived pass 1 restricted-but-unpinned. Returns the subset that is
+/// genuinely two-valued.
 fn two_valued_suspects(
     defs: &[GDef],
     top_c: &[CItem],
@@ -1056,27 +1068,157 @@ fn two_valued_suspects(
     suspects: &std::collections::BTreeSet<u32>,
 ) -> std::collections::BTreeSet<u32> {
     use crate::solver::Fp;
-    // Gather every suspect's referencing rows (small: |suspects| is tiny).
+    use rayon::prelude::*;
+    // Gather every suspect's referencing rows, in parallel over the shards (a
+    // suspect's verdict doesn't depend on the order of its rows). On circuits
+    // built from multiplications nearly every derived var is a suspect.
+    let mut is_suspect = vec![false; assign.len()];
+    for &v in suspects {
+        if let Some(s) = is_suspect.get_mut(v as usize) {
+            *s = true;
+        }
+    }
+    let suspect = |v: u32| is_suspect.get(v as usize).copied().unwrap_or(false);
+    let mut found: Vec<(u32, (Fp, Fp, Fp))> = top_c
+        .par_iter()
+        .fold(Vec::new, |mut found, item| {
+            expand_c_visit(
+                defs,
+                std::slice::from_ref(item),
+                &IDENTITY,
+                &mut |row: R1csRow| {
+                    let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
+                    if !terms.any(|t| suspect(t.var)) {
+                        return;
+                    }
+                    found.extend(
+                        crate::solver::univariate_r1cs_row(&row, assign, modulus)
+                            .into_iter()
+                            .filter(|(v, _)| suspect(*v)),
+                    );
+                },
+            );
+            found
+        })
+        .reduce(Vec::new, |mut a, mut b| {
+            a.append(&mut b);
+            a
+        });
+    found.par_sort_by_key(|(v, _)| *v);
     let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
-        suspects.iter().map(|&v| (v, Vec::new())).collect();
-    expand_c_visit(defs, top_c, &IDENTITY, &mut |row: R1csRow| {
+        std::collections::BTreeMap::new();
+    for (v, poly) in found {
+        polys.entry(v).or_default().push(poly);
+    }
+    two_valued_from_polys(&polys, assign, modulus)
+}
+
+/// Streaming pass 2 for a witness that satisfies every row. A suspect `v = α`
+/// is two-valued iff some `β ≠ α` satisfies all its rows. Each row with `a ≠ 0`
+/// has the roots `α` and `−b/a − α`, so such a `β` is the other root of every
+/// one of them, and the one row pass 1 kept gives the only candidate. Same
+/// verdicts as [`two_valued_suspects`] in one parallel sweep, without gathering
+/// the rows: on circuits built from multiplications nearly every derived var
+/// is a suspect.
+fn two_valued_satisfied(
+    defs: &[GDef],
+    top_c: &[CItem],
+    assign: &[Option<crate::solver::Fp>],
+    modulus: &num_bigint::BigUint,
+    suspects: &std::collections::BTreeSet<u32>,
+    quadratic: &[Quadratic],
+) -> std::collections::BTreeSet<u32> {
+    use rayon::prelude::*;
+    let test = SecondRoots::new(assign, modulus, suspects, quadratic);
+    top_c.par_iter().for_each(|item| {
+        expand_c_visit(
+            defs,
+            std::slice::from_ref(item),
+            &IDENTITY,
+            &mut |row: R1csRow| test.check(&row, assign, modulus),
+        );
+    });
+    test.survivors()
+}
+
+/// Each suspect's one candidate second root, and whether some row rejected it.
+struct SecondRoots {
+    beta: Vec<Option<crate::solver::Fp>>,
+    failed: Vec<std::sync::atomic::AtomicBool>,
+}
+
+impl SecondRoots {
+    fn new(
+        assign: &[Option<crate::solver::Fp>],
+        modulus: &num_bigint::BigUint,
+        suspects: &std::collections::BTreeSet<u32>,
+        quadratic: &[Quadratic],
+    ) -> Self {
+        use crate::solver::Fp;
+        use rayon::prelude::*;
+        let zero = Fp::zero(modulus);
+        let candidates: Vec<(u32, Fp)> = suspects
+            .par_iter()
+            .filter_map(|&v| {
+                let (a, b) = quadratic.get(v as usize)?.get()?;
+                let alpha = assign
+                    .get(v as usize)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| zero.clone());
+                let beta = b.neg().mul(&a.inverse()?).sub(&alpha);
+                (beta != alpha).then_some((v, beta))
+            })
+            .collect();
+        let mut beta = vec![None; quadratic.len()];
+        for (v, x) in candidates {
+            beta[v as usize] = Some(x);
+        }
+        let failed = (0..beta.len())
+            .map(|_| std::sync::atomic::AtomicBool::new(false))
+            .collect();
+        SecondRoots { beta, failed }
+    }
+
+    fn candidate(&self, v: u32) -> Option<&crate::solver::Fp> {
+        self.beta.get(v as usize).and_then(Option::as_ref)
+    }
+
+    /// Reject the candidates `row` doesn't hold for.
+    fn check(
+        &self,
+        row: &R1csRow,
+        assign: &[Option<crate::solver::Fp>],
+        modulus: &num_bigint::BigUint,
+    ) {
+        use std::sync::atomic::Ordering;
         let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
-        if !terms.any(|t| suspects.contains(&t.var)) {
+        if !terms.any(|t| self.candidate(t.var).is_some()) {
             return;
         }
-        for (v, poly) in crate::solver::univariate_r1cs_row(&row, assign, modulus) {
-            if let Some(ps) = polys.get_mut(&v) {
-                ps.push(poly);
+        for (v, (a, b, c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
+            let Some(x) = self.candidate(v) else { continue };
+            let failed = &self.failed[v as usize];
+            if !failed.load(Ordering::Relaxed) && !a.mul(x).mul(x).add(&b.mul(x)).add(&c).is_zero()
+            {
+                failed.store(true, Ordering::Relaxed);
             }
         }
-    });
-    two_valued_from_polys(&polys, assign, modulus)
+    }
+
+    fn survivors(&self) -> std::collections::BTreeSet<u32> {
+        use std::sync::atomic::Ordering;
+        (0..self.beta.len())
+            .filter(|&v| self.beta[v].is_some() && !self.failed[v].load(Ordering::Relaxed))
+            .map(|v| v as u32)
+            .collect()
+    }
 }
 
 /// The exact flat two-valued test over already-gathered per-suspect univariate
 /// reductions: a suspect is under-constrained iff some second root `β≠α`
 /// satisfies *all* of its rows. Mirrors `analyze_*_cp`'s candidate loop. Runs in
-/// parallel over the (tiny) suspect set.
+/// parallel over the suspects.
 fn two_valued_from_polys(
     polys: &std::collections::BTreeMap<
         u32,
@@ -1121,9 +1263,10 @@ fn two_valued_from_polys(
 
 /// Core streaming soundness pass shared by [`stream_analyze`] and
 /// [`stream_verify`]: classify (pass 1) + optional satisfiability check, then
-/// resolve the rare suspects (pass 2), and assemble the under-constraint list in
-/// var-id order. Peak extra memory over the witness is one flag byte per var (a
-/// few MB) plus the tiny suspect set — never the flat constraint system.
+/// resolve the suspects (pass 2), and assemble the under-constraint list in
+/// var-id order. Peak extra memory over the witness is a flag byte and, when
+/// checking satisfiability, one row's `(a, b)` per var — never the flat
+/// constraint system.
 #[allow(clippy::too_many_arguments)]
 fn stream_underconstrained(
     defs: &[GDef],
@@ -1134,10 +1277,13 @@ fn stream_underconstrained(
     modulus: &num_bigint::BigUint,
     check_sat: bool,
 ) -> (bool, Vec<crate::solver::UnderConstrained>) {
-    let (flags, sat_ok) = classify_and_check(defs, top_c, assign, modulus, vars.len(), check_sat);
+    let (flags, sat_ok, quadratic) =
+        classify_and_check(defs, top_c, assign, modulus, vars.len(), check_sat);
     let suspects = select_suspects(&flags, vars);
     let two_valued = if suspects.is_empty() {
         std::collections::BTreeSet::new()
+    } else if check_sat && sat_ok {
+        two_valued_satisfied(defs, top_c, assign, modulus, &suspects, &quadratic)
     } else {
         two_valued_suspects(defs, top_c, assign, modulus, &suspects)
     };
@@ -1146,7 +1292,7 @@ fn stream_underconstrained(
 }
 
 /// Vars that survived pass-1 classification restricted-but-never-pinned — the
-/// only ones that need the (expensive, rare) pass-2 two-valued test.
+/// only ones that need the pass-2 two-valued test.
 fn select_suspects(
     flags: &[std::sync::atomic::AtomicU8],
     vars: &[Var],
@@ -2844,8 +2990,9 @@ mod tests {
             .collect();
         let assign = &assign[..];
         let flags: Vec<AtomicU8> = (0..vars.len()).map(|_| AtomicU8::new(0)).collect();
+        let quadratic: Vec<Quadratic> = (0..vars.len()).map(|_| Quadratic::new()).collect();
         for r in rows {
-            apply_row_flags(r, assign, modulus, &flags);
+            apply_row_flags(r, assign, modulus, &flags, &quadratic);
         }
         let suspects = select_suspects(&flags, vars);
         let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
@@ -2858,6 +3005,21 @@ mod tests {
             }
         }
         let two_valued = two_valued_from_polys(&polys, assign, modulus);
+        // A satisfied witness takes the one-candidate pass: same verdicts.
+        if rows
+            .iter()
+            .all(|r| crate::solver::row_satisfied(&r.a, &r.b, &r.c, assign, modulus))
+        {
+            let roots = SecondRoots::new(assign, modulus, &suspects, &quadratic);
+            for r in rows {
+                roots.check(r, assign, modulus);
+            }
+            assert_eq!(
+                roots.survivors(),
+                two_valued,
+                "one-candidate pass disagrees"
+            );
+        }
         assemble_underconstrained(&flags, vars, keep_extra, &two_valued)
     }
 
@@ -3011,5 +3173,98 @@ mod tests {
             !stream.iter().any(|(v, _)| *v == 2),
             "pinned var must be clean"
         );
+    }
+
+    /// Random small satisfied systems: the one-candidate pass a satisfied witness
+    /// takes (checked inside `analyze_rows`) and the streaming core both match
+    /// the flat analyzer, with two-valued vars among the cases.
+    #[test]
+    fn one_candidate_pass_matches_on_random_satisfied_systems() {
+        let m = bn254_modulus();
+        let fp = |n: i64| Fp::from_decimal(&n.to_string(), &m);
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let num_vars = 6u32;
+        let vars: Vec<Var> = (0..num_vars)
+            .map(|id| {
+                let role = if id == 0 {
+                    VarRole::PublicInput
+                } else {
+                    VarRole::Derived
+                };
+                dvar(id, &format!("v{id}"), role)
+            })
+            .collect();
+        let mut two_valued = 0;
+        for _ in 0..3000 {
+            let assign: std::collections::BTreeMap<u32, Fp> =
+                (0..num_vars).map(|v| (v, fp(next(4) as i64 - 1))).collect();
+            let value = |lc: &LinearCombination| {
+                lc.terms
+                    .iter()
+                    .fold(Fp::from_const(&lc.constant, &m), |acc, t| {
+                        acc.add(&Fp::from_const(&t.coeff, &m).mul(&assign[&t.var]))
+                    })
+            };
+            let row_count = 1 + next(4);
+            let mut lc = |max_terms: u64| LinearCombination {
+                constant: FieldConst::from_i64(next(5) as i64 - 2),
+                terms: (0..next(max_terms + 1))
+                    .map(|_| Term {
+                        coeff: FieldConst::from_i64(next(5) as i64 - 2),
+                        var: next(num_vars as u64) as u32,
+                    })
+                    .collect(),
+            };
+            let rows: Vec<R1csRow> = (0..row_count)
+                .map(|_| {
+                    let (a, b, mut c) = (lc(2), lc(2), lc(1));
+                    // Satisfy the row through c's constant.
+                    let rest = value(&a).mul(&value(&b)).sub(&value(&LinearCombination {
+                        constant: FieldConst::from_i64(0),
+                        terms: c.terms.clone(),
+                    }));
+                    c.constant = LinearCombination::constant(rest.to_decimal()).constant;
+                    R1csRow {
+                        a,
+                        b,
+                        c,
+                        note: None,
+                    }
+                })
+                .collect();
+            let cp = CircuitProgram {
+                field: FieldSpec {
+                    name: "bn254".into(),
+                    modulus_decimal: m.to_string(),
+                },
+                vars: vars.clone(),
+                constraints: rows.clone(),
+                witness_gen: vec![],
+            };
+            let key = |u: &crate::solver::UnderConstrained| (u.var, u.reason.clone());
+            let mut flat: Vec<_> = crate::solver::analyze_underconstrained_cp(&cp, &assign)
+                .iter()
+                .map(key)
+                .collect();
+            let mut stream: Vec<_> =
+                analyze_rows(&rows, &vars, &(0..num_vars).collect(), &assign, &m)
+                    .iter()
+                    .map(key)
+                    .collect();
+            flat.sort();
+            stream.sort();
+            assert_eq!(stream, flat, "rows {rows:?}");
+            two_valued += stream
+                .iter()
+                .filter(|(_, r)| r.contains("two-valued"))
+                .count();
+        }
+        assert!(two_valued > 100, "only {two_valued} two-valued cases");
     }
 }
