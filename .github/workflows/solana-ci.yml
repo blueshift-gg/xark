@@ -61,6 +61,7 @@ jobs:
       - name: Cache cargo registry, git, and target
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           cache-directories: |
             ~/.cargo/registry
             ~/.cargo/git

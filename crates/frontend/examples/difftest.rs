@@ -124,29 +124,15 @@ fn main() {
     let max_mut: usize = flag("--mutations").map_or(16, |n| n.parse().unwrap());
     let analyze = args.iter().any(|x| x == "--analyze");
     let search = args.iter().any(|x| x == "--search");
-    let (mut searched, mut undecided) = (0usize, 0usize);
-    let mut adversary =
-        |name: &str, what: &str, inputs: &[(String, String)], honest: bool| -> bool {
-            if !search {
-                return true;
-            }
-            searched += 1;
-            match b.search(inputs) {
-                Ok(Some(v)) if v == honest => true,
-                Ok(Some(v)) => {
-                    println!("FAIL {name}{what}: honest solver says {honest}, witness search {v}");
-                    false
-                }
-                Ok(None) => {
-                    undecided += 1;
-                    true
-                }
-                Err(e) => {
-                    println!("FAIL {name}{what}: {e}");
-                    false
-                }
-            }
-        };
+    // The searches are the slow part (up to the time limit each, and most of a
+    // circuit's mutations on a non-native relation run it out): gathered here and
+    // run across the cores after the sweep, their verdicts reported in order.
+    let mut jobs: Vec<(String, String, Vec<(String, String)>, bool)> = Vec::new();
+    let mut adversary = |name: &str, what: &str, inputs: &[(String, String)], honest: bool| {
+        if search {
+            jobs.push((name.to_string(), what.to_string(), inputs.to_vec(), honest));
+        }
+    };
 
     if a.leaves.keys().collect::<Vec<_>>() != b.leaves.keys().collect::<Vec<_>>() {
         eprintln!("FAIL: the builds' input leaves differ");
@@ -195,9 +181,7 @@ fn main() {
             println!("FAIL {name}: test saw ok={want}, a={va}, b={vb}");
             continue;
         }
-        if !adversary(&name, "", &inputs, want) {
-            fails += 1;
-        }
+        adversary(&name, "", &inputs, want);
         if want && analyze {
             let assign = solver::solve(&b.prog, &b.ids(&inputs).unwrap()).unwrap();
             // Witness-only scratch (in no constraint) is causally disconnected, as
@@ -224,9 +208,7 @@ fn main() {
             m[i].1 = bump(&m[i].1);
             let (ma, mb) = (a.accepts(&m).unwrap(), b.accepts(&m).unwrap());
             muts += 1;
-            if !adversary(&name, &format!(" `{}`+1", inputs[i].0), &m, mb) {
-                fails += 1;
-            }
+            adversary(&name, &format!(" `{}`+1", inputs[i].0), &m, mb);
             if ma != mb {
                 fails += 1;
                 println!("FAIL {name}: `{}`+1: a={ma} b={mb}", inputs[i].0);
@@ -239,6 +221,57 @@ fn main() {
                     "note {name}: public `{}`+1 still accepted by both",
                     inputs[i].0
                 );
+            }
+        }
+    }
+    // Searches side by side: `XARK_SEARCH_THREADS` of them (default: the cores), or
+    // one at a time on a large circuit, whose search can take gigabytes (a whole
+    // ed25519 search peaks near 7 GB). A search's time limit is wall time, so the
+    // caller sizes the threads to the cores it has (`cargo xtask difftest`).
+    let threads = if b.prog.constraints.len() > 100_000 {
+        1
+    } else {
+        std::env::var("XARK_SEARCH_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
+    };
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut results: Vec<(usize, Result<Option<bool>, String>)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads.max(1))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some((_, _, inputs, _)) = jobs.get(i) else {
+                            break;
+                        };
+                        mine.push((i, b.search(inputs)));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap())
+            .collect()
+    });
+    results.sort_by_key(|(i, _)| *i);
+    let (mut searched, mut undecided) = (0usize, 0usize);
+    for ((name, what, _, honest), (_, result)) in jobs.iter().zip(results) {
+        searched += 1;
+        match result {
+            Ok(Some(v)) if v == *honest => {}
+            Ok(Some(v)) => {
+                fails += 1;
+                println!("FAIL {name}{what}: honest solver says {honest}, witness search {v}");
+            }
+            Ok(None) => undecided += 1,
+            Err(e) => {
+                fails += 1;
+                println!("FAIL {name}{what}: {e}");
             }
         }
     }

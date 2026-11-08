@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   check:
-    name: fmt + clippy + test
+    name: fmt + clippy + doc
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -29,6 +29,7 @@ jobs:
       - name: Cache cargo registry, git, and target
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           cache-directories: |
             ~/.cargo/registry
             ~/.cargo/git
@@ -53,32 +54,59 @@ jobs:
         run: |
           cargo doc --no-deps --workspace --exclude xark-wasm --lib
 
+  test:
+    # The workspace tests under the `ci` profile (release optimisation without the
+    # link-time work: end-to-end Groth16 setup+prove+verify tests are 10–20× slower
+    # in debug), in three parts on three runners. nextest's hashed partition keeps a
+    # test in its part when others come and go. The heaviest Groth16 e2e proves —
+    # the Ed25519 scalar-mul/EdDSA and secp256k1/r1 ECDSA vectors — run in slow.yml
+    # (60-min timeout). The `sbpf` and `differential_alt_bn128` integration tests
+    # under `gadgets/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`; they
+    # need the Anza toolchain and run in `solana-ci.yml`. One nextest run over the
+    # workspace (a second `-p xark-tests` run unified features differently and
+    # rebuilt for 3+ min). nextest skips doctests, which `cargo test --doc` runs, in
+    # the first part.
+    name: test (${{ matrix.part }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install stable Rust toolchain
+        # wasm32: the CLI end-to-end tests build circuits with `xark build`.
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry, git, and target
+        # The workspace crates too (66 test binaries): a pull request that changes
+        # one crate rebuilds that crate and its dependents, not the workspace.
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-workspace-crates: true
+
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
 
-      - name: cargo test (release)
-        # Release mode is mandatory here: end-to-end Groth16 setup+prove+verify
-        # tests (Blake2s, AES128, SHA256, Keccak, ECDSA, ...) are 10–20× slower
-        # in debug. The heaviest Groth16 e2e proves — the Ed25519 scalar-mul/EdDSA
-        # and secp256k1/r1 ECDSA vectors — take longer than the per-step CI limit
-        # and run in slow.yml (60-min timeout); exclude those packages here
-        # rather than terminating mid-test.
-        #
-        # The `sbpf` and `differential_alt_bn128` integration tests under
-        # `gadgets/tests/tests/` invoke `cargo build-sbf` per `#[svm_test]`;
-        # they need the Anza toolchain and run in `solana-ci.yml`.
-        # One nextest run over the workspace (a second `-p xark-tests` run unified
-        # features differently and rebuilt for 3+ min), its test binaries side by
-        # side; the filter leaves out those two. nextest skips doctests, which
-        # `cargo test --doc` runs. `xark` (the language crate) keeps its own
-        # release-mode job below; it isn't rerun here in the `ci` profile.
+      - name: cargo test (ci profile, part ${{ matrix.part }})
         run: |
           cargo nextest run --cargo-profile ci --no-fail-fast --workspace \
             --exclude xark --exclude xark-ed25519 --exclude xark-secp256k1 \
             --exclude xark-secp256r1 \
-            -E 'not (binary(sbpf) | binary(differential_alt_bn128))'
+            -E 'not (binary(sbpf) | binary(differential_alt_bn128))' \
+            --partition hash:${{ matrix.part }}/3
+
+      - name: cargo test --doc
+        if: matrix.part == 1
+        run: |
           cargo test --profile ci --doc --workspace --exclude xark \
             --exclude xark-ed25519 --exclude xark-secp256k1 --exclude xark-secp256r1
 
@@ -105,6 +133,10 @@ jobs:
         run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --target wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
       - name: Compare circuit digests
         # One circuit at a time: the keyed digest reduces and minimizes each circuit,
         # and four at once exceed the runner's memory.
@@ -129,6 +161,10 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
       - name: Compare keyed and flat digests
         run: cargo xtask digests --check --jobs 1
 
@@ -148,6 +184,8 @@ jobs:
           toolchain: "1.89"
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: cargo check
         run: |
           cargo check --workspace --exclude xark-tests --all-targets --locked
@@ -156,9 +194,13 @@ jobs:
     # The snapshot suite (count bridges to the Lean models, rejection diagnostics,
     # solves) and the native-semantics fuzzer. The heavy `#[ignore]`d known-answer
     # vectors run in `slow.yml`.
-    name: compiler snapshot suite + semantics fuzz
+    name: compiler snapshot suite + semantics fuzz (${{ matrix.part }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -168,6 +210,9 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-workspace-crates: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -175,12 +220,15 @@ jobs:
       - name: cargo test (snapshots, semantics fuzz, input and host tests)
         # Every test in the crate: naming files here let the others go stale
         # unnoticed. The heavy KAT vectors are `#[ignore]`d (slow.yml). nextest
-        # runs the test binaries side by side; `cargo test --doc` the doctests.
+        # runs the test binaries side by side, in two halves on two runners
+        # (hashed partition: a test stays in its half when others come and go).
         env:
           XARK_FUZZ_CASES: "200"
         run: |
-          cargo nextest run --release --no-fail-fast -p xark
-          cargo test --release --doc -p xark
+          cargo nextest run --release --no-fail-fast -p xark --partition hash:${{ matrix.part }}/2
+      - name: cargo test --doc
+        if: matrix.part == 1
+        run: cargo test --release --doc -p xark
 
   wasm-smoke:
     # The xark-wasm prover package (`npm test` in crates/wasm): against host
@@ -200,6 +248,10 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: wasm
+          cache-workspace-crates: true
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -249,12 +301,18 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: wasm
+          cache-workspace-crates: true
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       - name: Install Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: clients/check/package-lock.json
       - name: Generated clients (cube, zkyc, sha256, merkle)
         working-directory: clients/check
         run: npm ci && npm test
