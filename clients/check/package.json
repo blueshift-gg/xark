@@ -7,7 +7,7 @@
     "update": "vitest run -u"
   },
   "devDependencies": {
-    "@blueshift-gg/xark-wasm": "file:../../crates/wasm",
+    "@blueshift-gg/xark": "file:../../crates/wasm",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0",
     "vitest": "^5.1.0"

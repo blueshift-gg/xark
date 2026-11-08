@@ -51,8 +51,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: |
-          cargo doc --no-deps --workspace --exclude xark-wasm
-          cargo doc --no-deps --manifest-path crates/lang/Cargo.toml
+          cargo doc --no-deps --workspace --exclude xark-wasm --lib
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -73,13 +72,15 @@ jobs:
         # One nextest run over the workspace (a second `-p xark-tests` run unified
         # features differently and rebuilt for 3+ min), its test binaries side by
         # side; the filter leaves out those two. nextest skips doctests, which
-        # `cargo test --doc` runs.
+        # `cargo test --doc` runs. `xark` (the language crate) keeps its own
+        # release-mode job below; it isn't rerun here in the `ci` profile.
         run: |
           cargo nextest run --cargo-profile ci --no-fail-fast --workspace \
-            --exclude xark-ed25519 --exclude xark-secp256k1 --exclude xark-secp256r1 \
+            --exclude xark --exclude xark-ed25519 --exclude xark-secp256k1 \
+            --exclude xark-secp256r1 \
             -E 'not (binary(sbpf) | binary(differential_alt_bn128))'
-          cargo test --profile ci --doc --workspace --exclude xark-ed25519 \
-            --exclude xark-secp256k1 --exclude xark-secp256r1
+          cargo test --profile ci --doc --workspace --exclude xark \
+            --exclude xark-ed25519 --exclude xark-secp256k1 --exclude xark-secp256r1
 
   reproducible:
     # A circuit is identical (same R1CS digest) under every supported rustc. Rebuild every example with the oldest supported
@@ -150,7 +151,6 @@ jobs:
       - name: cargo check
         run: |
           cargo check --workspace --exclude xark-tests --all-targets --locked
-          cargo check --all-targets --locked --manifest-path crates/lang/Cargo.toml
 
   compiler-snapshots:
     # The snapshot suite (count bridges to the Lean models, rejection diagnostics,
@@ -168,8 +168,6 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/lang
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -181,9 +179,8 @@ jobs:
         env:
           XARK_FUZZ_CASES: "200"
         run: |
-          cd crates/lang
-          cargo nextest run --release --no-fail-fast
-          cargo test --release --doc
+          cargo nextest run --release --no-fail-fast -p xark
+          cargo test --release --doc -p xark
 
   wasm-smoke:
     # The xark-wasm prover package (`npm test` in crates/wasm): against host

@@ -220,7 +220,7 @@ xark profile examples/zkyc --html
 
 ```sh
 xark client                                  # writes <circuit>.ts
-npm install @blueshift-gg/xark-wasm@0.3      # the runtime it imports
+npm install @blueshift-gg/xark@0.3           # the runtime it imports
 ```
 
 `xark build` also writes `schema.json`: every input's name, visibility and
@@ -229,7 +229,7 @@ into the standard types and writes one `.ts` file: constants and a type per enum
 an interface per struct, the inputs, the public inputs as given and as decoded, and
 the circuit, which makes its provers and verifiers. What every client shares
 (`Field`, `Proof`, loading xark-wasm and the build output) is xark-wasm's
-`@blueshift-gg/xark-wasm/client`, so the file holds only the circuit, and an app
+`@blueshift-gg/xark/client`, so the file holds only the circuit, and an app
 imports only the file. The circuit's `schema.json` is inlined in it, so the file
 has no relative import and needs no project settings (Node runs it as is).
 Each type is the one you'd write by hand:
@@ -294,7 +294,7 @@ keyHash })` refuses any other `vk.bin` (`xark setup` prints its sha256).
 
 To prove on several threads, give the prover a worker pool:
 `Zkyc.prover(url, { pool: await createPool() })`, with `createPool` from
-`@blueshift-gg/xark-wasm/pool` (about 4× faster with 8 threads). A browser needs a
+`@blueshift-gg/xark/pool` (about 4× faster with 8 threads). A browser needs a
 cross-origin isolated page for it, and proves in a Web Worker.
 
 `Policy.default().on(…).minAge(18)` and `Identity.commitment(id)` are the crate's Rust,
@@ -398,7 +398,7 @@ rewrites are proven exact in Lean (`formal/Formal/Rewrites.lean`). Details:
 ## Proving and verifying in JavaScript
 
 Prove and verify anywhere JavaScript runs with
-[`@blueshift-gg/xark-wasm`](crates/wasm/README.md) (`prove(circuit, pk, inputs, sources?)`,
+[`@blueshift-gg/xark`](crates/wasm/README.md) (`prove(circuit, pk, inputs, sources?)`,
 `verify(vk, proof, publicInputs)`), or through the typed client `xark client`
 generates over it (above). `xark prove` writes the same bytes `verify` takes:
 `proof.bin` and `public_inputs.bin`.
@@ -474,10 +474,10 @@ cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 
-# `crates/lang` is its own workspace, so its suites run separately:
-cd crates/lang && cargo test --release
-cd crates/lang && cargo test --release --test snapshot -- --include-ignored  # + heavy KATs
-XARK_FUZZ_CASES=400 cargo test --release --test semantics_fuzz  # wider fuzzing
+# `crates/lang`'s test suites are heavy, so CI runs them in their own job:
+cargo test --release -p xark
+cargo test --release -p xark --test snapshot -- --include-ignored  # + heavy KATs
+XARK_FUZZ_CASES=400 cargo test --release -p xark --test semantics_fuzz  # wider fuzzing
 
 cargo xtask digests --check         # every example's circuit, unchanged
 ```

@@ -29,13 +29,11 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/lang
       - name: cargo test (semantics fuzz)
         env:
           XARK_FUZZ_CASES: "5000"
           XARK_FUZZ_SEED: ${{ github.run_id }}
-        run: cd crates/lang && cargo test --release --test semantics_fuzz -- --nocapture
+        run: cargo test --release -p xark --test semantics_fuzz -- --nocapture
 
   ed25519-sweep:
     # The adversarial sweep (`cargo xtask difftest`) of ed25519 alone, which pull

@@ -18,6 +18,7 @@ members = [
     "crates/ir",
     "crates/macros",
     "crates/cli",
+    "crates/lang",
     "crates/prover",
     "crates/schema",
     "xtask",
@@ -38,7 +39,6 @@ members = [
 # `cargo-build-sbf` (with its own pinned `Cargo.lock`) as the
 # reproducible-build target. See `docs/reproducible-build.md`.
 exclude = [
-    "crates/lang",
     "examples",
     "formal/templates",
     "crates/verifier/reference-program",
@@ -49,8 +49,7 @@ version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/blueshift-gg/xark"
-# 1.89, for the host tools (their dependencies need it) and for circuits (the
-# `xark` crate's own `rust-version`) — see docs/toolchain.md.
+# see docs/toolchain.md.
 rust-version = "1.89"
 
 [workspace.dependencies]
@@ -100,3 +99,9 @@ codegen-units = 1
 inherits = "release"
 lto = false
 codegen-units = 16
+
+# The frontend runs inside the test process: optimize it even in test builds.
+[profile.dev.package.xark-frontend]
+opt-level = 3
+[profile.dev.package.xark-ir]
+opt-level = 3

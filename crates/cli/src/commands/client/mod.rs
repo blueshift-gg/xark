@@ -92,7 +92,7 @@ fn lists_runtime(file: &std::path::Path) -> bool {
         .unwrap_or_default();
     ["dependencies", "devDependencies", "peerDependencies"]
         .iter()
-        .any(|k| pkg[k].get("@blueshift-gg/xark-wasm").is_some())
+        .any(|k| pkg[k].get("@blueshift-gg/xark").is_some())
 }
 
 /// On the first line of every generated client.
@@ -195,7 +195,7 @@ pub fn run(args: ClientArgs) -> Result<()> {
     let mut steps = Vec::new();
     if !lists_runtime(&out) {
         steps.push((
-            format!("npm install @blueshift-gg/xark-wasm@{release}"),
+            format!("npm install @blueshift-gg/xark@{release}"),
             "the runtime the client imports",
         ));
     }
