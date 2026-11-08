@@ -4010,10 +4010,10 @@ fn check_toy_curve(bits: u32, p: i128, ca: i128, op: &str, pairs: &[ToyPair]) {
             .chunks(pairs.len().div_ceil(threads).max(1))
             .map(|chunk| s.spawn(move || chunk.iter().map(check).collect::<Vec<_>>()))
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().unwrap())
-            .collect()
+        // Every thread joined before any is unwrapped: a panic while one is still
+        // to be joined aborts the test binary instead of failing the test.
+        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
+        joined.into_iter().flat_map(|r| r.unwrap()).collect()
     });
     for (d, u, n) in counts {
         defined += d;
