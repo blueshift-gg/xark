@@ -878,7 +878,10 @@ pub fn stream_solve_dense(
     let c = decode_core(b);
     let modulus = num_bigint::BigUint::parse_bytes(c.field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    solve_streamed(&c.inputs, c.num_vars, &c.defs, &c.top_w, &modulus, inputs)
+    let slots = solve_streamed(&c.inputs, c.num_vars, &c.defs, &c.top_w, &modulus, inputs);
+    // Freeing the decoded program takes a few ms the caller needn't wait for.
+    std::thread::spawn(move || drop(c));
+    slots
 }
 
 /// **Streaming constraint check** — solve the witness, then verify every R1CS row
@@ -3032,16 +3035,25 @@ mod eval {
                 w.put(var.id, v.as_bn254_fr().expect("BN254 modulus"));
             }
         }
-        let defs: Vec<Vec<WItem>> = defs.iter().map(|d| w_items(&d.w_items, Some(d))).collect();
+        // Compiling is per template and per top-level item, so it runs in
+        // parallel; a chunk boundary only forgoes carrying a `Bit` input over.
+        use rayon::prelude::*;
+        let defs: Vec<Vec<WItem>> = defs
+            .par_iter()
+            .map(|d| w_items(&d.w_items, Some(d)))
+            .collect();
+        let top: Vec<WItem> = top
+            .par_chunks(256)
+            .map(|c| w_items(c, None))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect();
         let mut memo = vec![None; defs.len()];
         let escapes = (0..defs.len())
             .map(|d| escapes(&defs, d, &mut memo))
             .collect();
-        let p = WProgram {
-            defs,
-            escapes,
-            top: w_items(top, None),
-        };
+        let p = WProgram { defs, escapes, top };
         let top = WFrame {
             base: 0,
             plugs: Vec::new(),
