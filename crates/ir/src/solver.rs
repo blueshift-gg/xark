@@ -592,7 +592,11 @@ fn inverse_256(a: &BigUint, m: &BigUint) -> Option<BigUint> {
     };
     let m = Option::from(Odd::new(words(m)?))?;
     let inv: U256 = Option::from(words(a)?.invert_odd_mod(&m))?;
-    let bytes: Vec<u8> = inv.to_words().iter().flat_map(|w| w.to_le_bytes()).collect();
+    let bytes: Vec<u8> = inv
+        .to_words()
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
     Some(BigUint::from_bytes_le(&bytes))
 }
 
@@ -1656,9 +1660,18 @@ mod tests {
             assert_eq!(inverse_256(&one, m), Some(one.clone()));
         }
         // Even or wider than 256 bits: no answer, so the caller uses Fermat.
-        assert_eq!(inverse_256(&BigUint::from(3u32), &BigUint::from(10u32)), None);
-        assert_eq!(inverse_256(&BigUint::from(3u32), &((&one << 256u32) + 1u32)), None);
+        assert_eq!(
+            inverse_256(&BigUint::from(3u32), &BigUint::from(10u32)),
+            None
+        );
+        assert_eq!(
+            inverse_256(&BigUint::from(3u32), &((&one << 256u32) + 1u32)),
+            None
+        );
         // No inverse (a shares a factor with m).
-        assert_eq!(inverse_256(&BigUint::from(3u32), &BigUint::from(9u32)), None);
+        assert_eq!(
+            inverse_256(&BigUint::from(3u32), &BigUint::from(9u32)),
+            None
+        );
     }
 }

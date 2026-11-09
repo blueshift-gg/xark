@@ -3002,7 +3002,11 @@ mod eval {
                         });
                         last.set(Some(x));
                         let b: &ark_ff::BigInt<4> = repr.get_or_insert_with(|| x.into_bigint());
-                        let bit = if b.get_bit(*index as usize) { ONE } else { Fr::zero() };
+                        let bit = if b.get_bit(*index as usize) {
+                            ONE
+                        } else {
+                            Fr::zero()
+                        };
                         w.put(f.out(*out), bit);
                         continue;
                     }
