@@ -1720,6 +1720,14 @@ impl crate::interp::Host for Host {
         self.partial
     }
 
+    fn witness_only(&self) -> bool {
+        self.b.witness_only
+    }
+
+    fn set_witness_only(&mut self, on: bool) {
+        self.b.witness_only = on;
+    }
+
     fn location(&self) -> Option<String> {
         None
     }
@@ -1875,11 +1883,15 @@ impl crate::interp::Host for Host {
                 };
                 self.put_field(m, a[0], out)?;
             }
+            // A comparison's result is a `bool` from here on, and later code (a branch,
+            // a select, `Field::from`) trusts it to be 0 or 1. So, like native integer
+            // ops, its rows are kept even in a witness-only region: without them the
+            // result would be a free witness tagged as a proven bit.
             Intr::Eq => {
                 self.cmp_calls += 1;
                 let x = self.get_field(m, a[0])?;
                 let y = self.get_field(m, a[1])?;
-                let out = self.b.emit_is_zero(x - y);
+                let out = self.native_int(|h| h.b.emit_is_zero(x - y));
                 return Ok(Some(self.new_wire(m, out, 1)));
             }
             Intr::Ult => {
@@ -1889,7 +1901,7 @@ impl crate::interp::Host for Host {
                 let n = int_of(a[2], "the comparison width `N`")? as usize;
                 // In an arm, `x, y < 2^n` (the range proof) binds only if it's taken.
                 let g = self.guard();
-                let out = self.b.emit_less_than_gated(n, x, y, g)?;
+                let out = self.native_int(|h| h.b.emit_less_than_gated(n, x, y, g))?;
                 return Ok(Some(self.new_wire(m, out, 1)));
             }
             Intr::BoolToField => {

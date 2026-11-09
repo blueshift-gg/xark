@@ -451,6 +451,17 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- Two soundness holes in `witness_begin()`/`witness_end()` regions, each letting a
+  prover make a valid proof of a statement the circuit rejects. No shipped circuit
+  hit either (every digest is unchanged).
+  - A `Field` comparison (`==`, `!=`, `lt`, …) made in a region lost its rows but
+    was still trusted as a 0-or-1 `bool`, so a branch or select on it after the
+    region could take any value (#59). It now keeps its rows, as native integer
+    ops do.
+  - An arm of a witness branch that panicked inside a region left the region open,
+    and every constraint after the branch was dropped (#58). Each arm now starts in
+    the region state the branch was reached in, and a region that would straddle a
+    branch is refused.
 - Malformed input is an error, not a panic: a row-file window index out of range,
   a malformed or wrongly laid out row stream, a proving key whose lengths overflow,
   and an MSM work item or accelerator result of the wrong size or with points that
