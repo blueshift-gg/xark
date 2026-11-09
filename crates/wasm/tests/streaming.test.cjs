@@ -1,6 +1,6 @@
 // xark-wasm streaming prover: `proveStreaming` single-threaded and with the
 // worker pool (both paths), the no-SharedArrayBuffer fallback, and the
-// wrong-key guard — against the sha256("abc") example (a 2^16 domain, so the
+// wrong-key guard — against the sha256("abc") example (large enough that the
 // blocked FFT and its worker passes run). Prerequisites:
 //
 //   xark build examples/sha256
@@ -8,8 +8,9 @@
 //        # the minimized form writes r1cs.stream (`auto` may pick `reduced`)
 //   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 \
 //        --r1cs-form reduced --out examples/sha256/target/xark/sha256-streamable
-//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 \
-//        --out examples/sha256/target/xark/sha256-smooth   # default: smooth domain
+//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 8 \
+//        --r1cs-form minimized --out examples/sha256/target/xark/sha256-smooth
+//        # the default smooth domain, with r1cs.stream; another seed, so another key
 //   wasm-pack build crates/wasm --target nodejs --release --out-dir dist/node
 //   node --test crates/wasm/tests/streaming.test.cjs
 //
@@ -171,7 +172,7 @@ test("transcodeKey: decoded key (with and without workers) proves the same bytes
   await assert.rejects(collect(transcodeKey(xark, new Response(pk.subarray(0, pk.length - 3)))), /ended early/);
 });
 
-// A default (`--domain auto` → smooth) key: the domain is 9·2^12, not 2^16.
+// A default (`--domain auto` → smooth) key: a 3·2^k or 9·2^k domain, not 2^k.
 const S = process.env.SMOOTH_KEY_DIR || join(ROOT, "examples", "sha256", "target", "xark", "sha256-smooth");
 const smooth = (() => {
   try {
@@ -187,7 +188,10 @@ const smooth = (() => {
 
 test("smooth-domain key: legacy prove / preload and proveStreaming all verify", { skip: !smooth }, () => {
   const meta = JSON.parse(readFileSync(join(S, "metadata.json"), "utf8"));
-  assert.equal(meta.qap_domain_size, 9 << 12);
+  const n = meta.qap_domain_size;
+  const pow2 = (x) => Number.isInteger(x) && x > 0 && (x & (x - 1)) === 0;
+  assert.ok(!pow2(n) && (pow2(n / 3) || pow2(n / 9)), `smooth domain, got ${n}`);
+  assert.ok(n >= meta.num_constraints, `domain ${n} holds ${meta.num_constraints} rows`);
   const legacy = xark.prove(xbc, smooth.pk, INPUTS);
   assert.ok(xark.verify(smooth.vk, legacy.proof, legacy.publicInputs));
   xark.preload(xbc, smooth.pk);
