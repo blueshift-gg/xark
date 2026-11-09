@@ -79,7 +79,7 @@ need a correspondingly large phase 1; treat them separately.
 
 Caveats when regenerating:
 - A full regen must be **consistent** — regenerate every artifact in a circuit's fixture dir from the
-  same keys, not a mix of dev-mode + ceremony bytes.
+  same keys, not a mix of single-party and ceremony bytes.
 - Update the hash pin in `gadgets/tests/tests/it/solana_format.rs` (`VK_SOLANA_SHA256` etc.), which
   intentionally locks the committed VK bytes.
 - Re-run `cargo test -p xark-tests` (host + `--test sbpf`).

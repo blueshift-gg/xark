@@ -41,6 +41,16 @@ fn ceremony_keys_prove_and_verify() {
         assert!(ok, "xark {}: {log}", args.join(" "));
         log
     };
+    // A seeded key, or a smooth domain, is a key made without a `.ptau`: setup
+    // refuses either with one.
+    let keys = tmp.path().join("keys");
+    for extra in [&["--deterministic-rng", "1"][..], &["--domain", "smooth"]] {
+        let mut args = vec!["setup", ".", "--ptau-file", ptau_s, "--out"];
+        args.push(keys.to_str().unwrap());
+        args.extend_from_slice(extra);
+        let (ok, log) = xark(&args, &out);
+        assert!(!ok && log.contains("a key made without a .ptau"), "{log}");
+    }
     step(&["ceremony", "init", "--ptau-file", ptau_s, "--out", cer_s]);
     // A second init over it is refused, not a reset.
     let (ok, log) = xark(

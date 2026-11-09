@@ -89,13 +89,7 @@ fn keyed_rows_reject_what_the_flat_circuit_rejects(name: &str, form: &str, reque
         let o = std::process::Command::new(crate::common::xark_bin())
             .arg("setup")
             .arg(&out)
-            .args([
-                "--insecure-dev-mode",
-                "--deterministic-rng",
-                "1",
-                "--r1cs-form",
-                form,
-            ])
+            .args(["--deterministic-rng", "1", "--r1cs-form", form])
             .output()
             .unwrap();
         assert!(

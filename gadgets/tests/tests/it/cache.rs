@@ -25,7 +25,6 @@ fn setup(out: &Path) -> (bool, String) {
     let mut c = Command::new(xark_bin());
     c.arg("setup")
         .arg(out)
-        .arg("--insecure-dev-mode")
         .arg("--deterministic-rng")
         .arg("1")
         .arg("--r1cs-form")

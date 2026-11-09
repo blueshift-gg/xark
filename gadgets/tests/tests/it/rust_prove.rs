@@ -27,7 +27,7 @@ fn rust_prove_matches_the_cli() {
     let (ok, log) = xark_build("cube", &out, &target);
     assert!(ok, "xark build: {log}");
     let o = Command::new(xark_bin())
-        .args(["setup", out.to_str().unwrap(), "--insecure-dev-mode"])
+        .args(["setup", out.to_str().unwrap()])
         .output()
         .expect("spawn xark setup");
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));

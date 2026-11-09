@@ -39,7 +39,7 @@ binary under `it/`) plus workspace unit tests, including:
   constraints, and the solver's `solve_and_check` rejects any witness that violates a
   constraint, so an unpinned hint output can't force a satisfying assignment.
 * **Ceremony enforcement** — `CeremonyError` rejection paths (Schnorr-PoK, transcript
-  hash chain, δ-consistency, dev-mode guards) exercised by the ptau/setup paths.
+  hash chain, δ-consistency, seeded-key guards) exercised by the ptau/setup paths.
 * **proptest smoke** (`gadgets/tests/tests/it/fuzz.rs`) — the verifier's entry points
   on arbitrary and mutated bytes (never panic, never accept) and the `circuit.xbc`
   decoder on arbitrary bytes (never panic). Runs with the test suite; production
@@ -196,10 +196,11 @@ Deliberately small: **no opcode dispatch.** The circuit's wasm lowers to
 
 * `.ptau` admissibility — degree match, subgroup membership, pairing-consistency.
 * Phase-2 contribution — Schnorr PoK per δ contribution; chain verification.
-* The deterministic-RNG path for `--insecure-dev-mode` (the only RNG path tests use) is
-  explicitly *not* production-safe; CLI guards prevent its use outside dev mode.
+* The deterministic-RNG path (`xark setup --deterministic-rng`, the only RNG path tests use)
+  is explicitly *not* production-safe: setup refuses it with a `.ptau`, `xark prove` refuses a
+  seeded prover RNG with a production key, and `xark export` warns about a seeded key.
 
-All four enforcement paths (Schnorr-PoK, transcript chain, δ consistency, dev-mode guard) are
+All four enforcement paths (Schnorr-PoK, transcript chain, δ consistency, seeded-key guard) are
 exercised by the ptau/setup paths in `gadgets/tests/tests/`.
 
 ### 5. Serialisation boundaries (`crates/backend/src/{serialization,solana}.rs`)

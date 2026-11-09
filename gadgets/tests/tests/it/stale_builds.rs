@@ -241,7 +241,7 @@ fn inspect_rebuilds_a_stale_circuit() {
 fn prove_rebuilds_a_stale_circuit_and_asks_for_new_keys() {
     let tmp = tempdir();
     let dir = cube(tmp.path());
-    for args in [&["build", "."][..], &["setup", ".", "--insecure-dev-mode"]] {
+    for args in [&["build", "."][..], &["setup", "."]] {
         let (ok, err) = xark(&dir, args);
         assert!(ok, "{err}");
     }
@@ -257,7 +257,7 @@ fn prove_rebuilds_a_stale_circuit_and_asks_for_new_keys() {
         "{err}"
     );
     assert!(err.contains("run `xark setup` again"), "{err}");
-    let (ok, err) = xark(&dir, &["setup", ".", "--insecure-dev-mode"]);
+    let (ok, err) = xark(&dir, &["setup", "."]);
     assert!(ok && !err.contains("changed since"), "{err}");
     let (ok, err) = xark(
         &dir,

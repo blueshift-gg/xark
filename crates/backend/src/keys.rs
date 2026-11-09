@@ -182,17 +182,17 @@ pub struct KeyMetadata {
     pub num_public_inputs: usize,
     pub num_constraints: usize,
     /// Fixed `ChaCha20Rng` seed used to drive Groth16 setup for reproducible
-    /// artifacts; `None` means OS RNG. Set only on the `--insecure-dev-mode
-    /// --deterministic-rng <seed>` path; production (ceremony) setup never sets it.
+    /// artifacts; `None` means OS RNG. Set only by `xark setup --deterministic-rng
+    /// <seed>`; a setup from a `.ptau` or a ceremony never sets it.
     #[serde(default)]
     pub deterministic_rng_seed: Option<u64>,
     /// Filename/identifier of the Powers-of-Tau transcript these keys derive
-    /// from. `None` for dev-mode keys.
+    /// from. `None` for a key made without one.
     #[serde(default)]
     pub ptau_source: Option<String>,
     /// SHA-256 (hex) of the phase-2 randomness seed used to derive γ, δ.
     /// **NOT** the seed itself — the seed must be discarded immediately after
-    /// setup (Groth16 soundness). `None` for dev-mode keys.
+    /// setup (Groth16 soundness). `None` for a key made without a `.ptau`.
     #[serde(default)]
     pub phase2_seed_hash: Option<String>,
     /// Which R1CS form the key is generated for: `None` = the boundary-minimized
@@ -213,7 +213,7 @@ impl KeyMetadata {
         Self {
             protocol: "groth16".into(),
             curve: "bn254".into(),
-            setup_mode: "insecure-dev-mode".into(),
+            setup_mode: "single-party".into(),
             production_safe: false,
             circuit_hash,
             digest: None,

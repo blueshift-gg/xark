@@ -4,11 +4,11 @@
 // blocked FFT and its worker passes run). Prerequisites:
 //
 //   xark build examples/sha256
-//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form minimized
+//   xark setup examples/sha256 --deterministic-rng 7 --r1cs-form minimized
 //        # the minimized form writes r1cs.stream (`auto` may pick `reduced`)
-//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 \
+//   xark setup examples/sha256 --deterministic-rng 7 \
 //        --r1cs-form reduced --out examples/sha256/target/xark/sha256-streamable
-//   xark setup examples/sha256 --insecure-dev-mode --deterministic-rng 8 \
+//   xark setup examples/sha256 --deterministic-rng 8 \
 //        --r1cs-form minimized --out examples/sha256/target/xark/sha256-smooth
 //        # the default smooth domain, with r1cs.stream; another seed, so another key
 //   wasm-pack build crates/wasm --target nodejs --release --out-dir dist/node

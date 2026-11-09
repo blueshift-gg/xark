@@ -175,7 +175,7 @@ require-corp`), and the proving call must run in a Web Worker (it blocks with
 `Atomics.wait`). Without isolation `parallelSupported()` is false and the same
 prover runs single-threaded with the same memory profile.
 
-**Smooth-domain keys** (`xark setup`'s default for dev keys: a QAP domain up to
+**Smooth-domain keys** (`xark setup`'s default for a key made without a `.ptau`: a QAP domain up to
 44% smaller) prove through every API. The key's header states its domain, so `proveFromStream` computes
 `h` as soon as the first bytes arrive, overlapping the rest of the download.
 

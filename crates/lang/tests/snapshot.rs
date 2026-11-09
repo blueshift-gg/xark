@@ -7279,6 +7279,90 @@ fn witness_regions_leave_no_proven_facts() {
     );
 }
 
+/// A `Field` comparison made in a `witness_begin()` region keeps its rows (#59): its
+/// result is a `bool` from there on, and a branch, a select or `Field::from` after the
+/// region trusts it to be 0 or 1, and to be the comparison. Without the rows it was a
+/// free witness tagged as a proven bit: `c = 1/2` proved `out = 4`, or any `out`.
+#[test]
+fn witness_regions_keep_field_comparisons() {
+    probe(
+        "wo_eq_branch",
+        "a: Private<Field>, b: Private<Field>, out: Public<Field>",
+        "witness_begin();\nlet c = a == b;\nwitness_end();\n\
+         let z = if c { Field::from(3u8) } else { Field::from(5u8) };\nrequire_eq(z, out);",
+        &[
+            (&[("a", "0"), ("b", "1"), ("out", "5")], true),
+            (&[("a", "0"), ("b", "1"), ("out", "4")], false),
+            (&[("a", "0"), ("b", "1"), ("out", "3")], false),
+            (&[("a", "1"), ("b", "1"), ("out", "3")], true),
+        ],
+    );
+    probe(
+        "wo_eq_field",
+        "a: Private<Field>, b: Private<Field>, out: Public<Field>",
+        "witness_begin();\nlet c = a == b;\nwitness_end();\n\
+         require_eq(Field::from(c) * Field::from(7u8), out);",
+        &[
+            (&[("a", "2"), ("b", "2"), ("out", "7")], true),
+            (&[("a", "2"), ("b", "3"), ("out", "0")], true),
+            (&[("a", "2"), ("b", "3"), ("out", "7")], false),
+            (&[("a", "2"), ("b", "3"), ("out", "3")], false),
+        ],
+    );
+    probe(
+        "wo_lt_branch",
+        "a: Private<Field>, b: Private<Field>, out: Public<Field>",
+        "witness_begin();\nlet c = a.lt::<8>(b);\nwitness_end();\n\
+         let z = if c { Field::from(3u8) } else { Field::from(5u8) };\nrequire_eq(z, out);",
+        &[
+            (&[("a", "1"), ("b", "2"), ("out", "3")], true),
+            (&[("a", "2"), ("b", "1"), ("out", "5")], true),
+            (&[("a", "2"), ("b", "1"), ("out", "4")], false),
+            (&[("a", "2"), ("b", "1"), ("out", "3")], false),
+        ],
+    );
+}
+
+/// An arm of a witness branch that diverges inside a `witness_begin()` region is
+/// dropped with the region (#58): the region stays closed for the other arm and
+/// everything after the branch, whose rows still bind. Before, the open region
+/// swallowed them, and `x = 0, out = 0` proved a circuit that requires `out = 42`.
+#[test]
+fn witness_regions_end_with_a_diverging_arm() {
+    probe(
+        "wo_panic_arm",
+        "x: Private<u32>, out: Public<Field>",
+        "require_eq(Field::from(x), out);\n\
+         if x == 0u32 {\nwitness_begin();\npanic!(\"boom\");\n}\n\
+         require_eq(Field::from(42u8), out);",
+        &[
+            (&[("x", "42"), ("out", "42")], true),
+            (&[("x", "0"), ("out", "0")], false),
+            (&[("x", "0"), ("out", "42")], false),
+            (&[("x", "7"), ("out", "7")], false),
+        ],
+    );
+}
+
+/// A region that opens or closes in one arm of a witness branch, and goes on past the
+/// branch, is refused: which rows it covers would depend on the witness.
+#[test]
+fn witness_regions_dont_straddle_branches() {
+    let name = "wo_straddle";
+    let src = "#![no_std]\nuse xark::prelude::*;\n\
+               pub fn circuit(x: Private<u32>, out: Public<Field>) {\n\
+               if x == 0u32 {\nwitness_begin();\n}\nrequire_eq(Field::from(x) * Field::from(x), out);\n\
+               witness_end();\n}\n";
+    let c = compile_with_field(&write_case(name, src), name, "bn254");
+    assert!(!c.status_success, "built a region that straddles a branch");
+    assert!(
+        c.stderr
+            .contains("region opens or closes inside one arm of a witness-dependent branch"),
+        "{}",
+        c.stderr
+    );
+}
+
 /// Native integer ops stay constrained inside a `witness_begin()` region: they are
 /// plain wasm, which LLVM may merge across the markers, so an integer computed there
 /// can be the very value used afterwards. A quotient taken in the region keeps its

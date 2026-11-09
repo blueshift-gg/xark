@@ -275,7 +275,7 @@ jobs:
         # The smoke test cross-checks the wasm-generated public inputs against
         # the host's (same circuit, same witness — must be byte-identical).
         run: |
-          target/release/xark setup examples/cube --insecure-dev-mode
+          target/release/xark setup examples/cube
           target/release/xark prove examples/cube --inputs '{"secret":"3","result":"27"}'
 
       - name: Build sha256 and its three keys
@@ -283,9 +283,9 @@ jobs:
         run: |
           x=target/release/xark
           k=examples/sha256/target/xark
-          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form minimized
-          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 7 --r1cs-form reduced --out $k/sha256-streamable
-          $x setup examples/sha256 --insecure-dev-mode --deterministic-rng 8 --r1cs-form minimized --out $k/sha256-smooth
+          $x setup examples/sha256 --deterministic-rng 7 --r1cs-form minimized
+          $x setup examples/sha256 --deterministic-rng 7 --r1cs-form reduced --out $k/sha256-streamable
+          $x setup examples/sha256 --deterministic-rng 8 --r1cs-form minimized --out $k/sha256-smooth
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked

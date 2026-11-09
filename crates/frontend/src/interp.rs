@@ -1062,6 +1062,10 @@ pub trait Host {
     /// guard, for the branch check: inside an arm every constraint and hint is
     /// guarded, so the count moves only if an arm declares a circuit input.
     fn emitted(&self) -> usize;
+    /// Whether a `witness_begin` region is open; and setting it, so each arm of a
+    /// witness branch starts in the state the branch was reached in.
+    fn witness_only(&self) -> bool;
+    fn set_witness_only(&mut self, on: bool);
     /// Describe the current source location (for diagnostics).
     fn location(&self) -> Option<String>;
     /// Native integer arithmetic / comparison / truncation on witness integers
@@ -3009,10 +3013,25 @@ impl Machine {
         apply: &[(u32, u8, Option<SymByte>)],
         stop: usize,
     ) -> CompileResult<(State, Writes)> {
+        let region = host.witness_only();
         host.arm_begin(self, cond, value)?;
         let r = self.run_path(module, host, st, apply, stop);
         host.arm_end();
-        r
+        // The arms run one after another on one host: each starts in the region state
+        // the branch was reached in, and an arm that diverges is dropped with any
+        // region it left open, or that region would swallow the other arm's rows and
+        // everything after the branch. An arm that goes on must leave the state as
+        // it found it: a region can't straddle a witness branch.
+        let changed = host.witness_only() != region;
+        host.set_witness_only(region);
+        match r {
+            Ok(_) if changed => Err(CompileError::new(
+                "a `witness_begin` region opens or closes inside one arm of a witness-dependent branch",
+            )
+            .with_help("open and close the region within the arm, or around the whole branch")
+            .or_location(|| host.location())),
+            r => r,
+        }
     }
 
     fn put_byte(&mut self, a: u32, byte: u8, sb: Option<SymByte>) {
