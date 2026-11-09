@@ -36,3 +36,4 @@ rayon = "1"
 ark-bn254 = { workspace = true }
 # parallel feature is enabled by default
 ark-ff = { version = "0.6", default-features = false, features = ["std"] }
+crypto-bigint = { version = "0.7", default-features = false }
