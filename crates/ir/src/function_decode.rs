@@ -883,8 +883,9 @@ pub fn stream_solve_dense(
     let modulus = num_bigint::BigUint::parse_bytes(c.field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
     let slots = solve_streamed(&c.inputs, c.num_vars, &c.defs, &c.top_w, &modulus, inputs);
-    // Freeing the decoded program takes a few ms the caller needn't wait for.
-    std::thread::spawn(move || drop(c));
+    // Freeing the decoded program takes a few ms the caller needn't wait for. Where
+    // threads can't be spawned (wasm), the unrun closure frees it here instead.
+    let _ = std::thread::Builder::new().spawn(move || drop(c));
     slots
 }
 
