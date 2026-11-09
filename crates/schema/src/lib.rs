@@ -1280,10 +1280,29 @@ mod ed25519 {
         if (&v * (&x * &x % &p)) % &p != u {
             return Err("not an Ed25519 point".into());
         }
+        // x = 0 with the sign bit set is a second encoding of the same point; RFC 8032
+        // §5.1.3 rejects it, so every point has one encoding.
+        if x.bits() == 0 && sign == 1 {
+            return Err("not an Ed25519 point (x = 0 with the sign bit set)".into());
+        }
         if (x.bit(0) as u8) != sign {
             x = (&p - &x) % &p;
         }
         Ok((x, y))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        /// The identity (x = 0, y = 1) has one encoding: with the sign bit set it's
+        /// refused, as RFC 8032 §5.1.3 says.
+        #[test]
+        fn x_zero_has_one_encoding() {
+            let mut b = [0u8; 32];
+            b[0] = 1;
+            assert!(super::decompress(&b).is_ok());
+            b[31] = 0x80;
+            assert!(super::decompress(&b).is_err());
+        }
     }
 }
 
