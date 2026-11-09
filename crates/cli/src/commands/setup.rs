@@ -72,9 +72,9 @@ pub struct SetupArgs {
     /// * `minimized` — the boundary-minimized circuit (a few % smaller on some
     ///   circuits); setup also writes `r1cs.stream`, which prove streams.
     /// * `auto` (default) — `reduced` at or above 2^20 constraints, where the global
-    ///   minimize costs GBs of setup memory for ~0% gain (Ed25519: 576 of 2.36M
-    ///   rows); below that, `minimized` only if it shrinks the FFT domain or saves
-    ///   ≥ 1% of rows or variables (sha256: 4.9%), else `reduced`.
+    ///   minimize costs GBs of setup memory; below that, `minimized` only if it
+    ///   shrinks the FFT domain or saves ≥ 1% of rows or variables
+    ///   (secp256k1_ecdsa: 36% of variables), else `reduced`.
     #[arg(long, value_enum, default_value_t = R1csForm::Auto)]
     pub r1cs_form: R1csForm,
 
@@ -86,7 +86,7 @@ pub struct SetupArgs {
     ///
     /// * `smooth` — the smallest of `2^k`, `3·2^k`, `9·2^k` points. A circuit just
     ///   past a power of two gets a domain up to 44% smaller, so a smaller key and
-    ///   a faster quotient FFT and `H` MSM (Ed25519: 4.19M → 2.36M points). The
+    ///   a faster quotient FFT and `H` MSM (sha256: 32,768 → 18,432 points). The
     ///   verifier is unchanged, but only xark's provers (`xark prove`, xark-wasm)
     ///   can prove against the key — not snarkjs or rapidsnark. Dev-mode only: a
     ///   Powers-of-Tau transcript's Lagrange bases are radix-2.

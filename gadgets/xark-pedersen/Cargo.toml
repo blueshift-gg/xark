@@ -1,6 +1,6 @@
 [package]
 name = "xark-pedersen"
-description = "Pedersen hash and commitment gadget for xark zero-knowledge circuits."
+description = "Pedersen hash gadget for xark zero-knowledge circuits."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"
@@ -9,6 +9,7 @@ edition = "2024"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "xark_pedersen"

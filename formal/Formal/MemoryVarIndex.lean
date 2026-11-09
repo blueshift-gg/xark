@@ -15,8 +15,10 @@ set_option linter.style.longLine false
 /-!
 # Variable-index memory-op soundness
 
-Mirrors the xark compiler's array-indexing lowering (`crates/frontend`).
-For an `n`-slot block under a variable index the gadget allocates:
+Models a selector-based variable-index array read / write. No current
+Rust structure in `crates/frontend` or the gadgets is named for it; the
+statements stand on their own. For an `n`-slot block under a variable
+index the modelled layer allocates:
 
 * booleans `s_j ∈ {0, 1}` for `j ∈ [0, n)`,
 * one row per slot: `s_j · (index − j) = 0`,
@@ -36,8 +38,8 @@ BN254 `Fr` (`r ≈ 2^254` ≫ any `n` we'd ever use as a block length).
 
 namespace Xark
 
-/-- **Selector partition determinism — variable-index `MemoryOp`.** Given a
-boolean witness `s : Fin n → F` satisfying the gadget's selector layer for
+/-- **Selector partition determinism — variable-index read / write.** Given a
+boolean witness `s : Fin n → F` satisfying the selector layer for
 a known index `index ∈ Fin n`:
 
 * `s_j ∈ {0, 1}` (booleans),
@@ -115,7 +117,7 @@ Under the determined selector layer (`s_j = 1[j = index]`):
 * For `j ≠ index`: `0 · _ = arr_post[j] - arr_pre[j]`
   ⇒ `arr_post[j] = arr_pre[j]` (unchanged).
 
-So the gadget faithfully implements "write `value` at `index`, leave other
+So the layer faithfully implements "write `value` at `index`, leave other
 slots unchanged" with no prover freedom. -/
 theorem write_value_correct {F : Type*} [Field F] {n : ℕ}
     (s : Fin n → F) (arr_pre arr_post : Fin n → F) (value : F)

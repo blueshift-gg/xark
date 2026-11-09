@@ -1,5 +1,5 @@
-//! secp256r1 (NIST P-256) ECDSA verification as a `#[circuit]` over the shared
-//! 3×86-bit Weierstrass gadget. Inputs are transparent compound types: `Point` =
+//! secp256r1 (NIST P-256) ECDSA verification as a `#[circuit]` by fake GLV over
+//! 8 × 32-bit limbs, 344,969 constraints. Inputs are transparent compound types: `Point` =
 //! `[u8; 64]` `x ‖ y`, `Signature` = `[u8; 64]` `r ‖ s`, `Scalar` = digest
 //! `int(hash(msg)) mod n` (`[u8; 32]`) — the exact bytes `p256` emits.
 use xark_secp256r1::prelude::*;

@@ -12,10 +12,10 @@ set_option linter.style.header false
 /-!
 # xark double-and-add ladder soundness — mechanised in Lean 4 / mathlib
 
-The scalar-mul gadget (`gadgets/xark-grumpkin/src/lib.rs`) (and the
-MSM gadget that calls it, plus the ECDSA verifier in
-`gadgets/xark-secp256k1/src/lib.rs`) computes `s · P` in-circuit by the
-standard LSB-first **double-and-add** ladder:
+A general lemma about the standard LSB-first **double-and-add** ladder for
+`s · P`. No current gadget runs this ladder (`xark_grumpkin::scalar_mul` is
+MSB-first signed digits from an offset, `Formal/GrumpkinMul.lean`; the secp
+verifiers are fake GLV):
 
     acc      := 0                       -- point at infinity
     running  := P
@@ -26,9 +26,7 @@ standard LSB-first **double-and-add** ladder:
 We prove the *combinatorial* correctness of this loop, abstractly over any
 additive commutative group `G`. The curve-arithmetic correctness of point
 addition (closure of the addition law, slope determinism) lives separately in
-`Formal.Curve`; here we only need the group structure. The two layers compose:
-specialise `G` to the Grumpkin point group and the same theorem closes the
-soundness story for `scalar_mul_in_circuit`.
+`Formal.Curve`; here we only need the group structure.
 
 * `ladder_step_correct` — the per-bit invariant: one application of the
   primitive sends `(acc, P) ↦ (acc + b·P, 2·P)`.
@@ -38,26 +36,23 @@ soundness story for `scalar_mul_in_circuit`.
   natural number encoded by the LSB-first bit-list.
 * `ladder_determinism` — corollary: bit-vectors encoding the same scalar give
   the same ladder output. Combined with `bits_unique` from `Formal.Gadgets`,
-  this closes the under-constraint story for the scalar-mul ladder: the
-  in-circuit accumulator is a function of the *scalar*, not of the witness
+  the accumulator is a function of the *scalar*, not of the witness
   bit-vector chosen by the prover.
 
 Scope: this file is group-theoretic only. It does not cover field/curve
-correctness (see `Formal.Curve`), nor the `(lo, hi)` 128-bit limb concatenation
-in `msm_in_circuit` — that is a trivial repackaging of the same bit list.
+correctness (see `Formal.Curve`).
 -/
 
 namespace Xark
 
 /-- One step of the LSB-first double-and-add ladder, as a pure function on the
-ambient additive group `G`. Mirrors the per-bit body of
-`scalar_mul_in_circuit`: conditionally add the running base to the
+ambient additive group `G`: conditionally add the running base to the
 accumulator, then double the running base. -/
 def ladderStep {G : Type*} [AddCommGroup G] (b : Bool) (s : G × G) : G × G :=
   (s.1 + (if b then s.2 else 0), s.2 + s.2)
 
-/-- The LSB-first ladder run from a given start state over a bit-list. The
-gadget's loop is `bs.foldl ladderStep (0, P)`. -/
+/-- The LSB-first ladder run from a given start state over a bit-list,
+`bs.foldl ladderStep (0, P)` from the seed. -/
 def ladder {G : Type*} [AddCommGroup G] (bs : List Bool) (s : G × G) : G × G :=
   bs.foldl (fun st b => ladderStep b st) s
 
@@ -69,8 +64,8 @@ def bitsToNat : List Bool → ℕ
 
 /-- **Per-step ladder invariant.** One application of `ladderStep` advances the
 accumulator by `b·P` (i.e. by `P` when `b = true`, by `0` when `b = false`)
-and doubles the running base point. This is exactly the per-bit behaviour of
-`scalar_mul_in_circuit`; it seeds the induction for `ladder_correct`. -/
+and doubles the running base point. It seeds the induction for
+`ladder_correct`. -/
 theorem ladder_step_correct {G : Type*} [AddCommGroup G] (b : Bool) (acc P : G) :
     ladderStep b (acc, P) = (acc + (if b then P else 0), (2 : ℕ) • P) := by
   unfold ladderStep
@@ -115,7 +110,7 @@ theorem ladder_foldl_correct {G : Type*} [AddCommGroup G] :
 the seed state `(0, P)` over an LSB-first bit-list `bs` yields the accumulator
 `bitsToNat bs • P` and running point `2 ^ bs.length • P`. In particular, the
 final accumulator is `scalar • P` for the natural-number scalar encoded by
-`bs`, matching the spec of `scalar_mul_in_circuit`. -/
+`bs`. -/
 theorem ladder_correct {G : Type*} [AddCommGroup G] (bs : List Bool) (P : G) :
     ladder bs (0, P) = (bitsToNat bs • P, (2 ^ bs.length) • P) := by
   have := ladder_foldl_correct bs (0 : G) P
@@ -124,8 +119,8 @@ theorem ladder_correct {G : Type*} [AddCommGroup G] (bs : List Bool) (P : G) :
 /-- **Ladder determinism / witness independence.** Two bit-lists of the same
 length that encode the same scalar produce the same ladder output. Combined
 with `bits_unique` in `Formal.Gadgets` (the bit-vector is pinned by the value
-of the recomposition sum), this discharges under-constraint slack for the
-scalar-mul gadget: the prover cannot witness an off-spec accumulator by
+of the recomposition sum), this rules out under-constraint slack for a
+ladder over pinned bits: the prover cannot witness an off-spec accumulator by
 choosing a different bit-decomposition of the same scalar. -/
 theorem ladder_determinism {G : Type*} [AddCommGroup G]
     (bs bs' : List Bool) (P : G)

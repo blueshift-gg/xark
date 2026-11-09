@@ -9,7 +9,8 @@
 //!
 //! Constraints come in long runs from one statement, so the map is a list of
 //! distinct [`Site`]s and the runs of constraint indices that map to each: a few
-//! dozen entries for a small circuit, ~65k for a 1.6M-constraint ECDSA verifier.
+//! dozen entries for a small circuit, 45 sites in 4,530 runs for
+//! `examples/secp256k1_ecdsa`.
 //! `xark prove`, the Rust test harness and xark-wasm all read it through
 //! [`SourceMap::at`]. (`profile.json`, from `xark profile`, is the full
 //! per-constraint record behind `xark profile`'s cost breakdown.)

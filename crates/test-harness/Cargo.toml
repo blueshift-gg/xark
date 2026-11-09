@@ -5,6 +5,7 @@ keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 readme = "README.md"
 version.workspace = true
 edition = "2024"

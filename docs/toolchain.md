@@ -21,11 +21,7 @@ and `test` all share one cache (`target/xark-wasm`). Builds carry DWARF line tab
 lines; they don't change the circuit or the lowering time, and compile time is the
 same within noise (only the `.wasm` grows).
 
-Nothing in the repository needs nightly. (Earlier releases had a second frontend,
-`xark-rustc`, that read MIR through `rustc_private` on a pinned nightly. It was
-removed once the stable frontend matched or beat it on every example: setup-minimized
-circuits within +0.3% everywhere and up to 7% smaller, the same accept/reject verdict
-on every example's test inputs, and faster, smaller builds.)
+Nothing in the repository needs nightly.
 
 ## Toolchain policy
 

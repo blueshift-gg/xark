@@ -61,7 +61,7 @@ theorem glv_sum_eq {G : Type*} [AddCommGroup G] (P : G) (k1 k2 lam : ℕ) :
 /-- **Endomorphism predicate.** `IsEndomorphism φ λ` says that `φ : G → G`
 is a map satisfying `φ(P) = λ · P` for all points `P`. For secp256k1,
 `φ(P) = (β · P.x mod p, P.y)` realises this with the documented `λ`
-(`secp256k1_lambda`). -/
+(`BETA` and `LAMBDA` in `xark-secp256k1`). -/
 def IsEndomorphism {G : Type*} [AddCommGroup G] (φ : G → G) (lam : ℕ) : Prop :=
   ∀ P : G, φ P = lam • P
 
@@ -87,7 +87,7 @@ homomorphism and the eigenvalue relation `φ(P) = λ • P` holds at *one*
 point `P`, then it holds at every multiple `k • P` — i.e. `φ`
 restricted to the cyclic subgroup ⟨`P`⟩ is precisely scalar
 multiplication by `λ`. This is the property the gadget exploits over the
-secp256k1 generator's cyclic subgroup of order `n = secp256k1_n`.
+secp256k1 generator's cyclic subgroup of order `n` (`NN` in `xark-secp256k1`).
 
 Once `Formal.Secp256k1Group.Secp256k1Point` is in scope, this
 theorem specialises to the concrete claim `φ(P) = λ · P` for the

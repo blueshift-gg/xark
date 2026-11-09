@@ -1,488 +1,196 @@
-# xark — write, compile, prove and verify zero-knowledge circuits in Rust
+# xark
 
 [![CI](https://github.com/blueshift-gg/xark/actions/workflows/ci.yml/badge.svg)](https://github.com/blueshift-gg/xark/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/xark-cli.svg?label=xark-cli)](https://crates.io/crates/xark-cli)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-xark takes a circuit written as ordinary Rust all the way to an on-chain proof.
-You write the circuit in Rust; xark compiles it with your stable `rustc` (to
-wasm32), lowers the module to R1CS, and proves it with Groth16 over BN254 — with a verifier that runs on Solana. There is no
-separate circuit DSL: **gadgets are ordinary Rust libraries** that lower to a
-small primitive constraint set, so the backend stays lean and the frontend
-stays expressive.
+**Zero-knowledge circuits in plain Rust, verified on Solana.** · [xark.gg](https://xark.gg)
 
-## Installation
-
-xark needs only stable Rust, 1.89 or newer:
-
-```bash
-cargo install xark-cli
-xark doctor        # checks your setup
-```
-
-`xark build` compiles your circuit crate with the toolchain you already have (to
-`wasm32-unknown-unknown`, which it adds with `rustup` on first use). To build from source instead, append `--git https://github.com/blueshift-gg/xark`.
-
-## As a language (library)
-
-Write a circuit as a `#[circuit]` function over `Field` values, using the `xark`
-prelude (`xark init` scaffolds the crate, `Cargo.toml` included; see
-`examples/cube`). `require_eq` emits a circuit equality constraint (not a native `bool`);
-`Private<T>` / `Public<T>` mark input visibility; `Field` supports `+ - *`,
-`.pow(n)` for exponentiation by a constant, and `^` as boolean XOR.
+You write a circuit as an ordinary Rust function. xark compiles it with your
+stable `rustc`, proves it with Groth16, and gives you a verifier for your Solana
+program. Proofs are 256 bytes.
 
 ```rust
 use xark::prelude::*;
 
-/// Prove knowledge of a cube root: `secret^3 == result`.
+/// I know a square root of `result`, and I won't say what it is.
 #[circuit]
-pub fn cube(secret: Private<Field>, result: Public<Field>) {
-    require_eq(secret.pow(3), result);
+pub fn square_root(secret: Private<Field>, result: Public<Field>) {
+    require_eq(secret * secret, result);
 }
-```
 
-Every public input must be used. One that only the verifier supplies, such as a
-recipient or a nonce that a proof must not be reused for, takes `bind(recipient)`:
-one constraint, and the proof then verifies only with the value it was made for.
-A 32-byte address is a `[Field; 2]` of its halves,
-`[Field::from_be_bytes(&key[..16]), Field::from_be_bytes(&key[16..])]`: as public
-inputs on chain, each half is zero-padded to 32 bytes. One `Field` would be reduced
-mod p, which most addresses exceed, so the program would have to reduce it too.
-
-### Testing a circuit from Rust
-
-`#[circuit]` also generates a validator under the circuit's name for tests and
-host code: the same parameters, each taking whatever converts to it. A `Field`
-takes an integer, a decimal or `0x`-hex string, or an `ark_bn254::Fr`; a
-gadget's input types take their natural form, such as an Ed25519 public key's
-32 bytes or a Grumpkin point's `(x, y)`.
-
-```rust
 #[test]
-fn accepts_a_cube_root() {
-    cube(3, 27).unwrap();
-    assert!(cube(3, 28).is_err());
+fn only_a_square_root_proves() {
+    square_root(3, 9).unwrap();
+    assert!(square_root(3, 10).is_err());
 }
 ```
 
-Inputs that fail a check are reported as the statement that fails, in tests, in
-`xark prove` and in the TypeScript client alike:
+## Why xark
 
-```text
-error: witness does not satisfy the circuit
+- **It's just Rust.** No circuit DSL to learn. You get stable `rustc`, your editor,
+  `cargo test`, and crates. A gadget is a Cargo dependency.
+- **Errors point at your code.** Inputs that break the circuit are reported as the
+  line that fails, in tests, at the command line and in the TypeScript client.
+- **Small proofs, cheap verification.** A Groth16 proof over BN254 is 256 bytes and
+  verifies on Solana in about 77k compute units.
+- **Typed clients.** `xark client` turns your circuit's inputs into a typed
+  TypeScript client that proves and verifies in Node or the browser.
+- **The hard gadgets are done.** Poseidon, Poseidon2, SHA-256, Keccak, BLAKE2s,
+  BLAKE3, Merkle proofs, AES, and ECDSA (secp256k1, P-256) and Ed25519 signature
+  verification.
 
-  src/lib.rs:96:20  id.nationality.require_in(policy.allowed);
-```
+## Quickstart
 
-Every build writes `sources.json` beside `circuit.xbc` for this: which source
-line each constraint came from (the circuit itself is unchanged by it).
+You need Rust 1.89 or newer.
 
-Circuit code also runs as plain Rust on the host: `Field` arithmetic,
-comparisons, hints and whole gadgets compute their values, and a failed
-`require` panics at its line. So tests and services call the same helpers the
-circuit does. `zkyc`'s tests make the issuer's commitment with
-`id.commitment()`, the very function the circuit checks it with, and
-`pubkey.verify(sig, digest)` checks an ECDSA signature off-circuit. (Calling the
-`#[circuit]` fn itself still checks the circuit through the prover.)
-
-### Inputs
-
-Every circuit parameter's type implements `xark::Input`, which says how its value
-maps to field elements and how clients see it. Group inputs into structs with
-`#[input]` (which also derives `Clone`, `Copy` and `Debug` unless the type lists
-them; `#[input(no_derive)]` for a type with its own), including gadget types:
-`examples/grumpkin_ivc` takes a few
-`Instance { cw, ce, u, x }` values instead of twenty separate parameters, and
-`to_fields()` hashes one in a single call. The generated `<Fn>Inputs` struct
-holds the same values for `xark::prover::circuit(..).check(..)`, `.prove(..)`
-and friends; a proof's `to_instruction_data()` is the bytes an exported Solana
-verifier reads. Its `to_json()` is the values as `xark prove --inputs` takes them,
-named as declared (`net_worth`) like `inputs.example.json`; `--inputs` also takes
-the camelCase names a TypeScript client uses (`netWorth`). A circuit crate needs only the `xark` dependency.
-
-### Everyday input types
-
-`xark` ships the types most credential-style circuits need, each one field wide
-and each with its natural form in tests, `--inputs` and the TypeScript client:
-
-- `Days<FROM, TO>`: a day from the start of year `FROM` to the end of `TO` (UTC),
-  in the circuit its day count, just wide enough for the range
-  (`Days<1900, 2100>` is 17 bits). It's `"1990-01-01"` in Rust and `--inputs` and a
-  JS `Date` in TypeScript, and any moment of a day is that day. `Time<UNIT, FROM, TO>`
-  is the same in other steps (`Time<MINUTE, 2020, 2060>`).
-- `Timestamp`: any moment, as Unix seconds (an `i64`, as Solana's `Clock` and a JS
-  `Date` hold it), compared as a signed 64-bit integer.
-- `Text`: a short string, up to 31 bytes (a document number, a name).
-- `Choice<E>` and `Bitfield<E>`: one variant of an enum, or a set of them, such
-  as a nationality and the allowed countries: `choice == Country::US`,
-  `require_in`, `require_one_of`, `contains`. Any fieldless enum with `#[input]` works;
-  `xark` ships ISO 3166 `Country`.
-
-An `#[input]` struct's narrow fields are packed: consecutive integers, flags, days
-and enum values share one field element (up to 253 bits) in declaration order, so
-`Identity` below is 3 leaves and `Policy` 2 public inputs. Keep narrow fields
-together, and mark a field `#[unpacked]` to give it its own leaf.
-
-```rust
-#[input]
-pub struct Identity { document: Text, born: Days<1900, 2100>, nationality: Choice<Country>, net_worth: u64, expires: Days<1900, 2100>, salt: Field }
-
-/// A verifier's rules, a public input: one circuit serves every policy.
-#[input]
-pub struct Policy { today: Days<1900, 2100>, born_by: Days<1900, 2100>, min_net_worth: u64, allowed: Bitfield<Country> }
-
-#[circuit]
-fn zkyc(id: Private<Identity>, commitment: Public<Field>, policy: Public<Policy>) {
-    require_eq(id.commitment(), commitment);
-    require(id.born <= policy.born_by);
-    require(id.net_worth >= policy.min_net_worth);
-    require(id.expires >= policy.today);
-    id.nationality.require_in(policy.allowed);
-}
-
-// In a test:
-// let policy = Policy::default().on("2026-10-20").min_age(18).worth_at_least(500_000).nationalities([US, GB, FR, DE]);
-// zkyc(id, id.commitment(), policy)
-```
-
-`examples/zkyc` is this circuit in full. A `bool` input works too: one field
-element, checked to be 0 or 1.
-
-A type `#[input]` doesn't cover implements `Input` by hand, in one impl that
-serves the circuit and the host alike:
-
-```rust
-impl Input for Hash {
-    const TYPE: Type = Type::Named(
-        &Type::named("Hash", Layout::fields(&[Member::new("hi", Type::Field), Member::new("lo", Type::Field)]))
-            .encoded(Encoding::Bytes(Bytes::Split(&[16, 16]))), // clients give its 32 bytes
-    );
-    fn read(r: &mut Reader) -> Self { Hash { hi: r.field(), lo: r.field() } }
-    fn write(&self, w: &mut Writer) { w.field(self.hi); w.field(self.lo) }
-}
-```
-
-A `TYPE` is built from the standard types (field, `uN`, bytes, number, date,
-text, choice, set, arrays, tuples, structs), and those are what client
-generators map: adding a language means mapping that fixed list, never a
-circuit's own types.
-
-## As a toolchain (CLI)
-
-```bash
-# Scaffold a new circuit crate, pre-wired for rust-analyzer diagnostics.
-xark init my-circuit
-
-# Compile: Rust → wasm → xark-IR → R1CS. All output (artifacts + an isolated
-# cargo target) lives under the crate's target/xark/.
-xark build examples/cube
-# → writes examples/cube/target/xark/cube/ (circuit.xbc + schema.json) and
-#   prints the circuit digest (a fingerprint of the R1CS the keys are made for).
-
-# Build, then run the crate's own `cargo test` circuit tests (they check inputs
-# against the circuit and name the source line of a failing constraint).
-# Arguments go to `cargo test`: `xark test examples/cube -- --nocapture`.
-xark test examples/cube
-
-# Generate a typed TypeScript client from schema.json: no setup or proof needed.
-# Like every command, it defaults to the current directory: inside the crate,
-# plain `xark client` is enough.
-xark client examples/cube
-# → examples/cube/target/xark/cube/cube.ts (one file, its schema inlined)
-
-# Generate Groth16 keys. With no .ptau this produces an INSECURE dev key
-# (single-party OsRng); pass --ptau-file (or run `xark ceremony`) for production.
-xark setup examples/cube
-
-# Solve the witness from your inputs, then produce AND verify a Groth16 proof.
-# Writes proof.bin and public_inputs.bin next to the keys.
-xark prove examples/cube --inputs '{"secret": "3", "result": "27"}'
-# → ✅ Proof produced and self-checked (1 public input(s)).
-# A gadget type takes its natural form: an Ed25519 key or a hash as 0x-hex bytes,
-# a scalar as a number. `xark setup` prints (or writes) a template to fill in.
-
-# Check a proof against the verifying key and its public inputs.
-xark verify examples/cube
-
-# Generate the Solana verifier crate (the key embedded; the proof, if there is one,
-# bundled as its self-test). Refuses a dev key unless you pass --allow-insecure.
-xark export examples/cube
-# → examples/cube/cube-verifier/, beside the circuit's sources (--out to choose)
-
-# Validate a circuit WITHOUT emitting artifacts — subset violations as rustc
-# diagnostics with source spans (great for editors / CI).
-xark check examples/cube
-
-# Where the constraints go: by source line, function and kind, each kind explained.
-# --html also writes target/xark/<name>/profile.html, the source shaded by cost.
-xark profile examples/zkyc --html
-```
-
-### Typed clients
+**1. Install the CLI**, and check your setup:
 
 ```sh
-xark client                                  # writes <circuit>.ts
-npm install @blueshift-gg/xark@0.3           # the runtime it imports
+cargo install xark-cli
+xark doctor
 ```
 
-`xark build` also writes `schema.json`: every input's name, visibility and
-`Input::TYPE`, plus the public inputs in proof order. `xark client` resolves it
-into the standard types and writes one `.ts` file: constants and a type per enum,
-an interface per struct, the inputs, the public inputs as given and as decoded, and
-the circuit, which makes its provers and verifiers. What every client shares
-(`Field`, `Proof`, loading xark-wasm and the build output) is xark-wasm's
-`@blueshift-gg/xark/client`, so the file holds only the circuit, and an app
-imports only the file. The circuit's `schema.json` is inlined in it, so the file
-has no relative import and needs no project settings (Node runs it as is).
-Each type is the one you'd write by hand:
+**2. Create a circuit.** `xark init` writes a crate with the square-root circuit
+above and two tests:
 
-```ts
-export const Country = { AD: "AD", AE: "AE", /* … */ US: "US", ZW: "ZW" } as const;
-export type Country = (typeof Country)[keyof typeof Country]; // "AD" | "AE" | …
-
-export interface Identity {
-  document: Text;              // a string, at most 31 bytes
-  born: Date;                  // a day, 1900-01-01 to 2100-12-31 (UTC)
-  nationality: Country;        // Country.US, or "US"; "XX" won't compile
-  netWorth: U64;               // bigint | number, in the attestor's unit
-  expires: Date;
-  salt: FieldInput;            // a Field, or an integer
-}
+```sh
+xark init my-circuit
 ```
 
-A field input takes a plain integer (a `bigint`, a safe integer, a decimal or
-`0x`-hex string) or a `Field`; either way it must be below the field's modulus, so a
-value that would wrap or round never reaches the prover, and a mistake names the
-input. `new Field(x)` checks it where you make it, and also takes little-endian
-bytes (as proofs and Rust's `Field::from_le_bytes` have them; `Field.fromBeBytes`
-for the other order). Decoded public inputs and Rust functions return `Field`s.
+**3. Test it.** `xark test` builds the circuit, then runs the crate's tests:
 
-A prover and a verifier are separate, each made from a URL serving a copy of
-`target/xark/<circuit>/` or from the bytes, so each has only the methods it can
-run. A proof travels as its bytes, `proof.toBytes()`; the verifier brings the public
-inputs it requires:
-
-```ts
-import { Country, Field, Identity, Policy, Zkyc } from "./zkyc";
-
-// In the app: fetches circuit.xbc, pk.bin, sources.json and client.wasm, and loads
-// xark-wasm (node, web or workerd). Outside a browser, pass the files' bytes instead:
-// Zkyc.prover({ circuit: readFileSync("…/circuit.xbc"), provingKey: …, client: … }).
-const prover = await Zkyc.prover("/circuits/zkyc/");
-const id = { document: "A1938274", born: new Date("1990-01-01"), nationality: Country.US, netWorth: 1_000_000, expires: new Date("2030-01-01"), salt: new Field(saltBytes) };
-const commitment = Identity.commitment(id); // the circuit's own Rust (below)
-const policy = Policy.default().on(new Date()).minAge(18).nationalities([Country.US, Country.GB, "FR", "DE"]);
-const proof = prover.prove({ id, commitment, policy });
-proof.publicInputs.policy.allowed; // ["DE", "FR", "GB", "US"]: decoded, a Date stays a Date
-send(proof.toBytes(), commitment);
-
-// On the server: check it proves the policy you require, not just any.
-const verifier = await Zkyc.verifier(vkBytes); // or a URL, or { verifyingKey, client }
-verifier.verify(bytes, { commitment, policy: required }); // true
+```console
+$ xark test my-circuit
+xark building circuit `my-circuit`
+xark 2 vars, 1 constraints, 0 witness-gen ops
+xark circuit digest 75e3ce529473dfaa2f89a85a0d588228
+...
+test tests::accepts_valid ... ok
+test tests::rejects_invalid ... ok
 ```
 
-`proof.toBytes()` is the proof as the Solana verifier `xark export` generates reads
-it (256 bytes; `Proof::from_le_bytes` on chain), so a program checks it against
-public inputs it supplies itself, such as its policy or a root in its state.
-`proof.toBytesCompressed()` is half the size, for anywhere else; a verifier reads
-either.
+**4. Prove.** The first proof also makes the key, from your machine's randomness:
 
-To be sure the prover runs the circuit the client was generated from, and not
-whatever a deployment serves, pin it: `Zkyc.prover(url, { digest: Zkyc.digest })`
-refuses any other circuit (`Zkyc.digest` is the digest `xark build` printed). The
-check is one pass over the circuit when the prover is made (about 2 s for Ed25519 in
-node), not per proof. A verifier pins its key the same way: `Zkyc.verifier(vk, {
-keyHash })` refuses any other `vk.bin` (`xark setup` prints its sha256).
+```console
+$ xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
+...
+✅ Proof produced and self-checked (1 public input(s)).
+```
 
-To prove on several threads, give the prover a worker pool:
-`Zkyc.prover(url, { pool: await createPool() })`, with `createPool` from
-`@blueshift-gg/xark/pool` (about 4× faster with 8 threads). A browser needs a
-cross-origin isolated page for it, and proves in a Web Worker.
+Try inputs that don't satisfy the circuit, and xark shows you where:
 
-`Policy.default().on(…).minAge(18)` and `Identity.commitment(id)` are the crate's Rust,
-not a TypeScript copy of it: the same `#[input]`, on an `impl` block, makes its
-methods client functions, typed from their signatures and documented with their doc
-comments.
+```console
+$ xark prove my-circuit --inputs '{"secret": 3, "result": 10}'
+error: witness does not satisfy the circuit
+
+  src/lib.rs:6:16  require_eq(secret * secret, result);
+```
+
+**5. Verify**, then **export** the Solana verifier:
+
+```console
+$ xark verify my-circuit
+✅ Proof verified
+
+$ xark export my-circuit
+...
+Key: a single-party setup from OS randomness: sound unless whoever ran `xark setup` kept that randomness (xark doesn't). `xark ceremony` spreads that trust.
+✅ On-chain verifier crate ready (verifying key embedded).
+```
+
+`my-circuit/my-circuit-verifier/` is a crate your Solana program depends on:
 
 ```rust
-#[input]
-impl Default for Policy {
-    /// A policy every holder passes: no expiry, age, net worth or nationality check.
-    fn default() -> Policy { … }
-}
-
-#[input]
-impl Policy {
-    /// Checked on `today`: the holder's document mustn't have expired by then.
-    pub fn on(self, today: impl Into<Days<1900, 2100>>) -> Policy { … }
-    /// At least `years` old on `today` (set it with `on` first).
-    pub fn min_age(self, years: u16) -> Policy { … }
+let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);
+let public_inputs: [[u8; 32]; 1] = [/* from your program's state */];
+if !my_circuit_verifier::verify(&proof, &public_inputs) {
+    return Err(ProgramError::InvalidArgument);
 }
 ```
 
-A trait's `impl` works the same way: `impl Default` gives `Policy.default()`.
+A key you make yourself is a single-party trusted setup: whoever relies on your
+verifier trusts that you didn't keep its randomness. For a key no one party has to
+be trusted for, run a multi-party ceremony: see [Trusted setup](docs/trusted-setup.md).
+The verifier crate's `SETUP` constant says which kind of key it embeds.
 
-`xark client` builds the crate's host code once more as `client.wasm` (beside
-`circuit.xbc`; a prover or verifier made from a URL fetches it, or
-`await Zkyc.ready(url)` loads it alone), with no JS glue, and
-each call runs it: values cross in their natural forms, a Rust panic arrives as an
-exception with its message. Parameters and results are any `Input` type. It
-works from any crate: a gadget that puts `#[input]` on its types and their `impl`s
-brings those functions to the client of every circuit that takes them, with
-nothing added to xark. A method that takes `self` is also a method on the values
-these functions return and on decoded public inputs, so a chain reads as in Rust:
-`Policy.default().on(today).minAge(18).worthAtLeast(500_000)`. A method named like a field
-can't be both in TypeScript: it stays `Policy.method(value, …)`, and `xark client`
-warns, so you can rename it.
+## Learn more
 
-The client holds no encoding logic of its own: xark-wasm encodes values against
-the schema with the same Rust code as `xark prove --inputs`, so the two can't
-drift, and a mistake names its input (`id.document: "…" is longer than 31 bytes`).
-Errors are typed for a UI to act on: an `InputError` carries the input's `path`
-(`"id.document"`), and a `CheckFailed` the failing statement's `site` (`file`,
-`line`, `col`, `text`, the functions it called into).
-`clients/check/{zkyc,cube,sha256,merkle}/` hold those examples' generated clients
-and their vitest tests. `npm test` there (run in CI) builds xark, xark-wasm and each
-example, fails if a committed client is stale (`npm run update` rewrites it),
-typechecks, and runs the tests in Node; a folder with a `<name>.test.ts` is all a new
-example needs.
+**Writing circuits**
+- [Testing a circuit](docs/testing.md): the generated validator, failing lines,
+  running circuit code on the host
+- [Inputs](docs/inputs.md): `#[input]` structs, and the built-in types (dates,
+  timestamps, text, enums and sets)
+- [What Rust compiles](docs/subset.md): the supported subset, and what's rejected
+- [Editor diagnostics](docs/editor.md): circuit errors inline in rust-analyzer
 
-## Editor diagnostics (rust-analyzer)
+**Using proofs**
+- [TypeScript clients](docs/typescript.md): typed provers and verifiers for Node
+  and the browser
+- [`@blueshift-gg/xark`](crates/wasm/README.md): the WebAssembly prover and
+  verifier underneath
+- [`xark-verifier`](crates/verifier/README.md): the on-chain verifier
 
-`xark check <crate-dir>` runs the full `rustc` frontend *and* the xark subset
-validator, surfacing every rejection as a **real `rustc` diagnostic with a source
-span**. With `--message-format=json` it emits the same JSON stream as `cargo
-check`, so an editor shows live rejections on save. In that mode it first runs the
-`cargo check --all-targets` it replaces, so errors in tests and other host-only
-code still show. `xark init` writes this
-wiring; to add it to an existing crate, point `rust-analyzer`'s check command at
-`xark` (which must be on `PATH`):
+**Going to production**
+- [Trusted setup](docs/trusted-setup.md): a multi-party ceremony instead of a single-party key
+- [Reproducible builds](docs/reproducible-build.md) of the on-chain verifier
+- [Security](docs/security.md) and [audit status](docs/audit-status.md)
+
+**How it works**
+- [Architecture](docs/architecture.md): Rust → wasm → constraints → Groth16 →
+  Solana
+- [Toolchains](docs/toolchain.md): why a circuit is the same under every stable
+  `rustc`
+
+Every command has `--help`, and `xark <command>` defaults to the crate in the
+current directory.
+
+## Gadgets
+
+Each gadget is its own crate under [`gadgets/`](gadgets). Add the ones you use:
 
 ```toml
-# rust-analyzer.toml
-[check]
-overrideCommand = ["xark", "check", ".", "--message-format=json"]
-```
-
-```jsonc
-// .vscode/settings.json (VS Code equivalent)
-{
-  "rust-analyzer.check.overrideCommand": ["xark", "check", ".", "--message-format=json"]
-}
-```
-
-Replace `.` with the crate directory (e.g. `examples/cube`) when the editor is
-opened above the circuit crate. A violation then appears inline, e.g.:
-
-```text
-error: witness-dependent control flow is not supported
- --> src/lib.rs:7:5
-note: branch conditions must be compile-time constants (e.g. loop bounds)
-```
-
-## The pipeline
-
-```text
-Rust source  →  rustc (stable, wasm32)  →  xark-IR  →  R1CS  →  Groth16 (BN254)  →  Solana verifier
-```
-
-`xark build` runs `cargo` on your circuit crate for `wasm32-unknown-unknown` with
-`--cfg xark`, where every circuit operation (`Field` arithmetic, comparisons,
-hints, `require_eq`, input binding) is a call to an `xark.*` wasm import. rustc
-does the hard work — parse, type-check, borrow-check, monomorphize, optimize — and
-xark then runs the module with those imports implemented as the circuit builder:
-loops and calls with known values simply execute (that *is* the unrolling), and
-witness values flow into constraints. The circuit is the same under every stable
-rustc (CI checks every example on 1.89, stable and beta), and constraint-reducing
-rewrites are proven exact in Lean (`formal/Formal/Rewrites.lean`). Details:
-[`crates/frontend/README.md`](crates/frontend/README.md).
-
-## Proving and verifying in JavaScript
-
-Prove and verify anywhere JavaScript runs with
-[`@blueshift-gg/xark`](crates/wasm/README.md) (`prove(circuit, pk, inputs, sources?)`,
-`verify(vk, proof, publicInputs)`), or through the typed client `xark client`
-generates over it (above). `xark prove` writes the same bytes `verify` takes:
-`proof.bin` and `public_inputs.bin`.
-
-## Crates and gadgets
-
-* **`xark`** (`crates/lang`, `#![no_std]`, stable) — the language library; its
-  `prelude` provides the marker primitives (`Field`, `require_eq`,
-  `Private`/`Public`). The CLI is the **`xark`** binary (stable; published as the
-  `xark-cli` crate); **`xark-frontend`** turns a circuit's wasm into R1CS.
-* **Backend** — `xark-backend` (Groth16 setup/prove/verify, trusted setup,
-  serialization) and `xark-verifier` (the `no_std` on-chain Solana verifier).
-  Both are frontend-agnostic.
-* **`xark-schema`** — `schema.json` and the one codec for input values (natural
-  JSON forms to field elements and back), shared by the CLI, xark-wasm (so every
-  generated client) and `client.wasm`. It needs only the BN254 scalar field and
-  JSON, not the prover, so a client for another language binds just this.
-
-Gadgets are **separate crates you add only when you need them**, all under
-**`gadgets/`** — kept apart from the core toolchain so they're easy to fork or
-use standalone. Shared circuit libraries: `xark-bits` (booleanity /
-bit-decomposition), `xark-bignum` (non-native arithmetic, used by the EC
-gadgets), `xark-curve` (curve macros), `xark-hash` (`Hash`/`Digest` types). Leaf
-gadgets: `xark-poseidon`, `xark-poseidon2`, `xark-sha256`, `xark-keccak`,
-`xark-mimc`, `xark-blake3`, `xark-blake2s`, `xark-aes`, `xark-pedersen`,
-`xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`.
-
-Adding a gadget is just a Cargo dependency:
-
-```toml
-# examples/poseidon/Cargo.toml
 [dependencies]
-xark = { path = "../../crates/lang" }
-xark-poseidon = { path = "../../gadgets/xark-poseidon" }
+xark = "0.3"
+xark-poseidon2 = "0.3"
 ```
 
-```rust
-use xark::prelude::*;
-use xark_poseidon::hash;
-// ... call `hash(..)` inside the `#[circuit]` fn and `require_eq` the result.
-```
+| Crate | What it does |
+|---|---|
+| `xark-poseidon`, `xark-poseidon2` | Poseidon and Poseidon2 hashes over BN254, the cheapest in a circuit |
+| `xark-sha256`, `xark-keccak`, `xark-blake2s`, `xark-blake3` | Standard hashes, matching their native implementations |
+| `xark-mimc`, `xark-pedersen` | MiMC and Pedersen hashes |
+| `xark-merkle` | Merkle-tree membership |
+| `xark-aes` | AES-128/256 block cipher, CTR and GCM |
+| `xark-secp256k1`, `xark-secp256r1` | ECDSA signature verification on secp256k1 and P-256 |
+| `xark-ed25519` | Ed25519 (EdDSA) signature verification |
+| `xark-grumpkin` | The Grumpkin curve, for recursion and folding |
+| `xark-bits`, `xark-bignum`, `xark-curve`, `xark-hash` | Building blocks for writing your own gadgets |
 
 ## Examples
 
-`examples/` holds runnable circuits. The simple ones (`cube`,
-`difference_of_squares`, `linear`, `inverse`) depend only on `xark`; the rest
-pull in the gadget crates they exercise. Build any with `xark build
-examples/<name>`.
+[`examples/`](examples) has 72 runnable circuits, from `cube` to `zkyc` (a private
+credential check against a public policy), with the gadgets above at work. Test
+any of them with `xark test examples/<name>`.
 
 ## Status
 
-> **Experimental.** Do not use generated Groth16 parameters or proofs in
-> production until the lowering, serialization, and setup process have been
-> independently audited. For real deployments run a multi-party phase-2 trusted
-> setup (`xark`'s ceremony path); never ship a key produced in insecure dev mode.
+> **Experimental, and not yet audited.** Don't deploy a key made in dev mode, and
+> don't rely on xark in production before an independent audit. See
+> [audit status](docs/audit-status.md).
 
-* **Trusted setup** — `.ptau` phase-1 parsing with admissibility checks, phase-2
-  setup derived from a `.ptau`, and a multi-contributor phase-2 MPC ceremony with
-  Schnorr proofs of knowledge and δ-consistency pairing checks. See
-  [`docs/trusted-setup.md`](docs/trusted-setup.md).
-* **Verifier** — `xark-verifier` verifies proofs on Solana via the `alt_bn128`
-  syscalls.
+## Contributing
 
-No external audit has been performed; see [`docs/audit-status.md`](docs/audit-status.md).
-
-## Development
-
-```bash
-# Install the CLI (puts `xark` on PATH):
-cargo install --path crates/cli
-
+```sh
+cargo xtask ci                  # every CI check, side by side
 cargo test --workspace --release
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-
-# `crates/lang`'s test suites are heavy, so CI runs them in their own job:
-cargo test --release -p xark
-cargo test --release -p xark --test snapshot -- --include-ignored  # + heavy KATs
-XARK_FUZZ_CASES=400 cargo test --release -p xark --test semantics_fuzz  # wider fuzzing
-
-cargo xtask digests --check         # every example's circuit, unchanged
+cargo xtask digests --check     # every example's circuit is unchanged
 ```
 
-Toolchains and circuit reproducibility: [`docs/toolchain.md`](docs/toolchain.md).
-Writing circuits — the supported subset and rejections: [`docs/subset.md`](docs/subset.md).
-Architecture: [`docs/architecture.md`](docs/architecture.md).
-Security walkthrough: [`docs/security.md`](docs/security.md).
+`crates/lang`'s test suites are heavy, so CI runs them separately:
+`cargo test --release -p xark`. [Toolchains](docs/toolchain.md) explains why a
+change that alters any circuit must update the digests.
+
+## License
+
+[MIT](LICENSE)

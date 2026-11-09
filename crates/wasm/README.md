@@ -36,8 +36,10 @@ xark setup    # → target/xark/<name>/{pk.bin, vk.bin}
 ```
 
 `circuit.xbc` is the single self-contained build artifact: it encodes both the
-solver view (witness generation) and the backend view (the minimized R1CS the
-proving key is keyed to)
+solver view (witness generation) and the backend view (the R1CS the proving key
+is keyed to: its template-reduced rows, read straight from the bytecode, or the
+boundary-minimized circuit rebuilt from them for a `minimized` key; `xark setup`
+picks `reduced` for large circuits, see `--r1cs-form`)
 
 ## Usage
 
@@ -79,7 +81,7 @@ console.log(verify(vk, proof, publicInputs)); // true
 
 ### Performance optimization (preloading)
 
-`prove` re-expands the `.xbc` and re-minimizes the R1CS on every call. For
+`prove` re-expands the `.xbc` (and re-minimizes it for a `minimized` key) on every call. For
 repeated proofs against the same circuit + key, parse them once with `preload`
 and call `prove_preloaded`:
 
@@ -246,7 +248,7 @@ read the public inputs, see `decode_public_inputs` below.
 > `prove` checks the proof against the key's verifying key before returning it;
 > an unsatisfiable witness is reported as an error, never returned as a proof.
 
-### `preload(circuitXbc, pkBytes)`
+### `preload(circuitXbc, pkBytes, sources?)`
 
 Parse + cache the `.xbc` and proving key once (replaces prior cached state). The key
 is decoded into wasm memory (about 2.2× its compressed size) so repeat proofs skip

@@ -37,8 +37,8 @@ pub fn build_valid_ptau(power: u32) -> Vec<u8> {
     let g1 = ark_bn254::G1Projective::generator();
     let g2 = ark_bn254::G2Projective::generator();
 
-    // The regen driver calls this with `power` up to ~21 (a 2^21 domain for the
-    // 1.6M-constraint ECDSA circuit), i.e. ~10M points. Computing each as a fresh
+    // The regen driver calls this with `power` up to 19 (the 2^19 domain for the
+    // P-256 ECDSA circuit), i.e. ~2.5M points. Computing each as a fresh
     // sequential `(G * scalar).into_affine()` — a full scalar-mul plus a per-point
     // field inversion — was the dominant single-threaded cost of a fixture regen.
     // Instead: derive the field powers τ^i once (cheap), fan the group scalar-muls

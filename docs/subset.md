@@ -31,11 +31,13 @@ pub fn cube(secret: Private<Field>, result: Public<Field>) {
 
 ## Supported
 
-- **Types:** `Field`; native `u8`..`u128`; fixed-size arrays (nested too); tuples and structs of
-  these. Circuit inputs must be built from `Field` and `uN` with **constant** array lengths; each
-  `uN` input is range-checked `< 2^N` on entry, and each `[u8; N]` `#[circuit]` parameter byte-wise.
-  A parameter is any `xark::Input` type: these, `#[input]` structs of them, the standard
-  types (`Timestamp`, `Days<FROM, TO>`, `Text`, `Choice<E>`, `Bitfield<E>`) and gadget types.
+- **Types:** `Field`; native `u8`..`u128` and `i8`..`i128`; `bool`; fixed-size arrays (nested
+  too); tuples and structs of these. Circuit inputs are built from `Field`, `uN`, `iN` and `bool`
+  with **constant** array lengths; each `uN` input is range-checked `< 2^N` on entry (an `iN` as
+  its two's complement, the same way), each `bool` checked to be 0 or 1, and each `[u8; N]`
+  `#[circuit]` parameter byte-wise. A parameter is any `xark::Input` type: these, `#[input]`
+  structs of them, the standard types (`Timestamp`, `Time<UNIT, FROM, TO>`, `Days<FROM, TO>`,
+  `Text`, `Choice<E>`, `Bitfield<E>`, `Country`) and gadget types.
 - **`Field` arithmetic:** `+`, `-`, `*`, `/`, unary `-`, compound assignment (`+=`, …), `.pow(n)`
   (exponentiation by a **constant** `n`). `^` is boolean XOR, not a power: each operand is checked
   to be 0 or 1 (free for known bits), and `.xor()` is the unchecked form.

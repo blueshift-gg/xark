@@ -58,15 +58,14 @@ bit-identical results.
 variables, through plug expressions once per call); phase 2 builds a compact
 column index from streamed rows instead of synthesizing the constraint system.
 Both are byte-identical to the previous setup for the same randomness. `xark
-setup` uses them (Ed25519 dev setup: 0.65 GB / 10 s, was 6.35 GB / 17.5 s).
+setup` uses them.
 
 **Smooth domains** (`DomainKind::Smooth`; `xark setup`'s default for dev keys,
 `--domain radix2` opts out). BN254's
 scalar field also has a subgroup of order 9, so the QAP domain can be the smallest
-of `2^k`, `3·2^k`, `9·2^k` points instead of the next power of two. Ed25519's
-2,358,839 rows fit `9·2^18 = 2,359,296` (radix-2: 4,194,304), so the `H` vector,
-its MSM and every quotient FFT shrink by 44%: `H` MSM 3.0 s → 1.7 s, quotient
-0.59 s → 0.36 s, dev setup 10 s → 6.7 s, key 509 → 451 MB (native, 16 threads).
+of `2^k`, `3·2^k`, `9·2^k` points instead of the next power of two. The 16,472
+rows of `examples/sha256` fit `9·2^11 = 18,432` (radix-2: 32,768), so the `H`
+vector, its MSM and every quotient FFT shrink by 44%.
 The verifier and verifying key are unaffected. The key's header (`KeyFormat` v2)
 states the domain size, so a push-streamed proof computes `h` from the first bytes
 of the key; `H`'s length implies it too, which every reader cross-checks. Only this prover (`xark prove`, xark-wasm)

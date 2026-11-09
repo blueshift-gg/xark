@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description = "Groth16 (BN254) keys, trusted-setup ceremony, serialization and verification for xark circuits."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]

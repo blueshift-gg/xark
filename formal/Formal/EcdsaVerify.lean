@@ -11,9 +11,12 @@ set_option linter.style.longLine false
 /-!
 # ECDSA verification end-to-end soundness
 
-Top-level soundness statement for the in-circuit ECDSA verifier in
-the secp256k1 gadget (`gadgets/xark-secp256k1/src/lib.rs`), packaging the
-per-primitive theorems already proved in `formal/`:
+Top-level soundness statement for a textbook-shaped in-circuit ECDSA
+verifier (`w = s⁻¹`, `u₁ = e·w`, `u₂ = r·w`, `R = u₁•g + u₂•Q`), packaging
+per-primitive theorems proved in `formal/`. The shipped verifiers do not
+compute this witness: `xark_secp256k1`'s `ecdsa_verify_packed` and
+`xark_secp256r1::ecdsa_verify` are fake GLV with certificates, proven in
+`Formal/FakeGlvK1.lean` and `Formal/FakeGlvR1.lean`. The pieces composed here:
 
 * `Formal.NonNative.mul_mod_via_Fr_limbwise_constraints` — the non-native
   modular product (`a · b mod m`) over 3 × 86-bit BN254 `Fr` limbs is sound.
@@ -21,7 +24,7 @@ per-primitive theorems already proved in `formal/`:
   computes `scalar • P` in any additive commutative group.
 
 into one theorem of the form
-**"any valid gadget witness implies the textbook ECDSA-verify predicate"**.
+**"any valid witness of the model implies the textbook ECDSA-verify predicate"**.
 
 ## Scope
 
@@ -35,8 +38,8 @@ What the wrapper *does* close, in Lean, over all assignments:
 * The **algebraic verification flow** — `w = s⁻¹ mod n`, `u₁ = e·w mod n`,
   `u₂ = r·w mod n`, `R = u₁•g + u₂•Q`, `r = R.x mod n` — is exactly the
   textbook ECDSA predicate. The non-native arithmetic and the scalar ladder
-  are the two pieces the gadget actually composes, and both have their own
-  end-to-end soundness theorems already.
+  are the two pieces the model composes, and both have their own
+  end-to-end soundness theorems.
 * The two bridges below (`mul_mod_lifts_to_ZMod`, `ladder_gives_R_def`) plug
   those theorems' conclusions directly into the wrapper's hypotheses, so the
   end-to-end statement composes without slack.
@@ -56,7 +59,7 @@ What it does **not** close:
 | Name                      | Statement                                                            |
 |---------------------------|----------------------------------------------------------------------|
 | `EcdsaVerifyRel`          | textbook ECDSA-verify predicate, abstractly                          |
-| `IsValidEcdsaWitness`     | gadget intermediate-state predicate, mirrors `ecdsa_verify_with_curve` |
+| `IsValidEcdsaWitness`     | modelled intermediate-state predicate                                |
 | `ecdsa_verify_sound`      | `IsValidEcdsaWitness → EcdsaVerifyRel`                               |
 | `mul_mod_lifts_to_ZMod`   | bridge from `valOfLimbs`/`mul_mod` ℕ identity to `ZMod n` equality    |
 | `ladder_gives_R_def`      | bridge from `ladder_correct` to the `R_def` field                    |
@@ -86,20 +89,21 @@ def EcdsaVerifyRel {G : Type*} [AddCommGroup G]
   r ≠ 0 ∧ s ≠ 0 ∧ ∃ w : ZMod n, s * w = 1 ∧
     r = xProj ((e * w).val • g + (r * w).val • Q)
 
-/-! ## Gadget intermediate-state witness -/
+/-! ## Modelled intermediate-state witness -/
 
-/-- **Gadget intermediate-state predicate.** Mirrors the witness allocations
-in the secp256k1 ECDSA-verify gadget (`gadgets/xark-secp256k1/src/lib.rs`) one-to-one:
+/-- **Modelled intermediate-state predicate.** One field per check of the
+textbook verifier (no current gadget allocates this witness; see the module
+doc):
 
-| Field            | Gadget constraint                                                |
+| Field            | Modelled check                                                   |
 |------------------|------------------------------------------------------------------|
-| `r_nonzero`      | `enforce_in_range_one_to_n(r)` (the `1 ≤ r` half)                |
-| `s_nonzero`      | `enforce_in_range_one_to_n(s)`                                   |
-| `w_inv_s`        | `inv_mod(s, n) = w`  ⇒  `s · w ≡ 1 (mod n)`                      |
-| `u1_def`         | `bigint256_mul_mod(e, w, n) = u₁`                                |
-| `u2_def`         | `bigint256_mul_mod(r, w, n) = u₂`                                |
-| `R_def`          | `scalar_mul_2p_* (u₁, g, Q, u₂) = Rpt`                           |
-| `r_eq_xR`        | `enforce_bigint_eq(Rpt.x mod n, r)`                              |
+| `r_nonzero`      | `1 ≤ r` (range check of `r` to `[1, n)`)                         |
+| `s_nonzero`      | `1 ≤ s`                                                          |
+| `w_inv_s`        | `s · w ≡ 1 (mod n)`                                              |
+| `u1_def`         | `u₁ = e · w mod n`                                               |
+| `u2_def`         | `u₂ = r · w mod n`                                               |
+| `R_def`          | `Rpt = u₁ • g + u₂ • Q`                                          |
+| `r_eq_xR`        | `r = Rpt.x mod n`                                                |
 
 Notice: every field is an algebraic equality (or non-zero predicate) in
 `ZMod n` / `G`. The lift from prover-supplied 3-limb `Fr` witnesses to these
@@ -120,7 +124,7 @@ structure IsValidEcdsaWitness {G : Type*} [AddCommGroup G]
 /-! ## End-to-end soundness -/
 
 /-- **End-to-end soundness wrapper.** Any prover witness satisfying the
-gadget's intermediate-state predicate (`IsValidEcdsaWitness`) implies the
+modelled intermediate-state predicate (`IsValidEcdsaWitness`) implies the
 textbook ECDSA-verify relation (`EcdsaVerifyRel`).
 
 The proof is pure substitution: every existential / projection in
@@ -181,19 +185,19 @@ theorem ladder_gives_R_def {G : Type*} [AddCommGroup G]
 /-- **End-to-end ECDSA verifier soundness (composed).** Takes the per-primitive
 guarantees in the exact shape produced by the existing soundness theorems
 (`mul_mod_via_Fr_limbwise_constraints` for the two products, `ladder_correct`
-+ ec_add for the point-side, the gadget's algebraic checks for the rest) and
-concludes the textbook `EcdsaVerifyRel`.
++ point addition for the point side, the model's algebraic checks for the
+rest) and concludes the textbook `EcdsaVerifyRel`.
 
-Hypotheses, in the order they appear in `ecdsa_verify_with_curve`:
+Hypotheses, in the order of the textbook verifier:
 
-* `h_r_ne, h_s_ne` — `enforce_in_range_one_to_n(r)` and `(s)` (the `≥ 1` half).
-* `h_w` — `inv_mod(s, n) = w` constraint.
+* `h_r_ne, h_s_ne` — `r ≥ 1` and `s ≥ 1`.
+* `h_w` — `s · w ≡ 1 (mod n)`.
 * `h_u1_nat, h_u2_nat` — `mul_mod` outputs at the `ZMod n`-value level
   (output of `mul_mod_via_Fr_limbwise_constraints` composed with the limb
   `.val` recomposition).
 * `h_acc1, h_acc2` — `ladder_correct` outputs for `u₁ • g` and `u₂ • Q`.
-* `h_R` — the `ec_add` output `Rpt = acc₁ + acc₂`.
-* `h_r_eq` — the final `enforce_bigint_eq` check.
+* `h_R` — the point addition `Rpt = acc₁ + acc₂`.
+* `h_r_eq` — the final `r = Rpt.x mod n` check.
 
 The conclusion `EcdsaVerifyRel n g Q xProj e r s` is the textbook
 "this is a valid ECDSA signature" predicate. -/
