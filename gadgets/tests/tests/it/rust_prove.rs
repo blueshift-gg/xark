@@ -2,11 +2,9 @@
 //! with the key `xark setup` wrote returns the same bytes `xark prove` writes, and
 //! `xark verify` accepts them.
 
-mod common;
-
 use std::process::Command;
 
-use common::{tempdir, xark_bin, xark_build};
+use crate::common::{tempdir, xark_bin, xark_build};
 
 struct CubeInputs {
     secret: u64,

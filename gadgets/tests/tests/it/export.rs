@@ -1,8 +1,7 @@
 //! `xark export` writes a Solana verifier crate whose own `cargo test` verifies
 //! the bundled proof against the embedded key.
 
-mod common;
-use common::{run, tempdir, xark_build, xark_prove, xark_setup};
+use crate::common::{run, tempdir, xark_build, xark_prove, xark_setup};
 use std::path::Path;
 
 #[test]

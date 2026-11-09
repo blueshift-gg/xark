@@ -349,7 +349,6 @@ fn claim_out_dir(test_out: &Path, out_name: &str) -> PathBuf {
 }
 
 fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let (deps, host_deps) = built_wasm();
     let root = workspace_root();
     let out_dir = claim_out_dir(&root.join("target/test-out"), out_name);
@@ -402,6 +401,10 @@ fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool)
         };
     }
     let bytes = std::fs::read(&wasm).expect("read circuit.wasm");
+    // One lowering at a time in this process; the rustc runs above are each their
+    // own process on their own output directory, so a test that compiles many
+    // small programs (the semantics fuzzer) compiles them across the cores.
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let spec = if field == "unknown" {
         xark_ir::FieldSpec::unknown()
     } else {

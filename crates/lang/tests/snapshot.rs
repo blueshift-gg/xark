@@ -3961,8 +3961,10 @@ fn check_toy_curve(bits: u32, p: i128, ca: i128, op: &str, pairs: &[ToyPair]) {
         .map(|(co, i)| leaf("s", co, i))
         .collect();
     let mask = (1i128 << bits) - 1;
-    let (mut defined, mut undefined, mut noncanonical) = (0, 0, 0);
-    for &(a, b) in pairs {
+    // Each pair's search is independent: run them across the cores (one test is
+    // the suite's longest otherwise), checking each result on its own thread.
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let check = |&(a, b): &ToyPair| -> (u32, u32, u32) {
         let mut fixed = std::collections::BTreeMap::new();
         for (pt, v) in [("p", a), ("q", b)] {
             for (co, val) in [("x", v.0), ("y", v.1)] {
@@ -3991,16 +3993,32 @@ fn check_toy_curve(bits: u32, p: i128, ca: i128, op: &str, pairs: &[ToyPair]) {
                         .sum::<i128>()
                 };
                 assert_eq!((val(0), val(3)), (x3, y3), "{op} {a:?} {b:?}");
-                defined += 1;
+                (1, 0, 0)
             }
-            (None, Projection::None) if canonical => undefined += 1,
-            (None, Projection::None) => noncanonical += 1,
+            (None, Projection::None) if canonical => (0, 1, 0),
+            (None, Projection::None) => (0, 0, 1),
             (want, other) => panic!(
                 "{op} p={p} {a:?} {b:?} (≡ {:?} {:?}): expected {want:?}, circuit {other:?}",
                 reduce(a),
                 reduce(b)
             ),
         }
+    };
+    let (mut defined, mut undefined, mut noncanonical) = (0, 0, 0);
+    let counts: Vec<(u32, u32, u32)> = std::thread::scope(|s| {
+        let handles: Vec<_> = pairs
+            .chunks(pairs.len().div_ceil(threads).max(1))
+            .map(|chunk| s.spawn(move || chunk.iter().map(check).collect::<Vec<_>>()))
+            .collect();
+        // Every thread joined before any is unwrapped: a panic while one is still
+        // to be joined aborts the test binary instead of failing the test.
+        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
+        joined.into_iter().flat_map(|r| r.unwrap()).collect()
+    });
+    for (d, u, n) in counts {
+        defined += d;
+        undefined += u;
+        noncanonical += n;
     }
     eprintln!(
         "p = {p}, a = {ca}, {op}: {defined} defined, {undefined} undefined, {noncanonical} non-canonical rejected"
@@ -5765,7 +5783,10 @@ fn pruned_arms_constrain_the_condition() {
         0xffff_fffe,
         u64::MAX,
     ];
-    for (name, body, n, native) in cases {
+    // The four shapes are independent; each searches on its own thread.
+    std::thread::scope(|scope| {
+        for (name, body, n, native) in cases {
+            scope.spawn(move || {
         let src = write_case(
             name,
             &format!(
@@ -5826,7 +5847,9 @@ fn pruned_arms_constrain_the_condition() {
                 }
             }
         }
-    }
+        });
+        }
+    });
 }
 
 /// `Field` range checks (`to_bits`), comparisons (`lt`) and

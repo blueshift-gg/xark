@@ -28,9 +28,15 @@ concurrency:
 
 jobs:
   kani:
-    name: prove (verifier)
+    # The 32 harnesses in two shards (every other, by position in the list below):
+    # one runner took 6m44 for all of them; the account runs 20 jobs at once.
+    name: prove (verifier, shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -55,8 +61,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: actions/cache@v5
+      - name: Restore cargo and Kani
+        # Saved only from master (the last step): the repository's caches are
+        # capped at 10 GB, and one per pull request evicted master's.
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
@@ -64,6 +72,7 @@ jobs:
             ~/.kani
             target
           key: ${{ runner.os }}-kani-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-kani-
 
       - name: Install Kani
         # The action wrapper does this for us, but we need direct control
@@ -120,7 +129,12 @@ jobs:
             verifier::proofs::add_mod_r_is_mod_add
           )
           failed=()
+          i=-1
           for h in "${harnesses[@]}"; do
+            i=$((i + 1))
+            if [ $((i % 2)) -ne ${{ matrix.shard }} ]; then
+              continue
+            fi
             echo "::group::Kani harness: $h"
             if cargo-kani -p xark-verifier -Z stubbing --exact --harness "$h"; then
               echo "::endgroup::"
@@ -135,4 +149,15 @@ jobs:
             printf '  - %s\n' "${failed[@]}"
             exit 1
           fi
-          echo "All ${#harnesses[@]} Kani harnesses verified."
+          echo "This shard's Kani harnesses verified."
+
+      - name: Save cargo and Kani
+        if: github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.kani
+            target
+          key: ${{ runner.os }}-kani-${{ hashFiles('Cargo.lock') }}

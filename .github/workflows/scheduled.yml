@@ -29,6 +29,8 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: cargo test (semantics fuzz)
         env:
           XARK_FUZZ_CASES: "5000"
@@ -51,6 +53,8 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Sweep ed25519
         env:
           XARK_SEARCH_SECS: "600"
@@ -79,5 +83,34 @@ jobs:
         run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --target wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Compare circuit digests
         run: cargo xtask digests --check --toolchain ${{ matrix.toolchain }}
+
+  coverage-whole:
+    # The coverage check over every example at once: an allowlist entry no call
+    # matches any more, or a committed constant-plug obligation no example uses.
+    # Pull requests check every call in four shards (lean.yml), which can't see
+    # these; `cargo xtask ci` runs this too.
+    name: coverage allowlist and obligations are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install rustc 1.99.1 + wasm32
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
+      - name: Every example
+        run: cargo xtask lean-export --coverage
+        env:
+          XARK_JOBS: 1

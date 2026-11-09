@@ -14,13 +14,11 @@
 //! changed witness exactly when the flat, unoptimized R1CS does. Variables the
 //! optimizer eliminated aren't compared: they're functions of the ones kept.
 
-mod common;
-
 use std::collections::BTreeMap;
 
+use crate::common::{tempdir, xark_build, xark_setup};
 use ark_bn254::Fr;
 use ark_ff::{One, Zero};
-use common::{tempdir, xark_build, xark_setup};
 use xark_groth16::r1cs::RowChunk;
 use xark_groth16::{ConstraintSource, PkSource};
 use xark_ir::VarId;
@@ -88,7 +86,7 @@ fn keyed_rows_reject_what_the_flat_circuit_rejects(name: &str, form: &str, reque
     let (ok, err) = xark_build(name, &out, &target);
     assert!(ok, "build failed: {err}");
     if request {
-        let o = std::process::Command::new(common::xark_bin())
+        let o = std::process::Command::new(crate::common::xark_bin())
             .arg("setup")
             .arg(&out)
             .args([
@@ -113,7 +111,7 @@ fn keyed_rows_reject_what_the_flat_circuit_rejects(name: &str, form: &str, reque
     let xbc = std::fs::read(out.join("circuit.xbc")).unwrap();
     let flat = xark_ir::function_decode::expand_function_blob(&xbc).unwrap();
     let prim = flat.to_primitive();
-    let fixture = common::fixture_dir().join(format!("inputs/{name}.json"));
+    let fixture = crate::common::fixture_dir().join(format!("inputs/{name}.json"));
     let given: BTreeMap<String, String> =
         serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
     let inputs: BTreeMap<VarId, String> = prim

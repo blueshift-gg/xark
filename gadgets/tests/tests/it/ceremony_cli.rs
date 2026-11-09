@@ -6,12 +6,10 @@
 //! in `crates/backend/src/ceremony.rs`. The transcript's toxic waste is known
 //! here, so this checks the pipeline is correct, not that a ceremony is secret.
 
-mod common;
-
 use std::path::Path;
 use std::process::Command;
 
-use common::{build_valid_ptau, tempdir, xark_bin, xark_build};
+use crate::common::{build_valid_ptau, tempdir, xark_bin, xark_build};
 
 fn xark(args: &[&str], dir: &Path) -> (bool, String) {
     let o = Command::new(xark_bin())

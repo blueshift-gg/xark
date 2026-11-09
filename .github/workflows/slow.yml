@@ -33,6 +33,7 @@ jobs:
       - name: Cache cargo registry, git, and target
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           cache-directories: |
             ~/.cargo/registry
             ~/.cargo/git
@@ -45,9 +46,13 @@ jobs:
         run: cargo test --release -p xark --test snapshot -- --ignored
 
   ec-gadget-vectors:
-    name: heavy EC gadget vectors (ed25519 + secp256k1/r1, release)
+    name: heavy EC gadget vectors (${{ matrix.gadget }}, release)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        gadget: [xark-ed25519, xark-secp256k1, xark-secp256r1]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -60,6 +65,7 @@ jobs:
       - name: Cache cargo registry, git, and target
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           cache-directories: |
             ~/.cargo/registry
             ~/.cargo/git
@@ -77,21 +83,22 @@ jobs:
         # stream — `check()`/`check_named` solve+analyze straight from `circuit.xbc`
         # (never the flat system), and the count pins are a streamed digest — so
         # the peak is the compiler subprocess (~5 GB), well under the runner.
-        run: cargo test -p xark-ed25519 -p xark-secp256k1 -p xark-secp256r1 --release
+        run: cargo test -p ${{ matrix.gadget }} --release
 
   example-sweep:
     # Every example on its own test inputs, plus single-leaf mutations of them,
     # each decided by exhaustive witness search: exactly one witness where the
     # test accepts, none where it rejects (`cargo xtask difftest`). Split
-    # into four shards that run side by side; a failure names the example and the
-    # input. A whole-ed25519 search peaks near 7 GB.
-    name: adversarial example sweep (shard ${{ matrix.shard }}/4)
+    # into six shards that run side by side (the examples whose searches run out
+    # their budget dealt out first, one per shard); a failure names the example and
+    # the input. A whole-ed25519 search peaks near 7 GB.
+    name: adversarial example sweep (shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -101,11 +108,15 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
       - name: Sweep this shard's examples
         # ed25519 is left out here: on these runners every one of its searches ran
         # out of time (undecided) and held a worker for ~20 min. The weekly run
         # (scheduled.yml) sweeps it alone, with time to decide.
-        run: cargo xtask difftest --shard ${{ matrix.shard }}/4 --jobs 2 --skip ed25519
+        run: cargo xtask difftest --shard ${{ matrix.shard }}/6 --jobs 2 --skip ed25519
 
   host-examples:
     # The two examples that aren't circuits, so the sweep skips them: the Nova
@@ -125,6 +136,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           workspaces: |
             examples/grumpkin_nova_prover
             examples/grumpkin_reference
@@ -148,5 +160,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Package and build every crate
         run: cargo xtask publish --dry-run

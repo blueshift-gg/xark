@@ -974,10 +974,7 @@ const F_PINNED: u8 = 4; // some referencing row is linear in the var (a=0, b≠0
 
 /// Fold one row's contribution into the per-variable classification flags. For
 /// each distinct variable the row references, reduce the row to its univariate
-/// `A·v² + B·v + C` (fixing all other vars to the witness) and OR in: `SEEN`
-/// always; `RESTRICTED` if `A≠0 ∨ B≠0`; `PINNED` if the row is linear in the var
-/// (`A=0 ∧ B≠0`). `fetch_or` is commutative, so this is safe to call from
-/// parallel shards in any order.
+/// `A·v² + B·v + C` (fixing all other vars to the witness) and [`note`] it.
 fn apply_row_flags(
     row: &R1csRow,
     assign: &[Option<crate::solver::Fp>],
@@ -985,19 +982,33 @@ fn apply_row_flags(
     flags: &[std::sync::atomic::AtomicU8],
     quadratic: &[Quadratic],
 ) {
-    use std::sync::atomic::Ordering;
     for (v, (a, b, _c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
-        let mut bits = F_SEEN;
-        if !(a.is_zero() && b.is_zero()) {
-            bits |= F_RESTRICTED;
-            if a.is_zero() {
-                bits |= F_PINNED;
-            } else if let Some(q) = quadratic.get(v as usize) {
-                let _ = q.set((a, b));
-            }
-        }
-        flags[v as usize].fetch_or(bits, Ordering::Relaxed);
+        note(v, a, b, flags, quadratic);
     }
+}
+
+/// Pass 1's record of one row's univariate reduction `a·v² + b·v + c` for `v`: OR
+/// in `SEEN` always, `RESTRICTED` if `a≠0 ∨ b≠0`, `PINNED` if the row is linear in
+/// the var (`a=0 ∧ b≠0`); a quadratic row (`a≠0`) is kept for pass 2. `fetch_or` is
+/// commutative, so parallel shards may call this in any order.
+fn note(
+    v: u32,
+    a: crate::solver::Fp,
+    b: crate::solver::Fp,
+    flags: &[std::sync::atomic::AtomicU8],
+    quadratic: &[Quadratic],
+) {
+    use std::sync::atomic::Ordering;
+    let mut bits = F_SEEN;
+    if !(a.is_zero() && b.is_zero()) {
+        bits |= F_RESTRICTED;
+        if a.is_zero() {
+            bits |= F_PINNED;
+        } else if let Some(q) = quadratic.get(v as usize) {
+            let _ = q.set((a, b));
+        }
+    }
+    flags[v as usize].fetch_or(bits, Ordering::Relaxed);
 }
 
 /// One row's `(a, b)` with `a ≠ 0` for a var — any of them (the first to land).
@@ -1005,8 +1016,8 @@ type Quadratic = std::sync::OnceLock<(crate::solver::Fp, crate::solver::Fp)>;
 
 /// Streaming pass 1: classify every variable with a **dense flag byte** while
 /// (optionally) checking satisfiability, in a single parallel sweep of the
-/// compact constraint stream. Returns the flag array (indexed by var id) and
-/// whether every row `a·b = c` held.
+/// compact constraint stream. Returns the flag array (indexed by var id),
+/// whether every row `a·b = c` held, and each var's kept quadratic row.
 ///
 /// This is the memory win: instead of storing each row's univariate `(a,b,c)`
 /// reduction (3 field elements per var-reference — GBs on a heavy EC circuit),
@@ -1021,6 +1032,7 @@ fn classify_and_check(
     modulus: &num_bigint::BigUint,
     num_vars: usize,
     check_sat: bool,
+    compiled: Option<&eval::Compiled>,
 ) -> (Vec<std::sync::atomic::AtomicU8>, bool, Vec<Quadratic>) {
     use rayon::prelude::*;
     use std::sync::atomic::AtomicU8;
@@ -1031,6 +1043,24 @@ fn classify_and_check(
     } else {
         Vec::new()
     };
+    if let Some(c) = compiled {
+        // Over BN254: the rows as the prover's evaluator compiles them (`Fr`
+        // coefficients, resolved references), each costing its field operations and
+        // nothing else, where building a row allocated three LCs and a map.
+        use crate::solver::Fp;
+        let z = bn254_values(assign);
+        let sat_ok = c
+            .top
+            .par_iter()
+            .map(|item| {
+                let mut flag = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, _c: ark_bn254::Fr| {
+                    note(v, Fp::Bn254(a), Fp::Bn254(b), &flags, &quadratic);
+                };
+                eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut flag)
+            })
+            .reduce(|| true, |x, y| x && y);
+        return (flags, !check_sat || sat_ok, quadratic);
+    }
     let sat_ok = top_c
         .par_iter()
         .map(|item| {
@@ -1053,6 +1083,16 @@ fn classify_and_check(
         })
         .reduce(|| true, |x, y| x && y);
     (flags, sat_ok, quadratic)
+}
+
+/// The witness as the compiled evaluator reads it: a variable's BN254 value, zero
+/// when unassigned (as the generic path treats a missing slot).
+fn bn254_values(assign: &[Option<crate::solver::Fp>]) -> impl Fn(u32) -> ark_bn254::Fr + Sync + '_ {
+    use ark_ff::Zero;
+    move |id: u32| match assign.get(id as usize) {
+        Some(Some(crate::solver::Fp::Bn254(v))) => *v,
+        _ => ark_bn254::Fr::zero(),
+    }
 }
 
 /// Streaming pass 2 for a witness not known to satisfy every row: re-stream the
@@ -1119,7 +1159,7 @@ fn two_valued_suspects(
 /// one of them, and the one row pass 1 kept gives the only candidate. Same
 /// verdicts as [`two_valued_suspects`] in one parallel sweep, without gathering
 /// the rows: on circuits built from multiplications nearly every derived var
-/// is a suspect.
+/// is a suspect. Over BN254 the sweep runs the compiled rows, as pass 1 did.
 fn two_valued_satisfied(
     defs: &[GDef],
     top_c: &[CItem],
@@ -1127,9 +1167,21 @@ fn two_valued_satisfied(
     modulus: &num_bigint::BigUint,
     suspects: &std::collections::BTreeSet<u32>,
     quadratic: &[Quadratic],
+    compiled: Option<&eval::Compiled>,
 ) -> std::collections::BTreeSet<u32> {
     use rayon::prelude::*;
     let test = SecondRoots::new(assign, modulus, suspects, quadratic);
+    if let Some(c) = compiled {
+        use crate::solver::Fp;
+        let z = bn254_values(assign);
+        c.top.par_iter().for_each(|item| {
+            let mut check = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, cc: ark_bn254::Fr| {
+                test.check_poly(v, &Fp::Bn254(a), &Fp::Bn254(b), &Fp::Bn254(cc));
+            };
+            eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut check);
+        });
+        return test.survivors();
+    }
     top_c.par_iter().for_each(|item| {
         expand_c_visit(
             defs,
@@ -1141,9 +1193,32 @@ fn two_valued_satisfied(
     test.survivors()
 }
 
-/// Each suspect's one candidate second root, and whether some row rejected it.
+/// The other root of `a·v² + b·v + c` given one root `α` and `a ≠ 0`, as `n/a` with
+/// `n = −b − a·α` (no inversion); `None` when it is `α` again.
+fn other_root(
+    a: &crate::solver::Fp,
+    b: &crate::solver::Fp,
+    alpha: &crate::solver::Fp,
+) -> Option<crate::solver::Fp> {
+    let n = b.neg().sub(&a.mul(alpha));
+    (n != a.mul(alpha)).then_some(n)
+}
+
+/// Whether `n/a` is a root of `aj·v² + bj·v + cj`: `aj·n² + bj·n·a + cj·a² = 0`.
+fn vanishes(
+    (n, a): (&crate::solver::Fp, &crate::solver::Fp),
+    (aj, bj, cj): &(crate::solver::Fp, crate::solver::Fp, crate::solver::Fp),
+) -> bool {
+    aj.mul(&n.mul(n))
+        .add(&bj.mul(&n.mul(a)))
+        .add(&cj.mul(&a.mul(a)))
+        .is_zero()
+}
+
+/// Each suspect's one candidate second root (as `n/a`), and whether some row
+/// rejected it.
 struct SecondRoots {
-    beta: Vec<Option<crate::solver::Fp>>,
+    beta: Vec<Option<(crate::solver::Fp, crate::solver::Fp)>>,
     failed: Vec<std::sync::atomic::AtomicBool>,
 }
 
@@ -1157,7 +1232,7 @@ impl SecondRoots {
         use crate::solver::Fp;
         use rayon::prelude::*;
         let zero = Fp::zero(modulus);
-        let candidates: Vec<(u32, Fp)> = suspects
+        let candidates: Vec<(u32, (Fp, Fp))> = suspects
             .par_iter()
             .filter_map(|&v| {
                 let (a, b) = quadratic.get(v as usize)?.get()?;
@@ -1166,8 +1241,7 @@ impl SecondRoots {
                     .cloned()
                     .flatten()
                     .unwrap_or_else(|| zero.clone());
-                let beta = b.neg().mul(&a.inverse()?).sub(&alpha);
-                (beta != alpha).then_some((v, beta))
+                Some((v, (other_root(a, b, &alpha)?, a.clone())))
             })
             .collect();
         let mut beta = vec![None; quadratic.len()];
@@ -1180,8 +1254,8 @@ impl SecondRoots {
         SecondRoots { beta, failed }
     }
 
-    fn candidate(&self, v: u32) -> Option<&crate::solver::Fp> {
-        self.beta.get(v as usize).and_then(Option::as_ref)
+    fn candidate(&self, v: u32) -> Option<(&crate::solver::Fp, &crate::solver::Fp)> {
+        self.beta.get(v as usize)?.as_ref().map(|(n, a)| (n, a))
     }
 
     /// Reject the candidates `row` doesn't hold for.
@@ -1191,18 +1265,28 @@ impl SecondRoots {
         assign: &[Option<crate::solver::Fp>],
         modulus: &num_bigint::BigUint,
     ) {
-        use std::sync::atomic::Ordering;
         let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
         if !terms.any(|t| self.candidate(t.var).is_some()) {
             return;
         }
         for (v, (a, b, c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
-            let Some(x) = self.candidate(v) else { continue };
-            let failed = &self.failed[v as usize];
-            if !failed.load(Ordering::Relaxed) && !a.mul(x).mul(x).add(&b.mul(x)).add(&c).is_zero()
-            {
-                failed.store(true, Ordering::Relaxed);
-            }
+            self.check_poly(v, &a, &b, &c);
+        }
+    }
+
+    /// Reject `v`'s candidate if `a·v² + b·v + c` (one of its rows) doesn't hold for it.
+    fn check_poly(
+        &self,
+        v: u32,
+        a: &crate::solver::Fp,
+        b: &crate::solver::Fp,
+        c: &crate::solver::Fp,
+    ) {
+        use std::sync::atomic::Ordering;
+        let Some(x) = self.candidate(v) else { return };
+        let failed = &self.failed[v as usize];
+        if !failed.load(Ordering::Relaxed) && !vanishes(x, &(a.clone(), b.clone(), c.clone())) {
+            failed.store(true, Ordering::Relaxed);
         }
     }
 
@@ -1237,22 +1321,14 @@ fn two_valued_from_polys(
                 .cloned()
                 .flatten()
                 .unwrap_or_else(|| Fp::zero(modulus));
-            let mut candidates: Vec<Fp> = Vec::new();
             for (a, b, _c) in ps {
                 if a.is_zero() {
                     continue;
                 }
-                let inv_a = a.inverse().expect("a != 0 in quadratic branch");
-                candidates.push(b.neg().mul(&inv_a).sub(&alpha));
-            }
-            for beta in &candidates {
-                if *beta == alpha {
+                let Some(n) = other_root(a, b, &alpha) else {
                     continue;
-                }
-                let satisfies_all = ps
-                    .iter()
-                    .all(|(a, b, c)| a.mul(beta).mul(beta).add(&b.mul(beta)).add(c).is_zero());
-                if satisfies_all {
+                };
+                if ps.iter().all(|p| vanishes((&n, a), p)) {
                     return Some(v);
                 }
             }
@@ -1277,13 +1353,25 @@ fn stream_underconstrained(
     modulus: &num_bigint::BigUint,
     check_sat: bool,
 ) -> (bool, Vec<crate::solver::UnderConstrained>) {
-    let (flags, sat_ok, quadratic) =
-        classify_and_check(defs, top_c, assign, modulus, vars.len(), check_sat);
+    // Over BN254 both passes run the compiled rows (`eval`); compiled once here.
+    let compiled = crate::solver::is_bn254(modulus).then(|| eval::compile(defs, top_c));
+    let compiled = compiled.as_ref();
+    let (flags, sat_ok, quadratic) = classify_and_check(
+        defs,
+        top_c,
+        assign,
+        modulus,
+        vars.len(),
+        check_sat,
+        compiled,
+    );
     let suspects = select_suspects(&flags, vars);
     let two_valued = if suspects.is_empty() {
         std::collections::BTreeSet::new()
     } else if check_sat && sat_ok {
-        two_valued_satisfied(defs, top_c, assign, modulus, &suspects, &quadratic)
+        two_valued_satisfied(
+            defs, top_c, assign, modulus, &suspects, &quadratic, compiled,
+        )
     } else {
         two_valued_suspects(defs, top_c, assign, modulus, &suspects)
     };
@@ -2393,6 +2481,12 @@ mod eval {
         pub plugs: &'a [Fr],
     }
 
+    /// The top-level frame: absolute variables, no plugs.
+    pub const TOP: Frame<'static> = Frame {
+        base: 0,
+        plugs: &[],
+    };
+
     fn resolve(v: u32, def: Option<&GDef>) -> VRef {
         match def {
             None => VRef::Global(v),
@@ -2549,6 +2643,97 @@ mod eval {
                 }
             }
         }
+    }
+
+    /// A plug of the running call as terms on absolute variables: the caller's
+    /// expression with the caller's own plugs resolved, so a template row's term on
+    /// the plug is a term on each of these (its constant only moves the row's value,
+    /// which [`eval_lc`] carries).
+    pub type Flat = Vec<(u32, Fr)>;
+
+    fn flatten(l: &Lc, f: &Frame, flat: &[Flat]) -> Flat {
+        let mut out = Vec::with_capacity(l.terms.len());
+        for &(r, c) in &l.terms {
+            match r {
+                VRef::Internal(o) => out.push((f.base + o, c)),
+                VRef::Global(id) => out.push((id, c)),
+                VRef::Plug(i) => out.extend(flat[i as usize].iter().map(|&(v, pc)| (v, pc * c))),
+            }
+        }
+        out
+    }
+
+    /// For every row of `items` under `z`: whether it holds, and for each variable it
+    /// references its univariate reduction `a·v² + b·v + c` (every other variable
+    /// fixed at `z`), through `emit(var, a, b, c)`. The BN254 twin of
+    /// [`crate::solver::univariate_r1cs_terms`] over compiled rows: a call evaluates
+    /// its plugs once for the values and flattens them once for the coefficients, so
+    /// no row is ever built. `scratch` is reused across rows. Returns whether every
+    /// row held.
+    pub fn classify(
+        c: &Compiled,
+        items: &[Item],
+        f: &Frame,
+        flat: &[Flat],
+        z: &dyn Fn(u32) -> Fr,
+        scratch: &mut Vec<(u32, usize, Fr)>,
+        emit: &mut dyn FnMut(u32, Fr, Fr, Fr),
+    ) -> bool {
+        let mut ok = true;
+        for it in items {
+            match it {
+                Item::Rows(rows) => {
+                    for r in rows {
+                        let full = [
+                            eval_lc(&r[0], f, z),
+                            eval_lc(&r[1], f, z),
+                            eval_lc(&r[2], f, z),
+                        ];
+                        ok &= full[0] * full[1] == full[2];
+                        scratch.clear();
+                        for (m, l) in r.iter().enumerate() {
+                            for &(vr, coef) in &l.terms {
+                                match vr {
+                                    VRef::Internal(o) => scratch.push((f.base + o, m, coef)),
+                                    VRef::Global(id) => scratch.push((id, m, coef)),
+                                    VRef::Plug(i) => scratch.extend(
+                                        flat[i as usize].iter().map(|&(v, pc)| (v, m, pc * coef)),
+                                    ),
+                                }
+                            }
+                        }
+                        scratch.sort_unstable_by_key(|t| t.0);
+                        let mut k = 0;
+                        while k < scratch.len() {
+                            let v = scratch[k].0;
+                            let mut own = [Fr::zero(); 3];
+                            while let Some(&(_, m, coef)) = scratch.get(k).filter(|t| t.0 == v) {
+                                own[m] += coef;
+                                k += 1;
+                            }
+                            let [av, bv, cv] = own;
+                            let x = z(v);
+                            let a0 = full[0] - av * x;
+                            let b0 = full[1] - bv * x;
+                            let c0 = full[2] - cv * x;
+                            emit(v, av * bv, av * b0 + a0 * bv - cv, a0 * b0 - c0);
+                        }
+                    }
+                }
+                Item::Call { def, base, plugs } => {
+                    let pv: Vec<Fr> = plugs.iter().map(|p| eval_lc(p, f, z)).collect();
+                    let pf: Vec<Flat> = plugs.iter().map(|p| flatten(p, f, flat)).collect();
+                    let base = match *base {
+                        VRef::Internal(o) => f.base + o,
+                        VRef::Global(id) => id,
+                        VRef::Plug(_) => unreachable!("a call base is always a fresh var"),
+                    };
+                    let inner = Frame { base, plugs: &pv };
+                    ok &= classify(c, &c.defs[*def as usize], &inner, &pf, z, scratch, emit);
+                }
+            }
+        }
+        ok
     }
 
     pub fn eval(
@@ -2967,6 +3152,42 @@ mod tests {
         // Sanity: the streams actually produced output (calls expanded).
         assert!(c_par.len() > top_c.len());
         assert!(w_par.len() > top_w.len());
+    }
+
+    /// The compiled BN254 classification (`eval::classify`) and the generic one (rows
+    /// built through the substitution) give every variable the same flags and the
+    /// same satisfaction verdict, on a stream of rows, rolled rows and template calls
+    /// whose plugs are expressions.
+    #[test]
+    fn compiled_classification_matches_generic() {
+        use std::sync::atomic::Ordering;
+        let m = bn254_modulus();
+        let defs = vec![make_def()];
+        let (top_c, _) = top_streams();
+        let n = 12_100usize;
+        let assign: Vec<Option<Fp>> = (0..n)
+            .map(|i| {
+                Some(Fp::from_decimal(
+                    &((i * 7919 % 1000) as i64 - 500).to_string(),
+                    &m,
+                ))
+            })
+            .collect();
+        let flags = |f: &[std::sync::atomic::AtomicU8]| -> Vec<u8> {
+            f.iter().map(|a| a.load(Ordering::Relaxed)).collect()
+        };
+        let (gf, gok, gq) = classify_and_check(&defs, &top_c, &assign, &m, n, true, None);
+        let compiled = eval::compile(&defs, &top_c);
+        let (cf, cok, _) = classify_and_check(&defs, &top_c, &assign, &m, n, true, Some(&compiled));
+        assert_eq!((flags(&gf), gok), (flags(&cf), cok));
+        assert!(flags(&gf).iter().any(|&f| f & F_PINNED != 0));
+        // Pass 2 over the same kept rows (`gq`: which row lands first varies between
+        // runs), every var a suspect: the compiled rows reject the same candidates.
+        assert!(gq.iter().filter(|q| q.get().is_some()).count() > 100);
+        let all: std::collections::BTreeSet<u32> = (0..n as u32).collect();
+        let generic = two_valued_satisfied(&defs, &top_c, &assign, &m, &all, &gq, None);
+        let compiled = two_valued_satisfied(&defs, &top_c, &assign, &m, &all, &gq, Some(&compiled));
+        assert_eq!(generic, compiled);
     }
 
     // ---- streaming under-constraint analyzer equivalence ----
