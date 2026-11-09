@@ -1,6 +1,6 @@
 [package]
 name = "xark-pedersen"
-description = "Pedersen hash and commitment gadget for xark zero-knowledge circuits."
+description = "Pedersen hash gadget for xark zero-knowledge circuits."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"

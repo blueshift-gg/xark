@@ -10,8 +10,9 @@
 //! # Inputs
 //! The public inputs are the transparent [`Point`] / [`Signature`] / [`Scalar`]
 //! types, each a 256-bit value in the compact **2×128-bit half** form (2 public
-//! field elements per value) — matching secp256k1. `unpack` recomposes them into
-//! the 8 × 32-bit limbs the arithmetic uses. The eager 3×86-bit affine curve gadget
+//! field elements per value) — matching secp256k1. The verifier recomposes them into
+//! 4 × 64-bit limbs for scalars and 8 × 32-bit limbs for point coordinates. The eager
+//! 3×86-bit affine curve gadget
 //! (`Point`/`Fq`/`Fp`, emitted by [`xark_curve::weierstrass!`]) lives in the [`affine`]
 //! submodule.
 
@@ -53,9 +54,9 @@ type Pt = [L8; 2];
 
 /// A P-256 256-bit value (a scalar `r`/`s`/`e`, or a point coordinate) in the
 /// compact **2×128-bit half** public-input form — `{ limbs: [Field; 2] }` =
-/// `[lo128, hi128]` in-circuit (2 public field elements vs 3 raw 86-bit limbs),
-/// `[u8; 32]` big-endian on the host. Recomposed to the internal 3×86 limbs by
-/// `unpack`. `#[input]` derives its host conversions (`[u8; 32]`
+/// `[lo128, hi128]` in-circuit (2 public field elements vs 4 raw 64-bit limbs),
+/// `[u8; 32]` big-endian on the host. Recomposed to internal limbs (4 × 64 for scalars,
+/// 8 × 32 for coordinates) by the gadget. `#[input]` derives its host conversions (`[u8; 32]`
 /// → `<name>.limbs[0..2]`) from this declaration.
 #[input(number(bits = 128))]
 pub struct Scalar {

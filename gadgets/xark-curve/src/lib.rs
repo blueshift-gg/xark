@@ -15,6 +15,7 @@
 ///     base = "0x…",              // base field modulus p
 ///     scalar = "0x…",            // scalar field modulus n
 ///     a = 0,                     // curve `a` coefficient: `0` or `-3`
+///     b = [b0, b1, b2],          // curve `b` coefficient, as 3 limbs
 ///     generators = [             // the four incremental-generator points…
 ///         [x0, x1, x2, y0, y1, y2],
 ///         [x0, x1, x2, y0, y1, y2],
@@ -24,6 +25,9 @@
 ///     correction = [x0, x1, x2, y0, y1, y2],   // the offset-accumulator correction
 /// }
 /// ```
+///
+/// A leading `bits = N,` sets the limb width (default 86), for exhaustive checks
+/// of the same gadget code over a small field.
 #[macro_export]
 macro_rules! weierstrass {
     // optional limb width (default 86): `weierstrass! { bits = 4, base = …, … }` — the

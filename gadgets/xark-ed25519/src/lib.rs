@@ -3,15 +3,17 @@
 //!
 //! Ed25519 lives over the base field `p = 2^255 − 19` with the curve equation
 //! `−x² + y² = 1 + d·x²·y²` and group order `L`. Its ~255-bit coordinates are
-//! foreign to the native BN254 proving field, so they use the shared 3 × 86-bit
-//! non-native limb arithmetic in [`xark_bignum`]. The whole group law, scalar-mul, and
-//! constants are emitted by the shared [`xark_curve::edwards!`] macro — the
-//! addition is **complete** (no exceptional cases), so unlike the secp256k1 ECDSA
-//! gadget there is no offset accumulator.
+//! foreign to the native BN254 proving field, so they use non-native limb arithmetic
+//! from [`xark_bignum`].
 //!
-//! This crate adds the fixed base point `B` and the EdDSA verification equation
-//! `[S]·B == R + [k]·A` (the algebraic core of Ed25519 verification; the SHA-512
-//! challenge hash `k = H(R‖A‖M)` is out of scope — `k` is supplied as a witness).
+//! The verifier ([`PointL::verify`]) checks the cofactored EdDSA equation
+//! `[8]·([S]·B − [k]·A − R) = O`, with `A` and `R` canonical and on the curve and
+//! `S < L`, by division certificates and fake GLV over 8 × 32-bit limbs. The SHA-512
+//! challenge `k = H(R‖A‖M)` is out of scope: `k` is an input.
+//!
+//! The [`xark_curve::edwards!`] macro also emits a complete twisted-Edwards group law
+//! and scalar multiplication over 3 × 86-bit limbs (`Point`, [`mul_base`]); its
+//! addition has no exceptional cases.
 
 #![no_std]
 // Gadget code keeps the `x = x + y` style it was written in (the old compiler
@@ -441,8 +443,8 @@ pub mod prelude {
 
 impl PointL {
     /// Verify an Ed25519 signature against this public key `A` and the challenge
-    /// `digest = k = H(R ‖ A ‖ M) mod L` (a [`Scalar`]). Checks the EdDSA equation
-    /// `[S]·B == R + [k]·A`. The transparent-type entry point — no limbs:
+    /// `digest = k = H(R ‖ A ‖ M) mod L` (a [`Scalar`]). Checks the cofactored EdDSA
+    /// equation `[8]·([S]·B − [k]·A − R) = O`. The transparent-type entry point — no limbs:
     ///
     /// ```ignore
     /// #[circuit]
