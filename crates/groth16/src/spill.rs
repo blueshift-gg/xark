@@ -24,7 +24,10 @@ pub(crate) fn fr_bytes(v: &[Fr]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, std::mem::size_of_val(v)) }
 }
 
-/// A temp file, deleted on drop.
+/// A temp file, deleted on drop. What it holds is witness-derived (the quotient
+/// step's coset evaluations, from which the witness can be recovered), so on unix
+/// it's created readable by its owner only and unlinked at once: the open handle
+/// keeps the data, and nothing is left behind if the process is killed.
 pub struct FileSpill {
     file: File,
     path: PathBuf,
@@ -37,18 +40,24 @@ impl FileSpill {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
         let path = dir.join(format!(".xark-spill-{}-{nanos}.bin", std::process::id()));
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let file = options.open(&path)?;
+        #[cfg(unix)]
+        std::fs::remove_file(&path)?;
         Ok(FileSpill { file, path })
     }
 }
 
 impl Drop for FileSpill {
     fn drop(&mut self) {
+        // Unlinked when it was created, on unix.
+        #[cfg(not(unix))]
         let _ = std::fs::remove_file(&self.path);
+        #[cfg(unix)]
+        let _ = &self.path;
     }
 }
 

@@ -164,3 +164,23 @@ fn unique_tempdir() -> TempDir {
     std::fs::create_dir_all(&path).expect("mkdir tempdir");
     TempDir { path }
 }
+
+/// A huge file is refused before it's read (#73): a 4 GiB sparse file, which
+/// reading whole would have to allocate. All zeros, it would even decode as public
+/// inputs (a count of 0), so the size is what stops it.
+#[test]
+fn a_huge_file_isnt_read_whole() {
+    let dir = unique_tempdir();
+    let path = dir.path().join("huge.bin");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(1 << 32).unwrap();
+    drop(file);
+    let start = std::time::Instant::now();
+    assert!(Groth16Keys::read_verifying_key(&path).is_err());
+    assert!(read_public_inputs(&path).is_err());
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(10),
+        "{:?}",
+        start.elapsed()
+    );
+}

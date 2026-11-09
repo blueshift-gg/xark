@@ -651,6 +651,37 @@ pub fn num_public_inputs(prog: &R1csProgram) -> usize {
         .count()
 }
 
+/// A `.ptau` file's bytes, once its 12-byte header (`ptau`, version 1, a section
+/// count) says it is one: a file that isn't is refused before it's read whole. The
+/// parser bounds the rest (a power of at most 28, sections within the file).
+pub fn read_ptau(path: &std::path::Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut head = [0u8; 12];
+    file.read_exact(&mut head)
+        .with_context(|| format!("{} is too short to be a .ptau file", path.display()))?;
+    if &head[..4] != b"ptau" {
+        anyhow::bail!(
+            "{} isn't a .ptau file (it doesn't start with `ptau`)",
+            path.display()
+        );
+    }
+    let version = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
+    if version != 1 {
+        anyhow::bail!(
+            "{}: unsupported .ptau version {version} (expected 1)",
+            path.display()
+        );
+    }
+    let len = file.metadata().map(|m| m.len() as usize).unwrap_or(0);
+    let mut bytes = Vec::with_capacity(len);
+    bytes.extend_from_slice(&head);
+    file.read_to_end(&mut bytes)
+        .with_context(|| format!("reading {}", path.display()))?;
+    Ok(bytes)
+}
+
 /// SHA-256 of arbitrary bytes, hex-encoded (no `0x`). Used to fingerprint a
 /// proof so it can be referenced/tracked and content-addressed on disk.
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -705,7 +736,20 @@ pub fn setup_trust(key_dir: &std::path::Path) -> SetupTrust {
         // contributor's randomness is OS randomness too); what it adds is a
         // transcript anyone can check the key against, and room for more
         // contributors.
-        if n >= 2 {
+        if n == 0 {
+            // No contribution: δ is still the one `init` derived from the seed it
+            // records in `circuit_meta.json`, so anyone with the ceremony directory
+            // can forge proofs. `finalize` refuses it now; a key finalized before
+            // that is a seeded key.
+            SetupTrust {
+                tag: "seeded",
+                summary: "a ceremony finalized with no contributions: its trapdoor follows \
+                          from the seed in the ceremony's circuit_meta.json, so anyone with \
+                          that file can forge proofs"
+                    .into(),
+                warn: true,
+            }
+        } else if n >= 2 {
             SetupTrust {
                 tag: "ceremony",
                 summary: format!(
@@ -806,11 +850,6 @@ pub fn ensure_key_matches_circuit(key: &std::path::Path, xbc: &std::path::Path) 
         );
     }
     Ok(())
-}
-
-/// The SHA-256 (hex) of a string (e.g. a phase-2 seed, recorded in key metadata).
-pub fn circuit_hash(r1cs_json: &str) -> String {
-    sha256_hex(r1cs_json.as_bytes())
 }
 
 #[cfg(test)]

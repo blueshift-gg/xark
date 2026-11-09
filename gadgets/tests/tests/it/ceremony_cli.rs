@@ -248,6 +248,65 @@ fn ceremony_keys_prove_and_verify() {
         ptau_s,
     ]);
     assert!(log.contains("Verified 0 contribution"), "{log}");
+    // But it doesn't finalize: with no contribution, δ follows from the seed in
+    // circuit_meta.json (#66).
+    let (ok, log) = xark(
+        &[
+            "ceremony",
+            "finalize",
+            "--ceremony-dir",
+            cer_s,
+            "--ptau-file",
+            ptau_s,
+        ],
+        &out,
+    );
+    assert!(
+        !ok && log.contains("the ceremony has no contributions"),
+        "{log}"
+    );
+    assert!(!cer.join("metadata.json").exists(), "finalized anyway");
+}
+
+/// `xark setup --ptau-file`: a file that isn't a `.ptau` is refused from its header,
+/// before it's read whole (#70), and the recorded `phase2_seed_hash` is the SHA-256
+/// of the seed's 32 bytes, whatever its text looks like (#71).
+#[test]
+fn setup_from_a_ptau_checks_the_file_and_hashes_the_seed() {
+    use sha2::{Digest, Sha256};
+    let tmp = tempdir();
+    let (out, target) = (tmp.path().join("cube"), tmp.path().join("target"));
+    let (ok, log) = xark_build("cube", &out, &target);
+    assert!(ok, "xark build: {log}");
+    let junk = tmp.path().join("junk.ptau");
+    std::fs::write(&junk, b"not a transcript at all").unwrap();
+    let (ok, log) = xark(&["setup", ".", "--ptau-file", junk.to_str().unwrap()], &out);
+    assert!(!ok && log.contains("isn't a .ptau file"), "{log}");
+
+    let ptau = tmp.path().join("test.ptau");
+    std::fs::write(&ptau, build_valid_ptau(12)).unwrap();
+    let want = hex::encode(Sha256::digest([0xab; 32]));
+    for seed in [format!("0x{}", "ab".repeat(32)), "AB".repeat(32)] {
+        let keys = tmp.path().join(format!("keys-{}", &seed[..2]));
+        let (ok, log) = xark(
+            &[
+                "setup",
+                ".",
+                "--ptau-file",
+                ptau.to_str().unwrap(),
+                "--phase2-seed",
+                &seed,
+                "--out",
+                keys.to_str().unwrap(),
+            ],
+            &out,
+        );
+        assert!(ok, "setup: {log}");
+        let meta: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(keys.join("metadata.json")).unwrap())
+                .unwrap();
+        assert_eq!(meta["phase2_seed_hash"], want.as_str(), "seed {seed}");
+    }
 }
 
 /// A `--ceremony-dir` that isn't one (a typo) says so, with how to start one; a

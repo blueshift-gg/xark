@@ -931,6 +931,29 @@ fn spilled_quotient_and_proof_are_identical() {
     assert_eq!(got, proof);
 }
 
+/// The spill file holds witness-derived data: on unix it's unlinked as soon as it's
+/// open, so no other user can read it and a killed prover leaves nothing (#69).
+#[cfg(unix)]
+#[test]
+fn a_spill_file_leaves_nothing_on_disk() {
+    use xark_groth16::spill::Spill;
+    let dir = std::env::temp_dir().join(format!("xark-spill-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut file = xark_groth16::spill::FileSpill::new_in(&dir).unwrap();
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        0,
+        "the spill file is visible"
+    );
+    let data: Vec<Fr> = (0..100u64).map(Fr::from).collect();
+    file.store(&data).unwrap();
+    let mut back = vec![Fr::from(0u64); 10];
+    file.load(40, &mut back).unwrap();
+    assert_eq!(back, data[40..50]);
+    drop(file);
+    std::fs::remove_dir(&dir).unwrap();
+}
+
 #[test]
 fn compiled_template_evaluation_equals_expansion() {
     let assign = kyc_witness();
