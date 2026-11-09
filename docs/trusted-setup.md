@@ -8,7 +8,9 @@ that one party; a **multi-party ceremony** removes that, since one honest contri
 The committed test vectors use a seeded setup (`--deterministic-rng`), whose trapdoor anyone with
 the seed can recover: fine for tests, never for a deployed verifier. `xark export` exports any key
 and writes how it was made into the verifier crate as `SETUP` (`seeded`, `single-party`,
-`ceremony` or `unknown`).
+`ceremony` or `unknown`). A ceremony needs two or more contributors to count as `ceremony`: one
+contributor's randomness is OS randomness too, so a ceremony of one is `single-party`, with a
+transcript anyone can check the key against.
 
 xark runs the **circuit-specific phase 2** itself (no external prover in the loop):
 

@@ -353,7 +353,8 @@ trapdoor requires solving discrete log on BN254. So an `OsRng` key is a sound si
 setup: it rests on trusting the operator, with no public transcript to show for it. A seeded key
 (`--deterministic-rng`) is different: anyone with the seed recovers the trapdoor. `xark export`
 accepts any key and records which it is in the verifier crate's `SETUP`: `single-party`,
-`seeded` (with a warning), `ceremony`, or `unknown` when there is no `metadata.json`.
+`seeded` (with a warning), `ceremony` (two or more contributors; a ceremony of one is
+`single-party`), or `unknown` when there is no `metadata.json`.
 
 ### Production setup
 
