@@ -589,6 +589,7 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, key: Option<&
     let names: Vec<String> = match fs::read(project.circuit_xbc()) {
         Ok(bytes) if super::is_function_artifact(&bytes) => {
             xark_ir::function_decode::decode_input_vars(&bytes)
+                .unwrap_or_default()
                 .into_iter()
                 .map(|v| v.name)
                 .collect()

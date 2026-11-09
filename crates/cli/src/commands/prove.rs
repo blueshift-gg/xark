@@ -258,7 +258,8 @@ fn prove_streaming(
     // when they ran one after the other.
     let (built, solved) = std::thread::scope(|s| {
         let solved = s.spawn(|| {
-            let vars = xark_ir::function_decode::decode_input_vars(&bytes);
+            let vars = xark_ir::function_decode::decode_input_vars(&bytes)
+                .map_err(|e| anyhow::anyhow!(e))?;
             let id_inputs = resolve_input_ids(&vars, inputs)?;
             drop(vars);
             let assign = stream_witness(&bytes, sources, &id_inputs)?;
