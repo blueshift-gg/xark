@@ -202,10 +202,9 @@ gadgets now check more:
 `xark client` now generates a typed client; in 0.2 it scaffolded a snarkjs
 verification starter, and the `xark-client` npm package is removed.
 
-- **What it writes:** `<circuit>.ts` and the `<circuit>.schema.ts` it imports
-  without an extension (the circuit's `schema.json` as a module; a bundler, Turbopack
-  included, and tsc's "bundler" resolution read it with no project settings), where
-  `-o` says: a file, or a directory to write them in. A tuple struct's fields
+- **What it writes:** one file, `<circuit>.ts`, with the circuit's `schema.json`
+  inlined, so Node, a bundler and tsc all run it with no project settings, where
+  `-o` says: a file, or a directory to write it in. A tuple struct's fields
   (`"0"`) and raw identifiers (`r#type`, named `type`) give a client that compiles. Names
   keep underscores around them (`_reserved`); a field JavaScript can't hold
   (`__proto__`, or `constructor` on a struct with Rust methods) is an error naming it. The
