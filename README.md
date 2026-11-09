@@ -70,8 +70,7 @@ test tests::accepts_valid ... ok
 test tests::rejects_invalid ... ok
 ```
 
-**4. Prove.** The first proof also makes a development key (insecure, for testing
-only):
+**4. Prove.** The first proof also makes the key, from your machine's randomness:
 
 ```console
 $ xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
@@ -94,7 +93,9 @@ error: witness does not satisfy the circuit
 $ xark verify my-circuit
 ✅ Proof verified
 
-$ xark export my-circuit --allow-insecure
+$ xark export my-circuit
+...
+Key: a single-party setup from OS randomness: sound unless whoever ran `xark setup` kept that randomness (xark doesn't). `xark ceremony` spreads that trust.
 ✅ On-chain verifier crate ready (verifying key embedded).
 ```
 
@@ -108,8 +109,10 @@ if !my_circuit_verifier::verify(&proof, &public_inputs) {
 }
 ```
 
-`--allow-insecure` is only for a dev key. Before you deploy, make a production key
-from a trusted setup: see [Trusted setup](docs/trusted-setup.md).
+A key you make yourself is a single-party trusted setup: whoever relies on your
+verifier trusts that you didn't keep its randomness. For a key no one party has to
+be trusted for, run a multi-party ceremony: see [Trusted setup](docs/trusted-setup.md).
+The verifier crate's `SETUP` constant says which kind of key it embeds.
 
 ## Learn more
 
@@ -129,7 +132,7 @@ from a trusted setup: see [Trusted setup](docs/trusted-setup.md).
 - [`xark-verifier`](crates/verifier/README.md): the on-chain verifier
 
 **Going to production**
-- [Trusted setup](docs/trusted-setup.md): ceremony keys instead of dev keys
+- [Trusted setup](docs/trusted-setup.md): a multi-party ceremony instead of a single-party key
 - [Reproducible builds](docs/reproducible-build.md) of the on-chain verifier
 - [Security](docs/security.md) and [audit status](docs/audit-status.md)
 

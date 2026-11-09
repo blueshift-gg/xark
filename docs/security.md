@@ -349,9 +349,11 @@ Option<String>`; `phase2_seed_hash: Option<String>` — SHA-256 of the seed used
 In `--insecure-dev-mode` the trapdoor exists transiently in process memory during
 `xark-groth16`'s `dev_setup`. The only durable artifacts are the proving key
 (trapdoor *exponentiated into group elements*, not the scalar) and VK; recovering the
-trapdoor requires solving discrete log on BN254. Still insufficient for production: the
-operator is a single point of failure, there's no public transcript, and
-`production_safe: false` should be rejected by any production deployment script.
+trapdoor requires solving discrete log on BN254. So an `OsRng` key is a sound single-party
+setup: it rests on trusting the operator, with no public transcript to show for it. A seeded key
+(`--deterministic-rng`) is different: anyone with the seed recovers the trapdoor. `xark export`
+accepts any key and records which it is in the verifier crate's `SETUP`: `single-party`,
+`seeded` (with a warning), `ceremony`, or `unknown` when there is no `metadata.json`.
 
 ### Production setup
 
@@ -359,7 +361,8 @@ Requires a Powers-of-Tau transcript plus a phase-2 contribution. Both **implemen
 `ptau.rs` parses snarkjs `.ptau` (with admissibility checks), `xark-groth16`'s
 `phase2_setup` derives the phase-2 keys, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
 δ-consistency), via `xark ceremony {init,contribute,verify,finalize}`. The
-`--insecure-dev-mode` path is local-only (`production_safe: false`). See
+`--insecure-dev-mode` path writes `production_safe: false`, and `xark prove` takes
+`--deterministic-rng` only for such a key. See
 [`docs/trusted-setup.md`](trusted-setup.md).
 
 ## 4. Known unaudited paths
@@ -431,8 +434,9 @@ Walk through before tagging a production release of a circuit deployed via xark:
   cross-reference [§2](#2-per-gadget-soundness-sketches).
 * [ ] **`circuit_hash` recorded in deployed metadata** and matches what the verifier
   (host `verify` + on-chain programs) expects.
-* [ ] **Setup mode is not `insecure-dev-mode`.** `metadata.json`'s `setup_mode` must be
-  `"phase2-from-ptau"` (or a production mode) and `production_safe: true`.
+* [ ] **The setup is one the verifier's users can trust.** The exported crate's `SETUP` is
+  `ceremony`, or `single-party` where trusting whoever ran setup is acceptable; never `seeded`
+  or `unknown`.
 * [ ] **`deterministic_rng_seed` is `null` in production metadata.** Non-null means the
   operator chose reproducibility — dev/test only.
 * [ ] **Public input order matches the verifier's.** Run end-to-end verify against the

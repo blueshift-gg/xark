@@ -21,11 +21,12 @@ xark init my-circuit                                    # a circuit crate, with 
 xark test my-circuit                                    # build it, run its tests
 xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
 xark verify my-circuit
-xark export my-circuit --allow-insecure                 # the Solana verifier crate
+xark export my-circuit                                  # the Solana verifier crate
 ```
 
-The first `prove` makes a development key. It's insecure: for production, make
-the key with `xark setup --ptau-file` or `xark ceremony` instead.
+The first `prove` makes the key from your machine's randomness: a single-party
+trusted setup, sound unless whoever made it kept that randomness. For a key no one
+party has to be trusted for, use `xark ceremony`.
 
 ## Commands
 

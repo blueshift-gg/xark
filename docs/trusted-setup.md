@@ -1,9 +1,14 @@
 # Trusted-setup ceremony
 
 Groth16 is only as sound as its trusted setup: whoever knows the phase-2 toxic waste
-(`τ`, `α`, `β`, `δ`) can forge proofs for *any* statement, however correct the verifier. The
-committed test vectors are produced with `--insecure-dev-mode` (a recoverable trapdoor) — fine for
-tests, but **production keys must come from a real multi-party ceremony.**
+(`τ`, `α`, `β`, `δ`) can forge proofs for *any* statement, however correct the verifier. A key
+`xark setup` makes without a `.ptau` comes from OS randomness: a single-party setup, sound unless
+whoever ran it kept that randomness, which xark never writes down. Everyone relying on it trusts
+that one party; a **multi-party ceremony** removes that, since one honest contributor is enough.
+The committed test vectors use a seeded setup (`--deterministic-rng`), whose trapdoor anyone with
+the seed can recover: fine for tests, never for a deployed verifier. `xark export` exports any key
+and writes how it was made into the verifier crate as `SETUP` (`seeded`, `single-party`,
+`ceremony` or `unknown`).
 
 xark runs the **circuit-specific phase 2** itself (no external prover in the loop):
 
