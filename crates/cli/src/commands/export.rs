@@ -67,10 +67,6 @@ pub struct ExportArgs {
     /// Name for the generated crate. Defaults to the `--out` directory name.
     #[arg(long)]
     pub crate_name: Option<String>,
-    /// Permit exporting a verifier for a non-production (dev-mode) key. Local
-    /// testing only — never deploy a verifier built this way.
-    #[arg(long)]
-    pub allow_insecure: bool,
 }
 
 pub fn run(args: ExportArgs) -> Result<()> {
@@ -108,7 +104,8 @@ pub fn run(args: ExportArgs) -> Result<()> {
         "run `xark setup` first?",
         || Groth16Keys::read_verifying_key(&vk_path),
     )?;
-    check_key_safe_for_export(&vk_path, args.allow_insecure)?;
+    // Any key exports; the crate says how it was made (`SETUP`, and its README).
+    let trust = super::setup_trust(vk_path.parent().unwrap_or(Path::new(".")));
     super::ensure_key_matches_circuit(&vk_path, &project.circuit_xbc())?;
     let num_public_inputs = vk.gamma_abc_g1.len().saturating_sub(1);
     let sample = if explicit || proof_path.exists() {
@@ -215,11 +212,11 @@ pub fn run(args: ExportArgs) -> Result<()> {
     write_str(&out.join("Cargo.toml"), &gen_cargo_toml(&crate_name))?;
     write_str(
         &out.join("src/lib.rs"),
-        &gen_lib_rs(num_public_inputs, sample.is_some()),
+        &gen_lib_rs(num_public_inputs, sample.is_some(), &trust),
     )?;
     write_str(
         &out.join("README.md"),
-        &gen_readme(&crate_name, num_public_inputs, sample.is_some()),
+        &gen_readme(&crate_name, num_public_inputs, sample.is_some(), &trust),
     )?;
 
     println!(
@@ -230,6 +227,12 @@ pub fn run(args: ExportArgs) -> Result<()> {
         num_public_inputs,
         vk_bytes.len(),
     );
+    let setup = format!("Key: {}.", trust.summary);
+    if trust.warn {
+        eprintln!("{}", crate::style::warn(&format!("⚠️  {setup}")));
+    } else {
+        println!("{setup}");
+    }
     println!(
         "{}",
         crate::style::brand("✅ On-chain verifier crate ready (verifying key embedded).")
@@ -247,40 +250,6 @@ pub fn run(args: ExportArgs) -> Result<()> {
     }
     println!("\n{}", crate::style::next_steps(&next));
     Ok(())
-}
-
-/// Reject (or with `--allow-insecure`, warn) if the verifying key beside
-/// `vk_path` was produced by an insecure setup (`metadata.json` not marked
-/// `production_safe`).
-fn check_key_safe_for_export(vk_path: &Path, allow_insecure: bool) -> Result<()> {
-    // production_safe only if a metadata.json beside the key says so.
-    let production_safe = vk_path
-        .parent()
-        .and_then(|dir| fs::read_to_string(dir.join("metadata.json")).ok())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("production_safe").and_then(|b| b.as_bool()))
-        .unwrap_or(false);
-
-    if production_safe {
-        return Ok(());
-    }
-    if allow_insecure {
-        eprintln!(
-            "{}",
-            crate::style::warn(
-                "⚠️  Exporting an on-chain verifier for an INSECURE dev-mode key \
-                 (--allow-insecure). Its trapdoor is not protected by a trusted-setup \
-                 ceremony — do NOT deploy this VK."
-            )
-        );
-        return Ok(());
-    }
-    anyhow::bail!(
-        "refusing to export an on-chain verifier for a non-production key: no \
-         metadata.json marks it production_safe. Run `xark setup --ptau-file …` (or the \
-         `xark ceremony` flow) first, or pass --allow-insecure for a local-testing verifier \
-         you will not deploy."
-    )
 }
 
 /// Sanitize an arbitrary string into a valid Cargo crate name
@@ -344,7 +313,8 @@ unexpected_cfgs = {{ level = "warn", check-cfg = [
     )
 }
 
-fn gen_lib_rs(n: usize, sample: bool) -> String {
+fn gen_lib_rs(n: usize, sample: bool, trust: &super::SetupTrust) -> String {
+    let setup = trust.tag;
     let tests = if sample {
         r#"
 #[cfg(test)]
@@ -375,6 +345,13 @@ pub use xark_verifier::{{Proof, VerifierError, Verifier}};
 
 /// Number of public inputs this circuit exposes.
 pub const NUM_PUBLIC_INPUTS: usize = {n};
+
+/// How the embedded key was made: `seeded` (anyone with the seed can forge
+/// proofs, so for tests only), `single-party` (sound unless whoever ran setup,
+/// or a ceremony's one contributor, kept its randomness), `ceremony` (two or
+/// more contributors: unless every one did), or `unknown`.
+/// A deploy script can refuse a verifier whose `SETUP` it doesn't accept.
+pub const SETUP: &str = "{setup}";
 
 /// The verifier for this circuit, embedding the verifying key at compile
 /// time. Its byte length is checked against `NUM_PUBLIC_INPUTS` at compile
@@ -427,7 +404,10 @@ pub fn verify_instruction_data_strict(data: &[u8]) -> bool {{
     )
 }
 
-fn gen_readme(name: &str, n: usize, sample: bool) -> String {
+fn gen_readme(name: &str, n: usize, sample: bool, trust: &super::SetupTrust) -> String {
+    let setup = trust.tag;
+    let mut summary = trust.summary.clone();
+    summary[..1].make_ascii_uppercase();
     let ident = name.replace('-', "_");
     let sample = if sample {
         "`cargo test` in this crate verifies the bundled sample proof against the
@@ -470,6 +450,12 @@ if !{ident}::verify(&proof, &public_inputs) {{
 
 When the transaction does carry the public inputs too (`proof || public_inputs`),
 `{ident}::verify_instruction_data(instruction_data)` checks both.
+
+## Trusted setup
+
+`{ident}::SETUP` is `{setup}`. {summary}. See xark's
+[trusted setup](https://github.com/blueshift-gg/xark/blob/master/docs/trusted-setup.md)
+guide for a setup that no single party has to be trusted for.
 
 ## Replay protection
 

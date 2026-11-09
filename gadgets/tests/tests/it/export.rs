@@ -15,17 +15,22 @@ fn exported_verifier_passes_its_own_test() {
     let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
     assert!(ok, "prove failed: {err}");
 
-    // A dev key is refused unless asked for.
+    // Any key exports, and the crate says how it was made: this one is seeded
+    // (`xark_setup`'s seed 1), which anyone with the seed could forge proofs for.
     let out_s = out.to_str().unwrap();
     let verifier = tmp.path().join("verifier");
     let verifier_s = verifier.to_str().unwrap();
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
-    assert!(
-        !ok && err.contains("--allow-insecure"),
-        "exported a dev key: {err}"
-    );
-    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s, "--allow-insecure"]);
     assert!(ok, "export failed: {err}");
+    assert!(
+        err.contains("seeded setup (--deterministic-rng 1)"),
+        "{err}"
+    );
+    let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains(r#"pub const SETUP: &str = "seeded";"#),
+        "{lib}"
+    );
     // A `CircuitProof` in Rust gives the same bytes as the sample files.
     let read = |f: &str| std::fs::read(out.join(f)).unwrap();
     let proof = xark_prover::CircuitProof {
@@ -43,7 +48,7 @@ fn exported_verifier_passes_its_own_test() {
         sample("instruction_data.bin")
     );
     // Again over its own output is fine (regenerating) …
-    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s, "--allow-insecure"]);
+    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
     assert!(ok, "re-export failed: {err}");
     assert!(
         err.contains("isn't empty: writing the verifier crate there anyway"),
@@ -53,13 +58,7 @@ fn exported_verifier_passes_its_own_test() {
     let mine = tmp.path().join("mine");
     std::fs::create_dir_all(mine.join("src")).unwrap();
     std::fs::write(mine.join("src/lib.rs"), "// my program\n").unwrap();
-    let (ok, _, err) = run(&[
-        "export",
-        out_s,
-        "--out",
-        mine.to_str().unwrap(),
-        "--allow-insecure",
-    ]);
+    let (ok, _, err) = run(&["export", out_s, "--out", mine.to_str().unwrap()]);
     assert!(!ok && err.contains("refusing to overwrite"), "{err}");
     assert_eq!(
         std::fs::read_to_string(mine.join("src/lib.rs")).unwrap(),
@@ -91,7 +90,6 @@ fn a_proof_is_optional() {
             out_s,
             "--out",
             verifier.to_str().unwrap(),
-            "--allow-insecure",
             "--crate-name",
             "proofless-verifier",
         ];

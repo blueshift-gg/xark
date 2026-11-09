@@ -495,20 +495,14 @@ fn export_and_verify_check_the_key() {
         "2",
     ]);
     assert!(ok, "second setup failed: {err}");
-    let (ok, _, err) = run(&["export", o, "--allow-insecure"]);
+    let (ok, _, err) = run(&["export", o]);
     assert!(ok && err.contains("is for another key"), "{err}");
     assert!(
         !out.join("verifier/instruction_data.bin").exists(),
         "bundled anyway"
     );
     let proof = out.join("proof.bin");
-    let (ok, _, err) = run(&[
-        "export",
-        o,
-        "--allow-insecure",
-        "--proof",
-        proof.to_str().unwrap(),
-    ]);
+    let (ok, _, err) = run(&["export", o, "--proof", proof.to_str().unwrap()]);
     assert!(!ok && err.contains("doesn't verify"), "{err}");
 
     // As if the circuit had been rebuilt with a change since setup.
@@ -518,7 +512,7 @@ fn export_and_verify_check_the_key() {
     m["circuit_hash"] = "00".repeat(32).into();
     m["digest"] = "00".repeat(16).into();
     std::fs::write(&meta, m.to_string()).unwrap();
-    for cmd in [&["export", o, "--allow-insecure"][..], &["verify", o]] {
+    for cmd in [&["export", o][..], &["verify", o]] {
         let (ok, stdout, err) = run(cmd);
         assert!(
             !ok && err.contains("different build of the circuit"),
@@ -557,7 +551,7 @@ fn inputs_take_natural_encodings() {
 /// The next steps `setup` and `client` print can be followed as written: the
 /// inputs file is to fill in, and the prover's directory is the package's (here
 /// `my-cube`), not the circuit's (`cube`). A placeholder left in is named, and
-/// the dev key's note says `export` will refuse it.
+/// setup says how it made the key.
 #[test]
 fn next_steps_can_be_followed() {
     let tmp = tempdir();
@@ -575,7 +569,10 @@ fn next_steps_can_be_followed() {
         out.contains(&format!("--inputs {file}")) && out.contains("replace the placeholders"),
         "{out}"
     );
-    assert!(out.contains("`xark export` will refuse it"), "{out}");
+    assert!(
+        out.contains("Key: a single-party setup from OS randomness"),
+        "{out}"
+    );
     let (ok, out) = run_in(&dir, &["prove", ".", "--inputs", file]);
     assert!(
         !ok && out.contains("still the placeholder \"<field>\""),
@@ -602,9 +599,16 @@ fn export_defaults_beside_the_crate() {
     assert!(ok, "build failed:\n{out}");
     let (ok, out) = run_in(&dir, &["setup", ".", "--insecure-dev-mode"]);
     assert!(ok, "setup failed:\n{out}");
-    let (ok, out) = run_in(&dir, &["export", ".", "--allow-insecure"]);
+    let (ok, out) = run_in(&dir, &["export", "."]);
     assert!(ok, "export failed:\n{out}");
+    // A key from OS randomness is a single-party setup, and the crate says so.
+    assert!(out.contains("Key: a single-party setup"), "{out}");
     let verifier = dir.join("arithmetic_square-verifier");
+    let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains(r#"pub const SETUP: &str = "single-party";"#),
+        "{lib}"
+    );
     let manifest = std::fs::read_to_string(verifier.join("Cargo.toml")).unwrap();
     assert!(
         manifest.contains("name = \"arithmetic-square-verifier\""),
