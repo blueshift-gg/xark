@@ -7508,9 +7508,10 @@ fn witness_bounded_loops() {
     assert!(c.stderr.contains("nest too deeply"), "{}", c.stderr);
 }
 
-/// **The signature circuits' building blocks, searched at full size.** The ECDSA and
-/// EdDSA circuits (1.6M–3.4M rows) are too big to search whole, so each block they
-/// are built from is searched exhaustively on its own, at the real field sizes,
+/// **The signature circuits' building blocks, searched at full size.** The ECDSA
+/// circuits are made of inverses a search skips, and searching the EdDSA circuit
+/// whole is a weekly job, so each block they are built from is searched
+/// exhaustively on its own, at the real field sizes,
 /// against a native reference: the ed25519 extended add and double (the output is
 /// determined by the inputs), `on_curve` (accepts exactly the canonical points on
 /// the curve), `eq_mod_p`, the 16-way point muxes, the scalar range checks

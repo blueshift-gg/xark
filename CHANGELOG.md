@@ -27,10 +27,10 @@ gadgets now check more:
 - ECDSA on secp256k1 and P-256, and EdDSA on Ed25519, are rewritten around proven
   gadgets: non-native multiplication by pseudo-Mersenne certificates over 8×32-bit
   limbs, fused double-and-add over signed digits, and fake GLV (ePrint 2025/933) with
-  a fixed-base comb, each gadget proven sound over its rows. Fewer rows (the
-  secp256k1 ECDSA circuit is 227,713); the hinted `R.x` is checked canonical
-  (`< p`), and Ed25519 keeps the cofactored check of RFC 8032. Keys for the ECDSA
-  and EdDSA examples must be made again.
+  a fixed-base comb, each gadget proven sound over its rows. Fewer rows
+  (`examples/secp256k1_ecdsa` is 227,168 in `xark inspect`); the hinted `R.x` is
+  checked canonical (`< p`), and Ed25519 keeps the cofactored check of RFC 8032.
+  Keys for the ECDSA and EdDSA examples must be made again.
 - Grumpkin scalar multiplication (`scalar_mul`, `wide_scalar_mul`,
   `multi_scalar_mul`) and the Pedersen hash are rewritten as proven gadgets: one
   fused incomplete step per bit over signed digits, and windowed lookups from

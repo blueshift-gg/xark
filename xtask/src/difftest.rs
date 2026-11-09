@@ -65,9 +65,8 @@ const BLINDSPOT: &[&str] = &["ec_incomplete", "ec_incomplete_r1"];
 /// instead (`signature_blocks_are_sound`).
 const UNSEARCHABLE: &[&str] = &["secp256k1_ecdsa", "secp256r1_ecdsa"];
 /// Per-search time limits (seconds) for examples that need more than the default (20),
-/// unless `XARK_SEARCH_SECS` is set: ed25519 is searched whole (2.4M rows, ~35 s a
-/// search here, more than 180 s on a CI runner, so pull requests `--skip` it and the
-/// weekly run sweeps it alone).
+/// unless `XARK_SEARCH_SECS` is set: ed25519 is searched whole (396,912 rows), so
+/// pull requests `--skip` it and the weekly run sweeps it alone.
 const SLOW: &[(&str, u32)] = &[
     ("ed25519", 180),
     // The `HEAVY` examples' searches either decide within seconds or run out any
