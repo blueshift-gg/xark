@@ -457,6 +457,28 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- A ceremony finalized with no contributions kept the δ `init` derives from the seed
+  it records in `circuit_meta.json`, so anyone with the directory could forge
+  proofs, yet it was marked production-safe and exported as `single-party` (#66).
+  `xark ceremony finalize` refuses it; a key finalized before is labelled `seeded`,
+  with a warning.
+- `blake2s_hash_one_block` and `blake3_hash_one_block` take the length as a const
+  generic (`::<LEN>`, at most 64) and require the bytes past it to be zero; a
+  `Field` length up to 2³² and any tail were accepted, so one message had many
+  digests (#72).
+- The `--low-memory` spill file holds witness-derived data: on unix it's created
+  readable by its owner only and unlinked at once, so it never outlives the
+  process (#69).
+- `metadata.phase2_seed_hash` is the SHA-256 of the seed's 32 bytes, not of the
+  argument's text (#71).
+- A hostile `circuit.xbc` fails to decode instead of aborting the process: counts are
+  checked against the bytes left, variables and expansions are capped, a template
+  call graph must be acyclic, and the panic hook is wrapped once rather than swapped
+  around each decode, so overlapping decodes can't leave it removed (#64, #65, #68).
+- Verifying keys, proofs and public inputs over 64 MiB are refused before they're
+  read, and a `.ptau` file's header is checked before it's read whole (#73, #70).
+- The `ec_incomplete` examples say why they need no on-curve check, and
+  `enforce_on_curve` says when it's optional (#67).
 - Two soundness holes in `xark-bignum`'s multiplication, each letting a prover make
   a valid proof of a wrong `(a·b) mod m` in a circuit that takes `m` or the limbs
   from the prover. The curve gadgets were not affected.
