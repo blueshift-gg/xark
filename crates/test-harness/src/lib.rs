@@ -327,12 +327,16 @@ fn built_wasm() -> &'static (PathBuf, PathBuf) {
 /// out dir after compiling into it, so a runner that gives each test its own process
 /// (`cargo nextest`) would otherwise let another test rewrite it meanwhile. If another
 /// process holds it, this one gets `<out_name>-<pid>` instead (never waiting, so two
-/// tests can't deadlock on two names).
+/// tests can't deadlock on two names). Each later claim in this process gets its own
+/// `<dir>.<n>`: two tests compiling the same source by the same name may run at once.
 fn claim_out_dir(test_out: &Path, out_name: &str) -> PathBuf {
-    static HELD: Mutex<Vec<(String, PathBuf, std::fs::File)>> = Mutex::new(Vec::new());
+    static HELD: Mutex<Vec<(String, PathBuf, std::fs::File, usize)>> = Mutex::new(Vec::new());
     let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, dir, _)) = held.iter().find(|(n, ..)| n == out_name) {
-        return dir.clone();
+    if let Some((_, dir, _, claims)) = held.iter_mut().find(|(n, ..)| n == out_name) {
+        *claims += 1;
+        let mut name = dir.file_name().expect("an out dir name").to_os_string();
+        name.push(format!(".{claims}"));
+        return dir.with_file_name(name);
     }
     std::fs::create_dir_all(test_out).expect("create target/test-out");
     let path = test_out.join(format!("{out_name}.lock"));
@@ -344,7 +348,7 @@ fn claim_out_dir(test_out: &Path, out_name: &str) -> PathBuf {
         }
         Err(std::fs::TryLockError::Error(e)) => panic!("locking {}: {e}", path.display()),
     };
-    held.push((out_name.to_string(), dir.clone(), file));
+    held.push((out_name.to_string(), dir.clone(), file, 0));
     dir
 }
 
