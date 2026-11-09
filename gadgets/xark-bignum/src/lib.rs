@@ -12,6 +12,11 @@
 //! limbs a circuit builds itself (`Bignum::new`, a `[Field; LIMBS]` parameter) need
 //! [`range_check_limbs`] first.
 //!
+//! In range isn't canonical: only [`mod_mul`]'s and [`sub2`]'s results are `< m`.
+//! An input, an inverse, or a sum or difference of them may be `≥ m` while congruent
+//! to the right value; check it canonical (`assert_canonical`) before comparing it,
+//! testing it for zero, or exposing its limbs.
+//!
 //! Arithmetic is limb-wise with explicit carry/borrow propagation; carries are
 //! range-checked so no intermediate term wraps the BN254 modulus the circuit is
 //! proven over (which would silently break the integer identity). A per-instance
@@ -513,8 +518,11 @@ macro_rules! fp {
                 $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs);
                 $crate::require_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
             }
-            /// Assert this element is nonzero (assumes range-checked limbs).
+            /// Assert this element is nonzero mod `m`. It's checked canonical (`< m`)
+            /// first: a range-checked value can be `m` itself, whose limbs aren't zero
+            /// though it is. (Its limbs must be range-checked, as inputs and results are.)
             pub fn assert_nonzero(self) {
+                $crate::require_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
                 $crate::assert_nonzero_limbs::<{ $limbs }>(self.limbs);
             }
         }
@@ -910,7 +918,9 @@ pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field
     borrow
 }
 
-/// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
+/// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs,
+/// and says nothing mod `m`: `m` itself passes. For "nonzero mod `m`", check the value
+/// canonical first (`require_lt` against `m − 1`), as `fp!`'s `assert_nonzero` does.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
     // all_zero = AND of isZero(limbᵢ); require == 0 to forbid value 0.
     let mut all_zero = Field::from(1u8);
@@ -1802,7 +1812,9 @@ pub fn mul_divmod_bounded<const LIMBS: usize, const BITS: usize>(
 }
 
 /// Non-native modular inverse `a⁻¹ mod m` over `LIMBS` × `BITS`-bit limbs. Output
-/// is `≡ a⁻¹` (not forced canonical — benign, as it only feeds a `mod_mul`).
+/// is `≡ a⁻¹` but not forced canonical: fine as a [`mod_mul`] operand, whose result
+/// is canonical; anything that compares it, tests it for zero or exposes its limbs
+/// needs it canonical first (`assert_canonical`, or a multiply by one).
 ///
 /// Specialized: the reduction remainder is *known* to be exactly `1`, so `r` is
 /// pinned to the constant `[1,0,…]` instead of being range-checked and

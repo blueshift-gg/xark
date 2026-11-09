@@ -25,6 +25,9 @@ gadgets now check more:
   `is_lt_check` now range-check the limbs they take as `[Field; N]`. The curve
   gadgets don't change.
 - `grumpkin_nova_fold` takes its inputs grouped by instance.
+- A `Time`/`Days` input is checked to its range of steps, not just its bit width
+  (`Days<2024, 2024>` is 366 days in 9 bits, and 366–511 were accepted): `zkyc`
+  changes. `scalar_range` changes only in row order.
 - The bit and hash gadgets take fewer rows, each proven sound in Lean over the
   exact rows it emits (`formal/`): XOR and OR with a constant fold to a linear form,
   `to_bits` computes bit 0 linearly, `xor3`/`maj3`/`chi`/`ch` are one row each,
@@ -457,6 +460,15 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- A `Time` or `Days` input past the end of its range (a value its bits hold but no
+  day of the type is) was accepted; it's refused as the input is read, packed or not.
+- `fp!`'s `assert_nonzero` checked only that the limbs weren't all zero, so `m`
+  itself, in range but not canonical, passed. It checks the value canonical first.
+  The crate docs now say which results are canonical: only `mod_mul`'s and `sub2`'s.
+- A `.ptau` whose τ is a root of unity of its size passed every admissibility check,
+  and keys from it let any witness prove; it's refused.
+- Ed25519 points decode as RFC 8032 says: `x = 0` with the sign bit set, `y ≥ p`,
+  and a `y` with no `x` are refused, so each point has one encoding.
 - A ceremony finalized with no contributions kept the δ `init` derives from the seed
   it records in `circuit_meta.json`, so anyone with the directory could forge
   proofs, yet it was marked production-safe and exported as `single-party` (#66).

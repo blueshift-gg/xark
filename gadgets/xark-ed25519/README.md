@@ -59,7 +59,9 @@ See [`examples/ed25519`](https://github.com/blueshift-gg/xark/tree/master/exampl
 ## Notes
 
 - The circuit checks the cofactored equation `[8]·([S]·B − [k]·A − R) = O`, with
-  `A` and `R` canonical and on the curve, and `S < L`.
+  `A` and `R` canonical and on the curve, and `S < L`. Being cofactored, it accepts
+  small-order `A` and `R` (as ZIP-215 does): a signature by a small-order key, or
+  with a small-order component added to `R`, verifies.
 - The SHA-512 challenge is **not** computed in the circuit. The prover supplies
   `k`. If `k` is public, the verifier can recompute it from `R`, `A` and the
   message to tie the proof to that message.

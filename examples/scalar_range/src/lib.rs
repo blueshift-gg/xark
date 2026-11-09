@@ -8,7 +8,8 @@ use xark_secp256k1::affine::Fq;
 #[circuit]
 pub fn scalar_range(s0: Private<Field>, s1: Private<Field>, s2: Private<Field>) {
     let s = Fq::new([s0, s1, s2]);
-    s.assert_canonical();
+    // In range, then nonzero mod n (which checks it canonical, `< n`, itself).
+    s.range_check();
     s.assert_nonzero();
 }
 

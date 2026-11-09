@@ -265,6 +265,14 @@ pub(crate) fn verify_powers_consistency(ptau: &PtauFile) -> Result<(), Phase2Err
     if ptau.tau_g1[1] == G1Affine::zero() || ptau.tau_g1[1] == g1 {
         return Err(fail("degenerate-tau")); // τ = 0 or τ = 1
     }
+    // τ a root of unity of the transcript's size n = 2^power (`τ^n = 1`, so of every
+    // radix-2 domain it serves, whose sizes divide n): the vanishing polynomial is 0
+    // at τ, every `h_query` point is the identity, and any witness proves. The ladder
+    // (checked geometric below) holds `τ^n·g1` at index n of its `2n − 1` points.
+    let n = ptau.tau_g1.len().div_ceil(2);
+    if n >= 2 && ptau.tau_g1[n] == g1 {
+        return Err(fail("degenerate-tau-root-of-unity"));
+    }
     if ptau.alpha_tau_g1[0] == G1Affine::zero() {
         return Err(fail("degenerate-alpha")); // α = 0
     }

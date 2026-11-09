@@ -2974,6 +2974,55 @@ fn bignum_mul_bound_and_limbs_are_its_own() {
     assert!(!case(half, "1"), "an out-of-range `fp!` limb (#63)");
 }
 
+/// A `Days` input is a day in its range: its bits hold more than its steps (`Days<2024,
+/// 2024>`: 366 days in 9 bits), and a value past the end of `TO` is refused as the
+/// input is read, packed or not; a `Days` past `MAX` couldn't exist in Rust.
+#[test]
+fn time_inputs_stay_in_their_range() {
+    let compile_case = |name: &str, body: &str| {
+        let src = format!("#![no_std]\nuse xark::prelude::*;\n{body}\n");
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let c = compile_case(
+        "days_range",
+        "#[circuit]\npub fn circuit(a: Private<Days<2024, 2024>>, k: Public<Field>) {\n\
+         \x20   require_eq(Field::from(a.steps()), k);\n}",
+    );
+    for (a, ok) in [("0", true), ("365", true), ("366", false), ("511", false)] {
+        assert_eq!(accepts_exactly_constraints(&c, &[("a", a), ("k", a)]), ok, "a = {a}");
+    }
+    let c = compile_case(
+        "days_range_packed",
+        "#[input]\npub struct S { pub a: Days<2024, 2024>, pub n: u8 }\n\
+         #[circuit]\npub fn circuit(s: Private<S>, k: Public<Field>) {\n\
+         \x20   require_eq(Field::from(s.a.steps()), k);\n}",
+    );
+    let leaf = c.program().vars.iter().find(|v| v.name.starts_with("s.")).map(|v| v.name.clone()).unwrap();
+    for (a, ok) in [(365u64, true), (400, false)] {
+        let packed = (a + (3 << 9)).to_string();
+        assert_eq!(
+            accepts_exactly_constraints(&c, &[(leaf.as_str(), packed.as_str()), ("k", &a.to_string())]),
+            ok,
+            "packed a = {a}"
+        );
+    }
+}
+
+/// `fp!`'s `assert_nonzero` means nonzero mod `m`: `m` itself, in range but not
+/// canonical, is refused (it passed when only the limbs were tested).
+#[test]
+fn fp_assert_nonzero_is_mod_m() {
+    let src = "#![no_std]\nuse xark::prelude::*;\nxark_bignum::fp!(El, \"83\", 1, 8);\n\
+               #[circuit]\npub fn circuit(a: Public<El>) {\n\x20   a.assert_nonzero();\n}\n";
+    let c = compile_with_field(&write_case("fp_nonzero", src), "fp_nonzero", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    for (a, ok) in [("5", true), ("0", false), ("83", false), ("166", false)] {
+        assert_eq!(accepts_exactly_constraints(&c, &[("a.limbs[0]", a)]), ok, "a = {a}");
+    }
+}
+
 /// **`Bignum<LIMBS, BITS>` wrapper.** The zero-cost newtype's methods
 /// (`a.mul(b, m)`) forward to the free functions, so the emitted R1CS is
 /// identical to calling `mod_mul::<3,86>` directly. Guards the classify fix

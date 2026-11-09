@@ -63,6 +63,10 @@ for a 24-limb modulus.
   `[Field; LIMBS]` parameter, `Bignum::new`) need `range_check_limbs` first.
 - Most operations also assume canonical operands (`a, b < m`); each function's
   docs give its precondition.
+- In range isn't canonical: only `mod_mul`'s and `sub2`'s results are below `m`. An
+  input, an inverse, or a sum or difference of them may be `≥ m` while congruent to
+  the right value, so check it canonical (`assert_canonical`) before comparing it or
+  exposing its limbs. `fp!`'s `assert_nonzero` does that itself.
 - `mod_mul` fails to compile for a `(LIMBS, BITS)` whose column products could
   wrap the BN254 field.
 - In `xark_bignum::prelude`, `require_lt` is xark's scalar `require_lt`; call the

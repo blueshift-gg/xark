@@ -53,6 +53,9 @@ See [`examples/secp256r1_ecdsa`](https://github.com/blueshift-gg/xark/tree/maste
   computed by the caller.
 - No public key is refused. A valid signature is refused only if its nonce `k`
   equals `±q`, the private key or its negation.
+- A signature isn't unique: if `(r, s)` verifies, so does `(r, n − s)`, as in any
+  ECDSA verifier. Don't use a signature as a nullifier or a "used once" key; if you
+  need one form, require low-s yourself (`s ≤ (n − 1)/2`).
 
 ## Cost
 
