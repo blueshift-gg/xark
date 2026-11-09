@@ -35,8 +35,9 @@ pub struct SetupArgs {
     pub out: Option<PathBuf>,
     /// Run Groth16 setup with locally generated randomness (the OS RNG), on
     /// purpose. It is also what setup falls back to when no `.ptau` is given or
-    /// found. Such a key has no ceremony and no transcript: fine for proving and
-    /// testing, but `xark export` refuses it. **Do not use it in production.**
+    /// found. That is a single-party trusted setup: sound unless whoever ran it
+    /// kept the randomness, which xark never writes down. For a setup no one party
+    /// has to be trusted for, use `xark ceremony`.
     #[arg(long, default_value_t = false)]
     pub insecure_dev_mode: bool,
     /// Reproducible-randomness escape hatch for test fixtures **only**.
@@ -558,20 +559,19 @@ pub fn run(args: SetupArgs) -> Result<()> {
             )
         );
     } else {
-        println!(
-            "\n{}",
-            crate::style::warn(
-                "⚠️  WARNING: setup_mode = insecure-dev-mode. Do not use in production."
-            )
-        );
+        let trust = super::setup_trust(meta_path.parent().unwrap_or(std::path::Path::new(".")));
+        let setup = format!("\nKey: {}.", trust.summary);
+        if trust.warn {
+            println!("{}", crate::style::warn(&setup));
+        } else {
+            println!("{setup}");
+        }
         if dev_fallback {
             println!(
                 "{}",
-                crate::style::warn(
-                    "note: no .ptau found, so this is an insecure single-party dev key: fine \
-                     for `xark prove` and tests, but `xark export` will refuse it. For \
-                     production, download a public .ptau and run `xark setup --ptau-file \
-                     <file>`, or run the multi-party `xark ceremony` (docs/trusted-setup.md)."
+                crate::style::dim(
+                    "(no .ptau found, so xark made the key itself; for a setup no one party \
+                     has to be trusted for, see `xark ceremony` in docs/trusted-setup.md)"
                 )
             );
         }

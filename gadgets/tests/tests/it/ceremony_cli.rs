@@ -165,8 +165,7 @@ fn ceremony_keys_prove_and_verify() {
         "a wrong public input must fail: {log}"
     );
 
-    // A finalized ceremony is production-safe: `xark export` takes its key
-    // without `--allow-insecure`.
+    // A finalized ceremony's verifier says so.
     let verifier = tmp.path().join("verifier");
     step(&[
         "export",
@@ -179,7 +178,33 @@ fn ceremony_keys_prove_and_verify() {
         "--out",
         verifier.to_str().unwrap(),
     ]);
-    assert!(verifier.join("Cargo.toml").is_file());
+    let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains(r#"pub const SETUP: &str = "ceremony";"#),
+        "{lib}"
+    );
+    // A ceremony of one trusts one party, as a key from `xark setup` does.
+    let meta = cer.join("metadata.json");
+    let two = std::fs::read_to_string(&meta).unwrap();
+    std::fs::write(
+        &meta,
+        two.replace("mpc[2 contributors]", "mpc[1 contributors]"),
+    )
+    .unwrap();
+    let log = step(&[
+        "export",
+        "--verifying-key",
+        vk.to_str().unwrap(),
+        "--out",
+        verifier.to_str().unwrap(),
+    ]);
+    assert!(log.contains("a ceremony with one contributor"), "{log}");
+    let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains(r#"pub const SETUP: &str = "single-party";"#),
+        "{lib}"
+    );
+    std::fs::write(&meta, two).unwrap();
 
     // `--force` replaces the finalized ceremony with a fresh one: no
     // contributions, and no metadata.json left to call the new keys

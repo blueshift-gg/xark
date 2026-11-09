@@ -147,7 +147,7 @@ test("toBytes() is the proof an exported Solana verifier reads", () => {
   const root = join(__dirname, "..", "..", "..");
   const xark = join(process.env.CARGO_TARGET_DIR ?? join(root, "target"), "release", "xark");
   execFileSync(xark, [
-    "export", outDir("cube"), "--allow-insecure",
+    "export", outDir("cube"),
     "--proof", join(dir, "proof.bin"), "--public-inputs", join(dir, "public_inputs.bin"),
     "--out", join(dir, "verifier"),
   ], { stdio: "pipe" });

@@ -658,6 +658,92 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+/// How a key was made, read from the `metadata.json` beside it: who would have to
+/// have cheated for a forged proof to verify. `xark setup` and `xark export` say
+/// it, and an exported verifier carries `tag` as its `SETUP`.
+pub struct SetupTrust {
+    /// `seeded`, `single-party`, `ceremony` (two or more contributors) or
+    /// `unknown`.
+    pub tag: &'static str,
+    pub summary: String,
+    /// Only a seeded key, or one without metadata, is worth a warning: a
+    /// single-party setup from OS randomness is a 1-of-1 trusted setup, sound
+    /// unless whoever ran it kept the randomness (xark never writes it down).
+    pub warn: bool,
+}
+
+pub fn setup_trust(key_dir: &std::path::Path) -> SetupTrust {
+    let meta = std::fs::read_to_string(key_dir.join("metadata.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let Some(meta) = meta else {
+        return SetupTrust {
+            tag: "unknown",
+            summary: "no metadata.json beside the key, so how it was made isn't known".into(),
+            warn: true,
+        };
+    };
+    let mode = meta
+        .get("setup_mode")
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
+    if let Some(seed) = meta.get("deterministic_rng_seed").and_then(|s| s.as_u64()) {
+        SetupTrust {
+            tag: "seeded",
+            summary: format!(
+                "a seeded setup (--deterministic-rng {seed}): anyone who knows the seed can \
+                 forge proofs, so it's for tests only"
+            ),
+            warn: true,
+        }
+    } else if let Some(n) = mode
+        .strip_prefix("phase2-from-ptau+mpc[")
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|n| n.parse::<usize>().ok())
+    {
+        // A ceremony of one is a single-party setup like any other (its
+        // contributor's randomness is OS randomness too); what it adds is a
+        // transcript anyone can check the key against, and room for more
+        // contributors.
+        if n >= 2 {
+            SetupTrust {
+                tag: "ceremony",
+                summary: format!(
+                    "a {n}-party ceremony: sound unless every contributor kept their \
+                     randomness. `xark ceremony verify` checks the key against its transcript"
+                ),
+                warn: false,
+            }
+        } else {
+            SetupTrust {
+                tag: "single-party",
+                summary: "a ceremony with one contributor: sound unless they kept their \
+                          randomness. `xark ceremony verify` checks the key against its \
+                          transcript, and more contributors spread the trust"
+                    .into(),
+                warn: false,
+            }
+        }
+    } else if mode == "phase2-from-ptau" {
+        SetupTrust {
+            tag: "single-party",
+            summary: "one party's phase 2 on a Powers-of-Tau transcript: sound unless whoever \
+                      ran `xark setup` kept the phase-2 seed. `xark ceremony` spreads that trust"
+                .into(),
+            warn: false,
+        }
+    } else {
+        SetupTrust {
+            tag: "single-party",
+            summary: "a single-party setup from OS randomness: sound unless whoever ran \
+                      `xark setup` kept that randomness (xark doesn't). `xark ceremony` \
+                      spreads that trust"
+                .into(),
+            warn: false,
+        }
+    }
+}
+
 /// The R1CS digest of a `circuit.xbc` (what `xark build` prints): the same for every
 /// build of a circuit, whichever Rust compiled it.
 pub fn r1cs_digest(xbc: &[u8]) -> String {
