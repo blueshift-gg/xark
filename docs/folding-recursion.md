@@ -9,7 +9,7 @@ BN254 (pairing curve, Groth16) has scalar field `Fr` and base field `Fq`.
 **Grumpkin** is `y² = x³ − 17` over `Fr` — its coordinates are Xark's native
 `Field`, so Grumpkin group ops are native in a BN254 circuit (a few constraints
 each, no non-native limbs). That makes the compute-heavy half of folding cheap:
-a full Nova fold step verifies in-circuit in **~9k constraints**
+a full Nova fold step verifies in-circuit in **~6k constraints**
 (`examples/grumpkin_nova_fold`), vs millions for non-native EC.
 
 ## What is built (all tested: accept + analyzer-clean + tamper-reject + Groth16)
@@ -17,10 +17,10 @@ a full Nova fold step verifies in-circuit in **~9k constraints**
 In-circuit **verifier** core:
 | Example | Verifies | Constraints |
 |---|---|---|
-| `grumpkin_ipa` | deferred-MSM accumulator claim | 12,212 |
-| `grumpkin_ipa_fold` | full Halo IPA reduction + in-circuit Poseidon2 FS | 40,150 |
-| `grumpkin_nova_fold` | one Nova folding step | 8,859 |
-| `grumpkin_ivc` | 2-step folding IVC (computation + accumulator chains) | 18,200 |
+| `grumpkin_ipa` | deferred-MSM accumulator claim | 8,188 |
+| `grumpkin_ipa_fold` | full Halo IPA reduction + in-circuit Poseidon2 FS | 26,254 |
+| `grumpkin_nova_fold` | one Nova folding step | 6,191 |
+| `grumpkin_ivc` | 2-step folding IVC (computation + accumulator chains) | 12,864 |
 | `grumpkin_complete_add` | identity-safe complete Grumpkin add (Nova prerequisite) | 24 |
 
 Host-side **prover** core (`examples/grumpkin_nova_prover`): extract a Xark R1CS

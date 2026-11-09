@@ -4,8 +4,8 @@ xark is one tool with two faces — a **language** (write a circuit as ordinary
 Rust) and a **toolchain** (`xark build` / `xark prove`) — split into
 focused crates with strict layering so that:
 
-* the circuit-author surface (`xark`'s prelude: `Field`, `require_eq`,
-  `Private`/`Public`, `bits`) stays small and stable,
+* the circuit-author surface (`xark`'s prelude: `Field`, `require`/`require_eq`,
+  `Private`/`Public`, `#[circuit]`, `#[input]`) stays small and stable,
 * Rust → xark-IR → R1CS lowering can be tested without a proving system,
 * the Groth16 layer can be swapped without touching lowering,
 * the on-chain verifier stays tiny, `no_std`, and dependency-light,
@@ -48,7 +48,7 @@ the same under every rustc (CI checks 1.89, stable and beta). Details:
 
 ## Crates
 
-### `xark` (the language + CLI) — `crates/lang`
+### `xark` (the language) — `crates/lang`
 
 The library defines the circuit primitives — `Field`, `require_eq`,
 `Private`/`Public`, and the `__xark_*` / `hint_*` intrinsics (wasm imports in the
@@ -60,7 +60,9 @@ needs only `use xark::prelude::*`). The `xark` command is the `xark-cli` crate
 ### `xark-ir`
 
 The xark-IR data structures (variables, linear combinations, R1CS constraints, the
-primitive/hint program) plus JSON serialization.
+primitive/hint program), the `circuit.xbc` decoder and expansion (`function_decode.rs`;
+the frontend's `output.rs` encodes it), the witness solver and the R1CS minimizer. The
+artifact is binary; the JSON views (`json.rs`) are written only by `xark build --emit-json`.
 
 ### Gadget crates (in `gadgets/`, add individually)
 
@@ -69,7 +71,7 @@ toolchain in `crates/` so it can be forked or used on its own. Everything here i
 ordinary Rust that lowers to the same primitive constraint set (no per-gadget
 backend support), and each ships KAT tests.
 
-Shared libraries the gadgets build on: `xark-bits` (bit/word blocks — `to_bits32`,
+Shared libraries the gadgets build on: `xark-bits` (bit/word blocks — `and32`,
 `xor32`, `rotr32`, `add32`, …), `xark-bignum` (non-native / foreign-field
 arithmetic, used by the EC gadgets), `xark-curve` (shared curve macros), `xark-hash`
 (the `Hash`/`Digest` types). The gadgets: `xark-poseidon`, `xark-poseidon2`,
@@ -87,7 +89,8 @@ as `xark::prover` in host builds, so circuit crates depend on `xark` alone.
 
 The Groth16 implementation: key generation (dev and Powers-of-Tau phase 2), the
 streaming prover, verification, and the key/proof types, which serialize
-byte-for-byte like `ark-groth16`'s (checked against it in tests).
+byte-for-byte like `ark-groth16`'s (checked against it in tests; a proving key adds a
+short header, see [`serialization.md`](serialization.md)).
 
 ### `xark-backend` — `crates/backend`
 
@@ -108,11 +111,14 @@ The on-chain Groth16 verifier: consumes the LE wire bytes, runs the pairing chec
 via `solana-nostd-alt-bn128`, `#![no_std]` on the Solana target. The typed
 `Verifier<N>` bakes the VK in at compile time.
 
-## Determinism and circuit hashing
+## Determinism and circuit digests
 
-The circuit hash covers a lowering-version tag (bump it whenever the lowering
-algorithm changes), the curve and proving-system identifiers, the number and
-identity of public inputs, and the constraints themselves (coefficients and variable
-indices). Setup writes that hash into metadata alongside the backend version and
-constraint count, so any change to lowering or to the circuit produces a different
-hash.
+The circuit digest `xark build` prints (and writes to `digest`) is a 128-bit
+fingerprint of the R1CS itself, folded from every row's coefficients and variable
+indices (`function_decode::stream_digest`). It depends only on the constraint
+system, so every build of a circuit has the same digest whichever Rust compiled it
+(CI checks every example's digest on 1.89, stable and beta). Setup writes it into
+`metadata.json` as `digest`, beside `circuit_hash` (the SHA-256 of that build's
+`circuit.xbc`), the backend version and the constraint count, so a key records the
+circuit it was made for and any change to lowering or to the circuit changes the
+digest.

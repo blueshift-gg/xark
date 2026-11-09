@@ -1,10 +1,19 @@
 # Integer operations on `Field`
 
+> **Current state (0.3).** This is the design note for the `Field`-level integer surface, which
+> ships as described below. Integers beyond it are native Rust integers, not `Field` methods: a
+> circuit takes `u8`..`u128`, `i8`..`i128` and `bool` inputs (range-checked on entry), and native
+> integer code on witnesses — signed comparisons, checked and wrapping `+ - *`, `/`, `%`, shifts,
+> casts — lowers to range-checked gadgets (see [subset.md](subset.md#supported)).
+> `require_lt`/`require_le`/`require_gt`/`require_ge` work on anything `PartialOrd`
+> (`crates/lang/src/lang.rs`). Sections that speak of PR #8 and its removed `U<N>`/`I<N>` wrappers
+> are history.
+
 Status: **the `Field`-level surface is what ships.** PR #8 (`core-cmp`) *did* ship
 first-class typed integers — `U<N>`/`I<N>` wrappers with range-proved inputs and checked
 fixed-width arithmetic — but those were **removed** in favor of the `Field`-level surface here.
-Signed integers and checked fixed-width (`U<N>`-style overflow-rejecting) arithmetic are **not
-currently provided**; if reintroduced they'd be `Field` methods, not separate types (see
+`Field` itself has no signed or overflow-checked operations; signed integers and checked
+fixed-width arithmetic come from native `iN`/`uN` values instead (see
 [Explicitly not building](#explicitly-not-building)).
 
 This defines how `Field` supports integer-flavoured ops (equality, ordering, shifts, modulus) in
@@ -53,8 +62,8 @@ op interprets its `Field` operand `x` as an `N`-bit value: it emits `to_bits::<N
 i.e. `2·N ≤ 253`. `u8..u64` satisfy this (`2·N ≤ 128`); `u128` (`2·N = 256 > 253`) does not, so
 `Rem<u128>` is **omitted** — `x % 5u128` fails to compile. Use a `u64`-or-narrower modulus.
 
-Signed `i8..i128` may be added later with the same shape (bias by `2ᴺ⁻¹` into `[0, 2ᴺ)`, reuse the
-unsigned path — how PR #8's removed `__xark_ilt` worked); out of scope for v1.
+There are no `Field` impls against signed `i8..i128` operands; signed values are native `iN`
+witnesses, whose comparisons the frontend lowers itself.
 
 ### `Field`-vs-`Field` (the one case with no native RHS)
 
@@ -148,24 +157,24 @@ This gives const-generic methods the same amortization a `U<N>` wrapper would �
   by `a.lt::<N>(b)`. Revisit only if a lot of word-heavy code makes a first-class bounded-int type
   worth two types + their full trait matrix. If reintroduced, `U<N>` = "a `Field` plus its cached
   `[Field; N]` bits, operators delegating to this same surface."
-* **Signed integers (`I<N>` / `i8..i128`)** — the signed ordering/bias path (`__xark_ilt`) shipped in
-  PR #8 and was removed with `I<N>`; there is currently **no** signed comparison surface. Could return
-  as `Field::ilt::<N>` on the same bias-then-unsigned-compare pattern.
-* **Checked fixed-width arithmetic** (`U<N>`-style `+`/`-`/`*` that range-re-prove their result so
-  overflow is unsatisfiable) — shipped in PR #8, removed with the wrappers; **not currently provided**.
-  `Field` `+`/`-`/`*` are plain field ops with no width or overflow check. A future `Field` method
-  could offer opt-in checked arithmetic.
+* **Signed `Field` operations (`I<N>`, `Field::ilt`)** — the signed ordering/bias path (`__xark_ilt`)
+  shipped in PR #8 and was removed with `I<N>`. Signed integers are native `i8..i128` values
+  instead (inputs and witnesses), with signed comparisons lowered by the frontend.
+* **Checked fixed-width arithmetic on `Field`** (`U<N>`-style `+`/`-`/`*` that range-re-prove their
+  result so overflow is unsatisfiable) — shipped in PR #8, removed with the wrappers. `Field`
+  `+`/`-`/`*` are plain field ops with no width or overflow check; checked arithmetic is native
+  `uN`'s (an overflow panic becomes a constraint, see [subset.md](subset.md)).
 
 ## Cleanup carried by this work
 
 PR #8 shipped an inconsistent state this spec resolves:
 
 * `impl PartialEq for Field` exists and works (`==`/`!=`) — keep.
-* `require_lt`/`require_le`/`require_gt`/`require_ge` call `a < b` on `Field`, which doesn't compile
-  (`E0369`, no `PartialOrd`) — they are **dead**. Either reimplement against this surface (const RHS →
-  operator; two witnesses → `.lt::<N>`) or remove until the surface lands.
-* The `lang.rs` comment claiming "`PartialOrd` on `Field`/`U<N>`/`I<N>`" is aspirational — none exist.
-  Update it to describe the real surface.
+* `require_lt`/`require_le`/`require_gt`/`require_ge` called `a < b` on `Field`, which didn't compile
+  (`E0369`, no `PartialOrd`). *Resolved:* they are generic over `PartialOrd`, so they work against a
+  native-int RHS (`require_lt(x, 100u32)`) and on native integers.
+* The `lang.rs` comment claiming "`PartialOrd` on `Field`/`U<N>`/`I<N>`" was aspirational.
+  *Resolved:* it describes the real surface.
 
 ## Related follow-ups (this review pass)
 

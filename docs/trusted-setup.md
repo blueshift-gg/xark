@@ -24,7 +24,7 @@ throwaway *test* transcript you can mint a small one yourself — see
 
 The ceremony is tested at two levels. `crates/backend/src/ceremony.rs` checks the library: one and
 three contributions compose and verify, and a tampered chain link, Schnorr response or δ, a zero δ,
-or keys that don't match the chain are all rejected. `gadgets/tests/tests/ceremony_cli.rs` runs the
+or keys that don't match the chain are all rejected. `gadgets/tests/tests/it/ceremony_cli.rs` runs the
 CLI end to end on every push: `xark build` → `ceremony init` (over a synthetic phase-1 transcript)
 → two `contribute`s → `verify` → `finalize`, then proves and verifies with the ceremony's keys and
 rejects a wrong public input. Both build phase 1 themselves, so they *know* the toxic waste: they
@@ -67,13 +67,13 @@ xark verify --verifying-key ceremony/verifying_key.bin --proof proof/proof.bin \
 Run the steps above for each circuit, then install the resulting `*.solana.bin` over the committed
 fixtures. The phase-1 power must cover the circuit: `2^power` at least its constraint count plus
 public inputs (`xark inspect` prints both). If the transcript is too small, `ceremony init` says
-how big it needs to be. `secp256k1_ecdsa` and `secp256r1_ecdsa` have millions of constraints and
+how big it needs to be. `secp256k1_ecdsa` and `secp256r1_ecdsa` (227,168 and 344,969 constraints)
 need a correspondingly large phase 1; treat them separately.
 
 Caveats when regenerating:
 - A full regen must be **consistent** — regenerate every artifact in a circuit's fixture dir from the
   same keys, not a mix of dev-mode + ceremony bytes.
-- Update the hash pin in `gadgets/tests/tests/solana_format.rs` (`VK_SOLANA_SHA256` etc.), which
+- Update the hash pin in `gadgets/tests/tests/it/solana_format.rs` (`VK_SOLANA_SHA256` etc.), which
   intentionally locks the committed VK bytes.
 - Re-run `cargo test -p xark-tests` (host + `--test sbpf`).
 

@@ -104,17 +104,18 @@ for the canonical encoder.
   holding a valid proof can make a different valid proof of the same public
   inputs. Never use proof bytes as a replay or dedup key; bind a nullifier,
   nonce or signer into the public inputs instead.
-- Every public input is cryptographically bound (`binding` test).
+- Every public input is cryptographically bound: a flipped input fails
+  (`tampered_public_input_rejected` in `gadgets/tests/tests/it/host.rs`).
 - `verify_groth16` never panics and never accepts adversarial bytes (`fuzz` test).
 - The entrypoint is fail-closed (anything not `Ok(true)` → reject).
 
 ## Testing
 
-The whole workspace's tests (host, fuzz, binding, and the on-chain Mollusk
-suite) live in the `xark-tests` crate:
+The whole workspace's tests (host, fuzz, and the on-chain Mollusk suite) live
+in the `xark-tests` crate:
 
 ```
-cargo test -p xark-tests # host (Arkworks path) + fuzz + binding
+cargo test -p xark-tests # host (Arkworks path) + fuzz
 cargo test -p xark-tests --test sbpf # on-chain in Mollusk (needs cargo-build-sbf)
 ```
 

@@ -19,9 +19,10 @@ soundness, and what an external auditor should focus on first. Pairs with
   verifier `.so` (`xark_verifier_reference_program.so`), hash-verified in CI.
 
 ### Test suite
-Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128`, `end_to_end`,
-`fuzz`, `host`, `multi_function`, `ptau`, `randomness`, `sbpf`, `serialization`,
-`solana_format`, `xark_ir_e2e`) plus workspace unit tests, including:
+Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128` and `sbpf` as
+their own binaries; `ceremony_cli`, `end_to_end`, `fuzz`, `host`, `multi_function`, `ptau`,
+`serialization`, `solana_format`, `xark_ir_e2e` and the rest as modules of the one `it`
+binary under `it/`) plus workspace unit tests, including:
 
 * **KAT cross-checks** against `k256`, `p256`, `sha2`, `keccak`, `blake2`, `blake3`,
   `aes`, `ark-grumpkin` — each gadget vs the published reference crate.
@@ -38,9 +39,10 @@ Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128`, `end_to_e
   constraint, so an unpinned hint output can't force a satisfying assignment.
 * **Ceremony enforcement** — `CeremonyError` rejection paths (Schnorr-PoK, transcript
   hash chain, δ-consistency, dev-mode guards) exercised by the ptau/setup paths.
-* **cargo-fuzz smoke** (`gadgets/tests/tests/fuzz.rs`) — over the artifact parser,
-  witness parser, and IR→R1CS lowering. Run manually; no CI gate yet. Production fuzzing
-  is CPU-weeks.
+* **proptest smoke** (`gadgets/tests/tests/it/fuzz.rs`) — the verifier's entry points
+  on arbitrary and mutated bytes (never panic, never accept) and the `circuit.xbc`
+  decoder on arbitrary bytes (never panic). Runs with the test suite; production
+  fuzzing is CPU-weeks.
 
 ### Lean 4 / mathlib formal proofs (`formal/`)
 
@@ -66,9 +68,10 @@ depending on `sorryAx`. Coverage (theorem names → modules):
   (`Formal.Poseidon` + `Formal.Poseidon2Bn254T3`).
 * **ECDSA scalar mult** — `ladder_step_correct`, `ladder_correct`, `ladder_determinism`
   (`Formal.Ecdsa`).
-* **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints` (4×64-bit) and
-  `mul_mod_via_Fr_limbwise_constraints_3` (3×86-bit, matching the `mod_mul_3` gadget the
-  secp curves use) — the full ℕ + Fr no-wrap chain (`Formal.NonNative`).
+* **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints` (4×64-bit), the
+  full ℕ + Fr no-wrap chain (`Formal.NonNative`); the pseudo-Mersenne multiplication
+  certificates the signature gadgets use (`mul_cert_k1`/`_r1`/`_25519`) are proven over
+  their exported rows (`Formal.MulCertK1 / MulCertR1 / MulCert25519`).
 * **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over `G : AddCommGroup`,
   `Formal.EcdsaVerify`).
 * **GLV** — `glv_sum_eq`, `glv_via_endomorphism`, `glv_endomorphism_correct` (abstract,
@@ -123,28 +126,29 @@ This is **not** an external audit. Until an external firm reviews the code, the 
 
 Rough order of "biggest blast radius if wrong":
 
-### 1. Non-native arithmetic over secp curves (`gadgets/xark-secp256k1/src/lib.rs`, `gadgets/xark-bignum/src/lib.rs`)
+### 1. Non-native arithmetic in the signature gadgets (`gadgets/xark-bignum/src/lib.rs`, `gadgets/xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`)
 
-The single largest soundness surface — every ECDSA proof depends on:
+The single largest soundness surface — every ECDSA and EdDSA proof depends on:
 
-* `bigint256_mul_mod` — limb-by-limb non-native mul with prover-aided quotient. Mechanised
-  in `Formal.NonNative.mul_mod_via_Fr_limbwise_constraints` (ℕ + Fr no-wrap, `n = 4, β = 2^64`).
-* `sub_mod` — direct subtraction (`a − b + k·m − c = 0`, `k ∈ {0,1}`).
-* `inv_mod` — modular inverse via `a·a_inv = 1`; reduces to `mul_mod` + a non-zero check.
-* `enforce_on_curve` — `y² = x³ + a·x + b mod p`. Lean lemmas exist for all three curves
-  (`enforce_on_curve_grumpkin_sound`, `Formal.Secp256k1.enforce_on_curve_secp256k1_sound`,
-  secp256r1 analogue), **but were previously not wired into the gadgets.** Grumpkin now
-  enforces it in-circuit (`y² = x³ − 17`, called by `scalar_mul`/`multi_scalar_mul`). The
-  secp256k1/secp256r1 (ECDSA) and Ed25519 gadgets do **not** yet call an on-curve check —
-  their points are public inputs, so on-curve validation is currently the caller's
-  responsibility off-circuit; wiring the (Lean-proven) non-native check in is a tracked
-  follow-up.
-* `enforce_in_range_one_to_n` — `r, s ∈ [1, n−1]`. Without it a malicious prover could
-  exploit the `inv_mod(s)` step.
-* GLV decomposition (`glv_decompose_in_circuit`) — proves `k = k1 + λ·k2 (mod n)` with
-  `|k1|, |k2| < 2^129`. Kernel proven (`glv_via_endomorphism` + `glv_endomorphism_correct`).
-* Fixed-base comb tables for `u1·G` — core proven (`windowed_scalar_mul_sound`); the
-  comb-row-2 doubling exception is in scope of the same proof.
+* `mul_cert_k1` / `mul_cert_r1` / `mul_cert_25519` — non-native multiplication by
+  pseudo-Mersenne certificates over 8×32-bit limbs, each proven sound over its exported
+  rows (`Formal.MulCertK1 / MulCertR1 / MulCert25519`).
+* `range_check_limbs` and `require_lt` — limb range checks and `x < m` against a
+  constant (`Formal.RangeCheckLimbs*`, `Formal.RequireLt*`).
+* On-curve and canonical-coordinate checks — `on_curve_k1` / `on_curve_r1` (secp) and
+  `point_in` (Ed25519) require each coordinate `< p` and the point on the curve, for the
+  public key and for the hinted `R` alike (`Formal.EcK1Check` / `EcR1Check` /
+  `EdCurveCheck`). Grumpkin's `enforce_on_curve` (`y² = x³ − 17`) is
+  native-field.
+* Scalar ranges — ECDSA requires `r, s, e < n` (`require_lt`) and `r, s ≠ 0`
+  (`assert_nonzero_limbs`); EdDSA requires `S < L` (`assert_scalar_below_order`).
+  Without them a malicious prover could exploit the hinted `s⁻¹` or malleate `S`.
+* Fake GLV (ePrint 2025/933) — the prover hints a short `(A, B)`; `fake_glv_check_k1` /
+  `_r1` / `_25519` pin the scalar relations (`Formal.FakeGlvK1 / FakeGlvR1 / FakeGlv25519`).
+* The group side — fused double-and-add steps over signed digits (`ec_double_add_k1` /
+  `_r1`, proven per step) and a fixed-base comb for the generator (`one_hot8` over
+  constant tables). How the steps are chained across the loop is covered by tests, not
+  by a whole-loop proof (see [`security.md` §6](security.md#6-recommended-audit-scope)).
 
 ### 2. Hint/advice trust-outputs assumption
 

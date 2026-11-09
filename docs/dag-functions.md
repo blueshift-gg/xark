@@ -8,15 +8,15 @@ the container, decoding, minimization, and how soundness is checked at each step
 
 ## Why
 
-A signature circuit is millions of constraints built from a handful of routines (a field
+A signature circuit is hundreds of thousands of constraints built from a handful of routines (a field
 multiply, a point add or double) run thousands of times. Storing the flat expansion wastes disk
 and load time; storing each routine once does not:
 
 | circuit | constraints | `circuit.xbc` |
 |---|---:|---:|
-| `ed25519` | 2,399,092 | 43 KB |
-| `secp256k1_ecdsa` | 1,634,595 | 441 KB |
-| `keccak256` | 156,280 | 562 KB |
+| `ed25519` | 396,912 | 6.2 MB |
+| `secp256k1_ecdsa` | 227,168 | 4.5 MB |
+| `keccak256` | 89,375 | 404 KB |
 
 ## Pipeline
 
@@ -122,8 +122,9 @@ variables, so the big win is crossing below a domain-size boundary.
 - **The minimizer preserves satisfiability** by construction, and end to end by producing
   verifying proofs that reject wrong witnesses. `XARK_VERIFY` (developer builds) also asserts
   it reached a fixpoint.
-- **Under-constraint gate.** Independently, lowering rejects any hint/advice or public variable
-  left unpinned by a constraint.
+- **Under-constraint search.** Independently, a circuit's tests (`Circuit::check`, which every
+  `#[circuit]` validator calls) and `xark check --inputs` solve a witness and report any
+  variable the constraints leave free. `xark prove` doesn't run it.
 
 ## Developer flags
 
