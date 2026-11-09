@@ -585,14 +585,15 @@ pub fn satisfaction_check(
 /// constraint check or soundness analysis: the proof self-verifies, and
 /// soundness is checked by the circuit's tests and `xark check --inputs`.
 ///
-/// If solving fails, it re-expands the flat program once for the precise
+/// Returns each variable's value by id (`None` where the solve set none). If
+/// solving fails, it re-expands the flat program once for the precise
 /// which-constraint / source-line diagnostic ([`explain_unsatisfied`]).
 pub fn stream_witness(
     bytes: &[u8],
     sources: Option<&SourceMap>,
     id_inputs: &BTreeMap<VarId, String>,
-) -> Result<BTreeMap<VarId, Fp>> {
-    match xark_ir::function_decode::stream_solve(bytes, id_inputs) {
+) -> Result<Vec<Option<Fp>>> {
+    match xark_ir::function_decode::stream_solve_dense(bytes, id_inputs) {
         Ok(assign) => Ok(assign),
         Err(e) => {
             explain_unsatisfied(bytes, sources, id_inputs)?;

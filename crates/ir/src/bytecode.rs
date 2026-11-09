@@ -451,8 +451,16 @@ impl<'a> Cursor<'a> {
             FC_ZERO => FieldConst::zero(),
             FC_ONE => FieldConst::one(),
             FC_NEG_ONE => FieldConst::from_i64(-1),
-            FC_SMALL_POS => FieldConst::from_bigint(BigInt::from(self.varint()?)),
-            FC_SMALL_NEG => FieldConst::from_bigint(-BigInt::from(self.varint()?)),
+            // Built straight into the small form where it fits, as `from_bigint`
+            // would normalize it, without allocating a `BigInt` first.
+            FC_SMALL_POS => match self.varint()? {
+                v if v <= i64::MAX as u64 => FieldConst::from_i64(v as i64),
+                v => FieldConst::from_bigint(BigInt::from(v)),
+            },
+            FC_SMALL_NEG => match self.varint()? {
+                v if v <= i64::MAX as u64 => FieldConst::from_i64(-(v as i64)),
+                v => FieldConst::from_bigint(-BigInt::from(v)),
+            },
             FC_BIG => {
                 let sign = match self.u8()? {
                     1 => Sign::Plus,
@@ -472,6 +480,10 @@ impl<'a> Cursor<'a> {
                 let k = self.varint()?;
                 if k > 4096 {
                     return Err(BytecodeError::Truncated);
+                }
+                if k < 63 {
+                    let v = 1i64 << k;
+                    return Ok(FieldConst::from_i64(if neg { -v } else { v }));
                 }
                 let v = BigInt::from(1) << k;
                 FieldConst::from_bigint(if neg { -v } else { v })

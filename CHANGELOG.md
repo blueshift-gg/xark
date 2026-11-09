@@ -280,6 +280,10 @@ verification starter, and the `xark-client` npm package is removed.
   stream. On one 14-core machine: ed25519 setup 6.9 → 3.9 s and prove 8.6 → 6.8 s;
   secp256k1_ecdsa setup 4.9 → 2.9 s; aes256_gcm setup peak 3.1 → 2.8 GB. Keys,
   proofs and the keyed rows are unchanged.
+- **A faster witness solve.** Bits skip the field multiply, a non-native inverse
+  is a 256-bit safegcd, and the hint program compiles in parallel. Proving on an
+  M3 Max: secp256k1_ecdsa 0.38 → 0.28 s, secp256r1_ecdsa 0.54 → 0.38 s, ed25519
+  0.48 → 0.41 s. Witnesses, keys and proofs are unchanged.
 - **A streaming Groth16 prover.** `xark prove` uses `xark-groth16`, which never
   holds the whole constraint system or proving key in memory, always from
   `circuit.xbc`. Keys and proofs are compatible with the arkworks path
