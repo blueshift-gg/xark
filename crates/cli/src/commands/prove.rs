@@ -65,9 +65,10 @@ pub struct ProveArgs {
     pub cache: bool,
 
     /// Keep a single domain-sized vector in memory during
-    /// the quotient step by parking the others in a temp file next to the proof
-    /// (rows are streamed once more). For proving the largest circuits on small
-    /// machines.
+    /// the quotient step by parking the others in a temp file beside the proving
+    /// key (rows are streamed once more). The file holds witness-derived data: on
+    /// unix it's readable by you only and unlinked as soon as it's open, so it never
+    /// outlives the process. For proving the largest circuits on small machines.
     #[arg(long, default_value_t = false)]
     pub low_memory: bool,
 }
@@ -257,7 +258,8 @@ fn prove_streaming(
     // when they ran one after the other.
     let (built, solved) = std::thread::scope(|s| {
         let solved = s.spawn(|| {
-            let vars = xark_ir::function_decode::decode_input_vars(&bytes);
+            let vars = xark_ir::function_decode::decode_input_vars(&bytes)
+                .map_err(|e| anyhow::anyhow!(e))?;
             let id_inputs = resolve_input_ids(&vars, inputs)?;
             drop(vars);
             let assign = stream_witness(&bytes, sources, &id_inputs)?;

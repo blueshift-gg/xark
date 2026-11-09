@@ -41,6 +41,51 @@ fn get_iv(b: &[u8], p: &mut usize) -> i64 {
     let u = get_uv(b, p);
     ((u >> 1) as i64) ^ -((u & 1) as i64)
 }
+/// A count of things that follow at `*p`, each encoded in at least `min_width`
+/// bytes. Panics (a malformed artifact) when they can't fit in the bytes left, so
+/// a hostile count is caught before it sizes an allocation.
+fn get_len(b: &[u8], p: &mut usize, min_width: u64) -> usize {
+    let n = get_uv(b, p);
+    let left = b.len().saturating_sub(*p) as u64;
+    assert!(
+        n.checked_mul(min_width).is_some_and(|w| w <= left),
+        "count {n} overruns the artifact"
+    );
+    n as usize
+}
+
+/// The most an artifact may declare or expand to: 2^30 variables, and 2^30 rows,
+/// witness ops and template calls in all (what parsing materializes and what
+/// expanding walks are each held to it). Groth16 over BN254 keys at most 2^28 rows
+/// (the scalar field's two-adicity bounds the FFT domain) and the largest examples
+/// are under 2^23, so this rejects only artifacts no prover could use, while
+/// keeping a few hostile bytes from asking for an unbounded walk or allocation.
+const SIZE_CAP: u64 = 1 << 30;
+
+thread_local! {
+    /// What parsing the current artifact has materialized so far (rolled calls,
+    /// rolled-run ops), against [`SIZE_CAP`].
+    static SPENT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Charge `n` items parsing is about to materialize.
+fn charge(n: u64) {
+    SPENT.with(|s| {
+        let total = s.get().saturating_add(n);
+        assert!(total <= SIZE_CAP, "the artifact expands past the size cap");
+        s.set(total);
+    });
+}
+
+/// A rolled run (item tag `7`), expanded, its cost charged.
+fn rolled_run(blob: &[u8]) -> (Vec<R1csRow>, Vec<WitnessGen>) {
+    let mut left = SIZE_CAP - SPENT.with(std::cell::Cell::get);
+    let out = crate::bytecode::decode_and_expand_ops_compact(blob, &pool(), &mut left)
+        .unwrap_or_else(|e| panic!("bad rolled run: {e}"));
+    SPENT.with(|s| s.set(SIZE_CAP - left));
+    out
+}
+
 fn get_fc(b: &[u8], p: &mut usize) -> FieldConst {
     let tag = b[*p];
     *p += 1;
@@ -54,7 +99,7 @@ fn get_fc(b: &[u8], p: &mut usize) -> FieldConst {
                 t => panic!("bad constant sign {t}"),
             };
             *p += 1;
-            let n = get_uv(b, p) as usize;
+            let n = get_len(b, p, 1);
             let v = num_bigint::BigInt::from_bytes_le(sign, &b[*p..*p + n]);
             *p += n;
             FieldConst::from_bigint(v)
@@ -86,7 +131,7 @@ fn get_var(b: &[u8], p: &mut usize, prev: &mut i64) -> u32 {
 }
 fn get_lc(b: &[u8], p: &mut usize) -> LinearCombination {
     let constant = get_fc(b, p);
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut terms = Vec::with_capacity(n.min(1 << 20));
     let mut prev = 0i64;
     for _ in 0..n {
@@ -97,12 +142,12 @@ fn get_lc(b: &[u8], p: &mut usize) -> LinearCombination {
     LinearCombination { constant, terms }
 }
 fn get_ids(b: &[u8], p: &mut usize) -> Vec<VarId> {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut prev = 0i64;
     (0..n).map(|_| get_var(b, p, &mut prev)).collect()
 }
 fn get_str(b: &[u8], p: &mut usize) -> String {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let s = std::str::from_utf8(&b[*p..*p + n]).unwrap().to_string();
     *p += n;
     s
@@ -126,7 +171,7 @@ fn get_witness_with(
 ) -> WitnessGen {
     let lcs =
         |b: &[u8], p: &mut usize, lc: &mut dyn FnMut(&[u8], &mut usize) -> LinearCombination| {
-            let n = get_uv(b, p) as usize;
+            let n = get_len(b, p, 1);
             (0..n).map(|_| lc(b, p)).collect::<Vec<_>>()
         };
     let tag = b[*p];
@@ -356,9 +401,9 @@ struct GDef {
 /// even: a bare variable (`1·v`), `v` = previous bare plug (initially `base`) +
 /// zigzag(header / 2); `1`: a general LC follows.
 fn get_plugs_compact(b: &[u8], p: &mut usize, base: u32) -> Vec<LinearCombination> {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut prev = i64::from(base);
-    let mut out = Vec::with_capacity(n);
+    let mut out = Vec::with_capacity(n.min(1 << 20));
     for _ in 0..n {
         let h = get_uv(b, p);
         if h & 1 == 0 {
@@ -375,21 +420,21 @@ fn get_plugs_compact(b: &[u8], p: &mut usize, base: u32) -> Vec<LinearCombinatio
 /// plugs delta-coded as in [`get_plugs_compact`] (each followed by its step).
 fn parse_rolled_calls_compact(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<LinearCombination>)> {
     let count = get_uv(b, p) as i64;
-    let period = get_uv(b, p) as usize;
+    let period = get_len(b, p, 1);
     #[allow(clippy::type_complexity)]
     let mut body: Vec<(
         u32,
         i64,
         i64,
         Vec<(FieldConst, Vec<(FieldConst, i64, i64)>)>,
-    )> = Vec::with_capacity(period);
+    )> = Vec::with_capacity(period.min(1 << 20));
     for _ in 0..period {
         let def = get_uv(b, p) as u32;
         let base0 = get_uv(b, p) as i64;
         let base_step = get_iv(b, p);
-        let nplugs = get_uv(b, p) as usize;
+        let nplugs = get_len(b, p, 1);
         let mut prev = base0;
-        let mut plugs = Vec::with_capacity(nplugs);
+        let mut plugs = Vec::with_capacity(nplugs.min(1 << 20));
         for _ in 0..nplugs {
             let h = get_uv(b, p);
             if h & 1 == 0 {
@@ -399,8 +444,8 @@ fn parse_rolled_calls_compact(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<Lin
                 plugs.push((FieldConst::zero(), vec![(FieldConst::one(), prev, step)]));
             } else {
                 let constant = get_fc(b, p);
-                let nterms = get_uv(b, p) as usize;
-                let mut terms = Vec::with_capacity(nterms);
+                let nterms = get_len(b, p, 1);
+                let mut terms = Vec::with_capacity(nterms.min(1 << 20));
                 for _ in 0..nterms {
                     let coeff = get_fc(b, p);
                     let var0 = get_uv(b, p) as i64;
@@ -412,7 +457,10 @@ fn parse_rolled_calls_compact(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<Lin
         }
         body.push((def, base0, base_step, plugs));
     }
-    let mut out = Vec::with_capacity(count.max(0) as usize * period);
+    // The block repeats its body `count` times: bounded by the cap, not the bytes.
+    // An empty body still costs the loop its iterations.
+    charge((count.max(0) as u64).saturating_mul(period.max(1) as u64));
+    let mut out = Vec::with_capacity((count.max(0) as usize).saturating_mul(period).min(1 << 20));
     for k in 0..count {
         for (def, base0, base_step, plugs) in &body {
             let lcs = plugs
@@ -483,7 +531,7 @@ fn push_refs(items: &[CItem], table: &mut Vec<LcRef>) {
 
 /// Parse a constraint item stream and its LC table.
 fn parse_c_items(b: &[u8], p: &mut usize) -> (Vec<CItem>, Vec<LcRef>) {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut out = Vec::with_capacity(n.min(1 << 20));
     let mut table: Vec<LcRef> = Vec::new();
     for _ in 0..n {
@@ -548,12 +596,10 @@ fn parse_c_items(b: &[u8], p: &mut usize) -> (Vec<CItem>, Vec<LcRef>) {
                 }
             }
             7 => {
-                let len = get_uv(b, p) as usize;
+                let len = get_len(b, p, 1);
                 let blob = &b[*p..*p + len];
                 *p += len;
-                let (rows, _) = crate::bytecode::decode_and_expand_ops_compact(blob, &pool())
-                    .unwrap_or_default();
-                out.push(CItem::Rolled(rows));
+                out.push(CItem::Rolled(rolled_run(blob).0));
             }
             t => panic!("bad constraint item tag {t}"),
         }
@@ -564,8 +610,8 @@ fn parse_c_items(b: &[u8], p: &mut usize) -> (Vec<CItem>, Vec<LcRef>) {
 /// Parse a witness item stream. `c_items` is the same scope's constraint stream:
 /// a tag `4` reuses its CALLs (in order) instead of repeating them.
 fn parse_w_items(b: &[u8], p: &mut usize, c_items: &[CItem], table: &[LcRef]) -> Vec<WItem> {
-    let n = get_uv(b, p) as usize;
-    let mut out = Vec::with_capacity(n);
+    let n = get_len(b, p, 1);
+    let mut out = Vec::with_capacity(n.min(1 << 20));
     let mut c_calls = c_items.iter().filter_map(|it| match it {
         CItem::Call(d, base, plugs) => Some((*d, *base, plugs)),
         _ => None,
@@ -605,12 +651,10 @@ fn parse_w_items(b: &[u8], p: &mut usize, c_items: &[CItem], table: &[LcRef]) ->
                 }
             }
             7 => {
-                let len = get_uv(b, p) as usize;
+                let len = get_len(b, p, 1);
                 let blob = &b[*p..*p + len];
                 *p += len;
-                let (_, wits) = crate::bytecode::decode_and_expand_ops_compact(blob, &pool())
-                    .unwrap_or_default();
-                out.push(WItem::Rolled(wits));
+                out.push(WItem::Rolled(rolled_run(blob).1));
             }
             t => panic!("bad witness item tag {t}"),
         }
@@ -740,7 +784,7 @@ pub fn stream_field(b: &[u8]) -> Option<FieldSpec> {
     if b.len() < 6 || b[..4] != crate::bytecode::MAGIC {
         return None;
     }
-    std::panic::catch_unwind(|| decode_header(b).0).ok()
+    catch_quietly(|| decode_header(b).0).ok()
 }
 
 /// Parse the header through the signature inputs; returns the cursor after them.
@@ -748,8 +792,15 @@ fn decode_header(b: &[u8]) -> (FieldSpec, usize, Vec<Var>, usize) {
     let mut p = 6usize;
     let name = get_str(b, &mut p);
     let modulus_decimal = get_str(b, &mut p);
-    let num_vars = get_uv(b, &mut p) as usize;
-    let num_inputs = get_uv(b, &mut p) as usize;
+    let num_vars = get_uv(b, &mut p);
+    assert!(
+        num_vars <= SIZE_CAP,
+        "{num_vars} variables is past the size cap"
+    );
+    let num_vars = num_vars as usize;
+    // Each input is a role byte and a name (at least its length byte).
+    let num_inputs = get_len(b, &mut p, 2);
+    assert!(num_inputs <= num_vars, "more inputs than variables");
     let mut inputs = Vec::with_capacity(num_inputs);
     for id in 0..num_inputs {
         let role = byte_role(b[p]);
@@ -796,17 +847,19 @@ fn parse_body(
 ) {
     let version = u16::from_le_bytes([b[4], b[5]]);
     assert_eq!(version, 2, "unsupported XBC container version {version}");
-    let n = get_uv(b, &mut p) as usize;
+    let n = get_len(b, &mut p, 1);
     let pool: Vec<FieldConst> = (0..n).map(|_| get_fc(b, &mut p)).collect();
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
             POOL.with(|p| *p.borrow_mut() = std::rc::Rc::new(Vec::new()));
+            SPENT.with(|s| s.set(0));
         }
     }
     POOL.with(|p| *p.borrow_mut() = std::rc::Rc::new(pool));
+    SPENT.with(|s| s.set(0));
     let _reset = Reset;
-    let n_defs = get_uv(b, &mut p) as usize;
+    let n_defs = get_len(b, &mut p, 1);
     let mut defs = Vec::with_capacity(n_defs.min(1 << 20));
     for _ in 0..n_defs {
         let base_var = get_uv(b, &mut p) as u32;
@@ -825,7 +878,92 @@ fn parse_body(
     let (top_c, table) = parse_c_items(b, &mut p);
     let top_w = parse_w_items(b, &mut p, &top_c, &table);
     let keep_extra: std::collections::BTreeSet<u32> = get_ids(b, &mut p).into_iter().collect();
+    check_calls(&defs, &top_c, &top_w);
     (defs, top_c, top_w, keep_extra)
+}
+
+/// Reject a template call graph the expanders can't walk, before anything walks
+/// it: a call to a missing template, a cycle (expansion would recurse until the
+/// stack overflows, which aborts rather than unwinds), or nesting that expands
+/// past [`SIZE_CAP`] (template `k` calling `k - 1` twice, 40 deep, is a few
+/// hundred bytes and 2^40 rows). Templates call each other in either index order
+/// in real artifacts, so the order comes from a topological sort (Kahn's), callees
+/// first; each template's cost is then its own items plus its callees' costs.
+fn check_calls(defs: &[GDef], top_c: &[CItem], top_w: &[WItem]) {
+    let n = defs.len();
+    let c_calls = |items: &[CItem]| -> Vec<u32> {
+        items
+            .iter()
+            .filter_map(|it| match it {
+                CItem::Call(d, ..) => Some(*d),
+                _ => None,
+            })
+            .collect()
+    };
+    let w_calls = |items: &[WItem]| -> Vec<u32> {
+        items
+            .iter()
+            .filter_map(|it| match it {
+                WItem::Call(d, ..) => Some(*d),
+                _ => None,
+            })
+            .collect()
+    };
+    for d in c_calls(top_c).into_iter().chain(w_calls(top_w)) {
+        assert!((d as usize) < n, "a call to missing template {d}");
+    }
+    // Per template: its calls not yet costed; per callee: its callers, once per call.
+    let mut pending = vec![0usize; n];
+    let mut callers: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, def) in defs.iter().enumerate() {
+        for d in c_calls(&def.c_items)
+            .into_iter()
+            .chain(w_calls(&def.w_items))
+        {
+            assert!((d as usize) < n, "a call to missing template {d}");
+            pending[i] += 1;
+            callers[d as usize].push(i);
+        }
+    }
+    // The rows (or ops) and calls a stream expands to, saturating past the cap. An
+    // empty rolled run still costs its item.
+    let c_cost = |items: &[CItem], cost: &[(u64, u64)]| -> u64 {
+        items.iter().fold(0u64, |acc, it| {
+            acc.saturating_add(match it {
+                CItem::Row(_) => 1,
+                CItem::Rolled(rows) => rows.len().max(1) as u64,
+                CItem::Call(d, ..) => cost[*d as usize].0.saturating_add(1),
+            })
+        })
+    };
+    let w_cost = |items: &[WItem], cost: &[(u64, u64)]| -> u64 {
+        items.iter().fold(0u64, |acc, it| {
+            acc.saturating_add(match it {
+                WItem::Row(_) => 1,
+                WItem::Rolled(ops) => ops.len().max(1) as u64,
+                WItem::Call(d, ..) => cost[*d as usize].1.saturating_add(1),
+            })
+        })
+    };
+    let mut cost = vec![(0u64, 0u64); n];
+    let mut ready: Vec<usize> = (0..n).filter(|&i| pending[i] == 0).collect();
+    let mut costed = 0;
+    while let Some(d) = ready.pop() {
+        cost[d] = (
+            c_cost(&defs[d].c_items, &cost),
+            w_cost(&defs[d].w_items, &cost),
+        );
+        costed += 1;
+        for &i in &callers[d] {
+            pending[i] -= 1;
+            if pending[i] == 0 {
+                ready.push(i);
+            }
+        }
+    }
+    assert!(costed == n, "template calls form a cycle");
+    let total = c_cost(top_c, &cost).saturating_add(w_cost(top_w, &cost));
+    assert!(total <= SIZE_CAP, "the artifact expands past the size cap");
 }
 
 fn decode_core(b: &[u8]) -> CompactCore {
@@ -868,9 +1006,11 @@ fn decode_compact(b: &[u8]) -> CompactDecoded {
 }
 
 /// Just the signature inputs (role + name), from the header alone — what input
-/// resolution needs, without decoding templates or a table of every variable.
-pub fn decode_input_vars(b: &[u8]) -> Vec<Var> {
-    decode_header(b).2
+/// resolution needs, without decoding templates or a table of every variable. A
+/// malformed header is an `Err`.
+pub fn decode_input_vars(b: &[u8]) -> Result<Vec<Var>, String> {
+    catch_quietly(|| decode_header(b).2)
+        .map_err(|()| "malformed function artifact (XBC header decode failed)".to_string())
 }
 
 /// [`stream_solve`] returning the solver's dense slots (`slots[id]`) instead of a
@@ -934,7 +1074,9 @@ pub fn stream_check(
 /// Rows are streamed one at a time; for naming a failure after a prover rejects
 /// a witness, whatever order its own rows are in.
 pub fn first_failing_row(b: &[u8], slots: &[Option<crate::solver::Fp>]) -> Option<usize> {
-    let (field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore {
+        field, defs, top_c, ..
+    } = decode_core(b);
     let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)?;
     let (mut i, mut failed) = (0usize, None);
     expand_c_visit(&defs, &top_c, &IDENTITY, &mut |row: R1csRow| {
@@ -972,7 +1114,7 @@ pub fn decode_vars(b: &[u8]) -> Vec<Var> {
 /// How many function templates (defs) the container holds: `0` for a circuit
 /// with no repeated calls worth templating.
 pub fn count_templates(b: &[u8]) -> usize {
-    decode_compact(b).2.len()
+    decode_core(b).defs.len()
 }
 
 // Per-variable classification flags accumulated by the streaming pass 1.
@@ -1520,7 +1662,7 @@ pub fn stream_solve_verify(
 /// resident set — the memory-win measurement point. Parallel over shards.
 pub fn stream_count_constraints(b: &[u8]) -> usize {
     use rayon::prelude::*;
-    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_c, .. } = decode_core(b);
     top_c
         .par_iter()
         .map(|item| {
@@ -1541,7 +1683,7 @@ pub fn stream_count_constraints(b: &[u8]) -> usize {
 /// gate-count bridges. Parallel over shards.
 pub fn stream_count_mul_gates(b: &[u8]) -> usize {
     use rayon::prelude::*;
-    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_c, .. } = decode_core(b);
     top_c
         .par_iter()
         .map(|item| {
@@ -1566,7 +1708,7 @@ pub fn stream_count_mul_gates(b: &[u8]) -> usize {
 /// count as `expand_function_blob(b).witness_gen.len()`, at a tiny fraction of
 /// the resident set — the memory-win measurement point for the streamed solve.
 pub fn stream_count_witness(b: &[u8]) -> usize {
-    let (_field, _vars, defs, _top_c, top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_w, .. } = decode_core(b);
     let mut n = 0usize;
     expand_w_visit(&defs, &top_w, &IDENTITY, &mut |_op| n += 1);
     n
@@ -1604,7 +1746,7 @@ fn digest_lc(acc: &mut u128, lc: &LinearCombination) {
 /// multi-GB expand+minimize the old constraint-count pin required. Witness-program
 /// changes that leave the R1CS intact are covered separately by the solver check.
 pub fn stream_digest(b: &[u8]) -> u128 {
-    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_c, .. } = decode_core(b);
     // FNV-1a 128-bit offset basis.
     let mut acc: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
     expand_c_visit(&defs, &top_c, &IDENTITY, &mut |row: R1csRow| {
@@ -1870,6 +2012,41 @@ fn solve_streamed(
         .collect())
 }
 
+thread_local! {
+    /// How many [`catch_quietly`] calls this thread is inside.
+    static QUIET: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `f`, turning a panic into `Err`, without printing it: a malformed artifact
+/// panics deep in the parser (bounds, tags, UTF-8), and one clean error line is
+/// what the caller reports. The process's panic hook is wrapped once, never
+/// swapped per call: swapping it raced between concurrent decodes and could leave
+/// a no-op installed for good. The wrapper hands every panic to the hook it
+/// wrapped unless it is on a thread inside here, so the host's hook keeps working.
+/// A panic on a rayon worker of a decode still prints (the worker isn't inside
+/// here); it is caught all the same when it resurfaces on this thread.
+fn catch_quietly<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
+    static WRAPPED: std::sync::Once = std::sync::Once::new();
+    WRAPPED.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // `try_with`: a panic while the thread's locals are torn down prints.
+            if QUIET.try_with(std::cell::Cell::get).unwrap_or(0) == 0 {
+                prev(info);
+            }
+        }));
+    });
+    struct Quiet;
+    impl Drop for Quiet {
+        fn drop(&mut self) {
+            QUIET.with(|q| q.set(q.get() - 1));
+        }
+    }
+    QUIET.with(|q| q.set(q.get() + 1));
+    let _quiet = Quiet;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| ())
+}
+
 /// Parse an `XBC` (version 2) container and expand it to a full `CircuitProgram`.
 /// The 6-byte header (`XBC` + version) is assumed already dispatched on.
 ///
@@ -1881,33 +2058,39 @@ pub fn expand_function_blob(b: &[u8]) -> Result<CircuitProgram, String> {
 }
 
 fn expand_function_blob_impl(b: &[u8]) -> Result<CircuitProgram, String> {
-    // Silence the panic printer for the expected-on-malformed-input inner panics,
-    // then restore it, so a bad artifact yields one clean error line. Decode is
-    // sequential in setup/prove, so swapping the process-global hook is safe; rayon
-    // fan-out panics propagate to this thread and are caught here too.
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        expand_function_blob_inner(b)
-    }));
-    std::panic::set_hook(prev);
-    out.map_err(|_| "malformed function artifact (XBC decode failed)".to_string())
+    // Rayon fan-out panics propagate to this thread and are caught here too.
+    catch_quietly(|| expand_function_blob_inner(b))
+        .map_err(|()| "malformed function artifact (XBC decode failed)".to_string())
+}
+
+/// The variables the prune keeps, in id order: the signature inputs (the first
+/// `inputs.len()` ids), then every other id below `num_vars` that a row references
+/// or an advice exception keeps, `Derived` and unnamed. Walks the sets, not
+/// `0..num_vars`, so a declared count costs nothing it doesn't name.
+fn kept_vars(
+    num_vars: usize,
+    inputs: Vec<Var>,
+    referenced: &std::collections::BTreeSet<u32>,
+    keep_extra: &std::collections::BTreeSet<u32>,
+) -> Vec<Var> {
+    let first = inputs.len();
+    let rest = referenced
+        .union(keep_extra)
+        .map(|&id| id as usize)
+        .filter(|&id| id >= first && id < num_vars)
+        .map(|id| Var {
+            id: id as u32,
+            name: format!("v{id}"),
+            role: VarRole::Derived,
+        });
+    inputs.into_iter().chain(rest).collect()
 }
 
 fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
-    let mut p = 6usize; // MAGIC(4) + version(2)
-    let name = get_str(b, &mut p);
-    let modulus_decimal = get_str(b, &mut p);
-    let num_vars = get_uv(b, &mut p) as usize;
-    // First `num_inputs` vars are signature inputs (role + name); all others `Derived`.
-    let num_inputs = get_uv(b, &mut p) as usize;
-    let mut roles = vec![VarRole::Derived; num_vars];
-    let mut names: Vec<Option<String>> = vec![None; num_vars];
-    for id in 0..num_inputs {
-        roles[id] = byte_role(b[p]);
-        p += 1;
-        names[id] = Some(get_str(b, &mut p));
-    }
+    // The first `num_inputs` vars are signature inputs (role + name); all others
+    // `Derived`.
+    let (field, num_vars, inputs, p) = decode_header(b);
+    let num_inputs = inputs.len();
     let (defs, top_c, top_w, keep_extra) = parse_body(b, p);
 
     // Constraints and witness are independent; expand across a rayon `join`.
@@ -1932,20 +2115,9 @@ fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
         id < num_inputs || referenced.contains(&(id as u32)) || keep_extra.contains(&(id as u32))
     };
     witness_gen.retain(|op| keep(witness_out(op) as usize));
-    let vars = (0..num_vars)
-        .filter(|&id| keep(id))
-        .map(|id| Var {
-            id: id as u32,
-            name: names[id].take().unwrap_or_else(|| format!("v{id}")),
-            role: roles[id].clone(),
-        })
-        .collect();
     CircuitProgram {
-        field: FieldSpec {
-            name,
-            modulus_decimal,
-        },
-        vars,
+        field,
+        vars: kept_vars(num_vars, inputs, &referenced, &keep_extra),
         constraints,
         witness_gen,
     }
@@ -2124,16 +2296,10 @@ pub fn expand_function_blob_reduced_certified(
 
 fn expand_reduced(
     b: &[u8],
-    mut certs: Option<&mut Vec<Certificate>>,
+    certs: Option<&mut Vec<Certificate>>,
 ) -> Result<CircuitProgram, String> {
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        expand_reduced_inner(b, certs.as_deref_mut())
-    }));
-    std::panic::set_hook(prev);
-    let prog =
-        out.map_err(|_| "malformed function artifact (XBC reduced decode failed)".to_string())?;
+    let prog = catch_quietly(|| expand_reduced_inner(b, certs))
+        .map_err(|()| "malformed function artifact (XBC reduced decode failed)".to_string())?;
     // Every public input is pinned by a constraint at build time (the compiler's
     // pinning check), so a reduction that leaves one unreferenced has cut it loose
     // — any value would verify. Refuse rather than key such a circuit.
@@ -2160,18 +2326,9 @@ fn expand_reduced(
 }
 
 fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> CircuitProgram {
-    let mut p = 6usize;
-    let name = get_str(b, &mut p);
-    let modulus_decimal = get_str(b, &mut p);
-    let num_vars = get_uv(b, &mut p) as usize;
-    let num_inputs = get_uv(b, &mut p) as usize;
-    let mut roles = vec![VarRole::Derived; num_vars];
-    let mut names: Vec<Option<String>> = vec![None; num_vars];
-    for id in 0..num_inputs {
-        roles[id] = byte_role(b[p]);
-        p += 1;
-        names[id] = Some(get_str(b, &mut p));
-    }
+    let (field, num_vars, inputs, p) = decode_header(b);
+    let num_inputs = inputs.len();
+    let (name, modulus_decimal) = (&field.name, &field.modulus_decimal);
     let (mut defs, top_c, _top_w, keep_extra) = parse_body(b, p);
 
     // Reduce each template body (plugs + outputs pinned) and the top stream (inputs
@@ -2189,13 +2346,13 @@ fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> C
             &def.c_items,
             &base_pins,
             &iface,
-            &name,
-            &modulus_decimal,
+            name,
+            modulus_decimal,
             certs.as_deref_mut(),
         );
     }
     let input_pins: BTreeMap<u32, ()> = (0..num_inputs as u32).map(|v| (v, ())).collect();
-    let top_reduced = minimize_items(&top_c, &input_pins, &iface, &name, &modulus_decimal, certs);
+    let top_reduced = minimize_items(&top_c, &input_pins, &iface, name, modulus_decimal, certs);
 
     let mut constraints = Vec::new();
     expand_c(&defs, &top_reduced, &IDENTITY, &mut constraints);
@@ -2214,23 +2371,9 @@ fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> C
             }
         }
     }
-    let keep = |id: usize| -> bool {
-        id < num_inputs || referenced.contains(&(id as u32)) || keep_extra.contains(&(id as u32))
-    };
-    let vars = (0..num_vars)
-        .filter(|&id| keep(id))
-        .map(|id| Var {
-            id: id as u32,
-            name: names[id].take().unwrap_or_else(|| format!("v{id}")),
-            role: roles[id].clone(),
-        })
-        .collect();
     CircuitProgram {
-        field: FieldSpec {
-            name,
-            modulus_decimal,
-        },
-        vars,
+        vars: kept_vars(num_vars, inputs, &referenced, &keep_extra),
+        field,
         constraints,
         witness_gen: Vec::new(),
     }
@@ -2264,11 +2407,8 @@ impl ReducedRowStream {
     /// count rows per item and collect the referenced-var set (for the var prune).
     /// Total: a malformed artifact is a clean `Err`, never a panic.
     pub fn new(b: &[u8]) -> Result<Self, String> {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::new_inner(b)));
-        std::panic::set_hook(prev);
-        out.map_err(|_| "malformed function artifact (XBC reduced decode failed)".to_string())
+        catch_quietly(|| Self::new_inner(b))
+            .map_err(|()| "malformed function artifact (XBC reduced decode failed)".to_string())
     }
 
     fn new_inner(b: &[u8]) -> Self {
@@ -2316,6 +2456,9 @@ impl ReducedRowStream {
         let words: Vec<AtomicU64> = (0..num_vars.div_ceil(64))
             .map(|_| AtomicU64::new(0))
             .collect();
+        // A var past the table is a malformed artifact: noted here and panicked on
+        // below, on the thread that catches it, rather than on a rayon worker.
+        let past = std::sync::atomic::AtomicBool::new(false);
         let counts: Vec<usize> = top
             .par_iter()
             .map(|it| {
@@ -2325,13 +2468,17 @@ impl ReducedRowStream {
                     for lc in [&row.a, &row.b, &row.c] {
                         for t in &lc.terms {
                             let v = t.var as usize;
-                            words[v / 64].fetch_or(1 << (v % 64), Ordering::Relaxed);
+                            match words.get(v / 64) {
+                                Some(w) => _ = w.fetch_or(1 << (v % 64), Ordering::Relaxed),
+                                None => past.store(true, Ordering::Relaxed),
+                            }
                         }
                     }
                 });
                 n
             })
             .collect();
+        assert!(!past.into_inner(), "a row names a variable past the table");
         let mut item_start = Vec::with_capacity(counts.len() + 1);
         let mut acc = 0usize;
         item_start.push(0);

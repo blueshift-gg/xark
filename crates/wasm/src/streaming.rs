@@ -395,7 +395,7 @@ fn prepare(
     options: &JsValue,
 ) -> Result<Prepared, js_sys::Error> {
     let xbc = to_bytes(circuit_xbc, "circuit.xbc")?;
-    let vars = xark_ir::function_decode::decode_input_vars(&xbc);
+    let vars = xark_ir::function_decode::decode_input_vars(&xbc).map_err(|e| js_error(&e))?;
     let reader = || -> Result<JsReader, js_sys::Error> {
         let arr = js_view(pk_bytes, "pk.bin")?;
         let len = arr.length() as u64;
@@ -439,7 +439,7 @@ pub(crate) fn prepare_auto(
 ) -> Result<Prepared, js_sys::Error> {
     let sources = parse_sources(sources)?;
     let xbc = to_bytes(circuit_xbc, "circuit.xbc")?;
-    let vars = xark_ir::function_decode::decode_input_vars(&xbc);
+    let vars = xark_ir::function_decode::decode_input_vars(&xbc).map_err(|e| js_error(&e))?;
     let reader = || -> Result<JsReader, js_sys::Error> {
         let arr = js_view(pk_bytes, "pk.bin")?;
         let len = arr.length() as u64;
@@ -680,7 +680,7 @@ pub fn begin_streaming_proof(
     options: JsValue,
 ) -> Result<StreamingProof, js_sys::Error> {
     let xbc = to_bytes(circuit_xbc, "circuit.xbc")?;
-    let vars = xark_ir::function_decode::decode_input_vars(&xbc);
+    let vars = xark_ir::function_decode::decode_input_vars(&xbc).map_err(|e| js_error(&e))?;
     let ids = resolve_inputs(&vars, inputs).map_err(|e| js_error(&e))?;
     drop(vars);
     let src = row_source(&xbc, None, &options)?;

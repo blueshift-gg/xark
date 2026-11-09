@@ -33,7 +33,7 @@ its words little-endian, and `Blake256` selects that byte order. See
 | Item | What it does |
 |---|---|
 | `blake2s::<N_BYTES>(msg)` | Unkeyed BLAKE2s-256 of `N_BYTES` bytes. Each byte is range-checked. Returns 8 words of 32 little-endian bits. |
-| `blake2s_hash_one_block(input_words, input_len_bytes)` | Hash a single message of up to 64 bytes, given as 16 words. |
+| `blake2s_hash_one_block::<LEN>(input_words)` | Hash a single message of `LEN <= 64` bytes, given as 16 words. The bytes past `LEN` must be zero. |
 | `compress(...)` | The BLAKE2s compression function, with counter and final-block flag. |
 | `Blake256` | Wrapper that compares a BLAKE output against a `Hash` in little-endian word order. |
 | `Hash` | Re-exported from `xark-hash`: a 256-bit digest as 2 field elements. |

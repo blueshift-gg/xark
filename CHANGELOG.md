@@ -18,6 +18,12 @@ gadgets now check more:
 - `xark-secp256r1`: the same check, +3 constraints.
 - `xark-bignum`: `mod_neg` gave a wrong result for some inputs at full 256-bit
   width; `mod_add` could overflow; `mod_neg(0)` is fixed.
+- `xark-bignum`: `mod_mul`, `mul_divmod` and `sub2` derive their bound `m − 1`
+  from `m` (#62), and a typed `Bignum` or `fp!` input range-checks its limbs
+  when it's read (#63). The `bignum`, `bignum_ops`, `bignum_wide`, `fp_mul`,
+  `sub2` and `is_lt_check` examples change; `bignum_wide`, `fp_mul`, `sub2` and
+  `is_lt_check` now range-check the limbs they take as `[Field; N]`. The curve
+  gadgets don't change.
 - `grumpkin_nova_fold` takes its inputs grouped by instance.
 - The bit and hash gadgets take fewer rows, each proven sound in Lean over the
   exact rows it emits (`formal/`): XOR and OR with a constant fold to a linear form,
@@ -451,6 +457,39 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- A ceremony finalized with no contributions kept the δ `init` derives from the seed
+  it records in `circuit_meta.json`, so anyone with the directory could forge
+  proofs, yet it was marked production-safe and exported as `single-party` (#66).
+  `xark ceremony finalize` refuses it; a key finalized before is labelled `seeded`,
+  with a warning.
+- `blake2s_hash_one_block` and `blake3_hash_one_block` take the length as a const
+  generic (`::<LEN>`, at most 64) and require the bytes past it to be zero; a
+  `Field` length up to 2³² and any tail were accepted, so one message had many
+  digests (#72).
+- The `--low-memory` spill file holds witness-derived data: on unix it's created
+  readable by its owner only and unlinked at once, so it never outlives the
+  process (#69).
+- `metadata.phase2_seed_hash` is the SHA-256 of the seed's 32 bytes, not of the
+  argument's text (#71).
+- A hostile `circuit.xbc` fails to decode instead of aborting the process: counts are
+  checked against the bytes left, variables and expansions are capped, a template
+  call graph must be acyclic, and the panic hook is wrapped once rather than swapped
+  around each decode, so overlapping decodes can't leave it removed (#64, #65, #68).
+- Verifying keys, proofs and public inputs over 64 MiB are refused before they're
+  read, and a `.ptau` file's header is checked before it's read whole (#73, #70).
+- The `ec_incomplete` examples say why they need no on-curve check, and
+  `enforce_on_curve` says when it's optional (#67).
+- Two soundness holes in `xark-bignum`'s multiplication, each letting a prover make
+  a valid proof of a wrong `(a·b) mod m` in a circuit that takes `m` or the limbs
+  from the prover. The curve gadgets were not affected.
+  - The remainder's bound `m − 1` was a separate argument nothing tied to `m`, so a
+    larger one admitted `r + m` (#62). `mod_mul`, `mul_divmod`, `sub2` and
+    `Bignum::{mul, sub2}` now take only `m` and derive the bound (`minus_one`).
+  - A limb `≥ 2^BITS` turned the column identity into a congruence mod BN254's
+    field (#63). A typed `Bignum` or `fp!` input now range-checks its limbs when
+    it's read; `fp!(unchecked_input …)` skips that for code that checks its inputs
+    itself, as the curve macros do. Limbs a circuit takes as `[Field; N]` still
+    need `range_check_limbs`, as the crate docs say.
 - Two soundness holes in `witness_begin()`/`witness_end()` regions, each letting a
   prover make a valid proof of a statement the circuit rejects. No shipped circuit
   hit either (every digest is unchanged).

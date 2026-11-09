@@ -8,9 +8,10 @@
 //! little-endian, so each of the 16 message words is the LE-`u32` of 4 consecutive
 //! bytes.
 //!
-//! [`blake2s_hash_one_block`] hashes a single (≤64-byte) message as one final
-//! block; [`blake2s`] is a Merkle–Damgård chain over [`compress`] for a
-//! compile-time `N_BYTES`-byte message.
+//! [`blake2s_hash_one_block`] hashes a single message of a compile-time `LEN <= 64`
+//! bytes as one final block, its tail past `LEN` constrained to zero; [`blake2s`]
+//! is a Merkle–Damgård chain over [`compress`] for a compile-time `N_BYTES`-byte
+//! message.
 
 #![no_std]
 // Circuit-lowered gadget code: the block count is const-folded from a native
@@ -18,7 +19,7 @@
 // do too; the explicit form is kept).
 #![allow(clippy::manual_div_ceil)]
 
-use xark::Field;
+use xark::{Field, require_eq};
 use xark_bits::{add3, add32, read_n, rotr32, sha256_iv, xor3_32, xor32};
 
 // The circuit storage model can't read a whole inner `[Field; 32]` word out of a
@@ -340,20 +341,40 @@ pub fn compress(
     out
 }
 
-/// Hash a single (≤64-byte) message block with unkeyed BLAKE2s (32-byte digest).
+/// Constrain every message bit past byte `LEN` of a 64-byte block to zero (one
+/// linear row per bit). Bit `p` of the block (`p = 32·word + bit`) belongs to byte
+/// `p / 8`, so the tail is bits `8·LEN..512`.
+fn require_zero_tail<const LEN: usize>(input_words: [[Field; 32]; 16]) {
+    let mut p = LEN * 8usize;
+    while p < 512usize {
+        require_eq(input_words[p / 32usize][p % 32usize], Field::from(0u8));
+        p += 1;
+    }
+}
+
+/// Hash a single message of `LEN` bytes (`LEN <= 64`) with unkeyed BLAKE2s
+/// (32-byte digest).
 ///
-/// `input_words` holds the 16 message words (each a `[Field; 32]` LE bit word);
-/// `input_len_bytes` is the number of message bytes in this block (0..=64) as a
-/// single `Field`.
+/// `input_words` holds the 16 message words (each a `[Field; 32]` LE bit word, the
+/// bits the caller's own decomposition); byte `k` of the message is bits
+/// `8(k%4)..8(k%4)+8` of word `k/4`. Every bit past byte `LEN` is constrained to
+/// zero: BLAKE2s pads the final block with zeros, so a nonzero tail would be the
+/// compression of a block no message of length `LEN` produces.
+///
+/// The length is a compile-time constant rather than a witness so that the
+/// counter is the message length by construction: a `Field` length would let the
+/// prover pick any counter below `2^32` for the same words.
 ///
 /// The initial chaining value is the IV with the parameter word folded into
 /// `h[0]`: `h[0] = IV[0] ^ 0x01010020` (digest_len = 32, key_len = 0, fanout = 1,
-/// depth = 1). Since this is the only (final) block, the counter `t` = message
-/// length and the final-block flag is set. Returns the 8-word (256-bit) digest.
-pub fn blake2s_hash_one_block(
+/// depth = 1). Since this is the only (final) block, the counter `t` = `LEN` and
+/// the final-block flag is set. Returns the 8-word (256-bit) digest.
+pub fn blake2s_hash_one_block<const LEN: usize>(
     input_words: [[Field; 32]; 16],
-    input_len_bytes: Field,
 ) -> [[Field; 32]; 8] {
+    const { assert!(LEN <= 64, "one BLAKE2s block holds at most 64 bytes") };
+    require_zero_tail::<LEN>(input_words);
+
     // Initial chaining value: IV with the parameter block folded into h[0]
     // (h[0] = IV[0] ^ 0x01010020 = 0x6A09E667 ^ 0x01010020 = 0x6B08E647).
     let ivc = sha256_iv();
@@ -382,7 +403,7 @@ pub fn blake2s_hash_one_block(
     }
 
     // Counter low = message length; counter high = 0; final-block flag = all-ones.
-    let t_low = input_len_bytes.to_bits::<32>();
+    let t_low = Field::from(LEN as u64).to_bits::<32>();
     let t_high = Field::from(0u8).to_bits::<32>();
     let f_final = Field::from(4294967295u32).to_bits::<32>(); // 0xFFFFFFFF
 

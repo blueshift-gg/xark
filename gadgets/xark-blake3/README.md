@@ -33,7 +33,7 @@ its words little-endian, and `Blake256` selects that byte order. See
 | Item | What it does |
 |---|---|
 | `blake3::<N_BYTES>(msg)` | BLAKE3 root hash of `N_BYTES` bytes (`N_BYTES <= 1024`). Each byte is range-checked. Returns 8 words of 32 little-endian bits. |
-| `blake3_hash_one_block(input_words, block_len_bytes)` | Hash a single block of up to 64 bytes, given as 16 words, as a one-chunk root. |
+| `blake3_hash_one_block::<LEN>(input_words)` | Hash a single message of `LEN <= 64` bytes, given as 16 words, as a one-chunk root. The bytes past `LEN` must be zero. |
 | `compress(...)` | The BLAKE3 compression function, with counter, block length and flags. |
 | `Blake256` | Wrapper that compares a BLAKE output against a `Hash` in little-endian word order. |
 | `Hash` | Re-exported from `xark-hash`: a 256-bit digest as 2 field elements. |

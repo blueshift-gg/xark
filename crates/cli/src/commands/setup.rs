@@ -19,7 +19,7 @@ use xark_backend::keys::KeyMetadata;
 use xark_backend::serialization::canonical_write_to_file;
 use xark_prover::XarkCircuit;
 
-use super::{circuit_hash, load_backend_r1cs, num_public_inputs};
+use super::{load_backend_r1cs, num_public_inputs};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -55,7 +55,10 @@ pub struct SetupArgs {
     #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub ptau_file: Option<PathBuf>,
     /// 32-byte randomness seed (hex) for the phase-2 `(γ, δ)` derivation.
-    /// Optional — auto-generated via OS RNG when not supplied.
+    /// Optional — auto-generated via OS RNG when not supplied. Whoever knows it can
+    /// forge proofs: a command-line argument is visible to other users of the
+    /// machine, so discard it, and prefer leaving it out. Only its SHA-256 is
+    /// recorded (`metadata.phase2_seed_hash`).
     #[arg(long, value_name = "HEX")]
     pub phase2_seed: Option<String>,
 
@@ -456,8 +459,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         }
         let mut seed_arr = [0u8; 32];
         seed_arr.copy_from_slice(&seed_bytes);
-        let ptau_bytes =
-            fs::read(ptau_file).with_context(|| format!("reading {}", ptau_file.display()))?;
+        let ptau_bytes = super::read_ptau(ptau_file)?;
         let ptau = xark_backend::ptau::parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
         drop(ptau_bytes);
         let vk = keyed.with_source(|src| -> Result<_> {
@@ -480,7 +482,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
         metadata.setup_mode = "phase2-from-ptau".into();
         metadata.production_safe = true;
         // commit to the (to-be-discarded) phase-2 seed for audit; never keep the seed
-        metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
+        // The seed's 32 bytes, as `KeyMetadata` documents: not the argument's text,
+        // whose `0x` and letter case would change the hash.
+        metadata.phase2_seed_hash = Some(super::sha256_hex(&seed_arr));
         metadata.ptau_source = ptau_file
             .file_name()
             .and_then(|s| s.to_str())
@@ -585,6 +589,7 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, key: Option<&
     let names: Vec<String> = match fs::read(project.circuit_xbc()) {
         Ok(bytes) if super::is_function_artifact(&bytes) => {
             xark_ir::function_decode::decode_input_vars(&bytes)
+                .unwrap_or_default()
                 .into_iter()
                 .map(|v| v.name)
                 .collect()
