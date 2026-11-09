@@ -2,6 +2,14 @@
 //! `2·G == 2G` and `G + 2G == 3G`. `Point` is the transparent compact
 //! uncompressed `[u8; 64]` (`x ‖ y`) type, so the test passes the raw
 //! `G`/`2G`/`3G` coordinate bytes `p256` emits.
+//!
+//! There is no on-curve check: the public `2G` and `3G` are the verifier's to check
+//! off-circuit, and they pin the private `G`. The doubling slope `λ = (3x² − 3)/2y`
+//! is the tangent on every curve `y² = x³ − 3x + b′`, so a `G` that doubles to an
+//! on-curve `2G` lies on that curve too, and is the one such point (the group has
+//! prime order). A circuit taking a private point with no such anchor calls
+//! `xark_secp256r1::affine::enforce_on_curve` on it first (as `examples/on_curve_r1`
+//! does).
 use xark::{circuit, require_eq, Private, Public};
 use xark_secp256r1::affine::{ec_add_incomplete, ec_double_incomplete, Point};
 

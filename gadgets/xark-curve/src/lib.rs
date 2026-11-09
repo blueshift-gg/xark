@@ -158,6 +158,9 @@ macro_rules! weierstrass {
         /// Pin `p` to the curve `y² = x³ + a·x + b`: canonical coordinates (`< p`, which
         /// the field gadgets' `a, b < m` precondition needs), then the equation.
         /// Required before the incomplete group law on any point from outside.
+        /// It is optional where something else already pins the point to the curve:
+        /// a public point the verifier checks off-circuit, or one the group law ties
+        /// to such a point (see `examples/ec_incomplete`), needs no check of its own.
         pub fn enforce_on_curve(p: Point) {
             p.x.assert_canonical();
             p.y.assert_canonical();
