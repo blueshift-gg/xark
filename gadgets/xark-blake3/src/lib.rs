@@ -8,8 +8,9 @@
 //! little-endian, so each of the 16 message words is the LE-`u32` of 4 consecutive
 //! bytes.
 //!
-//! [`blake3_hash_one_block`] hashes a single (≤64-byte) block as the root of a
-//! one-chunk message (flags `CHUNK_START | CHUNK_END | ROOT = 11`, counter 0);
+//! [`blake3_hash_one_block`] hashes a single message of a compile-time `LEN <= 64`
+//! bytes (its tail past `LEN` constrained to zero) as the root of a one-chunk
+//! message (flags `CHUNK_START | CHUNK_END | ROOT = 11`, counter 0);
 //! [`blake3`] chains [`compress`] over a `[Field; N_BYTES]` array (`N_BYTES <=
 //! 1024`, a single chunk).
 
@@ -19,7 +20,7 @@
 // do too; the explicit form is kept).
 #![allow(clippy::manual_div_ceil)]
 
-use xark::Field;
+use xark::{Field, require_eq};
 use xark_bits::{add3, add32, read_n, rotr32, sha256_iv, xor32};
 
 // The circuit storage model can't read a whole inner `[Field; 32]` word out of a
@@ -347,16 +348,35 @@ pub fn compress(
     out
 }
 
-/// Hash a single (≤64-byte) block as a one-chunk root node.
+/// Constrain every message bit past byte `LEN` of a 64-byte block to zero (one
+/// linear row per bit). Bit `p` of the block (`p = 32·word + bit`) belongs to byte
+/// `p / 8`, so the tail is bits `8·LEN..512`.
+fn require_zero_tail<const LEN: usize>(input_words: [[Field; 32]; 16]) {
+    let mut p = LEN * 8usize;
+    while p < 512usize {
+        require_eq(input_words[p / 32usize][p % 32usize], Field::from(0u8));
+        p += 1;
+    }
+}
+
+/// Hash a single message of `LEN` bytes (`LEN <= 64`) as a one-chunk root node.
 ///
-/// `input_words` holds the 16 message words (each a `[Field; 32]` LE bit word);
-/// `block_len_bytes` is the number of message bytes in this block (0..=64) as a
-/// single `Field`. Flags = `CHUNK_START | CHUNK_END | ROOT = 1 | 2 | 8 = 11`,
-/// counter = 0. Returns the 8-word (256-bit) BLAKE3 digest.
-pub fn blake3_hash_one_block(
-    input_words: [[Field; 32]; 16],
-    block_len_bytes: Field,
-) -> [[Field; 32]; 8] {
+/// `input_words` holds the 16 message words (each a `[Field; 32]` LE bit word, the
+/// bits the caller's own decomposition); byte `k` of the message is bits
+/// `8(k%4)..8(k%4)+8` of word `k/4`. Every bit past byte `LEN` is constrained to
+/// zero: BLAKE3 pads the final block with zeros, so a nonzero tail would be the
+/// compression of a block no message of length `LEN` produces.
+///
+/// The length is a compile-time constant rather than a witness so that
+/// `block_len` is the message length by construction: a `Field` length would let
+/// the prover pick any `block_len` below `2^32` for the same words.
+///
+/// Flags = `CHUNK_START | CHUNK_END | ROOT = 1 | 2 | 8 = 11`, counter = 0,
+/// `block_len` = `LEN`. Returns the 8-word (256-bit) BLAKE3 digest.
+pub fn blake3_hash_one_block<const LEN: usize>(input_words: [[Field; 32]; 16]) -> [[Field; 32]; 8] {
+    const { assert!(LEN <= 64, "one BLAKE3 block holds at most 64 bytes") };
+    require_zero_tail::<LEN>(input_words);
+
     // Initial chaining value = the full 8-word IV (unkeyed hashing).
     let ivc = sha256_iv();
     let zero = [Field::from(0u8); 32];
@@ -375,7 +395,7 @@ pub fn blake3_hash_one_block(
     // counter = 0 (both halves), block_len = message length, flags = 11.
     let counter_low = Field::from(0u8).to_bits::<32>();
     let counter_high = Field::from(0u8).to_bits::<32>();
-    let block_len = block_len_bytes.to_bits::<32>();
+    let block_len = Field::from(LEN as u64).to_bits::<32>();
     let flags = Field::from(11u8).to_bits::<32>();
 
     let full = compress(cv, input_words, counter_low, counter_high, block_len, flags);
