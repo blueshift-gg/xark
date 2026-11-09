@@ -6,7 +6,7 @@
 // `xark build` records the circuit's parameter types in target/xark/sha256/schema.json
 // and `xark client` turns them into the types below. Don't edit this file: change
 // the circuit, then rebuild and rerun `xark client`. Values go in their natural
-// forms (dates, strings, variant names, bytes); xark-wasm encodes them against the
+// forms (dates, strings, variant names, bytes); `@blueshift-gg/xark` encodes them against the
 // schema (at the end of the imports), exactly as `xark prove
 // --inputs` does.
 

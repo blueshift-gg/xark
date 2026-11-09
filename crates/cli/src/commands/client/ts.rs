@@ -328,7 +328,7 @@ pub fn generate(m: &Model, schema: &serde_json::Value, artifacts: &str) -> Resul
          // `xark build` records the circuit's parameter types in target/xark/{artifacts}/schema.json\n\
          // and `xark client` turns them into the types below. Don't edit this file: change\n\
          // the circuit, then rebuild and rerun `xark client`. Values go in their natural\n\
-         // forms (dates, strings, variant names, bytes); xark-wasm encodes them against the\n\
+         // forms (dates, strings, variant names, bytes); `@blueshift-gg/xark` encodes them against the\n\
          // schema (at the end of the imports), exactly as `xark prove\n\
          // --inputs` does.\n",
         sig.join(", "),
