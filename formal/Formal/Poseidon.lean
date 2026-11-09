@@ -16,13 +16,13 @@ set_option linter.style.header false
 /-!
 # xark Poseidon2 S-box and permutation soundness — mechanised in Lean 4 / mathlib
 
-The Poseidon2 permutation (`gadgets/xark-poseidon/src/lib.rs`) is built
+The Poseidon2 permutation (`gadgets/xark-poseidon2/src/lib.rs`) is built
 from two kinds of step: an `x⁵` S-box and linear (matrix) layers. The linear
 layers are pure linear combinations — each output witness is a fixed linear
 function of the inputs, so they are deterministic by construction. The only
 *multiplicative* gadget is the S-box, whose soundness we prove here.
 
-The S-box gadget (`gadgets/xark-poseidon/src/lib.rs`) emits three constraints for one cell:
+The S-box (`x.pow(5)` in `gadgets/xark-poseidon2/src/lib.rs`) emits three constraints for one cell:
 
     x * x = t,    t * t = u,    u * x = out.
 
@@ -33,7 +33,8 @@ whole permutation is a deterministic function of the input state.
 
 This file then folds those building blocks into a full-permutation determinism
 result. We model the state as `Fin t → F` (polymorphic over the width `t`; the
-gadget uses `t = 4` over BN254 `Fr` but nothing here depends on the choice):
+gadget uses `t = 3` over BN254 `Fr`, instantiated in `Formal/Poseidon2Bn254T3.lean`,
+but nothing here depends on the choice):
 
 * `linearStep` — matrix-vector product `(M·s) i = Σⱼ M i j · s j`; the output is
   a function of `M, s` by construction (`linear_step_determined`).
@@ -62,7 +63,7 @@ deterministic function of its input.
 namespace Xark
 
 /-- **Poseidon2 S-box soundness.** The three multiplication constraints emitted
-by the S-box gadget (`gadgets/xark-poseidon/src/lib.rs`) force the output to be `x⁵`. -/
+by the S-box (`gadgets/xark-poseidon2/src/lib.rs`) force the output to be `x⁵`. -/
 theorem sbox_sound {F : Type*} [CommRing F] (x t u out : F)
     (ht : x * x = t) (hu : t * t = u) (ho : u * x = out) :
     out = x ^ 5 := by
@@ -86,7 +87,8 @@ function of its inputs, so determinism is structural; the lemmas below state
 it explicitly so the soundness chain reads directly.
 -/
 
-/-- The `x⁵` S-box as a Lean function (matches the S-box in `gadgets/xark-poseidon/src/lib.rs`). -/
+/-- The `x⁵` S-box as a Lean function (matches the S-box in
+`gadgets/xark-poseidon2/src/lib.rs`). -/
 def sbox {F : Type*} [CommRing F] (x : F) : F := x ^ 5
 
 /-- Apply the S-box to every state cell (full-round non-linear layer). -/
@@ -95,8 +97,8 @@ def applySbox {F : Type*} [CommRing F] {t : ℕ} (s : Fin t → F) : Fin t → F
 
 /-- Apply the S-box only at index `0` (partial-round non-linear layer). The
 canonical Poseidon2 partial round S-boxes the first cell and leaves the rest
-unchanged — the Poseidon gadget (`gadgets/xark-poseidon/src/lib.rs`) does exactly this in its
-partial-round loop.
+unchanged — `internal_round` in `gadgets/xark-poseidon2/src/lib.rs` does exactly
+this.
 `[NeZero t]` is the minimum constraint to talk about index `0 : Fin t`. -/
 def applyPartialSbox {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
     (s : Fin t → F) : Fin t → F :=
@@ -133,7 +135,8 @@ theorem partial_sbox_apply_sound {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
     exact hrest i h0
 
 /-- Linear (matrix) layer: `(M · s) i = Σⱼ M i j · s j`. Mirrors the LC the
-gadget builds in `matrix_4x4_in_circuit` / `internal_m_in_circuit`. We only
+gadget builds in `matmul_external` (`circ(2,1,1)`) / `matmul_internal`
+(`J + diag [1,1,2]`). We only
 need `CommRing` (not `Field`) here so the concrete BN254 specialisation in
 `Formal.Poseidon2Bn254` — which uses `ZMod p` for the BN254 modulus without
 requiring a typeclass-level primality proof — can apply this directly. -/
@@ -169,8 +172,8 @@ theorem add_constants_determined {F : Type*} [CommRing F] {t : ℕ}
   rw [h i, h' i]
 
 /-- One full Poseidon2 round: add round constants, S-box every cell, apply the
-external linear layer. Mirrors the `0..rf_half` and `p_end..num_rounds` loops
-of `poseidon2_permutation_native`. -/
+external linear layer. Mirrors `external_round` (the first and last 4 rounds
+of `perm`). -/
 def fullRound {F : Type*} [CommRing F] {t : ℕ}
     (rc : Fin t → F) (M : Fin t → Fin t → F) (s : Fin t → F) : Fin t → F :=
   linearStep M (applySbox (addConstants rc s))
@@ -186,9 +189,9 @@ theorem full_round_determined {F : Type*} [CommRing F] {t : ℕ}
   rw [hs]
 
 /-- One partial Poseidon2 round: add a round constant to cell `0`, S-box cell
-`0`, apply the internal linear layer. Mirrors the `rf_half..p_end` loop. We
-model the round-constant addition as touching only cell `0` (the non-zero
-column of `rc_table[r]` for internal rounds, per `gadgets/xark-poseidon/src/lib.rs`). -/
+`0`, apply the internal linear layer. Mirrors `internal_round` (the 56
+middle rounds of `perm`), which adds its one constant `RC_INT[r]` to cell `0`
+only. -/
 def partialRound {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
     (rc0 : F) (M : Fin t → Fin t → F) (s : Fin t → F) : Fin t → F :=
   let s' : Fin t → F := fun i => if i = (0 : Fin t) then rc0 + s i else s i
@@ -204,7 +207,7 @@ theorem partial_round_determined {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
 
 /-- A single round in the permutation schedule: either a full round with
 constants `rc` and matrix `M`, or a partial round with constant `rc0` on cell
-`0` and matrix `M`. The actual Poseidon2 schedule for `t = 4`, BN254 `Fr` is
+`0` and matrix `M`. The actual Poseidon2 schedule for `t = 3`, BN254 `Fr` is
 `R_F/2 = 4` full, `R_P = 56` partial, `R_F/2 = 4` full — a length-64 list of
 `RoundKind` values, which we leave abstract here. (We write `partialR` rather
 than `partial` because the latter is a Lean keyword.) -/
@@ -220,7 +223,7 @@ def applyRound {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
   | RoundKind.partialR rc0 M => partialRound rc0 M s
 
 /-- The full Poseidon2 permutation: an optional initial linear layer
-(`matrix_multiplication_4x4` in the gadget's `poseidon2_permutation_native`)
+(`matmul_external` at the start of the gadget's `perm`)
 followed by a fixed schedule of full and partial rounds. -/
 def poseidonPermutation {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
     (Minit : Fin t → Fin t → F) (schedule : List (RoundKind F t))
@@ -230,7 +233,8 @@ def poseidonPermutation {F : Type*} [CommRing F] {t : ℕ} [NeZero t]
 /-- **Full-permutation determinism.** For any fixed initial matrix `Minit` and
 schedule, the Poseidon2 permutation is a function of the input state: two
 prover witnesses for the same input produce the same output. This is the
-end-of-soundness statement for the Poseidon gadget (`gadgets/xark-poseidon/src/lib.rs`) — combined
+end-of-soundness statement for the Poseidon2 gadget
+(`gadgets/xark-poseidon2/src/lib.rs`) — combined
 with `sbox_sound`,
 which pins each per-cell S-box output, *no* step in the permutation carries
 under-constraint slack. -/

@@ -36,10 +36,10 @@ are those templates with constant plugs (`Template.soundness_inst`, checked by
   first difference, and its lower limbs only add to it.
 
 The input assumption, `x`'s limbs `< 2^B`, is each caller's: `mul_divmod`'s `range_bits`
-on `r`, `sub2`'s and `assert_canonical`'s `range_check_limbs`, `on_curve_k1`'s and ed25519
-`on_curve_l`'s `range_check_limbs`, secp256k1's and secp256r1's `unpack` (bit
-decompositions), and `eddsa_verify`'s scalar bits (`formal/coverage-allowlist.txt` names
-the LC-plug ones).
+on `r`, `sub2`'s and `assert_canonical`'s `range_check_limbs`, the callers of `on_curve_k1` /
+`on_curve_r1` (`unpack8`), ed25519 `point_in`'s `to_bits::<85>` (in `limbs32`), secp256k1's
+`unpack` and secp256r1's `unpack4` (bit decompositions), and `eddsa_verify`'s scalar bits
+(`formal/coverage-allowlist.txt` names the LC-plug ones).
 -/
 
 namespace Xark.Templates

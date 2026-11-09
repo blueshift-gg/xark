@@ -17,15 +17,14 @@ Instantiates the width-polymorphic framework in `Formal.Poseidon` at `t = 3`
 with `M_E = circ(2,1,1)`, internal diagonal `[1,1,2]`, and the Horizen BN254
 round constants used by `gadgets/xark-poseidon2/src/lib.rs`. The determinism
 (soundness) theorem is an immediate specialisation of
-`Xark.poseidon_permutation_determined` — only the concrete parameters change
-from the (deleted) `t = 4` instance.
+`Xark.poseidon_permutation_determined` at these concrete parameters.
 -/
 
 namespace Xark
 
 /-- Our `t = 3` Poseidon2 round-constant table (64 rows). Rows 0–3 and 60–63 are
 full rounds (all three cells); rows 4–59 are partial (cell 0 only). Transcribed
-from `xark-poseidon2`'s `rc_ext` (8×3) and `rc_int` (56). -/
+from `xark-poseidon2`'s `RC_EXT` (8×3) and `RC_INT` (56). -/
 def poseidon2Bn254T3RoundConstantsNat : List (ℕ × ℕ × ℕ) :=
   [
   (13128406282895484157369354038809433636203389051939936481821261911791933663254, 18931653859213243425446645781588512487838213266321401679594943842133071369744, 14100663835952519432830313936592734340076294692040144715814219945570907513297),

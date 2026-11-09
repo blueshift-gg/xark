@@ -15,9 +15,9 @@ set_option linter.style.header false
 /-!
 # xark elliptic-curve addition soundness — mechanised in Lean 4 / mathlib
 
-`gadgets/xark-grumpkin/src/lib.rs` adds points on the embedded short
-Weierstrass curve `y² = x³ + a·x + b` (Grumpkin, the BN254 embedded curve).
-The generic (distinct-`x`) case supplies a slope witness `λ` constrained by
+Point addition on a short Weierstrass curve `y² = x³ + a·x + b`
+(Grumpkin, the BN254 embedded curve, for the concrete statements). The
+generic (distinct-`x`) case supplies a slope witness `λ` constrained by
 
     (x2 − x1)·λ = y2 − y1,
 
@@ -26,7 +26,10 @@ and the standard output formulas
     x3 = λ² − x1 − x2,    y3 = λ·(x1 − x3) − y1.
 
 We prove the soundness facts that matter for the generic add and the
-doubling case, over any field (so they apply to Grumpkin's base field `Fq`):
+doubling case, over any field (so they apply to Grumpkin's base field `Fq`).
+The slope and closure lemmas cover the incomplete `xark_grumpkin::ec_add`
+(`dx·inv = 1`, `λ = (y2 − y1)·inv`) and `ec_double` (`2y·inv = 1`,
+`λ = 3x²·inv`); the fused double-and-add step is `Formal/DoubleAdd.lean`:
 
 * `ec_add_generic_slope_unique` — when `x1 ≠ x2` the slope constraint pins `λ`
   uniquely, hence `x3, y3` are determined: **no under-constraint slack**.
@@ -42,8 +45,12 @@ doubling case, over any field (so they apply to Grumpkin's base field `Fq`):
   exactly the inverse case `P2 = −P1`; this documents the selector branch
   that routes such inputs to the point at infinity.
 
-We also mechanise the **selector-routing layer** that picks between the four
-branches (lhs-at-infinity, rhs-at-infinity, inverse, generic/doubling):
+The rest of the file models **flagged complete addition**: points carry an
+`is_infinity` flag and a selector layer routes between four branches
+(lhs-at-infinity, rhs-at-infinity, inverse, generic/doubling). No current
+gadget emits this shape (`xark_grumpkin` is incomplete affine with an offset
+accumulator, and its `enforce_on_curve` is the ungated `y² = x³ − 17`); the
+statements stand on their own:
 
 * `IsSelectorWitness` — predicate capturing the in-circuit constraints on the
   selector booleans `same_x, same_y, is_double, is_inverse` together with the
@@ -56,23 +63,22 @@ branches (lhs-at-infinity, rhs-at-infinity, inverse, generic/doubling):
   algebraic correspondence: at coinciding finite inputs `is_double = 1`, and
   at `(x1, y1), (x1, −y1)` with `y1 ≠ 0` we get `is_inverse = 1`.
 * `output_mux_lhs_inf`, `output_mux_rhs_inf`, `output_mux_inverse`,
-  `output_mux_generic` — for the output-mux relations the gadget emits
+  `output_mux_generic` — for the modelled output-mux relations
   (`x3 = take_p2·x2 + take_p1·x1 + take_generic·xg`, etc.), one theorem per
   routing branch verifying that the mux outputs the intended value.
 
-Finally, these per-piece theorems are tied into the end-to-end soundness story
-for the `ec_add_in_circuit` gadget:
+Finally, these per-piece theorems are tied into an end-to-end soundness
+statement for the modelled complete addition:
 
 * `gated_on_curve_sound` / `gated_on_curve_trivial` /
   `enforce_on_curve_grumpkin_sound` — the gated curve-membership constraint
   `(1 − is_infinity) · (y² − x³ + 17) = 0` forces curve membership exactly
-  when `is_infinity = 0` and is vacuous otherwise. This is the algebraic
-  content of `enforce_on_curve_grumpkin` in `gadgets/xark-grumpkin/src/lib.rs` and is what discharges
-  the "inputs are on the curve" hypothesis used by every preceding theorem.
+  when `is_infinity = 0` and is vacuous otherwise. This discharges the
+  "inputs are on the curve" hypothesis used by every preceding theorem.
 * `IsValidECAddWitness` — packaged predicate bundling: both inputs are
   on Grumpkin (or at infinity), all booleans are boolean, the selector
   layer constraints (an `IsSelectorWitness` instance), the two gated slope
-  constraints from `gadgets/xark-grumpkin/src/lib.rs` (generic and doubling branches), and the
+  constraints (generic and doubling branches), and the
   output-mux equations (an `IsOutputMux` instance).
 * `EcAddSemantics` — Lean-side specification of what the gadget *ought*
   to compute. Stated as a relation `EcAddSemantics in1 in2 out` between
@@ -90,8 +96,8 @@ for the `ec_add_in_circuit` gadget:
   `IsValidECAddWitness`, the output triple stands in the `EcAddSemantics`
   relation to the inputs, by case-split on `is_inf1, is_inf2, is_inverse`.
 
-Scope: the scalar-multiplication ladder in `gadgets/xark-secp256k1/src/lib.rs` built on top of point
-addition is not covered here.
+Scope: scalar multiplication built on top of point addition is not covered
+here (Grumpkin's is `Formal/GrumpkinMul.lean`).
 -/
 
 namespace Xark
@@ -146,8 +152,8 @@ theorem ec_double_slope_unique {F : Type*} [Field F]
 /-- **Doubling-case addition law closure.** If `(x1, y1)` is on Grumpkin
 (`y1² = x1³ + b`) and `λ` is the doubling slope `λ·(2·y1) = 3·x1²`, then the
 output `(x3, y3) = (λ² − 2·x1, λ·(x1 − x3) − y1)` produced by the gadget's
-formulas lies back on the curve. Concretely: the doubling branch of
-`ec_add_in_circuit` cannot forge an off-curve point. The statement is for the
+formulas lies back on the curve. Concretely: a doubling step cannot forge
+an off-curve point. The statement is for the
 `a = 0` form of short Weierstrass (Grumpkin); the gadget's doubling constraint
 `2·y1·λ = 3·x1²` matches this slope exactly. -/
 theorem ec_double_on_curve {F : Type*} [Field F]
@@ -185,8 +191,8 @@ uniquely from the inputs, and (b) the algebraic relationship between
 selectors and the doubling / inverse / generic cases.
 -/
 
-/-- **Selector witness predicate.** Captures exactly the in-circuit
-constraints `gadgets/xark-grumpkin/src/lib.rs` emits on the routing selectors:
+/-- **Selector witness predicate.** Captures the modelled constraints on
+the routing selectors:
 
 * `same_x, same_y, is_double, is_inverse, lhs_inf, rhs_inf` are booleans;
 * `same_x · (x2 − x1) = 0` and `(x2 − x1) · inv_dx = 1 − same_x` form
@@ -349,7 +355,7 @@ is_inf3 = lhs_inf · rhs_inf
 
 (The `take_p1 · lhs_inf` term is omitted from `is_inf3` because
 `take_p1` already carries the `(1 − lhs_inf)` factor, making the
-product identically zero — matching `gadgets/xark-grumpkin/src/lib.rs` exactly.) -/
+product identically zero.) -/
 structure IsOutputMux {F : Type*} [Field F]
     (x1 y1 x2 y2 xg yg lhs_inf rhs_inf is_inverse
      x3 y3 is_inf3 : F) : Prop where
@@ -386,7 +392,7 @@ theorem output_mux_rhs_inf {F : Type*} [Field F]
 
 /-- **Inverse branch.** When both inputs are finite (`lhs_inf = 0`,
 `rhs_inf = 0`) and `is_inverse = 1`, the mux outputs `(0, 0, 1)`: the
-point at infinity in the Grumpkin gadget's affine-point encoding. -/
+point at infinity in the modelled affine-point encoding. -/
 theorem output_mux_inverse {F : Type*} [Field F]
     {x1 y1 x2 y2 xg yg x3 y3 is_inf3 : F}
     (h : IsOutputMux x1 y1 x2 y2 xg yg 0 0 1 x3 y3 is_inf3) :
@@ -416,7 +422,7 @@ The gadget enforces input curve membership via the gated constraint
 
     (1 − is_infinity) · (y² − x³ + 17) = 0
 
-emitted by `enforce_on_curve_grumpkin` in `gadgets/xark-grumpkin/src/lib.rs`. Grumpkin is the
+(`xark_grumpkin::enforce_on_curve` is the ungated form). Grumpkin is the
 short-Weierstrass curve `y² = x³ − 17` (so `a = 0`, `b = −17`) over the
 proving-system base field. The two lemmas below close the two cases:
 
@@ -473,7 +479,7 @@ theorem enforce_on_curve_grumpkin_sound {F : Type*} [Field F]
 /-! ### End-to-end composition wrapper
 
 We now bundle the per-piece theorems into the full soundness statement
-for `ec_add_in_circuit`. The bundling has three parts:
+for the modelled complete addition. The bundling has three parts:
 
 1. `IsValidECAddWitness` — the predicate the prover must satisfy. It
    contains the gated curve checks for both inputs, the `IsSelectorWitness`
@@ -490,17 +496,17 @@ for `ec_add_in_circuit`. The bundling has three parts:
    `ec_add_in_circuit_sound` (full) — the wrapper theorems.
 
 We model the `(0, 0, 1)` infinity encoding directly in the constructors
-of `EcAddSemantics` so the relation matches `gadgets/xark-grumpkin/src/lib.rs` exactly. -/
+of `EcAddSemantics`. -/
 
-/-- **Packaged witness predicate** for the entire `ec_add_in_circuit`
-gadget. A prover who satisfies all of the gadget's R1CS constraints
+/-- **Packaged witness predicate** for the modelled complete addition.
+A prover who satisfies all of its R1CS constraints
 yields a Lean witness of this predicate (with the bookkeeping
 auxiliaries `xg`, `yg`, plus the slope `lambda`).
 
 Bundle:
 
-* `on_curve1`, `on_curve2` — the gated curve-membership constraint from
-  `enforce_on_curve_grumpkin`, one per input.
+* `on_curve1`, `on_curve2` — the gated curve-membership constraint, one
+  per input.
 * `is_inf1_bool`, `is_inf2_bool` — boolean booleans for the infinity flags.
 * `sel` — the routing selector witness (`IsSelectorWitness`).
 * `slope_generic` — gated generic-slope constraint

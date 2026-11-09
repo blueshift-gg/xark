@@ -13,14 +13,17 @@ set_option linter.style.longLine false
 /-!
 # secp256r1 (NIST P-256) in-circuit point-addition soundness
 
-Mirrors `Formal.Secp256k1` but for **secp256r1** (NIST P-256):
+Mirrors `Formal.Secp256k1` but for **secp256r1** (NIST P-256), the same
+flagged complete-addition model that no current gadget emits
+(`ec_add_incomplete_secp256r1_sound` at the end covers the incomplete
+`ec_add_incomplete` from `xark_curve::weierstrass!`):
 
     y² = x³ + a·x + b   with   a = −3
 
 The structural pieces (selector layer, output mux, on-curve gating) carry
 over from `Formal.Curve` directly. The two curve-equation-specific pieces
 that differ are the **doubling slope** and the **doubling-case addition-law
-closure**: secp256r1's `a = −3` means the gadget enforces
+closure**: secp256r1's `a = −3` means the model enforces
 `λ · (2·y₁) = 3·x₁² + a · 1 = 3·x₁² − 3`, not Grumpkin/secp256k1's
 `λ · (2·y₁) = 3·x₁²`.
 
@@ -94,7 +97,7 @@ theorem enforce_on_curve_secp256r1_sound {F : Type*} [Field F]
 Parametric in the curve constant `b`. The doubling-slope constraint
 encodes `a = −3` directly: `2·y₁·λ = 3·x₁² − 3 · 1 = 3·x₁² + a·1`. -/
 
-/-- **Bundled witness predicate** for `ec_add_in_circuit` on secp256r1. -/
+/-- **Bundled witness predicate** for the modelled addition on secp256r1. -/
 structure IsValidECAddWitness_secp256r1 {F : Type*} [Field F]
     (b x1 y1 is_inf1 x2 y2 is_inf2 lambda
      same_x same_y is_double is_inverse inv_dx inv_dy
@@ -115,7 +118,7 @@ structure IsValidECAddWitness_secp256r1 {F : Type*} [Field F]
 /-! ## End-to-end soundness for the generic branch
 
 The generic branch is curve-agnostic; we directly invoke
-`Formal.Curve.ec_add_generic_on_curve` with `a := -3, b := b_r1`. -/
+`Formal.Curve.ec_add_generic_on_curve` with `a := -3` and P-256's `b`. -/
 
 /-- **End-to-end soundness — generic branch (secp256r1).** -/
 theorem ec_add_in_circuit_secp256r1_generic_sound {F : Type*} [Field F]
@@ -311,7 +314,7 @@ theorem ec_add_in_circuit_secp256r1_sound {F : Type*} [Field F]
 
 /-- **secp256r1 (P-256) incomplete-affine addition soundness (base-field level).**
 Same flag-free 3-limb `ec_add_incomplete` shape as secp256k1, but over the P-256
-curve `y² = x³ − 3·x + b` (`a = −3`). The gadget enforces `dxinv·(x2−x1) = 1`,
+curve `y² = x³ − 3·x + b` (`a = −3`). It enforces `dxinv·(x2−x1) = 1`,
 `λ·(x2−x1) = y2−y1`, `x3 = λ²−x1−x2`, `y3 = λ·(x1−x3)−y1`; given both inputs on the
 curve, the output is on the curve and the slope is unique. Proved from the generic
 `Curve` algebra at `a = −3` (the `−3·x` term flows through unchanged). -/
