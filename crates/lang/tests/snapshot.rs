@@ -2581,9 +2581,13 @@ fn fp_mul_matches_lean_model() {
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
     // 164 fewer since the remainder's `require_lt` compares chunk-wise
-    // (`formal/Formal/RequireLt.lean`); the column identity is unchanged.
+    // (`formal/Formal/RequireLt.lean`); the column identity is unchanged. Since
+    // #62/#63 the example range-checks its two inputs first (2 × 258 booleanity
+    // rows) and `mod_mul` derives `p − 1` itself (5 is-zero rows over the constant
+    // `p`, which the reduction folds): 990 + 516 + 5. The multiply's own rows are
+    // still the 990 the model is stated over.
     assert_eq!(
-        mul, 990,
+        mul, 1511,
         "fp_mul mult-gate count pins mul_mod_via_Fr_limbwise_constraints_3; got {mul}"
     );
 }
@@ -2743,8 +2747,57 @@ fn const_generic_lowers() {
     assert_eq!(r1cs.constraints.len(), 1, "const_generic → 1 constraint");
 }
 
+/// `mod_mul` takes only `m` and derives the remainder's bound `m − 1` itself (#62):
+/// with `m − 1` from the prover, `m1 = 4` admitted `(2·2) mod 3 = 4`. And a typed
+/// `Bignum` input range-checks its limbs as it's read (#63): a limb `≥ 2^BITS`
+/// (here `2⁻¹ mod Fr`) made the column identity a congruence mod `Fr`, so
+/// `(2·b) mod 3 = 1` proved for a `b` whose integer value gives 2.
+#[test]
+fn bignum_mul_bound_and_limbs_are_its_own() {
+    let half = "10944121435919637611123202872628637544274182200208017171849102093287904247809";
+    let compile_case = |name: &str, body: &str| {
+        let src = format!("#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\n{body}\n");
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let c = compile_case(
+        "bignum_mul_m",
+        "#[circuit]\npub fn circuit(a: Private<Bignum<1, 8>>, b: Private<Bignum<1, 8>>, \
+         m: Public<Bignum<1, 8>>, out: Public<Field>) {\n\
+         \x20   require_eq(a.mul(b, m).limbs[0], out);\n}",
+    );
+    let case = |a: &str, b: &str, m: &str, out: &str| {
+        accepts_exactly_constraints(
+            &c,
+            &[
+                ("a.limbs[0]", a),
+                ("b.limbs[0]", b),
+                ("m.limbs[0]", m),
+                ("out", out),
+            ],
+        )
+    };
+    assert!(case("2", "2", "3", "1"));
+    assert!(!case("2", "2", "3", "4"), "a non-canonical remainder (#62)");
+    assert!(!case("2", half, "3", "1"), "an out-of-range limb (#63)");
+    assert!(!case("2", "2", "0", "0"), "m = 0");
+    // `fp!` types check their limbs on reading too.
+    let c = compile_case(
+        "bignum_fp_input",
+        "xark_bignum::fp!(El, \"83\", 1, 8);\n\
+         #[circuit]\npub fn circuit(a: Private<El>, b: Private<El>, out: Public<Field>) {\n\
+         \x20   require_eq((a * b).limbs[0], out);\n}",
+    );
+    let case = |b: &str, out: &str| {
+        accepts_exactly_constraints(&c, &[("a.limbs[0]", "2"), ("b.limbs[0]", b), ("out", out)])
+    };
+    assert!(case("3", "6"));
+    assert!(!case(half, "1"), "an out-of-range `fp!` limb (#63)");
+}
+
 /// **`Bignum<LIMBS, BITS>` wrapper.** The zero-cost newtype's methods
-/// (`a.mul(b, m, m1)`) forward to the free functions, so the emitted R1CS is
+/// (`a.mul(b, m)`) forward to the free functions, so the emitted R1CS is
 /// identical to calling `mod_mul::<3,86>` directly. Guards the classify fix
 /// (an inherent `mul`/`add`/… must not be mistaken for the `Field` operator)
 /// and const-generic struct-method inlining.
@@ -2756,9 +2809,11 @@ fn bignum_wrapper_lowers() {
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
     )
     .expect("parse r1cs.json");
-    // Same as the free-fn `mod_mul::<3,86>` (a·b mod m, 3×86-bit) under bn254.
-    // 167 fewer since `require_lt` compares chunk-wise (`formal/Formal/RequireLt.lean`).
-    assert_eq!(r1cs.constraints.len(), 1022, "Bignum::mul is zero-cost");
+    // Same as the free-fn `mod_mul::<3,86>` (a·b mod m, 3×86-bit) under bn254, plus
+    // the range checks of its four typed inputs (4 × 258 rows) and the `m − 1`
+    // derived from the public `m` (24 rows), both since #62/#63. 167 fewer since
+    // `require_lt` compares chunk-wise (`formal/Formal/RequireLt.lean`).
+    assert_eq!(r1cs.constraints.len(), 2078, "Bignum::mul is zero-cost");
 }
 
 /// **`fp!` operator layer.** `xark_bignum::fp!` defines a non-native field-element
@@ -4173,7 +4228,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "mod_mul",
-            call: "(mod_mul::<3, 2>(a, b, MM, M1), Z)",
+            call: "(mod_mul::<3, 2>(a, b, MM), Z)",
             arity: 2,
             two_out: false,
             spec: |v| Some([(v[0] * v[1]) % M, 0]),
@@ -4181,7 +4236,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "mul_divmod",
-            call: "{ let (q, r) = mul_divmod::<3, 2>(a, b, MM, M1); (r, q) }",
+            call: "{ let (q, r) = mul_divmod::<3, 2>(a, b, MM); (r, q) }",
             arity: 2,
             two_out: true,
             spec: |v| Some([v[0] * v[1] % M, v[0] * v[1] / M]),
@@ -4189,7 +4244,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "mod_inverse",
-            call: "(mod_mul::<3, 2>(mod_inverse::<3, 2>(a, MM), [Field::from(1u8), Field::from(0u8), Field::from(0u8)], MM, M1), Z)",
+            call: "(mod_mul::<3, 2>(mod_inverse::<3, 2>(a, MM), [Field::from(1u8), Field::from(0u8), Field::from(0u8)], MM), Z)",
             arity: 1,
             two_out: false,
             spec: |v| (v[0] % M != 0).then(|| [(1..M).find(|y| v[0] % M * y % M == 1).unwrap(), 0]),
@@ -4197,7 +4252,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "sub2",
-            call: "(sub2::<3, 2>(a, b, c, MM, M1), Z)",
+            call: "(sub2::<3, 2>(a, b, c, MM), Z)",
             arity: 3,
             two_out: false,
             spec: |v| Some([(v[0] - v[1] - v[2]).rem_euclid(M), 0]),

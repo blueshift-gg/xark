@@ -95,8 +95,12 @@ macro_rules! weierstrass {
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal ]
     ) => {
         // base field `Fp` (mod p), scalar field `Fq` (mod n), 3 × `$bits`-bit limbs
-        xark_bignum::fp!(pub Fp, $base, 3, $bits);
-        xark_bignum::fp!(pub Fq, $scalar, 3, $bits);
+        // Inputs read unchecked: the curve functions check the points they take
+        // canonical themselves (`assert_canonical`), so a check on reading would be
+        // paid twice. Arithmetic on `Fp`/`Fq` values from elsewhere needs
+        // `range_check` or `assert_canonical` first.
+        xark_bignum::fp!(unchecked_input pub Fp, $base, 3, $bits);
+        xark_bignum::fp!(unchecked_input pub Fq, $scalar, 3, $bits);
 
         /// An affine curve point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy, Debug)]
@@ -351,8 +355,9 @@ macro_rules! edwards {
         d = $d:literal $(,)?
     ) => {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod L), 3 × 86-bit limbs.
-        xark_bignum::fp!(pub Fp, $base);
-        xark_bignum::fp!(pub Fq, $scalar);
+        // Inputs unchecked, as for the Weierstrass curves above.
+        xark_bignum::fp!(unchecked_input pub Fp, $base);
+        xark_bignum::fp!(unchecked_input pub Fq, $scalar);
 
         /// An affine twisted-Edwards point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy, Debug)]

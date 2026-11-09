@@ -18,6 +18,12 @@ gadgets now check more:
 - `xark-secp256r1`: the same check, +3 constraints.
 - `xark-bignum`: `mod_neg` gave a wrong result for some inputs at full 256-bit
   width; `mod_add` could overflow; `mod_neg(0)` is fixed.
+- `xark-bignum`: `mod_mul`, `mul_divmod` and `sub2` derive their bound `m − 1`
+  from `m` (#62), and a typed `Bignum` or `fp!` input range-checks its limbs
+  when it's read (#63). The `bignum`, `bignum_ops`, `bignum_wide`, `fp_mul`,
+  `sub2` and `is_lt_check` examples change; `bignum_wide`, `fp_mul`, `sub2` and
+  `is_lt_check` now range-check the limbs they take as `[Field; N]`. The curve
+  gadgets don't change.
 - `grumpkin_nova_fold` takes its inputs grouped by instance.
 - The bit and hash gadgets take fewer rows, each proven sound in Lean over the
   exact rows it emits (`formal/`): XOR and OR with a constant fold to a linear form,
@@ -451,6 +457,17 @@ verification starter, and the `xark-client` npm package is removed.
 
 ### Fixed
 
+- Two soundness holes in `xark-bignum`'s multiplication, each letting a prover make
+  a valid proof of a wrong `(a·b) mod m` in a circuit that takes `m` or the limbs
+  from the prover. The curve gadgets were not affected.
+  - The remainder's bound `m − 1` was a separate argument nothing tied to `m`, so a
+    larger one admitted `r + m` (#62). `mod_mul`, `mul_divmod`, `sub2` and
+    `Bignum::{mul, sub2}` now take only `m` and derive the bound (`minus_one`).
+  - A limb `≥ 2^BITS` turned the column identity into a congruence mod BN254's
+    field (#63). A typed `Bignum` or `fp!` input now range-checks its limbs when
+    it's read; `fp!(unchecked_input …)` skips that for code that checks its inputs
+    itself, as the curve macros do. Limbs a circuit takes as `[Field; N]` still
+    need `range_check_limbs`, as the crate docs say.
 - Two soundness holes in `witness_begin()`/`witness_end()` regions, each letting a
   prover make a valid proof of a statement the circuit rejects. No shipped circuit
   hit either (every digest is unchanged).
