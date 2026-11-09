@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Write zero-knowledge circuits in Rust — the language prelude (no_std, stable)."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]

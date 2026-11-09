@@ -49,6 +49,7 @@ version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/blueshift-gg/xark"
+homepage = "https://xark.gg"
 # see docs/toolchain.md.
 rust-version = "1.89"
 
