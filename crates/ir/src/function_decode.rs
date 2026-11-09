@@ -68,6 +68,10 @@ fn get_fc(b: &[u8], p: &mut usize) -> FieldConst {
         4 | 5 => {
             let k = get_uv(b, p);
             assert!(k < 4096, "bad exponent");
+            if k < 63 {
+                let v = 1i64 << k;
+                return FieldConst::from_i64(if tag == 5 { -v } else { v });
+            }
             let v = num_bigint::BigInt::from(1) << k;
             FieldConst::from_bigint(if tag == 5 { -v } else { v })
         }
