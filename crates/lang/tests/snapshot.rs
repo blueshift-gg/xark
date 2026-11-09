@@ -613,9 +613,10 @@ fn time_inputs_compare_at_their_width() {
         signed, unsigned,
         "a signed comparison of inputs costs an unsigned one's"
     );
-    // 2 × 17-bit range checks and a 17-bit comparison, against 2 × 64 and a 64-bit one.
+    // 2 × 17-bit range checks, each input's `< STEPS` check (a day past 2100 isn't
+    // one) and a 17-bit comparison, against 2 × 64 and a 64-bit one.
     assert!(
-        days_rows * 3 < signed,
+        days_rows * 2 < signed,
         "{days_rows} rows for days, {signed} for timestamps"
     );
 }
@@ -2991,7 +2992,11 @@ fn time_inputs_stay_in_their_range() {
          \x20   require_eq(Field::from(a.steps()), k);\n}",
     );
     for (a, ok) in [("0", true), ("365", true), ("366", false), ("511", false)] {
-        assert_eq!(accepts_exactly_constraints(&c, &[("a", a), ("k", a)]), ok, "a = {a}");
+        assert_eq!(
+            accepts_exactly_constraints(&c, &[("a", a), ("k", a)]),
+            ok,
+            "a = {a}"
+        );
     }
     let c = compile_case(
         "days_range_packed",
@@ -2999,11 +3004,20 @@ fn time_inputs_stay_in_their_range() {
          #[circuit]\npub fn circuit(s: Private<S>, k: Public<Field>) {\n\
          \x20   require_eq(Field::from(s.a.steps()), k);\n}",
     );
-    let leaf = c.program().vars.iter().find(|v| v.name.starts_with("s.")).map(|v| v.name.clone()).unwrap();
+    let leaf = c
+        .program()
+        .vars
+        .iter()
+        .find(|v| v.name.starts_with("s."))
+        .map(|v| v.name.clone())
+        .unwrap();
     for (a, ok) in [(365u64, true), (400, false)] {
         let packed = (a + (3 << 9)).to_string();
         assert_eq!(
-            accepts_exactly_constraints(&c, &[(leaf.as_str(), packed.as_str()), ("k", &a.to_string())]),
+            accepts_exactly_constraints(
+                &c,
+                &[(leaf.as_str(), packed.as_str()), ("k", &a.to_string())]
+            ),
             ok,
             "packed a = {a}"
         );
@@ -3019,7 +3033,11 @@ fn fp_assert_nonzero_is_mod_m() {
     let c = compile_with_field(&write_case("fp_nonzero", src), "fp_nonzero", "bn254");
     assert!(c.status_success, "{}", c.stderr);
     for (a, ok) in [("5", true), ("0", false), ("83", false), ("166", false)] {
-        assert_eq!(accepts_exactly_constraints(&c, &[("a.limbs[0]", a)]), ok, "a = {a}");
+        assert_eq!(
+            accepts_exactly_constraints(&c, &[("a.limbs[0]", a)]),
+            ok,
+            "a = {a}"
+        );
     }
 }
 

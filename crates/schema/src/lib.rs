@@ -1253,20 +1253,6 @@ fn be32(v: &BigUint) -> Vec<u8> {
 mod ed25519 {
     use num_bigint::BigUint;
 
-    #[cfg(test)]
-    mod tests {
-        /// The identity (x = 0, y = 1) has one encoding: with the sign bit set it's
-        /// refused, as RFC 8032 §5.1.3 says.
-        #[test]
-        fn x_zero_has_one_encoding() {
-            let mut b = [0u8; 32];
-            b[0] = 1;
-            assert!(super::decompress(&b).is_ok());
-            b[31] = 0x80;
-            assert!(super::decompress(&b).is_err());
-        }
-    }
-
     /// Decompress an Ed25519 point (`y` little-endian, `x`'s sign in the top bit) to
     /// affine `(x, y)`.
     pub fn decompress(comp: &[u8]) -> Result<(BigUint, BigUint), String> {
@@ -1303,6 +1289,20 @@ mod ed25519 {
             x = (&p - &x) % &p;
         }
         Ok((x, y))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        /// The identity (x = 0, y = 1) has one encoding: with the sign bit set it's
+        /// refused, as RFC 8032 §5.1.3 says.
+        #[test]
+        fn x_zero_has_one_encoding() {
+            let mut b = [0u8; 32];
+            b[0] = 1;
+            assert!(super::decompress(&b).is_ok());
+            b[31] = 0x80;
+            assert!(super::decompress(&b).is_err());
+        }
     }
 }
 
