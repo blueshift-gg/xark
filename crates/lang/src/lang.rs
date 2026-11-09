@@ -1186,7 +1186,10 @@ pub fn require_ne(a: impl Into<Field>, b: impl Into<Field>) {
 /// ops (multiplications, `hint_*` calls) still fill their witness but emit **no R1CS
 /// constraints**, and the vars they allocate are pinning-exempt. Native integer
 /// (`u8`…`u64`, `bool`) arithmetic is constrained as usual inside the region: it is
-/// plain wasm, which the optimizer may move or merge across the region's ends. This lets a
+/// plain wasm, which the optimizer may move or merge across the region's ends. So is a
+/// `Field` comparison (`==`, `!=`, `lt`, …), whose result is a `bool` that later code
+/// trusts to be 0 or 1. A region opens and closes within one arm of a witness-dependent
+/// branch, or around the whole branch; an arm that panics inside it ends it. This lets a
 /// gadget *derive* advice (an inverse chain, a GLV reduction, a decompressed
 /// coordinate) at **zero constraint cost**, then pin only the final result with
 /// normal constrained code after `witness_end`.

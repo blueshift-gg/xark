@@ -319,7 +319,13 @@ free until pinned afterwards, and a requirement inside is not enforced. The fron
 memo tables — the bit-decomposition cache, select and product reuse, proven booleans,
 proven bounds — are **only fed by emitted rows**, so recomputing a value after the region
 constrains it afresh (`witness_regions_leave_no_proven_facts` in
-`crates/lang/tests/snapshot.rs`). Review each region's outputs for a pin.
+`crates/lang/tests/snapshot.rs`). Native integer and `bool` ops, and `Field` comparisons
+(their result is a `bool` later code trusts), keep their rows inside a region
+(`witness_regions_keep_field_comparisons`). Each arm of a witness branch starts in the
+region state the branch was reached in: an arm that diverges inside a region is dropped with
+it, and a region that would straddle a branch is refused
+(`witness_regions_end_with_a_diverging_arm`, `witness_regions_dont_straddle_branches`).
+Review each region's outputs for a pin.
 
 ## 3. Trusted setup
 

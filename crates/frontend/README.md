@@ -122,7 +122,12 @@ Between `witness_begin()` and `witness_end()` nothing is constrained: values are
 for the witness only, and requirements are dropped. Nothing computed there counts as
 proven afterwards — the bit-decomposition cache, select and product reuse, the set of
 proven booleans and the bounds learned from comparisons are only fed by emitted rows — so
-redoing an operation after the region constrains it again.
+redoing an operation after the region constrains it again. Native integer and `bool` ops,
+and `Field` comparisons (whose result is a `bool`), keep their rows inside a region.
+
+Each arm of a witness branch starts in the region state the branch was reached in. An arm
+that diverges is dropped with any region it opened; one that rejoins must leave the state
+as it found it, so a region that would straddle the branch is refused.
 
 ### Native-semantics fuzzing
 
