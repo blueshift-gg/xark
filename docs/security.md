@@ -412,7 +412,6 @@ Requires a Powers-of-Tau transcript plus a phase-2 contribution. Both **implemen
   MPC driver), but **not externally audited**; a real
   deployment's security still rests on off-chain conduct (honest participants, transcript
   integrity).
-* **`RecursiveAggregation`.** Rejected — BN254 doesn't form a cycle with itself.
 * **ECDSA-secp256k1 / -secp256r1 and EdDSA-Ed25519.** Implemented
   (`gadgets/xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`) by fake GLV over
   non-native 8×32-bit limbs; each gadget is proven sound over its rows, but the
