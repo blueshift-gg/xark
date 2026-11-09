@@ -119,13 +119,7 @@ fn a_proof_is_optional() {
         ok && sample.iter().all(|f| verifier.join(f).exists()),
         "{err}"
     );
-    let (ok, _, err) = run(&[
-        "setup",
-        out_s,
-        "--insecure-dev-mode",
-        "--deterministic-rng",
-        "2",
-    ]);
+    let (ok, _, err) = run(&["setup", out_s, "--deterministic-rng", "2"]);
     assert!(ok, "setup failed: {err}");
     let (ok, _, err) = export(&[]);
     assert!(

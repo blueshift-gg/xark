@@ -60,7 +60,7 @@ column index from streamed rows instead of synthesizing the constraint system.
 Both are byte-identical to the previous setup for the same randomness. `xark
 setup` uses them.
 
-**Smooth domains** (`DomainKind::Smooth`; `xark setup`'s default for dev keys,
+**Smooth domains** (`DomainKind::Smooth`; `xark setup`'s default for a key made without a `.ptau`,
 `--domain radix2` opts out). BN254's
 scalar field also has a subgroup of order 9, so the QAP domain can be the smallest
 of `2^k`, `3·2^k`, `9·2^k` points instead of the next power of two. The 16,472
@@ -87,7 +87,7 @@ radix-2 Lagrange bases, so ptau setups stay radix-2.
 * **Ordering contract**: streamed assignment and every streamed row equal
   arkworks' allocation and matrices; relabelling two variables (rows still
   satisfied) makes the proof fail — the contract has teeth.
-* **Setup**: dev keys byte-identical to `circuit_specific_setup` (bytecode and
+* **Setup**: keys made without a `.ptau` byte-identical to `circuit_specific_setup` (bytecode and
   program sources, both encodings); phase-2 keys byte-identical to
   `xark_backend::ptau::setup_from_ptau`.
 * **Whole proof**: byte-identical to `Groth16::prove` (in-memory and serialized

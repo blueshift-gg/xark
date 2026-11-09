@@ -212,8 +212,8 @@ pub fn xark_build(name: &str, out: &Path, target: &Path) -> (bool, String) {
     )
 }
 
-/// `xark setup <out-dir> --insecure-dev-mode --uncompressed` (generate proving &
-/// verifying keys). Uses the dev-mode setup with deterministic seed (1) for
+/// `xark setup <out-dir> --deterministic-rng 1 --uncompressed` (generate proving &
+/// verifying keys). Uses a key made without a `.ptau`, seeded (1) for
 /// reproducibility, and an uncompressed proving key so each prove skips point
 /// decompression (production's default, compressed, is
 /// `compressed_key_proves_and_verifies`). Returns `(success, stderr)`.
@@ -224,11 +224,7 @@ pub fn xark_setup(out: &Path) -> (bool, String) {
 /// As [`xark_setup`], writing a compressed proving key unless `uncompressed`.
 pub fn xark_setup_opts(out: &Path, uncompressed: bool) -> (bool, String) {
     let mut c = Command::new(xark_bin());
-    c.arg("setup")
-        .arg(out)
-        .arg("--insecure-dev-mode")
-        .arg("--deterministic-rng")
-        .arg("1");
+    c.arg("setup").arg(out).arg("--deterministic-rng").arg("1");
     if uncompressed {
         c.arg("--uncompressed");
     }

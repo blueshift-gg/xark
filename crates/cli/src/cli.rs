@@ -952,7 +952,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
             ),
             (
                 format!("xark prove {where_} --inputs '{{\"secret\": 3, \"result\": 9}}'"),
-                "produce your first proof (with a dev key, made on the first run)",
+                "produce your first proof (the key is made on the first run)",
             ),
         ])
     );

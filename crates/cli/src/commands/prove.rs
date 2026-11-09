@@ -536,17 +536,17 @@ fn autobuild_and_setup(
     // clear "run `xark build` first" error.
     if args.proving_key.is_none() && is_built && !pk_path.exists() {
         eprintln!(
-            "{} no proving key found — generating a dev key (use `xark setup --ptau-file` \
-             for production)…",
+            "{} no proving key found — making one from this machine's randomness (`xark \
+             ceremony` makes one no single party has to be trusted for)…",
             crate::style::tag()
         );
-        // Force dev-mode: the convenience loop must not silently run a production
-        // phase-2 ceremony just because a stray `.ptau` is discoverable. Producing
-        // a real key stays an explicit `xark setup`.
+        // From this machine's randomness: the convenience loop must not silently run
+        // a phase-2 setup just because a stray `.ptau` is discoverable. A key from a
+        // transcript stays an explicit `xark setup`.
         setup::run(setup::SetupArgs {
             path: args.path.clone(),
             out: None,
-            insecure_dev_mode: true,
+            without_ptau: true,
             deterministic_rng: None,
             ptau_file: None,
             phase2_seed: None,

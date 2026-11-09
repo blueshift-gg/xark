@@ -233,14 +233,14 @@ fn keys_are_for_bn254_builds() {
     let (ok, out) = run_in(&dir, &["build", ".", "--field", "7"]);
     assert!(ok && out.contains("xark profile . --field 7"), "{out}");
     assert!(!out.contains("xark setup"), "{out}");
-    let (ok, out) = run_in(&dir, &["setup", "--insecure-dev-mode"]);
+    let (ok, out) = run_in(&dir, &["setup"]);
     assert!(
         ok && out.contains("built for another field than bn254"),
         "{out}"
     );
     let (ok, out) = run_in(&dir, &["build", ".", "--field", "7", "--out", "other"]);
     assert!(ok, "{out}");
-    let (ok, out) = run_in(&dir, &["setup", "other", "--insecure-dev-mode"]);
+    let (ok, out) = run_in(&dir, &["setup", "other"]);
     assert!(
         !ok && out.contains("was built over another field (7)"),
         "{out}"
@@ -292,7 +292,7 @@ fn failed_setup_keeps_the_previous_keys() {
 fn setup_out_warns_and_names_the_key() {
     let tmp = tempdir();
     let dir = copy_example(tmp.path(), "arithmetic_square");
-    let setup = ["setup", "--insecure-dev-mode", "--out", "keys"];
+    let setup = ["setup", "--out", "keys"];
     let (ok, out) = run_in(&dir, &setup);
     assert!(ok && !out.contains("isn't empty"), "{out}");
     assert!(out.contains("--proving-key keys/pk.bin"), "{out}");
@@ -362,7 +362,7 @@ fn verify_names_a_proof_older_than_the_key() {
     let (ok, out) = run_in(&dir, &["verify"]);
     assert!(ok && !out.contains("hint:"), "{out}");
     std::thread::sleep(std::time::Duration::from_millis(1100)); // coarse file times
-    let (ok, out) = run_in(&dir, &["setup", "--insecure-dev-mode"]);
+    let (ok, out) = run_in(&dir, &["setup"]);
     assert!(ok, "{out}");
     let (ok, out) = run_in(&dir, &["verify"]);
     assert!(!ok, "{out}");
@@ -452,7 +452,7 @@ fn failed_build_removes_the_old_circuit() {
     for f in ["circuit.xbc", "schema.json", "digest"] {
         assert!(!built.join(f).exists(), "{f} survived a failed build");
     }
-    let (ok, out) = run_in(&dir, &["setup", "--insecure-dev-mode"]);
+    let (ok, out) = run_in(&dir, &["setup"]);
     assert!(!ok && out.contains("xark build"), "{out}");
 }
 
@@ -487,13 +487,7 @@ fn export_and_verify_check_the_key() {
 
     // A new key: the old proof no longer verifies with it, so it isn't bundled (and
     // named by flag, it's refused).
-    let (ok, _, err) = run(&[
-        "setup",
-        o,
-        "--insecure-dev-mode",
-        "--deterministic-rng",
-        "2",
-    ]);
+    let (ok, _, err) = run(&["setup", o, "--deterministic-rng", "2"]);
     assert!(ok, "second setup failed: {err}");
     let (ok, _, err) = run(&["export", o]);
     assert!(ok && err.contains("is for another key"), "{err}");
@@ -597,7 +591,7 @@ fn export_defaults_beside_the_crate() {
     let dir = copy_example(tmp.path(), "arithmetic_square");
     let (ok, out) = run_in(&dir, &["build", "."]);
     assert!(ok, "build failed:\n{out}");
-    let (ok, out) = run_in(&dir, &["setup", ".", "--insecure-dev-mode"]);
+    let (ok, out) = run_in(&dir, &["setup", "."]);
     assert!(ok, "setup failed:\n{out}");
     let (ok, out) = run_in(&dir, &["export", "."]);
     assert!(ok, "export failed:\n{out}");

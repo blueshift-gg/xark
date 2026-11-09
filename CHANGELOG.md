@@ -321,6 +321,11 @@ verification starter, and the `xark-client` npm package is removed.
   and README carry it: `seeded`, `single-party`, `ceremony` (two or more
   contributors; a ceremony of one is `single-party`) or `unknown`, for a deploy
   script to check.
+- `xark setup` has no `--insecure-dev-mode`: without a `.ptau`, it makes the key
+  from the machine's randomness, as it already did by default. `--deterministic-rng`
+  and `--domain smooth` work on their own, skip an auto-detected `.ptau`, and are
+  refused with `--ptau-file`. The key's `metadata.json` says `"setup_mode":
+  "single-party"`.
 - `xark build` reuses an unchanged build: when the `xark` binary, the options, the
   `XARK_*` variables, the compiled module and every source file are the same as for
   the outputs in `target/xark/<name>/` (and those are untouched), it says so and
@@ -474,8 +479,7 @@ verification starter, and the `xark-client` npm package is removed.
   - client's `prover(…)` hint and the generated client's docs point at the build's
     directory, named after the package, not the circuit (`target/xark/my-cube/`, not
     `target/xark/cube/`).
-  - setup says how it made the key and where to find a multi-party ceremony, and
-    `--insecure-dev-mode`'s help no longer says it is required.
+  - setup says how it made the key and where to find a multi-party ceremony.
 - A `#[circuit]` array parameter's length may be a `const`: `Private<[Field; DEPTH]>`
   failed with "array lengths must be integer literals". The circuit is the one the
   literal gives (`examples/merkle` now uses `const DEPTH`, same digest). A generic

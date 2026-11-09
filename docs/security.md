@@ -334,19 +334,19 @@ circuit-specific) breaks only that circuit.
 
 | Setup mode | Randomness | `production_safe` | metadata `setup_mode` |
 |---|---|---|---|
-| `--insecure-dev-mode` | `OsRng` (default) or `ChaCha20Rng(seed)` if `--deterministic-rng <seed>` | `false` | `"insecure-dev-mode"` |
+| `xark setup` (no `.ptau`) | `OsRng`, or `ChaCha20Rng(seed)` with `--deterministic-rng <seed>` | `false` | `"single-party"` (`"insecure-dev-mode"` before 0.3) |
 | `xark setup --ptau-file` | snarkjs Powers-of-Tau (phase-1) + one phase-2 contribution | `true` | `"phase2-from-ptau"` |
 | `xark ceremony …` | snarkjs Powers-of-Tau (phase-1) + multi-contributor phase-2 MPC | `true` | `"phase2-from-ptau+mpc[N contributors]"` |
 
 `KeyMetadata` (`crates/backend/src/keys.rs`) includes: `setup_mode: String`;
-`production_safe: bool` (`false` for any dev-mode key); `deterministic_rng_seed:
+`production_safe: bool` (`false` for a key made without a `.ptau`); `deterministic_rng_seed:
 Option<u64>` (present only when the operator chose reproducibility); `ptau_source:
 Option<String>`; `phase2_seed_hash: Option<String>` — SHA-256 of the seed used to derive
 `(γ, δ)`; **the seed itself must be discarded immediately after setup.**
 
-### Dev-mode trapdoor lifecycle
+### Single-party trapdoor lifecycle
 
-In `--insecure-dev-mode` the trapdoor exists transiently in process memory during
+Without a `.ptau`, the trapdoor exists transiently in process memory during
 `xark-groth16`'s `dev_setup`. The only durable artifacts are the proving key
 (trapdoor *exponentiated into group elements*, not the scalar) and VK; recovering the
 trapdoor requires solving discrete log on BN254. So an `OsRng` key is a sound single-party
@@ -361,9 +361,9 @@ accepts any key and records which it is in the verifier crate's `SETUP`: `single
 Requires a Powers-of-Tau transcript plus a phase-2 contribution. Both **implemented**:
 `ptau.rs` parses snarkjs `.ptau` (with admissibility checks), `xark-groth16`'s
 `phase2_setup` derives the phase-2 keys, `ceremony.rs` drives a multi-contributor MPC (Schnorr PoKs +
-δ-consistency), via `xark ceremony {init,contribute,verify,finalize}`. The
-`--insecure-dev-mode` path writes `production_safe: false`, and `xark prove` takes
-`--deterministic-rng` only for such a key. See
+δ-consistency), via `xark ceremony {init,contribute,verify,finalize}`. A key made without a
+`.ptau` gets `production_safe: false`, and `xark prove` takes `--deterministic-rng` only for
+such a key. See
 [`docs/trusted-setup.md`](trusted-setup.md).
 
 ## 4. Known unaudited paths

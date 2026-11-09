@@ -76,7 +76,7 @@ fn load_and_solve(name: &str, inputs: &[(&str, &str)]) -> (R1csProgram, BTreeMap
     (r1cs, assign)
 }
 
-/// Dev-mode keys for `prog` (xark-groth16's setup, as `xark setup --insecure-dev-mode`).
+/// Keys for `prog` (xark-groth16's setup, as `xark setup` makes them without a `.ptau`).
 fn setup(prog: &R1csProgram, rng: &mut xark_backend::ChaCha20Rng) -> ProvingKey<Bn254> {
     let mut pk = Vec::new();
     xark_groth16::setup::dev_setup(

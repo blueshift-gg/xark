@@ -1,9 +1,9 @@
 //! `xark setup` — generate Groth16 proving/verifying keys for a circuit.
 //!
-//! Reads the `circuit.xbc` produced by `xark build` and runs either the insecure
-//! dev-mode setup (`--insecure-dev-mode`) or the production phase-2 setup from a
-//! Powers-of-Tau transcript (`--ptau-file`, or one auto-detected under
-//! `target/xark/<name>/`). Keys land next to the build output as `pk.bin` / `vk.bin`.
+//! Reads the `circuit.xbc` produced by `xark build` and runs either a phase-2 setup
+//! from a Powers-of-Tau transcript (`--ptau-file`, or one auto-detected under
+//! `target/xark/<name>/`) or, without one, a single-party setup from this machine's
+//! randomness. Keys land next to the build output as `pk.bin` / `vk.bin`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -33,24 +33,25 @@ pub struct SetupArgs {
     /// warning if it isn't empty). Defaults to `target/xark/<name>/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
-    /// Run Groth16 setup with locally generated randomness (the OS RNG), on
-    /// purpose. It is also what setup falls back to when no `.ptau` is given or
-    /// found. That is a single-party trusted setup: sound unless whoever ran it
-    /// kept the randomness, which xark never writes down. For a setup no one party
-    /// has to be trusted for, use `xark ceremony`.
-    #[arg(long, default_value_t = false)]
-    pub insecure_dev_mode: bool,
-    /// Reproducible-randomness escape hatch for test fixtures **only**.
-    /// Requires `--insecure-dev-mode`. Drives setup with
+    /// Make the key from this machine's randomness even if a `.ptau` could be
+    /// found: what `xark prove`'s first-run setup asks for. Not a flag.
+    #[arg(skip)]
+    pub without_ptau: bool,
+    /// Reproducible-randomness escape hatch for test fixtures **only**: a key
+    /// made without a `.ptau`, driven by
     /// `ChaCha20Rng::seed_from_u64(<seed>)` so two runs with the same seed
     /// produce byte-identical keys. This trivially leaks the Groth16 trapdoor
     /// and must never be used beyond regenerating committed test fixtures.
     #[arg(long, value_name = "SEED")]
     pub deterministic_rng: Option<u64>,
-    /// Production phase-2 setup from a Powers-of-Tau (`.ptau`) transcript.
-    /// Mutually exclusive with `--insecure-dev-mode`. When neither is supplied,
+    /// Phase-2 setup from a Powers-of-Tau (`.ptau`) transcript. Without it,
     /// `setup` auto-detects a `.ptau` in `target/xark/<name>/`, `target/xark/`, the
-    /// crate root, or a `ptau/` directory in any of them.
+    /// crate root, or a `ptau/` directory in any of them (not for
+    /// `--deterministic-rng` or `--domain smooth`, which need a key made without
+    /// one). With none, the key comes from this machine's randomness: a
+    /// single-party trusted setup, sound unless whoever ran it kept the
+    /// randomness, which xark never writes down. For a setup no one party has to
+    /// be trusted for, use `xark ceremony`.
     #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub ptau_file: Option<PathBuf>,
     /// 32-byte randomness seed (hex) for the phase-2 `(γ, δ)` derivation.
@@ -334,37 +335,32 @@ pub fn run(args: SetupArgs) -> Result<()> {
         args.r1cs_form
     };
 
-    // Resolve the ptau path: explicit flag, or auto-detected when neither
-    // --ptau-file nor --insecure-dev-mode is supplied.
+    // The `.ptau`: given, or found beside the build, unless the key has to come
+    // from this machine's randomness (a seed, a smooth domain, or `xark prove`'s
+    // first key, which must not turn into a phase-2 setup over a stray `.ptau`).
+    let seeded_or_smooth = args.deterministic_rng.is_some() || args.domain == QapDomain::Smooth;
     let ptau_path: Option<PathBuf> = if args.ptau_file.is_some() {
         args.ptau_file.clone()
-    } else if !args.insecure_dev_mode {
-        project.find_ptau()
-    } else {
+    } else if args.without_ptau || seeded_or_smooth {
         None
+    } else {
+        project.find_ptau()
     };
-    // Only an *explicit* `--ptau-file` conflicts with `--insecure-dev-mode`
-    // (auto-detection is skipped when `--insecure-dev-mode` is set, so any
-    // `ptau_path` here under that flag came from `--ptau-file`).
-    if ptau_path.is_some() && args.insecure_dev_mode {
+    if ptau_path.is_some() && args.deterministic_rng.is_some() {
         bail!(
-            "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
+            "--deterministic-rng seeds a key made without a .ptau: leave out --ptau-file \
+             (the seed would decide the phase-2 randomness of a key meant for production)"
         );
     }
-    // `--deterministic-rng` leaks the trapdoor, so require `--insecure-dev-mode`
     if ptau_path.is_some() && args.domain == QapDomain::Smooth {
         bail!(
-            "--domain smooth is dev-mode only: a Powers-of-Tau transcript's Lagrange bases \
-             are for 2^k domains (use --insecure-dev-mode, or --domain radix2)"
+            "--domain smooth needs a key made without a .ptau: a Powers-of-Tau transcript's \
+             Lagrange bases are for 2^k domains (leave out --ptau-file, or use --domain radix2)"
         );
     }
-    if args.deterministic_rng.is_some() && !args.insecure_dev_mode {
-        bail!("--deterministic-rng requires --insecure-dev-mode");
-    }
-    // No `.ptau` and no explicit `--insecure-dev-mode`: fall back to insecure
-    // dev-mode so the common `xark build && xark setup && xark prove` loop just
-    // works. A real `--ptau-file` still runs production phase-2.
-    let dev_fallback = ptau_path.is_none() && !args.insecure_dev_mode;
+    // No `.ptau`: the key comes from this machine's randomness, so the common
+    // `xark build && xark setup && xark prove` loop just works.
+    let from_os = ptau_path.is_none() && args.deterministic_rng.is_none();
 
     let t_load = std::time::Instant::now();
     let (keyed, form_name, why, hash, num_constraints, num_pi, kind) =
@@ -406,7 +402,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
     };
     // Keys and metadata are written under temporary names and swapped in at the
     // end, so a failed or interrupted setup never leaves a new key beside old
-    // metadata (which could mark a dev key `production_safe`).
+    // metadata (which could mark a single-party key `production_safe`).
     let tmp = |p: &std::path::Path| {
         p.with_extension(format!(
             "{}.tmp",
@@ -491,9 +487,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
             .map(|s| s.to_string());
         vk
     } else {
-        // Dev-mode path. Only explicit `--deterministic-rng <n>` makes the key
+        // Without a `.ptau`. Only explicit `--deterministic-rng <n>` makes the key
         // reproducible; the no-`.ptau` fallback uses OsRng (a fixed seed would make
-        // every dev key byte-identical with a known trapdoor).
+        // every such key byte-identical with a known trapdoor).
         let mut rng = match args.deterministic_rng {
             Some(seed) => {
                 eprintln!(
@@ -566,7 +562,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         } else {
             println!("{setup}");
         }
-        if dev_fallback {
+        if from_os {
             println!(
                 "{}",
                 crate::style::dim(
