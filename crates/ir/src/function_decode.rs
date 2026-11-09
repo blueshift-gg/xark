@@ -2443,7 +2443,7 @@ mod eval {
     use crate::primitive::{Var, VarRole, WitnessGen};
     use crate::solver::{Fp, SolveError, exec_witness_op};
     use ark_bn254::Fr;
-    use ark_ff::Zero;
+    use ark_ff::{BigInteger, PrimeField, Zero};
     use num_bigint::BigUint;
     use std::collections::BTreeMap;
 
@@ -2911,7 +2911,13 @@ mod eval {
             let mut acc = l.k;
             for &(r, c) in &l.terms {
                 let x = self.var(r, w);
-                acc += if c == ONE { x } else { x * c };
+                // Most terms are bits, so a 0 or 1 skips the multiply.
+                if x.is_zero() {
+                } else if x == ONE {
+                    acc += c;
+                } else {
+                    acc += if c == ONE { x } else { x * c };
+                }
             }
             acc
         }
@@ -2979,10 +2985,24 @@ mod eval {
         // fixed plugs, and a template that writes only its own internals.
         let fixed = f.vals.is_some();
         let last = std::cell::Cell::new(None);
+        // The carried input's canonical integer, once a `Bit` has computed it.
+        let mut repr = None;
         for it in items {
             match it {
                 WItem::Op(op, same) => {
                     let carried = last.get().filter(|_| *same && fixed);
+                    if let WitnessGen::Bit { out, input, index } = op {
+                        let x = carried.unwrap_or_else(|| {
+                            repr = None;
+                            f.lc(input, w)
+                        });
+                        last.set(Some(x));
+                        let b: &ark_ff::BigInt<4> = repr.get_or_insert_with(|| x.into_bigint());
+                        let bit = if b.get_bit(*index as usize) { ONE } else { Fr::zero() };
+                        w.put(f.out(*out), bit);
+                        continue;
+                    }
+                    repr = None;
                     let eval = |l: &Lc| {
                         let x = carried.unwrap_or_else(|| f.lc(l, w));
                         last.set(Some(x));
