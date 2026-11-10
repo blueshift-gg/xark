@@ -16,4 +16,4 @@ name = "xark_poseidon"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
+xark = { path = "../../crates/lang", version = "0.3.1" }

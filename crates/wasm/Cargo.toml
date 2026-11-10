@@ -21,13 +21,13 @@ crate-type = ["cdylib", "rlib"]
 # (rayon) feature stays OFF — rayon's thread pool (and `std::time`) are
 # unsupported on `wasm32-unknown-unknown`, and enabling `parallel` here would
 # panic the prover.
-xark-ir = { path = "../ir", version = "0.3.0", default-features = false }
-xark-prover = { path = "../prover", version = "0.3.0", default-features = false }
-xark-schema = { path = "../schema", version = "0.3.0" }
+xark-ir = { path = "../ir", version = "0.3.1", default-features = false }
+xark-prover = { path = "../prover", version = "0.3.1", default-features = false }
+xark-schema = { path = "../schema", version = "0.3.1" }
 # The streaming prover (`proveStreaming`) and its worker kernels.
-xark-groth16 = { path = "../groth16", version = "0.3.0" }
+xark-groth16 = { path = "../groth16", version = "0.3.1" }
 # `poseidon2`: the gadget's hash, natively, so a client can hash as the circuit does.
-xark-poseidon2 = { path = "../../gadgets/xark-poseidon2", version = "0.3.0" }
+xark-poseidon2 = { path = "../../gadgets/xark-poseidon2", version = "0.3.1" }
 
 # Only the arkworks crates actually named in `lib.rs`. `ark-ff` / `ark-ec` are
 # pulled transitively (via `xark-groth16` etc.) with the right features — the `parallel`-OFF guarantee comes from the `xark-*`

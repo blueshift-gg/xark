@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 [lib]
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
+xark = { path = "../../crates/lang", version = "0.3.1" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

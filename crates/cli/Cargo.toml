@@ -22,12 +22,12 @@ debug = ["xark-ir/debug", "xark-prover/debug"]
 
 [dependencies]
 num-bigint = "0.4"
-xark-ir = { path = "../ir", version = "0.3.0" }
-xark-prover = { path = "../prover", version = "0.3.0" }
-xark-schema = { path = "../schema", version = "0.3.0" }
-xark-backend = { path = "../backend", version = "0.3.0" }
-xark-groth16 = { path = "../groth16", version = "0.3.0" }
-xark-frontend = { path = "../frontend", version = "0.3.0" }
+xark-ir = { path = "../ir", version = "0.3.1" }
+xark-prover = { path = "../prover", version = "0.3.1" }
+xark-schema = { path = "../schema", version = "0.3.1" }
+xark-backend = { path = "../backend", version = "0.3.1" }
+xark-groth16 = { path = "../groth16", version = "0.3.1" }
+xark-frontend = { path = "../frontend", version = "0.3.1" }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"

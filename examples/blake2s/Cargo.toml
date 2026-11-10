@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
-xark-blake2s = { path = "../../gadgets/xark-blake2s", version = "0.3.0" }
+xark = { path = "../../crates/lang", version = "0.3.1" }
+xark-blake2s = { path = "../../gadgets/xark-blake2s", version = "0.3.1" }
 
 [dev-dependencies]
 blake2 = "0.10"
