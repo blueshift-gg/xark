@@ -18,7 +18,7 @@ ark-ff.workspace = true
 ark-ec.workspace = true
 ark-serialize.workspace = true
 ark-std.workspace = true
-xark-groth16 = { path = "../groth16", version = "0.3.0" }
+xark-groth16 = { path = "../groth16", version = "0.3.1" }
 
 
 thiserror.workspace = true

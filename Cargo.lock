@@ -4680,7 +4680,7 @@ dependencies = [
 
 [[package]]
 name = "xark"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4695,7 +4695,7 @@ dependencies = [
 
 [[package]]
 name = "xark-aes"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ghash",
  "xark",
@@ -4705,7 +4705,7 @@ dependencies = [
 
 [[package]]
 name = "xark-backend"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4727,7 +4727,7 @@ dependencies = [
 
 [[package]]
 name = "xark-bignum"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
@@ -4737,7 +4737,7 @@ dependencies = [
 
 [[package]]
 name = "xark-bits"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "blake2",
  "blake3",
@@ -4751,7 +4751,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake2s"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4760,7 +4760,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake3"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4769,7 +4769,7 @@ dependencies = [
 
 [[package]]
 name = "xark-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
@@ -4794,11 +4794,11 @@ dependencies = [
 
 [[package]]
 name = "xark-curve"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "xark-ed25519"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "curve25519-dalek",
  "ed25519-dalek",
@@ -4813,7 +4813,7 @@ dependencies = [
 
 [[package]]
 name = "xark-frontend"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "addr2line",
  "num-bigint 0.4.8",
@@ -4826,7 +4826,7 @@ dependencies = [
 
 [[package]]
 name = "xark-groth16"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4848,7 +4848,7 @@ dependencies = [
 
 [[package]]
 name = "xark-grumpkin"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4857,14 +4857,14 @@ dependencies = [
 
 [[package]]
 name = "xark-hash"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-ir"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4878,7 +4878,7 @@ dependencies = [
 
 [[package]]
 name = "xark-keccak"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4887,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "xark-macros"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4896,7 +4896,7 @@ dependencies = [
 
 [[package]]
 name = "xark-merkle"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
@@ -4907,7 +4907,7 @@ dependencies = [
 
 [[package]]
 name = "xark-mimc"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4916,7 +4916,7 @@ dependencies = [
 
 [[package]]
 name = "xark-pedersen"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4925,14 +4925,14 @@ dependencies = [
 
 [[package]]
 name = "xark-poseidon"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-poseidon2"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4943,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4958,7 +4958,7 @@ dependencies = [
 
 [[package]]
 name = "xark-schema"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4968,7 +4968,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256k1"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "k256",
  "num-bigint 0.4.8",
@@ -4981,7 +4981,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256r1"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "num-bigint 0.4.8",
  "p256",
@@ -4994,7 +4994,7 @@ dependencies = [
 
 [[package]]
 name = "xark-sha256"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "xark",
  "xark-bits",
@@ -5003,7 +5003,7 @@ dependencies = [
 
 [[package]]
 name = "xark-test-harness"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "num-bigint 0.4.8",
  "serde_json",
@@ -5013,7 +5013,7 @@ dependencies = [
 
 [[package]]
 name = "xark-tests"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -5042,7 +5042,7 @@ dependencies = [
 
 [[package]]
 name = "xark-verifier"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",
@@ -5051,7 +5051,7 @@ dependencies = [
 
 [[package]]
 name = "xark-wasm"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",

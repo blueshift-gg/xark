@@ -16,11 +16,11 @@ name = "xark_grumpkin"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
+xark = { path = "../../crates/lang", version = "0.3.1" }
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
-xark-ir = { path = "../../crates/ir", version = "0.3.0" }
+xark-test-harness = { path = "../../crates/test-harness", version = "0.3.1" }
+xark-ir = { path = "../../crates/ir", version = "0.3.1" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

@@ -372,7 +372,12 @@ pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
 /// derive a different valid proof of the same statement. Never key replay
 /// protection on proof bytes; put it in the public inputs (a nullifier, nonce
 /// or signer the circuit binds).
-#[inline]
+///
+/// Never inlined, nor are the other entry points: inlined into a program's
+/// entrypoint (as fat LTO does), the pairing check's buffers can take that one frame
+/// past the SBF limit of 4,096 bytes. `cargo build-sbf` only warns about that, and the
+/// program then overwrites its own stack at run time.
+#[inline(never)]
 pub fn verify(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
     VERIFIER.verify(proof, public_inputs)
 }}
@@ -382,7 +387,7 @@ pub fn verify(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> b
 /// proofs are always canonical, so this never rejects an honest proof. It
 /// removes *encoding* malleability only: a re-randomized proof is still
 /// accepted (see [`verify`]).
-#[inline]
+#[inline(never)]
 pub fn verify_strict(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
     VERIFIER.verify_strict(proof, public_inputs)
 }}
@@ -390,13 +395,13 @@ pub fn verify_strict(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS
 /// Verify from raw instruction data laid out as
 /// `proof (256 B) || public_inputs ({n} * 32 B)` — the shape your program
 /// receives in its instruction data. Returns `false` on any failure.
-#[inline]
+#[inline(never)]
 pub fn verify_instruction_data(data: &[u8]) -> bool {{
     xark_verifier::verify_proof_only(VK_BYTES, data).unwrap_or(false)
 }}
 
 /// Strict [`verify_instruction_data`]; see [`verify_strict`].
-#[inline]
+#[inline(never)]
 pub fn verify_instruction_data_strict(data: &[u8]) -> bool {{
     xark_verifier::verify_proof_only_strict(VK_BYTES, data).unwrap_or(false)
 }}

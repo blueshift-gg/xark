@@ -8,11 +8,11 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
-xark-secp256r1 = { path = "../../gadgets/xark-secp256r1", version = "0.3.0" }
+xark = { path = "../../crates/lang", version = "0.3.1" }
+xark-secp256r1 = { path = "../../gadgets/xark-secp256r1", version = "0.3.1" }
 
 [dev-dependencies]
-xark-secp256r1 = { path = "../../gadgets/xark-secp256r1", version = "0.3.0" }
+xark-secp256r1 = { path = "../../gadgets/xark-secp256r1", version = "0.3.1" }
 p256 = "0.13"
 
 [lints.rust]

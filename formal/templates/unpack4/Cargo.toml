@@ -10,8 +10,8 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../../crates/lang", version = "0.3.0" }
-xark-secp256r1 = { path = "../../../gadgets/xark-secp256r1", version = "0.3.0" }
+xark = { path = "../../../crates/lang", version = "0.3.1" }
+xark-secp256r1 = { path = "../../../gadgets/xark-secp256r1", version = "0.3.1" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

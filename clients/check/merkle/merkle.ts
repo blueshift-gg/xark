@@ -53,7 +53,7 @@ const schema = {
   ],
   "types": {},
   "version": 2,
-  "xark": "0.3.0"
+  "xark": "0.3.1"
 };
 
 /** Every input of `merkle`. */

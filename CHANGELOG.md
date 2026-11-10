@@ -4,6 +4,17 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
+## 0.3.1
+
+### Fixes
+
+- The verifier crate `xark export` writes no longer inlines `verify`,
+  `verify_strict` or the `verify_instruction_data` functions. Inlined into a
+  program's entrypoint under fat LTO, the pairing check took that frame past the
+  SBF limit of 4,096 bytes (4,480 in xark-examples' `over-9000`), which
+  `cargo build-sbf` only warns about and which corrupts the stack at run time.
+  Re-run `xark export` to pick it up; no circuit or key changes.
+
 ## 0.3.0
 
 ### Circuits that changed
