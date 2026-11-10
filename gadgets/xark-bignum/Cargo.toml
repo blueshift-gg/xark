@@ -15,11 +15,11 @@ homepage.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.1" }
+xark.workspace = true
 
 [dev-dependencies]
-xark-test-harness = { path = "../../crates/test-harness", version = "0.3.1" }
-xark-ir = { path = "../../crates/ir", version = "0.3.1" }
+xark-test-harness = { path = "../../crates/test-harness" }
+xark-ir = { path = "../../crates/ir" }
 num-bigint.workspace = true
 
 [lints.rust]
