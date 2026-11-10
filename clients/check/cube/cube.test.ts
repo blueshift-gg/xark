@@ -26,7 +26,8 @@ test("proves and verifies", () => {
   const proof = prover.prove(inputs);
   expect(proof.publicInputs).toEqual({ result: new Field(27) });
   expect(proof.publicInputs.result.equals(27)).toBe(true);
-  expect(verifier.verify(proof)).toBe(true);
+  // @ts-expect-error: a public-input circuit needs the inputs it checks (tsc checks this line)
+  expect(() => verifier.verify(proof)).toThrow(/pass the ones it must prove/);
   // Against the public inputs a verifier requires.
   expect(verifier.verify(proof, { result: new Field(27) })).toBe(true);
   expect(verifier.verify(proof, { result: 28 })).toBe(false);
@@ -105,7 +106,7 @@ test("loads its build output from a URL", async () => {
     const proof = (await Cube.prover(server.url)).prove(inputs);
     // A verifier fetches only the verifying key, and can't prove.
     const fetched = await Cube.verifier(new URL(server.url));
-    expect(fetched.verify(proof)).toBe(true);
+    expect(fetched.verify(proof, { result: 27 })).toBe(true);
     // @ts-expect-error: a verifier has no `prove` (tsc checks this line)
     expect(fetched.prove).toBeUndefined();
     await expect(Cube.prover(server.url + "missing/")).rejects.toThrow(/404/);
@@ -126,7 +127,7 @@ test("a path outside a browser says to pass the bytes", async () => {
   await expect(Cube.verifier("/circuits/cube/")).rejects.toThrow(/readFileSync\("\/circuits\/cube\/vk\.bin"\)/);
   const read = (f: string) => readFileSync(join(dir, f));
   const proof = (await Cube.prover({ circuit: read("circuit.xbc"), provingKey: read("pk.bin") })).prove(inputs);
-  expect((await Cube.verifier(read("vk.bin"))).verify(proof)).toBe(true);
+  expect((await Cube.verifier(read("vk.bin"))).verify(proof, { result: 27 })).toBe(true);
 });
 
 test("a client from another xark release says so", () => {

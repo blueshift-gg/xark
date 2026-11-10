@@ -18,7 +18,6 @@ test("proves a preimage", () => {
   const proof = prover.prove({ msg, digest });
   expect(proof.publicInputs.digest).toBeInstanceOf(Uint8Array);
   expect(proof.publicInputs.digest).toHaveLength(32);
-  expect(verifier.verify(proof)).toBe(true);
   expect(verifier.verify(proof, { digest })).toBe(true);
   const other = digest.slice();
   other[31] ^= 1;
