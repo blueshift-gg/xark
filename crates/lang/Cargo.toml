@@ -20,7 +20,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # The `#[circuit]` / `#[gadget]` attribute macros (always available to authors).
-xark-macros = { path = "../macros", version = "0.3.1" }
+xark-macros.workspace = true
 
 # Host-only: `From<Field> for ark_bn254::Fr` (so a constructed input `Field` converts to
 # the prover's scalar). Gated on `cfg(not(xark))`: a circuit build never pulls
@@ -31,11 +31,12 @@ ark-ff = { version = "0.6", default-features = false }
 # Host-only: big-integer hints (bignum mul/inverse) computed natively; the fake-GLV
 # lattice hint as the solver computes it.
 num-bigint = "0.4"
+# Kept explicit for default-features = false; bump on release.
 xark-ir = { path = "../ir", version = "0.3.1", default-features = false }
 # Host-only: values in their natural JSON forms, for `#[input]` functions
 # (`client.rs`), through the codec every client shares.
 serde_json = "1"
-xark-schema = { path = "../schema", version = "0.3.1" }
+xark-schema.workspace = true
 
 # The host-side prover (`xark::prover`): what `#[circuit]`'s validator and the
 # input traits use, so a circuit crate needs no other xark dependency. Parallel
@@ -44,15 +45,16 @@ xark-schema = { path = "../schema", version = "0.3.1" }
 # in the client build (`--cfg xark_client`: the crate's host code as `client.wasm`
 # for `xark client`), which never proves.
 [target.'cfg(all(not(xark), not(xark_client), not(target_arch = "wasm32")))'.dependencies]
-xark-prover = { path = "../prover", version = "0.3.1" }
+xark-prover.workspace = true
 [target.'cfg(all(not(xark), not(xark_client), target_arch = "wasm32"))'.dependencies]
+# Kept explicit for default-features = false; bump on release.
 xark-prover = { path = "../prover", version = "0.3.1", default-features = false }
 
 [dev-dependencies]
-xark-schema = { path = "../schema", version = "0.3.1" }
-xark-test-harness = { path = "../test-harness", version = "0.3.1" }
-xark-ir = { path = "../ir", version = "0.3.1" }
-xark-prover = { path = "../prover", version = "0.3.1" }
+xark-schema = { path = "../schema" }
+xark-test-harness = { path = "../test-harness" }
+xark-ir = { path = "../ir" }
+xark-prover = { path = "../prover" }
 serde_json = "1"
 num-bigint = "0.4"
 
