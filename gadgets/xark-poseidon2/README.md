@@ -10,8 +10,8 @@ native version of every function.
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-poseidon2 = "0.3"
+xark = "0.4"
+xark-poseidon2 = "0.4"
 ```
 
 ## Use

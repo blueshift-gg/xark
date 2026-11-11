@@ -45,7 +45,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/blueshift-gg/xark"
@@ -84,21 +84,21 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 #   crates/prover:  xark-ir
 #   crates/lang:    xark-ir (cfg(not(xark))), xark-prover (wasm32)
 #   crates/wasm:    xark-ir, xark-prover
-xark = { path = "crates/lang", version = "0.3.1" }
-xark-backend = { path = "crates/backend", version = "0.3.1" }
-xark-bignum = { path = "gadgets/xark-bignum", version = "0.3.1" }
-xark-bits = { path = "gadgets/xark-bits", version = "0.3.1" }
-xark-curve = { path = "gadgets/xark-curve", version = "0.3.1" }
-xark-frontend = { path = "crates/frontend", version = "0.3.1" }
-xark-groth16 = { path = "crates/groth16", version = "0.3.1" }
-xark-hash = { path = "gadgets/xark-hash", version = "0.3.1" }
-xark-ir = { path = "crates/ir", version = "0.3.1" }
-xark-macros = { path = "crates/macros", version = "0.3.1" }
-xark-poseidon = { path = "gadgets/xark-poseidon", version = "0.3.1" }
-xark-poseidon2 = { path = "gadgets/xark-poseidon2", version = "0.3.1" }
-xark-prover = { path = "crates/prover", version = "0.3.1" }
-xark-schema = { path = "crates/schema", version = "0.3.1" }
-xark-verifier = { path = "crates/verifier", version = "0.3.1" }
+xark = { path = "crates/lang", version = "0.4.0" }
+xark-backend = { path = "crates/backend", version = "0.4.0" }
+xark-bignum = { path = "gadgets/xark-bignum", version = "0.4.0" }
+xark-bits = { path = "gadgets/xark-bits", version = "0.4.0" }
+xark-curve = { path = "gadgets/xark-curve", version = "0.4.0" }
+xark-frontend = { path = "crates/frontend", version = "0.4.0" }
+xark-groth16 = { path = "crates/groth16", version = "0.4.0" }
+xark-hash = { path = "gadgets/xark-hash", version = "0.4.0" }
+xark-ir = { path = "crates/ir", version = "0.4.0" }
+xark-macros = { path = "crates/macros", version = "0.4.0" }
+xark-poseidon = { path = "gadgets/xark-poseidon", version = "0.4.0" }
+xark-poseidon2 = { path = "gadgets/xark-poseidon2", version = "0.4.0" }
+xark-prover = { path = "crates/prover", version = "0.4.0" }
+xark-schema = { path = "crates/schema", version = "0.4.0" }
+xark-verifier = { path = "crates/verifier", version = "0.4.0" }
 
 # `target_os = "solana"` / `target_arch = "bpf"` are Solana-toolchain-only cfg
 # values; declare them so upstream rustc's `unexpected_cfgs` lint (1.80+) doesn't

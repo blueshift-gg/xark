@@ -4,7 +4,28 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
-## Unreleased
+## 0.4.0
+
+A project for a circuit and the Solana program that verifies it: `xark init`
+makes one, `xark add program` writes the program and a LiteSVM test, and `xark
+build` and `xark test` at its root do the rest. The verifier crate takes its
+public inputs by name. No circuit changed: keys made with 0.3 still verify (its
+digests are the same).
+
+### Moving from 0.3
+
+- **A circuit crate from 0.3** still works on its own. `xark export` now writes
+  its verifier crate to `<crate>/clients/rust/` (it was `<crate>/<name>-verifier/`;
+  the crate's name is unchanged) and `xark client` its client to
+  `<crate>/clients/ts/`: move them, or update the program's path dependency.
+  To make it a project, run `xark init <name>` in a new directory and move the
+  crate's `src/` and dependencies into `circuits/<name>/`.
+- **`verify`** takes `impl Into<Fields>`: a `PublicInputs`, or the
+  `[[u8; 32]; N]` you passed before, now by value (`verify(&proof, inputs)`, or
+  `*inputs` for a reference).
+- **`verify_instruction_data`** is gone: split the public inputs off after the
+  proof's 256 bytes into `Fields`, and call `verify`.
+- Re-run `xark export` and `xark client`, and use `@blueshift-gg/xark` 0.4.
 
 ### Changes
 
@@ -24,6 +45,13 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   with a public input of a type that has no Rust form yet (a limbed number, an
   Ed25519 point) gets no `PublicInputs`. The crate's self-test checks that the
   sample proof's public inputs, written by name, pack to the sample's elements.
+- **Breaking:** the crate `xark export` writes no longer has
+  `verify_instruction_data`, `verify_instruction_data_strict` or `VK_BYTES`: they
+  were a second way to verify (re-parsing the key at run time from a second copy of
+  it). A program that takes the public inputs in its instruction data splits them
+  off after the proof's 256 bytes into `Fields` for `verify`, as the program `xark
+  add program` writes does. The bundled self-test checks the sample with `verify`,
+  and that a changed public input fails.
 - `xark_verifier::fields`: the packing rules as `const fn`s, for the generated
   crate and for packing your own struct. `Packer::new().uint::<17>(day).finish()`
   takes each field's width as a const generic, so a value too wide for its bits,

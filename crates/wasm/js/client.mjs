@@ -16,7 +16,7 @@
 const MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 /** This package's version. A client's `schema.json` must come from the same release. */
-export const VERSION = "0.3.1";
+export const VERSION = "0.4.0";
 
 /** Whether versions `a` and `b` are the same release: the same minor before 1.0, major after. */
 function sameRelease(a, b) {

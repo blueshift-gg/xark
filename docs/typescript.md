@@ -6,7 +6,7 @@ helper functions.
 
 ```sh
 xark client                                  # writes clients/<circuit>/ts/<circuit>.ts in a project
-npm install @blueshift-gg/xark@0.3           # the runtime it imports
+npm install @blueshift-gg/xark@0.4           # the runtime it imports
 ```
 
 `xark build` also writes `schema.json`: every input's name, visibility and

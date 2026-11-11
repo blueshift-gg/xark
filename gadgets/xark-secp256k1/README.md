@@ -10,8 +10,8 @@ crate.
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-secp256k1 = "0.3"
+xark = "0.4"
+xark-secp256k1 = "0.4"
 ```
 
 ## Use

@@ -22,8 +22,8 @@ crate-type = ["cdylib", "rlib"]
 # unsupported on `wasm32-unknown-unknown`, and enabling `parallel` here would
 # panic the prover.
 # Kept explicit for default-features = false; bump on release.
-xark-ir = { path = "../ir", version = "0.3.1", default-features = false }
-xark-prover = { path = "../prover", version = "0.3.1", default-features = false }
+xark-ir = { path = "../ir", version = "0.4.0", default-features = false }
+xark-prover = { path = "../prover", version = "0.4.0", default-features = false }
 xark-schema.workspace = true
 # The streaming prover (`proveStreaming`) and its worker kernels.
 xark-groth16.workspace = true

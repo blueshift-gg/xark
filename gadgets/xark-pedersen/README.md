@@ -9,8 +9,8 @@ circuit's own field, so the curve arithmetic needs no non-native limbs.
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-pedersen = "0.3"
+xark = "0.4"
+xark-pedersen = "0.4"
 ```
 
 ## Use

@@ -33,7 +33,7 @@ const schema = {
   ],
   "types": {},
   "version": 2,
-  "xark": "0.3.1"
+  "xark": "0.4.0"
 };
 
 /** Every input of `cube`. */

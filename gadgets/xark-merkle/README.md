@@ -9,8 +9,8 @@ a public root, without saying which leaf. Nodes are hashed with Poseidon
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-merkle = "0.3"
+xark = "0.4"
+xark-merkle = "0.4"
 ```
 
 ## Use

@@ -12,8 +12,8 @@ accumulators, Nova instances) inside a BN254 proof. The tests check it against
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-grumpkin = "0.3"
+xark = "0.4"
+xark-grumpkin = "0.4"
 ```
 
 ## Use

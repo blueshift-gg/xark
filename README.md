@@ -167,8 +167,8 @@ Each gadget is its own crate under [`gadgets/`](gadgets). Add the ones you use:
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-poseidon2 = "0.3"
+xark = "0.4"
+xark-poseidon2 = "0.4"
 ```
 
 | Crate | What it does |

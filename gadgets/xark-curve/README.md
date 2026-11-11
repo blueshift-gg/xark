@@ -10,9 +10,9 @@ want signature verification, use those crates instead.
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-bignum = "0.3"
-xark-curve = "0.3"
+xark = "0.4"
+xark-bignum = "0.4"
+xark-curve = "0.4"
 ```
 
 The emitted code refers to `xark_bignum::…` and `xark::…`, so the crate that
