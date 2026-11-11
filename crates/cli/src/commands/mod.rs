@@ -42,6 +42,7 @@ pub mod export;
 pub mod inspect;
 pub mod profile;
 pub mod prove;
+pub mod public_inputs;
 pub mod setup;
 pub mod verify;
 

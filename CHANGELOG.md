@@ -14,6 +14,16 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   They were `<name>-verifier/` and `target/xark/<name>/<circuit>.ts`, where
   `cargo clean` deleted the client. `--out` still picks the place. See
   [docs/projects.md](docs/projects.md) for where this is going.
+- The verifier crate `xark export` writes has a `PublicInputs` struct: the
+  circuit's public inputs by name, in Rust types a program has at hand (integers,
+  `[u8; 32]`, `Days<FROM, TO>` from a Unix time, an enum per `Choice`, a
+  `Bitfield` per set), packed into field elements by `to_fields()` as `#[input]`
+  packs them. `verify` and `verify_strict` take a `&PublicInputs`; **breaking:**
+  the field elements by position are now `verify_fields` and
+  `verify_fields_strict`. A circuit with a public input of a type that has no
+  Rust form yet (a limbed number, an Ed25519 point) gets
+  `PublicInputs([[u8; 32]; N])`. The crate's self-test checks the sample proof's
+  public inputs, written by name, pack to the sample's field elements.
 
 ## 0.3.1
 

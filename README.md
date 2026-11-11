@@ -100,12 +100,15 @@ Key: a single-party setup from OS randomness: sound unless whoever ran `xark set
 ```
 
 `my-circuit/clients/rust/` is a crate, `my-circuit-verifier`, your Solana program
-depends on (`xark client` writes the TypeScript one in `clients/ts/`):
+depends on (`xark client` writes the TypeScript one in `clients/ts/`). Its
+`PublicInputs` has the circuit's public inputs by name, packed for you:
 
 ```rust
 let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);
-let public_inputs: [[u8; 32]; 1] = [/* from your program's state */];
-if !my_circuit_verifier::verify(&proof, &public_inputs) {
+let inputs = my_circuit_verifier::PublicInputs {
+    result: /* from your program's state, 32 bytes little-endian */,
+};
+if !my_circuit_verifier::verify(&proof, &inputs) {
     return Err(ProgramError::InvalidArgument);
 }
 ```

@@ -82,25 +82,30 @@ packs them into field elements as `#[input]` does, from the packing `schema.json
 records (`"packed": { "offset", "bits" }`), so a program never does it by hand:
 
 ```rust
-let inputs = zkyc_verifier::PublicInputs {
+use zkyc_verifier::{Bitfield, Country, Days, Policy, PublicInputs};
+
+let today = Days::<1900, 2100>::from_unix(clock.unix_timestamp).ok_or(…)?;
+let inputs = PublicInputs {
     commitment: record.commitment,
-    policy: zkyc_verifier::Policy {
-        today: Day::from_unix(clock.unix_timestamp)?,
+    policy: Policy {
+        today,
         born_by: …,
         min_net_worth: 500_000,
-        allowed: Countries::EMPTY.with(Country::DE).with(Country::FR),
+        allowed: Bitfield::<Country>::EMPTY.with(Country::DE).with(Country::FR),
     },
-    holder: Address(*holder.address()),
+    holder: *holder.address(), // a `Hash`: its 32 bytes, split into hi/lo for you
 };
 if !zkyc_verifier::verify(&proof, &inputs) { … }
 ```
 
-Each standard type (`crates/cli/src/commands/client/model.rs`) gets a `no_std`
-Rust form: a field element `[u8; 32]`, an integer its Rust integer, a `Days`
-range a step count with `from_unix`, a `Choice` or `Bitfield` a generated enum
-and set, an address its 32 bytes (split into hi/lo when packed). A type with no
-Rust form yet leaves `verify` taking `[[u8; 32]; N]`, as today. The encoder is
-tested against `xark_schema`, the codec `xark prove` uses, on every example.
+Each input type gets a `no_std` Rust form (`crates/cli/src/commands/public_inputs.rs`):
+a field element `[u8; 32]`, an integer its Rust integer, a `Time`/`Days` range
+with `from_unix`, a `Timestamp` an `i64`, `Text` a `Text`, a `Choice` a generated
+enum, a `Bitfield` a set of it, a byte-encoded type such as `Hash` its bytes. A
+type with no Rust form yet (a limbed number, an Ed25519 point) gives
+`PublicInputs([[u8; 32]; N])`. Every export with a sample proof checks the
+encoder against `xark_schema`, the codec `xark prove` uses: the crate's self-test
+writes the sample's public inputs by name, packs them and verifies the proof.
 
 ## At the project root
 
@@ -115,7 +120,7 @@ tested against `xark_schema`, the codec `xark prove` uses, on every example.
 ## Order of work
 
 1. The `clients/` default for `xark export` and `xark client`. (Built.)
-2. Typed `PublicInputs` in the generated Rust crate.
+2. Typed `PublicInputs` in the generated Rust crate. (Built.)
 3. `xark add circuit|program` and `xark.toml`.
 4. `xark build`, `xark test` and `xark check` at the project root.
 
