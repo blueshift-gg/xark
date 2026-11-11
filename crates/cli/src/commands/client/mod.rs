@@ -40,7 +40,7 @@ pub struct ClientArgs {
     #[arg(long, value_enum, default_value_t = Lang::Ts)]
     pub lang: Lang,
     /// Output file, or a directory to write `<circuit>.<ext>` in. Defaults to
-    /// `target/xark/<name>/<circuit>.<ext>`.
+    /// `<crate>/clients/<lang>/<circuit>.<ext>`, beside the circuit's sources.
     #[arg(long, short, value_hint = clap::ValueHint::FilePath)]
     pub out: Option<PathBuf>,
     /// Skip the Rust client functions (`#[input]` on an `impl`, built as
@@ -165,7 +165,7 @@ pub fn run(args: ClientArgs) -> Result<()> {
             o.join(file)
         }
         Some(o) => o,
-        None => project.xark_dir.join(file),
+        None => project.clients_dir().join(args.lang.ext()).join(file),
     };
     // The build's directory, named after the package (not the circuit).
     let artifacts = project

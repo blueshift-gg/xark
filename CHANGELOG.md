@@ -4,6 +4,17 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
+## Unreleased
+
+### Changes
+
+- `xark export` and `xark client` write to `clients/` beside the circuit's
+  sources by default: the verifier crate to `clients/rust/` (still named
+  `<name>-verifier`) and the TypeScript client to `clients/ts/<circuit>.ts`.
+  They were `<name>-verifier/` and `target/xark/<name>/<circuit>.ts`, where
+  `cargo clean` deleted the client. `--out` still picks the place. See
+  [docs/projects.md](docs/projects.md) for where this is going.
+
 ## 0.3.1
 
 ### Fixes

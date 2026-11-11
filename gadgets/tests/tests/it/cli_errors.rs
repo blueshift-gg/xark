@@ -578,15 +578,16 @@ fn next_steps_can_be_followed() {
         out.contains("target/xark/my-cube/") && !out.contains("target/xark/cube/"),
         "{out}"
     );
-    let ts = std::fs::read_to_string(dir.join("target/xark/my-cube/cube.ts")).unwrap();
+    let ts = std::fs::read_to_string(dir.join("clients/ts/cube.ts")).unwrap();
     assert!(!ts.contains("target/xark/cube/"), "{ts}");
 }
 
-/// With no `--out`, `export` writes `<crate>/<name>-verifier/`, beside the circuit's
-/// sources rather than under `target/` (gitignored, and gone after `cargo clean`),
-/// and the circuit crate still builds with it there.
+/// With no `--out`, `export` writes `<crate>/clients/rust/` and `client`
+/// `<crate>/clients/ts/`, beside the circuit's sources rather than under `target/`
+/// (gitignored, and gone after `cargo clean`), and the circuit crate still builds
+/// with them there.
 #[test]
-fn export_defaults_beside_the_crate() {
+fn clients_default_beside_the_crate() {
     let tmp = tempdir();
     let dir = copy_example(tmp.path(), "arithmetic_square");
     let (ok, out) = run_in(&dir, &["build", "."]);
@@ -597,7 +598,7 @@ fn export_defaults_beside_the_crate() {
     assert!(ok, "export failed:\n{out}");
     // A key from OS randomness is a single-party setup, and the crate says so.
     assert!(out.contains("Key: a single-party setup"), "{out}");
-    let verifier = dir.join("arithmetic_square-verifier");
+    let verifier = dir.join("clients/rust");
     let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
     assert!(
         lib.contains(r#"pub const SETUP: &str = "single-party";"#),
@@ -608,8 +609,13 @@ fn export_defaults_beside_the_crate() {
         manifest.contains("name = \"arithmetic-square-verifier\""),
         "{manifest}"
     );
-    assert!(out.contains("arithmetic_square-verifier"), "{out}");
-    assert!(!dir.join("target/xark/arithmetic_square/verifier").exists());
+    assert!(out.contains("clients/rust"), "{out}");
+    let (ok, out) = run_in(&dir, &["client", ".", "--no-functions"]);
+    assert!(ok, "client failed:\n{out}");
+    assert!(
+        dir.join("clients/ts/arithmetic_square.ts").exists(),
+        "{out}"
+    );
     let (ok, out) = run_in(&dir, &["build", "."]);
     assert!(ok, "the circuit crate no longer builds:\n{out}");
 }

@@ -99,7 +99,8 @@ Key: a single-party setup from OS randomness: sound unless whoever ran `xark set
 ✅ On-chain verifier crate ready (verifying key embedded).
 ```
 
-`my-circuit/my-circuit-verifier/` is a crate your Solana program depends on:
+`my-circuit/clients/rust/` is a crate, `my-circuit-verifier`, your Solana program
+depends on (`xark client` writes the TypeScript one in `clients/ts/`):
 
 ```rust
 let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);

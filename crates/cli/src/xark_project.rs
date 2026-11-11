@@ -61,16 +61,21 @@ impl XarkProject {
         (target.file_name()? == "target").then(|| target.parent().map(PathBuf::from))?
     }
 
-    /// Default output directory for `xark export`'s generated verifier crate:
-    /// `<crate>/<name>-verifier/`, beside the circuit's sources (a nested crate with
-    /// its own `[workspace]`, so the circuit crate neither builds nor packages it),
-    /// where git tracks it and `cargo clean` leaves it. A build output outside a
-    /// crate's `target/` keeps it there, as `verifier/`.
-    pub fn export_dir(&self) -> PathBuf {
-        match (self.crate_dir(), self.xark_dir.file_name()) {
-            (Some(krate), Some(name)) => krate.join(format!("{}-verifier", name.to_string_lossy())),
-            _ => self.xark_dir.join("verifier"),
+    /// Where the generated clients go by default: `<crate>/clients/`, `rust/` for
+    /// `xark export`'s verifier crate (nested, with its own `[workspace]`, so the
+    /// circuit crate neither builds nor packages it) and `ts/` for `xark client`'s.
+    /// Beside the circuit's sources, git tracks them and `cargo clean` leaves them. A
+    /// build output outside a crate's `target/` keeps them there.
+    pub fn clients_dir(&self) -> PathBuf {
+        match self.crate_dir() {
+            Some(krate) => krate.join("clients"),
+            None => self.xark_dir.join("clients"),
         }
+    }
+
+    /// The package the build is named after (`target/xark/<name>/`).
+    pub fn name(&self) -> Option<String> {
+        Some(self.xark_dir.file_name()?.to_string_lossy().into_owned())
     }
 
     /// Auto-detect a Powers-of-Tau (`.ptau`) transcript for production setup.

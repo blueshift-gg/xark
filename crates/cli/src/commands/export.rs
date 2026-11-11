@@ -59,12 +59,13 @@ pub struct ExportArgs {
     pub public_inputs: Option<PathBuf>,
     /// Output directory — the root of the generated verifier crate (a warning if it
     /// isn't empty; a `Cargo.toml` or `src/lib.rs` it didn't write is never
-    /// replaced). Defaults to `<crate>/<name>-verifier/`, beside the circuit's
-    /// sources (tracked by git, kept by `cargo clean`); for a build output outside
-    /// a crate's `target/`, its `verifier/`.
+    /// replaced). Defaults to `<crate>/clients/rust/`, beside the circuit's sources
+    /// (tracked by git, kept by `cargo clean`); for a build output outside a crate's
+    /// `target/`, its `clients/rust/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
-    /// Name for the generated crate. Defaults to the `--out` directory name.
+    /// Name for the generated crate. Defaults to `<name>-verifier`, or with `--out`
+    /// to that directory's name.
     #[arg(long)]
     pub crate_name: Option<String>,
 }
@@ -94,7 +95,10 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // A proof given by flag must be there and verify; the inferred one is a sample,
     // left out when missing or made with another key.
     let explicit = args.proof.is_some() || args.public_inputs.is_some();
-    let out_dir = args.out.clone().unwrap_or_else(|| project.export_dir());
+    let out_dir = args
+        .out
+        .clone()
+        .unwrap_or_else(|| project.clients_dir().join("rust"));
 
     // Load inputs.
     let vk = super::read_artifact(
@@ -156,12 +160,17 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // Encode (little-endian, the only on-chain wire format).
     let vk_bytes = assemble_vk_bytes_le(&vk);
 
-    let crate_name = sanitize_crate_name(args.crate_name.as_deref().unwrap_or_else(|| {
-        out_dir
+    // `clients/rust/` says nothing about the circuit: by default the crate is named
+    // after the package.
+    let default_name = match (&args.out, project.name()) {
+        (None, Some(name)) => format!("{name}-verifier"),
+        _ => out_dir
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("groth16-verifier")
-    }));
+            .to_string(),
+    };
+    let crate_name = sanitize_crate_name(args.crate_name.as_deref().unwrap_or(&default_name));
 
     // Write the generated crate: over an earlier export, never over anything
     // else (an `--out` naming your own program must not lose its code).
