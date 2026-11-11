@@ -22,7 +22,7 @@ assert!(VERIFIER.verify(&PROOF, &public_inputs)); // public_inputs: &[[u8;32]; 1
 
 In practice you don't write this by hand: `xark export` emits a small,
 self-contained crate that bakes in your circuit's VK and exposes `verify(...)`
-/ `verify_instruction_data(...)`. Your Solana program depends on that crate;
+with typed public inputs. Your Solana program depends on that crate;
 re-export when the circuit changes and the generated crate is the only thing
 that updates. Or call `verify_groth16(vk_bytes, proof_bytes, public_inputs)`
 directly when the VK is loaded dynamically — in that case the program **must**

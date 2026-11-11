@@ -669,9 +669,9 @@ impl CircuitProof {
         ))
     }
 
-    /// The proof, then its public inputs, as a Solana program receives them:
-    /// `verify_instruction_data(...)` of an exported verifier checks these bytes
-    /// (`instruction_data.bin`).
+    /// The proof, then its public inputs, as a Solana program that takes both
+    /// receives them (an exported verifier's `instruction_data.bin`): 256 bytes,
+    /// then 32 per public input, which its `verify` takes as `Fields`.
     pub fn to_instruction_data(&self) -> Result<Vec<u8>, ProveError> {
         Ok([self.to_solana_proof()?, self.to_solana_public_inputs()?].concat())
     }

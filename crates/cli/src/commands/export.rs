@@ -2,7 +2,7 @@
 //! **crate** for a circuit, with its verifying key embedded at compile time.
 //!
 //! Your Solana program depends on the generated crate and calls
-//! `verify(...)` / `verify_instruction_data(...)`. When the circuit changes,
+//! `verify(...)`. When the circuit changes,
 //! re-run `xark export` and the generated crate is the *only* thing that
 //! updates — your program code stays put.
 //!
@@ -441,12 +441,23 @@ fn gen_lib_rs(
 mod tests {{
     use super::*;
 
-    /// The proof bundled at export time verifies against the embedded VK.
+    /// The proof bundled at export time verifies against the embedded VK, with
+    /// its public inputs and only with them.
     #[test]
     fn bundled_proof_verifies() {{
-        assert!(verify_instruction_data(include_bytes!(
-            "../instruction_data.bin"
-        )));
+        let proof = Proof::from_le_bytes(include_bytes!("../proof.solana.bin"));
+        let mut fields: Fields = [[0; 32]; NUM_PUBLIC_INPUTS];
+        for (f, b) in fields
+            .iter_mut()
+            .zip(include_bytes!("../public_inputs.solana.bin").chunks(32))
+        {{
+            f.copy_from_slice(b);
+        }}
+        assert!(verify(&proof, fields));
+        if let Some(first) = fields.first_mut() {{
+            first[0] ^= 1;
+            assert!(!verify(&proof, fields));
+        }}
     }}
 {typed_test}}}
 "#
@@ -482,9 +493,6 @@ pub const SETUP: &str = "{setup}";
 pub const VERIFIER: Verifier<NUM_PUBLIC_INPUTS> =
     Verifier::from_le_bytes(include_bytes!("../verifying_key.solana.bin"));
 
-/// Raw LE verifying-key wire bytes (for the dynamic byte API).
-pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
-
 /// The public inputs as field elements, in proof order, each 32 bytes
 /// little-endian: what [`verify`] takes, from anything that converts into it.
 pub type Fields = [[u8; 32]; NUM_PUBLIC_INPUTS];
@@ -515,7 +523,7 @@ pub fn verify_strict(proof: &Proof, inputs: impl Into<Fields>) -> bool {{
     verify_fields_strict(proof, &inputs.into())
 }}
 
-// Never inlined, nor are the other entry points: inlined into a program's
+// Never inlined: inlined into a program's
 // entrypoint (as fat LTO does), the pairing check's buffers can take that one frame
 // past the SBF limit of 4,096 bytes. `cargo build-sbf` only warns about that, and the
 // program then overwrites its own stack at run time.
@@ -529,19 +537,6 @@ fn verify_fields_strict(proof: &Proof, public_inputs: &Fields) -> bool {{
     VERIFIER.verify_strict(proof, public_inputs)
 }}
 
-/// Verify from raw instruction data laid out as
-/// `proof (256 B) || public_inputs ({n} * 32 B)` — the shape your program
-/// receives in its instruction data. Returns `false` on any failure.
-#[inline(never)]
-pub fn verify_instruction_data(data: &[u8]) -> bool {{
-    xark_verifier::verify_proof_only(VK_BYTES, data).unwrap_or(false)
-}}
-
-/// Strict [`verify_instruction_data`]; see [`verify_strict`].
-#[inline(never)]
-pub fn verify_instruction_data_strict(data: &[u8]) -> bool {{
-    xark_verifier::verify_proof_only_strict(VK_BYTES, data).unwrap_or(false)
-}}
 {tests}"#
     )
 }
@@ -596,8 +591,9 @@ field elements in proof order: a `PublicInputs`, the elements themselves, or you
 own struct with a `From` impl, packed with `{ident}::fields` (const fns, so inputs
 known at compile time are constants).
 
-When the transaction does carry the public inputs too (`proof || public_inputs`),
-`{ident}::verify_instruction_data(instruction_data)` checks both.
+A transaction that carries the public inputs too (`proof || public_inputs`, a
+client's `proof.toInstructionData()`) splits them off after the proof's 256 bytes
+into `Fields`, and `verify` checks both.
 
 ## Trusted setup
 
