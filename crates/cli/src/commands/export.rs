@@ -473,6 +473,10 @@ mod tests {{
 //! your Solana program, build the [`PublicInputs`] it requires and call
 //! [`verify`]; re-run `xark export` when the circuit changes and this crate is
 //! the only thing that updates.
+// Generated, and compared byte for byte by `xark build --check`: `cargo fmt` leaves
+// it as written, and clippy's lints are for code you write.
+#![cfg_attr(rustfmt, rustfmt::skip)]
+#![allow(clippy::all)]
 #![cfg_attr(any(target_os = "solana", target_arch = "bpf"), no_std)]
 
 pub use xark_verifier::{{Proof, VerifierError, Verifier}};
