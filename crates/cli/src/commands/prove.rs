@@ -128,7 +128,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // `PROVE_TIME=1` prints a coarse phase breakdown (solve / prove) so the real
     // bottleneck is measured, not assumed.
     let timing = super::dbg_flag("PROVE_TIME");
-    let xbc = project.circuit_xbc();
+    let xbc = project.proving_xbc();
     // Inputs come from `--inputs`: inline JSON or a file path (agnostic).
     let inputs = match &args.inputs {
         Some(arg) => super::read_inputs(&project.xark_dir, arg)?,
@@ -239,7 +239,8 @@ fn prove_streaming(
     let fingerprint = super::sha256_hex(&bytes);
     // A key made for another circuit can't prove this one: say so, rather than
     // failing the self-verification below. One made from another build of the same
-    // circuit (another Rust version) fits.
+    // circuit (another Rust version) may not fit either: a key fits the build it
+    // was made from (a project keeps that build beside its key).
     match super::key_fit(pk_path, &bytes) {
         super::KeyFit::Different => anyhow::bail!(
             "the proving key {} was made for a different build of the circuit \
@@ -248,7 +249,9 @@ fn prove_streaming(
         ),
         super::KeyFit::SameCircuit => eprintln!(
             "note: {} was made from another build of this circuit (the same constraints, \
-             compiled differently, e.g. by another Rust version); proving with it",
+             compiled differently, e.g. by another Rust version); proving with it, but a \
+             key fits the build it was made from: if the proof fails its self-check, run \
+             `xark setup` for a new key",
             pk_path.display()
         ),
         super::KeyFit::Same => {}

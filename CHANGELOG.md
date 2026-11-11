@@ -74,7 +74,13 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   works.
 - A project commits its keys, in `keys/<circuit>/` (`xark setup`'s default there;
   the host prover and `@blueshift-gg/xark/testing` read them from there), since
-  the verifier crate embedding the verifying key is committed too. `xark build`
+  the verifier crate embedding the verifying key is committed too. With them goes
+  the `circuit.xbc` they were made from: a key proves only with the build it was
+  made from, so `xark prove`, the host prover and the testing module prove with
+  that one, and a clone that compiles the circuit differently (another Rust,
+  another xark) still proves with the committed keys. `xark build` compares its
+  constraints with the current build's to tell a changed circuit (new keys) from a
+  new build of the same one. `xark build`
   and `xark prove` no longer make a key when a committed verifier embeds one: a
   fresh clone without the keys stops with how to restore them, instead of quietly
   changing the verifier. `xark setup` suggests Git LFS for a proving key over
@@ -89,6 +95,13 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   xark is another release than the project's `xark.toml` records.
 - A failing constraint's file is shown from where you ran the command:
   `circuits/claim/src/lib.rs:6:16` at a project's root.
+- A project's circuits build with cargo's own profile settings (no LTO, one codegen
+  unit, no debug assertions, debug info stripped), whatever the workspace sets for
+  its programs: its fat LTO changed which functions were inlined, and so the keyed
+  rows and the source a constraint is attributed to (`inputs_done` in `xark
+  profile`). Builds outside a project are unchanged (every digest is the same).
+- A key made from another build of the same circuit is no longer said to fit: the
+  note says a key fits the build it was made from.
 - In a project, `xark test` builds a circuit's tests without the programs' fat
   LTO (the workspace's release profile): after an edit, the starter circuit's
   tests relink in 1 s instead of 8.

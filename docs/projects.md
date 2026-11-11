@@ -45,7 +45,7 @@ claim/
   programs/claim/       # Pinocchio: lib.rs, errors.rs, instructions/verify.rs
   clients/claim/rust/   # generated, committed: the verifier crate `claim-verifier`
   clients/claim/ts/     # generated, committed: the TypeScript client
-  keys/claim/           # committed: pk.bin, vk.bin, metadata.json
+  keys/claim/           # committed: pk.bin, vk.bin, metadata.json, circuit.xbc
   tests/claim.test.ts   # LiteSVM
   .github/workflows/ci.yml   # xark build --check, then xark test
 ```
@@ -70,7 +70,11 @@ claim/
 - **Keys are committed.** The verifier crate embeds the verifying key and is
   committed, so the keys are too, in `keys/<circuit>/`: a key only in the
   gitignored `target/` would be replaced on a fresh clone, and the verifier with
-  it. `xark build` and `xark prove` never make a key while a committed verifier
+  it. A key proves only with the build of the circuit it was made from, so that
+  `circuit.xbc` is kept beside it and every prover uses it: a clone that compiles
+  the same circuit differently still proves. `xark build` compares the kept build's
+  constraint digest with the current build's: the same, the key fits; different,
+  the circuit changed and needs new keys. `xark build` and `xark prove` never make a key while a committed verifier
   embeds one; a new key is an explicit `xark setup`. A proving key over 50 MB
   belongs in Git LFS (the zKYC circuit's is 265 KB, SHA-256's 3.2 MB, Ed25519's
   450 MB).

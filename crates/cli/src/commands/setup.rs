@@ -543,6 +543,15 @@ pub fn run(args: SetupArgs) -> Result<()> {
     println!("Wrote {}", pk_path.display());
     println!("Wrote {}", vk_path.display());
     println!("Wrote {}", meta_path.display());
+    // A key fits the build it was made from, and a project's keys are committed: the
+    // build goes with them, so a clone (another Rust, another xark) still proves with
+    // them.
+    if project.project_root().is_some() && args.out.is_none() {
+        let keyed = out_dir.join("circuit.xbc");
+        fs::copy(project.circuit_xbc(), &keyed)
+            .with_context(|| format!("writing {}", keyed.display()))?;
+        println!("Wrote {}", keyed.display());
+    }
     // A project commits its keys; GitHub refuses a file over 100 MB and warns
     // past 50 MB, so a key that size goes in Git LFS.
     if project.project_root().is_some()

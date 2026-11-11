@@ -40,7 +40,8 @@ export function artifacts(dir, keys = dir) {
   const read = (d, f) => new Uint8Array(readFileSync(join(d, f)));
   if (!existsSync(join(keys, "pk.bin"))) throw new Error(`no proving key in ${keys}: run \`xark build\``);
   return {
-    circuit: read(dir, "circuit.xbc"),
+    // A key fits the build it was made from: the one kept beside it, if it is.
+    circuit: existsSync(join(keys, "circuit.xbc")) ? read(keys, "circuit.xbc") : read(dir, "circuit.xbc"),
     provingKey: read(keys, "pk.bin"),
     verifyingKey: read(keys, "vk.bin"),
     sources: readFileSync(join(dir, "sources.json"), "utf8"),

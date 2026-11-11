@@ -57,6 +57,18 @@ impl XarkProject {
         }
     }
 
+    /// The `circuit.xbc` to prove against: the build the key was made from when it's
+    /// kept beside the key (`keys/<name>/circuit.xbc` in a project), since a key
+    /// fits only the build it was made from; otherwise this build's.
+    pub fn proving_xbc(&self) -> PathBuf {
+        let keyed = self.key_dir().join("circuit.xbc");
+        if keyed.is_file() {
+            keyed
+        } else {
+            self.circuit_xbc()
+        }
+    }
+
     /// The verifying key the generated verifier crate embeds, when there is one.
     pub fn committed_verifier_key(&self) -> Option<PathBuf> {
         let vk = self.clients_dir().join("rust/verifying_key.solana.bin");

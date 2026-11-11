@@ -62,6 +62,8 @@ fn add_a_circuit_then_its_program() {
     assert!(
         app.join("keys/claim/pk.bin").is_file() && app.join(".github/workflows/ci.yml").is_file()
     );
+    // The build the key was made from goes with it: a key proves only with that build.
+    assert!(app.join("keys/claim/circuit.xbc").is_file());
     for t in ["circuits/claim/target", "circuits/other/target"] {
         std::fs::remove_dir_all(app.join(t)).unwrap();
     }
@@ -265,6 +267,31 @@ fn a_project_keeps_what_isnt_xarks() {
     assert!(!ok && out.contains("clients/edge/ts/edge.ts"), "{out}");
     assert_eq!(std::fs::read_to_string(&ts).unwrap(), edited);
     std::fs::rename(tmp.path().join("second-keys"), app.join("keys/second")).unwrap();
+
+    // A key kept without its build gets it back from `xark build` (the same build),
+    // and `--check` names it missing until then.
+    let kept = app.join("keys/second/circuit.xbc");
+    std::fs::remove_file(&kept).unwrap();
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(
+        !ok && out.contains("no `circuit.xbc` beside its key"),
+        "{out}"
+    );
+    let (ok, out) = xark(&["build"]);
+    assert!(ok && kept.is_file(), "{out}");
+    // A key made from another build of the circuit, which isn't kept, can't be trusted
+    // to prove: `xark build` says so instead of carrying on.
+    std::fs::remove_file(&kept).unwrap();
+    let meta = app.join("keys/second/metadata.json");
+    let saved = std::fs::read_to_string(&meta).unwrap();
+    let mut m: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    m["circuit_hash"] = "00".repeat(32).into();
+    std::fs::write(&meta, m.to_string()).unwrap();
+    let (ok, out) = xark(&["build"]);
+    assert!(!ok && out.contains("isn't kept beside it"), "{out}");
+    std::fs::write(&meta, saved).unwrap();
+    let (ok, out) = xark(&["build"]);
+    assert!(ok && kept.is_file(), "{out}");
 
     // A program added after its circuit's client went missing regenerates the
     // client, and keeps the key.

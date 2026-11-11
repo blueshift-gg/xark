@@ -878,7 +878,14 @@ impl Circuit {
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             ProveError(format!("circuit `{}`: {what}: {e}", self.name))
         };
-        let xbc_path = self.dir.join("circuit.xbc");
+        // A key fits the build it was made from: prove with the `circuit.xbc` kept
+        // beside it (a project's `keys/<name>/`), else this build's.
+        let beside_key = pk_path.with_file_name("circuit.xbc");
+        let xbc_path = if beside_key.is_file() {
+            beside_key
+        } else {
+            self.dir.join("circuit.xbc")
+        };
         let xbc = std::fs::read(&xbc_path)
             .map_err(|e| fail(&format!("reading {}", xbc_path.display()), &e))?;
         let mut pk = xark_groth16::SerializedPk::open(pk_path).map_err(|e| {

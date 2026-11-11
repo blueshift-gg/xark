@@ -69,8 +69,12 @@ at its root build and test all of it. See [Projects](projects.md) for the layout
 
    ```sh
    mkdir -p keys/my-circuit
-   cp ../old/target/xark/my-circuit/{pk.bin,vk.bin,metadata.json} keys/my-circuit/
+   cp ../old/target/xark/my-circuit/{pk.bin,vk.bin,metadata.json,circuit.xbc} keys/my-circuit/
    ```
+
+   `circuit.xbc` is the build the key was made from, and a key proves only with that
+   build. If yours was rebuilt since `xark setup` (`xark build` says the key was
+   made from another build of the circuit), you need a new key and a new verifier.
 
    A project commits `keys/`. `xark build` makes a key only when there's none, and
    never while a committed verifier embeds one. A proving key over 50 MB belongs

@@ -112,9 +112,11 @@ pub fn build(root: &Path, check: bool) -> i32 {
 
 fn build_all(root: &Path, check: bool) -> i32 {
     // What `--check` compares, and leaves as it found it on every way out: the
-    // generated clients, and the workspace manifest an export keeps in sync.
+    // generated clients, the keys (and the builds beside them), and the workspace
+    // manifest an export keeps in sync.
     let watched = |root: &Path| {
         let mut files = snapshot(&root.join("clients"));
+        files.extend(snapshot(&root.join("keys")));
         if let Ok(b) = std::fs::read(root.join("Cargo.toml")) {
             files.insert(root.join("Cargo.toml"), b);
         }
@@ -235,42 +237,120 @@ pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<
             return Err(code);
         }
     }
-    let vk = project.verifying_key();
+    let name = circuit
+        .strip_prefix(root)
+        .unwrap_or(circuit)
+        .display()
+        .to_string();
+    let state = key_state(&project);
     if check {
-        let why = if !vk.is_file() {
-            Some("has no key")
-        } else if super::ensure_key_matches_circuit(&vk, &project.circuit_xbc()).is_err() {
-            Some("changed since its keys were made")
-        } else {
-            None
+        let why = match state {
+            KeyState::Fits => None,
+            KeyState::None => Some("has no key".to_string()),
+            KeyState::Changed => Some("changed since its keys were made".to_string()),
+            KeyState::Unpaired => Some(format!(
+                "has no `circuit.xbc` beside its key (the build it was made from, in {})",
+                super::shown(&project.key_dir())
+            )),
+            KeyState::BuildLost => Some(
+                "has a key made from another build of it, which isn't kept beside the key"
+                    .to_string(),
+            ),
         };
         if let Some(why) = why {
+            let fix = if matches!(state, KeyState::BuildLost) {
+                format!("restore it, or make a new key with `xark setup {name}`")
+            } else {
+                "run `xark build`".to_string()
+            };
             eprintln!(
-                "{} {} {why}: run `xark build` and commit `keys/` and `clients/`",
-                crate::style::err("error:"),
-                circuit.strip_prefix(root).unwrap_or(circuit).display()
+                "{} {name} {why}: {fix}, and commit `keys/` and `clients/`",
+                crate::style::err("error:")
             );
             return Err(1);
         }
-    } else if !vk.is_file() {
-        if let Err(e) = project.may_make_key() {
-            eprintln!("{} {e:#}", crate::style::err("error:"));
-            return Err(1);
+    } else {
+        match state {
+            KeyState::Fits => {}
+            KeyState::None => {
+                if let Err(e) = project.may_make_key() {
+                    eprintln!("{} {e:#}", crate::style::err("error:"));
+                    return Err(1);
+                }
+                xark(root, &["setup", &dir])?;
+            }
+            KeyState::Unpaired => {
+                // Made from this very build: keep it beside the key.
+                let keyed = project.key_dir().join("circuit.xbc");
+                if let Err(e) = std::fs::copy(project.circuit_xbc(), &keyed) {
+                    eprintln!("xark: writing {}: {e}", keyed.display());
+                    return Err(1);
+                }
+            }
+            KeyState::BuildLost => {
+                eprintln!(
+                    "{} the key in {} was made from another build of {name} (the same \
+                     constraints, compiled differently), and that build isn't kept beside it \
+                     as `circuit.xbc`. A key proves only with the build it was made from: \
+                     restore that file, or make a new key with `xark setup {name}` (the \
+                     deployed program then needs the new verifier)",
+                    crate::style::err("error:"),
+                    super::shown(&project.key_dir())
+                );
+                return Err(1);
+            }
+            KeyState::Changed => {
+                // A changed circuit needs new keys, and so a new verifier: say so, since
+                // the deployed program has to change with it.
+                eprintln!(
+                    "{} {name} changed since its keys were made: making new ones, so its \
+                     verifier changes too (deploy the program again)",
+                    crate::style::warn("warning:")
+                );
+                xark(root, &["setup", &dir])?;
+            }
         }
-        xark(root, &["setup", &dir])?;
-    } else if super::ensure_key_matches_circuit(&vk, &project.circuit_xbc()).is_err() {
-        // A changed circuit needs new keys, and so a new verifier: say so, since the
-        // deployed program has to change with it.
-        eprintln!(
-            "{} {} changed since its keys were made: making new ones, so its verifier \
-             changes too (deploy the program again)",
-            crate::style::warn("warning:"),
-            circuit.display()
-        );
-        xark(root, &["setup", &dir])?;
     }
     xark(root, &["export", &dir])?;
     xark(root, &["client", &dir])
+}
+
+/// A circuit's key, against its current build.
+enum KeyState {
+    /// No key yet.
+    None,
+    /// The key and the build it was made from (`circuit.xbc` beside it), whose
+    /// constraints are the current build's.
+    Fits,
+    /// A key made from this very build, without the build beside it yet.
+    Unpaired,
+    /// A key made from another build of the same constraints, which isn't kept: a key
+    /// proves only with its own build.
+    BuildLost,
+    /// The constraints changed since the key was made.
+    Changed,
+}
+
+fn key_state(project: &XarkProject) -> KeyState {
+    if !project.verifying_key().is_file() {
+        return KeyState::None;
+    }
+    let Ok(build) = std::fs::read(project.circuit_xbc()) else {
+        return KeyState::Fits;
+    };
+    let keyed = project.key_dir().join("circuit.xbc");
+    if let Ok(kept) = std::fs::read(&keyed) {
+        return if super::r1cs_digest(&kept) == super::r1cs_digest(&build) {
+            KeyState::Fits
+        } else {
+            KeyState::Changed
+        };
+    }
+    match super::key_fit(&project.verifying_key(), &build) {
+        super::KeyFit::Same => KeyState::Unpaired,
+        super::KeyFit::SameCircuit => KeyState::BuildLost,
+        super::KeyFit::Different => KeyState::Changed,
+    }
 }
 
 /// The programs, with `cargo build-sbf` at the root (the workspace's

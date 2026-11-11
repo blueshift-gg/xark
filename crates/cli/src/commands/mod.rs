@@ -848,8 +848,8 @@ pub enum KeyFit {
     /// Made from this very file, or nothing to compare (no metadata, or no build).
     Same,
     /// Made from another build of the same constraint system (another Rust version
-    /// laid out `circuit.xbc` differently): it fits. The prover's self-check still
-    /// catches a key whose rows turn out not to.
+    /// laid out `circuit.xbc` differently). It may not fit: a key fits the build it
+    /// was made from, and the prover's self-check catches one whose rows don't.
     SameCircuit,
     /// Made for a different circuit.
     Different,
