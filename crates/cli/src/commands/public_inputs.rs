@@ -8,10 +8,11 @@
 //! position and bit offset.
 //!
 //! `to_fields()` mirrors `xark_schema`'s encoder (`encode`, `pack`): every leaf the
-//! codec names (`policy.{today,born_by}`, `holder.hi`) becomes a Rust expression
-//! for its 32 little-endian bytes. A type with no `no_std` form here (a limbed
-//! number, an Ed25519 point) gives no typed inputs: the crate keeps only
-//! `verify_fields`. With a sample proof, the crate's self-test writes the sample's
+//! codec names (`policy.{today,born_by}`, `holder.hi`) becomes a `const` Rust
+//! expression for its 32 little-endian bytes, made with `xark_verifier::fields` (a
+//! packed run with its `Packer`, each field's width a const generic). A type with
+//! no `no_std` form here (a limbed number, an Ed25519 point) gives no typed inputs:
+//! `verify` then takes the field elements. With a sample proof, the crate's self-test writes the sample's
 //! public inputs as a typed value (from `xark_schema::decode_public`) and checks
 //! that its `to_fields()` is the sample's and that it verifies, so the two
 //! encoders are checked against each other on every export.
@@ -60,9 +61,9 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
     if order.len() != n || order.len() != g.leaves.len() {
         return None;
     }
-    let exprs: Vec<&String> = order
+    let exprs: Vec<String> = order
         .iter()
-        .map(|l| g.leaves.get(*l))
+        .map(|l| g.leaves.get(*l).map(Leaf::element))
         .collect::<Option<_>>()?;
 
     let mut items = String::new();
@@ -80,13 +81,21 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
          impl PublicInputs {{\n    \
          /// The field elements the proof is over, in proof order, each 32 bytes\n    \
          /// little-endian, packed as the circuit's `#[input]` packs them.\n    \
-         pub fn to_fields(&self) -> [[u8; 32]; NUM_PUBLIC_INPUTS] {{\n        \
+         pub const fn to_fields(&self) -> Fields {{\n        \
          [\n"
     );
     for e in exprs {
         let _ = writeln!(items, "            {e},");
     }
-    items.push_str("        ]\n    }\n}\n");
+    items.push_str(
+        "        ]\n    }\n}\n\n\
+         impl From<PublicInputs> for Fields {\n    \
+         fn from(inputs: PublicInputs) -> Fields {\n        \
+         inputs.to_fields()\n    }\n}\n\n\
+         impl From<&PublicInputs> for Fields {\n    \
+         fn from(inputs: &PublicInputs) -> Fields {\n        \
+         inputs.to_fields()\n    }\n}\n",
+    );
     let sample = match sample {
         Some(values) => {
             let decoded = xark_schema::Schema::parse(&schema.to_string())
@@ -111,9 +120,39 @@ struct Gen<'a> {
     schema: &'a Value,
     /// The input types' definitions, by Rust name.
     defs: BTreeMap<String, String>,
-    /// Each leaf the codec names, as an expression for its 32 bytes.
-    leaves: BTreeMap<String, String>,
+    /// Each leaf the codec names, and how to make it.
+    leaves: BTreeMap<String, Leaf>,
     uses: Uses,
+}
+
+/// How one leaf is made: a value of so many bits (packable), or an element as is.
+enum Leaf {
+    /// A `u128` expression.
+    Uint(String),
+    /// An `i128` expression, of this many bits.
+    Int(String, u64),
+    /// An expression for the element's 32 bytes.
+    Element(String),
+}
+
+impl Leaf {
+    /// The leaf as an element of its own.
+    fn element(&self) -> String {
+        match self {
+            Leaf::Uint(e) => format!("fields::uint({e})"),
+            Leaf::Int(e, w) => format!("fields::int::<{w}>({e})"),
+            Leaf::Element(e) => e.clone(),
+        }
+    }
+
+    /// The leaf as the next `bits` of a `Packer`.
+    fn pack(&self, bits: u64) -> String {
+        match self {
+            Leaf::Uint(e) => format!(".uint::<{bits}>({e})"),
+            Leaf::Int(e, _) => format!(".int::<{bits}>({e})"),
+            Leaf::Element(e) => format!(".bits::<{bits}>(&{e})"),
+        }
+    }
 }
 
 /// The helper types the definitions use.
@@ -135,7 +174,9 @@ const RESERVED: &[&str] = &[
     "Text",
     "Bitfield",
     "Variant",
-    "enc",
+    "Fields",
+    "Packer",
+    "fields",
 ];
 
 impl Gen<'_> {
@@ -152,7 +193,11 @@ impl Gen<'_> {
             return Some("bool".into());
         }
         if let Some(w) = ty["uint"].as_u64() {
-            return [8, 16, 32, 64, 128].contains(&w).then(|| format!("u{w}"));
+            return match w {
+                8 | 16 | 32 | 64 | 128 => Some(format!("u{w}")),
+                1..=127 => Some(format!("fields::Uint<{w}>")),
+                _ => None,
+            };
         }
         if let Some(w) = ty["int"].as_u64() {
             return [8, 16, 32, 64, 128].contains(&w).then(|| format!("i{w}"));
@@ -298,18 +343,23 @@ impl Gen<'_> {
     /// Record the leaves of `access`, a value of `ty` at codec path `path`
     /// (`xark_schema`'s `encode`, then `pack`).
     fn leaves(&mut self, ty: &Value, path: &str, access: &str) -> Option<()> {
-        let leaf = |g: &mut Self, e: String| {
-            g.leaves.insert(path.to_string(), e);
+        let leaf = |g: &mut Self, l: Leaf| {
+            g.leaves.insert(path.to_string(), l);
             Some(())
         };
         if ty == "field" {
-            return leaf(self, access.to_string());
+            return leaf(self, Leaf::Element(access.to_string()));
+        }
+        if let Some(w) = ty["uint"].as_u64()
+            && ![8, 16, 32, 64, 128].contains(&w)
+        {
+            return leaf(self, Leaf::Uint(format!("{access}.get()")));
         }
         if ty == "bool" || ty.get("uint").is_some() {
-            return leaf(self, format!("enc::uint({access} as u128)"));
+            return leaf(self, Leaf::Uint(format!("{access} as u128")));
         }
         if let Some(w) = ty["int"].as_u64() {
-            return leaf(self, format!("enc::int({access} as i128, {w})"));
+            return leaf(self, Leaf::Int(format!("{access} as i128"), w));
         }
         if let Some(a) = ty.get("array") {
             for i in 0..a["len"].as_u64()? {
@@ -327,16 +377,16 @@ impl Gen<'_> {
         let def = self.def(r).clone();
         let enc = &def["encoding"];
         if enc.get("timestamp").is_some() {
-            return leaf(self, format!("enc::int({access} as i128, 64)"));
+            return leaf(self, Leaf::Int(format!("{access} as i128"), 64));
         }
         if enc.get("time").is_some() {
-            return leaf(self, format!("enc::uint({access}.steps() as u128)"));
+            return leaf(self, Leaf::Uint(format!("{access}.steps() as u128")));
         }
         if enc.get("text").is_some() || enc.get("set").is_some() {
-            return leaf(self, format!("{access}.to_field()"));
+            return leaf(self, Leaf::Element(format!("{access}.to_field()")));
         }
         if enc.get("choice").is_some() {
-            return leaf(self, format!("enc::uint({access} as u128)"));
+            return leaf(self, Leaf::Uint(format!("{access} as u128")));
         }
         if enc.is_object() {
             return self.byte_leaves(r, path, access, 0);
@@ -355,21 +405,31 @@ impl Gen<'_> {
                     )?;
                 }
                 Group::Packed(fs) => {
-                    let mut parts = Vec::new();
+                    let mut packer = String::from("Packer::new()");
                     let mut names = Vec::new();
+                    let mut next = 0;
                     for f in &fs {
                         let n = f["name"].as_str()?;
                         let at = format!("{path}.{n}");
                         self.leaves(&f["type"], &at, &format!("{access}.{}", ident(n)))?;
-                        // A packed field is one leaf, folded into the packed one.
-                        let e = self.leaves.remove(&at)?;
-                        let offset = f["packed"]["offset"].as_u64()?;
-                        parts.push(format!("({e}, {offset})"));
+                        // A packed field is one leaf, folded into the packed one. A
+                        // `Packer` packs each run from bit 0, field after field.
+                        let l = self.leaves.remove(&at)?;
+                        let (offset, bits) = (
+                            f["packed"]["offset"].as_u64()?,
+                            f["packed"]["bits"].as_u64()?,
+                        );
+                        if offset != next {
+                            return None;
+                        }
+                        next += bits;
+                        packer.push_str(&l.pack(bits));
                         names.push(n);
                     }
+                    packer.push_str(".finish()");
                     self.leaves.insert(
                         format!("{path}.{{{}}}", names.join(",")),
-                        format!("enc::pack(&[{}])", parts.join(", ")),
+                        Leaf::Element(packer),
                     );
                 }
             }
@@ -388,8 +448,10 @@ impl Gen<'_> {
             match f["type"]["ref"].as_str() {
                 Some(fr) => self.byte_leaves(fr, &at, access, off)?,
                 None => {
-                    self.leaves
-                        .insert(at, format!("enc::be(&{access}[{off}..{}])", off + size));
+                    self.leaves.insert(
+                        at,
+                        Leaf::Element(format!("fields::be(&{access}, {off}, {size})")),
+                    );
                 }
             }
             off += size;
@@ -405,6 +467,15 @@ impl Gen<'_> {
         }
         if ty == "bool" {
             return Some(v.as_bool()?.to_string());
+        }
+        if let Some(w) = ty["uint"].as_u64()
+            && ![8, 16, 32, 64, 128].contains(&w)
+        {
+            let n = match v {
+                Value::String(s) => s.clone(),
+                _ => v.to_string(),
+            };
+            return Some(format!("fields::Uint::<{w}>::new({n}).unwrap()"));
         }
         if ty.get("uint").is_some() || ty.get("int").is_some() {
             return Some(match v {
@@ -480,7 +551,12 @@ impl Gen<'_> {
 impl Uses {
     /// The helpers every typed crate has (`enc`), and the input types it uses.
     fn helpers(&self) -> String {
-        let mut out = String::from(ENC);
+        let mut out = String::from(
+            "/// How the public inputs become field elements, as the circuit's `#[input]`\n\
+             /// makes them; also for packing your own.\n\
+             #[allow(unused_imports)]\n\
+             pub use xark_verifier::fields::{self, Packer};\n\n",
+        );
         if self.time {
             out.push_str(TIME);
         }
@@ -564,58 +640,6 @@ fn bytes32(n: &BigUint) -> String {
     b.resize(32, 0);
     byte_list(&b)
 }
-
-/// How each leaf becomes 32 little-endian bytes.
-const ENC: &str = r#"/// How the public inputs become field elements, as the circuit's `#[input]` makes
-/// them: each 32 bytes little-endian.
-#[allow(dead_code)]
-mod enc {
-    /// An unsigned integer.
-    pub const fn uint(v: u128) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        let b = v.to_le_bytes();
-        let mut i = 0;
-        while i < 16 {
-            out[i] = b[i];
-            i += 1;
-        }
-        out
-    }
-
-    /// A signed integer, in `bits`-bit two's complement.
-    pub const fn int(v: i128, bits: u32) -> [u8; 32] {
-        let v = v as u128;
-        uint(if bits == 128 { v } else { v & ((1u128 << bits) - 1) })
-    }
-
-    /// Bytes read as a big-endian integer.
-    pub fn be(b: &[u8]) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        for (o, x) in out.iter_mut().zip(b.iter().rev()) {
-            *o = *x;
-        }
-        out
-    }
-
-    /// Fields packed into one element, each at its bit offset.
-    pub fn pack(parts: &[([u8; 32], u32)]) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        for (v, offset) in parts {
-            let (bytes, bits) = ((offset / 8) as usize, offset % 8);
-            for i in (0..32).rev() {
-                if i < bytes {
-                    break;
-                }
-                let lo = v[i - bytes] << bits;
-                let hi = if bits > 0 && i > bytes { v[i - bytes - 1] >> (8 - bits) } else { 0 };
-                out[i] |= lo | hi;
-            }
-        }
-        out
-    }
-}
-
-"#;
 
 const TIME: &str = r#"/// A moment in `UNIT`-second steps from the start of year `FROM` to the end of
 /// `TO` (UTC), as the circuit's `xark::Time`: a program makes one from its `Clock`

@@ -98,6 +98,19 @@ let inputs = PublicInputs {
 if !zkyc_verifier::verify(&proof, &inputs) { … }
 ```
 
+`verify` takes `impl Into<Fields>` (`[[u8; 32]; N]`), so `PublicInputs` is a
+convenience, not a requirement: a program can pass the elements, or its own
+struct with a `From` impl packed with `xark_verifier::fields`. `to_fields()` and
+the `fields` packer are `const fn`s with each field's width a const generic
+(`Packer::new().uint::<17>(day)`), so inputs known at compile time are constants
+and a value too wide for its bits fails the build.
+
+A circuit's own tests keep using the circuit's types (`use super::*`): they are
+the source the generated crate comes from, and depending on `clients/rust` would
+need an export before the tests compile. The host prover's
+`CircuitProof::to_solana_public_inputs()` gives the elements' bytes (`N × 32`,
+little-endian), which split into `Fields` for `verify`.
+
 Each input type gets a `no_std` Rust form (`crates/cli/src/commands/public_inputs.rs`):
 a field element `[u8; 32]`, an integer its Rust integer, a `Time`/`Days` range
 with `from_unix`, a `Timestamp` an `i64`, `Text` a `Text`, a `Choice` a generated

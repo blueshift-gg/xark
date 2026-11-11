@@ -360,27 +360,19 @@ fn gen_lib_rs(
             .collect();
         assert_eq!(inputs.to_fields().as_slice(), fields.as_slice());
         let proof = Proof::from_le_bytes(include_bytes!("../proof.solana.bin"));
-        assert!(verify(&proof, &inputs));
+        assert!(verify(&proof, inputs));
     }}
 "#
                     )
                 }),
         ),
-        // Not every input has a Rust form here yet: the field elements, by position.
+        // Not every input has a Rust form here yet: `verify` takes the field elements
+        // (`xark inspect` lists what each one is), packed with `fields` if need be.
         None => (
-            r#"/// This circuit's public inputs, as field elements in proof order, each 32 bytes
-/// little-endian (`xark inspect` lists what each one is).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PublicInputs(pub [[u8; 32]; NUM_PUBLIC_INPUTS]);
-
-impl PublicInputs {
-    /// The field elements the proof is over.
-    pub fn to_fields(&self) -> [[u8; 32]; NUM_PUBLIC_INPUTS] {
-        self.0
-    }
-}
-"#
-            .to_string(),
+            "/// How the public inputs become field elements, as the circuit's `#[input]`\n\
+             /// makes them.\n\
+             pub use xark_verifier::fields;\n"
+                .to_string(),
             String::new(),
         ),
     };
@@ -435,9 +427,15 @@ pub const VERIFIER: Verifier<NUM_PUBLIC_INPUTS> =
 /// Raw LE verifying-key wire bytes (for the dynamic byte API).
 pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
 
+/// The public inputs as field elements, in proof order, each 32 bytes
+/// little-endian: what [`verify`] takes, from anything that converts into it.
+pub type Fields = [[u8; 32]; NUM_PUBLIC_INPUTS];
+
 {inputs}
-/// Verify `proof` against `inputs`. Returns `false` on any failure — a
-/// non-holding pairing, a malformed point, or a non-canonical public input.
+/// Verify `proof` against `inputs`: anything that converts into [`Fields`] (a
+/// `PublicInputs`, your own struct with a `From` impl, or the elements
+/// themselves). Returns `false` on any failure — a non-holding pairing, a
+/// malformed point, or a non-canonical public input.
 ///
 /// This matches the on-chain `alt_bn128` syscall, which masks the unused top
 /// bits of each coordinate limb. To also reject non-canonical *coordinate*
@@ -446,19 +444,8 @@ pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
 /// derive a different valid proof of the same statement. Never key replay
 /// protection on proof bytes; put it in the public inputs (a nullifier, nonce
 /// or signer the circuit binds).
-pub fn verify(proof: &Proof, inputs: &PublicInputs) -> bool {{
-    verify_fields(proof, &inputs.to_fields())
-}}
-
-/// [`verify`], from the public inputs' field elements in proof order.
-///
-/// Never inlined, nor are the other entry points: inlined into a program's
-/// entrypoint (as fat LTO does), the pairing check's buffers can take that one frame
-/// past the SBF limit of 4,096 bytes. `cargo build-sbf` only warns about that, and the
-/// program then overwrites its own stack at run time.
-#[inline(never)]
-pub fn verify_fields(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
-    VERIFIER.verify(proof, public_inputs)
+pub fn verify(proof: &Proof, inputs: impl Into<Fields>) -> bool {{
+    verify_fields(proof, &inputs.into())
 }}
 
 /// Strict [`verify`]: additionally rejects any proof/VK coordinate whose
@@ -466,16 +453,21 @@ pub fn verify_fields(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS
 /// proofs are always canonical, so this never rejects an honest proof. It
 /// removes *encoding* malleability only: a re-randomized proof is still
 /// accepted (see [`verify`]).
-pub fn verify_strict(proof: &Proof, inputs: &PublicInputs) -> bool {{
-    verify_fields_strict(proof, &inputs.to_fields())
+pub fn verify_strict(proof: &Proof, inputs: impl Into<Fields>) -> bool {{
+    verify_fields_strict(proof, &inputs.into())
 }}
 
-/// Strict [`verify_fields`]; see [`verify_strict`].
+// Never inlined, nor are the other entry points: inlined into a program's
+// entrypoint (as fat LTO does), the pairing check's buffers can take that one frame
+// past the SBF limit of 4,096 bytes. `cargo build-sbf` only warns about that, and the
+// program then overwrites its own stack at run time.
 #[inline(never)]
-pub fn verify_fields_strict(
-    proof: &Proof,
-    public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS],
-) -> bool {{
+fn verify_fields(proof: &Proof, public_inputs: &Fields) -> bool {{
+    VERIFIER.verify(proof, public_inputs)
+}}
+
+#[inline(never)]
+fn verify_fields_strict(proof: &Proof, public_inputs: &Fields) -> bool {{
     VERIFIER.verify_strict(proof, public_inputs)
 }}
 
@@ -541,8 +533,10 @@ if !{ident}::verify(&proof, &inputs) {{
 }}
 ```
 
-`{ident}::verify_fields` takes them as field elements instead, `[[u8; 32]; {n}]` in
-proof order, each 32 bytes little-endian.
+`verify` takes anything that converts into `{ident}::Fields`, the `[[u8; 32]; {n}]`
+field elements in proof order: a `PublicInputs`, the elements themselves, or your
+own struct with a `From` impl, packed with `{ident}::fields` (const fns, so inputs
+known at compile time are constants).
 
 When the transaction does carry the public inputs too (`proof || public_inputs`),
 `{ident}::verify_instruction_data(instruction_data)` checks both.

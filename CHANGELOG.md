@@ -17,13 +17,19 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 - The verifier crate `xark export` writes has a `PublicInputs` struct: the
   circuit's public inputs by name, in Rust types a program has at hand (integers,
   `[u8; 32]`, `Days<FROM, TO>` from a Unix time, an enum per `Choice`, a
-  `Bitfield` per set), packed into field elements by `to_fields()` as `#[input]`
-  packs them. `verify` and `verify_strict` take a `&PublicInputs`; **breaking:**
-  the field elements by position are now `verify_fields` and
-  `verify_fields_strict`. A circuit with a public input of a type that has no
-  Rust form yet (a limbed number, an Ed25519 point) gets
-  `PublicInputs([[u8; 32]; N])`. The crate's self-test checks the sample proof's
-  public inputs, written by name, pack to the sample's field elements.
+  `Bitfield` per set), packed into field elements by `to_fields()`, a `const fn`,
+  as `#[input]` packs them. **Breaking:** `verify` and `verify_strict` take
+  `impl Into<Fields>` (`Fields` is `[[u8; 32]; N]`): a `PublicInputs`, the
+  elements themselves, or a program's own struct with a `From` impl. A circuit
+  with a public input of a type that has no Rust form yet (a limbed number, an
+  Ed25519 point) gets no `PublicInputs`. The crate's self-test checks that the
+  sample proof's public inputs, written by name, pack to the sample's elements.
+- `xark_verifier::fields`: the packing rules as `const fn`s, for the generated
+  crate and for packing your own struct. `Packer::new().uint::<17>(day).finish()`
+  takes each field's width as a const generic, so a value too wide for its bits,
+  or a run past 253 bits, fails the build when the inputs are constants (and
+  panics at run time). `Uint<BITS>` holds an integer of a width Rust has no type
+  for.
 
 ## 0.3.1
 

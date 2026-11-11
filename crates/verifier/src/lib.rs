@@ -20,6 +20,7 @@
 //! collision.
 #![cfg_attr(any(target_os = "solana", target_arch = "bpf"), no_std)]
 
+pub mod fields;
 pub mod typed;
 pub mod verifier;
 
