@@ -145,6 +145,33 @@ export class Proof {
   toBytesCompressed() {
     return this.proofBytes.slice();
   }
+
+  /**
+   * The public inputs as an exported Solana verifier takes them (its `Fields`): 32
+   * bytes each, little-endian, in proof order.
+   */
+  toFields() {
+    // `publicInputBytes` is their canonical encoding: a little-endian u64 count, then
+    // each element's 32 little-endian bytes.
+    const b = this.publicInputBytes;
+    const n = b.length >= 8 ? Number(new DataView(b.buffer, b.byteOffset, 8).getBigUint64(0, true)) : -1;
+    if (n < 0 || b.length !== 8 + 32 * n) throw new Error("public inputs that aren't a prover's encoding");
+    return b.slice(8);
+  }
+
+  /**
+   * `toBytes()` then `toFields()`: the proof and its public inputs, for a program
+   * that takes both in its instruction data. A program that supplies the public
+   * inputs from its own state takes `toBytes()` alone.
+   */
+  toInstructionData() {
+    const proof = this.toBytes();
+    const fields = this.toFields();
+    const out = new Uint8Array(proof.length + fields.length);
+    out.set(proof);
+    out.set(fields, proof.length);
+    return out;
+  }
 }
 
 /**

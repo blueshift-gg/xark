@@ -61,16 +61,25 @@ impl XarkProject {
         (target.file_name()? == "target").then(|| target.parent().map(PathBuf::from))?
     }
 
-    /// Where the generated clients go by default: `<crate>/clients/`, `rust/` for
-    /// `xark export`'s verifier crate (nested, with its own `[workspace]`, so the
-    /// circuit crate neither builds nor packages it) and `ts/` for `xark client`'s.
-    /// Beside the circuit's sources, git tracks them and `cargo clean` leaves them. A
+    /// Where the generated clients go by default: `rust/` for `xark export`'s
+    /// verifier crate and `ts/` for `xark client`'s. In a project (a `xark.toml`
+    /// above the crate), `clients/<name>/` at its root, a member of its workspace;
+    /// otherwise `<crate>/clients/`, beside the circuit's sources (the verifier
+    /// crate nested with its own `[workspace]`, so the circuit crate neither builds
+    /// nor packages it). Either way git tracks them and `cargo clean` leaves them. A
     /// build output outside a crate's `target/` keeps them there.
     pub fn clients_dir(&self) -> PathBuf {
-        match self.crate_dir() {
-            Some(krate) => krate.join("clients"),
-            None => self.xark_dir.join("clients"),
+        match (self.crate_dir(), self.project_root(), self.name()) {
+            (Some(_), Some(root), Some(name)) => root.join("clients").join(name),
+            (Some(krate), _, _) => krate.join("clients"),
+            _ => self.xark_dir.join("clients"),
         }
+    }
+
+    /// The project the circuit crate is in: the nearest directory above it with a
+    /// `xark.toml`.
+    pub fn project_root(&self) -> Option<PathBuf> {
+        project_root(&self.crate_dir()?)
     }
 
     /// The package the build is named after (`target/xark/<name>/`).
@@ -106,6 +115,62 @@ impl XarkProject {
         }
         None
     }
+}
+
+/// The project `dir` is in: the nearest directory, `dir` itself or above it, with a
+/// `xark.toml`.
+pub fn project_root(dir: &Path) -> Option<PathBuf> {
+    let dir = std::path::absolute(dir).ok()?;
+    dir.ancestors()
+        .find(|d| d.join(PROJECT_FILE).is_file())
+        .map(Path::to_path_buf)
+}
+
+/// What makes a directory a project.
+pub const PROJECT_FILE: &str = "xark.toml";
+
+/// The project's workspace members: each of `circuits/*`, `programs/*` and
+/// `clients/*/rust` that holds a crate. Cargo reads a glob that matches nothing as
+/// a path that isn't there, so one is listed only once something is in it. Rewrites
+/// the `members = [...]` line of the root `Cargo.toml` that `xark add` wrote; one
+/// written by hand is left alone, with a warning when it's missing a crate.
+pub fn sync_members(root: &Path) -> Result<()> {
+    let has_crate = |pattern: &str| -> bool {
+        let (dir, rest) = pattern.split_once("/*").unwrap_or((pattern, ""));
+        std::fs::read_dir(root.join(dir)).is_ok_and(|entries| {
+            entries.flatten().any(|e| {
+                e.path()
+                    .join(rest.trim_start_matches('/'))
+                    .join("Cargo.toml")
+                    .is_file()
+            })
+        })
+    };
+    let members: Vec<String> = ["circuits/*", "programs/*", "clients/*/rust"]
+        .iter()
+        .filter(|p| has_crate(p))
+        .map(|p| format!("{p:?}"))
+        .collect();
+    let line = format!("members = [{}]", members.join(", "));
+    let manifest = root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)
+        .with_context(|| format!("reading {}", manifest.display()))?;
+    let Some(old) = text
+        .lines()
+        .find(|l| l.starts_with("members = [") && l.ends_with(']'))
+    else {
+        eprintln!(
+            "{} {} has no one-line `members = [...]` to update: make sure it lists {line}",
+            crate::style::warn("warning:"),
+            manifest.display()
+        );
+        return Ok(());
+    };
+    if old != line {
+        std::fs::write(&manifest, text.replacen(old, &line, 1))
+            .with_context(|| format!("writing {}", manifest.display()))?;
+    }
+    Ok(())
 }
 
 /// Resolve the name-scoped `target/xark/<pkg-name>/` output directory from a

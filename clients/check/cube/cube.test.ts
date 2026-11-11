@@ -33,6 +33,17 @@ test("proves and verifies", () => {
   expect(verifier.verify(proof, { result: 28 })).toBe(false);
 });
 
+test("a proof's public inputs are the field elements an exported verifier takes", () => {
+  const proof = prover.prove(inputs);
+  // `result`, 27, as 32 bytes little-endian: `Fields` for a program's `verify`.
+  const fields = proof.toFields();
+  expect(fields.length).toBe(32);
+  expect(fields[0]).toBe(27);
+  expect(fields.slice(1).every((b) => b === 0)).toBe(true);
+  // The proof then its public inputs, as `xark export`'s `instruction_data.bin` holds them.
+  expect(proof.toInstructionData()).toEqual(new Uint8Array([...proof.toBytes(), ...fields]));
+});
+
 test("a proof travels as its bytes, on-chain or compressed", () => {
   const proof = prover.prove(inputs);
   const [onChain, compressed] = [proof.toBytes(), proof.toBytesCompressed()];

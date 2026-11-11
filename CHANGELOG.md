@@ -30,6 +30,17 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   or a run past 253 bits, fails the build when the inputs are constants (and
   panics at run time). `Uint<BITS>` holds an integer of a width Rust has no type
   for.
+- `xark add circuit <name>` and `xark add program <name>` make and grow a
+  project: circuits in `circuits/`, Pinocchio programs in `programs/`, and each
+  circuit's generated clients in `clients/<circuit>/{rust,ts}`, in one Cargo
+  workspace, with a `xark.toml` at its root. A program comes with a LiteSVM test
+  in `tests/` that proves with the circuit's TypeScript client and verifies
+  onchain. `xark init` is unchanged.
+- `@blueshift-gg/xark`: a proof's `toFields()` (its public inputs as an exported
+  verifier's `Fields`) and `toInstructionData()` (the proof, then those), and
+  `@blueshift-gg/xark/testing`: a circuit's build output by name, LiteSVM with a
+  project's programs, a funded payer and `send`, for the tests every example
+  carried a copy of. It needs `litesvm` and `@solana/kit` beside it.
 
 ## 0.3.1
 

@@ -72,6 +72,23 @@ public inputs it supplies itself, such as its policy or a root in its state.
 either. A verifier also takes a `Proof`, but pass the public inputs you require
 (`verifier.verify(proof, required)`); only a circuit with no public inputs may omit them.
 
+A program that takes the public inputs in its instruction data instead reads
+`proof.toFields()`: each 32 bytes little-endian, in proof order, the `Fields` the
+exported crate's `verify` takes. `proof.toInstructionData()` is the proof then
+those.
+
+To test a project's programs in Node, `@blueshift-gg/xark/testing` (with `litesvm`
+and `@solana/kit` installed) loads a circuit's build output by name and runs the
+project's programs in LiteSVM:
+
+```ts
+import { circuit, funded, program, send, vm } from "@blueshift-gg/xark/testing";
+
+const prover = await Claim.prover(circuit("claim")); // circuits/claim's build
+const svm = vm({ [id]: program("claim") });           // target/deploy/claim_program.so
+await send(svm, await funded(svm), { programAddress: id, data: proof.toInstructionData() });
+```
+
 To be sure the prover runs the circuit the client was generated from, and not
 whatever a deployment serves, pin it: `Zkyc.prover(url, { digest: Zkyc.digest })`
 refuses any other circuit (`Zkyc.digest` is the digest `xark build` printed). The

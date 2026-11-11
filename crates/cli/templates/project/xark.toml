@@ -1,0 +1,6 @@
+# A xark project: circuits in circuits/, Solana programs in programs/, and the
+# clients xark generates for each circuit in clients/, in one Cargo workspace.
+# `xark add circuit <name>` and `xark add program <name>` add to it.
+[project]
+# The xark release it's made with.
+xark = "{{xark}}"

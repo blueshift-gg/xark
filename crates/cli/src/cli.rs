@@ -850,6 +850,34 @@ pub fn cmd_init(args: &[String]) -> i32 {
     let dir = name_arg
         .as_ref()
         .map_or_else(|| cwd.clone(), |n| cwd.join(n));
+    if let Err(code) = scaffold_circuit(&dir, false) {
+        return code;
+    }
+    let where_ = if let Some(n) = &name_arg {
+        n.as_str()
+    } else {
+        "."
+    };
+    eprintln!(
+        "{}",
+        crate::style::next_steps(&[
+            (
+                format!("xark test {where_}"),
+                "build the circuit and run its tests"
+            ),
+            (
+                format!("xark prove {where_} --inputs '{{\"secret\": 3, \"result\": 9}}'"),
+                "produce your first proof (the key is made on the first run)",
+            ),
+        ])
+    );
+    0
+}
+
+/// Write the starter circuit crate in `dir`, named after it, keeping any file
+/// already there; its name, or the exit code. A circuit in a project (`xark add
+/// circuit`) leaves the editor settings and `.gitignore` to the project's root.
+pub fn scaffold_circuit(dir: &std::path::Path, in_project: bool) -> Result<String, i32> {
     let name = dir
         .file_name()
         .and_then(|s| s.to_str())
@@ -861,7 +889,7 @@ pub fn cmd_init(args: &[String]) -> i32 {
              pick another directory name, e.g. `xark init {}`",
             suggest_crate_name(&name)
         );
-        return 2;
+        return Err(2);
     }
 
     // Pin the published `xark` dep to this CLI's own major.minor
@@ -915,7 +943,11 @@ pub fn cmd_init(args: &[String]) -> i32 {
     ];
 
     let mut created = 0u32;
+    let standalone_only = ["rust-analyzer.toml", ".vscode/settings.json", ".gitignore"];
     for (rel, contents) in &files {
+        if in_project && standalone_only.contains(rel) {
+            continue;
+        }
         let path = dir.join(rel);
         if path.exists() {
             eprintln!("xark: keeping existing {rel}");
@@ -925,11 +957,11 @@ pub fn cmd_init(args: &[String]) -> i32 {
             && let Err(e) = std::fs::create_dir_all(parent)
         {
             eprintln!("xark: failed to create {}: {e}", parent.display());
-            return 1;
+            return Err(1);
         }
         if let Err(e) = std::fs::write(&path, contents) {
             eprintln!("xark: failed to write {rel}: {e}");
-            return 1;
+            return Err(1);
         }
         created += 1;
     }
@@ -938,30 +970,12 @@ pub fn cmd_init(args: &[String]) -> i32 {
         "xark: scaffolded circuit `{name}` ({created} files) in {}",
         dir.display()
     );
-    let where_ = if let Some(n) = &name_arg {
-        n.as_str()
-    } else {
-        "."
-    };
-    eprintln!(
-        "{}",
-        crate::style::next_steps(&[
-            (
-                format!("xark test {where_}"),
-                "build the circuit and run its tests"
-            ),
-            (
-                format!("xark prove {where_} --inputs '{{\"secret\": 3, \"result\": 9}}'"),
-                "produce your first proof (the key is made on the first run)",
-            ),
-        ])
-    );
-    0
+    Ok(name)
 }
 
 /// Refuse names `cargo new` refuses: the crate (and its `#[circuit]` fn, named
 /// after it) must be a valid, non-keyword Rust identifier once `-` becomes `_`.
-fn check_crate_name(name: &str) -> Result<(), &'static str> {
+pub(crate) fn check_crate_name(name: &str) -> Result<(), &'static str> {
     const KEYWORDS: &[&str] = &[
         "_", "Self", "abstract", "as", "async", "await", "become", "box", "break", "const",
         "continue", "crate", "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for",

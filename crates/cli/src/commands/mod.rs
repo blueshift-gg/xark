@@ -33,6 +33,7 @@ pub(crate) fn dbg_flag(name: &str) -> bool {
     }
 }
 
+pub mod add;
 pub mod ceremony;
 pub mod check;
 pub mod client;
@@ -70,6 +71,9 @@ pub enum Command {
     /// Scaffold a starter circuit crate (rust-analyzer ready).
     #[command(alias = "new")]
     Init(InitArgs),
+    /// Add a circuit or a Solana program to a project (making the project on first
+    /// use): `xark add circuit <name>`, `xark add program <name>`.
+    Add(add::AddArgs),
     /// Compile a circuit crate (Rust → wasm32 → R1CS) into target/xark/.
     Build(BuildArgs),
     /// Validate a circuit crate and report subset rejections as diagnostics.
@@ -128,6 +132,7 @@ fn run(cli: Cli) -> Result<()> {
         // Frontend commands delegate to the hand-rolled `cargo`-driving
         // implementations, which return a process exit code.
         Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
+        Command::Add(a) => add::run(a),
         Command::Build(a) => exit_code("build", crate::cli::cmd_build_command(&a.to_argv())),
         // Bare `xark check` stays the fast, artifact-free `cargo check` validator.
         // `xark check --inputs …` opts into the witness-based soundness analyzer

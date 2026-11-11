@@ -29,7 +29,7 @@ workspace.
 **A circuit** is what `xark init` makes today, unchanged. It has no `xark.toml`.
 
 **A project** is a directory with a `xark.toml`. Nobody writes one by hand:
-`xark add` makes it on first use.
+`xark add` makes it on first use, in a directory with no `Cargo.toml` of its own.
 
 ```console
 $ mkdir my-app && cd my-app
@@ -49,9 +49,10 @@ my-app/
   tests/claim.test.ts   # LiteSVM
 ```
 
-- **Fixed folders.** `circuits/`, `programs/` and `clients/` are globbed in the
-  root `Cargo.toml`, so `xark add` never edits `members` and `xark.toml` lists
-  nothing.
+- **Fixed folders.** `circuits/*`, `programs/*` and `clients/*/rust` are globbed
+  in the root `Cargo.toml`, so `xark.toml` lists nothing. Cargo reads a glob that
+  matches nothing as a missing path, so `xark add` and `xark export` keep the
+  `members` line to the globs that hold a crate.
 - **Crate names.** A workspace can't hold two packages of one name: the program in
   `programs/claim/` is the crate `claim-program`, the client `claim-verifier`.
   `xark add program claim` uses the circuit of the same name; `--circuit` picks
@@ -71,8 +72,13 @@ clone builds the program without running xark first; CI checks it is up to date.
 - **`clients/…/rust`** is the crate `xark export` writes. With no features it is
   the `no_std` verifier a program depends on. With `prove` it proves from typed
   inputs on the host, for Rust tests and relayers.
-- **`clients/…/ts`** is what `xark client` writes: `prove()`, typed inputs and the
-  instruction data.
+- **`clients/…/ts`** is what `xark client` writes: `prove()` and typed inputs. A
+  proof's `toInstructionData()` is the proof and its public inputs as the
+  program's `Fields`.
+
+The tests use `@blueshift-gg/xark/testing`: a circuit's build output by name
+(`circuit("claim")`), a LiteSVM with the project's programs (`program("claim")`),
+a funded payer and `send`. Every example carried its own copy of these.
 
 ## Typed public inputs
 
@@ -134,7 +140,7 @@ writes the sample's public inputs by name, packs them and verifies the proof.
 
 1. The `clients/` default for `xark export` and `xark client`. (Built.)
 2. Typed `PublicInputs` in the generated Rust crate. (Built.)
-3. `xark add circuit|program` and `xark.toml`.
+3. `xark add circuit|program` and `xark.toml`. (Built.)
 4. `xark build`, `xark test` and `xark check` at the project root.
 
 The first two stand on their own: a lone circuit gets them before projects exist.

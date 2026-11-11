@@ -114,6 +114,16 @@ export class Proof<PublicValues> {
   toBytes(): Uint8Array;
   /** The proof compressed, 128 bytes (each point by `x` and a sign bit): a `Verifier` reads it. */
   toBytesCompressed(): Uint8Array;
+  /**
+   * The public inputs as an exported Solana verifier takes them (its `Fields`): 32
+   * bytes each, little-endian, in proof order.
+   */
+  toFields(): Uint8Array;
+  /**
+   * `toBytes()` then `toFields()`: the proof and its public inputs, for a program
+   * that takes both in its instruction data.
+   */
+  toInstructionData(): Uint8Array;
 }
 
 /** The parts of `@blueshift-gg/xark` a client uses (any of its builds). */

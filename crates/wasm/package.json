@@ -48,6 +48,22 @@
     "./client": {
       "types": "./js/client.d.ts",
       "default": "./js/client.mjs"
+    },
+    "./testing": {
+      "types": "./js/testing.d.ts",
+      "default": "./js/testing.mjs"
+    }
+  },
+  "peerDependencies": {
+    "@solana/kit": ">=5",
+    "litesvm": ">=1"
+  },
+  "peerDependenciesMeta": {
+    "@solana/kit": {
+      "optional": true
+    },
+    "litesvm": {
+      "optional": true
     }
   }
 }
