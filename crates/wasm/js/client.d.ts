@@ -243,13 +243,16 @@ export class Verifier<PublicInputs, PublicValues, Structs = {}> extends Session<
   private constructor();
   /**
    * Whether `proof` proves `publicInputs`: pass the ones you require (a policy, a
-   * root). A proof's bytes (`toBytes()` or `toBytesCompressed()`) need them; a
-   * `Proof` defaults to its own. A malformed or invalid proof is `false`;
-   * `publicInputs` that don't fit the circuit's types throw an `InputError` (a
-   * mistake in the caller, not a bad proof).
+   * root). They may be omitted only for a circuit with no public inputs. A
+   * `Uint8Array` is used as the canonical public-input bytes, as given. A malformed
+   * or invalid proof is `false`; `publicInputs` that don't fit the circuit's types
+   * throw an `InputError` (a mistake in the caller, not a bad proof).
    */
-  verify(proof: Proof<PublicValues>, publicInputs?: PublicInputs | Uint8Array): boolean;
-  verify(proof: Uint8Array, publicInputs: PublicInputs | Uint8Array): boolean;
+  verify(
+    ...args: [keyof PublicInputs] extends [never]
+      ? [proof: Proof<PublicValues> | Uint8Array]
+      : [proof: Proof<PublicValues> | Uint8Array, publicInputs: PublicInputs | Uint8Array]
+  ): boolean;
 }
 
 /** A circuit as its generated client describes it. */

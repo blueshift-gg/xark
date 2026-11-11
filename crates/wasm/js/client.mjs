@@ -486,16 +486,22 @@ export class Verifier extends Session {
     super(circuit, wasm);
     // Decoded once: a malformed key throws here, not as a `false` from every verify.
     this.key = new wasm.VerifyingKey(parts.verifyingKey);
+    // A schema without `public_inputs` is treated as having them.
+    this.hasPublicInputs = JSON.parse(circuit.schema).public_inputs?.length !== 0;
   }
 
   verify(proof, publicInputs) {
     const bytes = proof instanceof Uint8Array ? proof : proof.proofBytes;
-    if (proof instanceof Uint8Array && publicInputs === undefined) {
-      throw new TypeError("verify(bytes, publicInputs): a proof's bytes don't carry its public inputs; pass the ones it must prove");
+    if (publicInputs === undefined && this.hasPublicInputs) {
+      throw new TypeError(
+        proof instanceof Uint8Array
+          ? "verify(bytes, publicInputs): a proof's bytes don't carry its public inputs; pass the ones it must prove"
+          : "verify(proof, publicInputs): this circuit has public inputs; pass the ones it must prove",
+      );
     }
     const inputs =
       publicInputs === undefined
-        ? proof.publicInputBytes
+        ? this.encodePublicInputs({}) // a circuit with no public inputs
         : publicInputs instanceof Uint8Array
           ? publicInputs
           : this.encodePublicInputs(publicInputs);

@@ -69,7 +69,8 @@ verifier.verify(bytes, { commitment, policy: required }); // true
 it (256 bytes; `Proof::from_le_bytes` on chain), so a program checks it against
 public inputs it supplies itself, such as its policy or a root in its state.
 `proof.toBytesCompressed()` is half the size, for anywhere else; a verifier reads
-either.
+either. A verifier also takes a `Proof`, but pass the public inputs you require
+(`verifier.verify(proof, required)`); only a circuit with no public inputs may omit them.
 
 To be sure the prover runs the circuit the client was generated from, and not
 whatever a deployment serves, pin it: `Zkyc.prover(url, { digest: Zkyc.digest })`
@@ -125,11 +126,11 @@ drift, and a mistake names its input (`id.document: "…" is longer than 31 byte
 Errors are typed for a UI to act on: an `InputError` carries the input's `path`
 (`"id.document"`), and a `CheckFailed` the failing statement's `site` (`file`,
 `line`, `col`, `text`, the functions it called into).
-`clients/check/{zkyc,cube,sha256,merkle}/` hold those examples' generated clients
-and their vitest tests. `npm test` there (run in CI) builds xark, xark-wasm and each
-example, fails if a committed client is stale (`npm run update` rewrites it),
-typechecks, and runs the tests in Node; a folder with a `<name>.test.ts` is all a new
-example needs.
+`clients/check/{zkyc,cube,sha256,merkle,scalar_range}/` hold those examples'
+generated clients and their vitest tests. `npm test` there (run in CI) builds xark,
+xark-wasm and each example, fails if a committed client is stale (`npm run update`
+rewrites it), typechecks, and runs the tests in Node; a folder with a `<name>.test.ts`
+is all a new example needs.
 
 ## Without a generated client
 
