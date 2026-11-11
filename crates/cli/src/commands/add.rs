@@ -229,7 +229,8 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
             .context("reading the circuit's schema")?,
     )?;
     let circuit_fn = schema["circuit"].as_str().unwrap_or(circuit).to_string();
-    let verifier = format!("{circuit}-verifier");
+    // As `xark export` names it (`shielded_transact` → `shielded-transact-verifier`).
+    let verifier = super::export::sanitize_crate_name(&format!("{circuit}-verifier"));
     let pascal = super::client::ts::pascal(&circuit_fn);
     let error = format!(
         "{}Error",
@@ -309,7 +310,10 @@ pub fn check_circuit_name(root: &Path, name: &str) -> Result<()> {
         }
     }
     let names = package_names(root);
-    for taken in [name.to_string(), format!("{name}-verifier")] {
+    for taken in [
+        name.to_string(),
+        super::export::sanitize_crate_name(&format!("{name}-verifier")),
+    ] {
         if names.contains(&taken) {
             bail!("the workspace already has a crate `{taken}`: pick another name");
         }

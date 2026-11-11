@@ -178,7 +178,10 @@ pub fn run(args: ClientArgs) -> Result<()> {
     if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&out, client).with_context(|| format!("writing {}", out.display()))?;
+    // Unchanged, it keeps its mtime (a bundler or `tsc --watch` has nothing to redo).
+    if std::fs::read_to_string(&out).ok().as_deref() != Some(client.as_str()) {
+        std::fs::write(&out, client).with_context(|| format!("writing {}", out.display()))?;
+    }
     println!(
         "{}",
         crate::style::brand(&format!(

@@ -275,3 +275,71 @@ fn a_project_keeps_what_isnt_xarks() {
     assert!(ts.is_file());
     assert_eq!(std::fs::read(app.join("keys/edge/vk.bin")).unwrap(), vk);
 }
+
+/// `xark init --circuit` names the first circuit apart from the project, and a
+/// circuit with an underscore gets a program depending on the crate `xark export`
+/// names (`shielded_transact` → `shielded-transact-verifier`).
+#[test]
+fn names_follow_the_crates_xark_makes() {
+    let tmp = tempdir();
+    let app = tmp.path().join("pool");
+    let (ok, _, err) = crate::common::run(&["init", app.to_str().unwrap(), "--circuit", "deposit"]);
+    assert!(ok, "{err}");
+    assert!(app.join("circuits/deposit/src/lib.rs").is_file());
+    assert!(!app.join("circuits/pool").exists());
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap()
+        + &format!(
+            "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\n",
+            root.join("crates/lang").display(),
+            root.join("crates/verifier").display()
+        );
+    std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
+    let xark = |args: &[&str]| {
+        let o = Command::new(crate::common::xark_bin())
+            .args(args)
+            .current_dir(&app)
+            .output()
+            .expect("invoke xark");
+        let out =
+            String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+        (o.status.success(), out)
+    };
+    let (ok, out) = xark(&["add", "circuit", "shielded_transact"]);
+    assert!(ok, "{out}");
+    let (ok, out) = xark(&[
+        "add",
+        "program",
+        "transfer",
+        "--circuit",
+        "shielded_transact",
+    ]);
+    assert!(ok, "{out}");
+    let program = std::fs::read_to_string(app.join("programs/transfer/Cargo.toml")).unwrap();
+    assert!(
+        program.contains(
+            "shielded-transact-verifier = { path = \"../../clients/shielded_transact/rust\" }"
+        ),
+        "{program}"
+    );
+    let verifier =
+        std::fs::read_to_string(app.join("clients/shielded_transact/rust/Cargo.toml")).unwrap();
+    assert!(
+        verifier.contains("name = \"shielded-transact-verifier\""),
+        "{verifier}"
+    );
+    // After a proof, the next step in a project is `xark build`.
+    let (ok, out) = xark(&[
+        "prove",
+        "circuits/deposit",
+        "--inputs",
+        r#"{"secret": 3, "result": 9}"#,
+    ]);
+    assert!(
+        ok && out.contains("xark build") && !out.contains("xark export"),
+        "{out}"
+    );
+}

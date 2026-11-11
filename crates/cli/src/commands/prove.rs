@@ -488,23 +488,30 @@ fn write_outputs(
             super::shown(&public_path)
         );
     }
-    println!(
-        "\n{}",
-        crate::style::next_steps(&[
-            (
-                format!("xark verify {p}{files}"),
-                "check this proof locally"
-            ),
-            (
-                format!("xark client {p}"),
-                "generate a typed TypeScript client (prove + verify in JS)",
-            ),
-            (
-                format!("xark export {p}{files}"),
-                "generate the on-chain Solana verifier crate",
-            ),
-        ])
-    );
+    let mut steps = vec![(
+        format!("xark verify {p}{files}"),
+        "check this proof locally",
+    )];
+    let in_project = XarkProject::resolve(args.path.clone())
+        .ok()
+        .and_then(|p| p.project_root())
+        .is_some();
+    if in_project {
+        steps.push((
+            "xark build".to_string(),
+            "the verifier crate and TypeScript client (clients/), then the programs",
+        ));
+    } else {
+        steps.push((
+            format!("xark client {p}"),
+            "generate a typed TypeScript client (prove + verify in JS)",
+        ));
+        steps.push((
+            format!("xark export {p}{files}"),
+            "generate the onchain Solana verifier crate",
+        ));
+    }
+    println!("\n{}", crate::style::next_steps(&steps));
     Ok(())
 }
 

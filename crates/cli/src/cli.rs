@@ -530,7 +530,8 @@ fn build_stable(
 /// where a circuit's size comes from.
 fn print_hotspots(crate_abs: &std::path::Path, sources: &xark_ir::SourceMap, rows: usize) {
     let costs = sources.line_costs(rows);
-    if rows == 0 || costs.is_empty() {
+    // Lines under 1% would be noise; with none above it, there's nothing to show.
+    if rows == 0 || !costs.iter().take(3).any(|(_, n)| n * 100 >= rows) {
         return;
     }
     eprintln!("{} most constraints come from", crate::style::tag());
@@ -892,24 +893,39 @@ fn check_diagnostic_json(crate_abs: &std::path::Path, e: &xark_frontend::Compile
 /// `circuits/<name>/`, pre-wired for rust-analyzer so unsupported constructs surface
 /// inline as you type (via `xark check`). `xark add` grows it.
 pub fn cmd_init(args: &[String]) -> i32 {
-    let name_arg = args.iter().find(|a| !a.starts_with('-')).cloned();
+    let circuit_arg = args
+        .iter()
+        .position(|a| a == "--circuit")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+    let name_arg = args
+        .iter()
+        .enumerate()
+        .find(|(i, a)| !a.starts_with('-') && (*i == 0 || args[i - 1] != "--circuit"))
+        .map(|(_, a)| a.clone());
     let cwd = std::env::current_dir().expect("cwd");
     // The argument may be a path (`xark init apps/demo`): the project and its first
     // circuit are named after its last component.
     let dir = name_arg
         .as_ref()
         .map_or_else(|| cwd.clone(), |n| cwd.join(n));
-    let name = dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("circuit")
-        .to_string();
+    let name = circuit_arg.clone().unwrap_or_else(|| {
+        dir.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("circuit")
+            .to_string()
+    });
     if let Err(why) = check_crate_name(&name) {
-        eprintln!(
-            "error: can't name a crate `{name}`: {why}\n  \
-             pick another directory name, e.g. `xark init {}`",
-            suggest_crate_name(&name)
-        );
+        let suggest = suggest_crate_name(&name);
+        let how = if circuit_arg.is_some() {
+            format!("pick another circuit name, e.g. `--circuit {suggest}`")
+        } else {
+            format!(
+                "pick another directory name, e.g. `xark init {suggest}` (or name the circuit \
+                 with `--circuit`)"
+            )
+        };
+        eprintln!("error: can't name a crate `{name}`: {why}\n  {how}");
         return 2;
     }
     if let Err(e) = crate::commands::add::init_project(&dir, &name) {

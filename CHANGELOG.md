@@ -98,6 +98,12 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   the programs' tests, the verifier crates' self-tests and those of a library
   beside the circuits in release, and finds
   `node_modules` above the root too (an npm workspace's).
+- `xark init <dir> --circuit <name>` names the first circuit apart from the
+  project. `xark add program` names the verifier crate as `xark export` does
+  (`shielded_transact` → `shielded-transact-verifier`). `xark test` builds each
+  circuit once, `xark build` leaves unchanged generated files alone (so cargo
+  doesn't rebuild the programs), `xark profile` at a project's root profiles its
+  circuit, and after `xark prove` in a project the next step is `xark build`.
 - In a project, a crate in `circuits/` is a circuit if it has a `#[circuit]`: a
   library the circuits share can sit beside them.
 - A circuit can't be named `…-program` or `…-verifier`, or anything that isn't one

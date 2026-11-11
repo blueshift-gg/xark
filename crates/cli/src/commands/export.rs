@@ -286,7 +286,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
     }
     println!(
         "{}",
-        crate::style::brand("✅ On-chain verifier crate ready (verifying key embedded).")
+        crate::style::brand("✅ Onchain verifier crate ready (verifying key embedded).")
     );
     let p = super::path_arg(&args.path);
     let mut next = vec![(
@@ -329,7 +329,7 @@ fn existing_sample(
 
 /// Sanitize an arbitrary string into a valid Cargo crate name
 /// (`[a-z0-9_-]`, non-empty, not leading with a digit/sep).
-fn sanitize_crate_name(s: &str) -> String {
+pub(crate) fn sanitize_crate_name(s: &str) -> String {
     let mut out: String = s
         .to_ascii_lowercase()
         .chars()
@@ -621,14 +621,20 @@ or context the proof is for, and record *that* on-chain.
 }
 
 fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
-    let path = dir.join(name);
-    fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
+    write_str_bytes(&dir.join(name), bytes)
 }
 
 fn write_str(path: &Path, contents: &str) -> Result<()> {
-    fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
+    write_str_bytes(path, contents.as_bytes())
+}
+
+/// Write `bytes` unless the file already holds them: an unchanged file keeps its
+/// mtime, so cargo doesn't rebuild the crate and the program that depends on it.
+fn write_str_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    if fs::read(path).is_ok_and(|b| b == bytes) {
+        return Ok(());
+    }
+    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]

@@ -171,13 +171,22 @@ fn exit_code(_name: &str, code: i32) -> Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct InitArgs {
-    /// Name of the crate to scaffold. Omit to initialize the current directory.
+    /// The project's directory (and name). Omit to initialize the current directory.
     pub name: Option<String>,
+    /// Name the first circuit (`circuits/<circuit>/`) apart from the project. Defaults
+    /// to the project's name.
+    #[arg(long)]
+    pub circuit: Option<String>,
 }
 
 impl InitArgs {
     fn to_argv(&self) -> Vec<String> {
-        self.name.iter().cloned().collect()
+        let mut v: Vec<String> = self.name.iter().cloned().collect();
+        if let Some(c) = &self.circuit {
+            v.push("--circuit".into());
+            v.push(c.clone());
+        }
+        v
     }
 }
 

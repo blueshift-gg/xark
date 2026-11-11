@@ -246,7 +246,10 @@ fn esc(s: &str) -> String {
 
 /// The profile build (`xark build` with constraint attribution).
 fn build(args: &ProfileArgs) -> Result<()> {
-    let mut build_argv = vec![args.crate_dir.clone()];
+    // At a project's root, its circuit.
+    let dir = super::project::only_circuit(&args.crate_dir)
+        .map_or_else(|| args.crate_dir.clone(), |c| c.display().to_string());
+    let mut build_argv = vec![dir];
     if let Some(out) = &args.out {
         build_argv.push("--out".into());
         build_argv.push(out.clone());

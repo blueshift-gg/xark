@@ -116,7 +116,7 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         crate::style::next_steps(&[
             (
                 format!("xark export {p}"),
-                "generate the on-chain Solana verifier crate",
+                "generate the onchain Solana verifier crate",
             ),
             (
                 format!("xark client {p}"),

@@ -99,7 +99,7 @@ Node:
 $ xark add program my-circuit
 $ xark build
 ...
-✅ On-chain verifier crate ready (verifying key embedded).
+✅ Onchain verifier crate ready (verifying key embedded).
 ✅ TypeScript client for `my_circuit` at clients/my-circuit/ts/my_circuit.ts
 xark building the programs (cargo build-sbf)
 $ npm install && xark test
