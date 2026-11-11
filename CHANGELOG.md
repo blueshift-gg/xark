@@ -92,6 +92,12 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
 - In a project, `xark test` builds a circuit's tests without the programs' fat
   LTO (the workspace's release profile): after an edit, the starter circuit's
   tests relink in 1 s instead of 8.
+- `xark build` at a project's root works before a circuit's verifier crate
+  exists, as when a program that depends on it is moved in: a placeholder stands
+  in until the export replaces it, and `members` is synced first. `xark test` runs
+  the programs' tests, the verifier crates' self-tests and those of a library
+  beside the circuits in release, and finds
+  `node_modules` above the root too (an npm workspace's).
 - In a project, a crate in `circuits/` is a circuit if it has a `#[circuit]`: a
   library the circuits share can sit beside them.
 - A circuit can't be named `…-program` or `…-verifier`, or anything that isn't one

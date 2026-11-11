@@ -107,7 +107,7 @@ a funded payer and `send`. Every example carried its own copy of these.
 ## Typed public inputs
 
 `xark export` generates, from `schema.json`, a `PublicInputs` struct with the
-circuit's public inputs as named fields, and `verify(&proof, &PublicInputs)`. It
+circuit's public inputs as named fields, and `verify(&proof, inputs)` (a `PublicInputs`, by value). It
 packs them into field elements as `#[input]` does, from the packing `schema.json`
 records (`"packed": { "offset", "bits" }`), so a program never does it by hand:
 
@@ -125,7 +125,7 @@ let inputs = PublicInputs {
     },
     holder: *holder.address(), // a `Hash`: its 32 bytes, split into hi/lo for you
 };
-if !zkyc_verifier::verify(&proof, &inputs) { … }
+if !zkyc_verifier::verify(&proof, inputs) { … }
 ```
 
 `verify` takes `impl Into<Fields>` (`[[u8; 32]; N]`), so `PublicInputs` is a

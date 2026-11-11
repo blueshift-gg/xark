@@ -120,7 +120,7 @@ let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);
 let inputs = my_circuit_verifier::PublicInputs {
     result: /* from your program's state, 32 bytes little-endian */,
 };
-if !my_circuit_verifier::verify(&proof, &inputs) {
+if !my_circuit_verifier::verify(&proof, inputs) {
     return Err(ProgramError::InvalidArgument);
 }
 ```

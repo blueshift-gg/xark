@@ -135,10 +135,11 @@ let inputs = zkyc_verifier::PublicInputs {
     policy: zkyc_verifier::Policy { today, born_by, min_net_worth, allowed },
     holder: *holder.address(),
 };
-if !zkyc_verifier::verify(&proof, &inputs) { … }
+if !zkyc_verifier::verify(&proof, inputs) { … }
 ```
 
-`verify` takes anything that converts into `Fields` (`[[u8; 32]; N]`), so code
+Pass it by value (it's `Copy`): clippy flags a needless `&inputs`. `verify` takes
+anything that converts into `Fields` (`[[u8; 32]; N]`), so code
 that already builds the field elements keeps working: pass them by value,
 `verify(&proof, fields)`, or `*fields` from a reference. To pack a struct of your
 own, implement `From<&YourStruct> for Fields` with `xark_verifier::fields::Packer`.

@@ -273,7 +273,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
     println!(
         "Generated verifier crate `{crate_name}` at {} ({} public input(s), \
          VK = {} B). Depend on it from your Solana program and call \
-         `verify(&proof, &PublicInputs {{ .. }})`.",
+         `verify(&proof, PublicInputs {{ .. }})`.",
         out.display(),
         num_public_inputs,
         vk_bytes.len(),
@@ -585,7 +585,7 @@ let Some(proof) = instruction_data.first_chunk::<256>() else {{
 }};
 let proof = {ident}::Proof::from_le_bytes(proof);
 let inputs = {ident}::PublicInputs {{ /* from your program's state */ }};
-if !{ident}::verify(&proof, &inputs) {{
+if !{ident}::verify(&proof, inputs) {{
     return Err(ProgramError::InvalidArgument);
 }}
 ```
