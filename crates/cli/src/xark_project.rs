@@ -110,10 +110,15 @@ impl XarkProject {
         }
     }
 
-    /// The project the circuit crate is in: the nearest directory above it with a
-    /// `xark.toml`.
+    /// The project the circuit is one of: the directory with a `xark.toml` whose
+    /// `circuits/` holds its crate. (Another crate somewhere under a project isn't
+    /// one of its circuits, and keeps its keys and clients beside it.)
     pub fn project_root(&self) -> Option<PathBuf> {
-        project_root(&self.crate_dir()?)
+        let krate = std::path::absolute(self.crate_dir()?).ok()?;
+        let circuits = krate.parent()?;
+        let root = circuits.parent()?;
+        (circuits.file_name()? == "circuits" && root.join(PROJECT_FILE).is_file())
+            .then(|| root.to_path_buf())
     }
 
     /// The package the build is named after (`target/xark/<name>/`).
@@ -168,9 +173,11 @@ pub const PROJECT_FILE: &str = "xark.toml";
 /// a path that isn't there, so one is listed only once something is in it. The
 /// `default-members` are the programs, so a bare `cargo build-sbf` (or `cargo
 /// test`) at the root builds them alone: built together with the circuits, the
-/// circuits' host dependencies would join the SBF build. Rewrites the lines `xark
-/// init` wrote; a manifest edited past them is left alone, with a warning.
+/// circuits' host dependencies would join the SBF build. Only these globs are
+/// added or removed; anything else in the manifest (members of your own, comments,
+/// layout) stays as it is.
 pub fn sync_members(root: &Path) -> Result<()> {
+    const OURS: [&str; 3] = ["circuits/*", "programs/*", "clients/*/rust"];
     let has_crate = |pattern: &str| -> bool {
         let (dir, rest) = pattern.split_once("/*").unwrap_or((pattern, ""));
         std::fs::read_dir(root.join(dir)).is_ok_and(|entries| {
@@ -182,50 +189,53 @@ pub fn sync_members(root: &Path) -> Result<()> {
             })
         })
     };
-    let list = |patterns: &[&str]| -> String {
-        let ps: Vec<String> = patterns
-            .iter()
-            .filter(|p| has_crate(p))
-            .map(|p| format!("{p:?}"))
-            .collect();
-        format!("[{}]", ps.join(", "))
-    };
-    let members = format!(
-        "members = {}",
-        list(&["circuits/*", "programs/*", "clients/*/rust"])
-    );
-    let defaults =
-        has_crate("programs/*").then(|| format!("default-members = {}", list(&["programs/*"])));
     let manifest = root.join("Cargo.toml");
     let text = std::fs::read_to_string(&manifest)
         .with_context(|| format!("reading {}", manifest.display()))?;
-    let one_line = |l: &str, key: &str| l.starts_with(key) && l.ends_with(']');
-    if !text.lines().any(|l| one_line(l, "members = [")) {
-        eprintln!(
-            "{} {} has no one-line `members = [...]` to update: make sure it lists {members}{}",
-            crate::style::warn("warning:"),
-            manifest.display(),
-            defaults
-                .as_ref()
-                .map_or(String::new(), |d| format!(", and {d}")),
-        );
-        return Ok(());
-    }
-    let mut out = Vec::new();
-    for l in text.lines() {
-        if one_line(l, "default-members = [") {
-            continue;
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .with_context(|| format!("reading {}", manifest.display()))?;
+    let Some(ws) = doc.get_mut("workspace").and_then(|w| w.as_table_like_mut()) else {
+        bail!("{} has no [workspace]", manifest.display());
+    };
+    // `key`'s entries: ours that hold a crate, then whatever else was there.
+    let mut set = |key: &str, ours: &[&str]| {
+        let others: Vec<String> = ws
+            .get(key)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .filter(|v| !OURS.contains(v))
+            .map(str::to_string)
+            .collect();
+        let wanted: Vec<String> = ours
+            .iter()
+            .filter(|p| has_crate(p))
+            .map(|p| p.to_string())
+            .chain(others)
+            .collect();
+        if wanted.is_empty() && key == "default-members" {
+            ws.remove(key);
+            return;
         }
-        if one_line(l, "members = [") {
-            out.push(members.clone());
-            if let Some(d) = &defaults {
-                out.push(d.clone());
+        // Changed in place, so the comments around it stay.
+        match ws.get_mut(key).and_then(|v| v.as_array_mut()) {
+            Some(array) => {
+                let current: Vec<&str> = array.iter().filter_map(|v| v.as_str()).collect();
+                if current != wanted {
+                    array.clear();
+                    array.extend(wanted.iter().map(String::as_str));
+                }
             }
-            continue;
+            None => {
+                ws.insert(key, toml_edit::value(toml_edit::Array::from_iter(wanted)));
+            }
         }
-        out.push(l.to_string());
-    }
-    let new = out.join("\n") + "\n";
+    };
+    set("members", &OURS);
+    set("default-members", &["programs/*"]);
+    let new = doc.to_string();
     if new != text {
         std::fs::write(&manifest, new)
             .with_context(|| format!("writing {}", manifest.display()))?;

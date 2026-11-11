@@ -4,7 +4,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
@@ -78,6 +77,12 @@ pub fn init_project(dir: &Path, name: &str) -> Result<()> {
             dir.display()
         );
     }
+    check_circuit_name(dir, name)?;
+    let circuit = dir.join("circuits").join(name);
+    if circuit.exists() {
+        bail!("{} already exists", circuit.display());
+    }
+    // Everything checked: nothing below refuses halfway, leaving half a project.
     let xark = xark_ir::major_minor(env!("CARGO_PKG_VERSION"));
     write_new(
         dir,
@@ -85,38 +90,69 @@ pub fn init_project(dir: &Path, name: &str) -> Result<()> {
         &template!("xark.toml").replace("{{xark}}", &xark),
     )?;
     write_new(dir, "Cargo.toml", template!("Cargo.toml.tmpl"))?;
-    write_new(dir, ".gitignore", template!("gitignore"))?;
-    write_new(
-        dir,
-        ".github/workflows/ci.yml",
-        &template!("github/ci.yml").replace("{{xark_version}}", env!("CARGO_PKG_VERSION")),
-    )?;
+    // A directory may already have these (a `git init`, a template repository):
+    // `.gitignore` gets the lines it's missing, the others are kept as they are.
+    let ignore = dir.join(".gitignore");
+    let ours = template!("gitignore");
+    match fs::read_to_string(&ignore) {
+        Ok(theirs) => {
+            let missing: Vec<&str> = ours
+                .lines()
+                .filter(|l| !l.starts_with('#') && !theirs.lines().any(|t| t.trim() == *l))
+                .collect();
+            if !missing.is_empty() {
+                let sep = if theirs.ends_with('\n') || theirs.is_empty() {
+                    ""
+                } else {
+                    "\n"
+                };
+                fs::write(&ignore, format!("{theirs}{sep}{}\n", missing.join("\n")))
+                    .with_context(|| format!("writing {}", ignore.display()))?;
+            }
+        }
+        Err(_) => write_new(dir, ".gitignore", ours)?,
+    }
     // rust-analyzer runs `xark check` at the root: `cargo check` over the workspace,
     // then xark's validation of each circuit. `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code.
     let cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\"]";
-    write_new(
-        dir,
-        "rust-analyzer.toml",
-        &format!(
-            "# Run xark's subset validator on save so unsupported constructs show inline.\n\
-             # Needs `xark` on PATH. Replaces rust-analyzer's `cargo check`, which `xark\n\
-             # check` runs over the whole workspace too.\n\
-             [check]\noverrideCommand = {cmd}\n"
+    for (path, text) in [
+        (
+            ".github/workflows/ci.yml",
+            template!("github/ci.yml").replace("{{xark_version}}", env!("CARGO_PKG_VERSION")),
         ),
-    )?;
-    write_new(
-        dir,
-        ".vscode/settings.json",
-        &format!("{{\n  \"rust-analyzer.check.overrideCommand\": {cmd}\n}}\n"),
-    )?;
-    if crate::cli::scaffold_circuit(&dir.join("circuits").join(name), true).is_err() {
+        (
+            "rust-analyzer.toml",
+            format!(
+                "# Run xark's subset validator on save so unsupported constructs show inline.\n\
+                 # Needs `xark` on PATH. Replaces rust-analyzer's `cargo check`, which `xark\n\
+                 # check` runs over the whole workspace too.\n\
+                 [check]\noverrideCommand = {cmd}\n"
+            ),
+        ),
+        (
+            ".vscode/settings.json",
+            format!("{{\n  \"rust-analyzer.check.overrideCommand\": {cmd}\n}}\n"),
+        ),
+    ] {
+        if dir.join(path).exists() {
+            eprintln!(
+                "{} keeping your {path} (xark's would run `xark build --check` and `xark \
+                 test`, or `xark check` for rust-analyzer)",
+                crate::style::tag()
+            );
+        } else {
+            write_new(dir, path, &text)?;
+        }
+    }
+    if crate::cli::scaffold_circuit(&circuit, true).is_err() {
         bail!("couldn't scaffold the circuit (see above)");
     }
     sync_members(dir)
 }
 
 fn add_circuit(root: &Path, name: &str) -> Result<()> {
+    check_circuit_name(root, name)?;
     let dir = root.join("circuits").join(name);
     if dir.exists() {
         bail!("{} already exists", dir.display());
@@ -154,9 +190,12 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
     if dir.exists() {
         bail!("{} already exists", dir.display());
     }
+    crate::cli::check_crate_name(name)
+        .map_err(|why| anyhow::anyhow!("can't name a program `{name}`: {why}"))?;
     let crate_name = format!("{name}-program");
-    crate::cli::check_crate_name(&crate_name)
-        .map_err(|why| anyhow::anyhow!("can't name a crate `{crate_name}`: {why}"))?;
+    if package_names(root).contains(&crate_name) {
+        bail!("the workspace already has a crate `{crate_name}`: pick another program name");
+    }
 
     // The TypeScript tests' setup, once per project (first, so the client
     // generated below finds the runtime listed).
@@ -179,18 +218,10 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
         }
     }
     // The program depends on the circuit's verifier crate, and the test on its
-    // TypeScript client: generate them when they're missing.
-    let clients = root.join("clients").join(circuit);
-    if !clients.join("rust/Cargo.toml").is_file() || !clients.join("ts").is_dir() {
-        let path = circuit_dir.display().to_string();
-        for step in [
-            vec!["build", &path],
-            vec!["setup", &path],
-            vec!["export", &path],
-            vec!["client", &path],
-        ] {
-            xark(root, &step)?;
-        }
+    // TypeScript client: generate them as `xark build` does, which makes a key
+    // only when there's none and nothing embeds one.
+    if super::project::build_circuit(root, &circuit_dir, false).is_err() {
+        bail!("couldn't build `{circuit}` and its clients (see above)");
     }
     let xark_dir = circuit_dir.join("target/xark").join(circuit);
     let schema: Value = serde_json::from_str(
@@ -204,7 +235,7 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
         "{}Error",
         super::client::ts::pascal(&name.replace('-', "_"))
     );
-    let (inputs, inputs_doc) = sample_inputs(&schema, &xark_dir, &pascal);
+    let (inputs, inputs_doc, test) = sample_inputs(&schema, &xark_dir, &pascal);
 
     let fill = |t: &str| {
         t.replace("{{name}}", name)
@@ -217,6 +248,7 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
             .replace("{{Pascal}}", &pascal)
             .replace("{{inputs}}", &inputs)
             .replace("{{inputs_doc}}", &inputs_doc)
+            .replace("{{test}}", test)
     };
     for (path, text) in [
         ("Cargo.toml", template!("program/Cargo.toml.tmpl")),
@@ -261,9 +293,52 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
     Ok(())
 }
 
-/// The test's inputs: the starter circuit's known answer, or the circuit's
-/// `inputs.example.json` (camelCase, as the client takes them) to fill in.
-fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, String) {
+/// A circuit's name: a crate name (one path component), and not one the crates
+/// xark adds beside it could clash with in the workspace (`<name>-program`,
+/// `<name>-verifier`).
+pub fn check_circuit_name(root: &Path, name: &str) -> Result<()> {
+    crate::cli::check_crate_name(name)
+        .map_err(|why| anyhow::anyhow!("can't name a circuit `{name}`: {why}"))?;
+    for suffix in ["-program", "_program", "-verifier", "_verifier"] {
+        if name.ends_with(suffix) {
+            bail!(
+                "can't name a circuit `{name}`: `xark add` names its program `<name>-program` \
+                 and its verifier crate `<name>-verifier`, so a circuit's name can't end in \
+                 `{suffix}`"
+            );
+        }
+    }
+    let names = package_names(root);
+    for taken in [name.to_string(), format!("{name}-verifier")] {
+        if names.contains(&taken) {
+            bail!("the workspace already has a crate `{taken}`: pick another name");
+        }
+    }
+    Ok(())
+}
+
+/// The package names of the project's crates.
+fn package_names(root: &Path) -> Vec<String> {
+    let mut dirs = super::project::members(root, "circuits");
+    dirs.extend(super::project::members(root, "programs"));
+    dirs.extend(
+        std::fs::read_dir(root.join("clients"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path().join("rust"))
+            .filter(|p| p.join("Cargo.toml").is_file()),
+    );
+    dirs.iter()
+        .filter_map(|d| crate::xark_project::read_pkg_name(d))
+        .collect()
+}
+
+/// The test's inputs, their doc, and the test function: the starter circuit's
+/// known answer, run; or the circuit's `inputs.example.json` (camelCase, as the
+/// client takes them) to fill in, its test skipped until then so the project's
+/// tests (and CI) stay green.
+fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, String, &'static str) {
     let names: Vec<(&str, &str)> = schema["inputs"]
         .as_array()
         .into_iter()
@@ -274,6 +349,7 @@ fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, Stri
         return (
             "{ secret: 3, result: 9 }".into(),
             "/** 3 squared is 9: the starter circuit's statement. */\n".into(),
+            "test",
         );
     }
     let example = fs::read_to_string(xark_dir.join("inputs.example.json"))
@@ -287,7 +363,8 @@ fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, Stri
             "{} as unknown as {pascal}Inputs",
             serde_json::to_string_pretty(&camel_keys(example)).unwrap_or_default()
         ),
-        "/** Replace each placeholder with a value the circuit accepts. */\n".into(),
+        "/**\n * Replace each placeholder with a value the circuit accepts, then remove the\n * test's `.skip`.\n */\n".into(),
+        "test.skip",
     )
 }
 
@@ -301,21 +378,6 @@ fn camel_keys(v: Value) -> Value {
         Value::Array(a) => Value::Array(a.into_iter().map(camel_keys).collect()),
         v => v,
     }
-}
-
-/// Run this `xark` with `args` in `dir`.
-fn xark(dir: &Path, args: &[&str]) -> Result<()> {
-    let exe = std::env::current_exe().context("finding the xark binary")?;
-    let status = Command::new(exe)
-        .args(args)
-        .env(crate::style::NESTED, "1")
-        .current_dir(dir)
-        .status()
-        .with_context(|| format!("running `xark {}`", args.join(" ")))?;
-    if !status.success() {
-        bail!("`xark {}` failed (see above)", args.join(" "));
-    }
-    Ok(())
 }
 
 /// Write `text` to `dir/rel`, refusing to replace a file.

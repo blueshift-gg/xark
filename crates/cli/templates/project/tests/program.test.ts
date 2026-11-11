@@ -17,7 +17,7 @@ beforeAll(async () => {
 /** `Verify`: its discriminator (0), then the proof and its public inputs. */
 const verify = (data: Uint8Array) => ({ programAddress: id, data: new Uint8Array([0, ...data]) });
 
-test("a proof verifies onchain", async () => {
+{{test}}("a proof verifies onchain", async () => {
   const proof = prover.prove(INPUTS);
   const svm = vm({ [id]: program("{{name}}") });
   const payer = await funded(svm);

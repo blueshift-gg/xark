@@ -96,23 +96,21 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
          fn from(inputs: &PublicInputs) -> Fields {\n        \
          inputs.to_fields()\n    }\n}\n",
     );
-    let sample = match sample {
-        Some(values) => {
-            let decoded = xark_schema::Schema::parse(&schema.to_string())
-                .ok()?
-                .decode_public(values, false)
-                .ok()?;
-            let mut lit = String::from("PublicInputs {\n");
-            for input in &public {
-                let name = input["name"].as_str()?;
-                let v = g.literal(&input["type"], &decoded[name])?;
-                let _ = writeln!(lit, "            {}: {v},", ident(name));
-            }
-            lit.push_str("        }");
-            Some(lit)
+    // A sample that can't be written out typed only loses the self-test.
+    let sample = sample.and_then(|values| {
+        let decoded = xark_schema::Schema::parse(&schema.to_string())
+            .ok()?
+            .decode_public(values, false)
+            .ok()?;
+        let mut lit = String::from("PublicInputs {\n");
+        for input in &public {
+            let name = input["name"].as_str()?;
+            let v = g.literal(&input["type"], &decoded[name])?;
+            let _ = writeln!(lit, "            {}: {v},", ident(name));
         }
-        None => None,
-    };
+        lit.push_str("        }");
+        Some(lit)
+    });
     Some(Typed { items, sample })
 }
 
@@ -174,6 +172,16 @@ const RESERVED: &[&str] = &[
     "Text",
     "Bitfield",
     "Variant",
+    // Names the generated code uses from Rust's prelude.
+    "Option",
+    "Some",
+    "None",
+    "From",
+    "Clone",
+    "Copy",
+    "Debug",
+    "PartialEq",
+    "Eq",
     "Fields",
     "Packer",
     "fields",
@@ -261,15 +269,33 @@ impl Gen<'_> {
         if !self.defs.contains_key(&name) {
             // Recorded first, so a recursive reference ends.
             self.defs.insert(name.clone(), String::new());
+            let fields = def["struct"].as_array()?;
+            // A tuple struct's fields are named `0`, `1`, …: it stays one (`.0` and
+            // `Pt { 0: … }` work on either).
+            let tuple = !fields.is_empty()
+                && fields.iter().all(|f| {
+                    f["name"]
+                        .as_str()
+                        .is_some_and(|n| n.parse::<usize>().is_ok())
+                });
             let mut body = format!(
                 "/// `{r}`, as the circuit takes it.\n\
-                 #[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub struct {name} {{\n"
+                 #[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub struct {name}"
             );
-            for f in def["struct"].as_array()? {
-                let t = self.rust_ty(&f["type"])?;
-                let _ = writeln!(body, "    pub {}: {t},", ident(f["name"].as_str()?));
+            if tuple {
+                let types: Vec<String> = fields
+                    .iter()
+                    .map(|f| self.rust_ty(&f["type"]).map(|t| format!("pub {t}")))
+                    .collect::<Option<_>>()?;
+                let _ = writeln!(body, "({});", types.join(", "));
+            } else {
+                body.push_str(" {\n");
+                for f in fields {
+                    let t = self.rust_ty(&f["type"])?;
+                    let _ = writeln!(body, "    pub {}: {t},", ident(f["name"].as_str()?));
+                }
+                body.push_str("}\n");
             }
-            body.push_str("}\n");
             self.defs.insert(name.clone(), body);
         }
         Some(name)

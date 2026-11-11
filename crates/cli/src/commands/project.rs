@@ -38,7 +38,8 @@ pub fn check_release(root: &Path) {
             .strip_prefix("xark")?
             .trim_start()
             .strip_prefix('=')?;
-        Some(v.trim().trim_matches('"').to_string())
+        let v = v.split('#').next()?.trim().trim_matches('"');
+        Some(xark_ir::major_minor(v))
     });
     let this = xark_ir::major_minor(env!("CARGO_PKG_VERSION"));
     if let Some(pinned) = pinned
@@ -74,19 +75,31 @@ pub fn build(root: &Path, check: bool) -> i32 {
 }
 
 fn build_all(root: &Path, check: bool) -> i32 {
-    let before = check.then(|| snapshot(&root.join("clients")));
+    // What `--check` compares, and leaves as it found it on every way out: the
+    // generated clients, and the workspace manifest an export keeps in sync.
+    let watched = |root: &Path| {
+        let mut files = snapshot(&root.join("clients"));
+        if let Ok(b) = std::fs::read(root.join("Cargo.toml")) {
+            files.insert(root.join("Cargo.toml"), b);
+        }
+        files
+    };
+    let before = check.then(|| watched(root));
+    let mut failed = None;
     for circuit in members(root, "circuits") {
         if let Err(code) = build_circuit(root, &circuit, check) {
-            return code;
+            failed = Some(code);
+            break;
         }
     }
     if let Some(before) = before {
-        let after = snapshot(&root.join("clients"));
+        let after = watched(root);
         let changed: Vec<&PathBuf> = before
             .keys()
             .chain(after.keys().filter(|p| !before.contains_key(*p)))
             .filter(|p| before.get(*p) != after.get(*p))
             .collect();
+        restore(&before, &after);
         if !changed.is_empty() {
             eprintln!(
                 "{} the committed clients aren't what this build generates (run `xark \
@@ -96,9 +109,11 @@ fn build_all(root: &Path, check: bool) -> i32 {
             for p in &changed {
                 eprintln!("  {}", p.strip_prefix(root).unwrap_or(p).display());
             }
-            restore(&before, &after);
             return 1;
         }
+    }
+    if let Some(code) = failed {
+        return code;
     }
     if members(root, "programs").is_empty() {
         return 0;
@@ -129,6 +144,9 @@ fn restore(
     after: &std::collections::BTreeMap<PathBuf, Vec<u8>>,
 ) {
     for (p, b) in before {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
         let _ = std::fs::write(p, b);
     }
     for p in after.keys().filter(|p| !before.contains_key(*p)) {
@@ -138,7 +156,7 @@ fn restore(
 
 /// One circuit: built (if it isn't current), keys (if they're missing or for
 /// another circuit, unless `check`), then its clients.
-fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<(), i32> {
+pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<(), i32> {
     let dir = circuit.display().to_string();
     let code = crate::cli::cmd_build(std::slice::from_ref(&dir));
     if code != 0 {

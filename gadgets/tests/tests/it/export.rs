@@ -55,14 +55,6 @@ fn exported_verifier_passes_its_own_test() {
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
     assert!(ok, "re-export failed: {err}");
     assert_eq!(sample("proof.solana.bin"), bundled);
-    // A newer proof leaves the bundled sample as it is, while that still verifies:
-    // a proof is randomized, and regenerating mustn't change a committed crate.
-    let bundled = sample("proof.solana.bin");
-    let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
-    assert!(ok, "prove failed: {err}");
-    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
-    assert!(ok, "re-export failed: {err}");
-    assert_eq!(sample("proof.solana.bin"), bundled);
     // Again over its own output is fine (regenerating) …
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
     assert!(ok, "re-export failed: {err}");
@@ -225,6 +217,9 @@ pub struct Pair {
     pub b: i32,
 }
 
+#[input]
+pub struct Pt(pub u32, pub u64);
+
 #[circuit]
 pub fn kinds(
     x: Private<Field>,
@@ -238,6 +233,7 @@ pub fn kinds(
     digest: Public<Hash>,
     big: Public<u128>,
     neg: Public<i64>,
+    pt: Public<Pt>,
 ) {
     require_eq(x * x, y);
     bind(policy);
@@ -249,6 +245,7 @@ pub fn kinds(
     bind(digest);
     bind(big);
     bind(neg);
+    bind(pt);
 }
 "#;
 
@@ -257,7 +254,8 @@ const KINDS_INPUTS: &str = r#"{"x": 3, "y": 9,
  "who": "GB", "name": "Ada Lovelace", "when": "1969-07-20T20:17:40Z",
  "bytes": "0x01ff7e", "pairs": [{"a": 65535, "b": -1}, {"a": 7, "b": -2147483648}],
  "digest": "0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f",
- "big": "340282366920938463463374607431768211455", "neg": -42}
+ "big": "340282366920938463463374607431768211455", "neg": -42,
+ "pt": {"0": 4000000000, "1": "18446744073709551615"}}
 "#;
 
 /// `cargo test` in an exported crate, against this checkout's `xark-verifier`

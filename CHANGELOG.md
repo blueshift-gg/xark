@@ -59,6 +59,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   xark is another release than the project's `xark.toml` records.
 - A failing constraint's file is shown from where you ran the command:
   `circuits/claim/src/lib.rs:6:16` at a project's root.
+- In a project, `xark test` builds a circuit's tests without the programs' fat
+  LTO (the workspace's release profile): after an edit, the starter circuit's
+  tests relink in 1 s instead of 8.
+- A circuit can't be named `…-program` or `…-verifier`, or anything that isn't one
+  crate name, so the crates `xark add` makes beside it can't clash in the
+  workspace.
 - `@blueshift-gg/xark`: a proof's `toFields()` (its public inputs as an exported
   verifier's `Fields`) and `toInstructionData()` (the proof, then those), and
   `@blueshift-gg/xark/testing`: a circuit's build output by name, LiteSVM with a

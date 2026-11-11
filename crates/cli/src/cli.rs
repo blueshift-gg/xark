@@ -645,12 +645,22 @@ pub fn cmd_test(args: &[String]) -> i32 {
     // release is the sensible default. The other arguments go to `cargo test`
     // as given.
     eprintln!("xark: running `cargo test --release` in {crate_dir}");
-    let status = Command::new("cargo")
+    let mut cargo = Command::new("cargo");
+    cargo
         .arg("test")
         .arg("--release")
         .args(forwarded)
-        .current_dir(&crate_dir)
-        .status();
+        .current_dir(&crate_dir);
+    // In a project the workspace's release profile is the programs' (fat LTO, one
+    // codegen unit): it relinks a circuit's test binary in 8 s where it would take
+    // 1 s (the starter circuit, after an edit). The circuit itself is the same
+    // (its build sets its own profile), so its tests build without them.
+    if crate::xark_project::project_root(std::path::Path::new(&crate_dir)).is_some() {
+        cargo
+            .env("CARGO_PROFILE_RELEASE_LTO", "false")
+            .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "16");
+    }
+    let status = cargo.status();
     match status {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {

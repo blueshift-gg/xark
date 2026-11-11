@@ -5,7 +5,7 @@ and verify in Node, the browser or a Worker, with the circuit's own types and
 helper functions.
 
 ```sh
-xark client                                  # writes clients/ts/<circuit>.ts
+xark client                                  # writes clients/<circuit>/ts/<circuit>.ts in a project
 npm install @blueshift-gg/xark@0.3           # the runtime it imports
 ```
 

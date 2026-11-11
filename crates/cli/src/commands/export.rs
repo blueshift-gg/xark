@@ -243,10 +243,16 @@ pub fn run(args: ExportArgs) -> Result<()> {
     });
     // In a project, the crate is a member of its workspace; otherwise it stands
     // alone, so cargo doesn't fold it into the circuit's.
+    // Matched as the workspace globs it (`clients/*/rust`), on the real paths (a
+    // `--out` through `..` or a symlink is the same directory).
     let member = project.project_root().is_some_and(|root| {
-        std::path::absolute(out)
-            .map(|o| o.starts_with(root.join("clients")))
-            .unwrap_or(false)
+        match (out.canonicalize(), root.join("clients").canonicalize()) {
+            (Ok(o), Ok(clients)) => {
+                o.file_name() == Some("rust".as_ref())
+                    && o.parent().and_then(Path::parent) == Some(clients.as_path())
+            }
+            _ => false,
+        }
     });
     write_str(
         &out.join("Cargo.toml"),

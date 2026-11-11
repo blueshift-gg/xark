@@ -1,6 +1,7 @@
 # Projects: a circuit, its program and its clients
 
-Status: design. Nothing here is built yet except where a section says so.
+Status: built on the `clients-dir` branch for 0.4, except the `prove` feature of the
+generated Rust crate (planned).
 
 Getting from a circuit to a working Solana program takes five xark commands, a
 `cargo build-sbf` whose stack warnings have to be grepped for, and public inputs
@@ -93,8 +94,8 @@ root. `--out` still overrides it. It is committed, so a fresh
 clone builds the program without running xark first; CI checks it is up to date.
 
 - **`clients/…/rust`** is the crate `xark export` writes. With no features it is
-  the `no_std` verifier a program depends on. With `prove` it proves from typed
-  inputs on the host, for Rust tests and relayers.
+  the `no_std` verifier a program depends on. A planned `prove` feature would prove
+  from typed inputs on the host, for Rust tests and relayers.
 - **`clients/…/ts`** is what `xark client` writes: `prove()` and typed inputs. A
   proof's `toInstructionData()` is the proof and its public inputs as the
   program's `Fields`.
@@ -144,8 +145,9 @@ Each input type gets a `no_std` Rust form (`crates/cli/src/commands/public_input
 a field element `[u8; 32]`, an integer its Rust integer, a `Time`/`Days` range
 with `from_unix`, a `Timestamp` an `i64`, `Text` a `Text`, a `Choice` a generated
 enum, a `Bitfield` a set of it, a byte-encoded type such as `Hash` its bytes. A
-type with no Rust form yet (a limbed number, an Ed25519 point) gives
-`PublicInputs([[u8; 32]; N])`. Every export with a sample proof checks the
+type with no Rust form yet (a limbed number, an Ed25519 point) gives no
+`PublicInputs`: `verify` then takes the field elements (`Fields`), which
+`xark_verifier::fields` packs. Every export with a sample proof checks the
 encoder against `xark_schema`, the codec `xark prove` uses: the crate's self-test
 writes the sample's public inputs by name, packs them and verifies the proof.
 

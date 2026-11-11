@@ -4291,6 +4291,7 @@ dependencies = [
  "indexmap 2.14.0",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -4302,6 +4303,12 @@ checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.2.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "tracing"
@@ -4783,6 +4790,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde_json",
  "sha2 0.11.0",
+ "toml_edit",
  "tracing-subscriber",
  "xark-backend",
  "xark-frontend",
