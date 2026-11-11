@@ -249,7 +249,7 @@ pub fn sync_members(root: &Path) -> Result<()> {
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
     // 0. `base` is a project's root: its circuit, when it has one.
     if base.join(PROJECT_FILE).is_file() {
-        let circuits = crate::commands::project::members(base, "circuits");
+        let circuits = crate::commands::project::circuits(base);
         return match circuits.as_slice() {
             [one] => Ok(scoped_dir(one)),
             [] => bail!(

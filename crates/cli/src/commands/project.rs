@@ -54,6 +54,33 @@ pub fn check_release(root: &Path) {
     }
 }
 
+/// The project's circuits: the crates in `circuits/` with a `#[circuit]`. A
+/// library beside them (helpers the circuits share) is a member of the workspace,
+/// but nothing xark builds.
+pub fn circuits(root: &Path) -> Vec<PathBuf> {
+    members(root, "circuits")
+        .into_iter()
+        .filter(|c| has_circuit(&c.join("src")))
+        .collect()
+}
+
+/// Whether a source file under `dir` declares a `#[circuit]`.
+fn has_circuit(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                has_circuit(&p)
+            } else {
+                p.extension().is_some_and(|x| x == "rs")
+                    && std::fs::read_to_string(&p).is_ok_and(|t| t.contains("#[circuit]"))
+            }
+        })
+}
+
 /// The crates in `root/<group>/`, by name.
 pub fn members(root: &Path, group: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = std::fs::read_dir(root.join(group))
@@ -86,7 +113,7 @@ fn build_all(root: &Path, check: bool) -> i32 {
     };
     let before = check.then(|| watched(root));
     let mut failed = None;
-    for circuit in members(root, "circuits") {
+    for circuit in circuits(root) {
         if let Err(code) = build_circuit(root, &circuit, check) {
             failed = Some(code);
             break;
@@ -248,7 +275,7 @@ fn build_programs(root: &Path) -> i32 {
 /// `xark test` at a project's root: `forwarded` goes to each circuit's `cargo test`.
 pub fn test(root: &Path, forwarded: &[String]) -> i32 {
     check_release(root);
-    for circuit in members(root, "circuits") {
+    for circuit in circuits(root) {
         let mut args = vec![circuit.display().to_string()];
         args.extend(forwarded.iter().cloned());
         let code = crate::cli::cmd_test(&args);
@@ -300,7 +327,7 @@ pub fn check(root: &Path, json: bool) -> i32 {
         }
     }
     let mut code = 0;
-    for circuit in members(root, "circuits") {
+    for circuit in circuits(root) {
         let c = crate::cli::check_circuit(&circuit, json, seen.clone());
         if c != 0 {
             code = c;

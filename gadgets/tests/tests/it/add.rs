@@ -221,6 +221,18 @@ fn a_project_keeps_what_isnt_xarks() {
     std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
     let (ok, out) = xark(&["add", "circuit", "second"]);
     assert!(ok, "{out}");
+    // A library the circuits share sits beside them: a member, but no circuit.
+    std::fs::create_dir_all(app.join("circuits/common/src")).unwrap();
+    std::fs::write(
+        app.join("circuits/common/Cargo.toml"),
+        "[package]\nname = \"common\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("circuits/common/src/lib.rs"),
+        "pub const N: u32 = 3;\n",
+    )
+    .unwrap();
     let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();
     assert!(
         manifest.contains(r#""shared""#) && manifest.contains("# and ours"),

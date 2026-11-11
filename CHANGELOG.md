@@ -92,6 +92,8 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
 - In a project, `xark test` builds a circuit's tests without the programs' fat
   LTO (the workspace's release profile): after an edit, the starter circuit's
   tests relink in 1 s instead of 8.
+- In a project, a crate in `circuits/` is a circuit if it has a `#[circuit]`: a
+  library the circuits share can sit beside them.
 - A circuit can't be named `…-program` or `…-verifier`, or anything that isn't one
   crate name, so the crates `xark add` makes beside it can't clash in the
   workspace.
