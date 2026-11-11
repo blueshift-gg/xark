@@ -21,38 +21,41 @@ The generated code also lands in two places: the verifier crate beside the
 circuit (`<crate>/<name>-verifier/`) and the TypeScript client under `target/`,
 where `cargo clean` deletes it.
 
-## Two shapes, one tool
+## A project
 
-`xark.toml` says what a directory is, the way a `Cargo.toml` is a package or a
-workspace.
-
-**A circuit** is what `xark init` makes today, unchanged. It has no `xark.toml`.
-
-**A project** is a directory with a `xark.toml`. Nobody writes one by hand:
-`xark add` makes it on first use, in a directory with no `Cargo.toml` of its own.
+`xark init my-app` makes a project: a directory with a `xark.toml`, one Cargo
+workspace, and a starter circuit in `circuits/my-app/`. `xark add` grows it, and
+refuses to run outside one.
 
 ```console
-$ mkdir my-app && cd my-app
-$ xark add circuit claim
+$ xark init claim && cd claim
 $ xark add program claim
+$ xark build
+$ npm install && xark test
 ```
 
 ```text
-my-app/
-  xark.toml             # settings: the pinned xark version
-  Cargo.toml            # [workspace] members = ["circuits/*", "programs/*", "clients/*/rust"]
-  package.json          # vitest, litesvm, @blueshift-gg/xark
-  circuits/claim/       # the same files `xark init claim` writes
-  programs/claim/       # Pinocchio, `verify` wired to clients/claim/rust
-  clients/claim/rust/   # generated, committed
-  clients/claim/ts/     # generated, committed
+claim/
+  xark.toml             # settings: the pinned xark release
+  Cargo.toml            # the workspace: members, default-members, the programs' profile
+  rust-analyzer.toml    # `xark check .` at the root (and .vscode/settings.json)
+  package.json  tsconfig.json  vitest.config.ts
+  circuits/claim/       # the starter circuit and its tests
+  programs/claim/       # Pinocchio: lib.rs, errors.rs, instructions/verify.rs
+  clients/claim/rust/   # generated, committed: the verifier crate `claim-verifier`
+  clients/claim/ts/     # generated, committed: the TypeScript client
   tests/claim.test.ts   # LiteSVM
 ```
 
 - **Fixed folders.** `circuits/*`, `programs/*` and `clients/*/rust` are globbed
   in the root `Cargo.toml`, so `xark.toml` lists nothing. Cargo reads a glob that
-  matches nothing as a missing path, so `xark add` and `xark export` keep the
-  `members` line to the globs that hold a crate.
+  matches nothing as a missing path, so `xark init`, `xark add` and `xark export`
+  keep `members` to the globs that hold a crate.
+- **`default-members` are the programs.** Cargo merges features across what it
+  builds together, so the circuits' host dependencies (`getrandom` through
+  `rand`) would join an SBF build of the whole workspace and break it. With the
+  programs as the default, a bare `cargo build-sbf` at the root builds them alone.
+  A bare `cargo test` is the programs' too; `xark test` runs everything.
 - **Crate names.** A workspace can't hold two packages of one name: the program in
   `programs/claim/` is the crate `claim-program`, the client `claim-verifier`.
   `xark add program claim` uses the circuit of the same name; `--circuit` picks
@@ -61,12 +64,17 @@ my-app/
   `overflow-checks`, `opt-level` and `panic` through `--config`
   (`crates/frontend/src/lib.rs`), so the root `[profile.release]` can be the
   program's (fat LTO, no overflow checks) without changing any circuit.
+- **Commands at the root.** One circuit is the default for every command that
+  takes one (`xark prove`, `xark export`, `xark inspect`); with several, name it
+  (`xark prove circuits/claim`).
+
+A crate made by an earlier `xark init` (no `xark.toml`) still works as before: its
+clients go in its own `clients/{rust,ts}`.
 
 ## Generated clients go in `clients/`
 
-One rule for both shapes: a circuit's generated code goes in
-`clients/<circuit>/{rust,ts}` at the project root, or `clients/{rust,ts}` in a
-lone circuit's crate. `--out` still overrides it. It is committed, so a fresh
+A circuit's generated code goes in `clients/<circuit>/{rust,ts}` at the project
+root. `--out` still overrides it. It is committed, so a fresh
 clone builds the program without running xark first; CI checks it is up to date.
 
 - **`clients/…/rust`** is the crate `xark export` writes. With no features it is
@@ -128,20 +136,22 @@ writes the sample's public inputs by name, packs them and verifies the proof.
 
 ## At the project root
 
-- `xark build`: builds the circuits, re-runs setup when a key is stale, writes
-  `clients/`, then runs `cargo build-sbf` and fails on the SBF 4 KiB frame warning.
-- `xark test`: the circuits' tests, then the LiteSVM tests.
+- `xark build`: each circuit, its keys when they're missing or for an older
+  circuit, its clients, then `cargo build-sbf`, failing on the SBF 4 KiB frame
+  warning that `cargo build-sbf` only prints.
+- `xark test`: each circuit's tests, then (with programs) the build above, the
+  programs' Rust tests and `npm test`.
 - `xark check` (what rust-analyzer runs): `cargo check --workspace` once, then
-  xark's own validation on the members that are circuits (a crate that depends on
-  `xark` and has a `#[circuit]`). One override for the whole workspace; programs
-  see ordinary cargo diagnostics.
+  xark's own validation of each circuit. One override for the whole workspace;
+  programs see ordinary cargo diagnostics.
 
 ## Order of work
 
 1. The `clients/` default for `xark export` and `xark client`. (Built.)
 2. Typed `PublicInputs` in the generated Rust crate. (Built.)
 3. `xark add circuit|program` and `xark.toml`. (Built.)
-4. `xark build`, `xark test` and `xark check` at the project root.
+4. `xark init` makes the project; `xark build`, `xark test` and `xark check` at
+   its root. (Built.)
 
-The first two stand on their own: a lone circuit gets them before projects exist.
-Changing the default output folder is a breaking change, so this is 0.4.
+`xark init` making a project, and the default output folders moving, are breaking
+changes, so this is 0.4.

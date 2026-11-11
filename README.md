@@ -51,17 +51,18 @@ cargo install xark-cli
 xark doctor
 ```
 
-**2. Create a circuit.** `xark init` writes a crate with the square-root circuit
-above and two tests:
+**2. Start a project.** `xark init` makes a project with the square-root circuit
+above, and two tests, in `circuits/my-circuit/`:
 
 ```sh
-xark init my-circuit
+xark init my-circuit && cd my-circuit
 ```
 
-**3. Test it.** `xark test` builds the circuit, then runs the crate's tests:
+**3. Test it.** At the project's root, `xark test` builds the circuit, then runs its
+tests:
 
 ```console
-$ xark test my-circuit
+$ xark test
 xark building circuit `my-circuit`
 xark 2 vars, 1 constraints, 0 witness-gen ops
 xark circuit digest 75e3ce529473dfaa2f89a85a0d588228
@@ -73,7 +74,7 @@ test tests::rejects_invalid ... ok
 **4. Prove.** The first proof also makes the key, from your machine's randomness:
 
 ```console
-$ xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
+$ xark prove --inputs '{"secret": 3, "result": 9}'
 ...
 ✅ Proof produced and self-checked (1 public input(s)).
 ```
@@ -81,27 +82,34 @@ $ xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
 Try inputs that don't satisfy the circuit, and xark shows you where:
 
 ```console
-$ xark prove my-circuit --inputs '{"secret": 3, "result": 10}'
+$ xark prove --inputs '{"secret": 3, "result": 10}'
 error: witness does not satisfy the circuit
 
   src/lib.rs:6:16  require_eq(secret * secret, result);
 ```
 
-**5. Verify**, then **export** the Solana verifier:
+**5. Verify it on Solana.** `xark add program` writes a Pinocchio program that
+verifies the circuit's proofs, and a LiteSVM test that proves with the generated
+TypeScript client and sends the proof to it. `xark build` builds the circuit, its
+clients and the program; `xark test` runs every test. You need the
+[Solana CLI](https://solana.com/docs/intro/installation) for `cargo build-sbf`, and
+Node:
 
 ```console
-$ xark verify my-circuit
-✅ Proof verified
-
-$ xark export my-circuit
+$ xark add program my-circuit
+$ xark build
 ...
-Key: a single-party setup from OS randomness: sound unless whoever ran `xark setup` kept that randomness (xark doesn't). `xark ceremony` spreads that trust.
 ✅ On-chain verifier crate ready (verifying key embedded).
+✅ TypeScript client for `my_circuit` at clients/my-circuit/ts/my_circuit.ts
+xark building the programs (cargo build-sbf)
+$ npm install && xark test
+...
+ Test Files  1 passed (1)
 ```
 
-`my-circuit/clients/rust/` is a crate, `my-circuit-verifier`, your Solana program
-depends on (`xark client` writes the TypeScript one in `clients/ts/`). Its
-`PublicInputs` has the circuit's public inputs by name, packed for you:
+The program depends on `clients/my-circuit/rust/`, the verifier crate `xark build`
+generates (`my-circuit-verifier`). Its `PublicInputs` has the circuit's public
+inputs by name, packed for you, and `verify` takes it:
 
 ```rust
 let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);

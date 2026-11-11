@@ -28,8 +28,8 @@ A circuit crate depends on `xark` alone. You build and prove it with the
 
 ```sh
 cargo install xark-cli
-xark init my-circuit      # a crate like the one above, with its tests
-xark test my-circuit      # build the circuit, then run the tests
+xark init my-circuit      # a project with a crate like the one above, and its tests
+cd my-circuit && xark test   # build the circuit, then run the tests
 ```
 
 ## What's in the prelude

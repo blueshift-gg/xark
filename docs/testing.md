@@ -37,5 +37,6 @@ circuit does. `zkyc`'s tests make the issuer's commitment with
 `pubkey.verify(sig, digest)` checks an ECDSA signature off-circuit. (Calling the
 `#[circuit]` fn itself still checks the circuit through the prover.)
 
-`xark test <crate>` passes its arguments after `--` on to `cargo test`, such as
-`xark test my-circuit -- --nocapture`.
+`xark test` passes its arguments after `--` on to `cargo test`, such as
+`xark test -- --nocapture`. At a project's root it tests every circuit with them;
+`xark test circuits/my-circuit -- --nocapture` tests one.

@@ -131,9 +131,11 @@ pub const PROJECT_FILE: &str = "xark.toml";
 
 /// The project's workspace members: each of `circuits/*`, `programs/*` and
 /// `clients/*/rust` that holds a crate. Cargo reads a glob that matches nothing as
-/// a path that isn't there, so one is listed only once something is in it. Rewrites
-/// the `members = [...]` line of the root `Cargo.toml` that `xark add` wrote; one
-/// written by hand is left alone, with a warning when it's missing a crate.
+/// a path that isn't there, so one is listed only once something is in it. The
+/// `default-members` are the programs, so a bare `cargo build-sbf` (or `cargo
+/// test`) at the root builds them alone: built together with the circuits, the
+/// circuits' host dependencies would join the SBF build. Rewrites the lines `xark
+/// init` wrote; a manifest edited past them is left alone, with a warning.
 pub fn sync_members(root: &Path) -> Result<()> {
     let has_crate = |pattern: &str| -> bool {
         let (dir, rest) = pattern.split_once("/*").unwrap_or((pattern, ""));
@@ -146,28 +148,52 @@ pub fn sync_members(root: &Path) -> Result<()> {
             })
         })
     };
-    let members: Vec<String> = ["circuits/*", "programs/*", "clients/*/rust"]
-        .iter()
-        .filter(|p| has_crate(p))
-        .map(|p| format!("{p:?}"))
-        .collect();
-    let line = format!("members = [{}]", members.join(", "));
+    let list = |patterns: &[&str]| -> String {
+        let ps: Vec<String> = patterns
+            .iter()
+            .filter(|p| has_crate(p))
+            .map(|p| format!("{p:?}"))
+            .collect();
+        format!("[{}]", ps.join(", "))
+    };
+    let members = format!(
+        "members = {}",
+        list(&["circuits/*", "programs/*", "clients/*/rust"])
+    );
+    let defaults =
+        has_crate("programs/*").then(|| format!("default-members = {}", list(&["programs/*"])));
     let manifest = root.join("Cargo.toml");
     let text = std::fs::read_to_string(&manifest)
         .with_context(|| format!("reading {}", manifest.display()))?;
-    let Some(old) = text
-        .lines()
-        .find(|l| l.starts_with("members = [") && l.ends_with(']'))
-    else {
+    let one_line = |l: &str, key: &str| l.starts_with(key) && l.ends_with(']');
+    if !text.lines().any(|l| one_line(l, "members = [")) {
         eprintln!(
-            "{} {} has no one-line `members = [...]` to update: make sure it lists {line}",
+            "{} {} has no one-line `members = [...]` to update: make sure it lists {members}{}",
             crate::style::warn("warning:"),
-            manifest.display()
+            manifest.display(),
+            defaults
+                .as_ref()
+                .map_or(String::new(), |d| format!(", and {d}")),
         );
         return Ok(());
-    };
-    if old != line {
-        std::fs::write(&manifest, text.replacen(old, &line, 1))
+    }
+    let mut out = Vec::new();
+    for l in text.lines() {
+        if one_line(l, "default-members = [") {
+            continue;
+        }
+        if one_line(l, "members = [") {
+            out.push(members.clone());
+            if let Some(d) = &defaults {
+                out.push(d.clone());
+            }
+            continue;
+        }
+        out.push(l.to_string());
+    }
+    let new = out.join("\n") + "\n";
+    if new != text {
+        std::fs::write(&manifest, new)
             .with_context(|| format!("writing {}", manifest.display()))?;
     }
     Ok(())
@@ -177,6 +203,28 @@ pub fn sync_members(root: &Path) -> Result<()> {
 /// user-supplied base path, mirroring the per-circuit subdir layout `xark build`
 /// writes.
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
+    // 0. `base` is a project's root: its circuit, when it has one.
+    if base.join(PROJECT_FILE).is_file() {
+        let circuits = crate::commands::project::members(base, "circuits");
+        return match circuits.as_slice() {
+            [one] => Ok(scoped_dir(one)),
+            [] => bail!(
+                "the project at {} has no circuits yet: `xark add circuit <name>`",
+                base.display()
+            ),
+            _ => {
+                let names: Vec<String> = circuits
+                    .iter()
+                    .filter_map(|c| Some(format!("circuits/{}", c.file_name()?.to_str()?)))
+                    .collect();
+                bail!(
+                    "the project has {} circuits: name one ({})",
+                    circuits.len(),
+                    names.join(", ")
+                )
+            }
+        };
+    }
     // 1. `base` is already a scoped output dir (a `target/xark/<name>/` holding
     //    circuit.xbc, the artifact every build writes) — use it directly.
     if base.join("circuit.xbc").is_file() {

@@ -42,6 +42,7 @@ pub mod doctor;
 pub mod export;
 pub mod inspect;
 pub mod profile;
+pub mod project;
 pub mod prove;
 pub mod public_inputs;
 pub mod setup;

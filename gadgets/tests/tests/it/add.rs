@@ -8,8 +8,7 @@ use std::process::Command;
 #[test]
 fn add_a_circuit_then_its_program() {
     let tmp = tempdir();
-    let app = tmp.path().join("app");
-    std::fs::create_dir_all(&app).unwrap();
+    let app = tmp.path().join("claim");
     let xark = |args: &[&str]| {
         let o = Command::new(crate::common::xark_bin())
             .args(args)
@@ -29,14 +28,18 @@ fn add_a_circuit_then_its_program() {
             .to_string()
     };
 
-    let (ok, out) = xark(&["add", "circuit", "claim"]);
-    assert!(ok, "{out}");
+    let (ok, _, err) = crate::common::run(&["init", app.to_str().unwrap()]);
+    assert!(ok, "{err}");
     assert!(app.join("xark.toml").is_file() && app.join(".gitignore").is_file());
     assert!(app.join("circuits/claim/src/lib.rs").is_file());
     // The project's root has the editor settings and `.gitignore`, not the circuit.
     assert!(!app.join("circuits/claim/.gitignore").exists());
     // A glob that matches nothing would be a missing path to cargo.
     assert_eq!(members(), r#"members = ["circuits/*"]"#);
+    // A second circuit beside it.
+    let (ok, out) = xark(&["add", "circuit", "other"]);
+    assert!(ok, "{out}");
+    assert!(app.join("circuits/other/src/lib.rs").is_file());
 
     // The scaffold depends on the published crates; point the workspace at this
     // checkout's.
@@ -70,6 +73,12 @@ fn add_a_circuit_then_its_program() {
         members(),
         r#"members = ["circuits/*", "programs/*", "clients/*/rust"]"#
     );
+    // A bare `cargo build-sbf` (or `cargo test`) at the root is the programs'.
+    let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();
+    assert!(
+        manifest.contains("\ndefault-members = [\"programs/*\"]\n"),
+        "{manifest}"
+    );
     // A workspace member, not a workspace of its own.
     let verifier = std::fs::read_to_string(app.join("clients/claim/rust/Cargo.toml")).unwrap();
     assert!(!verifier.contains("[workspace]"), "{verifier}");
@@ -100,17 +109,30 @@ fn add_a_circuit_then_its_program() {
     );
 }
 
-/// A project is a new directory: `xark add` won't make one over an existing crate.
+/// `xark add` grows a project; outside one it says how to start one, and `xark init`
+/// won't make one over an existing crate.
 #[test]
-fn add_refuses_to_make_a_project_in_a_crate() {
+fn add_needs_a_project() {
     let tmp = tempdir();
+    let o = Command::new(crate::common::xark_bin())
+        .args(["add", "circuit", "claim"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("invoke xark");
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !o.status.success() && err.contains("xark init <name>"),
+        "{err}"
+    );
+    assert!(!tmp.path().join("xark.toml").exists());
+
     std::fs::write(
         tmp.path().join("Cargo.toml"),
         "[package]\nname = \"mine\"\n",
     )
     .unwrap();
     let o = Command::new(crate::common::xark_bin())
-        .args(["add", "circuit", "claim"])
+        .args(["init"])
         .current_dir(tmp.path())
         .output()
         .expect("invoke xark");

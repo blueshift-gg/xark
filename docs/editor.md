@@ -5,8 +5,10 @@ validator, surfacing every rejection as a **real `rustc` diagnostic with a sourc
 span**. With `--message-format=json` it emits the same JSON stream as `cargo
 check`, so an editor shows live rejections on save. In that mode it first runs the
 `cargo check --all-targets` it replaces, so errors in tests and other host-only
-code still show. `xark init` writes this
-wiring; to add it to an existing crate, point `rust-analyzer`'s check command at
+code still show. At a project's root (`xark check .`, what `xark init` wires up)
+it checks the whole workspace that way, then validates each circuit in
+`circuits/`, so programs and clients get ordinary cargo diagnostics. `xark init`
+writes this wiring; to add it to an existing crate, point `rust-analyzer`'s check command at
 `xark` (which must be on `PATH`):
 
 ```toml

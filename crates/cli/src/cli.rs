@@ -23,6 +23,10 @@ pub fn cmd_build(args: &[String]) -> i32 {
 /// other commands run first — `test`, `profile`, `prove`'s — stay quiet about
 /// it.)
 pub fn cmd_build_command(args: &[String]) -> i32 {
+    // At a project's root: every circuit, its keys and clients, then the programs.
+    if let Some(root) = crate::commands::project::root_at(args.first().map(String::as_str)) {
+        return crate::commands::project::build(&root);
+    }
     let code = cmd_build(args);
     if code == 0 {
         let dir = args.first().map_or(".", String::as_str);
@@ -598,6 +602,10 @@ pub fn cmd_clean(_args: &[String]) -> i32 {
 /// `target/xark/<pkg>/` artifacts exist, then run `cargo test` in the crate so
 /// the in-crate `cargo test` circuit tests can load them.
 pub fn cmd_test(args: &[String]) -> i32 {
+    // At a project's root: every circuit's tests, then the programs'.
+    if let Some(root) = crate::commands::project::root_at(args.first().map(String::as_str)) {
+        return crate::commands::project::test(&root, args.get(1..).unwrap_or(&[]));
+    }
     // `args[0]` is the crate dir; the rest goes to `cargo test` verbatim, so
     // `xark test . -- --include-ignored` is `cargo test -- --include-ignored`.
     let crate_dir = crate_root(args.first().map_or(".", String::as_str));
@@ -678,6 +686,9 @@ pub fn cmd_check(args: &[String]) -> i32 {
         eprintln!("error: `xark check <crate-dir>` requires a crate directory");
         return 2;
     };
+    if let Some(root) = crate::commands::project::root_at(Some(&crate_dir)) {
+        return crate::commands::project::check(&root, json);
+    }
     let crate_dir = PathBuf::from(crate_root(&crate_dir));
     let crate_abs = std::env::current_dir().expect("cwd").join(&crate_dir);
     check_stable(&crate_abs, json)
@@ -694,13 +705,23 @@ fn check_stable(crate_abs: &std::path::Path, json: bool) -> i32 {
     // `cfg(xark)`), never the tests or other host-only code.
     let mut skip_rendered = std::collections::HashSet::new();
     if json {
-        match host_check_json(crate_abs) {
+        match host_check_json(crate_abs, false) {
             Some((true, seen)) => skip_rendered = seen,
             // Errors: reported; the circuit build would only repeat them.
             Some((false, _)) => return 1,
             None => {}
         }
     }
+    check_circuit(crate_abs, json, skip_rendered)
+}
+
+/// The circuit half of `xark check`: build it for wasm32 and lower it, leaving out
+/// cargo's diagnostics already reported (`skip_rendered`).
+pub fn check_circuit(
+    crate_abs: &std::path::Path,
+    json: bool,
+    skip_rendered: std::collections::HashSet<String>,
+) -> i32 {
     let opts = xark_frontend::BuildOptions {
         json_diagnostics: json,
         skip_rendered,
@@ -736,12 +757,14 @@ fn check_stable(crate_abs: &std::path::Path, json: bool) -> i32 {
     }
 }
 
-/// `cargo check --all-targets` of the crate on the host, its JSON diagnostics
-/// relayed to stdout: `(passed, the diagnostics' rendered text)`, or `None` if
-/// cargo couldn't be run. Its `build-finished` line is held back unless it
-/// failed (the circuit check after it then reports its own).
-fn host_check_json(
+/// `cargo check --all-targets` of the crate (with `workspace`, every member of the
+/// workspace there) on the host, its JSON diagnostics relayed to stdout: `(passed,
+/// the diagnostics' rendered text)`, or `None` if cargo couldn't be run. Its
+/// `build-finished` line is held back unless it failed (the circuit check after it
+/// then reports its own).
+pub fn host_check_json(
     crate_abs: &std::path::Path,
+    workspace: bool,
 ) -> Option<(bool, std::collections::HashSet<String>)> {
     let out = Command::new("cargo")
         .args([
@@ -749,6 +772,7 @@ fn host_check_json(
             "--all-targets",
             "--message-format=json-diagnostic-rendered-ansi",
         ])
+        .args(workspace.then_some("--workspace"))
         .current_dir(crate_abs)
         .stderr(std::process::Stdio::inherit())
         .output()
@@ -839,38 +863,51 @@ fn check_diagnostic_json(crate_abs: &std::path::Path, e: &xark_frontend::Compile
     .to_string()
 }
 
-/// `xark init [name]` — scaffold a ready-to-edit circuit crate, pre-wired for
-/// rust-analyzer so unsupported constructs surface inline as you type (via
-/// `xark check`). With no name, initializes the current directory.
+/// `xark init [name]` — start a project in `name/` (or the current directory): a
+/// `xark.toml`, a Cargo workspace, and a starter circuit crate in
+/// `circuits/<name>/`, pre-wired for rust-analyzer so unsupported constructs surface
+/// inline as you type (via `xark check`). `xark add` grows it.
 pub fn cmd_init(args: &[String]) -> i32 {
     let name_arg = args.iter().find(|a| !a.starts_with('-')).cloned();
     let cwd = std::env::current_dir().expect("cwd");
-    // The argument may be a path (`xark init circuits/demo`): the crate is named
-    // after its last component.
+    // The argument may be a path (`xark init apps/demo`): the project and its first
+    // circuit are named after its last component.
     let dir = name_arg
         .as_ref()
         .map_or_else(|| cwd.clone(), |n| cwd.join(n));
-    if let Err(code) = scaffold_circuit(&dir, false) {
-        return code;
+    let name = dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("circuit")
+        .to_string();
+    if let Err(why) = check_crate_name(&name) {
+        eprintln!(
+            "error: can't name a crate `{name}`: {why}\n  \
+             pick another directory name, e.g. `xark init {}`",
+            suggest_crate_name(&name)
+        );
+        return 2;
     }
-    let where_ = if let Some(n) = &name_arg {
-        n.as_str()
-    } else {
-        "."
-    };
-    eprintln!(
-        "{}",
-        crate::style::next_steps(&[
-            (
-                format!("xark test {where_}"),
-                "build the circuit and run its tests"
-            ),
-            (
-                format!("xark prove {where_} --inputs '{{\"secret\": 3, \"result\": 9}}'"),
-                "produce your first proof (the key is made on the first run)",
-            ),
-        ])
-    );
+    if let Err(e) = crate::commands::add::init_project(&dir, &name) {
+        eprintln!("{} {e:#}", crate::style::err("error:"));
+        return 1;
+    }
+    let mut steps = Vec::new();
+    if let Some(n) = &name_arg {
+        steps.push((
+            format!("cd {n}"),
+            "the project's root: the commands below run there",
+        ));
+    }
+    steps.push((
+        "xark test".to_string(),
+        "build the circuit and run its tests",
+    ));
+    steps.push((
+        format!("xark add program {name}"),
+        "a Solana program that verifies its proofs, with a LiteSVM test",
+    ));
+    eprintln!("{}", crate::style::next_steps(&steps));
     0
 }
 

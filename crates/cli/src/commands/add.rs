@@ -1,8 +1,6 @@
-//! `xark add circuit|program <name>` — grow a project: circuits in `circuits/`,
-//! Solana programs in `programs/`, and each circuit's generated clients in
-//! `clients/<circuit>/`, members of one Cargo workspace. The first `add` makes the
-//! project where it runs (a `xark.toml`, the workspace `Cargo.toml`, a
-//! `.gitignore`); see `docs/projects.md`.
+//! `xark add circuit|program <name>` — grow a project `xark init` made: circuits in
+//! `circuits/`, Solana programs in `programs/`, and each circuit's generated clients
+//! in `clients/<circuit>/`, members of one Cargo workspace; see `docs/projects.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,12 +46,11 @@ macro_rules! template {
 
 pub fn run(args: AddArgs) -> Result<()> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let root = match project_root(&cwd) {
-        Some(root) => root,
-        None => {
-            new_project(&cwd)?;
-            cwd
-        }
+    let Some(root) = project_root(&cwd) else {
+        bail!(
+            "not in a xark project (no {PROJECT_FILE} here or above): start one with `xark \
+             init <name>`"
+        );
     };
     match args.what {
         What::Circuit { name } => add_circuit(&root, &name),
@@ -64,12 +61,19 @@ pub fn run(args: AddArgs) -> Result<()> {
     }
 }
 
-/// Make `dir` a project: its `xark.toml`, workspace and `.gitignore`.
-fn new_project(dir: &Path) -> Result<()> {
+/// `xark init`: make `dir` a project (its `xark.toml`, workspace, `.gitignore` and
+/// editor settings) with a starter circuit, `circuits/<name>/`.
+pub fn init_project(dir: &Path, name: &str) -> Result<()> {
+    if dir.join(PROJECT_FILE).exists() {
+        bail!(
+            "{} is already a xark project: `xark add` grows it",
+            dir.display()
+        );
+    }
     if dir.join("Cargo.toml").exists() {
         bail!(
-            "{} already has a Cargo.toml: a project is a new directory (`mkdir my-app && cd \
-             my-app && xark add circuit …`)",
+            "{} already has a Cargo.toml: start a project in a new directory (`xark init \
+             <name>`)",
             dir.display()
         );
     }
@@ -81,12 +85,29 @@ fn new_project(dir: &Path) -> Result<()> {
     )?;
     write_new(dir, "Cargo.toml", template!("Cargo.toml.tmpl"))?;
     write_new(dir, ".gitignore", template!("gitignore"))?;
-    eprintln!(
-        "{} made a project in {}: circuits/, programs/ and clients/ in one workspace",
-        crate::style::tag(),
-        dir.display()
-    );
-    Ok(())
+    // rust-analyzer runs `xark check` at the root: `cargo check` over the workspace,
+    // then xark's validation of each circuit. `rust-analyzer.toml` is the
+    // editor-agnostic form; `.vscode/settings.json` covers VS Code.
+    let cmd = "[\"xark\", \"check\", \".\", \"--message-format=json\"]";
+    write_new(
+        dir,
+        "rust-analyzer.toml",
+        &format!(
+            "# Run xark's subset validator on save so unsupported constructs show inline.\n\
+             # Needs `xark` on PATH. Replaces rust-analyzer's `cargo check`, which `xark\n\
+             # check` runs over the whole workspace too.\n\
+             [check]\noverrideCommand = {cmd}\n"
+        ),
+    )?;
+    write_new(
+        dir,
+        ".vscode/settings.json",
+        &format!("{{\n  \"rust-analyzer.check.overrideCommand\": {cmd}\n}}\n"),
+    )?;
+    if crate::cli::scaffold_circuit(&dir.join("circuits").join(name), true).is_err() {
+        bail!("couldn't scaffold the circuit (see above)");
+    }
+    sync_members(dir)
 }
 
 fn add_circuit(root: &Path, name: &str) -> Result<()> {
@@ -102,8 +123,8 @@ fn add_circuit(root: &Path, name: &str) -> Result<()> {
         "{}",
         crate::style::next_steps(&[
             (
-                format!("xark test circuits/{name}"),
-                "build the circuit and run its tests",
+                "xark test".to_string(),
+                "build the circuits and run their tests"
             ),
             (
                 format!("xark add program {name}"),
@@ -131,6 +152,26 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
     crate::cli::check_crate_name(&crate_name)
         .map_err(|why| anyhow::anyhow!("can't name a crate `{crate_name}`: {why}"))?;
 
+    // The TypeScript tests' setup, once per project (first, so the client
+    // generated below finds the runtime listed).
+    let project = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("xark-project")
+        .to_string();
+    let npm = env!("CARGO_PKG_VERSION");
+    for (path, text) in [
+        ("package.json", template!("package.json")),
+        ("tsconfig.json", template!("tsconfig.json")),
+        ("vitest.config.ts", template!("vitest.config.ts")),
+    ] {
+        if !root.join(path).exists() {
+            let text = text
+                .replace("{{project}}", &project)
+                .replace("{{xark_npm}}", npm);
+            write_new(root, path, &text)?;
+        }
+    }
     // The program depends on the circuit's verifier crate, and the test on its
     // TypeScript client: generate them when they're missing.
     let clients = root.join("clients").join(circuit);
@@ -193,25 +234,6 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
         &fill(template!("tests/program.test.ts")),
     )?;
 
-    // The TypeScript tests' setup, once per project.
-    let project = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("xark-project")
-        .to_string();
-    let npm = env!("CARGO_PKG_VERSION");
-    for (path, text) in [
-        ("package.json", template!("package.json")),
-        ("tsconfig.json", template!("tsconfig.json")),
-        ("vitest.config.ts", template!("vitest.config.ts")),
-    ] {
-        if !root.join(path).exists() {
-            let text = text
-                .replace("{{project}}", &project)
-                .replace("{{xark_npm}}", npm);
-            write_new(root, path, &text)?;
-        }
-    }
     eprintln!(
         "{} added program `{crate_name}` in {}, verifying `{circuit}`",
         crate::style::tag(),
@@ -221,12 +243,12 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
         "{}",
         crate::style::next_steps(&[
             (
-                format!("cargo build-sbf --manifest-path programs/{name}/Cargo.toml"),
-                "build the program (into target/deploy/)",
+                "xark build".to_string(),
+                "the circuits, their clients, then the programs (cargo build-sbf)",
             ),
             (
-                "npm install && npm test".to_string(),
-                "prove with the TypeScript client and verify onchain in LiteSVM",
+                "npm install && xark test".to_string(),
+                "the circuits' tests, then prove and verify onchain in LiteSVM",
             ),
         ])
     );
@@ -280,6 +302,7 @@ fn xark(dir: &Path, args: &[&str]) -> Result<()> {
     let exe = std::env::current_exe().context("finding the xark binary")?;
     let status = Command::new(exe)
         .args(args)
+        .env(crate::style::NESTED, "1")
         .current_dir(dir)
         .status()
         .with_context(|| format!("running `xark {}`", args.join(" ")))?;
