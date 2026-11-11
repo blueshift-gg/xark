@@ -36,7 +36,7 @@ const schema = {
   "public_inputs": [],
   "types": {},
   "version": 2,
-  "xark": "0.3.1"
+  "xark": "0.4.0"
 };
 
 /** Every input of `scalar_range`. */

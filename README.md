@@ -141,6 +141,8 @@ The verifier crate's `SETUP` constant says which kind of key it embeds.
 - [Editor diagnostics](docs/editor.md): circuit errors inline in rust-analyzer
 
 **Using proofs**
+- [Migrating from 0.3](docs/migrating-to-0.4.md): keep a circuit crate, or move it
+  into a project, keeping your keys
 - [TypeScript clients](docs/typescript.md): typed provers and verifiers for Node
   and the browser
 - [`@blueshift-gg/xark`](crates/wasm/README.md): the WebAssembly prover and

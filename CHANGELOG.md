@@ -14,6 +14,8 @@ digests are the same).
 
 ### Moving from 0.3
 
+The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating-to-0.4.md).
+
 - **A circuit crate from 0.3** still works on its own. `xark export` now writes
   its verifier crate to `<crate>/clients/rust/` (it was `<crate>/<name>-verifier/`;
   the crate's name is unchanged) and `xark client` its client to
