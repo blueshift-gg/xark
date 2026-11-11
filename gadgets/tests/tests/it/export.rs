@@ -47,6 +47,22 @@ fn exported_verifier_passes_its_own_test() {
         proof.to_instruction_data().unwrap(),
         sample("instruction_data.bin")
     );
+    // A newer proof leaves the bundled sample as it is, while that still verifies:
+    // a proof is randomized, and regenerating mustn't change a committed crate.
+    let bundled = sample("proof.solana.bin");
+    let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
+    assert!(ok, "prove failed: {err}");
+    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
+    assert!(ok, "re-export failed: {err}");
+    assert_eq!(sample("proof.solana.bin"), bundled);
+    // A newer proof leaves the bundled sample as it is, while that still verifies:
+    // a proof is randomized, and regenerating mustn't change a committed crate.
+    let bundled = sample("proof.solana.bin");
+    let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
+    assert!(ok, "prove failed: {err}");
+    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
+    assert!(ok, "re-export failed: {err}");
+    assert_eq!(sample("proof.solana.bin"), bundled);
     // Again over its own output is fine (regenerating) …
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
     assert!(ok, "re-export failed: {err}");

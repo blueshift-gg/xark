@@ -107,6 +107,10 @@ $ npm install && xark test
  Test Files  1 passed (1)
 ```
 
+Commit everything `xark build` writes, the keys in `keys/` included: the
+generated clients embed the verifying key, and the CI workflow `xark init` wrote
+checks they match the source (`xark build --check`).
+
 The program depends on `clients/my-circuit/rust/`, the verifier crate `xark build`
 generates (`my-circuit-verifier`). Its `PublicInputs` has the circuit's public
 inputs by name, packed for you, and `verify` takes it:

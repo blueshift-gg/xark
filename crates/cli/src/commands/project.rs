@@ -25,6 +25,34 @@ pub fn root_at(arg: Option<&str>) -> Option<PathBuf> {
     dir.join(PROJECT_FILE).is_file().then_some(dir)
 }
 
+/// Warn when this `xark` is another release than the project's (`xark.toml`'s
+/// `xark = "0.4"`): a circuit can change between releases (its digest, and so its
+/// keys and verifier), so the project builds with the one it records.
+pub fn check_release(root: &Path) {
+    let Ok(text) = std::fs::read_to_string(root.join(PROJECT_FILE)) else {
+        return;
+    };
+    let pinned = text.lines().find_map(|l| {
+        let v = l
+            .trim()
+            .strip_prefix("xark")?
+            .trim_start()
+            .strip_prefix('=')?;
+        Some(v.trim().trim_matches('"').to_string())
+    });
+    let this = xark_ir::major_minor(env!("CARGO_PKG_VERSION"));
+    if let Some(pinned) = pinned
+        && pinned != this
+    {
+        eprintln!(
+            "{} this project is made with xark {pinned} ({PROJECT_FILE}), and this xark is \
+             {this}: install that release (`cargo install xark-cli --version {pinned}.*`), or \
+             move the project to {this} on purpose and update `xark` in {PROJECT_FILE}",
+            crate::style::warn("warning:")
+        );
+    }
+}
+
 /// The crates in `root/<group>/`, by name.
 pub fn members(root: &Path, group: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = std::fs::read_dir(root.join(group))
@@ -38,11 +66,38 @@ pub fn members(root: &Path, group: &str) -> Vec<PathBuf> {
     out
 }
 
-/// `xark build` at a project's root.
-pub fn build(root: &Path) -> i32 {
+/// `xark build` at a project's root. With `check` (CI), keys are never made and
+/// `clients/` is left as it was: the build fails if what it generates differs.
+pub fn build(root: &Path, check: bool) -> i32 {
+    check_release(root);
+    build_all(root, check)
+}
+
+fn build_all(root: &Path, check: bool) -> i32 {
+    let before = check.then(|| snapshot(&root.join("clients")));
     for circuit in members(root, "circuits") {
-        if let Err(code) = build_circuit(root, &circuit) {
+        if let Err(code) = build_circuit(root, &circuit, check) {
             return code;
+        }
+    }
+    if let Some(before) = before {
+        let after = snapshot(&root.join("clients"));
+        let changed: Vec<&PathBuf> = before
+            .keys()
+            .chain(after.keys().filter(|p| !before.contains_key(*p)))
+            .filter(|p| before.get(*p) != after.get(*p))
+            .collect();
+        if !changed.is_empty() {
+            eprintln!(
+                "{} the committed clients aren't what this build generates (run `xark \
+                 build` and commit them):",
+                crate::style::err("error:")
+            );
+            for p in &changed {
+                eprintln!("  {}", p.strip_prefix(root).unwrap_or(p).display());
+            }
+            restore(&before, &after);
+            return 1;
         }
     }
     if members(root, "programs").is_empty() {
@@ -51,9 +106,39 @@ pub fn build(root: &Path) -> i32 {
     build_programs(root)
 }
 
+/// Every file under `dir`, by path.
+fn snapshot(dir: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if let Ok(b) = std::fs::read(&p) {
+                out.insert(p, b);
+            }
+        }
+    }
+    out
+}
+
+/// Put the files in `before` back, and remove the ones only `after` has.
+fn restore(
+    before: &std::collections::BTreeMap<PathBuf, Vec<u8>>,
+    after: &std::collections::BTreeMap<PathBuf, Vec<u8>>,
+) {
+    for (p, b) in before {
+        let _ = std::fs::write(p, b);
+    }
+    for p in after.keys().filter(|p| !before.contains_key(*p)) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 /// One circuit: built (if it isn't current), keys (if they're missing or for
-/// another circuit), then its clients.
-fn build_circuit(root: &Path, circuit: &Path) -> Result<(), i32> {
+/// another circuit, unless `check`), then its clients.
+fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<(), i32> {
     let dir = circuit.display().to_string();
     let code = crate::cli::cmd_build(std::slice::from_ref(&dir));
     if code != 0 {
@@ -64,7 +149,37 @@ fn build_circuit(root: &Path, circuit: &Path) -> Result<(), i32> {
         1
     })?;
     let vk = project.verifying_key();
-    if !vk.is_file() || super::ensure_key_matches_circuit(&vk, &project.circuit_xbc()).is_err() {
+    if check {
+        let why = if !vk.is_file() {
+            Some("has no key")
+        } else if super::ensure_key_matches_circuit(&vk, &project.circuit_xbc()).is_err() {
+            Some("changed since its keys were made")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            eprintln!(
+                "{} {} {why}: run `xark build` and commit `keys/` and `clients/`",
+                crate::style::err("error:"),
+                circuit.strip_prefix(root).unwrap_or(circuit).display()
+            );
+            return Err(1);
+        }
+    } else if !vk.is_file() {
+        if let Err(e) = project.may_make_key() {
+            eprintln!("{} {e:#}", crate::style::err("error:"));
+            return Err(1);
+        }
+        xark(root, &["setup", &dir])?;
+    } else if super::ensure_key_matches_circuit(&vk, &project.circuit_xbc()).is_err() {
+        // A changed circuit needs new keys, and so a new verifier: say so, since the
+        // deployed program has to change with it.
+        eprintln!(
+            "{} {} changed since its keys were made: making new ones, so its verifier \
+             changes too (deploy the program again)",
+            crate::style::warn("warning:"),
+            circuit.display()
+        );
         xark(root, &["setup", &dir])?;
     }
     xark(root, &["export", &dir])?;
@@ -114,6 +229,7 @@ fn build_programs(root: &Path) -> i32 {
 
 /// `xark test` at a project's root: `forwarded` goes to each circuit's `cargo test`.
 pub fn test(root: &Path, forwarded: &[String]) -> i32 {
+    check_release(root);
     for circuit in members(root, "circuits") {
         let mut args = vec![circuit.display().to_string()];
         args.extend(forwarded.iter().cloned());
@@ -126,7 +242,7 @@ pub fn test(root: &Path, forwarded: &[String]) -> i32 {
         return 0;
     }
     // The programs' tests need them built, and their clients current.
-    let code = build(root);
+    let code = build_all(root, false);
     if code != 0 {
         return code;
     }

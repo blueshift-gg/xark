@@ -14,10 +14,10 @@ export interface Artifacts {
   client?: Uint8Array;
 }
 
-/** A build output directory (`target/xark/<name>/`). */
-export function artifacts(dir: string): Artifacts;
+/** A build output directory (`target/xark/<name>/`), with the keys in `keys` (by default the same directory). */
+export function artifacts(dir: string, keys?: string): Artifacts;
 
-/** Circuit `name`'s build output: `circuits/<name>/target/xark/<name>/` in the project. */
+/** Circuit `name`'s build output (`circuits/<name>/target/xark/<name>/`) and keys (`keys/<name>/`) in the project. */
 export function circuit(name: string, root?: string): Artifacts;
 
 /** Program `name`'s build: `target/deploy/<name>_program.so` in the project. */

@@ -199,6 +199,11 @@ pub struct BuildArgs {
     /// never read back, and is multi-GB on large circuits, so it's off by default.
     #[arg(long = "emit-json", default_value_t = false)]
     pub emit_json: bool,
+    /// At a project's root, for CI: build everything, but fail if the committed
+    /// clients (`clients/`) aren't what it generates, or a key is missing or for an
+    /// older circuit. Writes nothing it wasn't given.
+    #[arg(long)]
+    pub check: bool,
 }
 
 impl BuildArgs {
@@ -212,6 +217,9 @@ impl BuildArgs {
         v.push(self.field.clone());
         if self.emit_json {
             v.push("--emit-json".into());
+        }
+        if self.check {
+            v.push("--check".into());
         }
         v
     }
@@ -527,9 +535,33 @@ pub fn load_primitive(path: &std::path::Path) -> Result<PrimitiveProgram> {
 
 /// Best-effort load of `sources.json` (each constraint's source statement) from a
 /// build directory, so a failing constraint names its line. `None` for a build
-/// from before it existed, or a malformed file.
+/// from before it existed, or a malformed file. Its files are shown from where
+/// you are ([`from_here`]).
 pub fn load_sources(dir: &std::path::Path) -> Option<SourceMap> {
-    SourceMap::load(dir)
+    let mut map = SourceMap::load(dir)?;
+    let krate = crate::xark_project::XarkProject {
+        xark_dir: dir.to_path_buf(),
+    }
+    .crate_dir();
+    if let Some(krate) = krate {
+        for site in &mut map.sites {
+            site.file = from_here(&krate, &site.file);
+        }
+    }
+    Some(map)
+}
+
+/// A source file of the circuit crate at `krate` (`src/lib.rs`), as a path from
+/// the current directory when that's above the crate, as at a project's root
+/// (`circuits/claim/src/lib.rs`), so it opens as given. Unchanged from inside it.
+pub fn from_here(krate: &std::path::Path, file: &str) -> String {
+    let (Ok(krate), Ok(cwd)) = (std::path::absolute(krate), std::env::current_dir()) else {
+        return file.to_string();
+    };
+    match krate.strip_prefix(&cwd) {
+        Ok(prefix) if !prefix.as_os_str().is_empty() => prefix.join(file).display().to_string(),
+        _ => file.to_string(),
+    }
 }
 
 /// Resolve `name → value` inputs to `VarId → decimal` for the solver. Shared by

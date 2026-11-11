@@ -112,7 +112,18 @@ pub fn run(args: ExportArgs) -> Result<()> {
     let trust = super::setup_trust(vk_path.parent().unwrap_or(Path::new(".")));
     super::ensure_key_matches_circuit(&vk_path, &project.circuit_xbc())?;
     let num_public_inputs = vk.gamma_abc_g1.len().saturating_sub(1);
-    let sample = if explicit || proof_path.exists() {
+    // The sample a crate already has, while it still verifies with this key: kept
+    // over any other, so regenerating doesn't change the crate (a proof is
+    // randomized, and only whoever proved last has one) and a fresh clone's build
+    // leaves the committed crate as it was.
+    let kept = if explicit {
+        None
+    } else {
+        existing_sample(&out_dir, &vk, num_public_inputs)
+    };
+    let sample = if kept.is_some() {
+        kept
+    } else if explicit || proof_path.exists() {
         let proof = super::read_artifact(
             &proof_path,
             "proof",
@@ -284,6 +295,30 @@ pub fn run(args: ExportArgs) -> Result<()> {
     }
     println!("\n{}", crate::style::next_steps(&next));
     Ok(())
+}
+
+/// The sample proof an earlier export bundled in `out` (`proof.solana.bin`,
+/// `public_inputs.solana.bin`), if it verifies with `vk`.
+fn existing_sample(
+    out: &Path,
+    vk: &xark_groth16::VerifyingKey<ark_bn254::Bn254>,
+    n: usize,
+) -> Option<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
+    use ark_serialize::CanonicalDeserialize;
+    let proof =
+        xark_groth16::solana::decode_proof_le(&fs::read(out.join("proof.solana.bin")).ok()?)
+            .ok()?;
+    let bytes = fs::read(out.join("public_inputs.solana.bin")).ok()?;
+    if bytes.len() != n * 32 {
+        return None;
+    }
+    let inputs: Vec<ark_bn254::Fr> = bytes
+        .chunks(32)
+        .map(|c| ark_bn254::Fr::deserialize_compressed(c).ok())
+        .collect::<Option<_>>()?;
+    xark_backend::verify(vk, &proof, &inputs)
+        .unwrap_or(false)
+        .then_some((proof, inputs))
 }
 
 /// Sanitize an arbitrary string into a valid Cargo crate name

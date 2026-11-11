@@ -55,6 +55,54 @@ fn add_a_circuit_then_its_program() {
     );
     std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
 
+    // CI's `xark build --check`: a project's keys are committed in `keys/`, so a
+    // fresh clone builds the same clients, and a change to them is caught.
+    let (ok, out) = xark(&["build"]);
+    assert!(ok, "{out}");
+    assert!(
+        app.join("keys/claim/pk.bin").is_file() && app.join(".github/workflows/ci.yml").is_file()
+    );
+    for t in ["circuits/claim/target", "circuits/other/target"] {
+        std::fs::remove_dir_all(app.join(t)).unwrap();
+    }
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(ok, "a fresh clone's build differs:\n{out}");
+    let ts = app.join("clients/claim/ts/claim.ts");
+    let committed = std::fs::read_to_string(&ts).unwrap();
+    std::fs::write(&ts, format!("{committed}// edited\n")).unwrap();
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(!ok && out.contains("clients/claim/ts/claim.ts"), "{out}");
+    std::fs::write(&ts, &committed).unwrap();
+    // A lost key isn't quietly replaced: the committed verifier embeds it.
+    std::fs::rename(app.join("keys"), app.join("keys.lost")).unwrap();
+    let (ok, out) = xark(&["build"]);
+    assert!(!ok && out.contains("embeds one"), "{out}");
+    std::fs::rename(app.join("keys.lost"), app.join("keys")).unwrap();
+
+    // CI's `xark build --check`: a project's keys are committed in `keys/`, so a
+    // fresh clone builds the same clients, and a change to them is caught.
+    let (ok, out) = xark(&["build"]);
+    assert!(ok, "{out}");
+    assert!(
+        app.join("keys/claim/pk.bin").is_file() && app.join(".github/workflows/ci.yml").is_file()
+    );
+    for t in ["circuits/claim/target", "circuits/other/target"] {
+        std::fs::remove_dir_all(app.join(t)).unwrap();
+    }
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(ok, "a fresh clone's build differs:\n{out}");
+    let ts = app.join("clients/claim/ts/claim.ts");
+    let committed = std::fs::read_to_string(&ts).unwrap();
+    std::fs::write(&ts, format!("{committed}// edited\n")).unwrap();
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(!ok && out.contains("clients/claim/ts/claim.ts"), "{out}");
+    std::fs::write(&ts, &committed).unwrap();
+    // A lost key isn't quietly replaced: the committed verifier embeds it.
+    std::fs::rename(app.join("keys"), app.join("keys.lost")).unwrap();
+    let (ok, out) = xark(&["build"]);
+    assert!(!ok && out.contains("embeds one"), "{out}");
+    std::fs::rename(app.join("keys.lost"), app.join("keys")).unwrap();
+
     // The program's verifier crate and TypeScript client are generated first.
     let (ok, out) = xark(&["add", "program", "claim"]);
     assert!(ok, "{out}");

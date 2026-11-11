@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch or pull request makes the older run moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_SBF_VERSION: 4.2.0
+  # The xark this project is made with (its `xark.toml`).
+  XARK_CLI_VERSION: {{xark_version}}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The wasm32 target circuits build for
+        run: rustup target add wasm32-unknown-unknown
+
+      # Neither tool has a prebuilt binary: both build from source, once, then come
+      # from this cache.
+      - name: Cached tools
+        id: tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-build-sbf
+            ~/.cargo/bin/xark
+          key: tools-${{ runner.os }}-sbf-${{ env.CARGO_BUILD_SBF_VERSION }}-xark-${{ env.XARK_CLI_VERSION }}
+
+      - name: Install cargo-build-sbf and xark
+        if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          cargo install cargo-build-sbf --version "$CARGO_BUILD_SBF_VERSION" --locked
+          cargo install xark-cli --version "$XARK_CLI_VERSION" --locked
+
+      - uses: actions/setup-node@v4
+        if: hashFiles('package.json') != ''
+        with:
+          node-version: 22
+
+      - name: Install the TypeScript tests' packages
+        if: hashFiles('package.json') != ''
+        run: npm install
+
+      # The committed keys and generated clients are what this source builds.
+      - name: xark build --check
+        run: xark build --check
+
+      - name: xark test
+        run: xark test

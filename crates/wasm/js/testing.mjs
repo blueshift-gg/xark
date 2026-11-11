@@ -32,22 +32,28 @@ export function projectRoot(from = process.cwd()) {
   }
 }
 
-/** A build output directory (`target/xark/<name>/`), as a prover takes it. */
-export function artifacts(dir) {
-  const read = (f) => new Uint8Array(readFileSync(join(dir, f)));
-  if (!existsSync(join(dir, "pk.bin"))) throw new Error(`no proving key in ${dir}: run \`xark build\``);
+/**
+ * A build output directory (`target/xark/<name>/`), as a prover takes it, with
+ * the keys in `keys` (by default the same directory).
+ */
+export function artifacts(dir, keys = dir) {
+  const read = (d, f) => new Uint8Array(readFileSync(join(d, f)));
+  if (!existsSync(join(keys, "pk.bin"))) throw new Error(`no proving key in ${keys}: run \`xark build\``);
   return {
-    circuit: read("circuit.xbc"),
-    provingKey: read("pk.bin"),
-    verifyingKey: read("vk.bin"),
+    circuit: read(dir, "circuit.xbc"),
+    provingKey: read(keys, "pk.bin"),
+    verifyingKey: read(keys, "vk.bin"),
     sources: readFileSync(join(dir, "sources.json"), "utf8"),
-    client: existsSync(join(dir, "client.wasm")) ? read("client.wasm") : undefined,
+    client: existsSync(join(dir, "client.wasm")) ? read(dir, "client.wasm") : undefined,
   };
 }
 
-/** Circuit `name`'s build output: `circuits/<name>/target/xark/<name>/` in the project. */
+/**
+ * Circuit `name`'s build output (`circuits/<name>/target/xark/<name>/`) and keys
+ * (`keys/<name>/`) in the project.
+ */
 export function circuit(name, root = projectRoot()) {
-  return artifacts(join(root, "circuits", name, "target", "xark", name));
+  return artifacts(join(root, "circuits", name, "target", "xark", name), join(root, "keys", name));
 }
 
 /** Program `name`'s build: `target/deploy/<name>_program.so` in the project. */

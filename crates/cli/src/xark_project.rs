@@ -39,11 +39,45 @@ impl XarkProject {
     }
 
     pub fn proving_key(&self) -> PathBuf {
-        self.xark_dir.join("pk.bin")
+        self.key_dir().join("pk.bin")
     }
 
     pub fn verifying_key(&self) -> PathBuf {
-        self.xark_dir.join("vk.bin")
+        self.key_dir().join("vk.bin")
+    }
+
+    /// Where `xark setup` puts the keys (and their `metadata.json`). In a project,
+    /// `keys/<name>/` at its root, committed: a verifier embedding the key is
+    /// committed too, so a key only in the gitignored `target/` would be replaced
+    /// on every fresh clone. Otherwise the build's own directory.
+    pub fn key_dir(&self) -> PathBuf {
+        match (self.project_root(), self.name()) {
+            (Some(root), Some(name)) if self.crate_dir().is_some() => root.join("keys").join(name),
+            _ => self.xark_dir.clone(),
+        }
+    }
+
+    /// The verifying key the generated verifier crate embeds, when there is one.
+    pub fn committed_verifier_key(&self) -> Option<PathBuf> {
+        let vk = self.clients_dir().join("rust/verifying_key.solana.bin");
+        vk.is_file().then_some(vk)
+    }
+
+    /// Making a key where there's none is only for a circuit nothing verifies yet:
+    /// a verifier that embeds a key (`clients/…/rust/`) means it was lost (a fresh
+    /// clone of a project whose keys weren't committed), and a new one would quietly
+    /// stop matching the deployed program and everyone's proofs.
+    pub fn may_make_key(&self) -> Result<()> {
+        if let Some(vk) = self.committed_verifier_key() {
+            bail!(
+                "no key in {}, but {} embeds one: restore the keys (a project commits \
+                 `keys/`), or make new ones on purpose with `xark setup` (the deployed \
+                 program then needs the new verifier)",
+                crate::commands::shown(&self.key_dir()),
+                crate::commands::shown(&vk)
+            );
+        }
+        Ok(())
     }
 
     pub fn proof(&self) -> PathBuf {

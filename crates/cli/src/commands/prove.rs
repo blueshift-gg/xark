@@ -537,6 +537,7 @@ fn autobuild_and_setup(
     // If no crate dir is found, fall through: `load_r1cs` emits the usual
     // clear "run `xark build` first" error.
     if args.proving_key.is_none() && is_built && !pk_path.exists() {
+        project.may_make_key()?;
         eprintln!(
             "{} no proving key found — making one from this machine's randomness (`xark \
              ceremony` makes one no single party has to be trusted for)…",

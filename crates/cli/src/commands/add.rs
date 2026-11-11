@@ -52,6 +52,7 @@ pub fn run(args: AddArgs) -> Result<()> {
              init <name>`"
         );
     };
+    super::project::check_release(&root);
     match args.what {
         What::Circuit { name } => add_circuit(&root, &name),
         What::Program { name, circuit } => {
@@ -85,6 +86,11 @@ pub fn init_project(dir: &Path, name: &str) -> Result<()> {
     )?;
     write_new(dir, "Cargo.toml", template!("Cargo.toml.tmpl"))?;
     write_new(dir, ".gitignore", template!("gitignore"))?;
+    write_new(
+        dir,
+        ".github/workflows/ci.yml",
+        &template!("github/ci.yml").replace("{{xark_version}}", env!("CARGO_PKG_VERSION")),
+    )?;
     // rust-analyzer runs `xark check` at the root: `cargo check` over the workspace,
     // then xark's validation of each circuit. `rust-analyzer.toml` is the
     // editor-agnostic form; `.vscode/settings.json` covers VS Code.

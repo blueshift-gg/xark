@@ -1,2 +1,4 @@
 target/
 node_modules/
+# Rebuilt from the circuit when it's missing: the keys beside it are committed.
+keys/*/r1cs.stream

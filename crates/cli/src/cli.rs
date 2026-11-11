@@ -24,8 +24,13 @@ pub fn cmd_build(args: &[String]) -> i32 {
 /// it.)
 pub fn cmd_build_command(args: &[String]) -> i32 {
     // At a project's root: every circuit, its keys and clients, then the programs.
+    let check = args.iter().any(|a| a == "--check");
     if let Some(root) = crate::commands::project::root_at(args.first().map(String::as_str)) {
-        return crate::commands::project::build(&root);
+        return crate::commands::project::build(&root, check);
+    }
+    if check {
+        eprintln!("error: `--check` is for a project's root (the directory with `xark.toml`)");
+        return 2;
     }
     let code = cmd_build(args);
     if code == 0 {
@@ -76,6 +81,7 @@ fn cmd_build_impl(args: &[String], profile: bool) -> i32 {
                 }
             }
             "--emit-json" => emit_json = true,
+            "--check" => {}
             _ if crate_dir.is_none() => crate_dir = Some(a.clone()),
             _ => {}
         }
@@ -505,7 +511,11 @@ fn build_stable(
         p.witness_gen.len(),
     );
     if !profile {
-        print_hotspots(&lowered.sources, lowered.output.r1cs.constraints.len());
+        print_hotspots(
+            crate_abs,
+            &lowered.sources,
+            lowered.output.r1cs.constraints.len(),
+        );
     }
     eprintln!("{} circuit digest {digest}", crate::style::tag());
     eprintln!(
@@ -518,7 +528,7 @@ fn build_stable(
 
 /// The three source lines that cost the most constraints, so every build shows
 /// where a circuit's size comes from.
-fn print_hotspots(sources: &xark_ir::SourceMap, rows: usize) {
+fn print_hotspots(crate_abs: &std::path::Path, sources: &xark_ir::SourceMap, rows: usize) {
     let costs = sources.line_costs(rows);
     if rows == 0 || costs.is_empty() {
         return;
@@ -527,7 +537,11 @@ fn print_hotspots(sources: &xark_ir::SourceMap, rows: usize) {
     // Lines under 1% would be noise.
     for (site, n) in costs.iter().take(3).filter(|(_, n)| n * 100 >= rows) {
         let pct = format!("{:.0}%", 100.0 * *n as f64 / rows as f64);
-        let at = format!("{}:{}", site.file, site.line);
+        let at = format!(
+            "{}:{}",
+            crate::commands::from_here(crate_abs, &site.file),
+            site.line
+        );
         eprintln!(
             "      {pct:>4}  {}  {}",
             crate::style::brand(&at),

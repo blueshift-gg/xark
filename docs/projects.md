@@ -44,7 +44,9 @@ claim/
   programs/claim/       # Pinocchio: lib.rs, errors.rs, instructions/verify.rs
   clients/claim/rust/   # generated, committed: the verifier crate `claim-verifier`
   clients/claim/ts/     # generated, committed: the TypeScript client
+  keys/claim/           # committed: pk.bin, vk.bin, metadata.json
   tests/claim.test.ts   # LiteSVM
+  .github/workflows/ci.yml   # xark build --check, then xark test
 ```
 
 - **Fixed folders.** `circuits/*`, `programs/*` and `clients/*/rust` are globbed
@@ -64,6 +66,19 @@ claim/
   `overflow-checks`, `opt-level` and `panic` through `--config`
   (`crates/frontend/src/lib.rs`), so the root `[profile.release]` can be the
   program's (fat LTO, no overflow checks) without changing any circuit.
+- **Keys are committed.** The verifier crate embeds the verifying key and is
+  committed, so the keys are too, in `keys/<circuit>/`: a key only in the
+  gitignored `target/` would be replaced on a fresh clone, and the verifier with
+  it. `xark build` and `xark prove` never make a key while a committed verifier
+  embeds one; a new key is an explicit `xark setup`. A proving key over 50 MB
+  belongs in Git LFS (the zKYC circuit's is 265 KB, SHA-256's 3.2 MB, Ed25519's
+  450 MB).
+- **Stable clients.** A rebuild leaves `clients/` byte for byte as it was: the
+  sample proof a verifier crate bundles is kept while it verifies, since a proof
+  is randomized and only whoever proved last has one. `xark build --check` (CI)
+  fails when the committed clients aren't what the source generates.
+- **One release.** `xark.toml` records the xark release; the root commands warn
+  when the CLI is another.
 - **Commands at the root.** One circuit is the default for every command that
   takes one (`xark prove`, `xark export`, `xark inspect`); with several, name it
   (`xark prove circuits/claim`).

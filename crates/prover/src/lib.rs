@@ -837,13 +837,30 @@ impl Circuit {
         })
     }
 
-    /// Prove `inputs` with the built circuit and its proving key
-    /// (`<dir>/pk.bin`, from `xark setup`) and return the proof — the same
-    /// streaming prover and the same bytes as `xark prove`, without the CLI. The
-    /// inputs must satisfy the circuit, with the same diagnostics as
-    /// [`Self::check_satisfied`]; soundness is [`Self::check`]'s job.
+    /// Prove `inputs` with the built circuit and its proving key (from `xark
+    /// setup`: `keys/<name>/pk.bin` in a project, otherwise `<dir>/pk.bin`) and
+    /// return the proof — the same streaming prover and the same bytes as `xark
+    /// prove`, without the CLI. The inputs must satisfy the circuit, with the same
+    /// diagnostics as [`Self::check_satisfied`]; soundness is [`Self::check`]'s job.
     pub fn prove<I: ProveInputs>(&self, inputs: I) -> Result<CircuitProof, ProveError> {
-        self.prove_with_key(self.dir.join("pk.bin"), inputs)
+        self.prove_with_key(self.proving_key(), inputs)
+    }
+
+    /// Where `xark setup` put this circuit's proving key: in a project (a
+    /// `xark.toml` above the build), `keys/<name>/` at its root, where it's
+    /// committed; otherwise beside the build.
+    fn proving_key(&self) -> std::path::PathBuf {
+        let local = self.dir.join("pk.bin");
+        let abs = std::path::absolute(&self.dir).unwrap_or_else(|_| self.dir.clone());
+        let in_project = abs
+            .ancestors()
+            .find(|d| d.join("xark.toml").is_file())
+            .zip(abs.file_name())
+            .map(|(root, name)| root.join("keys").join(name).join("pk.bin"));
+        match in_project {
+            Some(pk) if pk.exists() || !local.exists() => pk,
+            _ => local,
+        }
     }
 
     /// [`Self::prove`] with a proving key from elsewhere (e.g. a ceremony's

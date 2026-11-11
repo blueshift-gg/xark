@@ -42,6 +42,23 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   that takes a circuit defaults to the project's one. The workspace's
   `default-members` are the programs, so `cargo build-sbf` at the root just
   works.
+- A project commits its keys, in `keys/<circuit>/` (`xark setup`'s default there;
+  the host prover and `@blueshift-gg/xark/testing` read them from there), since
+  the verifier crate embedding the verifying key is committed too. `xark build`
+  and `xark prove` no longer make a key when a committed verifier embeds one: a
+  fresh clone without the keys stops with how to restore them, instead of quietly
+  changing the verifier. `xark setup` suggests Git LFS for a proving key over
+  50 MB.
+- `xark build --check` (at a project's root) fails if the committed clients
+  aren't what the source generates, or a key is missing or for an older circuit,
+  and writes nothing. `xark init` writes `.github/workflows/ci.yml`, which runs it
+  and `xark test`.
+- `xark export` keeps the sample proof a verifier crate already bundles while it
+  still verifies, so a newer local proof (or none) doesn't change the crate.
+- At a project's root, `xark build`, `xark test` and `xark add` warn when this
+  xark is another release than the project's `xark.toml` records.
+- A failing constraint's file is shown from where you ran the command:
+  `circuits/claim/src/lib.rs:6:16` at a project's root.
 - `@blueshift-gg/xark`: a proof's `toFields()` (its public inputs as an exported
   verifier's `Fields`) and `toInstructionData()` (the proof, then those), and
   `@blueshift-gg/xark/testing`: a circuit's build output by name, LiteSVM with a
