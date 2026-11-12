@@ -12,7 +12,7 @@ set_option linter.unusedSimpArgs false
 namespace Xark.Templates.CondSwap.Consts
 open Xark.Template
 
-/-- LC plugs of calls in merkle. -/
+/-- LC plugs of calls in merkle, nullifier_tree. -/
 theorem soundness_free (σ : TVar → F) (h : template.Sat σ) :
     Spec (template.ins σ) (template.outs σ) :=
   soundness σ h
