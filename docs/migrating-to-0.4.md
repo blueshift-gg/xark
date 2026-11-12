@@ -176,6 +176,20 @@ if !verify(&Proof::from_le_bytes(proof), fields) { … }
 A proof's `toInstructionData()` is `toBytes()` followed by `toFields()`, its public
 inputs as the program's `Fields`, for a program that takes both.
 
+## Update scripts and host code
+
+These are gone, each with what to use instead:
+
+| 0.3 | 0.4 |
+|---|---|
+| `xark setup --streamable` | `xark setup --r1cs-form reduced` |
+| `xark_backend::verify(&vk, &proof, &inputs)` | `xark_groth16::verify(&vk, &inputs, &proof)` |
+| `xark_backend::solana::{decode_g1, decode_g2, decode_fr, encode_fr}` | the little-endian on-chain format in `xark_groth16::solana` (`encode_*_le`, `decode_proof_le`) |
+
+A proving key whose `XKPK` header has an unknown version is now refused by
+`Groth16Keys::read_proving_key` instead of read as a guess. Every key xark has
+written loads as before.
+
 ## Checking the move
 
 - `xark build --check` at the project's root passes with nothing to commit.

@@ -127,6 +127,24 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   `@blueshift-gg/xark/testing`: a circuit's build output by name, LiteSVM with a
   project's programs, a funded payer and `send`, for the tests every example
   carried a copy of. It needs `litesvm` and `@solana/kit` beside it.
+- `xark prove` says how long the witness solve and the prove took, in one line
+  under its summary. `PROVE_TIME=1` (a `--features debug` build) still adds the
+  constraint count and the row-cache marker.
+- **Breaking:** `xark setup --streamable` is gone: it was a second spelling of
+  `--r1cs-form reduced`, which works as before.
+- **Breaking:** a proving key whose `XKPK` header has a version this xark doesn't
+  know is refused by `Groth16Keys::read_proving_key` (and so by `xark ceremony`),
+  as `xark prove` and xark-wasm already refused it: `xark-backend` reads the header
+  with `xark_groth16::pk::KeyFormat` instead of a copy of it that guessed at the
+  layout. Every key xark has written (headerless, v1 and v2) still loads.
+- **Breaking:** `xark_backend::verify` is gone: it only reordered the arguments of
+  `xark_groth16::verify(vk, public_inputs, proof)`, which returns the same result.
+- **Breaking:** `xark_backend::solana` no longer has the big-endian decoders
+  `decode_g1`, `decode_g2` and `decode_fr`, nor `encode_fr`: nothing used them. Its
+  `G1_BYTES`, `G2_BYTES` and `FR_BYTES` are now `xark_groth16::solana`'s; the
+  little-endian encoders there (`encode_*_le`, `assemble_*_bytes_le`) are the
+  on-chain format, and `xark_groth16::solana::decode_proof_le` reads a proof back.
+- The hidden `xark::_FieldMarker` type alias is gone; nothing used it.
 
 ## 0.3.1
 
