@@ -179,9 +179,17 @@ pub fn run(args: ClientArgs) -> Result<()> {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     // Unchanged, it keeps its mtime (a bundler or `tsc --watch` has nothing to redo).
-    if std::fs::read_to_string(&out).ok().as_deref() != Some(client.as_str()) {
-        std::fs::write(&out, client).with_context(|| format!("writing {}", out.display()))?;
+    if std::fs::read_to_string(&out).ok().as_deref() == Some(client.as_str()) {
+        println!(
+            "{} {} client for `{}` at {} is unchanged",
+            crate::style::tag(),
+            args.lang.name(),
+            model.circuit,
+            out.display()
+        );
+        return Ok(());
     }
+    std::fs::write(&out, client).with_context(|| format!("writing {}", out.display()))?;
     println!(
         "{}",
         crate::style::brand(&format!(

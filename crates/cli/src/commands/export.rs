@@ -206,7 +206,8 @@ pub fn run(args: ExportArgs) -> Result<()> {
     fs::create_dir_all(out.join("src"))
         .with_context(|| format!("creating {}", out.join("src").display()))?;
 
-    write_file(out, "verifying_key.solana.bin", &vk_bytes)?;
+    // Whether this export changed a file: a rebuild that changed nothing says so.
+    let mut changed = write_file(out, "verifying_key.solana.bin", &vk_bytes)?;
     const SAMPLE: [&str; 3] = [
         "proof.solana.bin",
         "public_inputs.solana.bin",
@@ -220,12 +221,12 @@ pub fn run(args: ExportArgs) -> Result<()> {
             .iter()
             .zip([proof_bytes, public_inputs_bytes, instruction_data])
         {
-            write_file(out, name, &bytes)?;
+            changed |= write_file(out, name, &bytes)?;
         }
     } else {
         // An earlier export's sample, for whatever key it had.
         for name in SAMPLE {
-            let _ = fs::remove_file(out.join(name));
+            changed |= fs::remove_file(out.join(name)).is_ok();
         }
     }
 
@@ -254,22 +255,37 @@ pub fn run(args: ExportArgs) -> Result<()> {
             _ => false,
         }
     });
-    write_str(
+    changed |= write_str(
         &out.join("Cargo.toml"),
         &gen_cargo_toml(&crate_name, member),
     )?;
     if member && let Some(root) = project.project_root() {
         crate::xark_project::sync_members(&root)?;
     }
-    write_str(
+    changed |= write_str(
         &out.join("src/lib.rs"),
         &gen_lib_rs(num_public_inputs, sample.is_some(), typed.as_ref(), &trust),
     )?;
-    write_str(
+    changed |= write_str(
         &out.join("README.md"),
         &gen_readme(&crate_name, num_public_inputs, sample.is_some(), &trust),
     )?;
 
+    if !changed {
+        println!(
+            "{} verifier crate `{crate_name}` at {} is unchanged",
+            crate::style::tag(),
+            out.display()
+        );
+        // The key's trust still matters on every run when it's a warning.
+        if trust.warn {
+            eprintln!(
+                "{}",
+                crate::style::warn(&format!("⚠️  Key: {}.", trust.summary))
+            );
+        }
+        return Ok(());
+    }
     println!(
         "Generated verifier crate `{crate_name}` at {} ({} public input(s), \
          VK = {} B). Depend on it from your Solana program and call \
@@ -620,21 +636,23 @@ or context the proof is for, and record *that* on-chain.
     )
 }
 
-fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<bool> {
     write_str_bytes(&dir.join(name), bytes)
 }
 
-fn write_str(path: &Path, contents: &str) -> Result<()> {
+fn write_str(path: &Path, contents: &str) -> Result<bool> {
     write_str_bytes(path, contents.as_bytes())
 }
 
 /// Write `bytes` unless the file already holds them: an unchanged file keeps its
 /// mtime, so cargo doesn't rebuild the crate and the program that depends on it.
-fn write_str_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Whether it wrote.
+fn write_str_bytes(path: &Path, bytes: &[u8]) -> Result<bool> {
     if fs::read(path).is_ok_and(|b| b == bytes) {
-        return Ok(());
+        return Ok(false);
     }
-    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
+    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))?;
+    Ok(true)
 }
 
 #[cfg(test)]

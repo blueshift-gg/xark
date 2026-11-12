@@ -229,6 +229,11 @@ pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<
         eprintln!("{} {e:#}", crate::style::err("error:"));
         1
     })?;
+    let name = circuit
+        .strip_prefix(root)
+        .unwrap_or(circuit)
+        .display()
+        .to_string();
     // A current build (`xark test`'s, which also attributes each constraint to its
     // source line) is the same circuit: no second build.
     if crate::cli::stale_build(&project.xark_dir, "circuit.xbc", Some("bn254")).is_some() {
@@ -236,12 +241,12 @@ pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<
         if code != 0 {
             return Err(code);
         }
+    } else {
+        eprintln!(
+            "{} circuit `{name}` is unchanged since the last build",
+            crate::style::tag()
+        );
     }
-    let name = circuit
-        .strip_prefix(root)
-        .unwrap_or(circuit)
-        .display()
-        .to_string();
     let state = key_state(&project);
     if check {
         let why = match state {
