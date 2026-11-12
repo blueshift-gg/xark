@@ -152,6 +152,12 @@ export interface Wasm {
     verify(proof: Uint8Array, publicInputs: Uint8Array): boolean;
   };
   poseidon2(inputs: string[]): string;
+  poseidon2Commit(inputs: string[]): string;
+  poseidon2Nullifier(inputs: string[]): string;
+  /** The ciphertext, then the tag. */
+  poseidon2Encrypt(key: string, nonce: string, message: string[]): string[];
+  /** Throws when the tag doesn't match. */
+  poseidon2Decrypt(key: string, nonce: string, ciphertext: string[], tag: string): string[];
   /** The circuit digest of a `circuit.xbc` (what `xark build` prints). */
   circuitDigest(circuit: Uint8Array): string;
   /** A proof (either form) as an exported Solana verifier reads it (256 bytes). */
@@ -229,6 +235,17 @@ export class Session<PublicInputs, PublicValues, Structs> {
   fields<K extends keyof Structs & string>(type: K, value: Structs[K]): Field[];
   /** `xark_poseidon2::hash`, as the circuit computes it. */
   poseidon2(fields: readonly Field[]): Field;
+  /** `xark_poseidon2::commit` (at least one element), as the circuit computes it. */
+  commit(fields: readonly Field[]): Field;
+  /** `xark_poseidon2::nullifier` (at least one element), as the circuit computes it. */
+  nullifier(fields: readonly Field[]): Field;
+  /**
+   * `xark_poseidon2::encrypt`: `message` (at least one element) under `key` and
+   * `nonce`. Never reuse a key and nonce.
+   */
+  encrypt(key: Field, nonce: Field, message: readonly Field[]): { ciphertext: Field[]; tag: Field };
+  /** `xark_poseidon2::decrypt`: throws when the tag doesn't match. */
+  decrypt(key: Field, nonce: Field, ciphertext: readonly Field[], tag: Field): Field[];
 }
 
 /** Proves a circuit: from `circuit.prover(…)`. */

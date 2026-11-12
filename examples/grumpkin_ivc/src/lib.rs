@@ -24,19 +24,6 @@
 
 use xark_grumpkin::prelude::*;
 
-/// `r = low128(Poseidon2(transcript))` as 128 little-endian bits.
-fn challenge(t: [Field; 15]) -> [Field; 128] {
-    let h = xark_poseidon2::hash(t);
-    let bits = h.to_bits_canonical();
-    let mut out = [Field::from(0u8); 128];
-    let mut i = 0usize;
-    while i < 128usize {
-        out[i] = bits[i];
-        i += 1;
-    }
-    out
-}
-
 /// One Nova folding step `a ⊕ r·b` with cross-term `t`, the challenge
 /// `r = low128(Poseidon2(a, b, t, z_next))` bound to `z_next`.
 fn fold_step(a: Instance, b: Instance, t: Affine, z_next: Field) -> Instance {
@@ -51,7 +38,7 @@ fn fold_step(a: Instance, b: Instance, t: Affine, z_next: Field) -> Instance {
     tr[12] = t.x;
     tr[13] = t.y;
     tr[14] = z_next;
-    let r_bits = challenge(tr);
+    let r_bits = xark_poseidon2::challenge::<15, 128>(tr);
     let r_fr = Field::from_bits::<128>(r_bits);
     let pt = |p: Affine| [p.x, p.y];
     let cw = ec_add(pt(a.cw), scalar_mul(r_bits, pt(b.cw)));

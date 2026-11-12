@@ -10,7 +10,7 @@
   "main": "./dist/node/xark_wasm.js",
   "types": "./dist/node/xark_wasm.d.ts",
   "scripts": {
-    "test": "node --test tests/wasm-smoke.test.cjs tests/streaming.test.cjs"
+    "test": "node --test tests/wasm-smoke.test.cjs tests/streaming.test.cjs tests/poseidon2.test.cjs"
   },
   "files": [
     "dist/node/*",

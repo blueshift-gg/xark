@@ -359,6 +359,20 @@ const fields = valueFields(schema, "Identity", JSON.stringify(id));
 poseidon2(fields); // == the circuit's `xark_poseidon2::hash(id.to_fields())`
 ```
 
+### `poseidon2Commit(inputs)`, `poseidon2Nullifier(inputs)` → `string`
+
+`xark_poseidon2::commit` and `xark_poseidon2::nullifier` of one or more field
+elements, as decimal strings: the domain-separated hashes a circuit uses for a
+note's commitment and its nullifier.
+
+### `poseidon2Encrypt(key, nonce, message)` → `string[]`, `poseidon2Decrypt(key, nonce, ciphertext, tag)` → `string[]`
+
+`xark_poseidon2::encrypt` of one or more field elements returns the ciphertext,
+then the tag; `poseidon2Decrypt` returns the message, and throws when the tag
+doesn't match (a wrong key or nonce, or a changed ciphertext or tag). A session
+has them as `commit`, `nullifier`, `encrypt` (returning `{ ciphertext, tag }`)
+and `decrypt`.
+
 ## Security
 
 Prover randomness comes from the platform CSPRNG (`crypto.getRandomValues`).

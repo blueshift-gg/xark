@@ -25,19 +25,6 @@
 
 use xark_grumpkin::prelude::*;
 
-/// `r = low128(Poseidon2(transcript))` as 128 little-endian bits.
-fn challenge(t: [Field; 14]) -> [Field; 128] {
-    let h = xark_poseidon2::hash(t);
-    let bits = h.to_bits_canonical();
-    let mut out = [Field::from(0u8); 128];
-    let mut i = 0usize;
-    while i < 128usize {
-        out[i] = bits[i];
-        i += 1;
-    }
-    out
-}
-
 /// Verify one Nova folding step: given two committed relaxed-R1CS instances, the
 /// cross-term commitment `comm_T`, and the claimed folded instance, check the
 /// fold is correct with the in-circuit Fiat–Shamir challenge `r`.
@@ -60,7 +47,7 @@ pub fn grumpkin_nova_fold(
     }
     tr[12] = t.x;
     tr[13] = t.y;
-    let r_bits = challenge(tr);
+    let r_bits = xark_poseidon2::challenge::<14, 128>(tr);
     let r_fr = Field::from_bits::<128>(r_bits);
 
     let pt = |p: Affine| [p.x, p.y];

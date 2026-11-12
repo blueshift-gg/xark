@@ -145,6 +145,26 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   little-endian encoders there (`encode_*_le`, `assemble_*_bytes_le`) are the
   on-chain format, and `xark_groth16::solana::decode_proof_le` reads a proof back.
 - The hidden `xark::_FieldMarker` type alias is gone; nothing used it.
+- `xark_poseidon2::commit::<N>` and `nullifier::<N>`: the sponge `hash` with its
+  capacity lane seeded with `2^64 · domain + N` (domain 1 and 2), so a commitment
+  is never a nullifier, a `hash` or a `hash2` (a Merkle node) short of a Poseidon2
+  collision. Use them where a circuit hashed a note or an identity with `hash` and
+  its nullifier with `hash2` or a hand-placed tag element. Natively in `native`
+  (and `commit_slice`, `nullifier_slice`), and in `@blueshift-gg/xark` as
+  `poseidon2Commit`/`poseidon2Nullifier` and a session's `commit`/`nullifier`.
+- `xark_poseidon2::encrypt::<N>` and `decrypt::<N>`: authenticated encryption of
+  field elements under a key and nonce, the Poseidon sponge construction of
+  Khovratovich's "Encryption with Poseidon" on the width-3 permutation (domain 3);
+  `decrypt` constrains the tag. `⌈N/2⌉ + 1` permutations each. Natively, and in
+  `@blueshift-gg/xark` as `poseidon2Encrypt`/`poseidon2Decrypt` and a session's
+  `encrypt`/`decrypt`.
+- `xark_poseidon2::challenge::<N, BITS>`: a Fiat–Shamir challenge, the low `BITS`
+  canonical bits of `hash(transcript)`. It replaces the four copies in
+  `examples/grumpkin_*`, whose rows are the same.
+- `xark::select(bit, t, f)` (in the prelude): `bit ? t : f` for a pinned bit, over
+  a field element or arrays of them (the `Select` trait, for a gadget's own
+  types). `xark-grumpkin`'s private `mux` and `grumpkin_complete_add`'s use it,
+  with the same rows.
 
 ## 0.3.1
 
