@@ -183,6 +183,11 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   verifier crate's `PublicInputs`. `examples/bound_recipient` takes its recipient
   as one (its `--inputs` form is now the address in base58, not two hex halves;
   its digest is the same).
+- `xark_grumpkin::schnorr`: Schnorr signatures over Grumpkin. `verify(pubkey, sig,
+  msg)` requires `s·G = R + e·P` with a Poseidon2 challenge, in 5,051 constraints for a
+  two-element message (an Ed25519 signature is ~397k); `schnorr::host` makes keys,
+  signs with a deterministic nonce and verifies, over `ark-grumpkin`. New example
+  `grumpkin_schnorr` (a new digest line; no other changed).
 
 ## 0.3.1
 

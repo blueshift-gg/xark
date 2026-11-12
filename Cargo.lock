@@ -385,6 +385,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-grumpkin"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2c969a12ceed8881e5c66277dabd3e7a5aa2c72c9370f3f42eca3f2dd33a21a"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-std 0.6.0",
+]
+
+[[package]]
 name = "ark-poly"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4858,8 +4870,13 @@ dependencies = [
 name = "xark-grumpkin"
 version = "0.4.0"
 dependencies = [
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-grumpkin",
+ "num-bigint 0.4.8",
  "xark",
  "xark-ir",
+ "xark-poseidon2",
  "xark-test-harness",
 ]
 

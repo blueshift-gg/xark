@@ -68,6 +68,8 @@
 
 use xark::{Field, gadget, input, require_eq, select, witness_begin, witness_end};
 
+pub mod schnorr;
+
 /// Scalar bit-length (see module docs). Kept in sync with the `128usize` loop
 /// literals below (loop bounds must be integer literals in the subset).
 pub const N_BITS: usize = 128;

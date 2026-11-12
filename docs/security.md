@@ -247,6 +247,23 @@ inputs that need `O`'s discrete log. Each is proven sound over its exported rows
 `scalar_mul_rejects_zero_off_curve_and_offset`, `scalar_mul_rejects_a_non_boolean_bit`,
 `msm_rejects_degenerate_inputs` (`gadgets/xark-grumpkin/tests/vec.rs`).
 
+**Schnorr** (`gadgets/xark-grumpkin/src/schnorr.rs`) checks `s·G = R + e·P` with two
+`wide_scalar_mul`s and one `ec_add`, so the edges above refuse rather than accept. The
+challenge `e` is a Poseidon2 sponge over `R`, `P` and the message, its capacity seeded
+with a tag and the length. `R` is pinned on the curve (and `P` inside
+`wide_scalar_mul`); Grumpkin has cofactor 1, so no subgroup check is needed. `G`
+enters `wide_scalar_mul` as two witnesses pinned to its coordinates, so both calls
+are the proven template on plain plugs (`lean-export --coverage`: covered). Two
+integer comparisons, glue outside any proven template, make the scalars unique: `s ≤ n − 1`
+(else `s + n` verifies too), and the hinted limbs of `e` recompose to the digest and
+are `≤ r − 1` (else `e + r`, a different scalar, would also recompose to it mod `r`).
+Each walks the bits `wide_scalar_mul` already made, MSB first, as `to_bits_canonical`
+does. **KAT:** `host_signer_matches_the_known_answer` (against `schnorr_ref.py`,
+plain-integer Grumpkin), `circuit_accepts_host_signatures`, and the negatives
+`circuit_rejects_tampering` (wrong key or message, tampered `R` or `s`, off-curve `R`
+or `P`, `s = 0`, `s = n`) and `circuit_rejects_non_canonical_s`
+(`gadgets/xark-grumpkin/tests/schnorr.rs`).
+
 ### 2.13 Merkle membership (Poseidon)
 
 `gadgets/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression

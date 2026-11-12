@@ -183,12 +183,12 @@ xark-poseidon2 = "0.4"
 | `xark-aes` | AES-128/256 block cipher, CTR and GCM |
 | `xark-secp256k1`, `xark-secp256r1` | ECDSA signature verification on secp256k1 and P-256 |
 | `xark-ed25519` | Ed25519 (EdDSA) signature verification |
-| `xark-grumpkin` | The Grumpkin curve, for recursion and folding |
+| `xark-grumpkin` | The Grumpkin curve, for recursion and folding, and Schnorr signatures over it |
 | `xark-bits`, `xark-bignum`, `xark-curve`, `xark-hash` | Building blocks for writing your own gadgets |
 
 ## Examples
 
-[`examples/`](examples) has 72 runnable circuits, from `cube` to `zkyc` (a private
+[`examples/`](examples) has 73 runnable circuits, from `cube` to `zkyc` (a private
 credential check against a public policy), with the gadgets above at work. Test
 any of them with `xark test examples/<name>`.
 

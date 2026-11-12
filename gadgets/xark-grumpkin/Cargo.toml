@@ -17,8 +17,17 @@ path = "src/lib.rs"
 
 [dependencies]
 xark.workspace = true
+# `schnorr`'s challenge.
+xark-poseidon2.workspace = true
+
+# `schnorr::host`: keys, signing and verification (not in a circuit build).
+[target.'cfg(not(xark))'.dependencies]
+ark-ec = { version = "0.6", default-features = false }
+ark-ff = { version = "0.6", default-features = false }
+ark-grumpkin = { version = "0.6", default-features = false }
 
 [dev-dependencies]
+num-bigint.workspace = true
 xark-test-harness = { path = "../../crates/test-harness" }
 xark-ir = { path = "../../crates/ir" }
 
