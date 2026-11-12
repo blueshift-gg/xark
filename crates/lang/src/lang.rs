@@ -1331,5 +1331,50 @@ pub fn require_ge<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a >= b, true);
 }
 
+/// `bit ? t : f`, for a `bit` already pinned to 0 or 1 (a `to_bits` bit, a `bool`
+/// from a comparison): `f + bit·(t − f)`, one row per field element of `t`, none when
+/// `bit` or `t − f` is a constant. It doesn't check `bit`: for any other value the
+/// result is that affine combination of `t` and `f`, which a prover who chooses
+/// `bit` would choose too. So pin it first (`bit.require_bool()`), unless it is a
+/// `bool` or a decomposition's bit already.
+///
+/// `t` and `f` are a [`Field`], an array of them, or nested arrays; a gadget crate
+/// implements [`Select`] for its own point or limb types.
+///
+/// ```ignore
+/// let y = select(x.lt::<64>(limit), x, limit); // min(x, limit)
+/// ```
+#[inline]
+pub fn select<T: Select>(bit: impl Into<Field>, t: T, f: T) -> T {
+    T::select(bit.into(), t, f)
+}
+
+/// What [`select`] picks between.
+pub trait Select: Copy {
+    /// `bit ? t : f`, for a `bit` in `{0, 1}`.
+    fn select(bit: Field, t: Self, f: Self) -> Self;
+}
+
+impl Select for Field {
+    #[inline]
+    fn select(bit: Field, t: Field, f: Field) -> Field {
+        f + bit * (t - f)
+    }
+}
+
+/// Element-wise, in index order (so the rows come in that order too).
+impl<T: Select, const N: usize> Select for [T; N] {
+    #[inline]
+    fn select(bit: Field, t: [T; N], f: [T; N]) -> [T; N] {
+        let mut out = f;
+        let mut i = 0usize;
+        while i < N {
+            out[i] = T::select(bit, t[i], f[i]);
+            i += 1;
+        }
+        out
+    }
+}
+
 // The `__xark_*` intrinsics referenced above live in `crate::intrinsics` (imported
 // at the top). See that module for the constraint-vs-hint ABI and lowering docs.

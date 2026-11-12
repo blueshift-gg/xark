@@ -42,6 +42,7 @@ cd my-circuit && xark test   # build the circuit, then run the tests
 | `Field` | An element of the BN254 scalar field: `+ - * /`, `.pow(n)`, comparisons, `.to_bits::<N>()` |
 | `Private<T>`, `Public<T>` | An input the prover keeps secret, or one the verifier sees |
 | `require`, `require_eq`, `require_ne`, `require_lt`, `require_le`, `require_gt`, `require_ge` | Constraints: the proof exists only if they hold |
+| `select` | `select(bit, t, f)` is `bit ? t : f` for a bit: a field element or an array of them, one row each |
 | `bind` | Binds a public input that no constraint uses, such as a recipient a proof is for |
 | `#[input]`, `Input` | Inputs as structs and enums, packed into as few field elements as they fit |
 | `Days`, `Time`, `Timestamp`, `Text`, `Choice`, `Bitfield`, `Country` | Everyday input types for credential-style circuits |

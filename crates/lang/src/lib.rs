@@ -111,7 +111,7 @@ pub mod wasm;
 pub mod prelude {
     pub use crate::lang::{
         Field, Private, Public, bind, require, require_eq, require_ge, require_gt, require_le,
-        require_lt, require_ne, witness_begin, witness_end,
+        require_lt, require_ne, select, witness_begin, witness_end,
     };
     // `#[input]` makes a struct a circuit input (`Input`), an enum a
     // `Choice`/`Bitfield` of variants (`Enum`), and an `impl` block's methods client
@@ -126,8 +126,8 @@ pub mod prelude {
 // Same surface as `prelude`, re-exported at the crate root so both
 // `use xark::prelude::*;` and `use xark::{require, Field, ...};` work.
 pub use crate::lang::{
-    Field, Private, Public, bind, require, require_eq, require_ge, require_gt, require_le,
-    require_lt, require_ne, witness_begin, witness_end,
+    Field, Private, Public, Select, bind, require, require_eq, require_ge, require_gt, require_le,
+    require_lt, require_ne, select, witness_begin, witness_end,
 };
 // `require_eq` dispatches through `RequireEqCircuit`, comparing scalars, fixed
 // arrays, and composite types; downstream crates impl it for their own shapes.
