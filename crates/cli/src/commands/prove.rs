@@ -596,9 +596,16 @@ fn autobuild_and_setup(
 }
 
 /// Best-effort locate the circuit crate directory (holding `Cargo.toml`) to
-/// auto-build: an explicit crate path, else the cwd, else walking up from the
-/// resolved output dir.
+/// auto-build: the crate the resolved output dir is under, else an explicit crate
+/// path, else the cwd, else walking up from the resolved output dir.
 fn find_crate_dir(args: &ProveArgs, project: &XarkProject) -> Option<PathBuf> {
+    // The crate the build output belongs to, first: at a project's root the path
+    // and the cwd hold the workspace's `Cargo.toml`, not the circuit's.
+    if let Some(krate) = project.crate_dir()
+        && krate.join("Cargo.toml").is_file()
+    {
+        return Some(krate);
+    }
     // Try each source independently: an explicit crate path, then the cwd, then
     // walking up from the resolved output dir. (Independent `if`s, not else-if,
     // so an explicit *non-crate* path still falls back to cwd.)

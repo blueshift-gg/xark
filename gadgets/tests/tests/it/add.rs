@@ -170,6 +170,40 @@ fn add_needs_a_project() {
     assert!(!tmp.path().join("xark.toml").exists());
 }
 
+/// `xark prove` at a fresh project's root builds its circuit and makes its key
+/// first: the root's `Cargo.toml` is the workspace's, so the build it runs is the
+/// circuit crate's, not the root's.
+#[test]
+fn prove_at_a_fresh_root_builds_the_circuit() {
+    let tmp = tempdir();
+    let app = tmp.path().join("claim");
+    let (ok, _, err) = crate::common::run(&["init", app.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let mut manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();
+    manifest += &format!(
+        "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\n",
+        root.join("crates/lang").display()
+    );
+    std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
+
+    let o = Command::new(crate::common::xark_bin())
+        .arg("prove")
+        .current_dir(&app)
+        .output()
+        .expect("invoke xark");
+    let err = String::from_utf8_lossy(&o.stderr);
+    // Built and keyed; what's left is the inputs, which a fresh project has none of.
+    assert!(
+        !o.status.success() && err.contains("missing input"),
+        "{err}"
+    );
+    assert!(app.join("keys/claim/pk.bin").is_file(), "{err}");
+}
+
 /// The edges of a project: `xark init` beside files a directory already has, a
 /// workspace member of your own, names that would clash, a `--check` that fails
 /// partway, and a program added after a client went missing.
