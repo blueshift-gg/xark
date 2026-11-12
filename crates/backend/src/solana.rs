@@ -1,5 +1,5 @@
 //! Solana / `alt_bn128`-compatible (Ethereum-compatible) binary encoding for
-//! BN254 group elements and scalars.
+//! BN254 group elements.
 //!
 //! Solana exposes the BN254 pairing-friendly group operations through three
 //! syscalls (`sol_alt_bn128_addition`, `sol_alt_bn128_multiplication`,
@@ -11,7 +11,6 @@
 //! * **G2Affine** is encoded as 128 bytes: `x.c1 || x.c0 || y.c1 || y.c0`,
 //!   each component a 32-byte big-endian Fq value. Note the **`(c1, c0)`
 //!   order** — imaginary part first, real part second.
-//! * **Fr** scalars are 32 bytes big-endian.
 //! * The **point at infinity** is the all-zeros buffer (64 bytes for G1,
 //!   128 bytes for G2).
 //!
@@ -23,26 +22,19 @@
 //!
 //! ## Big-endian vs little-endian
 //!
-//! The big-endian `(c1, c0)` encoders above are the original
+//! The big-endian `(c1, c0)` encoders below are the original
 //! Ethereum-precompile format; today they are used only as a canonical byte
-//! representation for ceremony transcript hashing. The **on-chain export**
-//! (`assemble_{vk,proof,public_inputs}_bytes_le`, consumed by `xark-verifier`)
-//! uses the **little-endian** `(c0, c1)` encoders further down, matching the
-//! `alt_bn128_*_le` syscall family. See those sections below.
+//! representation for ceremony transcript hashing, which never decodes them.
+//! The **on-chain export** (`assemble_{vk,proof,public_inputs}_bytes_le`,
+//! consumed by `xark-verifier`) uses the **little-endian** `(c0, c1)` encoders
+//! re-exported further down, matching the `alt_bn128_*_le` syscall family.
 
-use ark_bn254::{Fq, Fq2, Fr, G1Affine, G2Affine};
+use ark_bn254::{Fq, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
-use ark_ff::PrimeField;
 use num_bigint::BigUint;
 
-/// Width in bytes of an encoded Fq / Fr field element.
+/// Width in bytes of an encoded Fq field element.
 const FIELD_BYTES: usize = 32;
-/// Width in bytes of an encoded G1 point.
-pub const G1_BYTES: usize = 64;
-/// Width in bytes of an encoded G2 point.
-pub const G2_BYTES: usize = 128;
-/// Width in bytes of an encoded Fr scalar.
-pub const FR_BYTES: usize = 32;
 
 /// Encode an Fq element as 32 big-endian bytes (zero-padded on the left).
 fn encode_fq(value: &Fq) -> [u8; FIELD_BYTES] {
@@ -53,11 +45,6 @@ fn encode_fq(value: &Fq) -> [u8; FIELD_BYTES] {
     let offset = FIELD_BYTES - bytes.len();
     out[offset..].copy_from_slice(&bytes);
     out
-}
-
-/// Decode 32 big-endian bytes into an Fq element (reduced modulo `p`).
-fn decode_fq(bytes: &[u8]) -> Fq {
-    Fq::from_be_bytes_mod_order(bytes)
 }
 
 /// Encode a G1 affine point as 64 bytes: `x (32 BE) || y (32 BE)`.
@@ -71,18 +58,6 @@ pub fn encode_g1(p: &G1Affine) -> [u8; G1_BYTES] {
     out[..FIELD_BYTES].copy_from_slice(&encode_fq(&x));
     out[FIELD_BYTES..].copy_from_slice(&encode_fq(&y));
     out
-}
-
-/// Decode 64 bytes into a G1 affine point. An all-zero buffer decodes to
-/// the point at infinity. No subgroup check is performed (matches the
-/// behavior of the on-chain syscalls, which check internally).
-pub fn decode_g1(bytes: &[u8; G1_BYTES]) -> G1Affine {
-    if bytes.iter().all(|b| *b == 0) {
-        return G1Affine::zero();
-    }
-    let x = decode_fq(&bytes[..FIELD_BYTES]);
-    let y = decode_fq(&bytes[FIELD_BYTES..]);
-    G1Affine::new_unchecked(x, y)
 }
 
 /// Encode a G2 affine point as 128 bytes:
@@ -102,36 +77,6 @@ pub fn encode_g2(p: &G2Affine) -> [u8; G2_BYTES] {
     out
 }
 
-/// Decode 128 bytes into a G2 affine point. Handles the `(c1, c0)` wire
-/// order. An all-zero buffer decodes to the point at infinity.
-pub fn decode_g2(bytes: &[u8; G2_BYTES]) -> G2Affine {
-    if bytes.iter().all(|b| *b == 0) {
-        return G2Affine::zero();
-    }
-    let x_c1 = decode_fq(&bytes[0..32]);
-    let x_c0 = decode_fq(&bytes[32..64]);
-    let y_c1 = decode_fq(&bytes[64..96]);
-    let y_c0 = decode_fq(&bytes[96..128]);
-    let x = Fq2::new(x_c0, x_c1);
-    let y = Fq2::new(y_c0, y_c1);
-    G2Affine::new_unchecked(x, y)
-}
-
-/// Encode an Fr scalar as 32 big-endian bytes (zero-padded on the left).
-pub fn encode_fr(f: &Fr) -> [u8; FR_BYTES] {
-    let big: BigUint = (*f).into();
-    let bytes = big.to_bytes_be();
-    let mut out = [0u8; FR_BYTES];
-    let offset = FR_BYTES - bytes.len();
-    out[offset..].copy_from_slice(&bytes);
-    out
-}
-
-/// Decode 32 big-endian bytes into an Fr scalar (reduced modulo `r`).
-pub fn decode_fr(bytes: &[u8; FR_BYTES]) -> Fr {
-    Fr::from_be_bytes_mod_order(bytes)
-}
-
 // =============================================================================
 // Little-endian variants for the `alt_bn128_*_le` syscall family.
 // =============================================================================
@@ -148,11 +93,11 @@ pub fn decode_fr(bytes: &[u8; FR_BYTES]) -> Fr {
 // `(c1, c0)` flip was a quirk of the Ethereum-compat BE format that the LE
 // variants don't preserve).
 
-// The encoders themselves live in `xark_groth16::solana`, shared with xark-wasm
-// so a proof made in a browser becomes the same instruction data.
+// The encoders and the point sizes live in `xark_groth16::solana`, shared with
+// xark-wasm so a proof made in a browser becomes the same instruction data.
 pub use xark_groth16::solana::{
-    assemble_proof_bytes_le, assemble_public_inputs_bytes_le, assemble_vk_bytes_le, encode_fr_le,
-    encode_g1_le, encode_g2_le, negate_g1,
+    FR_BYTES, G1_BYTES, G2_BYTES, assemble_proof_bytes_le, assemble_public_inputs_bytes_le,
+    assemble_vk_bytes_le, encode_fr_le, encode_g1_le, encode_g2_le, negate_g1,
 };
 
 #[cfg(test)]
@@ -170,39 +115,35 @@ mod tests {
         (G2Affine::generator() * Fr::from(k)).into_affine()
     }
 
+    /// Each 32-byte coordinate of a little-endian encoding, byte-reversed: the
+    /// big-endian bytes of the same coordinates, in the same order.
+    fn reverse_coords(le: &[u8]) -> Vec<u8> {
+        le.chunks(FIELD_BYTES)
+            .flat_map(|c| c.iter().rev().copied())
+            .collect()
+    }
+
     #[test]
-    fn roundtrip_g1_random() {
+    fn g1_is_the_le_encoding_byte_reversed() {
         for k in [1u64, 2, 3, 5, 7, 11, 13, 42, 1234, 999_999] {
             let p = g1_for(k);
-            let bytes = encode_g1(&p);
-            let back = decode_g1(&bytes);
-            assert_eq!(p, back, "G1 roundtrip failed for k={k}");
+            let be = encode_g1(&p).to_vec();
+            assert_eq!(be, reverse_coords(&encode_g1_le(&p)), "k={k}");
         }
     }
 
     #[test]
-    fn roundtrip_g2_random() {
+    fn g2_is_the_le_encoding_byte_reversed_with_c1_first() {
         for k in [1u64, 2, 3, 5, 7, 11, 13, 42, 1234, 999_999] {
             let p = g2_for(k);
-            let bytes = encode_g2(&p);
-            let back = decode_g2(&bytes);
-            assert_eq!(p, back, "G2 roundtrip failed for k={k}");
+            // LE wire: x.c0 x.c1 y.c0 y.c1; BE wire: x.c1 x.c0 y.c1 y.c0.
+            let reversed = reverse_coords(&encode_g2_le(&p));
+            let swapped: Vec<u8> = [1, 0, 3, 2]
+                .iter()
+                .flat_map(|&i| reversed[i * FIELD_BYTES..][..FIELD_BYTES].to_vec())
+                .collect();
+            assert_eq!(encode_g2(&p).to_vec(), swapped, "k={k}");
         }
-    }
-
-    #[test]
-    fn roundtrip_fr() {
-        for k in [0u64, 1, 2, 3, 7, 42, 1_000_000_007, u64::MAX] {
-            let f = Fr::from(k);
-            let bytes = encode_fr(&f);
-            let back = decode_fr(&bytes);
-            assert_eq!(f, back, "Fr roundtrip failed for k={k}");
-        }
-        // Cover a non-u64-derived value too: -1 (i.e. r-1).
-        let neg_one = Fr::from(0u64) - Fr::from(1u64);
-        let bytes = encode_fr(&neg_one);
-        let back = decode_fr(&bytes);
-        assert_eq!(neg_one, back, "Fr roundtrip failed for -1");
     }
 
     #[test]
@@ -240,10 +181,6 @@ mod tests {
             &encode_fq(&y_c0),
             "byte slot 96..128 must be y.c0"
         );
-
-        // And decoding flips them back correctly.
-        let back = decode_g2(&bytes);
-        assert_eq!(back, p);
     }
 
     #[test]
@@ -276,25 +213,8 @@ mod tests {
     }
 
     #[test]
-    fn point_at_infinity_round_trips() {
-        // G1 identity.
-        let g1_zero = G1Affine::zero();
-        let g1_bytes = encode_g1(&g1_zero);
-        assert_eq!(
-            g1_bytes, [0u8; G1_BYTES],
-            "G1 infinity must encode to zeros"
-        );
-        let g1_back = decode_g1(&g1_bytes);
-        assert_eq!(g1_back, g1_zero);
-
-        // G2 identity.
-        let g2_zero = G2Affine::zero();
-        let g2_bytes = encode_g2(&g2_zero);
-        assert_eq!(
-            g2_bytes, [0u8; G2_BYTES],
-            "G2 infinity must encode to zeros"
-        );
-        let g2_back = decode_g2(&g2_bytes);
-        assert_eq!(g2_back, g2_zero);
+    fn point_at_infinity_encodes_to_zeros() {
+        assert_eq!(encode_g1(&G1Affine::zero()), [0u8; G1_BYTES]);
+        assert_eq!(encode_g2(&G2Affine::zero()), [0u8; G2_BYTES]);
     }
 }
