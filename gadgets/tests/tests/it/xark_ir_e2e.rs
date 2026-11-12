@@ -7,7 +7,7 @@
 //!   1. load the IR (`R1csProgram` + witness-gen `PrimitiveProgram`),
 //!   2. **solve the witness with xark's own solver**,
 //!   3. run xark's *real* production backend: `setup_from_ptau` (xark-groth16's
-//!      phase-2 setup) → `xark_groth16::prove` → `xark_backend::verify`.
+//!      phase-2 setup) → `xark_groth16::prove` → `xark_groth16::verify`.
 //!
 //! A green test is the whole thesis: gadgets live in the frontend, the backend
 //! is lean, and it proves our IR directly.
@@ -103,7 +103,7 @@ fn cube_proves_and_verifies_through_xark_backend_no_acir() {
     .expect("prove via xark keys");
 
     assert!(
-        xark_backend::verify(&keys.verifying_key, &proof, &pi).expect("verify"),
+        xark_groth16::verify(&keys.verifying_key, &pi, &proof).expect("verify"),
         "our xark-IR circuit must verify through xark's backend"
     );
 
@@ -111,7 +111,7 @@ fn cube_proves_and_verifies_through_xark_backend_no_acir() {
     let mut bad = pi.clone();
     bad[0] += Fr::from(1u64);
     assert!(
-        !xark_backend::verify(&keys.verifying_key, &proof, &bad).expect("verify tampered"),
+        !xark_groth16::verify(&keys.verifying_key, &bad, &proof).expect("verify tampered"),
         "tampering the public input must invalidate the proof"
     );
 }

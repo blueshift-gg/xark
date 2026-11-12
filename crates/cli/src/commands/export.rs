@@ -147,7 +147,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
         }
         // The proof is the generated crate's self-test: one that doesn't verify (a
         // proof from an earlier key) would only fail there, after the export.
-        if xark_backend::verify(&vk, &proof, &public_inputs)? {
+        if xark_groth16::verify(&vk, &public_inputs, &proof)? {
             Some((proof, public_inputs))
         } else if explicit {
             anyhow::bail!(
@@ -322,7 +322,7 @@ fn existing_sample(
         .chunks(32)
         .map(|c| ark_bn254::Fr::deserialize_compressed(c).ok())
         .collect::<Option<_>>()?;
-    xark_backend::verify(vk, &proof, &inputs)
+    xark_groth16::verify(vk, &inputs, &proof)
         .unwrap_or(false)
         .then_some((proof, inputs))
 }

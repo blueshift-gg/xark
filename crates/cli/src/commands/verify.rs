@@ -11,7 +11,7 @@ use ark_bn254::Fr;
 use clap::Args;
 
 use xark_backend::serialization::read_public_inputs;
-use xark_backend::{keys::Groth16Keys, proof::ProofBundle, verify};
+use xark_backend::{keys::Groth16Keys, proof::ProofBundle};
 
 use crate::xark_project::XarkProject;
 
@@ -87,7 +87,7 @@ pub fn run(args: VerifyArgs) -> Result<()> {
         Some(arg) => super::read_public_inputs(&project.xark_dir, arg)?,
     };
 
-    let ok = verify(&vk, &proof, &public)?;
+    let ok = xark_groth16::verify(&vk, &public, &proof)?;
     println!(
         "{}",
         if ok {
