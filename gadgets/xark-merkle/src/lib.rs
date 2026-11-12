@@ -9,7 +9,17 @@
 //! Soundness: each level orders its pair with [`cond_swap`], which constrains
 //! `index_bits[i]` boolean (`b·b == b`) itself, so a prover cannot smuggle a
 //! non-`{0,1}` selector; the final `require_eq` pins the fold to the claimed root.
+//!
+//! [`poseidon2`] is the same tree over Poseidon2, with appends and an indexed tree
+//! for non-membership; [`tree`] builds either tree's roots and paths on the host.
 #![no_std]
+
+#[cfg(not(xark))]
+extern crate alloc;
+
+pub mod poseidon2;
+#[cfg(not(xark))]
+pub mod tree;
 
 use xark::{Field, gadget, require_eq};
 use xark_poseidon::hash2;

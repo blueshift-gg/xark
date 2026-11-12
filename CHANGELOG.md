@@ -165,6 +165,16 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   a field element or arrays of them (the `Select` trait, for a gadget's own
   types). `xark-grumpkin`'s private `mux` and `grumpkin_complete_add`'s use it,
   with the same rows.
+- `xark-merkle` has Merkle trees on Poseidon2 (`xark_merkle::poseidon2`):
+  `merkle_root` and `merkle_verify` as before, `merkle_append` (the root with a
+  leaf written in an empty slot, one path proving both roots), and an indexed
+  tree (Aztec's) for non-membership: `indexed_non_membership` and
+  `indexed_insert`, comparing values below `2^BITS`, `BITS ≤ 252`. They are
+  `cond_swap` and Poseidon2 composed, with no new `#[gadget]`. `xark_merkle::tree`
+  builds the trees on the host (`Tree`, filled from the left, with Poseidon2 or
+  Poseidon nodes, and `IndexedTree`): roots, paths, empty-subtree roots,
+  appends and insertions, for the paths a client hand-rolled. The Poseidon
+  `merkle_root`/`merkle_verify` are unchanged. New example: `nullifier_tree`.
 
 ## 0.3.1
 

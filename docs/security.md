@@ -264,6 +264,24 @@ function `H`, and that each level emits the template's rows); bridge `merkle_mat
 `xark-merkle`'s `tests/vec.rs` (honest path accepted; wrong root, tampered sibling,
 non-boolean bit, and each tampered witness value rejected).
 
+**Poseidon2 trees** (`gadgets/xark-merkle/src/poseidon2.rs`) are the same fold over
+`xark_poseidon2::hash2`, with no `#[gadget]` of their own. `merkle_append` folds two
+leaves up one path: `leaf` through `cond_swap`, `empty_leaf` through the swap written
+out (`a + b·(s − a)`, one product), whose bit `cond_swap`'s row already made boolean;
+it asserts the second fold equals `old_root` and returns the first. So the new tree is
+the old one with one slot, then empty, written; which slot is the caller's to bind.
+The indexed tree (Aztec's): a leaf is `hash([value, next_index, next_value])`,
+`indexed_non_membership` asserts the low leaf is in the tree and `value < x` and
+(`next_value = 0` or `x < next_value`), with `Field::lt::<BITS>`, which range-checks
+both operands below `2^BITS`, `BITS ≤ 252`, so the comparison is on integers and can't
+wrap. That proves `x` absent from a tree that is a sorted list; `indexed_insert` keeps
+it one (the low leaf rewritten in place to point at `x`, the new leaf appended in an
+empty slot) from the head `(0, 0, 0)`. **KAT:** `tests/poseidon2.rs` (roots from
+`merkle_ref.py`, the Python Poseidon2; round trips; a wrong sibling, flipped and
+non-boolean bits, a written slot, present values and low leaves whose range misses
+`x` rejected; each tampered witness value rejected; at depth 2 an exhaustive witness
+search finds one witness for each honest input and none for each forgery).
+
 ### 2.14 xark-IR arithmetic → R1CS lowering
 
 **Files.** `crates/ir/` (arithmetic ops) and `crates/prover/` (R1CS synthesis).

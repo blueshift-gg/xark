@@ -4910,6 +4910,7 @@ dependencies = [
  "xark",
  "xark-ir",
  "xark-poseidon",
+ "xark-poseidon2",
  "xark-test-harness",
 ]
 

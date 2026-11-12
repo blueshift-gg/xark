@@ -1,6 +1,6 @@
 [package]
 name = "xark-merkle"
-description = "Merkle-tree membership gadget for xark zero-knowledge circuits."
+description = "Merkle trees for xark zero-knowledge circuits: membership, appends and non-membership."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"
@@ -18,6 +18,7 @@ path = "src/lib.rs"
 [dependencies]
 xark.workspace = true
 xark-poseidon.workspace = true
+xark-poseidon2.workspace = true
 
 [dev-dependencies]
 xark-test-harness = { path = "../../crates/test-harness" }

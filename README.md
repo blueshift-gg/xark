@@ -179,7 +179,7 @@ xark-poseidon2 = "0.4"
 | `xark-poseidon`, `xark-poseidon2` | Poseidon and Poseidon2 hashes over BN254, the cheapest in a circuit |
 | `xark-sha256`, `xark-keccak`, `xark-blake2s`, `xark-blake3` | Standard hashes, matching their native implementations |
 | `xark-mimc`, `xark-pedersen` | MiMC and Pedersen hashes |
-| `xark-merkle` | Merkle-tree membership |
+| `xark-merkle` | Merkle trees: membership, appends, non-membership (indexed trees) |
 | `xark-aes` | AES-128/256 block cipher, CTR and GCM |
 | `xark-secp256k1`, `xark-secp256r1` | ECDSA signature verification on secp256k1 and P-256 |
 | `xark-ed25519` | Ed25519 (EdDSA) signature verification |
