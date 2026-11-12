@@ -77,6 +77,7 @@ test tests::rejects_invalid ... ok
 $ xark prove --inputs '{"secret": 3, "result": 9}'
 ...
 ✅ Proof produced and self-checked (1 public input(s)).
+   solved in 0.00s, proved in 0.00s
 ```
 
 Try inputs that don't satisfy the circuit, and xark shows you where:

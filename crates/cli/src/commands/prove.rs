@@ -125,8 +125,8 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // it just replaces a "run build first" error with actually doing it.
     autobuild_and_setup(&args, &project, &pk_path)?;
 
-    // `PROVE_TIME=1` prints a coarse phase breakdown (solve / prove) so the real
-    // bottleneck is measured, not assumed.
+    // `PROVE_TIME=1` (a `debug` build) adds the constraint count and whether the
+    // rows came from the cache to the solve / prove times every proof reports.
     let timing = super::dbg_flag("PROVE_TIME");
     let xbc = project.proving_xbc();
     // Inputs come from `--inputs`: inline JSON or a file path (agnostic).
@@ -164,7 +164,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
             }
         }
     };
-    let (proof, public) = prove_streaming(
+    let (proof, public, times) = prove_streaming(
         &args,
         &xbc,
         &pk_path,
@@ -173,7 +173,14 @@ pub fn run(args: ProveArgs) -> Result<()> {
         sources.as_ref(),
         timing,
     )?;
-    write_outputs(&args, &proof_out, &out_dir, proof, public)
+    write_outputs(&args, &proof_out, &out_dir, proof, public, times)
+}
+
+/// How long the two halves of a proof took: solving the witness (with the row
+/// source built beside it) and the Groth16 prove (key read, MSMs and self-check).
+struct ProveTimes {
+    solve: std::time::Duration,
+    prove: std::time::Duration,
 }
 
 /// The prover RNG: OS randomness, or — test fixtures only — a fixed seed (refused
@@ -233,7 +240,11 @@ fn prove_streaming(
     inputs: &BTreeMap<String, String>,
     sources: Option<&xark_ir::SourceMap>,
     timing: bool,
-) -> Result<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
+) -> Result<(
+    xark_groth16::Proof<ark_bn254::Bn254>,
+    Vec<ark_bn254::Fr>,
+    ProveTimes,
+)> {
     let t = std::time::Instant::now();
     let bytes = std::fs::read(xbc).with_context(|| format!("reading {}", xbc.display()))?;
     let fingerprint = super::sha256_hex(&bytes);
@@ -345,14 +356,18 @@ fn prove_streaming(
             let _ = fs::remove_file(&tmp);
         }
     }
+    let times = ProveTimes {
+        solve: t_solve,
+        prove: t_prove.elapsed(),
+    };
     if timing {
         eprintln!(
             "PROVE_TIME: [streaming] solve={t_solve:?} prove={:?} ({} constraints) cached={cached}",
-            t_prove.elapsed(),
+            times.prove,
             src.num_constraints()
         );
     }
-    Ok((proof, public))
+    Ok((proof, public, times))
 }
 
 /// The rows to prove from, and whether they came without re-running the minimize
@@ -428,6 +443,7 @@ fn write_outputs(
     out_dir: &std::path::Path,
     proof: xark_groth16::Proof<ark_bn254::Bn254>,
     public: Vec<ark_bn254::Fr>,
+    times: ProveTimes,
 ) -> Result<()> {
     let bundle = ProofBundle {
         proof,
@@ -458,6 +474,14 @@ fn write_outputs(
         crate::style::brand(&format!(
             "✅ Proof produced and self-checked ({} public input(s)).",
             public.len()
+        ))
+    );
+    println!(
+        "{}",
+        crate::style::dim(&format!(
+            "   solved in {:.2}s, proved in {:.2}s",
+            times.solve.as_secs_f64(),
+            times.prove.as_secs_f64()
         ))
     );
 
