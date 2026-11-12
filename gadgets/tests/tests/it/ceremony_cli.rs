@@ -391,6 +391,13 @@ fn keys_changed_beyond_delta_are_refused() {
     let (pk_path, vk_path) = (cer.join("proving_key.bin"), cer.join("verifying_key.bin"));
     let honest_pk = std::fs::read(&pk_path).unwrap();
     let honest_vk = std::fs::read(&vk_path).unwrap();
+    // A header version this reader doesn't know is refused, not read as some
+    // other layout.
+    assert_eq!(&honest_pk[..5], b"XKPK\x02");
+    let mut future = honest_pk.clone();
+    future[4] = 3;
+    let err = Groth16Keys::decode_proving_key(&future).unwrap_err();
+    assert!(err.to_string().contains("version 3"), "{err}");
     let mut keys = Groth16Keys {
         proving_key: Groth16Keys::read_proving_key(&pk_path).unwrap(),
         verifying_key: Groth16Keys::read_verifying_key(&vk_path).unwrap(),
