@@ -130,20 +130,27 @@ pub fn main() {
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor(a) => doctor::run(a),
-        // Frontend commands delegate to the hand-rolled `cargo`-driving
-        // implementations, which return a process exit code.
-        Command::Init(a) => exit_code("init", crate::cli::cmd_init(&a.to_argv())),
+        // Frontend commands drive `cargo` and print their own diagnostics; they
+        // return a process exit code.
+        Command::Init(a) => exit_code(crate::cli::cmd_init(
+            a.name.as_deref(),
+            a.circuit.as_deref(),
+        )),
         Command::Add(a) => add::run(a),
-        Command::Build(a) => exit_code("build", crate::cli::cmd_build_command(&a.to_argv())),
+        Command::Build(a) => exit_code(crate::cli::cmd_build_command(&a)),
         // Bare `xark check` stays the fast, artifact-free `cargo check` validator.
         // `xark check --inputs …` opts into the witness-based soundness analyzer
         // (build + solve + `analyze_underconstrained`), which is `anyhow`-based.
-        Command::Check(a) if a.inputs.is_none() => {
-            exit_code("check", crate::cli::cmd_check(&a.to_argv()))
-        }
+        Command::Check(a) if a.inputs.is_none() => exit_code(crate::cli::cmd_check(
+            &a.crate_dir,
+            a.message_format.as_deref() == Some("json"),
+        )),
         Command::Check(a) => check::run(a),
-        Command::Test(a) => exit_code("test", crate::cli::cmd_test(&a.to_argv())),
-        Command::Clean(a) => exit_code("clean", crate::cli::cmd_clean(&a.to_argv())),
+        Command::Test(a) => {
+            let (dir, forwarded) = a.split();
+            exit_code(crate::cli::cmd_test(&dir, &forwarded))
+        }
+        Command::Clean(_) => exit_code(crate::cli::cmd_clean()),
         // Backend commands are `anyhow`-based.
         Command::Setup(a) => setup::run(a),
         Command::Prove(a) => prove::run(a),
@@ -159,7 +166,7 @@ fn run(cli: Cli) -> Result<()> {
 
 /// Bridge a frontend command's process exit code into the `anyhow` flow: exit
 /// straight away on failure (the frontend already printed a diagnostic).
-fn exit_code(_name: &str, code: i32) -> Result<()> {
+fn exit_code(code: i32) -> Result<()> {
     if code == 0 {
         Ok(())
     } else {
@@ -177,17 +184,6 @@ pub struct InitArgs {
     /// to the project's name.
     #[arg(long)]
     pub circuit: Option<String>,
-}
-
-impl InitArgs {
-    fn to_argv(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.name.iter().cloned().collect();
-        if let Some(c) = &self.circuit {
-            v.push("--circuit".into());
-            v.push(c.clone());
-        }
-        v
-    }
 }
 
 #[derive(clap::Args, Debug)]
@@ -215,33 +211,8 @@ pub struct BuildArgs {
     pub check: bool,
 }
 
-impl BuildArgs {
-    fn to_argv(&self) -> Vec<String> {
-        let mut v = vec![self.crate_dir.clone()];
-        if let Some(out) = &self.out {
-            v.push("--out".into());
-            v.push(out.clone());
-        }
-        v.push("--field".into());
-        v.push(self.field.clone());
-        if self.emit_json {
-            v.push("--emit-json".into());
-        }
-        if self.check {
-            v.push("--check".into());
-        }
-        v
-    }
-}
-
 #[derive(clap::Args, Debug)]
 pub struct CleanArgs {}
-
-impl CleanArgs {
-    fn to_argv(&self) -> Vec<String> {
-        Vec::new()
-    }
-}
 
 #[derive(clap::Args, Debug)]
 pub struct CheckArgs {
@@ -265,16 +236,6 @@ pub struct CheckArgs {
     pub out: Option<String>,
 }
 
-impl CheckArgs {
-    fn to_argv(&self) -> Vec<String> {
-        let mut v = vec![self.crate_dir.clone()];
-        if self.message_format.as_deref() == Some("json") {
-            v.push("--message-format=json".into());
-        }
-        v
-    }
-}
-
 #[derive(clap::Args, Debug)]
 pub struct TestArgs {
     /// Circuit crate directory to build and test.
@@ -288,17 +249,15 @@ pub struct TestArgs {
 }
 
 impl TestArgs {
-    /// `[crate dir, cargo test args…]`, read from the raw command line: clap
+    /// `(crate dir, cargo test args)`, read from the raw command line: clap
     /// swallows a `--` that `cargo test` needs (`xark test . -- --list` must reach
     /// cargo as `-- --list`). The first argument is the crate dir if it is one or
     /// looks like a path (so a mistyped path is reported, not taken as a filter);
     /// `xark test my_test` filters in the current crate.
-    fn to_argv(&self) -> Vec<String> {
+    fn split(&self) -> (String, Vec<String>) {
         let raw: Vec<String> = std::env::args().collect();
         let Some(i) = raw.iter().skip(1).position(|a| a == "test") else {
-            let mut v = vec![self.crate_dir.clone()];
-            v.extend(self.cargo_args.iter().cloned());
-            return v;
+            return (self.crate_dir.clone(), self.cargo_args.clone());
         };
         let rest = &raw[i + 2..];
         match rest.first() {
@@ -306,11 +265,9 @@ impl TestArgs {
                 if !d.starts_with('-')
                     && (std::path::Path::new(d).is_dir() || looks_like_path(d)) =>
             {
-                rest.to_vec()
+                (d.clone(), rest[1..].to_vec())
             }
-            _ => std::iter::once(".".to_string())
-                .chain(rest.iter().cloned())
-                .collect(),
+            _ => (".".to_string(), rest.to_vec()),
         }
     }
 }

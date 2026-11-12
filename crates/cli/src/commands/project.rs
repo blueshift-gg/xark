@@ -232,7 +232,7 @@ pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<
     // A current build (`xark test`'s, which also attributes each constraint to its
     // source line) is the same circuit: no second build.
     if crate::cli::stale_build(&project.xark_dir, "circuit.xbc", Some("bn254")).is_some() {
-        let code = crate::cli::cmd_build(std::slice::from_ref(&dir));
+        let code = crate::cli::cmd_build(&dir);
         if code != 0 {
             return Err(code);
         }
@@ -398,9 +398,7 @@ fn build_programs(root: &Path) -> i32 {
 pub fn test(root: &Path, forwarded: &[String]) -> i32 {
     check_release(root);
     for circuit in circuits(root) {
-        let mut args = vec![circuit.display().to_string()];
-        args.extend(forwarded.iter().cloned());
-        let code = crate::cli::cmd_test(&args);
+        let code = crate::cli::cmd_test(&circuit.display().to_string(), forwarded);
         if code != 0 {
             return code;
         }

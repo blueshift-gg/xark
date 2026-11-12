@@ -534,7 +534,7 @@ fn autobuild_and_setup(
             crate::style::tag(),
             dir.display()
         );
-        if crate::cli::cmd_build(&[dir.display().to_string()]) != 0 {
+        if crate::cli::cmd_build(&dir.display().to_string()) != 0 {
             anyhow::bail!("auto-build failed (build the circuit with `xark build` first)");
         }
         is_built = project.circuit_xbc().exists();
