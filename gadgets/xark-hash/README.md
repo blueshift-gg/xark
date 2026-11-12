@@ -29,7 +29,8 @@ pub fn sha256(msg: Private<[u8; 3]>, digest: Public<Hash>) {
 }
 ```
 
-On the host, a `Hash` is a plain `[u8; 32]`.
+On the host, a `Hash` is a plain `[u8; 32]`. A Solana address has the same
+layout but its own type, `xark::Address`, which clients give in base58.
 
 ## What's in it
 

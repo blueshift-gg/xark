@@ -63,6 +63,28 @@ fn zkyc(id: Private<Identity>, commitment: Public<Field>, policy: Public<Policy>
 `examples/zkyc` is this circuit in full. A `bool` input works too: one field
 element, checked to be 0 or 1.
 
+## Addresses
+
+`Address` is a Solana address (a `Pubkey`, @solana/kit's `Address`): a recipient,
+a holder, a mint. It's two field elements, the first and last 16 bytes, each
+big-endian, as `xark_hash::Hash` splits a digest: one field would reduce most
+addresses mod p, and a program would have to reduce its own the same way. It's
+base58 in `--inputs` and decoded public inputs (`0x`-hex is taken too), a
+`[u8; 32]` or its base58 in Rust (`Address::new(key.to_bytes())`,
+`"Tokenkeg…".into()`), kit's `Address` or its bytes in TypeScript, and a
+`[u8; 32]` in an exported verifier's `PublicInputs`, which splits it for you.
+
+```rust
+#[circuit]
+fn withdraw(note: Private<Note>, root: Public<Field>, recipient: Public<Address>) {
+    require_eq(note.root(), root);
+    bind(recipient); // the proof verifies only with the recipient it was made for
+}
+```
+
+`require_eq` compares two addresses (two constraints), and `to_fields()` gives
+`[hi, lo]` to hash one. `examples/bound_recipient` binds one.
+
 A type `#[input]` doesn't cover implements `Input` by hand, in one impl that
 serves the circuit and the host alike:
 
@@ -78,6 +100,6 @@ impl Input for Hash {
 ```
 
 A `TYPE` is built from the standard types (field, `uN`, bytes, number, date,
-text, choice, set, arrays, tuples, structs), and those are what client
+text, choice, set, address, arrays, tuples, structs), and those are what client
 generators map: adding a language means mapping that fixed list, never a
 circuit's own types.

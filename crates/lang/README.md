@@ -45,7 +45,7 @@ cd my-circuit && xark test   # build the circuit, then run the tests
 | `select` | `select(bit, t, f)` is `bit ? t : f` for a bit: a field element or an array of them, one row each |
 | `bind` | Binds a public input that no constraint uses, such as a recipient a proof is for |
 | `#[input]`, `Input` | Inputs as structs and enums, packed into as few field elements as they fit |
-| `Days`, `Time`, `Timestamp`, `Text`, `Choice`, `Bitfield`, `Country` | Everyday input types for credential-style circuits |
+| `Days`, `Time`, `Timestamp`, `Text`, `Choice`, `Bitfield`, `Country`, `Address` | Everyday input types for credential-style circuits, and a Solana address |
 
 `u8`–`u128`, `i8`–`i128` and `bool` inputs work as well, range-checked to their
 width.

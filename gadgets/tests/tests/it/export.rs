@@ -169,8 +169,9 @@ fn typed_public_inputs_match_the_proof() {
     )
     .unwrap();
     // Packed runs (one with a 249-bit set and a bool), a choice, text, times of
-    // two units, bytes, an array of structs, a hash's halves, and the extremes of
-    // signed and unsigned integers.
+    // two units, bytes, an array of structs, a hash's halves, an address (given in
+    // base58, a `[u8; 32]` in the crate), and the extremes of signed and unsigned
+    // integers.
     std::fs::write(dir.join("src/lib.rs"), KINDS).unwrap();
     std::fs::write(dir.join("inputs.json"), KINDS_INPUTS).unwrap();
     let d = dir.to_str().unwrap();
@@ -191,6 +192,7 @@ fn typed_public_inputs_match_the_proof() {
     let verifier = dir.join("clients/rust");
     let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
     assert!(lib.contains("pub struct PublicInputs {"), "{lib}");
+    assert!(lib.contains("    pub to: [u8; 32],"), "{lib}");
     let log = cargo_test(&verifier);
     assert!(log.contains("2 passed"), "{log}");
 }
@@ -231,6 +233,7 @@ pub fn kinds(
     bytes: Public<[u8; 3]>,
     pairs: Public<[Pair; 2]>,
     digest: Public<Hash>,
+    to: Public<Address>,
     big: Public<u128>,
     neg: Public<i64>,
     pt: Public<Pt>,
@@ -243,6 +246,7 @@ pub fn kinds(
     bind(bytes);
     bind(pairs);
     bind(digest);
+    bind(to);
     bind(big);
     bind(neg);
     bind(pt);
@@ -254,6 +258,7 @@ const KINDS_INPUTS: &str = r#"{"x": 3, "y": 9,
  "who": "GB", "name": "Ada Lovelace", "when": "1969-07-20T20:17:40Z",
  "bytes": "0x01ff7e", "pairs": [{"a": 65535, "b": -1}, {"a": 7, "b": -2147483648}],
  "digest": "0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f",
+ "to": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
  "big": "340282366920938463463374607431768211455", "neg": -42,
  "pt": {"0": 4000000000, "1": "18446744073709551615"}}
 "#;

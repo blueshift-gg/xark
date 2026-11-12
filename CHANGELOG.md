@@ -175,6 +175,14 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   Poseidon nodes, and `IndexedTree`): roots, paths, empty-subtree roots,
   appends and insertions, for the paths a client hand-rolled. The Poseidon
   `merkle_root`/`merkle_verify` are unchanged. New example: `nullifier_tree`.
+- `xark::Address`, a Solana address as an input: two field elements, its 16-byte
+  halves big-endian (as a wallet passed as a `Hash` or `[Field; 2]` was, so the
+  rows are the same), named `Address` in `schema.json`. It's base58 in `--inputs`
+  and decoded public inputs, a `[u8; 32]` or base58 in Rust, @solana/kit's
+  `Address` (or its bytes) in a TypeScript client, and a `[u8; 32]` in the
+  verifier crate's `PublicInputs`. `examples/bound_recipient` takes its recipient
+  as one (its `--inputs` form is now the address in base58, not two hex halves;
+  its digest is the same).
 
 ## 0.3.1
 

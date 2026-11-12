@@ -558,6 +558,9 @@ impl Gen<'_> {
             }
             return Some(s);
         }
+        if enc["base58"] == true {
+            return Some(byte_list(&xark_schema::base58::decode(v.as_str()?).ok()?));
+        }
         if enc.is_object() {
             return Some(byte_list(&hex(v.as_str()?)?));
         }

@@ -29,15 +29,17 @@ export class Field {
 /**
  * A value as JSON from xark-wasm or `client.wasm`: a `Field`, `bigint`, `Date` or
  * bytes as a string (decimal, an ISO 8601 date or date-time, `0x`-hex), the rest as
- * they are.
+ * they are (a branded string, such as @solana/kit's base58 `Address`, as itself).
  */
 export type Json<T> = T extends Field | bigint | Date | Uint8Array
   ? string
-  : T extends readonly unknown[]
-    ? { [K in keyof T]: Json<T[K]> }
-    : T extends object
-      ? { [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]: Json<T[K]> }
-      : T;
+  : T extends string
+    ? T
+    : T extends readonly unknown[]
+      ? { [K in keyof T]: Json<T[K]> }
+      : T extends object
+        ? { [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]: Json<T[K]> }
+        : T;
 
 /** An input value the circuit's types refuse. */
 export class InputError extends Error {

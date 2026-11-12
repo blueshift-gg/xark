@@ -127,7 +127,7 @@ let inputs = PublicInputs {
         min_net_worth: 500_000,
         allowed: Bitfield::<Country>::EMPTY.with(Country::DE).with(Country::FR),
     },
-    holder: *holder.address(), // a `Hash`: its 32 bytes, split into hi/lo for you
+    holder: holder.address().to_bytes(), // an `Address`: its 32 bytes, split into hi/lo for you
 };
 if !zkyc_verifier::verify(&proof, inputs) { … }
 ```
@@ -148,7 +148,7 @@ little-endian), which split into `Fields` for `verify`.
 Each input type gets a `no_std` Rust form (`crates/cli/src/commands/public_inputs.rs`):
 a field element `[u8; 32]`, an integer its Rust integer, a `Time`/`Days` range
 with `from_unix`, a `Timestamp` an `i64`, `Text` a `Text`, a `Choice` a generated
-enum, a `Bitfield` a set of it, a byte-encoded type such as `Hash` its bytes. A
+enum, a `Bitfield` a set of it, an `Address` or a byte-encoded type such as `Hash` its bytes. A
 type with no Rust form yet (a limbed number, an Ed25519 point) gives no
 `PublicInputs`: `verify` then takes the field elements (`Fields`), which
 `xark_verifier::fields` packs. Every export with a sample proof checks the

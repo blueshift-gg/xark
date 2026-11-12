@@ -41,6 +41,18 @@ input. `new Field(x)` checks it where you make it, and also takes little-endian
 bytes (as proofs and Rust's `Field::from_le_bytes` have them; `Field.fromBeBytes`
 for the other order). Decoded public inputs and Rust functions return `Field`s.
 
+An `Address` input (a Solana address, [Inputs](inputs.md#addresses)) is
+@solana/kit's `Address`, or its 32 bytes as a `Uint8Array`, and decodes to an
+`Address`, so a signer's `address`, a PDA or `address("…")` passes as it is and a
+decoded one goes straight back into kit. A client whose circuit takes one imports
+the type from `@solana/kit`, which the app then needs installed:
+
+```ts
+const proof = prover.prove({ x: 3, y: 9, recipient: signer.address });
+proof.publicInputs.recipient;                                    // an Address
+verifier.verify(proof.toBytes(), { y: 9, recipient: signer.address }); // true
+```
+
 A prover and a verifier are separate, each made from a URL serving a copy of
 `target/xark/<circuit>/` or from the bytes, so each has only the methods it can
 run. A proof travels as its bytes, `proof.toBytes()`; the verifier brings the public
@@ -143,7 +155,7 @@ drift, and a mistake names its input (`id.document: "…" is longer than 31 byte
 Errors are typed for a UI to act on: an `InputError` carries the input's `path`
 (`"id.document"`), and a `CheckFailed` the failing statement's `site` (`file`,
 `line`, `col`, `text`, the functions it called into).
-`clients/check/{zkyc,cube,sha256,merkle,scalar_range}/` hold those examples'
+`clients/check/{zkyc,cube,sha256,merkle,scalar_range,bound_recipient}/` hold those examples'
 generated clients and their vitest tests. `npm test` there (run in CI) builds xark,
 xark-wasm and each example, fails if a committed client is stale (`npm run update`
 rewrites it), typechecks, and runs the tests in Node; a folder with a `<name>.test.ts`

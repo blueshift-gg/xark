@@ -49,11 +49,12 @@ pub mod lang;
 pub mod input;
 pub use input::{Enum, Input};
 
-/// Everyday input types: [`Text`], [`Choice`] and [`Bitfield`] (of an [`Enum`]).
+/// Everyday input types: [`Text`], [`Address`], [`Choice`] and [`Bitfield`] (of an
+/// [`Enum`]).
 pub mod types;
 #[cfg(not(xark))]
 pub use types::InvalidValue;
-pub use types::{Bitfield, Choice, Text};
+pub use types::{Address, Bitfield, Choice, Text};
 
 /// Times: a [`Timestamp`] (Unix seconds), and a [`Time`] over a range of years
 /// ([`Days`]).
@@ -119,7 +120,7 @@ pub mod prelude {
     pub use crate::country::Country;
     pub use crate::input::{Enum, Input};
     pub use crate::time::{DAY, Days, HOUR, MINUTE, SECOND, Time, Timestamp, WEEK};
-    pub use crate::types::{Bitfield, Choice, Text};
+    pub use crate::types::{Address, Bitfield, Choice, Text};
     pub use xark_macros::{circuit, input};
 }
 

@@ -85,9 +85,10 @@ fn wrong_public_output_fails_to_verify() {
     );
 }
 
-/// A public input in no constraint, `bind`ed (a recipient only the verifier
-/// supplies, as its two 16-byte halves): the proof verifies only with the address
-/// it was made for.
+/// A public input in no constraint, `bind`ed (a recipient `Address` only the
+/// verifier supplies): the proof verifies only with the address it was made for,
+/// in base58 or as its bytes, and its public inputs are the address's two 16-byte
+/// halves, unreduced.
 #[test]
 fn a_bound_public_input_binds_the_proof() {
     let tmp = tempdir();
@@ -97,26 +98,63 @@ fn a_bound_public_input_binds_the_proof() {
     assert!(ok, "build failed: {err}");
     let (ok, err) = xark_setup(&out);
     assert!(ok, "setup failed: {err}");
-    // An address above p, so neither half may be reduced on the way in.
-    let alice = r#"["0xf1e2d3c4b5a69788796a5b4c3d2e1f00", "0x00112233445566778899aabbccddeeff"]"#;
-    let inputs = format!(r#"{{"x": "3", "y": "9", "recipient": {alice}}}"#);
+    // f1e2d3c4b5a69788796a5b4c3d2e1f00 00112233445566778899aabbccddeeff: above p,
+    // so neither half may be reduced on the way in.
+    let alice = "HHDs1nrQ4yPMCTW79vBSPt7V9hXyhsJMTG5bkv9BjBxr";
+    let inputs = format!(r#"{{"x": "3", "y": "9", "recipient": "{alice}"}}"#);
     let (ok, stdout, stderr) = run(&["prove", out.to_str().unwrap(), "--inputs", &inputs]);
     assert!(ok, "prove failed: {stdout}{stderr}");
+    // As a Solana verifier reads them: `y`, then each half as a 32-byte
+    // little-endian element.
+    let proof = xark_prover::CircuitProof {
+        proof: std::fs::read(out.join("proof.bin")).unwrap(),
+        public_inputs: std::fs::read(out.join("public_inputs.bin")).unwrap(),
+    };
+    let elements = proof.to_solana_public_inputs().unwrap();
+    let le = |hex: &str| {
+        let mut b: Vec<u8> = (0..32)
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .rev()
+            .collect();
+        b.resize(32, 0);
+        b
+    };
+    assert_eq!(
+        elements[32..],
+        [
+            le("f1e2d3c4b5a69788796a5b4c3d2e1f00"),
+            le("00112233445566778899aabbccddeeff")
+        ]
+        .concat()
+    );
     let verify = |recipient: &str| {
         let inputs = format!(r#"{{"y": "9", "recipient": {recipient}}}"#);
         run(&["verify", out.to_str().unwrap(), "--inputs", &inputs])
     };
-    let (ok, stdout, stderr) = verify(alice);
-    assert!(ok, "{stdout}{stderr}");
+    for same in [
+        format!("{alice:?}"),
+        // Its bytes, as hex.
+        r#""0xf1e2d3c4b5a69788796a5b4c3d2e1f0000112233445566778899aabbccddeeff""#.into(),
+    ] {
+        let (ok, stdout, stderr) = verify(&same);
+        assert!(ok, "{same}: {stdout}{stderr}");
+    }
     for other in [
         // One bit different.
-        r#"["0xf1e2d3c4b5a69788796a5b4c3d2e1f00", "0x00112233445566778899aabbccddeefe"]"#,
+        r#""HHDs1nrQ4yPMCTW79vBSPt7V9hXyhsJMTG5bkv9BjBxq""#,
         // The halves swapped.
-        r#"["0x00112233445566778899aabbccddeeff", "0xf1e2d3c4b5a69788796a5b4c3d2e1f00"]"#,
+        r#""1G9spZjaDkgYURAhMVL28Bj5woAEdS6AZ6XbaXk4ZV1""#,
     ] {
         let (ok, stdout, stderr) = verify(other);
         assert!(!ok, "recipient {other} verified: {stdout}{stderr}");
     }
+    // Not base58: refused, naming the input.
+    let (ok, stdout, stderr) = verify(r#""0OIl""#);
+    assert!(
+        !ok && stderr.contains("recipient") && stderr.contains("base58"),
+        "{stdout}{stderr}"
+    );
 }
 
 #[test]

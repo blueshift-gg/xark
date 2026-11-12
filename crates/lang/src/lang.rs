@@ -1131,7 +1131,7 @@ pub fn require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
 /// any value satisfies but which ties the proof to it.
 ///
 /// ```ignore
-/// pub fn withdraw(note: Private<Note>, root: Public<Field>, recipient: Public<Field>) {
+/// pub fn withdraw(note: Private<Note>, root: Public<Field>, recipient: Public<Address>) {
 ///     require_eq(note.root(), root);
 ///     bind(recipient);
 /// }
