@@ -188,7 +188,7 @@ xark-poseidon2 = "0.4"
 
 ## Examples
 
-[`examples/`](examples) has 73 runnable circuits, from `cube` to `zkyc` (a private
+[`examples/`](examples) has 74 runnable circuits, from `cube` to `zkyc` (a private
 credential check against a public policy), with the gadgets above at work. Test
 any of them with `xark test examples/<name>`.
 
