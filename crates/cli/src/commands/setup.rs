@@ -84,10 +84,6 @@ pub struct SetupArgs {
     #[arg(long, value_enum, default_value_t = R1csForm::Auto)]
     pub r1cs_form: R1csForm,
 
-    /// Shorthand for `--r1cs-form reduced`.
-    #[arg(long, default_value_t = false, conflicts_with = "r1cs_form")]
-    pub streamable: bool,
-
     /// QAP evaluation domain.
     ///
     /// * `smooth` — the smallest of `2^k`, `3·2^k`, `9·2^k` points. A circuit just
@@ -333,11 +329,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
     crate::cli::build_if_needed(&project.xark_dir, true)?;
     let out_dir = args.out.clone().unwrap_or_else(|| project.key_dir());
     let prof = super::dbg_flag("XARK_BUILD_TIME");
-    let form = if args.streamable {
-        R1csForm::Reduced
-    } else {
-        args.r1cs_form
-    };
+    let form = args.r1cs_form;
 
     // The `.ptau`: given, or found beside the build, unless the key has to come
     // from this machine's randomness (a seed, a smooth domain, or `xark prove`'s

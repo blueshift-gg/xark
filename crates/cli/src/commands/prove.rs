@@ -565,7 +565,6 @@ fn autobuild_and_setup(
             phase2_seed: None,
             uncompressed: false,
             r1cs_form: setup::R1csForm::Auto,
-            streamable: false,
             domain: setup::QapDomain::Auto,
         })?;
     }
