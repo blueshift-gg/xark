@@ -209,6 +209,26 @@ bug, we inherit it. **KAT:** `poseidon2_perm_matches_reference_vector`,
 `poseidon2_perm_zero_input`, `native_perm_matches_reference_vectors`,
 `native_matches_the_circuit` (`gadgets/xark-poseidon2/tests/vec.rs`).
 
+**Commitments and nullifiers.** `commit` and `nullifier` are `hash`'s sponge (rate 2,
+capacity 1, inputs added into the rate lanes) with the capacity lane seeded with
+`2^64 · domain + N`, domain 1 and 2. `hash2` seeds it with `0`, `hash` with `N < 2^64`,
+and Schnorr's challenge (§2.12) with its 16-byte ASCII tag in the domain place, so no
+two of them start the permutation from the same state: a sponge whose capacity starts
+from distinct values computes independent functions (Bertoni et al., "On the
+indifferentiability of the sponge construction", Eurocrypt 2008), and a commitment
+equals a nullifier or a Merkle node only by a Poseidon2 collision. The length is in the
+seed, so inputs of different lengths don't collide either. Their rows are the
+permutation's and linear combinations; nothing new is proven. `commit` hides its inputs
+only if one of them is a random secret; the circuit can't check that. Domain 3 is kept
+for authenticated encryption. **Challenges.** `challenge::<N, BITS>` is the low `BITS`
+bits of `hash(transcript)`, with no domain of its own: it is that hash, by design, and a
+protocol with more than one kind of challenge puts a label in the transcript. The bits
+come from `to_bits_canonical` (§2.2), so a prover can't choose another representative
+and with it another challenge. **KAT:** `native_modes_match_the_reference` (against
+`poseidon2_ref.py`, which writes them from their definitions), `domains_are_separate`,
+`commit_and_nullifier_in_a_circuit` (swapped outputs refused, also by exhaustive
+witness search) and `challenge_in_a_circuit` (`gadgets/xark-poseidon2/tests/modes.rs`).
+
 ### 2.11 AES-128/256 encryption
 
 `gadgets/xark-aes/src/lib.rs`. AES-128 and AES-256 blocks, CTR mode and GCM; all are
