@@ -152,12 +152,6 @@ The steps, with before and after code: [docs/migrating-to-0.4.md](docs/migrating
   its nullifier with `hash2` or a hand-placed tag element. Natively in `native`
   (and `commit_slice`, `nullifier_slice`), and in `@blueshift-gg/xark` as
   `poseidon2Commit`/`poseidon2Nullifier` and a session's `commit`/`nullifier`.
-- `xark_poseidon2::encrypt::<N>` and `decrypt::<N>`: authenticated encryption of
-  field elements under a key and nonce, the Poseidon sponge construction of
-  Khovratovich's "Encryption with Poseidon" on the width-3 permutation (domain 3);
-  `decrypt` constrains the tag. `⌈N/2⌉ + 1` permutations each. Natively, and in
-  `@blueshift-gg/xark` as `poseidon2Encrypt`/`poseidon2Decrypt` and a session's
-  `encrypt`/`decrypt`.
 - `xark_poseidon2::challenge::<N, BITS>`: a Fiat–Shamir challenge, the low `BITS`
   canonical bits of `hash(transcript)`. It replaces the four copies in
   `examples/grumpkin_*`, whose rows are the same.

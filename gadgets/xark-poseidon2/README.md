@@ -44,11 +44,9 @@ for a commitment to a private credential.
 | `hash::<N>(inputs)` | Sponge hash of `N` field elements (rate 2, capacity 1). The capacity is seeded with `N`, so `hash([a]) != hash([a, 0])`. |
 | `commit::<N>(inputs)` | A commitment: `hash`'s sponge in domain 1. Include a random element to make it hiding. |
 | `nullifier::<N>(inputs)` | A nullifier (say of a secret key and a note's commitment): `hash`'s sponge in domain 2. |
-| `encrypt::<N>(key, nonce, message)` | Authenticated encryption: the ciphertext (`N` elements) and a tag. |
-| `decrypt::<N>(key, nonce, ciphertext, tag)` | The message; the circuit is unsatisfiable unless the tag matches. |
 | `challenge::<N, BITS>(transcript)` | A Fiat–Shamir challenge: the low `BITS` canonical bits of `hash(transcript)`. |
 | `poseidon2_perm(state)` | The Poseidon2 permutation on a width-3 state. |
-| `native` | The same functions on the host, over `ark_bn254::Fr`, plus `hash_slice`, `commit_slice`, `nullifier_slice`, `encrypt_slice` and `decrypt_slice` for a length known only at run time. |
+| `native` | The same functions on the host, over `ark_bn254::Fr`, plus `hash_slice`, `commit_slice` and `nullifier_slice` for a length known only at run time. |
 
 ## Domains
 
@@ -63,42 +61,15 @@ construction", Eurocrypt 2008):
 | `hash::<N>` | `N` |
 | `commit::<N>` | `2^64 · 1 + N` |
 | `nullifier::<N>` | `2^64 · 2 + N` |
-| `encrypt`/`decrypt` of `N` elements | `2^64 · 3 + N` |
 
 No two are equal for any lengths (`N < 2^64`), so a commitment can't be passed off
 as a nullifier or a node, and a nullifier reveals nothing about the commitment
 made of the same values, short of a Poseidon2 collision. The length is in the
-domain too: `commit([a])` and `commit([a, 0])` are unrelated.
+domain too: `commit([a])` and `commit([a, 0])` are unrelated. Domain 3 is kept
+for authenticated encryption, which a later release may add.
 
-## Encryption
-
-`encrypt`/`decrypt` are the Poseidon sponge encryption of Khovratovich,
-"Encryption with Poseidon" (Dusk Network, 2019), as zk-kit's `poseidon-cipher`
-implements it, on this crate's width-3 state: it starts as `[key, nonce, 2^64 · 3
-+ N]`; each pair of message elements is added into the two rate lanes after a
-permutation, and those lanes are the ciphertext; a last permutation's first lane
-is the tag. The paper's width-4 state holds a two-element key and `nonce + 2^128 ·
-N`; here the key is one element (for a Diffie–Hellman shared Grumpkin point, its
-`x`), the nonce has the other rate lane, and the length is in the capacity, so any
-field element is a nonce. An odd message's last block adds into one lane: the
-paper pads with a zero, whose ciphertext is the keystream the decryptor computes
-anyway. Never encrypt twice under one key and nonce.
-
-```rust
-use xark_poseidon2::prelude::*;
-
-#[circuit]
-pub fn memo(key: Private<Field>, note: Private<[Field; 3]>, nonce: Public<Field>,
-            ciphertext: Public<[Field; 3]>, tag: Public<Field>) {
-    // The published memo is this note, encrypted to the key's holder.
-    let (c, t) = encrypt(key, nonce, note);
-    require_eq(c, ciphertext);
-    require_eq(t, tag);
-}
-```
-
-`poseidon2_ref.py` has every function written from its definition (the
-encryption with the paper's zero padding); `tests/modes.rs` checks the circuit
+`poseidon2_ref.py` has every function written from its definition;
+`tests/modes.rs` checks the circuit
 and `native` against its vectors.
 
 ## Outside the circuit
@@ -124,9 +95,7 @@ tests check them against each other and the reference vectors.
 - `hash::<5>`, checked against a public output: 721 constraints
   ([`examples/poseidon2_sponge`](https://github.com/blueshift-gg/xark/tree/master/examples/poseidon2_sponge)).
 - `commit::<N>`, `nullifier::<N>` and `hash::<N>` cost `⌈N/2⌉` permutations (240
-  rows each); `encrypt::<N>` and `decrypt::<N>` cost `⌈N/2⌉ + 1`, and `decrypt`
-  one more row for the tag (`decrypt::<3>` against a public message: 724
-  constraints).
+  rows each).
 - `challenge::<N, 128>`: `hash::<N>` and 353 rows for the canonical
   decomposition (`challenge::<14, 128>`, its bits recomposed against a public
   value: 2035 constraints).
@@ -136,7 +105,6 @@ tests check them against each other and the reference vectors.
 A circuit's `#[input] impl` methods run in its generated client, so a method that
 calls `commit` or `nullifier` (`Note::commitment`, say) computes the same value in
 TypeScript. `@blueshift-gg/xark` also has them directly: a session's
-`commit(fields)`, `nullifier(fields)`, `encrypt(key, nonce, message)` and
-`decrypt(key, nonce, ciphertext, tag)`.
+`commit(fields)` and `nullifier(fields)`.
 
 Part of [xark](https://github.com/blueshift-gg/xark): zero-knowledge circuits in plain Rust, verified on Solana.

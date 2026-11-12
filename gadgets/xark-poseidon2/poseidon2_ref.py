@@ -71,12 +71,12 @@ def poseidon2_perm(state):
     return s
 
 # ---------------------------------------------------------------------------
-# The domain-separated functions (commit, nullifier, encrypt/decrypt) and the
+# The domain-separated functions (commit, nullifier) and the
 # Fiat-Shamir challenge, written from their definitions rather than from the Rust,
 # so the vectors in tests/vec.rs check the gadget against an independent account.
 # ---------------------------------------------------------------------------
 
-DOMAIN_COMMIT, DOMAIN_NULLIFIER, DOMAIN_ENCRYPT = 1, 2, 3
+DOMAIN_COMMIT, DOMAIN_NULLIFIER = 1, 2
 
 def iv(domain, length):
     # capacity lane: 2^64 * domain + length
@@ -103,41 +103,6 @@ def nullifier(xs):
     assert len(xs) >= 1
     return sponge(iv(DOMAIN_NULLIFIER, len(xs)), xs)
 
-def encrypt(key, nonce, msg):
-    # Khovratovich, "Encryption with Poseidon" (zk-kit poseidon-cipher), on a
-    # width-3 state [key, nonce, 2^64*3 + len]: the message is zero-padded to whole
-    # blocks, each block is permute-then-add, and a last permutation gives the tag.
-    n = len(msg)
-    assert n >= 1
-    padded = msg + [0] * (n % 2)
-    s = [key % P, nonce % P, iv(DOMAIN_ENCRYPT, n)]
-    ct = []
-    for i in range(0, len(padded), 2):
-        s = poseidon2_perm(s)
-        s[0] = (s[0] + padded[i]) % P
-        s[1] = (s[1] + padded[i + 1]) % P
-        ct += [s[0], s[1]]
-    tag = poseidon2_perm(s)[0]
-    # The padding's ciphertext is the keystream itself: the decryptor recomputes
-    # it, so only the message's n elements are sent.
-    return ct[:n], tag
-
-def decrypt(key, nonce, ct, tag):
-    n = len(ct)
-    s = [key % P, nonce % P, iv(DOMAIN_ENCRYPT, n)]
-    msg = []
-    for i in range(0, n, 2):
-        s = poseidon2_perm(s)
-        msg.append((ct[i] - s[0]) % P)
-        s[0] = ct[i]
-        if i + 1 < n:
-            msg.append((ct[i + 1] - s[1]) % P)
-            s[1] = ct[i + 1]
-        # an odd last block's second lane is the zero pad: s[1] + 0
-    if poseidon2_perm(s)[0] != tag:
-        return None
-    return msg
-
 def challenge(xs, bits):
     return hash_n(xs) % (1 << bits)
 
@@ -161,16 +126,5 @@ if __name__ == "__main__":
     print("nullifier([1,2,3]) =", nullifier([1,2,3]))
     print("hash([1,2,3]) =", hash_n([1,2,3]))
     print("commit([7]) =", commit([7]))
-    for n in (3, 4):
-        msg = [10 + i for i in range(n)]
-        ct, tag = encrypt(123456789, 42, msg)
-        assert decrypt(123456789, 42, ct, tag) == msg
-        assert decrypt(123456789, 43, ct, tag) is None
-        assert decrypt(123456788, 42, ct, tag) is None
-        assert decrypt(123456789, 42, [ct[0] + 1] + ct[1:], tag) is None
-        assert decrypt(123456789, 42, ct, tag + 1) is None
-        print("encrypt(key=123456789, nonce=42, %r) =" % msg)
-        for x in ct: print(" ", x)
-        print("  tag", tag)
     t = [i + 1 for i in range(14)]
     print("challenge(1..=14, 128) =", challenge(t, 128))

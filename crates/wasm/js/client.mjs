@@ -482,18 +482,6 @@ class Session {
   nullifier(fields) {
     return new Field(this.wasm.poseidon2Nullifier(fields.map(String)));
   }
-
-  encrypt(key, nonce, message) {
-    const out = this.wasm.poseidon2Encrypt(String(key), String(nonce), message.map(String));
-    const tag = new Field(out.pop());
-    return { ciphertext: out.map((f) => new Field(f)), tag };
-  }
-
-  decrypt(key, nonce, ciphertext, tag) {
-    return this.wasm
-      .poseidon2Decrypt(String(key), String(nonce), ciphertext.map(String), String(tag))
-      .map((f) => new Field(f));
-  }
 }
 
 export class Prover extends Session {

@@ -565,40 +565,6 @@ pub fn poseidon2_nullifier(inputs: Vec<String>) -> Result<String, js_sys::Error>
     Ok(xark_poseidon2::native::nullifier_slice(&fields).to_string())
 }
 
-/// `xark_poseidon2::encrypt` of a message of one or more field elements: the
-/// ciphertext (one element per message element), then the tag.
-#[wasm_bindgen(js_name = poseidon2Encrypt)]
-pub fn poseidon2_encrypt(
-    key: String,
-    nonce: String,
-    message: Vec<String>,
-) -> Result<Vec<String>, js_sys::Error> {
-    let [key, nonce] = <[Fr; 2]>::try_from(field_elements(&[key, nonce])?)
-        .unwrap_or_else(|_| unreachable!("two strings, two elements"));
-    let message = nonempty(field_elements(&message)?, "encrypt")?;
-    let (mut out, tag) = xark_poseidon2::native::encrypt_slice(key, nonce, &message);
-    out.push(tag);
-    Ok(out.iter().map(Fr::to_string).collect())
-}
-
-/// `xark_poseidon2::decrypt`: the message, or an error when `tag` isn't the one
-/// `key` and `nonce` give `ciphertext` (the circuit's `decrypt` is unsatisfiable
-/// there too).
-#[wasm_bindgen(js_name = poseidon2Decrypt)]
-pub fn poseidon2_decrypt(
-    key: String,
-    nonce: String,
-    ciphertext: Vec<String>,
-    tag: String,
-) -> Result<Vec<String>, js_sys::Error> {
-    let [key, nonce, tag] = <[Fr; 3]>::try_from(field_elements(&[key, nonce, tag])?)
-        .unwrap_or_else(|_| unreachable!("three strings, three elements"));
-    let ciphertext = field_elements(&ciphertext)?;
-    let message = xark_poseidon2::native::decrypt_slice(key, nonce, &ciphertext, tag)
-        .ok_or_else(|| js_error("decrypt: the tag doesn't match (wrong key or nonce, or a changed ciphertext or tag)"))?;
-    Ok(message.iter().map(Fr::to_string).collect())
-}
-
 /// Field elements from decimal or `0x`-hex strings, each below the field order.
 fn field_elements(inputs: &[String]) -> Result<Vec<Fr>, js_sys::Error> {
     inputs
@@ -612,8 +578,8 @@ fn field_elements(inputs: &[String]) -> Result<Vec<Fr>, js_sys::Error> {
         .collect()
 }
 
-/// `fields`, unless empty: the circuit's `commit`, `nullifier` and `encrypt` take
-/// at least one element.
+/// `fields`, unless empty: the circuit's `commit` and `nullifier` take at least
+/// one element.
 fn nonempty(fields: Vec<Fr>, what: &str) -> Result<Vec<Fr>, js_sys::Error> {
     if fields.is_empty() {
         return Err(js_error(&format!("{what}: at least one field element")));

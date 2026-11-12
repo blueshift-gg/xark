@@ -23,18 +23,14 @@
 //! implementation: both instantiate one generic algorithm.
 //!
 //! On top of the permutation: [`hash2`] and [`hash`], the domain-separated
-//! [`commit`] and [`nullifier`], authenticated encryption ([`encrypt`],
-//! [`decrypt`]) and a Fiat–Shamir [`challenge`]. Plain functions over the
-//! permutation, so their rows are its rows and some linear combinations.
+//! [`commit`] and [`nullifier`], and a Fiat–Shamir [`challenge`]. Plain
+//! functions over the permutation, so their rows are its rows and some linear
+//! combinations.
 
 #![no_std]
 // Gadget code keeps the `x = x + y` style it was written in (the old compiler
 // rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
-
-// The host's run-time-length forms (`native::encrypt_slice`, …) return a `Vec`.
-#[cfg(not(xark))]
-extern crate alloc;
 
 use core::ops::{Add, Mul};
 use xark::Field;
@@ -289,7 +285,7 @@ pub fn hash<const N: usize>(inputs: [Field; N]) -> Field {
 }
 
 // ===========================================================================
-// Domain-separated sponges: commitments, nullifiers, encryption.
+// Domain-separated sponges: commitments and nullifiers.
 //
 // Every function below seeds the capacity lane with `2^64 · domain + len`. The
 // existing functions seed it with `0` (`hash2`, and so every Merkle node built on
@@ -306,8 +302,7 @@ pub fn hash<const N: usize>(inputs: [Field; N]) -> Field {
 pub const DOMAIN_COMMIT: u64 = 1;
 /// The domain of [`nullifier`].
 pub const DOMAIN_NULLIFIER: u64 = 2;
-/// The domain of [`encrypt`] and [`decrypt`].
-pub const DOMAIN_ENCRYPT: u64 = 3;
+// Domain 3 is kept for authenticated encryption, which a later release may add.
 
 /// The capacity lane's first value: `2^64 · domain + len`. Constants only, so it
 /// costs no row.
@@ -332,52 +327,6 @@ fn tagged<F: Elem>(domain: u64, inputs: &[F]) -> F {
     state[0]
 }
 
-/// The duplex both directions share: the state after `key` and `nonce`, which
-/// the first block's permutation turns into keystream.
-fn enc_state<F: Elem>(key: F, nonce: F, len: usize) -> [F; T] {
-    [key, nonce, iv(DOMAIN_ENCRYPT, len)]
-}
-
-/// Encrypt `message` into `out` (the same length), returning the tag.
-fn encrypt_in<F: Elem>(key: F, nonce: F, message: &[F], out: &mut [F]) -> F {
-    let mut s = enc_state(key, nonce, message.len());
-    let mut i = 0usize;
-    while i < message.len() {
-        s = perm(s);
-        s[0] = s[0] + message[i];
-        out[i] = s[0];
-        if i + 1 < message.len() {
-            s[1] = s[1] + message[i + 1];
-            out[i + 1] = s[1];
-        }
-        i += 2;
-    }
-    perm(s)[0]
-}
-
-/// Decrypt `ciphertext` into `out`, returning the tag it should come with. A
-/// ciphertext lane replaces the state lane it came from, as the encryptor's did.
-fn decrypt_in<F: Elem + core::ops::Sub<Output = F>>(
-    key: F,
-    nonce: F,
-    ciphertext: &[F],
-    out: &mut [F],
-) -> F {
-    let mut s = enc_state(key, nonce, ciphertext.len());
-    let mut i = 0usize;
-    while i < ciphertext.len() {
-        s = perm(s);
-        out[i] = ciphertext[i] - s[0];
-        s[0] = ciphertext[i];
-        if i + 1 < ciphertext.len() {
-            out[i + 1] = ciphertext[i + 1] - s[1];
-            s[1] = ciphertext[i + 1];
-        }
-        i += 2;
-    }
-    perm(s)[0]
-}
-
 /// A commitment to `N ≥ 1` field elements: the [`hash`] sponge in the
 /// [`DOMAIN_COMMIT`] domain (capacity seeded with `2^64 + N`). It hides the
 /// values only when one of them is a random secret (a blinding factor, a note's
@@ -398,53 +347,6 @@ pub fn commit<const N: usize>(inputs: [Field; N]) -> Field {
 pub fn nullifier<const N: usize>(inputs: [Field; N]) -> Field {
     const { assert!(N >= 1, "nullifier::<N>: N must be at least 1") };
     tagged(DOMAIN_NULLIFIER, &inputs)
-}
-
-/// Authenticated encryption of `message` under `key` and `nonce`: the Poseidon
-/// sponge construction of Khovratovich, "Encryption with Poseidon" (Dusk Network,
-/// 2019), as zk-kit's `poseidon-cipher` implements it, on this crate's width-3
-/// permutation. Returns the ciphertext (one element per message element) and the
-/// tag. Costs `⌈N/2⌉ + 1` permutations, 240 rows each, and nothing else.
-///
-/// The state starts as `[key, nonce, 2^64 · 3 + N]`; for each pair of message
-/// elements it is permuted, the pair is added into the two rate lanes, and those
-/// lanes are the ciphertext; one last permutation's first lane is the tag. Where
-/// the paper's width-4 state holds a two-element key and `nonce + 2^128 · N` in its
-/// three rate lanes, here the key is one element (for a Diffie–Hellman shared
-/// Grumpkin point, its `x`), the nonce has the other rate lane, and the length
-/// moves into the capacity's [`DOMAIN_ENCRYPT`] tag: so any field element is a
-/// nonce, with no range check. An odd message's last block adds into the first
-/// lane only; the paper pads it with a zero whose ciphertext the decryptor then
-/// checks is the keystream, which is the same state.
-///
-/// Never encrypt two messages under one `key` and `nonce`: the keystreams would
-/// repeat.
-pub fn encrypt<const N: usize>(
-    key: Field,
-    nonce: Field,
-    message: [Field; N],
-) -> ([Field; N], Field) {
-    const { assert!(N >= 1, "encrypt::<N>: N must be at least 1") };
-    let mut out = message;
-    let tag = encrypt_in(key, nonce, &message, &mut out);
-    (out, tag)
-}
-
-/// Decrypt what [`encrypt`] made, constraining the tag: the circuit is
-/// unsatisfiable unless `tag` is the one `key` and `nonce` give `ciphertext`, so a
-/// wrong key or nonce, or a changed ciphertext or tag, is refused. The same
-/// permutations as [`encrypt`], plus the tag's row.
-pub fn decrypt<const N: usize>(
-    key: Field,
-    nonce: Field,
-    ciphertext: [Field; N],
-    tag: Field,
-) -> [Field; N] {
-    const { assert!(N >= 1, "decrypt::<N>: N must be at least 1") };
-    let mut out = ciphertext;
-    let expected = decrypt_in(key, nonce, &ciphertext, &mut out);
-    xark::require_eq(expected, tag);
-    out
 }
 
 /// A Fiat–Shamir challenge: the low `BITS` bits (little-endian, each a pinned
@@ -479,7 +381,6 @@ pub fn challenge<const N: usize, const BITS: usize>(transcript: [Field; N]) -> [
 /// ```
 #[cfg(not(xark))]
 pub mod native {
-    use alloc::vec::Vec;
     use core::str::FromStr;
 
     pub use ark_bn254::Fr;
@@ -540,48 +441,6 @@ pub mod native {
     pub fn nullifier_slice(inputs: &[Fr]) -> Fr {
         assert!(!inputs.is_empty(), "nullifier: at least one element");
         super::tagged(super::DOMAIN_NULLIFIER, inputs)
-    }
-
-    /// [`crate::encrypt`], natively: the ciphertext and its tag.
-    pub fn encrypt<const N: usize>(key: Fr, nonce: Fr, message: [Fr; N]) -> ([Fr; N], Fr) {
-        const { assert!(N >= 1, "encrypt::<N>: N must be at least 1") };
-        let mut out = message;
-        let tag = super::encrypt_in(key, nonce, &message, &mut out);
-        (out, tag)
-    }
-
-    /// [`crate::decrypt`], natively: the message, or `None` when `tag` isn't the
-    /// one `key` and `nonce` give `ciphertext` (where the circuit is unsatisfiable).
-    pub fn decrypt<const N: usize>(
-        key: Fr,
-        nonce: Fr,
-        ciphertext: [Fr; N],
-        tag: Fr,
-    ) -> Option<[Fr; N]> {
-        const { assert!(N >= 1, "decrypt::<N>: N must be at least 1") };
-        let mut out = ciphertext;
-        (super::decrypt_in(key, nonce, &ciphertext, &mut out) == tag).then_some(out)
-    }
-
-    /// [`encrypt`] of a message whose length (`≥ 1`) is known only at run time.
-    ///
-    /// # Panics
-    /// On an empty message, which [`crate::encrypt`] doesn't take either.
-    pub fn encrypt_slice(key: Fr, nonce: Fr, message: &[Fr]) -> (Vec<Fr>, Fr) {
-        assert!(!message.is_empty(), "encrypt: at least one element");
-        let mut out = message.to_vec();
-        let tag = super::encrypt_in(key, nonce, message, &mut out);
-        (out, tag)
-    }
-
-    /// [`decrypt`] of a ciphertext whose length is known only at run time: `None`
-    /// also for an empty one.
-    pub fn decrypt_slice(key: Fr, nonce: Fr, ciphertext: &[Fr], tag: Fr) -> Option<Vec<Fr>> {
-        if ciphertext.is_empty() {
-            return None;
-        }
-        let mut out = ciphertext.to_vec();
-        (super::decrypt_in(key, nonce, ciphertext, &mut out) == tag).then_some(out)
     }
 
     /// [`crate::challenge`], natively, as the field element its bits spell: the
