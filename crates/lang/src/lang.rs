@@ -12,7 +12,6 @@
 #![allow(clippy::assign_op_pattern)]
 
 use core::cmp::{Ordering, PartialOrd};
-use core::marker::PhantomData;
 use core::ops::{
     Add, AddAssign, BitXor, BitXorAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub,
     SubAssign,
@@ -1334,8 +1333,3 @@ pub fn require_ge<A: PartialOrd<B>, B>(a: A, b: B) {
 
 // The `__xark_*` intrinsics referenced above live in `crate::intrinsics` (imported
 // at the top). See that module for the constraint-vs-hint ABI and lowering docs.
-
-// Keeps `PhantomData` referenced so `#![no_std]` users pulling only this crate do
-// not trip an unused-import lint.
-#[doc(hidden)]
-pub type _FieldMarker = PhantomData<Field>;
