@@ -25,7 +25,7 @@ use crate::xark_project::XarkProject;
 #[derive(Args, Debug)]
 pub struct SetupArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 

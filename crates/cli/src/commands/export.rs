@@ -41,27 +41,29 @@ use crate::xark_project::XarkProject;
 #[derive(Args, Debug)]
 pub struct ExportArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
-    /// Verifying key. Inferred as `target/xark/<name>/vk.bin` when omitted.
+    /// Verifying key. Inferred when omitted: `keys/<name>/vk.bin` in a project, and
+    /// otherwise `<crate>/target/xark/<name>/vk.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
     /// Proof, bundled as the generated crate's self-test vector. Inferred as
-    /// `target/xark/<name>/proof.bin`; without one (or with one for another key),
-    /// the crate has no self-test.
+    /// `<crate>/target/xark/<name>/proof.bin`; without one (or with one for another
+    /// key), the crate has no self-test.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
     /// Public inputs file produced by `xark prove`. Inferred as
-    /// `target/xark/<name>/public_inputs.bin`.
+    /// `<crate>/target/xark/<name>/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
     /// Output directory — the root of the generated verifier crate (a warning if it
     /// isn't empty; a `Cargo.toml` or `src/lib.rs` it didn't write is never
-    /// replaced). Defaults to `<crate>/clients/rust/`, beside the circuit's sources
-    /// (tracked by git, kept by `cargo clean`); for a build output outside a crate's
-    /// `target/`, its `clients/rust/`.
+    /// replaced). Defaults to `clients/<name>/rust/` in a project, and otherwise to
+    /// `<crate>/clients/rust/`, beside the circuit's sources (tracked by git, kept by
+    /// `cargo clean`); for a build output outside a crate's `target/`, its
+    /// `clients/rust/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Name for the generated crate. Defaults to `<name>-verifier`, or with `--out`

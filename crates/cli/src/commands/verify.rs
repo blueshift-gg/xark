@@ -23,7 +23,7 @@ fn fs_modified(path: &std::path::Path) -> Option<std::time::SystemTime> {
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
@@ -33,13 +33,14 @@ pub struct VerifyArgs {
     #[arg(long = "inputs", value_name = "JSON|FILE")]
     pub inputs: Option<String>,
 
-    /// Verifying key. Inferred as `target/xark/<name>/vk.bin` when omitted.
+    /// Verifying key. Inferred when omitted: `keys/<name>/vk.bin` in a project, and
+    /// otherwise `<crate>/target/xark/<name>/vk.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
-    /// Proof file. Inferred as `target/xark/<name>/proof.bin` when omitted.
+    /// Proof file. Inferred as `<crate>/target/xark/<name>/proof.bin` when omitted.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
-    /// Public inputs file. Inferred as `target/xark/<name>/public_inputs.bin`.
+    /// Public inputs file. Inferred as `<crate>/target/xark/<name>/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
 }

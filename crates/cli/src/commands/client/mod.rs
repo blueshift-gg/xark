@@ -40,6 +40,7 @@ pub struct ClientArgs {
     #[arg(long, value_enum, default_value_t = Lang::Ts)]
     pub lang: Lang,
     /// Output file, or a directory to write `<circuit>.<ext>` in. Defaults to
+    /// `clients/<circuit>/<lang>/<circuit>.<ext>` in a project, and otherwise to
     /// `<crate>/clients/<lang>/<circuit>.<ext>`, beside the circuit's sources.
     #[arg(long, short, value_hint = clap::ValueHint::FilePath)]
     pub out: Option<PathBuf>,
