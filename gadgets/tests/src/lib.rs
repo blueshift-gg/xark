@@ -20,6 +20,18 @@ pub use xark_verifier::*;
 // stable way to share the API.
 pub use solana_nostd_alt_bn128;
 
+/// The Cargo profile a test binary was built with, from either
+/// `target/<profile>/deps/<test>` or
+/// `target/<profile>/build/<pkg>/<hash>/out/<test>`.
+#[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+fn profile_from_exe(exe: &std::path::Path) -> Option<String> {
+    exe.ancestors()
+        .find_map(|dir| match dir.file_name()?.to_str()? {
+            "deps" | "build" => dir.parent()?.file_name()?.to_str().map(str::to_string),
+            _ => None,
+        })
+}
+
 /// Path to the built `xark` CLI binary, for the CLI integration tests.
 /// Returns the `xark` CLI binary path.
 #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
@@ -35,11 +47,11 @@ pub fn xark_bin() -> std::path::PathBuf {
         // diagnostic markers (`cached=`, timing). cargo cache-hits when it's already
         // debug-built, so this only recompiles after a non-debug workspace build.
         let exe = "xark";
-        // The profile this test was built with (`target/<profile>/deps/<test>`):
-        // `release`, or CI's `ci`. A debug test build still gets a release `xark`.
+        // A debug test build still gets a release `xark`.
         let profile = std::env::current_exe()
             .ok()
-            .and_then(|p| Some(p.parent()?.parent()?.file_name()?.to_str()?.to_string()))
+            .as_deref()
+            .and_then(profile_from_exe)
             .filter(|p| p != "debug")
             .unwrap_or_else(|| "release".into());
         let status = std::process::Command::new(env!("CARGO"))
@@ -266,4 +278,33 @@ pub mod fixtures {
         2,
         "sha256_basic"
     );
+}
+
+#[cfg(all(test, not(any(target_os = "solana", target_arch = "bpf"))))]
+mod tests {
+    use super::profile_from_exe;
+    use std::path::Path;
+
+    #[test]
+    fn profile_is_read_from_both_cargo_layouts() {
+        assert_eq!(
+            profile_from_exe(Path::new("/w/target/ci/deps/it-abc")),
+            Some("ci".into())
+        );
+        assert_eq!(
+            profile_from_exe(Path::new("/w/target/ci/build/xark-tests/abc/out/it-abc")),
+            Some("ci".into())
+        );
+        assert_eq!(
+            profile_from_exe(Path::new(
+                "/w/target/release/build/xark/abc/out/snapshot-abc"
+            )),
+            Some("release".into())
+        );
+        assert_eq!(
+            profile_from_exe(Path::new("/w/target/debug/deps/it-abc")),
+            Some("debug".into())
+        );
+        assert_eq!(profile_from_exe(Path::new("/w/elsewhere/it-abc")), None);
+    }
 }
