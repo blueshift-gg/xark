@@ -16,6 +16,7 @@
 //! | bool                   | `boolean`                     | `boolean`     |
 //! | bytes                  | `Uint8Array`                  | `Uint8Array`  |
 //! | number (limbed)        | an integer, or bytes          | `bigint`      |
+//! | address                | `Address` (@solana/kit), or bytes | `Address` |
 //! | timestamp              | `Date` (to the second)        | `Date`        |
 //! | time (`Days<…>`, …)    | `Date` (rounded down to its step) | `Date`    |
 //! | text                   | `string`                      | `string`      |
@@ -86,6 +87,7 @@ fn input(ty: &Ty) -> String {
         Ty::Bool => "boolean".into(),
         Ty::Bytes { .. } => "Uint8Array".into(),
         Ty::Number { .. } => "bigint | number | string | Uint8Array".into(),
+        Ty::Address => "Address | Uint8Array".into(),
         Ty::Timestamp | Ty::Time { .. } => "Date".into(),
         Ty::Text { max: TEXT } => "Text".into(),
         Ty::Text { .. } => "string".into(),
@@ -108,6 +110,7 @@ fn value(ty: &Ty, structs: &mut BTreeSet<String>) -> String {
     match ty {
         Ty::Field => "Field".into(),
         Ty::Number { .. } => "bigint".into(),
+        Ty::Address => "Address".into(),
         Ty::Uint(w) | Ty::Int(w) if *w <= 53 => "number".into(),
         Ty::Uint(_) | Ty::Int(_) => "bigint".into(),
         Ty::Bool => "boolean".into(),
@@ -138,9 +141,14 @@ fn revive(ty: &Ty, e: &str) -> String {
         Ty::Field => format!("new Field({e})"),
         Ty::Number { .. } => format!("BigInt({e})"),
         Ty::Uint(w) | Ty::Int(w) if *w > 53 => format!("BigInt({e})"),
-        Ty::Uint(_) | Ty::Int(_) | Ty::Bool | Ty::Text { .. } | Ty::Choice(_) | Ty::Set(_) => {
-            e.into()
-        }
+        // An address comes back in base58, which is what an `Address` is.
+        Ty::Uint(_)
+        | Ty::Int(_)
+        | Ty::Bool
+        | Ty::Text { .. }
+        | Ty::Choice(_)
+        | Ty::Set(_)
+        | Ty::Address => e.into(),
         Ty::Bytes { .. } => format!("fromHex({e})"),
         Ty::Timestamp | Ty::Time { .. } => format!("new Date({e})"),
         // Element by element, so a fixed length stays a tuple.
@@ -202,6 +210,7 @@ fn note(ty: &Ty) -> Option<String> {
         } => format!("`{r}`: its bytes."),
         Ty::Bytes { .. } => return None,
         Ty::Number { of } => format!("`{of}`: the number, or its little-endian bytes."),
+        Ty::Address => "A Solana address (base58), or its 32 bytes.".into(),
         Ty::Text { max } => format!("Text: at most {max} UTF-8 bytes."),
         Ty::Set(e) => format!("A set of `{e}`: one, or a list of them."),
         Ty::Array(_, n) => format!("Exactly {n} elements."),
@@ -586,9 +595,16 @@ pub fn generate(m: &Model, schema: &serde_json::Value, artifacts: &str) -> Resul
         .map(|v| v.to_string())
         .chain(types.iter().map(|t| format!("type {t}")))
         .collect();
+    // An address is @solana/kit's `Address`, the type the app's own addresses have.
+    let kit = if uses_address(m) {
+        "import type { Address } from \"@solana/kit\";\n"
+    } else {
+        ""
+    };
     Ok(format!(
         "{head}\
          import {{ {} }} from \"{RUNTIME}\";\n\
+         {kit}\
          export {{ CheckFailed, Field, InputError, fromHex, toHex }};\n\n\
          // The circuit's schema.json.\n\
          const schema = {};\n\n\
@@ -596,6 +612,23 @@ pub fn generate(m: &Model, schema: &serde_json::Value, artifacts: &str) -> Resul
         imports.join(", "),
         serde_json::to_string_pretty(schema)?
     ))
+}
+
+/// Whether any input, struct field or client function takes or returns an address.
+fn uses_address(m: &Model) -> bool {
+    fn has(ty: &Ty) -> bool {
+        match ty {
+            Ty::Address => true,
+            Ty::Array(t, _) => has(t),
+            Ty::Tuple(ts) => ts.iter().any(has),
+            _ => false,
+        }
+    }
+    m.inputs.iter().any(|(f, _)| has(&f.ty))
+        || m.structs.values().flatten().any(|f| has(&f.ty))
+        || m.exports
+            .iter()
+            .any(|e| has(&e.returns) || e.params.iter().any(|p| has(&p.ty)))
 }
 
 /// "A" or "An", for a name.
@@ -649,6 +682,30 @@ mod tests {
       "public_inputs": ["born_before", "allowed", "commitment"]
     }"#;
 
+    /// An address is @solana/kit's `Address` (or its bytes) going in, and an
+    /// `Address` coming back.
+    #[test]
+    fn addresses_are_kit_addresses() {
+        let schema = serde_json::json!({
+            "version": 2,
+            "circuit": "pay",
+            "inputs": [{"name": "recipient", "visibility": "public", "type": {"ref": "Address"}}],
+            "types": {"Address": {
+                "struct": [{"name": "hi", "type": "field"}, {"name": "lo", "type": "field"}],
+                "encoding": {"bytes": 32, "concat": [16, 16], "base58": true}}},
+            "public_inputs": ["recipient.hi", "recipient.lo"]
+        });
+        let ts = generate(&Model::new(&schema).unwrap(), &schema, "pay").unwrap();
+        for want in [
+            "from \"@blueshift-gg/xark/client\";\nimport type { Address } from \"@solana/kit\";\nexport {",
+            "  /** A Solana address (base58), or its 32 bytes. */\n  recipient: Address | Uint8Array;",
+            "export interface PayPublicValues {\n  recipient: Address;\n}",
+            "    recipient: v.recipient,",
+        ] {
+            assert!(ts.contains(want), "missing {want:?} in:\n{ts}");
+        }
+    }
+
     #[test]
     fn names() {
         assert_eq!(pascal("zkyc_circuit"), "ZkycCircuit");
@@ -690,6 +747,7 @@ mod tests {
             assert!(ts.contains(want), "missing {want:?} in:\n{ts}");
         }
         assert!(ts.starts_with("// Generated by `xark client`"));
+        assert!(!ts.contains("@solana/kit"), "{ts}");
         assert!(!ts.contains("__NAME__") && !ts.contains("__SCHEMA__"));
         // No `any`: every value the runtime hands back is typed as `Json<…>`.
         for any in [": any", "<any>", "as any"] {

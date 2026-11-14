@@ -16,7 +16,7 @@
 const MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 /** This package's version. A client's `schema.json` must come from the same release. */
-export const VERSION = "0.3.1";
+export const VERSION = "0.4.0";
 
 /** Whether versions `a` and `b` are the same release: the same minor before 1.0, major after. */
 function sameRelease(a, b) {
@@ -144,6 +144,33 @@ export class Proof {
   /** The proof compressed: 128 bytes (each point by `x` and a sign bit). */
   toBytesCompressed() {
     return this.proofBytes.slice();
+  }
+
+  /**
+   * The public inputs as an exported Solana verifier takes them (its `Fields`): 32
+   * bytes each, little-endian, in proof order.
+   */
+  toFields() {
+    // `publicInputBytes` is their canonical encoding: a little-endian u64 count, then
+    // each element's 32 little-endian bytes.
+    const b = this.publicInputBytes;
+    const n = b.length >= 8 ? Number(new DataView(b.buffer, b.byteOffset, 8).getBigUint64(0, true)) : -1;
+    if (n < 0 || b.length !== 8 + 32 * n) throw new Error("public inputs that aren't a prover's encoding");
+    return b.slice(8);
+  }
+
+  /**
+   * `toBytes()` then `toFields()`: the proof and its public inputs, for a program
+   * that takes both in its instruction data. A program that supplies the public
+   * inputs from its own state takes `toBytes()` alone.
+   */
+  toInstructionData() {
+    const proof = this.toBytes();
+    const fields = this.toFields();
+    const out = new Uint8Array(proof.length + fields.length);
+    out.set(proof);
+    out.set(fields, proof.length);
+    return out;
   }
 }
 
@@ -446,6 +473,14 @@ class Session {
 
   poseidon2(fields) {
     return new Field(this.wasm.poseidon2(fields.map(String)));
+  }
+
+  commit(fields) {
+    return new Field(this.wasm.poseidon2Commit(fields.map(String)));
+  }
+
+  nullifier(fields) {
+    return new Field(this.wasm.poseidon2Nullifier(fields.map(String)));
   }
 }
 

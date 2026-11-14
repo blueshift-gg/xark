@@ -11,8 +11,8 @@ authors use it to give a new 256-bit hash the same public-input form.
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-hash = "0.3"
+xark = "0.4"
+xark-hash = "0.4"
 ```
 
 ## Use
@@ -29,7 +29,8 @@ pub fn sha256(msg: Private<[u8; 3]>, digest: Public<Hash>) {
 }
 ```
 
-On the host, a `Hash` is a plain `[u8; 32]`.
+On the host, a `Hash` is a plain `[u8; 32]`. A Solana address has the same
+layout but its own type, `xark::Address`, which clients give in base58.
 
 ## What's in it
 

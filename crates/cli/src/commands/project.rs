@@ -1,0 +1,513 @@
+//! A project's root: `xark build`, `xark test` and `xark check` there act on all of
+//! it (see `docs/projects.md`).
+//!
+//! * `build`: each circuit, its keys when they're missing or for an older circuit,
+//!   its clients (`clients/<circuit>/{rust,ts}`), then the programs with
+//!   `cargo build-sbf`, which fails on a stack frame past the SBF limit.
+//! * `test`: each circuit's tests, the programs' Rust tests, then the TypeScript
+//!   tests in `tests/`.
+//! * `check`: what rust-analyzer runs. `cargo check` over the workspace once, then
+//!   xark's own validation of each circuit.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::xark_project::{PROJECT_FILE, XarkProject};
+
+/// The project at `arg` (a directory argument, or the current directory when it's
+/// `None` or `.`), when that's a project's root.
+pub fn root_at(arg: Option<&str>) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let dir = match arg {
+        None | Some(".") => cwd,
+        Some(a) => cwd.join(a),
+    };
+    dir.join(PROJECT_FILE).is_file().then_some(dir)
+}
+
+/// Warn when this `xark` is another release than the project's (`xark.toml`'s
+/// `xark = "0.4"`): a circuit can change between releases (its digest, and so its
+/// keys and verifier), so the project builds with the one it records.
+pub fn check_release(root: &Path) {
+    let Ok(text) = std::fs::read_to_string(root.join(PROJECT_FILE)) else {
+        return;
+    };
+    let pinned = text.lines().find_map(|l| {
+        let v = l
+            .trim()
+            .strip_prefix("xark")?
+            .trim_start()
+            .strip_prefix('=')?;
+        let v = v.split('#').next()?.trim().trim_matches('"');
+        Some(xark_ir::major_minor(v))
+    });
+    let this = xark_ir::major_minor(env!("CARGO_PKG_VERSION"));
+    if let Some(pinned) = pinned
+        && pinned != this
+    {
+        eprintln!(
+            "{} this project is made with xark {pinned} ({PROJECT_FILE}), and this xark is \
+             {this}: install that release (`cargo install xark-cli --version {pinned}.*`), or \
+             move the project to {this} on purpose and update `xark` in {PROJECT_FILE}",
+            crate::style::warn("warning:")
+        );
+    }
+}
+
+/// The project's circuits: the crates in `circuits/` with a `#[circuit]`. A
+/// library beside them (helpers the circuits share) is a member of the workspace,
+/// but nothing xark builds.
+pub fn circuits(root: &Path) -> Vec<PathBuf> {
+    members(root, "circuits")
+        .into_iter()
+        .filter(|c| has_circuit(&c.join("src")))
+        .collect()
+}
+
+/// Whether a source file under `dir` declares a `#[circuit]`.
+fn has_circuit(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                has_circuit(&p)
+            } else {
+                p.extension().is_some_and(|x| x == "rs")
+                    && std::fs::read_to_string(&p).is_ok_and(|t| t.contains("#[circuit]"))
+            }
+        })
+}
+
+/// The circuit a directory argument means: at a project's root with one circuit,
+/// that circuit's crate.
+pub fn only_circuit(arg: &str) -> Option<PathBuf> {
+    match circuits(&root_at(Some(arg))?).as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    }
+}
+
+/// The crates in `root/<group>/`, by name.
+pub fn members(root: &Path, group: &str) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::fs::read_dir(root.join(group))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join("Cargo.toml").is_file())
+        .collect();
+    out.sort();
+    out
+}
+
+/// `xark build` at a project's root. With `check` (CI), keys are never made and
+/// `clients/` is left as it was: the build fails if what it generates differs.
+pub fn build(root: &Path, check: bool) -> i32 {
+    check_release(root);
+    build_all(root, check)
+}
+
+fn build_all(root: &Path, check: bool) -> i32 {
+    // What `--check` compares, and leaves as it found it on every way out: the
+    // generated clients, the keys (and the builds beside them), and the workspace
+    // manifest an export keeps in sync.
+    let watched = |root: &Path| {
+        let mut files = snapshot(&root.join("clients"));
+        files.extend(snapshot(&root.join("keys")));
+        if let Ok(b) = std::fs::read(root.join("Cargo.toml")) {
+            files.insert(root.join("Cargo.toml"), b);
+        }
+        files
+    };
+    let before = check.then(|| watched(root));
+    // A program may already depend on a circuit's verifier crate before its first
+    // build (moved in from elsewhere): cargo can't load the workspace without it, so
+    // the circuit couldn't build to make it. A placeholder stands in until the
+    // export below replaces it.
+    for circuit in circuits(root) {
+        if let Some(name) = crate::xark_project::read_pkg_name(&circuit) {
+            let dir = root.join("clients").join(&name).join("rust");
+            if !dir.join("Cargo.toml").exists() {
+                let _ = std::fs::create_dir_all(dir.join("src"));
+                let _ = std::fs::write(
+                    dir.join("Cargo.toml"),
+                    format!(
+                        "# Auto-generated by `xark export` (a placeholder until it runs).\n\
+                         [package]\nname = \"{}\"\nversion = \"0.1.0\"\n\
+                         edition = \"2024\"\n",
+                        super::export::sanitize_crate_name(&format!("{name}-verifier"))
+                    ),
+                );
+                let _ = std::fs::write(
+                    dir.join("src/lib.rs"),
+                    "//! Auto-generated by `xark export` (a placeholder until it runs).\n",
+                );
+            }
+        }
+    }
+    if let Err(e) = crate::xark_project::sync_members(root) {
+        eprintln!("{} {e:#}", crate::style::err("error:"));
+        return 1;
+    }
+    let mut failed = None;
+    for circuit in circuits(root) {
+        if let Err(code) = build_circuit(root, &circuit, check) {
+            failed = Some(code);
+            break;
+        }
+    }
+    if let Some(before) = before {
+        let after = watched(root);
+        let changed: Vec<&PathBuf> = before
+            .keys()
+            .chain(after.keys().filter(|p| !before.contains_key(*p)))
+            .filter(|p| before.get(*p) != after.get(*p))
+            .collect();
+        restore(&before, &after);
+        if !changed.is_empty() {
+            eprintln!(
+                "{} the committed clients aren't what this build generates (run `xark \
+                 build` and commit them):",
+                crate::style::err("error:")
+            );
+            for p in &changed {
+                eprintln!("  {}", p.strip_prefix(root).unwrap_or(p).display());
+            }
+            return 1;
+        }
+    }
+    if let Some(code) = failed {
+        return code;
+    }
+    if members(root, "programs").is_empty() {
+        return 0;
+    }
+    build_programs(root)
+}
+
+/// Every file under `dir`, by path.
+fn snapshot(dir: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if let Ok(b) = std::fs::read(&p) {
+                out.insert(p, b);
+            }
+        }
+    }
+    out
+}
+
+/// Put the files in `before` back, and remove the ones only `after` has.
+fn restore(
+    before: &std::collections::BTreeMap<PathBuf, Vec<u8>>,
+    after: &std::collections::BTreeMap<PathBuf, Vec<u8>>,
+) {
+    for (p, b) in before {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, b);
+    }
+    for p in after.keys().filter(|p| !before.contains_key(*p)) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// One circuit: built (if it isn't current), keys (if they're missing or for
+/// another circuit, unless `check`), then its clients.
+pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<(), i32> {
+    let dir = circuit.display().to_string();
+    let project = XarkProject::resolve(Some(circuit.to_path_buf())).map_err(|e| {
+        eprintln!("{} {e:#}", crate::style::err("error:"));
+        1
+    })?;
+    let name = circuit
+        .strip_prefix(root)
+        .unwrap_or(circuit)
+        .display()
+        .to_string();
+    // A current build (`xark test`'s, which also attributes each constraint to its
+    // source line) is the same circuit: no second build.
+    if crate::cli::stale_build(&project.xark_dir, "circuit.xbc", Some("bn254")).is_some() {
+        let code = crate::cli::cmd_build(&dir);
+        if code != 0 {
+            return Err(code);
+        }
+    } else {
+        eprintln!(
+            "{} circuit `{name}` is unchanged since the last build",
+            crate::style::tag()
+        );
+    }
+    let state = key_state(&project);
+    if check {
+        let why = match state {
+            KeyState::Fits => None,
+            KeyState::None => Some("has no key".to_string()),
+            KeyState::Changed => Some("changed since its keys were made".to_string()),
+            KeyState::Unpaired => Some(format!(
+                "has no `circuit.xbc` beside its key (the build it was made from, in {})",
+                super::shown(&project.key_dir())
+            )),
+            KeyState::BuildLost => Some(
+                "has a key made from another build of it, which isn't kept beside the key"
+                    .to_string(),
+            ),
+        };
+        if let Some(why) = why {
+            let fix = if matches!(state, KeyState::BuildLost) {
+                format!("restore it, or make a new key with `xark setup {name}`")
+            } else {
+                "run `xark build`".to_string()
+            };
+            eprintln!(
+                "{} {name} {why}: {fix}, and commit `keys/` and `clients/`",
+                crate::style::err("error:")
+            );
+            return Err(1);
+        }
+    } else {
+        match state {
+            KeyState::Fits => {}
+            KeyState::None => {
+                if let Err(e) = project.may_make_key() {
+                    eprintln!("{} {e:#}", crate::style::err("error:"));
+                    return Err(1);
+                }
+                xark(root, &["setup", &dir])?;
+            }
+            KeyState::Unpaired => {
+                // Made from this very build: keep it beside the key.
+                let keyed = project.key_dir().join("circuit.xbc");
+                if let Err(e) = std::fs::copy(project.circuit_xbc(), &keyed) {
+                    eprintln!("xark: writing {}: {e}", keyed.display());
+                    return Err(1);
+                }
+            }
+            KeyState::BuildLost => {
+                eprintln!(
+                    "{} the key in {} was made from another build of {name} (the same \
+                     constraints, compiled differently), and that build isn't kept beside it \
+                     as `circuit.xbc`. A key proves only with the build it was made from: \
+                     restore that file, or make a new key with `xark setup {name}` (the \
+                     deployed program then needs the new verifier)",
+                    crate::style::err("error:"),
+                    super::shown(&project.key_dir())
+                );
+                return Err(1);
+            }
+            KeyState::Changed => {
+                // A changed circuit needs new keys, and so a new verifier: say so, since
+                // the deployed program has to change with it.
+                eprintln!(
+                    "{} {name} changed since its keys were made: making new ones, so its \
+                     verifier changes too (deploy the program again)",
+                    crate::style::warn("warning:")
+                );
+                xark(root, &["setup", &dir])?;
+            }
+        }
+    }
+    xark(root, &["export", &dir])?;
+    xark(root, &["client", &dir])
+}
+
+/// A circuit's key, against its current build.
+enum KeyState {
+    /// No key yet.
+    None,
+    /// The key and the build it was made from (`circuit.xbc` beside it), whose
+    /// constraints are the current build's.
+    Fits,
+    /// A key made from this very build, without the build beside it yet.
+    Unpaired,
+    /// A key made from another build of the same constraints, which isn't kept: a key
+    /// proves only with its own build.
+    BuildLost,
+    /// The constraints changed since the key was made.
+    Changed,
+}
+
+fn key_state(project: &XarkProject) -> KeyState {
+    if !project.verifying_key().is_file() {
+        return KeyState::None;
+    }
+    let Ok(build) = std::fs::read(project.circuit_xbc()) else {
+        return KeyState::Fits;
+    };
+    let keyed = project.key_dir().join("circuit.xbc");
+    if let Ok(kept) = std::fs::read(&keyed) {
+        return if super::r1cs_digest(&kept) == super::r1cs_digest(&build) {
+            KeyState::Fits
+        } else {
+            KeyState::Changed
+        };
+    }
+    match super::key_fit(&project.verifying_key(), &build) {
+        super::KeyFit::Same => KeyState::Unpaired,
+        super::KeyFit::SameCircuit => KeyState::BuildLost,
+        super::KeyFit::Different => KeyState::Changed,
+    }
+}
+
+/// The programs, with `cargo build-sbf` at the root (the workspace's
+/// `default-members` are the programs, so the circuits' host dependencies stay out
+/// of it). Its output is shown; a stack frame past the SBF limit of 4 KiB fails the
+/// build, which `cargo build-sbf` only warns about.
+fn build_programs(root: &Path) -> i32 {
+    eprintln!(
+        "{} building the programs (cargo build-sbf)",
+        crate::style::tag()
+    );
+    let out = match Command::new("cargo")
+        .arg("build-sbf")
+        .current_dir(root)
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!(
+                "xark: couldn't run `cargo build-sbf` ({e}): install the Solana CLI \
+                 (https://solana.com/docs/intro/installation)"
+            );
+            return 1;
+        }
+    };
+    let log =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    eprint!("{log}");
+    if !out.status.success() {
+        return out.status.code().unwrap_or(1);
+    }
+    if log.contains("overflows the maximum allowed frame space") {
+        eprintln!(
+            "{} a stack frame is past the SBF limit of 4 KiB (the warning above): the \
+             program would overwrite its own stack at run time. Move the big work out \
+             of line with #[inline(never)], as the generated `verify` is.",
+            crate::style::err("error:")
+        );
+        return 1;
+    }
+    0
+}
+
+/// `xark test` at a project's root: `forwarded` goes to each circuit's `cargo test`.
+pub fn test(root: &Path, forwarded: &[String]) -> i32 {
+    check_release(root);
+    for circuit in circuits(root) {
+        let code = crate::cli::cmd_test(&circuit.display().to_string(), forwarded);
+        if code != 0 {
+            return code;
+        }
+    }
+    if members(root, "programs").is_empty() {
+        return 0;
+    }
+    // The programs' tests need them built, and their clients current.
+    let code = build_all(root, false);
+    if code != 0 {
+        return code;
+    }
+    // The programs' Rust tests and the verifier crates' self-tests, in release (a
+    // test that proves is 10–50× slower in debug), without the programs' fat LTO.
+    eprintln!(
+        "{} running the programs' and verifier crates' Rust tests",
+        crate::style::tag()
+    );
+    let mut cargo = Command::new("cargo");
+    cargo
+        .args(["test", "--release"])
+        .env("CARGO_PROFILE_RELEASE_LTO", "false")
+        .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "16");
+    let verifiers = std::fs::read_dir(root.join("clients"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().join("rust"));
+    // A library beside the circuits isn't a circuit `xark test` tests above.
+    let circuit_crates = circuits(root);
+    let libraries = members(root, "circuits")
+        .into_iter()
+        .filter(|c| !circuit_crates.contains(c));
+    for dir in members(root, "programs")
+        .into_iter()
+        .chain(verifiers)
+        .chain(libraries)
+    {
+        if let Some(name) = crate::xark_project::read_pkg_name(&dir) {
+            cargo.args(["-p", &name]);
+        }
+    }
+    if let Err(code) = run(root, &mut cargo) {
+        return code;
+    }
+    if !root.join("package.json").is_file() {
+        return 0;
+    }
+    // Where Node finds them: here or in a directory above (an npm workspace hoists
+    // its packages to its root).
+    if !root.ancestors().any(|d| d.join("node_modules").is_dir()) {
+        eprintln!(
+            "xark: the TypeScript tests need their packages: run `npm install`, then `xark test` \
+             again"
+        );
+        return 1;
+    }
+    eprintln!(
+        "{} running the TypeScript tests (npm test)",
+        crate::style::tag()
+    );
+    match run(root, Command::new("npm").arg("test")) {
+        Ok(()) => 0,
+        Err(code) => code,
+    }
+}
+
+/// `xark check` at a project's root: `cargo check` over the workspace, then each
+/// circuit's validation.
+pub fn check(root: &Path, json: bool) -> i32 {
+    let mut seen = std::collections::HashSet::new();
+    if json {
+        match crate::cli::host_check_json(root, true) {
+            Some((true, rendered)) => seen = rendered,
+            Some((false, _)) => return 1,
+            None => {}
+        }
+    }
+    let mut code = 0;
+    for circuit in circuits(root) {
+        let c = crate::cli::check_circuit(&circuit, json, seen.clone());
+        if c != 0 {
+            code = c;
+        }
+    }
+    code
+}
+
+/// Run `xark` (this binary) with `args` in `dir`.
+fn xark(dir: &Path, args: &[&str]) -> Result<(), i32> {
+    let exe = std::env::current_exe().map_err(|_| 1)?;
+    run(
+        dir,
+        Command::new(exe).args(args).env(crate::style::NESTED, "1"),
+    )
+}
+
+fn run(dir: &Path, cmd: &mut Command) -> Result<(), i32> {
+    match cmd.current_dir(dir).status() {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(s.code().unwrap_or(1)),
+        Err(e) => {
+            eprintln!("xark: couldn't run {:?}: {e}", cmd.get_program());
+            Err(1)
+        }
+    }
+}

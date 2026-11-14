@@ -5,8 +5,8 @@ and verify in Node, the browser or a Worker, with the circuit's own types and
 helper functions.
 
 ```sh
-xark client                                  # writes target/xark/<circuit>/<circuit>.ts
-npm install @blueshift-gg/xark@0.3           # the runtime it imports
+xark client                                  # writes clients/<circuit>/ts/<circuit>.ts in a project
+npm install @blueshift-gg/xark@0.4           # the runtime it imports
 ```
 
 `xark build` also writes `schema.json`: every input's name, visibility and
@@ -41,6 +41,18 @@ input. `new Field(x)` checks it where you make it, and also takes little-endian
 bytes (as proofs and Rust's `Field::from_le_bytes` have them; `Field.fromBeBytes`
 for the other order). Decoded public inputs and Rust functions return `Field`s.
 
+An `Address` input (a Solana address, [Inputs](inputs.md#addresses)) is
+@solana/kit's `Address`, or its 32 bytes as a `Uint8Array`, and decodes to an
+`Address`, so a signer's `address`, a PDA or `address("…")` passes as it is and a
+decoded one goes straight back into kit. A client whose circuit takes one imports
+the type from `@solana/kit`, which the app then needs installed:
+
+```ts
+const proof = prover.prove({ x: 3, y: 9, recipient: signer.address });
+proof.publicInputs.recipient;                                    // an Address
+verifier.verify(proof.toBytes(), { y: 9, recipient: signer.address }); // true
+```
+
 A prover and a verifier are separate, each made from a URL serving a copy of
 `target/xark/<circuit>/` or from the bytes, so each has only the methods it can
 run. A proof travels as its bytes, `proof.toBytes()`; the verifier brings the public
@@ -71,6 +83,23 @@ public inputs it supplies itself, such as its policy or a root in its state.
 `proof.toBytesCompressed()` is half the size, for anywhere else; a verifier reads
 either. A verifier also takes a `Proof`, but pass the public inputs you require
 (`verifier.verify(proof, required)`); only a circuit with no public inputs may omit them.
+
+A program that takes the public inputs in its instruction data instead reads
+`proof.toFields()`: each 32 bytes little-endian, in proof order, the `Fields` the
+exported crate's `verify` takes. `proof.toInstructionData()` is the proof then
+those.
+
+To test a project's programs in Node, `@blueshift-gg/xark/testing` (with `litesvm`
+and `@solana/kit` installed) loads a circuit's build output by name and runs the
+project's programs in LiteSVM:
+
+```ts
+import { circuit, funded, program, send, vm } from "@blueshift-gg/xark/testing";
+
+const prover = await Claim.prover(circuit("claim")); // circuits/claim's build
+const svm = vm({ [id]: program("claim") });           // target/deploy/claim_program.so
+await send(svm, await funded(svm), { programAddress: id, data: proof.toInstructionData() });
+```
 
 To be sure the prover runs the circuit the client was generated from, and not
 whatever a deployment serves, pin it: `Zkyc.prover(url, { digest: Zkyc.digest })`
@@ -126,7 +155,7 @@ drift, and a mistake names its input (`id.document: "…" is longer than 31 byte
 Errors are typed for a UI to act on: an `InputError` carries the input's `path`
 (`"id.document"`), and a `CheckFailed` the failing statement's `site` (`file`,
 `line`, `col`, `text`, the functions it called into).
-`clients/check/{zkyc,cube,sha256,merkle,scalar_range}/` hold those examples'
+`clients/check/{zkyc,cube,sha256,merkle,scalar_range,bound_recipient}/` hold those examples'
 generated clients and their vitest tests. `npm test` there (run in CI) builds xark,
 xark-wasm and each example, fails if a committed client is stale (`npm run update`
 rewrites it), typechecks, and runs the tests in Node; a folder with a `<name>.test.ts`

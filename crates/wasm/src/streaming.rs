@@ -301,7 +301,7 @@ fn row_source(
                 .map_err(|e| js_error(&format!("parsing circuit.xbc: {e}")))?;
             if a_len.is_some_and(|n| n != src.layout().num_vars()) {
                 return Err(js_error(
-                    "expandRows needs a key made with `xark setup --streamable`",
+                    "expandRows needs a key made with `xark setup --r1cs-form reduced`",
                 ));
             }
             src.set_compiled(false);

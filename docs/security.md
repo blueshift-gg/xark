@@ -209,6 +209,26 @@ bug, we inherit it. **KAT:** `poseidon2_perm_matches_reference_vector`,
 `poseidon2_perm_zero_input`, `native_perm_matches_reference_vectors`,
 `native_matches_the_circuit` (`gadgets/xark-poseidon2/tests/vec.rs`).
 
+**Commitments and nullifiers.** `commit` and `nullifier` are `hash`'s sponge (rate 2,
+capacity 1, inputs added into the rate lanes) with the capacity lane seeded with
+`2^64 · domain + N`, domain 1 and 2. `hash2` seeds it with `0`, `hash` with `N < 2^64`,
+and Schnorr's challenge (§2.12) with its 16-byte ASCII tag in the domain place, so no
+two of them start the permutation from the same state: a sponge whose capacity starts
+from distinct values computes independent functions (Bertoni et al., "On the
+indifferentiability of the sponge construction", Eurocrypt 2008), and a commitment
+equals a nullifier or a Merkle node only by a Poseidon2 collision. The length is in the
+seed, so inputs of different lengths don't collide either. Their rows are the
+permutation's and linear combinations; nothing new is proven. `commit` hides its inputs
+only if one of them is a random secret; the circuit can't check that. Domain 3 is kept
+for authenticated encryption. **Challenges.** `challenge::<N, BITS>` is the low `BITS`
+bits of `hash(transcript)`, with no domain of its own: it is that hash, by design, and a
+protocol with more than one kind of challenge puts a label in the transcript. The bits
+come from `to_bits_canonical` (§2.2), so a prover can't choose another representative
+and with it another challenge. **KAT:** `native_modes_match_the_reference` (against
+`poseidon2_ref.py`, which writes them from their definitions), `domains_are_separate`,
+`commit_and_nullifier_in_a_circuit` (swapped outputs refused, also by exhaustive
+witness search) and `challenge_in_a_circuit` (`gadgets/xark-poseidon2/tests/modes.rs`).
+
 ### 2.11 AES-128/256 encryption
 
 `gadgets/xark-aes/src/lib.rs`. AES-128 and AES-256 blocks, CTR mode and GCM; all are
@@ -247,6 +267,23 @@ inputs that need `O`'s discrete log. Each is proven sound over its exported rows
 `scalar_mul_rejects_zero_off_curve_and_offset`, `scalar_mul_rejects_a_non_boolean_bit`,
 `msm_rejects_degenerate_inputs` (`gadgets/xark-grumpkin/tests/vec.rs`).
 
+**Schnorr** (`gadgets/xark-grumpkin/src/schnorr.rs`) checks `s·G = R + e·P` with two
+`wide_scalar_mul`s and one `ec_add`, so the edges above refuse rather than accept. The
+challenge `e` is a Poseidon2 sponge over `R`, `P` and the message, its capacity seeded
+with a tag and the length. `R` is pinned on the curve (and `P` inside
+`wide_scalar_mul`); Grumpkin has cofactor 1, so no subgroup check is needed. `G`
+enters `wide_scalar_mul` as two witnesses pinned to its coordinates, so both calls
+are the proven template on plain plugs (`lean-export --coverage`: covered). Two
+integer comparisons, glue outside any proven template, make the scalars unique: `s ≤ n − 1`
+(else `s + n` verifies too), and the hinted limbs of `e` recompose to the digest and
+are `≤ r − 1` (else `e + r`, a different scalar, would also recompose to it mod `r`).
+Each walks the bits `wide_scalar_mul` already made, MSB first, as `to_bits_canonical`
+does. **KAT:** `host_signer_matches_the_known_answer` (against `schnorr_ref.py`,
+plain-integer Grumpkin), `circuit_accepts_host_signatures`, and the negatives
+`circuit_rejects_tampering` (wrong key or message, tampered `R` or `s`, off-curve `R`
+or `P`, `s = 0`, `s = n`) and `circuit_rejects_non_canonical_s`
+(`gadgets/xark-grumpkin/tests/schnorr.rs`).
+
 ### 2.13 Merkle membership (Poseidon)
 
 `gadgets/xark-merkle/src/lib.rs`. Folds a Poseidon 2-to-1 compression
@@ -263,6 +300,24 @@ assumption), `completeness` (a bit selector), and `root_binds` (the levels compu
 function `H`, and that each level emits the template's rows); bridge `merkle_matches_lean_model`. **KAT:**
 `xark-merkle`'s `tests/vec.rs` (honest path accepted; wrong root, tampered sibling,
 non-boolean bit, and each tampered witness value rejected).
+
+**Poseidon2 trees** (`gadgets/xark-merkle/src/poseidon2.rs`) are the same fold over
+`xark_poseidon2::hash2`, with no `#[gadget]` of their own. `merkle_append` folds two
+leaves up one path: `leaf` through `cond_swap`, `empty_leaf` through the swap written
+out (`a + b·(s − a)`, one product), whose bit `cond_swap`'s row already made boolean;
+it asserts the second fold equals `old_root` and returns the first. So the new tree is
+the old one with one slot, then empty, written; which slot is the caller's to bind.
+The indexed tree (Aztec's): a leaf is `hash([value, next_index, next_value])`,
+`indexed_non_membership` asserts the low leaf is in the tree and `value < x` and
+(`next_value = 0` or `x < next_value`), with `Field::lt::<BITS>`, which range-checks
+both operands below `2^BITS`, `BITS ≤ 252`, so the comparison is on integers and can't
+wrap. That proves `x` absent from a tree that is a sorted list; `indexed_insert` keeps
+it one (the low leaf rewritten in place to point at `x`, the new leaf appended in an
+empty slot) from the head `(0, 0, 0)`. **KAT:** `tests/poseidon2.rs` (roots from
+`merkle_ref.py`, the Python Poseidon2; round trips; a wrong sibling, flipped and
+non-boolean bits, a written slot, present values and low leaves whose range misses
+`x` rejected; each tampered witness value rejected; at depth 2 an exhaustive witness
+search finds one witness for each honest input and none for each forgery).
 
 ### 2.14 xark-IR arithmetic → R1CS lowering
 

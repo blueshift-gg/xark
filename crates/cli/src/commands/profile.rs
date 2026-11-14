@@ -246,14 +246,10 @@ fn esc(s: &str) -> String {
 
 /// The profile build (`xark build` with constraint attribution).
 fn build(args: &ProfileArgs) -> Result<()> {
-    let mut build_argv = vec![args.crate_dir.clone()];
-    if let Some(out) = &args.out {
-        build_argv.push("--out".into());
-        build_argv.push(out.clone());
-    }
-    build_argv.push("--field".into());
-    build_argv.push(args.field.clone());
-    let code = crate::cli::cmd_build_profile(&build_argv);
+    // At a project's root, its circuit.
+    let dir = super::project::only_circuit(&args.crate_dir)
+        .map_or_else(|| args.crate_dir.clone(), |c| c.display().to_string());
+    let code = crate::cli::build(&dir, args.out.as_deref(), &args.field, true, false);
     if code != 0 {
         bail!("build failed (exit {code}); fix the circuit before `xark profile`");
     }

@@ -121,10 +121,10 @@ fn end_to_end_verify_from_fixtures() {
     let public_inputs =
         read_public_inputs(&dir.join("public_inputs.bin")).expect("read public inputs");
 
-    let ok = xark_backend::verify(&vk, &proof, &public_inputs).expect("verify");
+    let ok = xark_groth16::verify(&vk, &public_inputs, &proof).expect("verify");
     assert!(
         ok,
-        "committed Groth16 fixtures failed to verify end-to-end against `xark_backend::verify`"
+        "committed Groth16 fixtures failed to verify end-to-end against `xark_groth16::verify`"
     );
 }
 

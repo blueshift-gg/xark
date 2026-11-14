@@ -55,7 +55,15 @@ pub fn dim(s: &str) -> String {
 /// Render a "Next steps" block: a branded header then one line per
 /// `(command, hint)`, command in brand color and hint dimmed. One place so every
 /// command's guided footer looks identical.
+/// Set on the `xark` commands a project-wide one runs.
+pub const NESTED: &str = "XARK_NESTED";
+
 pub fn next_steps(steps: &[(String, &str)]) -> String {
+    // A step of a project-wide command (`xark build` at a project's root runs
+    // `xark export`, …): the outer command says what's next.
+    if std::env::var_os(NESTED).is_some() {
+        return String::new();
+    }
     // Align hints into a column, measured by display columns not bytes (commands
     // may contain `…`, `‖`).
     let width = steps

@@ -94,16 +94,17 @@ short header, see [`serialization.md`](serialization.md)).
 
 ### `xark-backend` — `crates/backend`
 
-Frontend-agnostic Groth16 over BN254:
+Frontend-agnostic Groth16 over BN254 (verification is `xark_groth16::verify`):
 
-* `verify.rs` — Groth16 verification (`xark-groth16`'s pairing check).
 * `ptau.rs` / `ceremony.rs` — the real trusted-setup path:
   ingest a snarkjs `powersoftau` (`.ptau`) transcript, derive a phase-2 setup,
   run a multi-contributor MPC ceremony with Schnorr PoKs and δ-consistency
   pairing checks (see `docs/trusted-setup.md`).
 * `keys.rs`, `proof.rs`, `serialization.rs` — binary (`CanonicalSerialize`)
   encoding of keys, proofs, and public inputs.
-* `solana.rs` — the little-endian wire encoder for the on-chain verifier.
+* `solana.rs` — the little-endian wire encoder for the on-chain verifier
+  (re-exported from `xark_groth16::solana`), and the big-endian point encoding
+  the ceremony transcript hashes.
 
 ### `xark-verifier` — `crates/verifier`
 

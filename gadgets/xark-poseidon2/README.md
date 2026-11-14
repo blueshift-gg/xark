@@ -10,8 +10,8 @@ native version of every function.
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-poseidon2 = "0.3"
+xark = "0.4"
+xark-poseidon2 = "0.4"
 ```
 
 ## Use
@@ -42,8 +42,35 @@ for a commitment to a private credential.
 |---|---|
 | `hash2(a, b)` | 2-to-1 compression: `poseidon2_perm([a, b, 0])[0]`. |
 | `hash::<N>(inputs)` | Sponge hash of `N` field elements (rate 2, capacity 1). The capacity is seeded with `N`, so `hash([a]) != hash([a, 0])`. |
+| `commit::<N>(inputs)` | A commitment: `hash`'s sponge in domain 1. Include a random element to make it hiding. |
+| `nullifier::<N>(inputs)` | A nullifier (say of a secret key and a note's commitment): `hash`'s sponge in domain 2. |
+| `challenge::<N, BITS>(transcript)` | A Fiat–Shamir challenge: the low `BITS` canonical bits of `hash(transcript)`. |
 | `poseidon2_perm(state)` | The Poseidon2 permutation on a width-3 state. |
-| `native` | The same functions on the host, over `ark_bn254::Fr`, plus `hash_slice` for a length known only at run time. |
+| `native` | The same functions on the host, over `ark_bn254::Fr`, plus `hash_slice`, `commit_slice` and `nullifier_slice` for a length known only at run time. |
+
+## Domains
+
+Each function starts the sponge's capacity lane from its own value, so their
+outputs are independent functions of their inputs (a sponge's capacity is its
+domain separator; Bertoni et al., "On the indifferentiability of the sponge
+construction", Eurocrypt 2008):
+
+| Function | Capacity starts at |
+|---|---|
+| `hash2` (and so every Merkle node built on it) | `0` |
+| `hash::<N>` | `N` |
+| `commit::<N>` | `2^64 · 1 + N` |
+| `nullifier::<N>` | `2^64 · 2 + N` |
+
+No two are equal for any lengths (`N < 2^64`), so a commitment can't be passed off
+as a nullifier or a node, and a nullifier reveals nothing about the commitment
+made of the same values, short of a Poseidon2 collision. The length is in the
+domain too: `commit([a])` and `commit([a, 0])` are unrelated. Domain 3 is kept
+for authenticated encryption, which a later release may add.
+
+`poseidon2_ref.py` has every function written from its definition;
+`tests/modes.rs` checks the circuit
+and `native` against its vectors.
 
 ## Outside the circuit
 
@@ -67,5 +94,17 @@ tests check them against each other and the reference vectors.
   constraints ([`examples/poseidon2`](https://github.com/blueshift-gg/xark/tree/master/examples/poseidon2)).
 - `hash::<5>`, checked against a public output: 721 constraints
   ([`examples/poseidon2_sponge`](https://github.com/blueshift-gg/xark/tree/master/examples/poseidon2_sponge)).
+- `commit::<N>`, `nullifier::<N>` and `hash::<N>` cost `⌈N/2⌉` permutations (240
+  rows each).
+- `challenge::<N, 128>`: `hash::<N>` and 353 rows for the canonical
+  decomposition (`challenge::<14, 128>`, its bits recomposed against a public
+  value: 2035 constraints).
+
+## In a TypeScript client
+
+A circuit's `#[input] impl` methods run in its generated client, so a method that
+calls `commit` or `nullifier` (`Note::commitment`, say) computes the same value in
+TypeScript. `@blueshift-gg/xark` also has them directly: a session's
+`commit(fields)` and `nullifier(fields)`.
 
 Part of [xark](https://github.com/blueshift-gg/xark): zero-knowledge circuits in plain Rust, verified on Solana.

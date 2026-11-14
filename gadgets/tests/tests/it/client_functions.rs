@@ -77,9 +77,8 @@ fn a_gadgets_functions_reach_the_client() {
     let (ok, out) = xark(&circ, &["client"]);
     assert!(ok, "client failed:\n{out}");
     assert!(out.contains("skipping `Unused::zero`"), "{out}");
-    let dir = circ.join("target/xark/circ");
-    assert!(dir.join("client.wasm").exists());
-    let ts = std::fs::read_to_string(dir.join("circ.ts")).unwrap();
+    assert!(circ.join("target/xark/circ/client.wasm").exists());
+    let ts = std::fs::read_to_string(circ.join("clients/ts/circ.ts")).unwrap();
     for want in [
         "export const Span = {",
         "   * `lo..hi`, checked.",
@@ -131,9 +130,11 @@ fn no_functions_no_module() {
     assert!(ok, "build failed:\n{out}");
     let (ok, out) = xark(&dir, &["client"]);
     assert!(ok, "client failed:\n{out}");
-    let out_dir = dir.join("target/xark/arithmetic_square");
-    assert!(!out_dir.join("client.wasm").exists());
-    let ts = std::fs::read_to_string(out_dir.join("arithmetic_square.ts")).unwrap();
+    assert!(
+        !dir.join("target/xark/arithmetic_square/client.wasm")
+            .exists()
+    );
+    let ts = std::fs::read_to_string(dir.join("clients/ts/arithmetic_square.ts")).unwrap();
     assert!(ts.contains("  client: false,") && !ts.contains(".call("));
 }
 

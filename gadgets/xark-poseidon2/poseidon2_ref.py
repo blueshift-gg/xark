@@ -70,6 +70,42 @@ def poseidon2_perm(state):
         s = matmul_external_shortcut(s)
     return s
 
+# ---------------------------------------------------------------------------
+# The domain-separated functions (commit, nullifier) and the
+# Fiat-Shamir challenge, written from their definitions rather than from the Rust,
+# so the vectors in tests/vec.rs check the gadget against an independent account.
+# ---------------------------------------------------------------------------
+
+DOMAIN_COMMIT, DOMAIN_NULLIFIER = 1, 2
+
+def iv(domain, length):
+    # capacity lane: 2^64 * domain + length
+    return (domain << 64) + length
+
+def sponge(capacity, xs):
+    # rate 2, capacity 1 (lane 2): add each pair into the rate lanes, permute.
+    s = [0, 0, capacity]
+    for i in range(0, len(xs), 2):
+        s[0] = (s[0] + xs[i]) % P
+        if i + 1 < len(xs):
+            s[1] = (s[1] + xs[i + 1]) % P
+        s = poseidon2_perm(s)
+    return s[0]
+
+def hash_n(xs):
+    return sponge(len(xs), xs)
+
+def commit(xs):
+    assert len(xs) >= 1
+    return sponge(iv(DOMAIN_COMMIT, len(xs)), xs)
+
+def nullifier(xs):
+    assert len(xs) >= 1
+    return sponge(iv(DOMAIN_NULLIFIER, len(xs)), xs)
+
+def challenge(xs, bits):
+    return hash_n(xs) % (1 << bits)
+
 if __name__ == "__main__":
     # Cross-check matrix shortcuts vs explicit products on random vectors.
     import random
@@ -84,3 +120,11 @@ if __name__ == "__main__":
     print("poseidon2_perm([0,1,2]) =")
     for x in out: print(" ", x)
     # 2-to-1 hash [in0,in1,in2]
+    print("poseidon2_perm([1,2,3]) =", poseidon2_perm([1,2,3]))
+    # Vectors for tests/vec.rs.
+    print("commit([1,2,3]) =", commit([1,2,3]))
+    print("nullifier([1,2,3]) =", nullifier([1,2,3]))
+    print("hash([1,2,3]) =", hash_n([1,2,3]))
+    print("commit([7]) =", commit([7]))
+    t = [i + 1 for i in range(14)]
+    print("challenge(1..=14, 128) =", challenge(t, 128))

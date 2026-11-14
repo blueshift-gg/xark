@@ -1,5 +1,5 @@
-//! `xark init` scaffolds a crate whose own tests pass under `xark test` — the
-//! first thing a new user runs.
+//! `xark init` starts a project whose circuit's own tests pass under `xark test`
+//! at its root — the first thing a new user runs.
 
 use crate::common::{run, tempdir};
 use std::path::Path;
@@ -13,11 +13,15 @@ fn init_then_test() {
     let dir_s = dir.to_str().unwrap();
     let (ok, _, err) = run(&["init", dir_s]);
     assert!(ok, "init failed: {err}");
+    // A project: its circuit in `circuits/<name>/`, the editor settings at the root.
+    assert!(dir.join("xark.toml").is_file() && dir.join("rust-analyzer.toml").is_file());
+    let circuit = dir.join("circuits/zk-demo");
+    let circuit_s = circuit.to_str().unwrap();
 
     // The scaffold depends on the published crates; point it at this checkout.
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let root = root.canonicalize().unwrap();
-    let manifest = dir.join("Cargo.toml");
+    let manifest = circuit.join("Cargo.toml");
     let toml = std::fs::read_to_string(&manifest).unwrap();
     // The scaffold pins major.minor (of a pre-release too).
     let core = env!("CARGO_PKG_VERSION").split('-').next().unwrap();
@@ -71,7 +75,7 @@ fn init_then_test() {
 
     // The editor check (rust-analyzer's `overrideCommand`) reports errors in
     // the tests too, not only in what the circuit build compiles.
-    let lib = dir.join("src/lib.rs");
+    let lib = circuit.join("src/lib.rs");
     let clean = std::fs::read_to_string(&lib).unwrap();
     let broken = clean.replacen(
         "fn accepts_valid() {",
@@ -105,7 +109,7 @@ fn init_then_test() {
     std::fs::write(&lib, edited).unwrap();
     let o = std::process::Command::new("cargo")
         .args(["test", "--release"])
-        .current_dir(&dir)
+        .current_dir(&circuit)
         .env("CARGO_TARGET_DIR", &target)
         .env("XARK", crate::common::xark_bin())
         .output()
@@ -119,11 +123,11 @@ fn init_then_test() {
     // A build over another field (`--field 7`) isn't the circuit Rust tests check:
     // plain `cargo test` rebuilds it for BN254, then passes.
     std::fs::write(&lib, &src).unwrap();
-    let (ok, _, err) = run(&["build", dir_s, "--field", "7"]);
+    let (ok, _, err) = run(&["build", circuit_s, "--field", "7"]);
     assert!(ok, "build --field 7 failed: {err}");
     let o = std::process::Command::new("cargo")
         .args(["test", "--release"])
-        .current_dir(&dir)
+        .current_dir(&circuit)
         .env("CARGO_TARGET_DIR", &target)
         .env("XARK", crate::common::xark_bin())
         .output()

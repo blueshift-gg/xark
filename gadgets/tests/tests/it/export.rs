@@ -47,6 +47,14 @@ fn exported_verifier_passes_its_own_test() {
         proof.to_instruction_data().unwrap(),
         sample("instruction_data.bin")
     );
+    // A newer proof leaves the bundled sample as it is, while that still verifies:
+    // a proof is randomized, and regenerating mustn't change a committed crate.
+    let bundled = sample("proof.solana.bin");
+    let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
+    assert!(ok, "prove failed: {err}");
+    let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
+    assert!(ok, "re-export failed: {err}");
+    assert_eq!(sample("proof.solana.bin"), bundled);
     // Again over its own output is fine (regenerating) …
     let (ok, _, err) = run(&["export", out_s, "--out", verifier_s]);
     assert!(ok, "re-export failed: {err}");
@@ -67,8 +75,8 @@ fn exported_verifier_passes_its_own_test() {
 
     let log = cargo_test(&verifier);
     assert!(
-        log.contains("1 passed"),
-        "expected the bundled-proof test:\n{log}"
+        log.contains("2 passed"),
+        "expected the bundled-proof and typed-inputs tests:\n{log}"
     );
 }
 
@@ -135,6 +143,125 @@ fn a_proof_is_optional() {
     let (ok, _, err) = export(&["--proof", proof.to_str().unwrap()]);
     assert!(!ok && err.contains("doesn't verify"), "{err}");
 }
+
+/// The exported crate's `PublicInputs` packs every kind of input as `#[input]`
+/// does: its self-test writes the sample proof's public inputs by name (as
+/// `xark_schema` decodes them), checks `to_fields()` gives the sample's field
+/// elements, and verifies the proof with them.
+#[test]
+fn typed_public_inputs_match_the_proof() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("kinds");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"kinds\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[workspace]\n\
+             [dependencies]\nxark = {{ path = {:?} }}\nxark-hash = {{ path = {:?} }}\n\
+             [lints.rust]\nunexpected_cfgs = {{ level = \"warn\", check-cfg = ['cfg(xark)'] }}\n",
+            root.join("crates/lang").display().to_string(),
+            root.join("gadgets/xark-hash").display().to_string(),
+        ),
+    )
+    .unwrap();
+    // Packed runs (one with a 249-bit set and a bool), a choice, text, times of
+    // two units, bytes, an array of structs, a hash's halves, an address (given in
+    // base58, a `[u8; 32]` in the crate), and the extremes of signed and unsigned
+    // integers.
+    std::fs::write(dir.join("src/lib.rs"), KINDS).unwrap();
+    std::fs::write(dir.join("inputs.json"), KINDS_INPUTS).unwrap();
+    let d = dir.to_str().unwrap();
+    for args in [
+        vec!["build", d],
+        vec!["setup", d],
+        vec![
+            "prove",
+            d,
+            "--inputs",
+            dir.join("inputs.json").to_str().unwrap(),
+        ],
+        vec!["export", d],
+    ] {
+        let (ok, _, err) = run(&args);
+        assert!(ok, "`xark {}` failed: {err}", args[0]);
+    }
+    let verifier = dir.join("clients/rust");
+    let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
+    assert!(lib.contains("pub struct PublicInputs {"), "{lib}");
+    assert!(lib.contains("    pub to: [u8; 32],"), "{lib}");
+    let log = cargo_test(&verifier);
+    assert!(log.contains("2 passed"), "{log}");
+}
+
+const KINDS: &str = r#"#![cfg_attr(xark, no_std)]
+use xark::prelude::*;
+use xark_hash::Hash;
+
+pub type Day = Days<1900, 2100>;
+
+#[input]
+pub struct Policy {
+    pub today: Day,
+    pub born_by: Day,
+    pub min: u64,
+    pub allowed: Bitfield<Country>,
+    pub flag: bool,
+    pub at: Time<3600, 2000, 2100>,
+}
+
+#[input]
+pub struct Pair {
+    pub a: u16,
+    pub b: i32,
+}
+
+#[input]
+pub struct Pt(pub u32, pub u64);
+
+#[circuit]
+pub fn kinds(
+    x: Private<Field>,
+    y: Public<Field>,
+    policy: Public<Policy>,
+    who: Public<Choice<Country>>,
+    name: Public<Text>,
+    when: Public<Timestamp>,
+    bytes: Public<[u8; 3]>,
+    pairs: Public<[Pair; 2]>,
+    digest: Public<Hash>,
+    to: Public<Address>,
+    big: Public<u128>,
+    neg: Public<i64>,
+    pt: Public<Pt>,
+) {
+    require_eq(x * x, y);
+    bind(policy);
+    bind(who);
+    bind(name);
+    bind(when);
+    bind(bytes);
+    bind(pairs);
+    bind(digest);
+    bind(to);
+    bind(big);
+    bind(neg);
+    bind(pt);
+}
+"#;
+
+const KINDS_INPUTS: &str = r#"{"x": 3, "y": 9,
+ "policy": {"today": "2026-11-11", "born_by": "2008-11-11", "min": "18446744073709551615", "allowed": ["DE","FR","ZW","AD"], "flag": true, "at": "2026-11-11T13:45:00Z"},
+ "who": "GB", "name": "Ada Lovelace", "when": "1969-07-20T20:17:40Z",
+ "bytes": "0x01ff7e", "pairs": [{"a": 65535, "b": -1}, {"a": 7, "b": -2147483648}],
+ "digest": "0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f",
+ "to": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+ "big": "340282366920938463463374607431768211455", "neg": -42,
+ "pt": {"0": 4000000000, "1": "18446744073709551615"}}
+"#;
 
 /// `cargo test` in an exported crate, against this checkout's `xark-verifier`
 /// (the crate pins the published one); what it printed.

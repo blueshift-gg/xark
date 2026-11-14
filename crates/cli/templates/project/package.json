@@ -1,0 +1,16 @@
+{
+  "name": "{{project}}",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsc --noEmit && vitest run"
+  },
+  "devDependencies": {
+    "@blueshift-gg/xark": "^{{xark_npm}}",
+    "@solana/kit": "^8.5.0",
+    "@types/node": "^22.0.0",
+    "litesvm": "^1.6.1",
+    "typescript": "^5.6.0",
+    "vitest": "^5.1.0"
+  }
+}

@@ -3,6 +3,7 @@
 //! workspace's test build). `sbpf.rs` and `differential_alt_bn128.rs` stay their
 //! own binaries: `#[svm_test]` builds them for SBF (solana-ci.yml).
 
+mod add;
 mod batch;
 mod cache;
 mod ceremony_cli;

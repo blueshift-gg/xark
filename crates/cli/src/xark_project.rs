@@ -39,11 +39,57 @@ impl XarkProject {
     }
 
     pub fn proving_key(&self) -> PathBuf {
-        self.xark_dir.join("pk.bin")
+        self.key_dir().join("pk.bin")
     }
 
     pub fn verifying_key(&self) -> PathBuf {
-        self.xark_dir.join("vk.bin")
+        self.key_dir().join("vk.bin")
+    }
+
+    /// Where `xark setup` puts the keys (and their `metadata.json`). In a project,
+    /// `keys/<name>/` at its root, committed: a verifier embedding the key is
+    /// committed too, so a key only in the gitignored `target/` would be replaced
+    /// on every fresh clone. Otherwise the build's own directory.
+    pub fn key_dir(&self) -> PathBuf {
+        match (self.project_root(), self.name()) {
+            (Some(root), Some(name)) if self.crate_dir().is_some() => root.join("keys").join(name),
+            _ => self.xark_dir.clone(),
+        }
+    }
+
+    /// The `circuit.xbc` to prove against: the build the key was made from when it's
+    /// kept beside the key (`keys/<name>/circuit.xbc` in a project), since a key
+    /// fits only the build it was made from; otherwise this build's.
+    pub fn proving_xbc(&self) -> PathBuf {
+        let keyed = self.key_dir().join("circuit.xbc");
+        if keyed.is_file() {
+            keyed
+        } else {
+            self.circuit_xbc()
+        }
+    }
+
+    /// The verifying key the generated verifier crate embeds, when there is one.
+    pub fn committed_verifier_key(&self) -> Option<PathBuf> {
+        let vk = self.clients_dir().join("rust/verifying_key.solana.bin");
+        vk.is_file().then_some(vk)
+    }
+
+    /// Making a key where there's none is only for a circuit nothing verifies yet:
+    /// a verifier that embeds a key (`clients/…/rust/`) means it was lost (a fresh
+    /// clone of a project whose keys weren't committed), and a new one would quietly
+    /// stop matching the deployed program and everyone's proofs.
+    pub fn may_make_key(&self) -> Result<()> {
+        if let Some(vk) = self.committed_verifier_key() {
+            bail!(
+                "no key in {}, but {} embeds one: restore the keys (a project commits \
+                 `keys/`), or make new ones on purpose with `xark setup` (the deployed \
+                 program then needs the new verifier)",
+                crate::commands::shown(&self.key_dir()),
+                crate::commands::shown(&vk)
+            );
+        }
+        Ok(())
     }
 
     pub fn proof(&self) -> PathBuf {
@@ -61,16 +107,35 @@ impl XarkProject {
         (target.file_name()? == "target").then(|| target.parent().map(PathBuf::from))?
     }
 
-    /// Default output directory for `xark export`'s generated verifier crate:
-    /// `<crate>/<name>-verifier/`, beside the circuit's sources (a nested crate with
-    /// its own `[workspace]`, so the circuit crate neither builds nor packages it),
-    /// where git tracks it and `cargo clean` leaves it. A build output outside a
-    /// crate's `target/` keeps it there, as `verifier/`.
-    pub fn export_dir(&self) -> PathBuf {
-        match (self.crate_dir(), self.xark_dir.file_name()) {
-            (Some(krate), Some(name)) => krate.join(format!("{}-verifier", name.to_string_lossy())),
-            _ => self.xark_dir.join("verifier"),
+    /// Where the generated clients go by default: `rust/` for `xark export`'s
+    /// verifier crate and `ts/` for `xark client`'s. In a project (a `xark.toml`
+    /// above the crate), `clients/<name>/` at its root, a member of its workspace;
+    /// otherwise `<crate>/clients/`, beside the circuit's sources (the verifier
+    /// crate nested with its own `[workspace]`, so the circuit crate neither builds
+    /// nor packages it). Either way git tracks them and `cargo clean` leaves them. A
+    /// build output outside a crate's `target/` keeps them there.
+    pub fn clients_dir(&self) -> PathBuf {
+        match (self.crate_dir(), self.project_root(), self.name()) {
+            (Some(_), Some(root), Some(name)) => root.join("clients").join(name),
+            (Some(krate), _, _) => krate.join("clients"),
+            _ => self.xark_dir.join("clients"),
         }
+    }
+
+    /// The project the circuit is one of: the directory with a `xark.toml` whose
+    /// `circuits/` holds its crate. (Another crate somewhere under a project isn't
+    /// one of its circuits, and keeps its keys and clients beside it.)
+    pub fn project_root(&self) -> Option<PathBuf> {
+        let krate = std::path::absolute(self.crate_dir()?).ok()?;
+        let circuits = krate.parent()?;
+        let root = circuits.parent()?;
+        (circuits.file_name()? == "circuits" && root.join(PROJECT_FILE).is_file())
+            .then(|| root.to_path_buf())
+    }
+
+    /// The package the build is named after (`target/xark/<name>/`).
+    pub fn name(&self) -> Option<String> {
+        Some(self.xark_dir.file_name()?.to_string_lossy().into_owned())
     }
 
     /// Auto-detect a Powers-of-Tau (`.ptau`) transcript for production setup.
@@ -103,10 +168,119 @@ impl XarkProject {
     }
 }
 
+/// The project `dir` is in: the nearest directory, `dir` itself or above it, with a
+/// `xark.toml`.
+pub fn project_root(dir: &Path) -> Option<PathBuf> {
+    let dir = std::path::absolute(dir).ok()?;
+    dir.ancestors()
+        .find(|d| d.join(PROJECT_FILE).is_file())
+        .map(Path::to_path_buf)
+}
+
+/// What makes a directory a project.
+pub const PROJECT_FILE: &str = "xark.toml";
+
+/// The project's workspace members: each of `circuits/*`, `programs/*` and
+/// `clients/*/rust` that holds a crate. Cargo reads a glob that matches nothing as
+/// a path that isn't there, so one is listed only once something is in it. The
+/// `default-members` are the programs, so a bare `cargo build-sbf` (or `cargo
+/// test`) at the root builds them alone: built together with the circuits, the
+/// circuits' host dependencies would join the SBF build. Only these globs are
+/// added or removed; anything else in the manifest (members of your own, comments,
+/// layout) stays as it is.
+pub fn sync_members(root: &Path) -> Result<()> {
+    const OURS: [&str; 3] = ["circuits/*", "programs/*", "clients/*/rust"];
+    let has_crate = |pattern: &str| -> bool {
+        let (dir, rest) = pattern.split_once("/*").unwrap_or((pattern, ""));
+        std::fs::read_dir(root.join(dir)).is_ok_and(|entries| {
+            entries.flatten().any(|e| {
+                e.path()
+                    .join(rest.trim_start_matches('/'))
+                    .join("Cargo.toml")
+                    .is_file()
+            })
+        })
+    };
+    let manifest = root.join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)
+        .with_context(|| format!("reading {}", manifest.display()))?;
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .with_context(|| format!("reading {}", manifest.display()))?;
+    let Some(ws) = doc.get_mut("workspace").and_then(|w| w.as_table_like_mut()) else {
+        bail!("{} has no [workspace]", manifest.display());
+    };
+    // `key`'s entries: ours that hold a crate, then whatever else was there.
+    let mut set = |key: &str, ours: &[&str]| {
+        let others: Vec<String> = ws
+            .get(key)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .filter(|v| !OURS.contains(v))
+            .map(str::to_string)
+            .collect();
+        let wanted: Vec<String> = ours
+            .iter()
+            .filter(|p| has_crate(p))
+            .map(|p| p.to_string())
+            .chain(others)
+            .collect();
+        if wanted.is_empty() && key == "default-members" {
+            ws.remove(key);
+            return;
+        }
+        // Changed in place, so the comments around it stay.
+        match ws.get_mut(key).and_then(|v| v.as_array_mut()) {
+            Some(array) => {
+                let current: Vec<&str> = array.iter().filter_map(|v| v.as_str()).collect();
+                if current != wanted {
+                    array.clear();
+                    array.extend(wanted.iter().map(String::as_str));
+                }
+            }
+            None => {
+                ws.insert(key, toml_edit::value(toml_edit::Array::from_iter(wanted)));
+            }
+        }
+    };
+    set("members", &OURS);
+    set("default-members", &["programs/*"]);
+    let new = doc.to_string();
+    if new != text {
+        std::fs::write(&manifest, new)
+            .with_context(|| format!("writing {}", manifest.display()))?;
+    }
+    Ok(())
+}
+
 /// Resolve the name-scoped `target/xark/<pkg-name>/` output directory from a
 /// user-supplied base path, mirroring the per-circuit subdir layout `xark build`
 /// writes.
 fn resolve_xark_dir(base: &Path) -> Result<PathBuf> {
+    // 0. `base` is a project's root: its circuit, when it has one.
+    if base.join(PROJECT_FILE).is_file() {
+        let circuits = crate::commands::project::circuits(base);
+        return match circuits.as_slice() {
+            [one] => Ok(scoped_dir(one)),
+            [] => bail!(
+                "the project at {} has no circuits yet: `xark add circuit <name>`",
+                base.display()
+            ),
+            _ => {
+                let names: Vec<String> = circuits
+                    .iter()
+                    .filter_map(|c| Some(format!("circuits/{}", c.file_name()?.to_str()?)))
+                    .collect();
+                bail!(
+                    "the project has {} circuits: name one ({})",
+                    circuits.len(),
+                    names.join(", ")
+                )
+            }
+        };
+    }
     // 1. `base` is already a scoped output dir (a `target/xark/<name>/` holding
     //    circuit.xbc, the artifact every build writes) — use it directly.
     if base.join("circuit.xbc").is_file() {

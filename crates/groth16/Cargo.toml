@@ -12,7 +12,7 @@ rust-version.workspace = true
 
 [dependencies]
 # Kept explicit for default-features = false; bump on release.
-xark-ir = { path = "../ir", version = "0.3.1", default-features = false }
+xark-ir = { path = "../ir", version = "0.4.0", default-features = false }
 # Field + curve arithmetic only. The prover itself (setup, MSM, FFT, R1CS→QAP,
 # proof assembly, verification) and the key/proof types are implemented here; the
 # types serialize byte-for-byte like `ark-groth16`'s, which the tests check against

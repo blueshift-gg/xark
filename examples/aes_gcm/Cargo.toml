@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.1" }
-xark-aes = { path = "../../gadgets/xark-aes", version = "0.3.1" }
+xark = { path = "../../crates/lang", version = "0.4.0" }
+xark-aes = { path = "../../gadgets/xark-aes", version = "0.4.0" }
 
 [dev-dependencies]
 # Reference AES-GCM (renamed to avoid colliding with this crate's own name).

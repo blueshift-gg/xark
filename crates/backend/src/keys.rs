@@ -6,6 +6,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use xark_groth16::pk::KeyFormat;
 use xark_groth16::{ProvingKey, VerifyingKey};
 
 use crate::serialization::{canonical_read_from_file, canonical_write_to_file};
@@ -15,31 +16,6 @@ use crate::serialization::{canonical_read_from_file, canonical_write_to_file};
 pub struct Groth16Keys {
     pub proving_key: ProvingKey<Bn254>,
     pub verifying_key: VerifyingKey<Bn254>,
-}
-
-/// Self-describing proving-key header: `XKPK` + version + point-compression mode
-/// (`0` = compressed, `1` = uncompressed), and for version 2 the QAP domain size
-/// (`u64` LE), so a streaming prover knows it from the first bytes. Compressed
-/// keys are ~half the size; uncompressed keys skip the per-point square-root on
-/// load (~2× faster prove) at 2× disk. A file without this magic is a legacy key —
-/// read as compressed. Same format as `xark_groth16::pk::KeyFormat`.
-const PK_MAGIC: &[u8; 4] = b"XKPK";
-const PK_VERSION: u8 = 2;
-
-/// `(point-compression, key body)` for a proving-key file, honoring the header if
-/// present (v1: 6 bytes, v2: 14), else defaulting to compressed for legacy keys.
-pub(crate) fn pk_compression(bytes: &[u8]) -> (Compress, &[u8]) {
-    if bytes.len() >= 6 && &bytes[..4] == PK_MAGIC {
-        let mode = if bytes[5] == 1 {
-            Compress::No
-        } else {
-            Compress::Yes
-        };
-        let len = if bytes[4] >= 2 { 14 } else { 6 };
-        (mode, &bytes[len.min(bytes.len())..])
-    } else {
-        (Compress::Yes, bytes)
-    }
 }
 
 impl Groth16Keys {
@@ -52,16 +28,12 @@ impl Groth16Keys {
     /// (uncompressed) doubles the file but skips the decompression sqrt on every
     /// load — a large prove-time win when disk/bandwidth isn't the constraint.
     pub fn write_proving_key_mode(&self, path: &Path, compress: Compress) -> std::io::Result<()> {
-        let mut buf = Vec::with_capacity(14 + self.proving_key.serialized_size(compress));
-        buf.extend_from_slice(PK_MAGIC);
-        buf.push(PK_VERSION);
-        buf.push(if matches!(compress, Compress::No) {
-            1
-        } else {
-            0
-        });
-        // QAP domain size: arkworks' `h_query` has one point fewer.
-        buf.extend_from_slice(&(self.proving_key.h_query.len() as u64 + 1).to_le_bytes());
+        // The v2 `XKPK` header (`KeyFormat`) carries the point mode and the QAP
+        // domain size, so a streaming prover knows the domain from the first
+        // bytes. arkworks' `h_query` has one point fewer than the domain.
+        let domain = self.proving_key.h_query.len() + 1;
+        let mut buf = KeyFormat::header(matches!(compress, Compress::Yes), Some(domain));
+        buf.reserve(self.proving_key.serialized_size(compress));
         self.proving_key
             .serialize_with_mode(&mut buf, compress)
             .map_err(std::io::Error::other)?;
@@ -85,9 +57,14 @@ impl Groth16Keys {
     }
 
     /// [`Self::read_proving_key`] from bytes already in memory (header included).
+    /// An untagged key is a legacy compressed one; a header version this reader
+    /// doesn't know is an error rather than a guess.
     pub fn decode_proving_key(bytes: &[u8]) -> std::io::Result<ProvingKey<Bn254>> {
-        let (compress, body) = pk_compression(bytes);
-        read_proving_key_parallel(body, compress).map_err(|e| std::io::Error::other(e.to_string()))
+        let fmt = KeyFormat::parse(bytes, true)
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .expect("parse at EOF always decides");
+        read_proving_key_parallel(&bytes[fmt.header_len..], fmt.compress())
+            .map_err(|e| std::io::Error::other(e.to_string()))
     }
 
     pub fn read_verifying_key(path: &Path) -> std::io::Result<VerifyingKey<Bn254>> {
@@ -197,7 +174,7 @@ pub struct KeyMetadata {
     pub phase2_seed_hash: Option<String>,
     /// Which R1CS form the key is generated for: `None` = the boundary-minimized
     /// circuit (default `xark setup`); `Some("reduced")` = the template-reduced
-    /// circuit `circuit.xbc` streams directly (`xark setup --streamable`), which the
+    /// circuit `circuit.xbc` streams directly (`xark setup --r1cs-form reduced`), which the
     /// streaming prover proves without ever materializing the constraint system.
     #[serde(default)]
     pub r1cs_form: Option<String>,

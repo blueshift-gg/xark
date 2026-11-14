@@ -548,7 +548,26 @@ fn value_fields_with(
 /// below the field order), as a decimal string: the value the gadget constrains.
 #[wasm_bindgen]
 pub fn poseidon2(inputs: Vec<String>) -> Result<String, js_sys::Error> {
-    let fields = inputs
+    Ok(xark_poseidon2::native::hash_slice(&field_elements(&inputs)?).to_string())
+}
+
+/// `xark_poseidon2::commit` of one or more field elements, as a decimal string.
+#[wasm_bindgen(js_name = poseidon2Commit)]
+pub fn poseidon2_commit(inputs: Vec<String>) -> Result<String, js_sys::Error> {
+    let fields = nonempty(field_elements(&inputs)?, "commit")?;
+    Ok(xark_poseidon2::native::commit_slice(&fields).to_string())
+}
+
+/// `xark_poseidon2::nullifier` of one or more field elements, as a decimal string.
+#[wasm_bindgen(js_name = poseidon2Nullifier)]
+pub fn poseidon2_nullifier(inputs: Vec<String>) -> Result<String, js_sys::Error> {
+    let fields = nonempty(field_elements(&inputs)?, "nullifier")?;
+    Ok(xark_poseidon2::native::nullifier_slice(&fields).to_string())
+}
+
+/// Field elements from decimal or `0x`-hex strings, each below the field order.
+fn field_elements(inputs: &[String]) -> Result<Vec<Fr>, js_sys::Error> {
+    inputs
         .iter()
         .map(|s| {
             xark_prover::field_input_decimal(s)
@@ -556,8 +575,16 @@ pub fn poseidon2(inputs: Vec<String>) -> Result<String, js_sys::Error> {
                 .and_then(|d| <Fr as std::str::FromStr>::from_str(&d).ok())
                 .ok_or_else(|| js_error(&format!("{s:?} is not a field element")))
         })
-        .collect::<Result<Vec<Fr>, _>>()?;
-    Ok(xark_poseidon2::native::hash_slice(&fields).to_string())
+        .collect()
+}
+
+/// `fields`, unless empty: the circuit's `commit` and `nullifier` take at least
+/// one element.
+fn nonempty(fields: Vec<Fr>, what: &str) -> Result<Vec<Fr>, js_sys::Error> {
+    if fields.is_empty() {
+        return Err(js_error(&format!("{what}: at least one field element")));
+    }
+    Ok(fields)
 }
 
 // ---------------------------------------------------------------------------

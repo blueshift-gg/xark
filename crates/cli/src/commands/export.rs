@@ -2,7 +2,7 @@
 //! **crate** for a circuit, with its verifying key embedded at compile time.
 //!
 //! Your Solana program depends on the generated crate and calls
-//! `verify(...)` / `verify_instruction_data(...)`. When the circuit changes,
+//! `verify(...)`. When the circuit changes,
 //! re-run `xark export` and the generated crate is the *only* thing that
 //! updates — your program code stays put.
 //!
@@ -41,30 +41,33 @@ use crate::xark_project::XarkProject;
 #[derive(Args, Debug)]
 pub struct ExportArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
-    /// Verifying key. Inferred as `target/xark/<name>/vk.bin` when omitted.
+    /// Verifying key. Inferred when omitted: `keys/<name>/vk.bin` in a project, and
+    /// otherwise `<crate>/target/xark/<name>/vk.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub verifying_key: Option<PathBuf>,
     /// Proof, bundled as the generated crate's self-test vector. Inferred as
-    /// `target/xark/<name>/proof.bin`; without one (or with one for another key),
-    /// the crate has no self-test.
+    /// `<crate>/target/xark/<name>/proof.bin`; without one (or with one for another
+    /// key), the crate has no self-test.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proof: Option<PathBuf>,
     /// Public inputs file produced by `xark prove`. Inferred as
-    /// `target/xark/<name>/public_inputs.bin`.
+    /// `<crate>/target/xark/<name>/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
     /// Output directory — the root of the generated verifier crate (a warning if it
     /// isn't empty; a `Cargo.toml` or `src/lib.rs` it didn't write is never
-    /// replaced). Defaults to `<crate>/<name>-verifier/`, beside the circuit's
-    /// sources (tracked by git, kept by `cargo clean`); for a build output outside
-    /// a crate's `target/`, its `verifier/`.
+    /// replaced). Defaults to `clients/<name>/rust/` in a project, and otherwise to
+    /// `<crate>/clients/rust/`, beside the circuit's sources (tracked by git, kept by
+    /// `cargo clean`); for a build output outside a crate's `target/`, its
+    /// `clients/rust/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
-    /// Name for the generated crate. Defaults to the `--out` directory name.
+    /// Name for the generated crate. Defaults to `<name>-verifier`, or with `--out`
+    /// to that directory's name.
     #[arg(long)]
     pub crate_name: Option<String>,
 }
@@ -94,7 +97,10 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // A proof given by flag must be there and verify; the inferred one is a sample,
     // left out when missing or made with another key.
     let explicit = args.proof.is_some() || args.public_inputs.is_some();
-    let out_dir = args.out.clone().unwrap_or_else(|| project.export_dir());
+    let out_dir = args
+        .out
+        .clone()
+        .unwrap_or_else(|| project.clients_dir().join("rust"));
 
     // Load inputs.
     let vk = super::read_artifact(
@@ -108,7 +114,18 @@ pub fn run(args: ExportArgs) -> Result<()> {
     let trust = super::setup_trust(vk_path.parent().unwrap_or(Path::new(".")));
     super::ensure_key_matches_circuit(&vk_path, &project.circuit_xbc())?;
     let num_public_inputs = vk.gamma_abc_g1.len().saturating_sub(1);
-    let sample = if explicit || proof_path.exists() {
+    // The sample a crate already has, while it still verifies with this key: kept
+    // over any other, so regenerating doesn't change the crate (a proof is
+    // randomized, and only whoever proved last has one) and a fresh clone's build
+    // leaves the committed crate as it was.
+    let kept = if explicit {
+        None
+    } else {
+        existing_sample(&out_dir, &vk, num_public_inputs)
+    };
+    let sample = if kept.is_some() {
+        kept
+    } else if explicit || proof_path.exists() {
         let proof = super::read_artifact(
             &proof_path,
             "proof",
@@ -132,7 +149,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
         }
         // The proof is the generated crate's self-test: one that doesn't verify (a
         // proof from an earlier key) would only fail there, after the export.
-        if xark_backend::verify(&vk, &proof, &public_inputs)? {
+        if xark_groth16::verify(&vk, &public_inputs, &proof)? {
             Some((proof, public_inputs))
         } else if explicit {
             anyhow::bail!(
@@ -156,12 +173,17 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // Encode (little-endian, the only on-chain wire format).
     let vk_bytes = assemble_vk_bytes_le(&vk);
 
-    let crate_name = sanitize_crate_name(args.crate_name.as_deref().unwrap_or_else(|| {
-        out_dir
+    // `clients/rust/` says nothing about the circuit: by default the crate is named
+    // after the package.
+    let default_name = match (&args.out, project.name()) {
+        (None, Some(name)) => format!("{name}-verifier"),
+        _ => out_dir
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("groth16-verifier")
-    }));
+            .to_string(),
+    };
+    let crate_name = sanitize_crate_name(args.crate_name.as_deref().unwrap_or(&default_name));
 
     // Write the generated crate: over an earlier export, never over anything
     // else (an `--out` naming your own program must not lose its code).
@@ -186,7 +208,8 @@ pub fn run(args: ExportArgs) -> Result<()> {
     fs::create_dir_all(out.join("src"))
         .with_context(|| format!("creating {}", out.join("src").display()))?;
 
-    write_file(out, "verifying_key.solana.bin", &vk_bytes)?;
+    // Whether this export changed a file: a rebuild that changed nothing says so.
+    let mut changed = write_file(out, "verifying_key.solana.bin", &vk_bytes)?;
     const SAMPLE: [&str; 3] = [
         "proof.solana.bin",
         "public_inputs.solana.bin",
@@ -200,29 +223,75 @@ pub fn run(args: ExportArgs) -> Result<()> {
             .iter()
             .zip([proof_bytes, public_inputs_bytes, instruction_data])
         {
-            write_file(out, name, &bytes)?;
+            changed |= write_file(out, name, &bytes)?;
         }
     } else {
         // An earlier export's sample, for whatever key it had.
         for name in SAMPLE {
-            let _ = fs::remove_file(out.join(name));
+            changed |= fs::remove_file(out.join(name)).is_ok();
         }
     }
 
-    write_str(&out.join("Cargo.toml"), &gen_cargo_toml(&crate_name))?;
-    write_str(
-        &out.join("src/lib.rs"),
-        &gen_lib_rs(num_public_inputs, sample.is_some(), &trust),
+    // The public inputs by name, from the build's schema (none from a bare key).
+    let schema: Option<serde_json::Value> =
+        fs::read_to_string(project.xark_dir.join("schema.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok());
+    let typed = schema.as_ref().and_then(|s| {
+        super::public_inputs::generate(
+            s,
+            num_public_inputs,
+            sample.as_ref().map(|(_, inputs)| inputs.as_slice()),
+        )
+    });
+    // In a project, the crate is a member of its workspace; otherwise it stands
+    // alone, so cargo doesn't fold it into the circuit's.
+    // Matched as the workspace globs it (`clients/*/rust`), on the real paths (a
+    // `--out` through `..` or a symlink is the same directory).
+    let member = project.project_root().is_some_and(|root| {
+        match (out.canonicalize(), root.join("clients").canonicalize()) {
+            (Ok(o), Ok(clients)) => {
+                o.file_name() == Some("rust".as_ref())
+                    && o.parent().and_then(Path::parent) == Some(clients.as_path())
+            }
+            _ => false,
+        }
+    });
+    changed |= write_str(
+        &out.join("Cargo.toml"),
+        &gen_cargo_toml(&crate_name, member),
     )?;
-    write_str(
+    if member && let Some(root) = project.project_root() {
+        crate::xark_project::sync_members(&root)?;
+    }
+    changed |= write_str(
+        &out.join("src/lib.rs"),
+        &gen_lib_rs(num_public_inputs, sample.is_some(), typed.as_ref(), &trust),
+    )?;
+    changed |= write_str(
         &out.join("README.md"),
         &gen_readme(&crate_name, num_public_inputs, sample.is_some(), &trust),
     )?;
 
+    if !changed {
+        println!(
+            "{} verifier crate `{crate_name}` at {} is unchanged",
+            crate::style::tag(),
+            out.display()
+        );
+        // The key's trust still matters on every run when it's a warning.
+        if trust.warn {
+            eprintln!(
+                "{}",
+                crate::style::warn(&format!("⚠️  Key: {}.", trust.summary))
+            );
+        }
+        return Ok(());
+    }
     println!(
         "Generated verifier crate `{crate_name}` at {} ({} public input(s), \
          VK = {} B). Depend on it from your Solana program and call \
-         `verify_instruction_data(...)`.",
+         `verify(&proof, PublicInputs {{ .. }})`.",
         out.display(),
         num_public_inputs,
         vk_bytes.len(),
@@ -235,7 +304,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
     }
     println!(
         "{}",
-        crate::style::brand("✅ On-chain verifier crate ready (verifying key embedded).")
+        crate::style::brand("✅ Onchain verifier crate ready (verifying key embedded).")
     );
     let p = super::path_arg(&args.path);
     let mut next = vec![(
@@ -252,9 +321,33 @@ pub fn run(args: ExportArgs) -> Result<()> {
     Ok(())
 }
 
+/// The sample proof an earlier export bundled in `out` (`proof.solana.bin`,
+/// `public_inputs.solana.bin`), if it verifies with `vk`.
+fn existing_sample(
+    out: &Path,
+    vk: &xark_groth16::VerifyingKey<ark_bn254::Bn254>,
+    n: usize,
+) -> Option<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
+    use ark_serialize::CanonicalDeserialize;
+    let proof =
+        xark_groth16::solana::decode_proof_le(&fs::read(out.join("proof.solana.bin")).ok()?)
+            .ok()?;
+    let bytes = fs::read(out.join("public_inputs.solana.bin")).ok()?;
+    if bytes.len() != n * 32 {
+        return None;
+    }
+    let inputs: Vec<ark_bn254::Fr> = bytes
+        .chunks(32)
+        .map(|c| ark_bn254::Fr::deserialize_compressed(c).ok())
+        .collect::<Option<_>>()?;
+    xark_groth16::verify(vk, &inputs, &proof)
+        .unwrap_or(false)
+        .then_some((proof, inputs))
+}
+
 /// Sanitize an arbitrary string into a valid Cargo crate name
 /// (`[a-z0-9_-]`, non-empty, not leading with a digit/sep).
-fn sanitize_crate_name(s: &str) -> String {
+pub(crate) fn sanitize_crate_name(s: &str) -> String {
     let mut out: String = s
         .to_ascii_lowercase()
         .chars()
@@ -283,8 +376,16 @@ fn verifier_dep() -> String {
     format!(r#""={}""#, env!("CARGO_PKG_VERSION"))
 }
 
-fn gen_cargo_toml(name: &str) -> String {
+fn gen_cargo_toml(name: &str, member: bool) -> String {
     let verifier_dep = verifier_dep();
+    let workspace = if member {
+        "# A member of the project's workspace (its `clients/*/rust`).\n"
+    } else {
+        "# Standalone: this crate resolves its own lock, independent of the circuit or\n\
+         # program workspace it lives beside. (Without this, cargo folds it into a\n\
+         # parent workspace and refuses to build it.)\n\
+         [workspace]\n"
+    };
     format!(
         r#"# Auto-generated by `xark export` — regenerate to update the embedded VK.
 [package]
@@ -292,11 +393,7 @@ name = "{name}"
 version = "0.1.0"
 edition = "2024"
 
-# Standalone: this crate resolves its own lock, independent of the circuit or
-# program workspace it lives beside. (Without this, cargo folds it into a
-# parent workspace and refuses to build it.)
-[workspace]
-
+{workspace}
 [dependencies]
 # The verifier core, pinned to the crates.io version of the `xark` CLI that
 # generated this crate.
@@ -313,32 +410,91 @@ unexpected_cfgs = {{ level = "warn", check-cfg = [
     )
 }
 
-fn gen_lib_rs(n: usize, sample: bool, trust: &super::SetupTrust) -> String {
+fn gen_lib_rs(
+    n: usize,
+    sample: bool,
+    typed: Option<&super::public_inputs::Typed>,
+    trust: &super::SetupTrust,
+) -> String {
     let setup = trust.tag;
-    let tests = if sample {
-        r#"
-#[cfg(test)]
-mod tests {
-    /// The proof bundled at export time verifies against the embedded VK.
+    let (inputs, typed_test) = match typed {
+        Some(t) => (
+            t.items.clone(),
+            t.sample
+                .as_ref()
+                .filter(|_| sample)
+                .map_or(String::new(), |lit| {
+                    format!(
+                        r#"
+    /// The sample's public inputs, by name, are its field elements, and verify.
     #[test]
-    fn bundled_proof_verifies() {
-        assert!(super::verify_instruction_data(include_bytes!(
-            "../instruction_data.bin"
-        )));
-    }
-}
+    fn typed_public_inputs_match_the_sample() {{
+        let inputs = {lit};
+        let fields: Vec<[u8; 32]> = include_bytes!("../public_inputs.solana.bin")
+            .chunks(32)
+            .map(|c| c.try_into().unwrap())
+            .collect();
+        assert_eq!(inputs.to_fields().as_slice(), fields.as_slice());
+        let proof = Proof::from_le_bytes(include_bytes!("../proof.solana.bin"));
+        assert!(verify(&proof, inputs));
+    }}
 "#
+                    )
+                }),
+        ),
+        // Not every input has a Rust form here yet: `verify` takes the field elements
+        // (`xark inspect` lists what each one is), packed with `fields` if need be.
+        None => (
+            "/// How the public inputs become field elements, as the circuit's `#[input]`\n\
+             /// makes them.\n\
+             pub use xark_verifier::fields;\n"
+                .to_string(),
+            String::new(),
+        ),
+    };
+    let tests = if sample {
+        format!(
+            r#"
+#[cfg(test)]
+mod tests {{
+    use super::*;
+
+    /// The proof bundled at export time verifies against the embedded VK, with
+    /// its public inputs and only with them.
+    #[test]
+    fn bundled_proof_verifies() {{
+        let proof = Proof::from_le_bytes(include_bytes!("../proof.solana.bin"));
+        let mut fields: Fields = [[0; 32]; NUM_PUBLIC_INPUTS];
+        for (f, b) in fields
+            .iter_mut()
+            .zip(include_bytes!("../public_inputs.solana.bin").chunks(32))
+        {{
+            f.copy_from_slice(b);
+        }}
+        assert!(verify(&proof, fields));
+        if let Some(first) = fields.first_mut() {{
+            first[0] ^= 1;
+            assert!(!verify(&proof, fields));
+        }}
+    }}
+{typed_test}}}
+"#
+        )
     } else {
-        ""
+        String::new()
     };
     format!(
         r#"//! Auto-generated by `xark export` — do not edit by hand.
 //!
 //! Self-contained Groth16 verifier for this circuit ({n} public input(s)).
 //! The verifying key is embedded at compile time. Depend on this crate from
-//! your Solana program and call [`verify`] / [`verify_instruction_data`];
-//! re-run `xark export` when the circuit changes and this crate is the only
-//! thing that updates.
+//! your Solana program, build the [`PublicInputs`] it requires and call
+//! [`verify`]; re-run `xark export` when the circuit changes and this crate is
+//! the only thing that updates.
+// Generated, and compared byte for byte by `xark build --check`: `cargo fmt` leaves
+// it as written, and clippy's lints are for code you write.
+#![cfg_attr(rustfmt, rustfmt::skip)]
+#![allow(clippy::all)]
 #![cfg_attr(any(target_os = "solana", target_arch = "bpf"), no_std)]
 
 pub use xark_verifier::{{Proof, VerifierError, Verifier}};
@@ -359,11 +515,15 @@ pub const SETUP: &str = "{setup}";
 pub const VERIFIER: Verifier<NUM_PUBLIC_INPUTS> =
     Verifier::from_le_bytes(include_bytes!("../verifying_key.solana.bin"));
 
-/// Raw LE verifying-key wire bytes (for the dynamic byte API).
-pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
+/// The public inputs as field elements, in proof order, each 32 bytes
+/// little-endian: what [`verify`] takes, from anything that converts into it.
+pub type Fields = [[u8; 32]; NUM_PUBLIC_INPUTS];
 
-/// Verify `proof` against `public_inputs`. Returns `false` on any failure —
-/// a non-holding pairing, a malformed point, or a non-canonical public input.
+{inputs}
+/// Verify `proof` against `inputs`: anything that converts into [`Fields`] (a
+/// `PublicInputs`, your own struct with a `From` impl, or the elements
+/// themselves). Returns `false` on any failure — a non-holding pairing, a
+/// malformed point, or a non-canonical public input.
 ///
 /// This matches the on-chain `alt_bn128` syscall, which masks the unused top
 /// bits of each coordinate limb. To also reject non-canonical *coordinate*
@@ -372,14 +532,8 @@ pub const VK_BYTES: &[u8] = include_bytes!("../verifying_key.solana.bin");
 /// derive a different valid proof of the same statement. Never key replay
 /// protection on proof bytes; put it in the public inputs (a nullifier, nonce
 /// or signer the circuit binds).
-///
-/// Never inlined, nor are the other entry points: inlined into a program's
-/// entrypoint (as fat LTO does), the pairing check's buffers can take that one frame
-/// past the SBF limit of 4,096 bytes. `cargo build-sbf` only warns about that, and the
-/// program then overwrites its own stack at run time.
-#[inline(never)]
-pub fn verify(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
-    VERIFIER.verify(proof, public_inputs)
+pub fn verify(proof: &Proof, inputs: impl Into<Fields>) -> bool {{
+    verify_fields(proof, &inputs.into())
 }}
 
 /// Strict [`verify`]: additionally rejects any proof/VK coordinate whose
@@ -387,24 +541,24 @@ pub fn verify(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> b
 /// proofs are always canonical, so this never rejects an honest proof. It
 /// removes *encoding* malleability only: a re-randomized proof is still
 /// accepted (see [`verify`]).
+pub fn verify_strict(proof: &Proof, inputs: impl Into<Fields>) -> bool {{
+    verify_fields_strict(proof, &inputs.into())
+}}
+
+// Never inlined: inlined into a program's
+// entrypoint (as fat LTO does), the pairing check's buffers can take that one frame
+// past the SBF limit of 4,096 bytes. `cargo build-sbf` only warns about that, and the
+// program then overwrites its own stack at run time.
 #[inline(never)]
-pub fn verify_strict(proof: &Proof, public_inputs: &[[u8; 32]; NUM_PUBLIC_INPUTS]) -> bool {{
+fn verify_fields(proof: &Proof, public_inputs: &Fields) -> bool {{
+    VERIFIER.verify(proof, public_inputs)
+}}
+
+#[inline(never)]
+fn verify_fields_strict(proof: &Proof, public_inputs: &Fields) -> bool {{
     VERIFIER.verify_strict(proof, public_inputs)
 }}
 
-/// Verify from raw instruction data laid out as
-/// `proof (256 B) || public_inputs ({n} * 32 B)` — the shape your program
-/// receives in its instruction data. Returns `false` on any failure.
-#[inline(never)]
-pub fn verify_instruction_data(data: &[u8]) -> bool {{
-    xark_verifier::verify_proof_only(VK_BYTES, data).unwrap_or(false)
-}}
-
-/// Strict [`verify_instruction_data`]; see [`verify_strict`].
-#[inline(never)]
-pub fn verify_instruction_data_strict(data: &[u8]) -> bool {{
-    xark_verifier::verify_proof_only_strict(VK_BYTES, data).unwrap_or(false)
-}}
 {tests}"#
     )
 }
@@ -438,23 +592,30 @@ updates.
 {name} = {{ path = "path/to/{name}" }}   # or a git/published source
 ```
 
-The proof comes in the instruction data (256 bytes: a client's `proof.toBytes()`);
-the public inputs are what your program requires, from its own state (a policy, a
-root, a nullifier), each 32 bytes little-endian:
+The proof comes in the instruction data (256 bytes: a client's `proof.toBytes()`).
+The public inputs are what your program requires, from its own state (a policy, a
+root, a nullifier): build a `PublicInputs`, the circuit's public inputs by name,
+which packs them into field elements as the circuit's `#[input]` does:
 
 ```rust
 let Some(proof) = instruction_data.first_chunk::<256>() else {{
     return Err(ProgramError::InvalidInstructionData);
 }};
 let proof = {ident}::Proof::from_le_bytes(proof);
-let public_inputs: [[u8; 32]; {n}] = [/* from your program's state */];
-if !{ident}::verify(&proof, &public_inputs) {{
+let inputs = {ident}::PublicInputs {{ /* from your program's state */ }};
+if !{ident}::verify(&proof, inputs) {{
     return Err(ProgramError::InvalidArgument);
 }}
 ```
 
-When the transaction does carry the public inputs too (`proof || public_inputs`),
-`{ident}::verify_instruction_data(instruction_data)` checks both.
+`verify` takes anything that converts into `{ident}::Fields`, the `[[u8; 32]; {n}]`
+field elements in proof order: a `PublicInputs`, the elements themselves, or your
+own struct with a `From` impl, packed with `{ident}::fields` (const fns, so inputs
+known at compile time are constants).
+
+A transaction that carries the public inputs too (`proof || public_inputs`, a
+client's `proof.toInstructionData()`) splits them off after the proof's 256 bytes
+into `Fields`, and `verify` checks both.
 
 ## Trusted setup
 
@@ -477,15 +638,23 @@ or context the proof is for, and record *that* on-chain.
     )
 }
 
-fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
-    let path = dir.join(name);
-    fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
+fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<bool> {
+    write_str_bytes(&dir.join(name), bytes)
 }
 
-fn write_str(path: &Path, contents: &str) -> Result<()> {
-    fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
+fn write_str(path: &Path, contents: &str) -> Result<bool> {
+    write_str_bytes(path, contents.as_bytes())
+}
+
+/// Write `bytes` unless the file already holds them: an unchanged file keeps its
+/// mtime, so cargo doesn't rebuild the crate and the program that depends on it.
+/// Whether it wrote.
+fn write_str_bytes(path: &Path, bytes: &[u8]) -> Result<bool> {
+    if fs::read(path).is_ok_and(|b| b == bytes) {
+        return Ok(false);
+    }
+    fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -494,7 +663,8 @@ mod tests {
 
     #[test]
     fn generated_manifest_is_standalone_and_version_pinned() {
-        let manifest = gen_cargo_toml("example-verifier");
+        let manifest = gen_cargo_toml("example-verifier", false);
+        assert!(!gen_cargo_toml("example-verifier", true).contains("[workspace]"));
 
         // Standalone so cargo doesn't fold it into a neighbouring workspace.
         assert!(manifest.contains("\n[workspace]\n"));

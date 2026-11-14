@@ -1,5 +1,5 @@
 //! Groth16 (BN254) keys, the trusted-setup ceremony (`.ptau` + phase 2), key and
-//! proof serialization (including the Solana encoding) and verification for xark
+//! proof serialization (including the Solana encoding) for xark
 //! circuits. Setup and proving are `xark-groth16`.
 
 pub mod ceremony;
@@ -8,12 +8,10 @@ pub mod proof;
 pub mod ptau;
 pub mod serialization;
 pub mod solana;
-pub mod verify;
 
 pub use keys::{Groth16Keys, KeyMetadata};
 pub use proof::ProofBundle;
 pub use ptau::{PtauError, PtauFile, parse_ptau};
-pub use verify::verify;
 
 #[cfg(feature = "test-deterministic")]
 pub use rand_chacha::ChaCha20Rng;

@@ -40,7 +40,8 @@ pub struct ClientArgs {
     #[arg(long, value_enum, default_value_t = Lang::Ts)]
     pub lang: Lang,
     /// Output file, or a directory to write `<circuit>.<ext>` in. Defaults to
-    /// `target/xark/<name>/<circuit>.<ext>`.
+    /// `clients/<circuit>/<lang>/<circuit>.<ext>` in a project, and otherwise to
+    /// `<crate>/clients/<lang>/<circuit>.<ext>`, beside the circuit's sources.
     #[arg(long, short, value_hint = clap::ValueHint::FilePath)]
     pub out: Option<PathBuf>,
     /// Skip the Rust client functions (`#[input]` on an `impl`, built as
@@ -165,7 +166,7 @@ pub fn run(args: ClientArgs) -> Result<()> {
             o.join(file)
         }
         Some(o) => o,
-        None => project.xark_dir.join(file),
+        None => project.clients_dir().join(args.lang.ext()).join(file),
     };
     // The build's directory, named after the package (not the circuit).
     let artifacts = project
@@ -177,6 +178,17 @@ pub fn run(args: ClientArgs) -> Result<()> {
     let client = args.lang.generate(&model, &schema, &artifacts)?;
     if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    // Unchanged, it keeps its mtime (a bundler or `tsc --watch` has nothing to redo).
+    if std::fs::read_to_string(&out).ok().as_deref() == Some(client.as_str()) {
+        println!(
+            "{} {} client for `{}` at {} is unchanged",
+            crate::style::tag(),
+            args.lang.name(),
+            model.circuit,
+            out.display()
+        );
+        return Ok(());
     }
     std::fs::write(&out, client).with_context(|| format!("writing {}", out.display()))?;
     println!(

@@ -1,11 +1,12 @@
 //! Everyday input types with a natural form on both sides: a short [`Text`], one
-//! variant of an [`Enum`] ([`Choice`]) and a set of them ([`Bitfield`]). Each is one
-//! `Field` in the circuit and its plain value off it (`"A1938274"`, `Country::US`),
-//! with its standard type recorded in `schema.json`. Times are in [`crate::time`].
+//! variant of an [`Enum`] ([`Choice`]) and a set of them ([`Bitfield`]), and a Solana
+//! [`Address`]. Each is one `Field` in the circuit (an address two) and its plain value
+//! off it (`"A1938274"`, `Country::US`, base58), with its standard type recorded in
+//! `schema.json`. Times are in [`crate::time`].
 
 use core::marker::PhantomData;
 
-use crate::input::{Encoding, Enum, Input, Layout, Reader, Type, Writer};
+use crate::input::{Encoding, Enum, Input, Layout, Member, Reader, Type, Writer};
 use crate::lang::{Field, require, require_eq};
 
 // ---- Text ---------------------------------------------------------------------
@@ -37,6 +38,40 @@ impl Text {
     /// The text's `Field`.
     pub const fn field(self) -> Field {
         self.0
+    }
+}
+
+// ---- Address ----------------------------------------------------------------------
+
+/// A Solana address (a `Pubkey`, @solana/kit's `Address`): a recipient, a signer, a
+/// mint. Its 32 bytes are two field elements, `hi` the first 16 and `lo` the last 16,
+/// each big-endian, as `xark_hash::Hash` splits a digest: one field would reduce
+/// most addresses mod p, and a program would have to reduce its own the same way.
+/// Off-circuit it's built from the 32 bytes (`Address::new(key.to_bytes())`) or its
+/// base58 (`"Tokenkeg…".into()`); a generated client takes an `Address`.
+///
+/// In the circuit, `require_eq` compares two (two constraints), `bind` ties a proof
+/// to one no constraint uses, and [`Address::to_fields`] hashes one.
+#[derive(Clone, Copy)]
+pub struct Address {
+    hi: Field,
+    lo: Field,
+}
+
+impl Address {
+    /// From its 32 bytes. A `const fn`, so a fixed address (a program id) can be a
+    /// constant in the circuit.
+    pub const fn new(bytes: [u8; 32]) -> Address {
+        let (hi, lo) = bytes.split_at(16);
+        Address {
+            hi: Field::from_be_bytes(hi),
+            lo: Field::from_be_bytes(lo),
+        }
+    }
+
+    /// Its two field elements, `[hi, lo]`, in input order: to hash it, or `bind` it.
+    pub const fn to_fields(self) -> [Field; 2] {
+        [self.hi, self.lo]
     }
 }
 
@@ -253,6 +288,30 @@ impl Input for Text {
     }
 }
 
+/// Its 32 bytes in two 16-byte halves, as a `Hash`'s are, given in base58.
+impl Input for Address {
+    const TYPE: Type = Type::Named(
+        &Type::named(
+            "Address",
+            Layout::fields(&[
+                Member::new("hi", Type::Field),
+                Member::new("lo", Type::Field),
+            ]),
+        )
+        .encoded(Encoding::Address),
+    );
+    fn read(r: &mut Reader<'_>) -> Self {
+        Address {
+            hi: r.field(),
+            lo: r.field(),
+        }
+    }
+    fn write(&self, w: &mut Writer<'_>) {
+        w.field(self.hi);
+        w.field(self.lo);
+    }
+}
+
 impl<E: Enum> Input for Choice<E> {
     const TYPE: Type = Type::Named(
         &Type::named("Choice", Layout::Newtype(Type::Field))
@@ -309,6 +368,16 @@ macro_rules! one_field_partial_eq {
 }
 one_field_partial_eq!(Text, Choice<E: Enum>, Bitfield<E: Enum>);
 
+/// Both halves equal: two equality constraints.
+impl crate::RequireEqCircuit<Address> for Address {
+    #[inline]
+    #[cfg_attr(not(xark), track_caller)]
+    fn require_eq_circuit(self, rhs: Address) {
+        crate::lang::__xark_require_eq_scalar(self.hi, rhs.hi);
+        crate::lang::__xark_require_eq_scalar(self.lo, rhs.lo);
+    }
+}
+
 /// `choice == Country::US`: whether it is that variant (see [`Choice::is`]).
 impl<E: Enum> PartialEq<E> for Choice<E> {
     fn eq(&self, variant: &E) -> bool {
@@ -327,6 +396,11 @@ mod circuit_debug {
     impl fmt::Debug for Text {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "Text({:?})", self.0)
+        }
+    }
+    impl fmt::Debug for Address {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Address({:?}, {:?})", self.hi, self.lo)
         }
     }
     impl<E: Enum> fmt::Debug for Choice<E> {
@@ -392,6 +466,63 @@ mod host {
         }
     }
 
+    impl Address {
+        /// From its base58 (`"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"`), checked
+        /// to be 32 bytes.
+        pub fn parse(s: &str) -> Result<Address, InvalidValue> {
+            let b = xark_schema::base58::decode(s).map_err(InvalidValue)?;
+            let b: [u8; 32] = b.try_into().map_err(|b: alloc::vec::Vec<u8>| {
+                InvalidValue(alloc::format!("{s:?} is {} bytes, not 32", b.len()))
+            })?;
+            Ok(Address::new(b))
+        }
+
+        /// Its 32 bytes.
+        pub fn to_bytes(self) -> [u8; 32] {
+            let mut out = [0u8; 32];
+            for (half, f) in out.chunks_mut(16).zip([self.hi, self.lo]) {
+                let le = le_bytes(f);
+                half.copy_from_slice(&le[..16]);
+                half.reverse();
+            }
+            out
+        }
+    }
+
+    impl From<[u8; 32]> for Address {
+        fn from(bytes: [u8; 32]) -> Address {
+            Address::new(bytes)
+        }
+    }
+
+    /// Its base58, as [`Address::parse`]. Panics on anything else.
+    impl From<&str> for Address {
+        fn from(s: &str) -> Address {
+            Address::parse(s).unwrap_or_else(|e| panic!("{e}"))
+        }
+    }
+
+    /// In a byte-encoded `#[input]` struct, its 32 bytes.
+    impl crate::host::FromBeBytes for Address {
+        const BYTES: usize = 32;
+        fn from_be_bytes(bytes: &[u8]) -> Address {
+            Address::new(bytes.try_into().expect("an address is 32 bytes"))
+        }
+    }
+
+    /// Its base58.
+    impl fmt::Display for Address {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&xark_schema::base58::encode(&self.to_bytes()))
+        }
+    }
+
+    impl fmt::Debug for Address {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Address({self})")
+        }
+    }
+
     /// A constant `Field`'s 32 little-endian bytes.
     fn le_bytes(f: Field) -> [u8; 32] {
         use ark_ff::{BigInteger, PrimeField};
@@ -452,6 +583,40 @@ mod tests {
         Red,
         Green,
         Blue,
+    }
+
+    /// The SPL Token program's address: its bytes, halves and base58 agree.
+    #[test]
+    fn addresses() {
+        let token = [
+            6, 221, 246, 225, 215, 101, 161, 147, 217, 203, 225, 70, 206, 235, 121, 172, 28, 180,
+            133, 237, 95, 91, 55, 145, 58, 140, 245, 133, 126, 255, 0, 169,
+        ];
+        let a = Address::from("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+        assert_eq!(a.to_bytes(), token);
+        assert_eq!(
+            a.to_fields(),
+            [
+                Field::from_be_bytes(&token[..16]),
+                Field::from_be_bytes(&token[16..])
+            ]
+        );
+        assert_eq!(Address::from(token).to_fields(), a.to_fields());
+        assert_eq!(
+            alloc::format!("{a:?}"),
+            "Address(TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA)"
+        );
+        assert_eq!(Address::new([0xff; 32]).to_bytes(), [0xff; 32]);
+        assert!(Address::parse("1111").is_err() && Address::parse("0x00").is_err());
+        assert_eq!(
+            crate::client::to_json(&a).unwrap(),
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        );
+        let back: Address = crate::client::from_json(&serde_json::json!(
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ))
+        .unwrap();
+        assert_eq!(back.to_bytes(), token);
     }
 
     #[test]

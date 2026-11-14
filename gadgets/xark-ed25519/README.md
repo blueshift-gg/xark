@@ -9,8 +9,8 @@ Solana keys use. The example's tests verify real signatures from the
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-ed25519 = "0.3"
+xark = "0.4"
+xark-ed25519 = "0.4"
 ```
 
 ## Use

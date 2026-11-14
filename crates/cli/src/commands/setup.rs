@@ -25,12 +25,13 @@ use crate::xark_project::XarkProject;
 #[derive(Args, Debug)]
 pub struct SetupArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
     /// Directory to write the keys and their metadata to (created if missing; a
-    /// warning if it isn't empty). Defaults to `target/xark/<name>/`.
+    /// warning if it isn't empty). Defaults to `keys/<name>/` in a project (it's
+    /// committed), and otherwise to `target/xark/<name>/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Make the key from this machine's randomness even if a `.ptau` could be
@@ -82,10 +83,6 @@ pub struct SetupArgs {
     ///   (secp256k1_ecdsa: 36% of variables), else `reduced`.
     #[arg(long, value_enum, default_value_t = R1csForm::Auto)]
     pub r1cs_form: R1csForm,
-
-    /// Shorthand for `--r1cs-form reduced`.
-    #[arg(long, default_value_t = false, conflicts_with = "r1cs_form")]
-    pub streamable: bool,
 
     /// QAP evaluation domain.
     ///
@@ -330,13 +327,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     // Build first if there's no build yet; keys for a circuit older than its source
     // would prove the wrong thing.
     crate::cli::build_if_needed(&project.xark_dir, true)?;
-    let out_dir = args.out.clone().unwrap_or_else(|| project.xark_dir.clone());
+    let out_dir = args.out.clone().unwrap_or_else(|| project.key_dir());
     let prof = super::dbg_flag("XARK_BUILD_TIME");
-    let form = if args.streamable {
-        R1csForm::Reduced
-    } else {
-        args.r1cs_form
-    };
+    let form = args.r1cs_form;
 
     // The `.ptau`: given, or found beside the build, unless the key has to come
     // from this machine's randomness (a seed, a smooth domain, or `xark prove`'s
@@ -542,6 +535,29 @@ pub fn run(args: SetupArgs) -> Result<()> {
     println!("Wrote {}", pk_path.display());
     println!("Wrote {}", vk_path.display());
     println!("Wrote {}", meta_path.display());
+    // A key fits the build it was made from, and a project's keys are committed: the
+    // build goes with them, so a clone (another Rust, another xark) still proves with
+    // them.
+    if project.project_root().is_some() && args.out.is_none() {
+        let keyed = out_dir.join("circuit.xbc");
+        fs::copy(project.circuit_xbc(), &keyed)
+            .with_context(|| format!("writing {}", keyed.display()))?;
+        println!("Wrote {}", keyed.display());
+    }
+    // A project commits its keys; GitHub refuses a file over 100 MB and warns
+    // past 50 MB, so a key that size goes in Git LFS.
+    if project.project_root().is_some()
+        && args.out.is_none()
+        && fs::metadata(&pk_path).is_ok_and(|m| m.len() > 50 << 20)
+    {
+        eprintln!(
+            "{} {} is {} MB: commit it with Git LFS (`git lfs track \"keys/*/pk.bin\"`), as \
+             GitHub refuses a file over 100 MB",
+            crate::style::warn("note:"),
+            pk_path.display(),
+            fs::metadata(&pk_path).map(|m| m.len() >> 20).unwrap_or(0)
+        );
+    }
     println!(
         "verifying key sha256: {vk_sha256}  {}",
         crate::style::dim("# pin a client's verifier to it: { keyHash }")

@@ -494,7 +494,25 @@ pub fn build_crate_with(
             // circuit itself is the same at every level.
             "--config",
             "profile.release.opt-level=\"s\"",
+            // The rest of the release profile as cargo's defaults, whatever the
+            // workspace sets (a project's is its programs': fat LTO, one codegen unit,
+            // stripped). They don't change the R1CS, but they change what's inlined,
+            // and so the keyed rows, the template's size and which function a
+            // constraint is attributed to; and debug assertions would become
+            // constraints.
+            "--config",
+            "profile.release.lto=false",
+            // One unit: what rustc builds a circuit crate with when cargo names none
+            // (the pinned digests are of those builds); 16 changes the keyed rows.
+            "--config",
+            "profile.release.codegen-units=1",
+            "--config",
+            "profile.release.debug-assertions=false",
         ]);
+    if !opts.line_tables {
+        // Cargo's release default with no debug info (since Rust 1.77).
+        cmd.args(["--config", "profile.release.strip=\"debuginfo\""]);
+    }
     if opts.line_tables {
         cmd.args([
             "--config",

@@ -51,17 +51,18 @@ cargo install xark-cli
 xark doctor
 ```
 
-**2. Create a circuit.** `xark init` writes a crate with the square-root circuit
-above and two tests:
+**2. Start a project.** `xark init` makes a project with the square-root circuit
+above, and two tests, in `circuits/my-circuit/`:
 
 ```sh
-xark init my-circuit
+xark init my-circuit && cd my-circuit
 ```
 
-**3. Test it.** `xark test` builds the circuit, then runs the crate's tests:
+**3. Test it.** At the project's root, `xark test` builds the circuit, then runs its
+tests:
 
 ```console
-$ xark test my-circuit
+$ xark test
 xark building circuit `my-circuit`
 xark 2 vars, 1 constraints, 0 witness-gen ops
 xark circuit digest 75e3ce529473dfaa2f89a85a0d588228
@@ -73,38 +74,54 @@ test tests::rejects_invalid ... ok
 **4. Prove.** The first proof also makes the key, from your machine's randomness:
 
 ```console
-$ xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
+$ xark prove --inputs '{"secret": 3, "result": 9}'
 ...
 ✅ Proof produced and self-checked (1 public input(s)).
+   solved in 0.00s, proved in 0.00s
 ```
 
 Try inputs that don't satisfy the circuit, and xark shows you where:
 
 ```console
-$ xark prove my-circuit --inputs '{"secret": 3, "result": 10}'
+$ xark prove --inputs '{"secret": 3, "result": 10}'
 error: witness does not satisfy the circuit
 
   src/lib.rs:6:16  require_eq(secret * secret, result);
 ```
 
-**5. Verify**, then **export** the Solana verifier:
+**5. Verify it on Solana.** `xark add program` writes a Pinocchio program that
+verifies the circuit's proofs, and a LiteSVM test that proves with the generated
+TypeScript client and sends the proof to it. `xark build` builds the circuit, its
+clients and the program; `xark test` runs every test. You need the
+[Solana CLI](https://solana.com/docs/intro/installation) for `cargo build-sbf`, and
+Node:
 
 ```console
-$ xark verify my-circuit
-✅ Proof verified
-
-$ xark export my-circuit
+$ xark add program my-circuit
+$ xark build
 ...
-Key: a single-party setup from OS randomness: sound unless whoever ran `xark setup` kept that randomness (xark doesn't). `xark ceremony` spreads that trust.
-✅ On-chain verifier crate ready (verifying key embedded).
+✅ Onchain verifier crate ready (verifying key embedded).
+✅ TypeScript client for `my_circuit` at clients/my-circuit/ts/my_circuit.ts
+xark building the programs (cargo build-sbf)
+$ npm install && xark test
+...
+ Test Files  1 passed (1)
 ```
 
-`my-circuit/my-circuit-verifier/` is a crate your Solana program depends on:
+Commit everything `xark build` writes, the keys in `keys/` included: the
+generated clients embed the verifying key, and the CI workflow `xark init` wrote
+checks they match the source (`xark build --check`).
+
+The program depends on `clients/my-circuit/rust/`, the verifier crate `xark build`
+generates (`my-circuit-verifier`). Its `PublicInputs` has the circuit's public
+inputs by name, packed for you, and `verify` takes it:
 
 ```rust
 let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);
-let public_inputs: [[u8; 32]; 1] = [/* from your program's state */];
-if !my_circuit_verifier::verify(&proof, &public_inputs) {
+let inputs = my_circuit_verifier::PublicInputs {
+    result: /* from your program's state, 32 bytes little-endian */,
+};
+if !my_circuit_verifier::verify(&proof, inputs) {
     return Err(ProgramError::InvalidArgument);
 }
 ```
@@ -125,6 +142,8 @@ The verifier crate's `SETUP` constant says which kind of key it embeds.
 - [Editor diagnostics](docs/editor.md): circuit errors inline in rust-analyzer
 
 **Using proofs**
+- [Migrating from 0.3](docs/migrating-to-0.4.md): keep a circuit crate, or move it
+  into a project, keeping your keys
 - [TypeScript clients](docs/typescript.md): typed provers and verifiers for Node
   and the browser
 - [`@blueshift-gg/xark`](crates/wasm/README.md): the WebAssembly prover and
@@ -151,8 +170,8 @@ Each gadget is its own crate under [`gadgets/`](gadgets). Add the ones you use:
 
 ```toml
 [dependencies]
-xark = "0.3"
-xark-poseidon2 = "0.3"
+xark = "0.4"
+xark-poseidon2 = "0.4"
 ```
 
 | Crate | What it does |
@@ -160,16 +179,16 @@ xark-poseidon2 = "0.3"
 | `xark-poseidon`, `xark-poseidon2` | Poseidon and Poseidon2 hashes over BN254, the cheapest in a circuit |
 | `xark-sha256`, `xark-keccak`, `xark-blake2s`, `xark-blake3` | Standard hashes, matching their native implementations |
 | `xark-mimc`, `xark-pedersen` | MiMC and Pedersen hashes |
-| `xark-merkle` | Merkle-tree membership |
+| `xark-merkle` | Merkle trees: membership, appends, non-membership (indexed trees) |
 | `xark-aes` | AES-128/256 block cipher, CTR and GCM |
 | `xark-secp256k1`, `xark-secp256r1` | ECDSA signature verification on secp256k1 and P-256 |
 | `xark-ed25519` | Ed25519 (EdDSA) signature verification |
-| `xark-grumpkin` | The Grumpkin curve, for recursion and folding |
+| `xark-grumpkin` | The Grumpkin curve, for recursion and folding, and Schnorr signatures over it |
 | `xark-bits`, `xark-bignum`, `xark-curve`, `xark-hash` | Building blocks for writing your own gadgets |
 
 ## Examples
 
-[`examples/`](examples) has 72 runnable circuits, from `cube` to `zkyc` (a private
+[`examples/`](examples) has 74 runnable circuits, from `cube` to `zkyc` (a private
 credential check against a public policy), with the gadgets above at work. Test
 any of them with `xark test examples/<name>`.
 

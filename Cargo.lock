@@ -385,6 +385,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-grumpkin"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2c969a12ceed8881e5c66277dabd3e7a5aa2c72c9370f3f42eca3f2dd33a21a"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-std 0.6.0",
+]
+
+[[package]]
 name = "ark-poly"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4291,6 +4303,7 @@ dependencies = [
  "indexmap 2.14.0",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -4302,6 +4315,12 @@ checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.2.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "tracing"
@@ -4680,7 +4699,7 @@ dependencies = [
 
 [[package]]
 name = "xark"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4695,7 +4714,7 @@ dependencies = [
 
 [[package]]
 name = "xark-aes"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ghash",
  "xark",
@@ -4705,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "xark-backend"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4727,7 +4746,7 @@ dependencies = [
 
 [[package]]
 name = "xark-bignum"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
@@ -4737,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "xark-bits"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "blake2",
  "blake3",
@@ -4751,7 +4770,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake2s"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4760,7 +4779,7 @@ dependencies = [
 
 [[package]]
 name = "xark-blake3"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4769,7 +4788,7 @@ dependencies = [
 
 [[package]]
 name = "xark-cli"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
@@ -4783,6 +4802,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde_json",
  "sha2 0.11.0",
+ "toml_edit",
  "tracing-subscriber",
  "xark-backend",
  "xark-frontend",
@@ -4794,11 +4814,11 @@ dependencies = [
 
 [[package]]
 name = "xark-curve"
-version = "0.3.1"
+version = "0.4.0"
 
 [[package]]
 name = "xark-ed25519"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "curve25519-dalek",
  "ed25519-dalek",
@@ -4813,7 +4833,7 @@ dependencies = [
 
 [[package]]
 name = "xark-frontend"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "addr2line",
  "num-bigint 0.4.8",
@@ -4826,7 +4846,7 @@ dependencies = [
 
 [[package]]
 name = "xark-groth16"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -4848,23 +4868,28 @@ dependencies = [
 
 [[package]]
 name = "xark-grumpkin"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-grumpkin",
+ "num-bigint 0.4.8",
  "xark",
  "xark-ir",
+ "xark-poseidon2",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-hash"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-ir"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4878,7 +4903,7 @@ dependencies = [
 
 [[package]]
 name = "xark-keccak"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -4887,7 +4912,7 @@ dependencies = [
 
 [[package]]
 name = "xark-macros"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4896,18 +4921,19 @@ dependencies = [
 
 [[package]]
 name = "xark-merkle"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "num-bigint 0.4.8",
  "xark",
  "xark-ir",
  "xark-poseidon",
+ "xark-poseidon2",
  "xark-test-harness",
 ]
 
 [[package]]
 name = "xark-mimc"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4916,7 +4942,7 @@ dependencies = [
 
 [[package]]
 name = "xark-pedersen"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
  "xark-ir",
@@ -4925,14 +4951,14 @@ dependencies = [
 
 [[package]]
 name = "xark-poseidon"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
 ]
 
 [[package]]
 name = "xark-poseidon2"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4943,7 +4969,7 @@ dependencies = [
 
 [[package]]
 name = "xark-prover"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4958,7 +4984,7 @@ dependencies = [
 
 [[package]]
 name = "xark-schema"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -4968,7 +4994,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256k1"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "k256",
  "num-bigint 0.4.8",
@@ -4981,7 +5007,7 @@ dependencies = [
 
 [[package]]
 name = "xark-secp256r1"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "num-bigint 0.4.8",
  "p256",
@@ -4994,7 +5020,7 @@ dependencies = [
 
 [[package]]
 name = "xark-sha256"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "xark",
  "xark-bits",
@@ -5003,7 +5029,7 @@ dependencies = [
 
 [[package]]
 name = "xark-test-harness"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "num-bigint 0.4.8",
  "serde_json",
@@ -5013,7 +5039,7 @@ dependencies = [
 
 [[package]]
 name = "xark-tests"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -5042,7 +5068,7 @@ dependencies = [
 
 [[package]]
 name = "xark-verifier"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "solana-nostd-alt-bn128",
  "solana-program-error",
@@ -5051,7 +5077,7 @@ dependencies = [
 
 [[package]]
 name = "xark-wasm"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",

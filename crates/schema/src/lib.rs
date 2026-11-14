@@ -30,10 +30,12 @@
 //! | `{"bytes": K, "limbs": B}`       | a number, or a list of its little-endian bytes, split into `B`-bit limbs |
 //! | `{"concat": [k…] \| "fields"}`   | `0x`-hex bytes, the fields' encodings back to back (`"sec1": true`: a leading `0x04` too) |
 //! | `{"bytes": 32, "ed25519": true}` | a compressed Ed25519 point                      |
+//! | `{"bytes": 32, "concat": [16, 16], "base58": true}` | a Solana address: base58, `0x`-hex or a list of its bytes; decoded as base58 |
 //!
 //! Without an encoding a struct is an object of its fields. Field names may be
 //! `snake_case` (as declared) or `camelCase` (as in a generated client).
 
+pub mod base58;
 pub mod time;
 
 use std::collections::BTreeMap;
@@ -462,6 +464,8 @@ impl Schema {
                 _ => integer(v)?,
             };
             self.encode_number(r, &n, at, out)?;
+        } else if enc["base58"] == true {
+            self.encode_bytes(r, &address(v)?, at, out)?;
         } else {
             self.encode_bytes(r, &bytes(v)?, at, out)?;
         }
@@ -688,6 +692,9 @@ impl Schema {
         if enc.get("limbs").is_some() {
             return Ok(Value::String(self.decode_number(r, it)?.to_string()));
         }
+        if enc["base58"] == true {
+            return Ok(Value::String(base58::encode(&self.decode_bytes(r, it)?)));
+        }
         if enc.is_object() {
             return Ok(Value::String(format!(
                 "0x{}",
@@ -854,6 +861,9 @@ impl Schema {
         }
         if enc.get("limbs").is_some() {
             return q("<number>");
+        }
+        if enc["base58"] == true {
+            return q("<base58 address>");
         }
         if enc.is_object() {
             let len = self
@@ -1032,7 +1042,7 @@ fn is_placeholder(s: &str) -> bool {
     let Some(inner) = s.strip_prefix('<').and_then(|t| t.strip_suffix('>')) else {
         return false;
     };
-    matches!(inner, "field" | "text" | "number")
+    matches!(inner, "field" | "text" | "number" | "base58 address")
         || inner.strip_prefix('u').is_some_and(width)
         || inner.strip_prefix('i').is_some_and(width)
         || (inner.starts_with("a ") && inner.ends_with(", …"))
@@ -1104,6 +1114,17 @@ fn field(v: &Value) -> Result<Fr, String> {
 }
 
 /// Bytes: `0x`-hex, or a list of byte values.
+/// A Solana address's bytes: base58, as wallets and explorers write it, or any form
+/// [`bytes`] takes (a `0x`-hex string is never base58, which has no `0`).
+fn address(v: &Value) -> Result<Vec<u8>, String> {
+    match v {
+        Value::String(s) if !s.trim().starts_with("0x") && !s.trim().starts_with("0X") => {
+            base58::decode(s.trim()).map_err(|e| format!("{e}: expected a base58 address"))
+        }
+        _ => bytes(v),
+    }
+}
+
 fn bytes(v: &Value) -> Result<Vec<u8>, String> {
     match v {
         Value::String(s) => {
@@ -1739,6 +1760,48 @@ mod tests {
         let pk = "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
         let values = s.public_inputs(&json!({ "pk": pk })).unwrap();
         assert_eq!(s.decode_public(&values, true).unwrap()["pk"], pk);
+    }
+
+    /// An address is given in base58 (or as hex or bytes), split into two big-endian
+    /// halves as a `Hash` is, and decoded back to base58.
+    #[test]
+    fn addresses_are_base58() {
+        let s = Schema::parse(
+            r#"{"version": 2,
+              "inputs": [{"name": "to", "visibility": "public", "type": {"ref": "Address"}}],
+              "types": {
+                "Address": {"struct": [{"name": "hi", "type": "field"}, {"name": "lo", "type": "field"}],
+                            "encoding": {"bytes": 32, "concat": [16, 16], "base58": true}}
+              },
+              "public_inputs": ["to.hi", "to.lo"]}"#,
+        )
+        .unwrap();
+        // The SPL Token program: 06ddf6e1…7eff00a9.
+        let token = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+        let hex = "0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9";
+        let values = s.public_inputs(&json!({ "to": token })).unwrap();
+        let half = |h: &str| Fr::from(BigUint::parse_bytes(h.as_bytes(), 16).unwrap());
+        assert_eq!(
+            values,
+            [
+                half("06ddf6e1d765a193d9cbe146ceeb79ac"),
+                half("1cb485ed5f5b37913a8cf5857eff00a9")
+            ]
+        );
+        assert_eq!(s.decode_public(&values, true).unwrap()["to"], token);
+        assert_eq!(s.public_inputs(&json!({ "to": hex })).unwrap(), values);
+        let list: Vec<u8> = bytes(&json!(hex)).unwrap();
+        assert_eq!(s.public_inputs(&json!({ "to": list })).unwrap(), values);
+        // Not base58 (`0`, `O`, `I`, `l`), or not 32 bytes.
+        for bad in [
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5D0",
+            "1111",
+            "0x00",
+        ] {
+            let e = s.public_inputs(&json!({ "to": bad })).unwrap_err();
+            assert_eq!(e.path, "to", "{bad}: {e}");
+        }
+        assert_eq!(s.summary()[0].template, r#""<base58 address>""#);
     }
 
     #[test]

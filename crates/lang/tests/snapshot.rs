@@ -330,6 +330,54 @@ fn require_ne_solves_iff_distinct() {
     );
 }
 
+/// `select(bit, t, f)` over a field element and an array: one row per element, and
+/// over every witness exactly `bit ? t : f`. With `bit` a `bool` input (pinned on
+/// entry), the search finds the one witness for the right outputs and none for a
+/// swapped or changed one; a `bool` from a comparison works as the bit too.
+#[test]
+fn select_picks_by_bit() {
+    let src = "#![no_std]\n\
+        use xark::prelude::*;\n\
+        pub fn circuit(bit: Private<bool>, t: Private<[Field; 2]>, f: Private<[Field; 2]>,\n\
+          s: Private<Field>, a: Public<[Field; 2]>, m: Public<Field>) {\n\
+        require_eq(select(bit, t, f), a);\n\
+        require_eq(select(s.lt::<8>(Field::from(5u8)), s, Field::from(5u8)), m);\n\
+        }\n";
+    let c = compile_with_field(&write_case("select", src), "select", "bn254");
+    assert!(c.status_success, "select failed: {}", c.stderr);
+    let case = |bit: &str, s: &str, a: [&str; 2], m: &str| {
+        [
+            ("bit", bit.to_string()),
+            ("t[0]", "11".into()),
+            ("t[1]", "12".into()),
+            ("f[0]", "21".into()),
+            ("f[1]", "22".into()),
+            ("s", s.into()),
+            ("a[0]", a[0].into()),
+            ("a[1]", a[1].into()),
+            ("m", m.into()),
+        ]
+    };
+    let accepts = |inputs: [(&str, String); 9]| {
+        let refs: Vec<(&str, &str)> = inputs.iter().map(|(n, v)| (*n, v.as_str())).collect();
+        accepts_exactly(&c, &refs)
+    };
+    assert!(accepts(case("1", "3", ["11", "12"], "3")));
+    assert!(accepts(case("0", "9", ["21", "22"], "5")));
+    assert!(!accepts(case("1", "3", ["21", "22"], "3")));
+    assert!(!accepts(case("0", "3", ["21", "12"], "3")));
+    assert!(!accepts(case("1", "9", ["11", "12"], "9")));
+    assert!(!accepts(case("1", "3", ["11", "12"], "5")));
+
+    // On the host, the same function.
+    use xark::Field;
+    let (t, f) = (
+        [Field::from(1u8), Field::from(2u8)],
+        [Field::from(3u8), Field::from(4u8)],
+    );
+    assert!(xark::select(true, t, f) == t && xark::select(false, t, f) == f);
+}
+
 /// Native `u64` as a first-class circuit witness: a `Private<u64>` input is range-checked
 /// to 64 bits on entry, and the *native* `<` operator lowers to the field comparison
 /// gadget — no wrapper type, no `::<64>`. A true ordering solves (analyzer-clean), a false

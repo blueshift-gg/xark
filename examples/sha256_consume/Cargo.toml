@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.1" }
-xark-sha256 = { path = "../../gadgets/xark-sha256", version = "0.3.1" }
+xark = { path = "../../crates/lang", version = "0.4.0" }
+xark-sha256 = { path = "../../gadgets/xark-sha256", version = "0.4.0" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

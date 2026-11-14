@@ -26,7 +26,7 @@ use crate::xark_project::XarkProject;
 #[derive(Args, Debug)]
 pub struct ProveArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
@@ -41,12 +41,13 @@ pub struct ProveArgs {
     #[arg(long = "inputs", value_name = "JSON|FILE")]
     pub inputs: Option<String>,
 
-    /// Proving key. Inferred as `target/xark/<name>/pk.bin` when omitted.
+    /// Proving key. Inferred when omitted: `keys/<name>/pk.bin` in a project, and
+    /// otherwise `<crate>/target/xark/<name>/pk.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub proving_key: Option<PathBuf>,
     /// Directory to write the proof (`proof.bin`) and its public inputs
     /// (`public_inputs.bin`) to (created if missing; a warning if it isn't empty).
-    /// Defaults to `target/xark/<name>/`.
+    /// Defaults to `<crate>/target/xark/<name>/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Reproducible-randomness escape hatch for test fixtures **only**. Groth16
@@ -125,10 +126,10 @@ pub fn run(args: ProveArgs) -> Result<()> {
     // it just replaces a "run build first" error with actually doing it.
     autobuild_and_setup(&args, &project, &pk_path)?;
 
-    // `PROVE_TIME=1` prints a coarse phase breakdown (solve / prove) so the real
-    // bottleneck is measured, not assumed.
+    // `PROVE_TIME=1` (a `debug` build) adds the constraint count and whether the
+    // rows came from the cache to the solve / prove times every proof reports.
     let timing = super::dbg_flag("PROVE_TIME");
-    let xbc = project.circuit_xbc();
+    let xbc = project.proving_xbc();
     // Inputs come from `--inputs`: inline JSON or a file path (agnostic).
     let inputs = match &args.inputs {
         Some(arg) => super::read_inputs(&project.xark_dir, arg)?,
@@ -164,7 +165,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
             }
         }
     };
-    let (proof, public) = prove_streaming(
+    let (proof, public, times) = prove_streaming(
         &args,
         &xbc,
         &pk_path,
@@ -173,7 +174,14 @@ pub fn run(args: ProveArgs) -> Result<()> {
         sources.as_ref(),
         timing,
     )?;
-    write_outputs(&args, &proof_out, &out_dir, proof, public)
+    write_outputs(&args, &proof_out, &out_dir, proof, public, times)
+}
+
+/// How long the two halves of a proof took: solving the witness (with the row
+/// source built beside it) and the Groth16 prove (key read, MSMs and self-check).
+struct ProveTimes {
+    solve: std::time::Duration,
+    prove: std::time::Duration,
 }
 
 /// The prover RNG: OS randomness, or — test fixtures only — a fixed seed (refused
@@ -233,13 +241,18 @@ fn prove_streaming(
     inputs: &BTreeMap<String, String>,
     sources: Option<&xark_ir::SourceMap>,
     timing: bool,
-) -> Result<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
+) -> Result<(
+    xark_groth16::Proof<ark_bn254::Bn254>,
+    Vec<ark_bn254::Fr>,
+    ProveTimes,
+)> {
     let t = std::time::Instant::now();
     let bytes = std::fs::read(xbc).with_context(|| format!("reading {}", xbc.display()))?;
     let fingerprint = super::sha256_hex(&bytes);
     // A key made for another circuit can't prove this one: say so, rather than
     // failing the self-verification below. One made from another build of the same
-    // circuit (another Rust version) fits.
+    // circuit (another Rust version) may not fit either: a key fits the build it
+    // was made from (a project keeps that build beside its key).
     match super::key_fit(pk_path, &bytes) {
         super::KeyFit::Different => anyhow::bail!(
             "the proving key {} was made for a different build of the circuit \
@@ -248,7 +261,9 @@ fn prove_streaming(
         ),
         super::KeyFit::SameCircuit => eprintln!(
             "note: {} was made from another build of this circuit (the same constraints, \
-             compiled differently, e.g. by another Rust version); proving with it",
+             compiled differently, e.g. by another Rust version); proving with it, but a \
+             key fits the build it was made from: if the proof fails its self-check, run \
+             `xark setup` for a new key",
             pk_path.display()
         ),
         super::KeyFit::Same => {}
@@ -342,14 +357,18 @@ fn prove_streaming(
             let _ = fs::remove_file(&tmp);
         }
     }
+    let times = ProveTimes {
+        solve: t_solve,
+        prove: t_prove.elapsed(),
+    };
     if timing {
         eprintln!(
             "PROVE_TIME: [streaming] solve={t_solve:?} prove={:?} ({} constraints) cached={cached}",
-            t_prove.elapsed(),
+            times.prove,
             src.num_constraints()
         );
     }
-    Ok((proof, public))
+    Ok((proof, public, times))
 }
 
 /// The rows to prove from, and whether they came without re-running the minimize
@@ -425,6 +444,7 @@ fn write_outputs(
     out_dir: &std::path::Path,
     proof: xark_groth16::Proof<ark_bn254::Bn254>,
     public: Vec<ark_bn254::Fr>,
+    times: ProveTimes,
 ) -> Result<()> {
     let bundle = ProofBundle {
         proof,
@@ -455,6 +475,14 @@ fn write_outputs(
         crate::style::brand(&format!(
             "✅ Proof produced and self-checked ({} public input(s)).",
             public.len()
+        ))
+    );
+    println!(
+        "{}",
+        crate::style::dim(&format!(
+            "   solved in {:.2}s, proved in {:.2}s",
+            times.solve.as_secs_f64(),
+            times.prove.as_secs_f64()
         ))
     );
 
@@ -488,23 +516,30 @@ fn write_outputs(
             super::shown(&public_path)
         );
     }
-    println!(
-        "\n{}",
-        crate::style::next_steps(&[
-            (
-                format!("xark verify {p}{files}"),
-                "check this proof locally"
-            ),
-            (
-                format!("xark client {p}"),
-                "generate a typed TypeScript client (prove + verify in JS)",
-            ),
-            (
-                format!("xark export {p}{files}"),
-                "generate the on-chain Solana verifier crate",
-            ),
-        ])
-    );
+    let mut steps = vec![(
+        format!("xark verify {p}{files}"),
+        "check this proof locally",
+    )];
+    let in_project = XarkProject::resolve(args.path.clone())
+        .ok()
+        .and_then(|p| p.project_root())
+        .is_some();
+    if in_project {
+        steps.push((
+            "xark build".to_string(),
+            "the verifier crate and TypeScript client (clients/), then the programs",
+        ));
+    } else {
+        steps.push((
+            format!("xark client {p}"),
+            "generate a typed TypeScript client (prove + verify in JS)",
+        ));
+        steps.push((
+            format!("xark export {p}{files}"),
+            "generate the onchain Solana verifier crate",
+        ));
+    }
+    println!("\n{}", crate::style::next_steps(&steps));
     Ok(())
 }
 
@@ -524,7 +559,7 @@ fn autobuild_and_setup(
             crate::style::tag(),
             dir.display()
         );
-        if crate::cli::cmd_build(&[dir.display().to_string()]) != 0 {
+        if crate::cli::cmd_build(&dir.display().to_string()) != 0 {
             anyhow::bail!("auto-build failed (build the circuit with `xark build` first)");
         }
         is_built = project.circuit_xbc().exists();
@@ -537,6 +572,7 @@ fn autobuild_and_setup(
     // If no crate dir is found, fall through: `load_r1cs` emits the usual
     // clear "run `xark build` first" error.
     if args.proving_key.is_none() && is_built && !pk_path.exists() {
+        project.may_make_key()?;
         eprintln!(
             "{} no proving key found — making one from this machine's randomness (`xark \
              ceremony` makes one no single party has to be trusted for)…",
@@ -554,7 +590,6 @@ fn autobuild_and_setup(
             phase2_seed: None,
             uncompressed: false,
             r1cs_form: setup::R1csForm::Auto,
-            streamable: false,
             domain: setup::QapDomain::Auto,
         })?;
     }
@@ -562,9 +597,16 @@ fn autobuild_and_setup(
 }
 
 /// Best-effort locate the circuit crate directory (holding `Cargo.toml`) to
-/// auto-build: an explicit crate path, else the cwd, else walking up from the
-/// resolved output dir.
+/// auto-build: the crate the resolved output dir is under, else an explicit crate
+/// path, else the cwd, else walking up from the resolved output dir.
 fn find_crate_dir(args: &ProveArgs, project: &XarkProject) -> Option<PathBuf> {
+    // The crate the build output belongs to, first: at a project's root the path
+    // and the cwd hold the workspace's `Cargo.toml`, not the circuit's.
+    if let Some(krate) = project.crate_dir()
+        && krate.join("Cargo.toml").is_file()
+    {
+        return Some(krate);
+    }
     // Try each source independently: an explicit crate path, then the cwd, then
     // walking up from the resolved output dir. (Independent `if`s, not else-if,
     // so an explicit *non-crate* path still falls back to cwd.)

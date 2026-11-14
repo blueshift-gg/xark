@@ -669,9 +669,9 @@ impl CircuitProof {
         ))
     }
 
-    /// The proof, then its public inputs, as a Solana program receives them:
-    /// `verify_instruction_data(...)` of an exported verifier checks these bytes
-    /// (`instruction_data.bin`).
+    /// The proof, then its public inputs, as a Solana program that takes both
+    /// receives them (an exported verifier's `instruction_data.bin`): 256 bytes,
+    /// then 32 per public input, which its `verify` takes as `Fields`.
     pub fn to_instruction_data(&self) -> Result<Vec<u8>, ProveError> {
         Ok([self.to_solana_proof()?, self.to_solana_public_inputs()?].concat())
     }
@@ -837,13 +837,30 @@ impl Circuit {
         })
     }
 
-    /// Prove `inputs` with the built circuit and its proving key
-    /// (`<dir>/pk.bin`, from `xark setup`) and return the proof — the same
-    /// streaming prover and the same bytes as `xark prove`, without the CLI. The
-    /// inputs must satisfy the circuit, with the same diagnostics as
-    /// [`Self::check_satisfied`]; soundness is [`Self::check`]'s job.
+    /// Prove `inputs` with the built circuit and its proving key (from `xark
+    /// setup`: `keys/<name>/pk.bin` in a project, otherwise `<dir>/pk.bin`) and
+    /// return the proof — the same streaming prover and the same bytes as `xark
+    /// prove`, without the CLI. The inputs must satisfy the circuit, with the same
+    /// diagnostics as [`Self::check_satisfied`]; soundness is [`Self::check`]'s job.
     pub fn prove<I: ProveInputs>(&self, inputs: I) -> Result<CircuitProof, ProveError> {
-        self.prove_with_key(self.dir.join("pk.bin"), inputs)
+        self.prove_with_key(self.proving_key(), inputs)
+    }
+
+    /// Where `xark setup` put this circuit's proving key: in a project (a
+    /// `xark.toml` above the build), `keys/<name>/` at its root, where it's
+    /// committed; otherwise beside the build.
+    fn proving_key(&self) -> std::path::PathBuf {
+        let local = self.dir.join("pk.bin");
+        let abs = std::path::absolute(&self.dir).unwrap_or_else(|_| self.dir.clone());
+        let in_project = abs
+            .ancestors()
+            .find(|d| d.join("xark.toml").is_file())
+            .zip(abs.file_name())
+            .map(|(root, name)| root.join("keys").join(name).join("pk.bin"));
+        match in_project {
+            Some(pk) if pk.exists() || !local.exists() => pk,
+            _ => local,
+        }
     }
 
     /// [`Self::prove`] with a proving key from elsewhere (e.g. a ceremony's
@@ -861,7 +878,14 @@ impl Circuit {
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             ProveError(format!("circuit `{}`: {what}: {e}", self.name))
         };
-        let xbc_path = self.dir.join("circuit.xbc");
+        // A key fits the build it was made from: prove with the `circuit.xbc` kept
+        // beside it (a project's `keys/<name>/`), else this build's.
+        let beside_key = pk_path.with_file_name("circuit.xbc");
+        let xbc_path = if beside_key.is_file() {
+            beside_key
+        } else {
+            self.dir.join("circuit.xbc")
+        };
         let xbc = std::fs::read(&xbc_path)
             .map_err(|e| fail(&format!("reading {}", xbc_path.display()), &e))?;
         let mut pk = xark_groth16::SerializedPk::open(pk_path).map_err(|e| {

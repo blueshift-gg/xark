@@ -17,11 +17,12 @@ It needs stable Rust 1.89 or newer. `xark build` adds the
 ## From a new circuit to a proof
 
 ```sh
-xark init my-circuit                                    # a circuit crate, with tests
-xark test my-circuit                                    # build it, run its tests
-xark prove my-circuit --inputs '{"secret": 3, "result": 9}'
-xark verify my-circuit
-xark export my-circuit                                  # the Solana verifier crate
+xark init my-circuit && cd my-circuit                   # a project, with a circuit and its tests
+xark test                                               # build it, run its tests
+xark prove --inputs '{"secret": 3, "result": 9}'
+xark verify
+xark add program my-circuit                             # a Solana program verifying it, and a LiteSVM test
+xark build                                              # the circuit, its clients, the program
 ```
 
 The first `prove` makes the key from your machine's randomness: a single-party

@@ -608,7 +608,7 @@ fn regen_one(spec: &Spec, work: &Path) {
         convert(&Groth16::<Bn254>::prove(&ark_pk, ArkCircuit::of(&circ), &mut rng).expect("prove"));
     eprintln!("  [timing] prove: {:.1}s", t.elapsed().as_secs_f64());
     assert!(
-        xark_backend::verify(&keys.verifying_key, &proof, &pi).expect("verify"),
+        xark_groth16::verify(&keys.verifying_key, &pi, &proof).expect("verify"),
         "regenerated `{}` proof failed to verify before writing",
         spec.name
     );
