@@ -1156,9 +1156,9 @@ fn build_function_blob(env: &Builder, field: &FieldSpec, num_inputs: usize) -> V
     // `Visibility::Private` but are computed by the witness program, not supplied.
     // So we store only the inputs (role + name); the rest are `v{id}` / Derived.
     put_uv(&mut b, num_inputs as u64);
-    for id in 0..num_inputs {
-        b.push(vis_byte(&env.variables[id].visibility));
-        put_str(&mut b, &env.variables[id].name);
+    for var in &env.variables[..num_inputs] {
+        b.push(vis_byte(&var.visibility));
+        put_str(&mut b, &var.name);
     }
     // Every scope's item streams: each def's body, then the top level.
     let mut scopes: Vec<(Vec<GItem>, Vec<GItem>)> = env
