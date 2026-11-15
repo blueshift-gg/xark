@@ -43,7 +43,7 @@
 //! * `P` on the curve (inside `wide_scalar_mul`).
 //! * `s ≤ n − 1`: otherwise `s` and `s + n` would both verify (malleability).
 //! * The challenge limbs as above, then `s·G = R + e·P` with the proven
-//!   [`wide_scalar_mul`] and the incomplete [`ec_add`](crate::ec_add).
+//!   [`wide_scalar_mul`] and the incomplete [`ec_add`].
 //!
 //! The incomplete edges refuse, never accept: `s = 0`, `e = 0`, or `R = ±e·P`
 //! leave no proof. For an honest signer each has probability about `2⁻²⁵³`.
