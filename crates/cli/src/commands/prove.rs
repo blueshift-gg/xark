@@ -20,7 +20,7 @@ use xark_backend::serialization::write_public_inputs;
 use xark_groth16::{Accelerator, ConstraintSource, Local, PkSource};
 use xark_prover::{XarkCircuit, fr_from_decimal};
 
-use super::{explain_unsatisfied, resolve_input_ids, setup, stream_witness};
+use super::{resolve_input_ids, setup, stream_witness};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
@@ -254,7 +254,11 @@ fn prove_streaming(
     pk_path: &std::path::Path,
     kind: StreamKind,
     context: StreamingContext<'_>,
-) -> Result<(xark_groth16::Proof<ark_bn254::Bn254>, Vec<ark_bn254::Fr>)> {
+) -> Result<(
+    xark_groth16::Proof<ark_bn254::Bn254>,
+    Vec<ark_bn254::Fr>,
+    ProveTimes,
+)> {
     let StreamingContext {
         inputs,
         sources,
