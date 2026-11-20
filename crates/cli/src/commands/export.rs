@@ -70,6 +70,10 @@ pub struct ExportArgs {
     /// to that directory's name.
     #[arg(long)]
     pub crate_name: Option<String>,
+    /// Write the manifest as a workspace member even when `--out` is outside
+    /// `clients/`. Used by `xark build --check` to stage the comparison.
+    #[arg(long, hide = true)]
+    pub member: bool,
 }
 
 pub fn run(args: ExportArgs) -> Result<()> {
@@ -202,7 +206,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
             );
         }
     }
-    if args.out.is_some() {
+    if args.out.is_some() && !args.member {
         super::warn_if_not_empty(out, "verifier crate");
     }
     fs::create_dir_all(out.join("src"))
@@ -248,20 +252,24 @@ pub fn run(args: ExportArgs) -> Result<()> {
     // alone, so cargo doesn't fold it into the circuit's.
     // Matched as the workspace globs it (`clients/*/rust`), on the real paths (a
     // `--out` through `..` or a symlink is the same directory).
-    let member = project.project_root().is_some_and(|root| {
-        match (out.canonicalize(), root.join("clients").canonicalize()) {
-            (Ok(o), Ok(clients)) => {
-                o.file_name() == Some("rust".as_ref())
-                    && o.parent().and_then(Path::parent) == Some(clients.as_path())
+    let member = args.member
+        || project.project_root().is_some_and(|root| {
+            match (out.canonicalize(), root.join("clients").canonicalize()) {
+                (Ok(o), Ok(clients)) => {
+                    o.file_name() == Some("rust".as_ref())
+                        && o.parent().and_then(Path::parent) == Some(clients.as_path())
+                }
+                _ => false,
             }
-            _ => false,
-        }
-    });
+        });
     changed |= write_str(
         &out.join("Cargo.toml"),
         &gen_cargo_toml(&crate_name, member),
     )?;
-    if member && let Some(root) = project.project_root() {
+    if member
+        && !args.member
+        && let Some(root) = project.project_root()
+    {
         crate::xark_project::sync_members(&root)?;
     }
     changed |= write_str(

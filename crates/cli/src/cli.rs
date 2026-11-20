@@ -20,7 +20,7 @@ pub fn cmd_build(crate_dir: &str) -> i32 {
 /// other commands run first — `test`, `profile`, `prove`'s — stay quiet about
 /// it.)
 pub fn cmd_build_command(args: &crate::commands::BuildArgs) -> i32 {
-    // At a project's root: every circuit, its keys and clients, then the programs.
+    // At a project's root: every circuit and its clients.
     if let Some(root) = crate::commands::project::root_at(Some(&args.crate_dir)) {
         return crate::commands::project::build(&root, args.check);
     }
@@ -583,12 +583,9 @@ pub fn cmd_clean() -> i32 {
 /// `target/xark/<pkg>/` artifacts exist, then run `cargo test` in the crate so
 /// the in-crate `cargo test` circuit tests can load them. `forwarded` goes to
 /// `cargo test` verbatim, so `xark test . -- --include-ignored` is `cargo test --
-/// --include-ignored`.
+/// --include-ignored`. The project-root dispatch lives in
+/// `commands::project::test`.
 pub fn cmd_test(crate_dir: &str, forwarded: &[String]) -> i32 {
-    // At a project's root: every circuit's tests, then the programs'.
-    if let Some(root) = crate::commands::project::root_at(Some(crate_dir)) {
-        return crate::commands::project::test(&root, forwarded);
-    }
     let crate_dir = crate_root(crate_dir);
 
     // Build first so the tests' artifacts are present + current, unless they are.
@@ -840,9 +837,15 @@ fn check_diagnostic_json(crate_abs: &std::path::Path, e: &xark_frontend::Compile
 
 /// `xark init [name]` — start a project in `name/` (or the current directory): a
 /// `xark.toml`, a Cargo workspace, and a starter circuit crate in
-/// `circuits/<name>/`, pre-wired for rust-analyzer so unsupported constructs surface
-/// inline as you type (via `xark check`). `xark add` grows it.
-pub fn cmd_init(name_arg: Option<&str>, circuit_arg: Option<&str>) -> i32 {
+/// `circuits/<name>/`, pre-wired for rust-analyzer. On a terminal it asks whether
+/// to scaffold a Pinocchio program; `--program` and `--program-name` make the
+/// choice non-interactive. `xark add` grows it.
+pub fn cmd_init(
+    name_arg: Option<&str>,
+    circuit_arg: Option<&str>,
+    program_arg: Option<&str>,
+    program_name_arg: Option<&str>,
+) -> i32 {
     let cwd = std::env::current_dir().expect("cwd");
     // The argument may be a path (`xark init apps/demo`): the project and its first
     // circuit are named after its last component.
@@ -866,10 +869,57 @@ pub fn cmd_init(name_arg: Option<&str>, circuit_arg: Option<&str>) -> i32 {
         eprintln!("error: can't name a crate `{name}`: {why}\n  {how}");
         return 2;
     }
+
+    let interactive = crate::commands::scaffold::is_interactive();
+    let choice = match crate::commands::scaffold::resolve_program_choice(program_arg, interactive) {
+        Ok(choice) => choice,
+        Err(e) => {
+            eprintln!("{} {e:#}", crate::style::err("error:"));
+            return 2;
+        }
+    };
+    let mut program_name = program_name_arg.map(str::to_string);
+    if program_name.is_some() && matches!(choice, crate::commands::scaffold::ProgramChoice::None) {
+        eprintln!("error: `--program-name` needs a program (drop `--program none`, or pick one)");
+        return 2;
+    }
+    let scaffold = match choice {
+        crate::commands::scaffold::ProgramChoice::Scaffold(scaffolder) => Some(scaffolder),
+        crate::commands::scaffold::ProgramChoice::None => None,
+    };
+    if scaffold.is_some() && program_name.is_none() {
+        if interactive && program_arg.is_none() {
+            match crate::commands::scaffold::prompt_program_name(
+                &mut std::io::stdin().lock(),
+                &mut std::io::stderr(),
+                &name,
+            ) {
+                Ok(n) => program_name = Some(n),
+                Err(e) => {
+                    eprintln!("{} {e:#}", crate::style::err("error:"));
+                    return 2;
+                }
+            }
+        } else {
+            program_name = Some(name.clone());
+        }
+    }
+    if let Some(n) = &program_name
+        && let Err(why) = check_crate_name(n)
+    {
+        eprintln!(
+            "error: can't name a program `{n}`: {why}\n  pick another name, e.g. \
+             `--program-name {}`",
+            suggest_crate_name(n)
+        );
+        return 2;
+    }
+
     if let Err(e) = crate::commands::add::init_project(&dir, &name) {
         eprintln!("{} {e:#}", crate::style::err("error:"));
         return 1;
     }
+
     let mut steps = Vec::new();
     if let Some(n) = name_arg {
         steps.push((
@@ -877,14 +927,41 @@ pub fn cmd_init(name_arg: Option<&str>, circuit_arg: Option<&str>) -> i32 {
             "the project's root: the commands below run there",
         ));
     }
-    steps.push((
-        "xark test".to_string(),
-        "build the circuit and run its tests",
-    ));
-    steps.push((
-        format!("xark add program {name}"),
-        "a Solana program that verifies its proofs, with a LiteSVM test",
-    ));
+    if let Some(scaffolder) = scaffold {
+        let program_name = program_name.as_deref().expect("program name");
+        let request = crate::commands::scaffold::ProgramScaffold {
+            root: &dir,
+            circuit: &name,
+            name: program_name,
+        };
+        if let Err(e) = crate::commands::scaffold::scaffold_program(&request, scaffolder) {
+            eprintln!("{} {e:#}", crate::style::err("error:"));
+            return 1;
+        }
+        eprintln!(
+            "{} added program `{}-program` in {}",
+            crate::style::tag(),
+            program_name,
+            dir.join("programs").join(program_name).display()
+        );
+        steps.extend([
+            (
+                "xark build --check".to_string(),
+                "the circuit, its clients and keys",
+            ),
+            ("cargo build-sbf".to_string(), "the program"),
+            ("cargo test-sbf".to_string(), "the program's SBF tests"),
+            (
+                "npm install && npm test".to_string(),
+                "the program's LiteSVM test",
+            ),
+        ]);
+    } else {
+        steps.push((
+            "xark test".to_string(),
+            "build the circuit and run its tests",
+        ));
+    }
     eprintln!("{}", crate::style::next_steps(&steps));
     0
 }

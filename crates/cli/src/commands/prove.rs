@@ -527,7 +527,7 @@ fn write_outputs(
     if in_project {
         steps.push((
             "xark build".to_string(),
-            "the verifier crate and TypeScript client (clients/), then the programs",
+            "the verifier crate and TypeScript client (clients/)",
         ));
     } else {
         steps.push((

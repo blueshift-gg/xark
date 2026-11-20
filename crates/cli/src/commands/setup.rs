@@ -35,8 +35,8 @@ pub struct SetupArgs {
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Make the key from this machine's randomness even if a `.ptau` could be
-    /// found: what `xark prove`'s first-run setup asks for. Not a flag.
-    #[arg(skip)]
+    /// found. Used by `xark build`'s dev bootstrap; hidden from help.
+    #[arg(long, hide = true)]
     pub without_ptau: bool,
     /// Reproducible-randomness escape hatch for test fixtures **only**: a key
     /// made without a `.ptau`, driven by

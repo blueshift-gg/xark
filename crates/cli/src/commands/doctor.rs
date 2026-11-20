@@ -94,9 +94,9 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
             "cargo install xark-cli",
         ),
     }
-    // A project's `xark build` builds its programs with `cargo build-sbf`, and its
-    // `xark test` runs the TypeScript tests with Node: there they're required;
-    // elsewhere, only for what uses them.
+    // xark builds circuits and their clients. A project's programs belong to their
+    // framework (`cargo build-sbf`/`cargo test-sbf` for Pinocchio), so these are
+    // useful to report but are not checks xark's own commands require.
     let in_project = std::env::current_dir()
         .ok()
         .and_then(|d| crate::xark_project::project_root(&d))
@@ -105,33 +105,18 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
     let sbf_fix = "install the Solana CLI: https://solana.com/docs/intro/installation";
     let node = cmd_ok("node", &["--version"]);
     let node_fix = "install Node.js from https://nodejs.org";
-    if in_project {
-        problems += check(
-            sbf.is_some(),
-            "cargo build-sbf",
-            Some("builds this project's programs (`xark build`)"),
-            sbf_fix,
-        );
-        problems += check(
-            node.is_some(),
-            "node",
-            Some("runs this project's TypeScript tests (`xark test`)"),
-            node_fix,
-        );
-    } else {
-        info(
-            sbf.is_some(),
-            "cargo build-sbf",
-            "for Solana programs (`xark add program`, then `xark build`)",
-            sbf_fix,
-        );
-        info(
-            node.is_some(),
-            "node",
-            "for the TypeScript client and a project's LiteSVM tests",
-            node_fix,
-        );
-    }
+    info(
+        sbf.is_some(),
+        "cargo build-sbf",
+        "for Solana programs (their framework's build/test command)",
+        sbf_fix,
+    );
+    info(
+        node.is_some(),
+        "node",
+        "for the TypeScript client and a project's LiteSVM tests",
+        node_fix,
+    );
 
     println!();
     if problems == 0 {
