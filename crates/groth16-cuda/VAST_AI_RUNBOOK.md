@@ -53,9 +53,14 @@ image.
    disk and transfer charges. If the account cannot enforce credit-only usage,
    do not create the instance until the billing behavior is clear.
 4. Use a CUDA *development* container, not a runtime-only image. Vast's CUDA
-   Ubuntu template documents a `cudnn-devel` image with `nvcc`; verify `nvcc`,
-   `nvidia-smi`, `nsys`, Rust/Cargo, and GNU time before running the suite.
-   The project validation script requires all of them.
+   Ubuntu template documents a `cudnn-devel` image with `nvcc`. Verify `nvcc`,
+   `nvidia-smi`, `g++`, `make`, `git`, Python 3, Rust/Cargo, and GNU time before
+   running the suite. The credit smoke can skip Nsight with
+   `XARK_CUDA_CAPTURE_NSYS=0`; the full run requires `nsys`. If Rust is missing,
+   install stable Rust using the official [rustup guide](https://rustup.rs/).
+   Install the version-matched ICICLE CUDA backend using Xark's pinned v4.0.0
+   setup instructions. Nsight CLI installation is documented by NVIDIA's
+   [Nsight Systems installation guide](https://docs.nvidia.com/nsight-systems/InstallationGuide/).
 5. Read the current fork branch head, clone that branch, and require the clone
    to match the recorded revision:
 
@@ -74,8 +79,9 @@ image.
 
 6. Run the bounded smoke matrix. This runs the required host checks, both GPU
    correctness paths, CUDA CLI cube proof and verification on both backends,
-   then three benchmark repetitions at 1,024 and 65,536 points with one
-   65,536-point Nsight capture per backend:
+   then three benchmark repetitions at 1,024 and 65,536 points. Nsight is
+   skipped on the credit preflight to keep its toolchain and runtime small; the
+   full $50 run captures Nsight traces.
 
    The CLI inputs are the public cube fixture (`secret=3`, `result=27`). Do not
    send private proving inputs or keys to a marketplace host. The CLI records
@@ -83,9 +89,9 @@ image.
 
    ```sh
    XARK_MSM_SIZES=1024,65536 \
-   XARK_PROFILE_SIZES=65536 \
    XARK_MSM_REPEATS=3 \
    XARK_MSM_SEED=24841619657020237 \
+   XARK_CUDA_CAPTURE_NSYS=0 \
    crates/groth16-cuda/scripts/run_cuda_validation.sh
    ```
 

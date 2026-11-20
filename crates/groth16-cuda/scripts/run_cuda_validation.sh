@@ -18,6 +18,7 @@ Optional environment:
   XARK_PROFILE_SIZES          comma-separated sizes captured by Nsight
   XARK_MSM_REPEATS            benchmark repetitions (default: 7)
   XARK_MSM_SEED               deterministic input seed
+  XARK_CUDA_CAPTURE_NSYS=0     skip Nsight traces for a correctness smoke run
   XARK_CUDA_SANITIZE=1        run the custom CUDA tests under Compute Sanitizer
 EOF
   exit 0
@@ -43,8 +44,18 @@ sizes=${XARK_MSM_SIZES:-1024,65536,524288}
 profile_sizes=${XARK_PROFILE_SIZES:-65536,524288}
 repeats=${XARK_MSM_REPEATS:-7}
 seed=${XARK_MSM_SEED:-24841619657020237}
+capture_nsys=${XARK_CUDA_CAPTURE_NSYS:-1}
 
-for tool in cargo rustc nvidia-smi nvcc nsys; do
+if [[ "$capture_nsys" != 0 && "$capture_nsys" != 1 ]]; then
+  printf 'XARK_CUDA_CAPTURE_NSYS must be 0 or 1\n' >&2
+  exit 2
+fi
+
+required_tools=(cargo rustc git g++ make python3 nvidia-smi nvcc)
+if [[ "$capture_nsys" == 1 ]]; then
+  required_tools+=(nsys)
+fi
+for tool in "${required_tools[@]}"; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     printf 'required tool is missing: %s\n' "$tool" >&2
     exit 2
@@ -77,8 +88,13 @@ export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-include stdint.h"
   printf '\nCXXFLAGS:\n%s\n' "$CXXFLAGS"
   printf '\nnvcc:\n'
   nvcc --version
-  printf '\nnsys:\n'
-  nsys --version
+  if [[ "$capture_nsys" == 1 ]]; then
+    printf '\nnsys:\n'
+    nsys --version
+  else
+    printf '\nnsys=skipped\n'
+  fi
+  printf '\ncuda_capture_nsys=%s\n' "$capture_nsys"
   if [[ ${XARK_CUDA_SANITIZE:-0} == 1 ]]; then
     printf '\ncompute-sanitizer:\n'
     compute-sanitizer --version
@@ -160,16 +176,18 @@ benchmark="$target_dir/release/examples/msm_bench"
   >"$results_dir/msm-benchmark-custom.csv" \
   2>"$results_dir/msm-benchmark-custom.log"
 
-IFS=',' read -r -a capture_sizes <<<"$profile_sizes"
-for backend in icicle custom; do
-  for size in "${capture_sizes[@]}"; do
-    report="$results_dir/msm-$backend-$size"
-    nsys profile --trace=cuda,osrt --stats=true --force-overwrite=true \
-      --output="$report" "$benchmark" --backend "$backend" --sizes "$size" \
-      --repeats 3 --seed "$seed" >"$report.log" 2>&1
-    nsys stats --report cuda_gpu_kern_sum,cuda_gpu_mem_time_sum,cuda_api_sum \
-      "$report.nsys-rep" >"$report-stats.txt" 2>&1
+if [[ "$capture_nsys" == 1 ]]; then
+  IFS=',' read -r -a capture_sizes <<<"$profile_sizes"
+  for backend in icicle custom; do
+    for size in "${capture_sizes[@]}"; do
+      report="$results_dir/msm-$backend-$size"
+      nsys profile --trace=cuda,osrt --stats=true --force-overwrite=true \
+        --output="$report" "$benchmark" --backend "$backend" --sizes "$size" \
+        --repeats 3 --seed "$seed" >"$report.log" 2>&1
+      nsys stats --report cuda_gpu_kern_sum,cuda_gpu_mem_time_sum,cuda_api_sum \
+        "$report.nsys-rep" >"$report-stats.txt" 2>&1
+    done
   done
-done
+fi
 
 printf 'CUDA validation artifacts: %s\n' "$results_dir"

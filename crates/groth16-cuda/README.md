@@ -94,7 +94,9 @@ native frontend. Existing flags are preserved.
 
 Set `ICICLE_BACKEND_INSTALL_DIR` for a non-default backend path. Workload and
 output settings are available through `XARK_MSM_SIZES`, `XARK_PROFILE_SIZES`,
-`XARK_MSM_REPEATS`, `XARK_MSM_SEED`, and `XARK_CUDA_RESULTS_DIR`.
+`XARK_MSM_REPEATS`, `XARK_MSM_SEED`, and `XARK_CUDA_RESULTS_DIR`. Set
+`XARK_CUDA_CAPTURE_NSYS=0` for a correctness and timing smoke run when Nsight
+Systems is not installed; the default full run requires it and captures traces.
 Set `XARK_CUDA_SANITIZE=1` to run the custom CUDA integration tests under
 Compute Sanitizer's memory checker with device leak checking enabled. This checks
 CUDA memory accesses and device allocations; it does not measure host RSS.
