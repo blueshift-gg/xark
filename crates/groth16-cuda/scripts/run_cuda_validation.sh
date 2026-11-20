@@ -3,11 +3,13 @@ set -Eeuo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../../.." && pwd)
+cd "$repo_root"
 manifest="$repo_root/crates/groth16-cuda/Cargo.toml"
+gpu_cli_manifest="$repo_root/crates/groth16-gpu-cli/Cargo.toml"
 
 if [[ ${1:-} == "--help" ]]; then
   cat <<'EOF'
-Run the ICICLE and custom CUDA MSM correctness, Groth16 proof, benchmark, and Nsight checks.
+Run ICICLE and custom CUDA MSM correctness, cube CLI prove/verify, benchmarks, and Nsight checks.
 
 Optional environment:
   ICICLE_BACKEND_INSTALL_DIR  ICICLE CUDA backend installation directory
@@ -63,6 +65,7 @@ fi
 
 mkdir -p "$results_dir"
 export CARGO_TARGET_DIR="$target_dir"
+export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-include stdint.h"
 
 {
   printf 'commit=%s\n' "$commit"
@@ -71,6 +74,7 @@ export CARGO_TARGET_DIR="$target_dir"
   rustc --version --verbose
   printf '\ncargo:\n'
   cargo --version
+  printf '\nCXXFLAGS:\n%s\n' "$CXXFLAGS"
   printf '\nnvcc:\n'
   nvcc --version
   printf '\nnsys:\n'
@@ -99,6 +103,29 @@ XARK_CUDA_REQUIRED=1 cargo test --manifest-path "$manifest" --test gpu_proof 2>&
 XARK_CUDA_REQUIRED=1 cargo test --manifest-path "$manifest" \
   --features custom-cuda --test gpu_custom_cuda 2>&1 \
   | tee "$results_dir/custom-gpu-msm-proof-test.log"
+
+cargo run -p xark-cli -- setup examples/cube 2>&1 \
+  | tee "$results_dir/cuda-cli-setup.log"
+cargo run --manifest-path "$gpu_cli_manifest" --features cuda-msm \
+  --bin xark-gpu -- prove examples/cube \
+  --inputs '{"secret":"3","result":"27"}' --accelerator cuda \
+  --acknowledge-gpu-side-channel-risk 2>&1 \
+  | tee "$results_dir/cuda-cli-icicle-prove.log"
+grep -E 'MSM backend: Cuda; status=.*; GPU G1 chunks=[1-9][0-9]* points=' \
+  "$results_dir/cuda-cli-icicle-prove.log"
+cargo run -p xark-cli -- verify examples/cube 2>&1 \
+  | tee "$results_dir/cuda-cli-icicle-verify.log"
+
+cargo run --manifest-path "$gpu_cli_manifest" --features custom-cuda-msm \
+  --bin xark-gpu -- prove examples/cube \
+  --inputs '{"secret":"3","result":"27"}' --accelerator cuda \
+  --acknowledge-gpu-side-channel-risk 2>&1 \
+  | tee "$results_dir/cuda-cli-custom-prove.log"
+grep -E 'MSM backend: Cuda; status=.*; GPU G1 chunks=[1-9][0-9]* points=' \
+  "$results_dir/cuda-cli-custom-prove.log"
+cargo run -p xark-cli -- verify examples/cube 2>&1 \
+  | tee "$results_dir/cuda-cli-custom-verify.log"
+
 if [[ ${XARK_CUDA_SANITIZE:-0} == 1 ]]; then
   custom_test_binary=$(python3 - "$target_dir/debug/deps" <<'PY'
 import os

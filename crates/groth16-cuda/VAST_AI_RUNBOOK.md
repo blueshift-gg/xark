@@ -56,18 +56,30 @@ image.
    Ubuntu template documents a `cudnn-devel` image with `nvcc`; verify `nvcc`,
    `nvidia-smi`, `nsys`, Rust/Cargo, and GNU time before running the suite.
    The project validation script requires all of them.
-5. Clone the public fork branch and verify the immutable source revision:
+5. Read the current fork branch head, clone that branch, and require the clone
+   to match the recorded revision:
 
    ```sh
+   expected_commit=$(git ls-remote https://github.com/aryanputta/xark.git \
+     refs/heads/gpu-msm-isolated | cut -f1)
    git clone --branch gpu-msm-isolated --depth 1 \
      https://github.com/aryanputta/xark.git xark
    cd xark
-   test "$(git rev-parse HEAD)" = 7755ae6f0d0b9928ade075a7f23d6676cefce3db
+   test "$(git rev-parse HEAD)" = "$expected_commit"
+   git status --short --branch
    ```
 
+   Record `git rev-parse HEAD` in the output bundle. The validation script also
+   records the commit in its environment file and output directory.
+
 6. Run the bounded smoke matrix. This runs the required host checks, both GPU
-   correctness paths and proof verification, then three benchmark repetitions
-   at 1,024 and 65,536 points with one 65,536-point Nsight capture per backend:
+   correctness paths, CUDA CLI cube proof and verification on both backends,
+   then three benchmark repetitions at 1,024 and 65,536 points with one
+   65,536-point Nsight capture per backend:
+
+   The CLI inputs are the public cube fixture (`secret=3`, `result=27`). Do not
+   send private proving inputs or keys to a marketplace host. The CLI records
+   its timing-side-channel warning and requires an explicit acknowledgment.
 
    ```sh
    XARK_MSM_SIZES=1024,65536 \
@@ -100,9 +112,10 @@ Run the full reproducible matrix only after the smoke run succeeds:
 crates/groth16-cuda/scripts/run_cuda_validation.sh
 ```
 
-This requires GPU MSM comparison, GPU proof generation and verification, both
-backends, the default seeded sweep (1,024, 65,536, and 524,288 inputs, seven
-repetitions), and Nsight captures at 65,536 and 524,288. If the run exceeds the
+This requires GPU MSM comparison, GPU proof generation and verification, CUDA
+CLI prove/verify through both adapters with confirmed GPU chunk use, the default
+seeded sweep (1,024, 65,536, and 524,288 inputs, seven repetitions), and Nsight
+captures at 65,536 and 524,288. If the run exceeds the
 four-hour session cap, retain its logs and run a planned second session rather
 than increasing the cap during the run. Preserve every raw CSV and profile
 report. Compare each GPU adapter with CPU Pippenger from the same input set;

@@ -80,11 +80,17 @@ CUDA backend matching the pinned v4.0.0 Rust frontend. Run from a clean checkout
 crates/groth16-cuda/scripts/run_cuda_validation.sh
 ```
 
-The run executes host checks, builds both adapters, requires CUDA for the ICICLE
-and custom MSM comparisons and verified proofs, writes a benchmark CSV per
-backend, and captures Nsight Systems traces at 65,536 and 524,288 points for
-both. It saves the source revision, toolchain and GPU details, test logs, CSVs,
-and profiler reports under `out/cuda-validation/<commit>/`.
+The run executes host checks, builds both adapters, requires CUDA for ICICLE and
+custom MSM comparisons and verified proofs, and proves then verifies the cube
+example through the CUDA CLI on both backends. The CLI log must show accepted
+GPU G1 chunks, so a CPU fallback cannot pass as GPU CLI coverage. The script
+writes benchmark CSVs and captures Nsight Systems traces at 65,536 and 524,288
+points for both backends. It saves the source revision, toolchain and GPU
+details, test and CLI logs, CSVs, and profiler reports under
+`out/cuda-validation/<commit>/`.
+
+The run script sets `CXXFLAGS` to include `stdint.h` for the pinned ICICLE
+native frontend. Existing flags are preserved.
 
 Set `ICICLE_BACKEND_INSTALL_DIR` for a non-default backend path. Workload and
 output settings are available through `XARK_MSM_SIZES`, `XARK_PROFILE_SIZES`,
