@@ -4,6 +4,62 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
+## Unreleased
+
+`xark build` and `xark test` at a project's root are circuit-only. `xark init`
+gains a wizard: it asks whether to scaffold a Pinocchio (LiteSVM) program, with
+`--program pinocchio`, `--program none`, and `--program-name`. Programs are
+built and tested natively (`cargo build-sbf`, `cargo test-sbf`, `npm test`);
+`xark add program` remains for existing projects and a second program.
+`[programs]` metadata is removed. `xark build` bootstraps a missing key and
+rotates a plain single-party dev key when constraints change; ceremony and
+phase-2 keys require explicit setup (`xark prove` keeps its first-proof
+convenience). `xark build --check` writes nothing that is committed. This is a
+breaking change. No circuit changed: every digest is the same.
+
+### Breaking
+
+- `xark init` prompts for a program on a terminal. `--program none` is the
+  default and skips the prompt; `--program pinocchio` scaffolds a program and
+  its LiteSVM test; `--program-name <name>` names it (defaulting to the circuit).
+- `xark build` at a project's root builds each circuit and its clients.
+  `xark test` tests the circuits and the libraries beside them. Neither builds
+  or tests programs, and neither has a `--programs` flag. A missing key is
+  bootstrapped with `xark setup` from OS randomness (not a stray `.ptau`); a
+  changed plain single-party dev key is rotated with the same warning as before,
+  while a ceremony or phase-2 key stops with `xark setup`/`xark ceremony`.
+- `xark build --check` stages generated clients under `target/xark/check/` and
+  byte-compares them with `clients/`. It writes nothing under `clients/`, `keys/`
+  or the workspace manifest, and does not build programs.
+- `xark add program` remains as the incremental/advanced scaffold: it adds
+  `programs/*` and `default-members`, writes the program test and the optional
+  `programs.yml`, and leaves builds/tests to the framework. It no longer writes
+  `[programs]` metadata.
+- `.github/workflows/ci.yml` is circuit-only: `xark build --check` and `xark test`.
+  `.github/workflows/programs.yml` runs the native program steps.
+- `@blueshift-gg/xark/testing`'s `program(name, root?)` keeps the v0.4 name
+  convention and accepts `{ root, dir, file }` options for another build path. It
+  is a test helper, not a sandbox. A manual program uses `vm()` with its `.so` path.
+- `xark doctor` reports `cargo-build-sbf` and Node as informational, not as
+  required tools.
+
+### Moving from 0.4
+
+An existing 0.4 project's old `ci.yml` calls `xark build --check` and `xark test`.
+Those remain circuit-only. Add the new `.github/workflows/programs.yml` (copy it
+from a fresh `xark add program` project): it runs `cargo build-sbf`, the stack
+check, `cargo test-sbf`, the verifier self-tests, and `npm test`.
+
+Remove any `[programs]` metadata from `xark.toml`; xark ignores it. Keys stay
+committed; `xark build` bootstraps a missing key and rotates a plain dev key when
+the circuit changes; ceremony keys need `xark ceremony` again.
+`xark add program` still refuses an existing `programs/<name>/`. See
+[Upgrading from 0.4](projects.md#upgrading-from-04).
+
+The CLI release containing this change must be pinned in `xark.toml` (and bumped
+in the workspace and npm package): the generated `programs.yml` embeds that
+version.
+
 ## 0.4.0
 
 A project for a circuit and the Solana program that verifies it: `xark init`
