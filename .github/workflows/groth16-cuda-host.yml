@@ -39,6 +39,8 @@ jobs:
     # The pinned ICICLE program header uses uint32_t without including stdint.h.
     env:
       CXXFLAGS: -include stdint.h
+      # Reuse the ICICLE native frontend across the standalone Cargo workspaces.
+      CARGO_TARGET_DIR: crates/groth16-cuda/target
     steps:
       - name: Checkout
         uses: actions/checkout@v5
