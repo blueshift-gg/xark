@@ -1,0 +1,104 @@
+name: programs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch or pull request makes the older run moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # `cargo-build-sbf` and `cargo-test-sbf` come from this one crate.
+  CARGO_BUILD_SBF_VERSION: 4.2.0
+  # The xark this project is made with (its `xark.toml`).
+  XARK_CLI_VERSION: {{xark_version}}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The wasm32 target circuits build for
+        run: rustup target add wasm32-unknown-unknown
+
+      # xark builds from source, once, then comes from this cache.
+      - name: Cached xark
+        id: xark
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/xark
+          key: xark-${{ runner.os }}-${{ env.XARK_CLI_VERSION }}
+
+      - name: Install xark
+        if: steps.xark.outputs.cache-hit != 'true'
+        run: cargo install xark-cli --version "$XARK_CLI_VERSION" --locked
+
+      # The generated test's `circuit()` reads the circuit's `target/xark/`
+      # artifacts, which are not committed: build them before the program tests.
+      - name: Build the circuit artifacts the tests read
+        run: xark build --check
+
+      # Both binaries build from source, once, then come from this cache.
+      - name: Cached tools
+        id: tools
+        if: hashFiles('programs/**/Cargo.toml') != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-build-sbf
+            ~/.cargo/bin/cargo-test-sbf
+          key: sbf-${{ runner.os }}-${{ env.CARGO_BUILD_SBF_VERSION }}
+
+      - name: Install cargo-build-sbf
+        if: steps.tools.outputs.cache-hit != 'true' && hashFiles('programs/**/Cargo.toml') != ''
+        run: cargo install cargo-build-sbf --version "$CARGO_BUILD_SBF_VERSION" --locked
+
+      - uses: actions/setup-node@v4
+        if: hashFiles('package.json') != ''
+        with:
+          node-version: 22
+
+      - name: Install the TypeScript tests' packages
+        if: hashFiles('package.json') != ''
+        run: npm install
+
+      - name: Build the programs
+        if: hashFiles('programs/**/Cargo.toml') != ''
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/cargo-build-sbf.log"
+          cargo build-sbf 2>&1 | tee "$log"
+          if grep -q "overflows the maximum allowed frame space" "$log"; then
+            echo "::error::a stack frame is past the SBF limit of 4 KiB (the warning above): the program would overwrite its own stack at run time. Move the big work out of line with #[inline(never)], as the generated verify is."
+            exit 1
+          fi
+
+      - name: Test the programs
+        if: hashFiles('programs/**/Cargo.toml') != ''
+        run: cargo test-sbf
+
+      # The generated verifier's self-test checks its bundled sample proof.
+      - name: Test the generated verifier crates
+        if: hashFiles('clients/*/rust/Cargo.toml') != ''
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: |
+          for crate in clients/*/rust; do
+            [ -f "$crate/Cargo.toml" ] || continue
+            cargo test --release --manifest-path "$crate/Cargo.toml"
+          done
+
+      - name: TypeScript tests
+        if: hashFiles('package.json') != ''
+        run: npm test

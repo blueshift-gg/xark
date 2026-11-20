@@ -46,6 +46,7 @@ pub mod profile;
 pub mod project;
 pub mod prove;
 pub mod public_inputs;
+pub(crate) mod scaffold;
 pub mod setup;
 pub mod verify;
 
@@ -73,14 +74,14 @@ pub enum Command {
     /// Scaffold a starter circuit crate (rust-analyzer ready).
     #[command(alias = "new")]
     Init(InitArgs),
-    /// Add a circuit or a Solana program to a project (making the project on first
-    /// use): `xark add circuit <name>`, `xark add program <name>`.
+    /// Add a circuit or a Solana program to an existing project:
+    /// `xark add circuit <name>`, `xark add program <name>`.
     Add(add::AddArgs),
-    /// Compile a circuit crate (Rust → wasm32 → R1CS) into target/xark/.
+    /// Compile circuits (Rust → wasm32 → R1CS) and their clients.
     Build(BuildArgs),
     /// Validate a circuit crate and report subset rejections as diagnostics.
     Check(CheckArgs),
-    /// Build the circuit, then run its `cargo test` circuit tests.
+    /// Build each circuit, then run its tests.
     Test(TestArgs),
     /// Remove all xark build output (every `target/xark/`, `target/xark-wasm/` and
     /// `target/xark-client/` under the current dir).
@@ -136,6 +137,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::Init(a) => exit_code(crate::cli::cmd_init(
             a.name.as_deref(),
             a.circuit.as_deref(),
+            a.program.as_deref(),
+            a.program_name.as_deref(),
         )),
         Command::Add(a) => add::run(a),
         Command::Build(a) => exit_code(crate::cli::cmd_build_command(&a)),
@@ -148,8 +151,18 @@ fn run(cli: Cli) -> Result<()> {
         )),
         Command::Check(a) => check::run(a),
         Command::Test(a) => {
-            let (dir, forwarded) = a.split();
-            exit_code(crate::cli::cmd_test(&dir, &forwarded))
+            let (dir, forwarded, check) = a.split();
+            if let Some(root) = project::root_at(Some(&dir)) {
+                exit_code(project::test(&root, &forwarded, check))
+            } else {
+                if check {
+                    eprintln!(
+                        "error: `--check` is for a project's root (the directory with `xark.toml`)"
+                    );
+                    std::process::exit(2);
+                }
+                exit_code(crate::cli::cmd_test(&dir, &forwarded))
+            }
         }
         Command::Clean(_) => exit_code(crate::cli::cmd_clean()),
         // Backend commands are `anyhow`-based.
@@ -185,6 +198,13 @@ pub struct InitArgs {
     /// to the project's name.
     #[arg(long)]
     pub circuit: Option<String>,
+    /// Program to scaffold: `pinocchio`, or `none` (the default). On a terminal,
+    /// omitting it kicks off the wizard.
+    #[arg(long)]
+    pub program: Option<String>,
+    /// Program name. Defaults to the first circuit's name.
+    #[arg(long = "program-name")]
+    pub program_name: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -205,9 +225,10 @@ pub struct BuildArgs {
     /// never read back, and is multi-GB on large circuits, so it's off by default.
     #[arg(long = "emit-json", default_value_t = false)]
     pub emit_json: bool,
-    /// At a project's root, for CI: build everything, but fail if the committed
-    /// clients (`clients/`) aren't what it generates, or a key is missing or for an
-    /// older circuit. Writes nothing it wasn't given.
+    /// At a project's root, for CI: build every circuit and its clients, but fail
+    /// if the committed clients (`clients/`) aren't what it generates, or a key is
+    /// missing or for an older circuit. Writes nothing it wasn't given, and does
+    /// not build programs.
     #[arg(long)]
     pub check: bool,
 }
@@ -242,6 +263,10 @@ pub struct TestArgs {
     /// Circuit crate directory to build and test.
     #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
     pub crate_dir: String,
+    /// At a project's root, verify the committed clients/keys instead of refreshing
+    /// them.
+    #[arg(long)]
+    pub check: bool,
     /// Arguments for `cargo test`, passed through verbatim, as you'd give them to
     /// `cargo test` itself: a test-name filter, cargo flags, and after `--` the
     /// test binary's (`xark test . -- --include-ignored`).
@@ -250,25 +275,40 @@ pub struct TestArgs {
 }
 
 impl TestArgs {
-    /// `(crate dir, cargo test args)`, read from the raw command line: clap
-    /// swallows a `--` that `cargo test` needs (`xark test . -- --list` must reach
-    /// cargo as `-- --list`). The first argument is the crate dir if it is one or
-    /// looks like a path (so a mistyped path is reported, not taken as a filter);
-    /// `xark test my_test` filters in the current crate.
-    fn split(&self) -> (String, Vec<String>) {
+    /// `(crate dir, cargo test args, check)`, read from the raw command
+    /// line: clap swallows a `--` that `cargo test` needs (`xark test . -- --list`
+    /// must reach cargo as `-- --list`). The first argument is the crate dir if it
+    /// is one or looks like a path (so a mistyped path is reported, not taken as a
+    /// filter); `xark test my_test` filters in the current crate.
+    fn split(&self) -> (String, Vec<String>, bool) {
         let raw: Vec<String> = std::env::args().collect();
         let Some(i) = raw.iter().skip(1).position(|a| a == "test") else {
-            return (self.crate_dir.clone(), self.cargo_args.clone());
+            return (self.crate_dir.clone(), self.cargo_args.clone(), self.check);
         };
         let rest = &raw[i + 2..];
-        match rest.first() {
+        // `--check` is xark's; everything else is cargo's. After a literal `--`,
+        // it belongs to the test binary, so stop recognizing it.
+        let mut filtered = Vec::new();
+        let mut check = false;
+        let mut literal = false;
+        for arg in rest {
+            if !literal && arg == "--check" {
+                check = true;
+                continue;
+            }
+            if arg == "--" {
+                literal = true;
+            }
+            filtered.push(arg.clone());
+        }
+        match filtered.first() {
             Some(d)
                 if !d.starts_with('-')
                     && (std::path::Path::new(d).is_dir() || looks_like_path(d)) =>
             {
-                (d.clone(), rest[1..].to_vec())
+                (d.clone(), filtered[1..].to_vec(), check)
             }
-            _ => (".".to_string(), rest.to_vec()),
+            _ => (".".to_string(), filtered, check),
         }
     }
 }

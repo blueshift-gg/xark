@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
-use serde_json::Value;
 
 use crate::xark_project::{PROJECT_FILE, project_root, sync_members};
 
@@ -33,6 +32,9 @@ pub enum What {
         /// The circuit it verifies. Defaults to the one named `<name>`.
         #[arg(long)]
         circuit: Option<String>,
+        /// Program scaffolder: `pinocchio`.
+        #[arg(long, default_value = "pinocchio")]
+        framework: String,
     },
 }
 
@@ -54,9 +56,31 @@ pub fn run(args: AddArgs) -> Result<()> {
     super::project::check_release(&root);
     match args.what {
         What::Circuit { name } => add_circuit(&root, &name),
-        What::Program { name, circuit } => {
+        What::Program {
+            name,
+            circuit,
+            framework,
+        } => {
             let circuit = circuit.unwrap_or_else(|| name.clone());
-            add_program(&root, &name, &circuit)
+            let scaffolder = super::scaffold::find(&framework).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown program framework `{framework}` (known: {})",
+                    super::scaffold::ids().join(", ")
+                )
+            })?;
+            let request = super::scaffold::ProgramScaffold {
+                root: &root,
+                circuit: &circuit,
+                name: &name,
+            };
+            super::scaffold::scaffold_program(&request, scaffolder)?;
+            eprintln!(
+                "{} added program `{name}-program` in {}, verifying `{circuit}`",
+                crate::style::tag(),
+                root.join("programs").join(&name).display()
+            );
+            eprintln!("{}", crate::style::next_steps(&scaffolder.next_steps()));
+            Ok(())
         }
     }
 }
@@ -137,8 +161,8 @@ pub fn init_project(dir: &Path, name: &str) -> Result<()> {
     ] {
         if dir.join(path).exists() {
             eprintln!(
-                "{} keeping your {path} (xark's would run `xark build --check` and `xark \
-                 test`, or `xark check` for rust-analyzer)",
+                "{} keeping your {path} (xark's would run `xark build --check` and \
+                 `xark test`, or `xark check` for rust-analyzer)",
                 crate::style::tag()
             );
         } else {
@@ -177,126 +201,6 @@ fn add_circuit(root: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
-    let circuit_dir = root.join("circuits").join(circuit);
-    if !circuit_dir.join("Cargo.toml").is_file() {
-        bail!(
-            "no circuit `{circuit}` in {}: add it with `xark add circuit {circuit}`, or name \
-             another with `--circuit`",
-            root.join("circuits").display()
-        );
-    }
-    let dir = root.join("programs").join(name);
-    if dir.exists() {
-        bail!("{} already exists", dir.display());
-    }
-    crate::cli::check_crate_name(name)
-        .map_err(|why| anyhow::anyhow!("can't name a program `{name}`: {why}"))?;
-    let crate_name = format!("{name}-program");
-    if package_names(root).contains(&crate_name) {
-        bail!("the workspace already has a crate `{crate_name}`: pick another program name");
-    }
-
-    // The TypeScript tests' setup, once per project (first, so the client
-    // generated below finds the runtime listed).
-    let project = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("xark-project")
-        .to_string();
-    let npm = env!("CARGO_PKG_VERSION");
-    for (path, text) in [
-        ("package.json", template!("package.json")),
-        ("tsconfig.json", template!("tsconfig.json")),
-        ("vitest.config.ts", template!("vitest.config.ts")),
-    ] {
-        if !root.join(path).exists() {
-            let text = text
-                .replace("{{project}}", &project)
-                .replace("{{xark_npm}}", npm);
-            write_new(root, path, &text)?;
-        }
-    }
-    // The program depends on the circuit's verifier crate, and the test on its
-    // TypeScript client: generate them as `xark build` does, which makes a key
-    // only when there's none and nothing embeds one.
-    if super::project::build_circuit(root, &circuit_dir, false).is_err() {
-        bail!("couldn't build `{circuit}` and its clients (see above)");
-    }
-    let xark_dir = circuit_dir.join("target/xark").join(circuit);
-    let schema: Value = serde_json::from_str(
-        &fs::read_to_string(xark_dir.join("schema.json"))
-            .context("reading the circuit's schema")?,
-    )?;
-    let circuit_fn = schema["circuit"].as_str().unwrap_or(circuit).to_string();
-    // As `xark export` named it: `shielded_transact` → `shielded-transact-client`, or
-    // the `-verifier` a 0.4.0 project's crate keeps.
-    let verifier =
-        crate::xark_project::read_pkg_name(&root.join("clients").join(circuit).join("rust"))
-            .unwrap_or_else(|| super::export::client_crate_name(circuit));
-    let pascal = super::client::ts::pascal(&circuit_fn);
-    let error = format!(
-        "{}Error",
-        super::client::ts::pascal(&name.replace('-', "_"))
-    );
-    let (inputs, inputs_doc, test) = sample_inputs(&schema, &xark_dir, &pascal);
-
-    let fill = |t: &str| {
-        t.replace("{{name}}", name)
-            .replace("{{crate}}", &crate_name)
-            .replace("{{circuit}}", circuit)
-            .replace("{{circuit_file}}", &circuit_fn)
-            .replace("{{verifier}}", &verifier)
-            .replace("{{verifier_ident}}", &verifier.replace('-', "_"))
-            .replace("{{Error}}", &error)
-            .replace("{{Pascal}}", &pascal)
-            .replace("{{inputs}}", &inputs)
-            .replace("{{inputs_doc}}", &inputs_doc)
-            .replace("{{test}}", test)
-    };
-    for (path, text) in [
-        ("Cargo.toml", template!("program/Cargo.toml.tmpl")),
-        ("src/lib.rs", template!("program/src/lib.rs")),
-        ("src/errors.rs", template!("program/src/errors.rs")),
-        (
-            "src/instructions/mod.rs",
-            template!("program/src/instructions/mod.rs"),
-        ),
-        (
-            "src/instructions/verify.rs",
-            template!("program/src/instructions/verify.rs"),
-        ),
-    ] {
-        write_new(&dir, path, &fill(text))?;
-    }
-    sync_members(root)?;
-    write_new(
-        root,
-        &format!("tests/{name}.test.ts"),
-        &fill(template!("tests/program.test.ts")),
-    )?;
-
-    eprintln!(
-        "{} added program `{crate_name}` in {}, verifying `{circuit}`",
-        crate::style::tag(),
-        dir.display()
-    );
-    eprintln!(
-        "{}",
-        crate::style::next_steps(&[
-            (
-                "xark build".to_string(),
-                "the circuits, their clients, then the programs (cargo build-sbf)",
-            ),
-            (
-                "npm install && xark test".to_string(),
-                "the circuits' tests, then prove and verify onchain in LiteSVM",
-            ),
-        ])
-    );
-    Ok(())
-}
-
 /// A circuit's name: a crate name (one path component), and not one the crates
 /// xark adds beside it could clash with in the workspace (`<name>-program`,
 /// `<name>-client`).
@@ -322,7 +226,7 @@ pub fn check_circuit_name(root: &Path, name: &str) -> Result<()> {
 }
 
 /// The package names of the project's crates.
-fn package_names(root: &Path) -> Vec<String> {
+pub(crate) fn package_names(root: &Path) -> Vec<String> {
     let mut dirs = super::project::members(root, "circuits");
     dirs.extend(super::project::members(root, "programs"));
     dirs.extend(
@@ -338,54 +242,8 @@ fn package_names(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The test's inputs, their doc, and the test function: the starter circuit's
-/// known answer, run; or the circuit's `inputs.example.json` (camelCase, as the
-/// client takes them) to fill in, its test skipped until then so the project's
-/// tests (and CI) stay green.
-fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, String, &'static str) {
-    let names: Vec<(&str, &str)> = schema["inputs"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|i| Some((i["name"].as_str()?, i["visibility"].as_str()?)))
-        .collect();
-    if names == [("secret", "private"), ("result", "public")] {
-        return (
-            "{ secret: 3, result: 9 }".into(),
-            "/** 3 squared is 9: the starter circuit's statement. */\n".into(),
-            "test",
-        );
-    }
-    let example = fs::read_to_string(xark_dir.join("inputs.example.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .unwrap_or(Value::Object(Default::default()));
-    // Placeholders aren't values of the input types: the cast goes once they're
-    // replaced.
-    (
-        format!(
-            "{} as unknown as {pascal}Inputs",
-            serde_json::to_string_pretty(&camel_keys(example)).unwrap_or_default()
-        ),
-        "/**\n * Replace each placeholder with a value the circuit accepts, then remove the\n * test's `.skip`.\n */\n".into(),
-        "test.skip",
-    )
-}
-
-fn camel_keys(v: Value) -> Value {
-    match v {
-        Value::Object(m) => Value::Object(
-            m.into_iter()
-                .map(|(k, v)| (xark_schema::camel(&k), camel_keys(v)))
-                .collect(),
-        ),
-        Value::Array(a) => Value::Array(a.into_iter().map(camel_keys).collect()),
-        v => v,
-    }
-}
-
 /// Write `text` to `dir/rel`, refusing to replace a file.
-fn write_new(dir: &Path, rel: &str, text: &str) -> Result<()> {
+pub(crate) fn write_new(dir: &Path, rel: &str, text: &str) -> Result<()> {
     let path: PathBuf = dir.join(rel);
     if path.exists() {
         bail!("{} already exists", path.display());

@@ -566,7 +566,7 @@ fn write_outputs(
     if in_project {
         steps.push((
             "xark build".to_string(),
-            "the verifier crate and TypeScript client (clients/), then the programs",
+            "the verifier crate and TypeScript client (clients/)",
         ));
     } else {
         steps.push((
@@ -624,6 +624,7 @@ fn autobuild_and_setup(
             path: args.path.clone(),
             out: None,
             without_ptau: true,
+            nested: false,
             deterministic_rng: None,
             ptau_file: None,
             phase2_seed: None,

@@ -94,9 +94,9 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
             "cargo install xark-cli",
         ),
     }
-    // A project's `xark build` builds its programs with `cargo build-sbf`, and its
-    // `xark test` runs the TypeScript tests with Node: there they're required;
-    // elsewhere, only for what uses them.
+    // A project's programs are built and tested by their framework, so only \
+    // `cargo-build-sbf` is checked. Node is informational as it may be needed
+    // to run the programs' LiteSV test and generate TypeScript clients.
     let in_project = std::env::current_dir()
         .ok()
         .and_then(|d| crate::xark_project::project_root(&d))
@@ -109,20 +109,20 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
         problems += check(
             sbf.is_some(),
             "cargo build-sbf",
-            Some("builds this project's programs (`xark build`)"),
+            Some("builds this project's Solana programs"),
             sbf_fix,
         );
-        problems += check(
+        info(
             node.is_some(),
             "node",
-            Some("runs this project's TypeScript tests (`xark test`)"),
+            "runs the programs' LiteSVM test and the TypeScript client",
             node_fix,
         );
     } else {
         info(
             sbf.is_some(),
             "cargo build-sbf",
-            "for Solana programs (`xark add program`, then `xark build`)",
+            "for Solana programs (the framework's build command)",
             sbf_fix,
         );
         info(

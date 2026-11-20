@@ -85,6 +85,11 @@ fn add_a_circuit_then_its_program() {
     // The program's verifier crate and TypeScript client are generated first.
     let (ok, out) = xark(&["add", "program", "claim"]);
     assert!(ok, "{out}");
+    // The framework that scaffolded the program says how to build and test it.
+    assert!(
+        out.contains("cargo build-sbf") && out.contains("cargo test-sbf"),
+        "the program's own commands weren't printed:\n{out}"
+    );
     for f in [
         "programs/claim/src/lib.rs",
         "programs/claim/src/errors.rs",

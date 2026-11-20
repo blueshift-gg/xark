@@ -35,9 +35,14 @@ pub struct SetupArgs {
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
     /// Make the key from this machine's randomness even if a `.ptau` could be
-    /// found: what `xark prove`'s first-run setup asks for. Not a flag.
+    /// found: `xark prove`'s first-run setup and `xark build`'s dev bootstrap
+    /// set it in code. Not a flag.
     #[arg(skip)]
     pub without_ptau: bool,
+    /// Set when a project-wide command (`xark build`) runs setup in-process: it
+    /// prints what's next itself, so setup doesn't.
+    #[arg(skip)]
+    pub nested: bool,
     /// Reproducible-randomness escape hatch for test fixtures **only**: a key
     /// made without a `.ptau`, driven by
     /// `ChaCha20Rng::seed_from_u64(<seed>)` so two runs with the same seed
@@ -594,7 +599,9 @@ pub fn run(args: SetupArgs) -> Result<()> {
     }
     // Keys written elsewhere (`--out`): `xark prove` must be pointed at them.
     let key = (pk_path != project.proving_key()).then_some(pk_path.as_path());
-    print_next_steps(&project, &args.path, key);
+    if !args.nested {
+        print_next_steps(&project, &args.path, key);
+    }
     Ok(())
 }
 
