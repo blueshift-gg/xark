@@ -24,22 +24,19 @@ set_option linter.style.header false
 /-!
 # xark gadget soundness — mechanised in Lean 4 / mathlib
 
-Machine-checked soundness lemmas for the R1CS gadgets emitted by the xark
-frontend (`crates/frontend/src/builder.rs`, `crates/lang/src/lang.rs`). Each theorem mirrors the
-*exact* constraints the Rust builder enforces, so a proof here is a statement
-about the real circuit.
+Soundness lemmas for the two primitives under the xark frontend's R1CS
+(`crates/frontend/src/builder.rs`, `crates/lang/src/lang.rs`).
 
-* `boolean_sound` — mirrors the boolean-enforcement gadget in
-  `gadgets/xark-bits/src/lib.rs`, which
-  enforces `b * (b - 1) = 0`. We prove that this holds **iff** `b ∈ {0, 1}`,
+* `boolean_sound` — `Field::require_bool` emits `b · b = b`, i.e.
+  `b * (b - 1) = 0`. We prove that this holds **iff** `b ∈ {0, 1}`,
   in any field (more generally any ring with no zero divisors). This is the
   primitive every other gadget builds on (range, bitwise, the hashes all
   pin their wires to {0,1} this way).
 
-* `range_unique` — mirrors the bit-decomposition gadget in
-  `gadgets/xark-bits/src/lib.rs`, which
-  allocates `n` boolean wires `bᵢ` and enforces `Σᵢ 2ⁱ·bᵢ = value`. We prove
-  the gadget is **functionally deterministic**: the bit-vector is *uniquely*
+* `range_unique` — boolean wires `bᵢ` with `Σᵢ 2ⁱ·bᵢ = value`, the
+  arithmetic behind `Field::to_bits` (its exact rows, from
+  `Builder::decompose_bits`, are proven in `Formal/ToBits.lean`). We prove
+  the decomposition is **functionally deterministic**: the bit-vector is *uniquely*
   determined by `value` — i.e. the R1CS has no under-constraint slack — as
   long as the width `n ≤ 253 < log₂ r`, so the field sum cannot wrap the
   BN254 scalar modulus. Under-constraint is the precise bug class these
@@ -49,9 +46,8 @@ about the real circuit.
 
 namespace Xark
 
-/-- **`enforce_boolean` soundness.** The single constraint
-`b * (b - 1) = 0` emitted by the boolean gadget (`gadgets/xark-bits/src/lib.rs`)
-holds exactly when `b` is a
+/-- **Booleanity soundness.** The constraint `b * (b - 1) = 0`
+(`Field::require_bool`'s `b · b = b`) holds exactly when `b` is a
 boolean field element. Stated for any ring with no zero divisors (every field,
 in particular `ark_bn254::Fr`). -/
 theorem boolean_sound {F : Type*} [Ring F] [NoZeroDivisors F] (b : F) :
@@ -65,8 +61,8 @@ def r : ℕ :=
 instance : NeZero r := ⟨by unfold r; norm_num⟩
 instance : Fact (1 < r) := ⟨by unfold r; norm_num⟩
 
-/-- `2^253 < r`: the width cap `MAX_BITS = 253` in the range gadget
-(`gadgets/xark-bits/src/lib.rs`) keeps an
+/-- `2^253 < r`: the width cap `N <= 253` in `Field::to_bits`
+(`crates/lang/src/lang.rs`) keeps an
 `n`-bit recomposition (`n ≤ 253`) strictly below the modulus, so it cannot wrap. -/
 theorem two_pow_lt_r : (2 : ℕ) ^ 253 < r := by unfold r; norm_num
 
@@ -115,13 +111,14 @@ theorem bits_unique :
     · exact hlow
     · intro j; exact congrFun htails j
 
-/-- **`decompose_into_bits` determinism / soundness.** Given the boolean
+/-- **Bit-decomposition determinism / soundness.** Given the boolean
 constraints on every bit (`hb`, `hb'`) and the recomposition constraint
 `Σᵢ 2ⁱ·bᵢ = Σᵢ 2ⁱ·b'ᵢ` (both equal to the same `value` wire), the two
 bit-vectors coincide — for any width `n ≤ 253`. The range gadget therefore
 pins its witness uniquely: no prover has slack to choose a different
-decomposition of the same value. The bound `n ≤ 253` is exactly the Rust
-`MAX_BITS` cap, and is what prevents a field wrap-around from collapsing two
+decomposition of the same value. The bound `n ≤ 253` is exactly
+`Field::to_bits`'s `N <= 253` assertion, and is what prevents a field
+wrap-around from collapsing two
 distinct bit-vectors onto one value. -/
 theorem range_unique {n : ℕ} (hn : n ≤ 253)
     (b b' : Fin n → ZMod r)

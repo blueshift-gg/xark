@@ -2,12 +2,12 @@
 //!
 //! First, in order: `cargo fmt --check`, clippy, and a build of every test binary (so
 //! the steps after don't queue on one `target/` lock). Then every independent step at
-//! once, each logging to `target/ci/<step>.log`: the workspace and `crates/lang`
-//! tests (nextest, and their doctests), the digests, the Lean exports and coverage,
-//! the minimizer certificates, the publish plan, xark-wasm's wasm build, the
-//! generated clients, the Lean proofs and, after them, xtask's ignored tests (they
-//! need the Lean build). Steps whose tools aren't installed (`lake`, `npm`,
-//! `cargo build-sbf`) are skipped and say so. Keyed rows are pinned under one rustc
+//! once, each logging to `target/ci/<step>.log`: the workspace tests (nextest, and
+//! their doctests), the digests, the Lean exports and coverage, the minimizer
+//! certificates, the publish plan, xark-wasm's wasm build, the generated clients,
+//! the Lean proofs and, after them, xtask's ignored tests (they need the Lean
+//! build). Steps whose tools aren't installed (`lake`, `npm`, `cargo build-sbf`) are
+//! skipped and say so. Keyed rows are pinned under one rustc
 //! ([`KEYED_TOOLCHAIN`], as CI's `keyed-rows` job), so those steps run under it.
 //!
 //! `--since <REF>` runs only the steps the files changed since `REF` (committed or
@@ -46,7 +46,6 @@ pub struct Args {
 /// Every step after the build ones.
 const ALL: &[&str] = &[
     "workspace",
-    "lang",
     "sbpf",
     "digests",
     "lean-check",
@@ -67,7 +66,6 @@ const ALL: &[&str] = &[
 fn affected(path: &str) -> &'static [&'static str] {
     const CIRCUITS: &[&str] = &[
         "workspace",
-        "lang",
         "digests",
         "lean-check",
         "coverage",
@@ -125,8 +123,8 @@ fn affected(path: &str) -> &'static [&'static str] {
     {
         PROVER
     } else if top("crates/test-harness/") {
-        // The gadget crates' and crates/lang's tests compile through it.
-        &["workspace", "lang"]
+        // The gadget crates' and xark's tests compile through it.
+        &["workspace"]
     } else if top("formal/") {
         LEAN
     } else if top("xtask/") {
@@ -191,15 +189,6 @@ fn steps() -> Vec<Step> {
             "cargo nextest run --release --no-fail-fast --workspace \
              -E 'not (binary(sbpf) | binary(differential_alt_bn128))' \
              && cargo test -q --release --doc --workspace"
-                .into(),
-            Some("cargo-nextest"),
-            None,
-        ),
-        step(
-            "lang",
-            "crates/lang suite (nextest) and doctests",
-            "cd crates/lang && cargo nextest run --release --no-fail-fast \
-             && cargo test -q --release --doc"
                 .into(),
             Some("cargo-nextest"),
             None,
@@ -345,12 +334,6 @@ pub fn run(args: Args) -> Result<()> {
         prep.push((
             "build-tests",
             "cargo test -q --release --workspace --no-run".into(),
-        ));
-    }
-    if wants("lang") {
-        prep.push((
-            "build-lang",
-            "cd crates/lang && cargo test -q --release --no-run".into(),
         ));
     }
     if wants("xtask-ignored") || chosen.iter().any(|s| s.cmd.contains("cargo xtask")) {
@@ -548,10 +531,7 @@ mod tests {
         assert!(!affected("crates/groth16/src/accel.rs").contains(&"lake"));
         assert_eq!(affected("formal/Formal/RequireLt.lean")[0], "lake");
         assert_eq!(affected("clients/check/zkyc/zkyc.test.ts"), ["clients"]);
-        assert_eq!(
-            affected("crates/test-harness/src/lib.rs"),
-            ["workspace", "lang"]
-        );
+        assert_eq!(affected("crates/test-harness/src/lib.rs"), ["workspace"]);
         assert_eq!(affected("rust-toolchain.toml"), ALL);
     }
 }

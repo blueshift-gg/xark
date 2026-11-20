@@ -42,13 +42,12 @@ BLAKE3) is:
   whole-permutation equality into the per-round structural decomposition
   that the gadget's per-bit constraints jointly satisfy.
 
-The bit-level equivalence of each round-step's individual constraints
-with the FIPS / RFC reference is the `<X>_round_bit_equivalence`
-theorem family in `Formal.BitwuzlaCompose` (historical name; pure
-Lean), composed structurally through the per-layer soundness lemmas in
-`Formal.Sha256`, `Formal.Keccak` and `Formal.Blake`.
-What this file adds is the round-loop induction that lifts those
-per-round equivalences to whole-permutation equality.
+The per-bit structural soundness of the round pieces is in
+`Formal.Sha256` (`Ch_bit_sound`, `Maj_bit_sound`), `Formal.Keccak`
+(`keccakRoundStep_bit_sound`) and `Formal.Blake`
+(`blake2s_round_compose_bit`, `blake3_round_compose_bit`). What this file
+adds is the round-loop induction from the iterated permutation to the
+per-round snapshots.
 -/
 
 namespace Xark
@@ -152,7 +151,7 @@ def IsValidSha256CompressionWitness
 /-- **End-to-end soundness wrapper for the SHA-256 compression gadget
 (`gadgets/xark-sha256/src/lib.rs`).**
 The witness's per-round structural equalities are precisely those the
-gadget enforces (one `add_mod_32`/`Ch`/`Maj`/`Σ` per round). The
+gadget enforces (each round's wrapping adds, `Ch`, `Maj` and `Σ`s). The
 wrapper packages them into the spec relation's existential. -/
 theorem lowerSha256Compression_sound
     {input : Fin 16 → Word32} {state_in output : Fin 8 → Word32}
@@ -293,8 +292,8 @@ def Keccakf1600Rel
 /-- **Gadget intermediate-state witness for Keccak-f[1600].** The
 witness exhibits a 25-snapshot history with per-round equalities — same
 shape as the spec relation. Bit-level equivalence of `keccakRoundStep`
-with the per-bit gadget output is discharged structurally by
-`keccak_round_bit_equivalence` in `Formal.BitwuzlaCompose`. -/
+with the per-bit gadget output is `keccakRoundStep_bit_sound` in
+`Formal.Keccak`. -/
 def IsValidKeccakf1600Witness
     (state_in output : Fin 25 → Word64) (rc : Fin 24 → Word64) : Prop :=
   ∃ rounds : Fin 25 → Fin 25 → Word64,
@@ -458,9 +457,7 @@ def Blake2sCompressionRel
     (∀ i : Fin 10,
       rounds ⟨i.val + 1, by omega⟩ =
         blake2sRoundStep (rounds ⟨i.val, by omega⟩) m i) ∧
-    -- Bookkeeping for counter / flag / output; the bit-equality of the
-    -- final h_out with the FIPS reference is discharged by
-    -- `blake2s_closed_chain` in `Formal.BitwuzlaCompose`.
+    -- Bookkeeping for counter / flag / output (trivial conjuncts).
     (t_lo = t_lo) ∧ (t_hi = t_hi) ∧ (last_block = last_block) ∧ (h_out = h_out)
 
 /-- Gadget intermediate-state witness for BLAKE2s. -/
@@ -663,8 +660,9 @@ def IsValidEmbeddedCurveAddWitness {F : Type*} [Field F]
     xg yg x3 y3 is_inf3 ∧
   (is_inf1 = 0 → is_inf2 = 0 → x1 = x2 → y1 = y2 → (2 : F) * y1 ≠ 0)
 
-/-- **End-to-end soundness wrapper for the embedded-curve point-addition gadget
-(`gadgets/xark-grumpkin/src/lib.rs`).** -/
+/-- **End-to-end soundness wrapper for embedded-curve point addition**, over
+the flagged complete addition modelled in `Formal.Curve` (no current gadget
+emits it; `xark_grumpkin::ec_add` is incomplete). -/
 theorem lowerEmbeddedCurveAdd_sound {F : Type*} [Field F]
     {x1 y1 is_inf1 x2 y2 is_inf2 lambda
      same_x same_y is_double is_inverse inv_dx inv_dy
@@ -694,7 +692,8 @@ theorem lowerMultiScalarMul_sound {G : Type*} [AddCommGroup G]
 
 /-! ## ECDSA secp256k1 / secp256r1 wrappers -/
 
-/-- **End-to-end soundness wrapper for ECDSA-secp256k1 verification.** -/
+/-- **End-to-end soundness wrapper for ECDSA-secp256k1 verification**, over
+the textbook model of `Formal.EcdsaVerify`. -/
 theorem lowerEcdsaSecp256k1_sound
     {G : Type*} [AddCommGroup G]
     {n : ℕ} [NeZero n] {g Q : G} {xProj : G → ZMod n}
@@ -710,7 +709,8 @@ theorem lowerEcdsaSecp256k1_sound
     EcdsaVerifyRel n g Q xProj e r s :=
   ecdsa_verify_compose h_r_ne h_s_ne h_w h_u1_nat h_u2_nat h_acc1 h_acc2 h_R h_r_eq
 
-/-- **End-to-end soundness wrapper for ECDSA-secp256r1 verification.** -/
+/-- **End-to-end soundness wrapper for ECDSA-secp256r1 verification**, over
+the textbook model of `Formal.EcdsaVerify`. -/
 theorem lowerEcdsaSecp256r1_sound
     {G : Type*} [AddCommGroup G]
     {n : ℕ} [NeZero n] {g Q : G} {xProj : G → ZMod n}

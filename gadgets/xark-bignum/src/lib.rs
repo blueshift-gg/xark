@@ -3,8 +3,19 @@
 //!
 //! A field element is a width-generic `Bignum`: `LIMBS` little-endian `BITS`-bit
 //! limbs (value `Σ limb[i]·2^(BITS·i)`); callers pick the width (e.g. `<3, 86>`).
-//! Every op takes the modulus explicitly (`m` limbs, `m_minus_1` for the range
-//! check), so one set of routines serves any prime field.
+//! Every op takes the modulus explicitly (`m` limbs), so one set of routines serves
+//! any prime field.
+//!
+//! Every op assumes its operands' limbs are `< 2^BITS`: its rows prove the integer
+//! relation it documents only then. A typed input (`Bignum`, or a type from [`fp!`])
+//! is range-checked when it's read, and every op's result is range-checked, so only
+//! limbs a circuit builds itself (`Bignum::new`, a `[Field; LIMBS]` parameter) need
+//! [`range_check_limbs`] first.
+//!
+//! In range isn't canonical: only [`mod_mul`]'s and [`sub2`]'s results are `< m`.
+//! An input, an inverse, or a sum or difference of them may be `≥ m` while congruent
+//! to the right value; check it canonical (`assert_canonical`) before comparing it,
+//! testing it for zero, or exposing its limbs.
 //!
 //! Arithmetic is limb-wise with explicit carry/borrow propagation; carries are
 //! range-checked so no intermediate term wraps the BN254 modulus the circuit is
@@ -58,10 +69,14 @@ pub struct Bignum<const LIMBS: usize, const BITS: usize> {
 
 /// A circuit input given as a whole number (a decimal or `0x`-hex string in a
 /// client), split into `LIMBS` little-endian `BITS`-bit limbs `<name>.limbs[i]`.
+/// Each limb is range-checked as it's read: the prover chooses the limbs, whatever
+/// a client's encoder did, and every op assumes them `< 2^BITS`.
 impl<const LIMBS: usize, const BITS: usize> xark::Input for Bignum<LIMBS, BITS> {
     const TYPE: xark::input::Type = crate::number_type!("Bignum", LIMBS, BITS);
     fn read(r: &mut xark::input::Reader<'_>) -> Self {
-        Bignum { limbs: r.read() }
+        let limbs = r.read();
+        range_check_limbs::<LIMBS, BITS>(limbs);
+        Bignum { limbs }
     }
     fn write(&self, w: &mut xark::input::Writer<'_>) {
         w.write(&self.limbs)
@@ -148,9 +163,9 @@ impl<const LIMBS: usize, const BITS: usize> Bignum<LIMBS, BITS> {
         range_check_limbs::<LIMBS, BITS>(self.limbs)
     }
 
-    /// `(self · rhs) mod m`. `m_minus_1` is `m − 1` (the remainder range bound).
-    pub fn mul(self, rhs: Self, m: Self, m_minus_1: Self) -> Self {
-        let limbs = mod_mul::<LIMBS, BITS>(self.limbs, rhs.limbs, m.limbs, m_minus_1.limbs);
+    /// `(self · rhs) mod m`.
+    pub fn mul(self, rhs: Self, m: Self) -> Self {
+        let limbs = mod_mul::<LIMBS, BITS>(self.limbs, rhs.limbs, m.limbs);
         Bignum { limbs }
     }
 
@@ -179,9 +194,8 @@ impl<const LIMBS: usize, const BITS: usize> Bignum<LIMBS, BITS> {
     }
 
     /// Fused `(self − b − c) mod m` (one hint, cheaper than two subtractions).
-    /// `m_minus_1` is `m − 1`.
-    pub fn sub2(self, b: Self, c: Self, m: Self, m_minus_1: Self) -> Self {
-        let limbs = sub2::<LIMBS, BITS>(self.limbs, b.limbs, c.limbs, m.limbs, m_minus_1.limbs);
+    pub fn sub2(self, b: Self, c: Self, m: Self) -> Self {
+        let limbs = sub2::<LIMBS, BITS>(self.limbs, b.limbs, c.limbs, m.limbs);
         Bignum { limbs }
     }
 
@@ -329,13 +343,24 @@ macro_rules! fp {
     // Two-arg form: ~256-bit prime field, default 3 × 86-bit layout (86 bits is
     // multiply-optimal over BN254).
     ($vis:vis $name:ident, $modulus:literal) => {
-        $crate::fp!(@build $vis $name, $modulus, 3, 86);
+        $crate::fp!(@build checked $vis $name, $modulus, 3, 86);
         $crate::fp!(@host $name, 3, 86);
+    };
+    // Inputs read WITHOUT the limb range check, for code that checks every input it
+    // takes itself (the curve gadgets pin each coordinate and scalar canonical before
+    // any arithmetic), so the check isn't paid twice.
+    (unchecked_input $vis:vis $name:ident, $modulus:literal) => {
+        $crate::fp!(@build raw $vis $name, $modulus, 3, 86);
+        $crate::fp!(@host $name, 3, 86);
+    };
+    (unchecked_input $vis:vis $name:ident, $modulus:literal, $limbs:literal, $bits:literal) => {
+        $crate::fp!(@build raw $vis $name, $modulus, $limbs, $bits);
+        $crate::fp!(@host $name, $limbs, $bits);
     };
     // Same, but WITHOUT the host conversions: for callers that supply their own (e.g.
     // curves give a byte host via `curve_host_inputs!`), so the two don't clash.
     (no_host $vis:vis $name:ident, $modulus:literal) => {
-        $crate::fp!(@build $vis $name, $modulus, 3, 86);
+        $crate::fp!(@build checked $vis $name, $modulus, 3, 86);
     };
     // Storage only: `LIMBS` × `BITS`-bit limbs with no modulus and no arithmetic — an
     // input wrapper for code that does its own limb arithmetic (e.g. a lazy-reduction
@@ -345,7 +370,7 @@ macro_rules! fp {
         $vis struct $name {
             pub limbs: [$crate::Field; $limbs],
         }
-        $crate::fp!(@input $name, $limbs, $bits);
+        $crate::fp!(@input raw $name, $limbs, $bits);
         #[allow(dead_code)]
         impl $name {
             /// Wrap `LIMBS` little-endian `BITS`-bit limbs.
@@ -361,26 +386,39 @@ macro_rules! fp {
     };
     // `no_host` with an explicit limb layout.
     (no_host $vis:vis $name:ident, $modulus:literal, $limbs:literal, $bits:literal) => {
-        $crate::fp!(@build $vis $name, $modulus, $limbs, $bits);
+        $crate::fp!(@build checked $vis $name, $modulus, $limbs, $bits);
     };
     // Geometry from a `Bignum<LIMBS, BITS>` type — `fp!(Fp, "0x…", Scalar)`.
     ($vis:vis $name:ident, $modulus:literal, $geom:ty) => {
-        $crate::fp!(@build $vis $name, $modulus, { <$geom>::LIMBS }, { <$geom>::BITS });
+        $crate::fp!(@build checked $vis $name, $modulus, { <$geom>::LIMBS }, { <$geom>::BITS });
         $crate::fp!(@host $name, { <$geom>::LIMBS }, { <$geom>::BITS });
     };
     // Explicit limb layout: `fp!(Fp, "0x…", 4, 64)`.
     ($vis:vis $name:ident, $modulus:literal, $limbs:literal, $bits:literal) => {
-        $crate::fp!(@build $vis $name, $modulus, $limbs, $bits);
+        $crate::fp!(@build checked $vis $name, $modulus, $limbs, $bits);
         $crate::fp!(@host $name, $limbs, $bits);
     };
     // A circuit input given as one whole number (a decimal or `0x`-hex string in a
     // client), split into `$limbs` little-endian `$bits`-bit limbs `<name>.limbs[i]`.
-    (@input $name:ident, $limbs:expr, $bits:expr) => {
+    // `checked`: each limb is range-checked as it's read (the prover chooses the
+    // limbs, whatever the client encoded); `raw`: the caller checks.
+    (@input checked $name:ident, $limbs:expr, $bits:expr) => {
+        $crate::fp!(@input_impl $name, $limbs, $bits, |limbs| {
+            $crate::range_check_limbs::<{ $limbs }, { $bits }>(limbs)
+        });
+    };
+    (@input raw $name:ident, $limbs:expr, $bits:expr) => {
+        $crate::fp!(@input_impl $name, $limbs, $bits, |_limbs| {});
+    };
+    (@input_impl $name:ident, $limbs:expr, $bits:expr, $check:expr) => {
         impl $crate::__xark::Input for $name {
             const TYPE: $crate::__xark::input::Type =
                 $crate::number_type!(stringify!($name), $limbs, $bits);
             fn read(r: &mut $crate::__xark::input::Reader<'_>) -> Self {
-                Self { limbs: r.read() }
+                let limbs: [$crate::Field; $limbs] = r.read();
+                let check: fn([$crate::Field; $limbs]) = $check;
+                check(limbs);
+                Self { limbs }
             }
             fn write(&self, w: &mut $crate::__xark::input::Writer<'_>) {
                 w.write(&self.limbs)
@@ -436,12 +474,12 @@ macro_rules! fp {
             }
         };
     };
-    (@build $vis:vis $name:ident, $modulus:literal, $limbs:expr, $bits:expr) => {
+    (@build $check:ident $vis:vis $name:ident, $modulus:literal, $limbs:expr, $bits:expr) => {
         #[derive(Clone, Copy, Debug)]
         $vis struct $name {
             pub limbs: [$crate::Field; $limbs],
         }
-        $crate::fp!(@input $name, $limbs, $bits);
+        $crate::fp!(@input $check $name, $limbs, $bits);
         #[allow(dead_code)]
         impl $name {
             const M: [$crate::Field; $limbs] = {
@@ -464,7 +502,7 @@ macro_rules! fp {
             }
             /// Fused `(self − b − c) mod m` (one hint).
             pub fn sub2(self, b: Self, c: Self) -> Self {
-                Self::new($crate::sub2::<{ $limbs }, { $bits }>(self.limbs, b.limbs, c.limbs, Self::M, Self::M1))
+                Self::new($crate::sub2_bounded::<{ $limbs }, { $bits }>(self.limbs, b.limbs, c.limbs, Self::M, Self::M1))
             }
             /// `(3·self) mod m`.
             pub fn triple(self) -> Self {
@@ -480,8 +518,11 @@ macro_rules! fp {
                 $crate::range_check_limbs::<{ $limbs }, { $bits }>(self.limbs);
                 $crate::require_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
             }
-            /// Assert this element is nonzero (assumes range-checked limbs).
+            /// Assert this element is nonzero mod `m`. It's checked canonical (`< m`)
+            /// first: a range-checked value can be `m` itself, whose limbs aren't zero
+            /// though it is. (Its limbs must be range-checked, as inputs and results are.)
             pub fn assert_nonzero(self) {
+                $crate::require_lt::<{ $limbs }, { $bits }>(self.limbs, Self::M1);
                 $crate::assert_nonzero_limbs::<{ $limbs }>(self.limbs);
             }
         }
@@ -500,7 +541,7 @@ macro_rules! fp {
         impl ::core::ops::Mul for $name {
             type Output = Self;
             fn mul(self, rhs: Self) -> Self {
-                Self::new($crate::mod_mul::<{ $limbs }, { $bits }>(self.limbs, rhs.limbs, Self::M, Self::M1))
+                Self::new($crate::mod_mul_bounded::<{ $limbs }, { $bits }>(self.limbs, rhs.limbs, Self::M, Self::M1))
             }
         }
         impl ::core::ops::Neg for $name {
@@ -877,7 +918,9 @@ pub fn is_lt<const LIMBS: usize, const BITS: usize>(a: [Field; LIMBS], b: [Field
     borrow
 }
 
-/// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs.
+/// Assert the limbs encode a nonzero value (not all zero). Assumes range-checked limbs,
+/// and says nothing mod `m`: `m` itself passes. For "nonzero mod `m`", check the value
+/// canonical first (`require_lt` against `m − 1`), as `fp!`'s `assert_nonzero` does.
 pub fn assert_nonzero_limbs<const LIMBS: usize>(limbs: [Field; LIMBS]) {
     // all_zero = AND of isZero(limbᵢ); require == 0 to forbid value 0.
     let mut all_zero = Field::from(1u8);
@@ -1678,13 +1721,49 @@ pub fn on_curve_r1_check(x: [Field; 8], y: [Field; 8], s: [Field; 8], z: [Field;
 /// `< 2^(2·BITS)`; summed across a column with carry/bias headroom, `2·BITS + slack`
 /// bits must stay below the field. The `const` assertion below fails to compile for
 /// any unsound `(LIMBS, BITS)`. For `<3, 86>`: `172 + 8 = 180 < 253`.
+///
+/// `a`, `b` and `m` must have limbs `< 2^BITS` (see the crate docs), and `m ≥ 1`.
 pub fn mod_mul<const LIMBS: usize, const BITS: usize>(
+    a: [Field; LIMBS],
+    b: [Field; LIMBS],
+    m: [Field; LIMBS],
+) -> [Field; LIMBS] {
+    mul_divmod::<LIMBS, BITS>(a, b, m).1
+}
+
+/// [`mod_mul`] with `m − 1` given: for a constant modulus, whose `m − 1` is a
+/// constant too (what [`fp!`] uses). `m_minus_1` must be exactly `m − 1`: it bounds
+/// the remainder, and a larger one admits `r + m` as well as `r`.
+#[doc(hidden)]
+pub fn mod_mul_bounded<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     b: [Field; LIMBS],
     m: [Field; LIMBS],
     m_minus_1: [Field; LIMBS],
 ) -> [Field; LIMBS] {
-    mul_divmod::<LIMBS, BITS>(a, b, m, m_minus_1).1
+    mul_divmod_bounded::<LIMBS, BITS>(a, b, m, m_minus_1).1
+}
+
+/// `m − 1`, limb by limb with its borrow: the bound [`require_lt`] takes for
+/// `x < m`, computed from `m` by constrained rows, never taken from the prover.
+/// `m`'s limbs must be `< 2^BITS`, and `m ≥ 1` is required; the result's limbs are
+/// then `< 2^BITS` too.
+pub fn minus_one<const LIMBS: usize, const BITS: usize>(m: [Field; LIMBS]) -> [Field; LIMBS] {
+    let zero = Field::from(0u8);
+    let mut out = m;
+    // Subtract 1 at limb 0; a limb borrows from the next exactly when it's 0 and a
+    // borrow reaches it.
+    let mut borrow = Field::from(1u8);
+    let mut i = 0usize;
+    while i < LIMBS {
+        let next = borrow * Field::from(m[i] == zero);
+        out[i] = m[i] - borrow + next * two_pow::<BITS>();
+        borrow = next;
+        i += 1;
+    }
+    // A borrow out of the top limb: `m` was 0.
+    require_eq(borrow, zero);
+    out
 }
 
 /// Non-native `a·b` exposing **both** halves of the division: returns
@@ -1696,7 +1775,19 @@ pub fn mod_mul<const LIMBS: usize, const BITS: usize>(
 /// The quotient is what lets a scaled-division advice (e.g. a GLV lattice
 /// reduction's `⌊b·u / n⌋`) be *derived in-circuit* from its inputs rather than
 /// supplied as a witness input.
+///
+/// `a`, `b` and `m` must have limbs `< 2^BITS` (see the crate docs), and `m ≥ 1`.
 pub fn mul_divmod<const LIMBS: usize, const BITS: usize>(
+    a: [Field; LIMBS],
+    b: [Field; LIMBS],
+    m: [Field; LIMBS],
+) -> ([Field; LIMBS], [Field; LIMBS]) {
+    mul_divmod_bounded::<LIMBS, BITS>(a, b, m, minus_one::<LIMBS, BITS>(m))
+}
+
+/// [`mul_divmod`] with `m − 1` given, as [`mod_mul_bounded`].
+#[doc(hidden)]
+pub fn mul_divmod_bounded<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     b: [Field; LIMBS],
     m: [Field; LIMBS],
@@ -1721,7 +1812,9 @@ pub fn mul_divmod<const LIMBS: usize, const BITS: usize>(
 }
 
 /// Non-native modular inverse `a⁻¹ mod m` over `LIMBS` × `BITS`-bit limbs. Output
-/// is `≡ a⁻¹` (not forced canonical — benign, as it only feeds a `mod_mul`).
+/// is `≡ a⁻¹` but not forced canonical: fine as a [`mod_mul`] operand, whose result
+/// is canonical; anything that compares it, tests it for zero or exposes its limbs
+/// needs it canonical first (`assert_canonical`, or a multiply by one).
 ///
 /// Specialized: the reduction remainder is *known* to be exactly `1`, so `r` is
 /// pinned to the constant `[1,0,…]` instead of being range-checked and
@@ -1763,7 +1856,20 @@ pub fn mod_inverse<const LIMBS: usize, const BITS: usize>(
 /// pinned to `{0,1,2}` (2 bits with the `(1,1)` pattern excluded), so each
 /// `lhs[i] = a[i] + qabs·m[i] < 3·2^BITS` and the signed carry stays `|t| ≤ 3`
 /// (`cb = t+4 ∈ [1,7]`, range-checked `< 8`).
+///
+/// `a`, `b`, `c` and `m` must have limbs `< 2^BITS` (see the crate docs).
 pub fn sub2<const LIMBS: usize, const BITS: usize>(
+    a: [Field; LIMBS],
+    b: [Field; LIMBS],
+    c: [Field; LIMBS],
+    m: [Field; LIMBS],
+) -> [Field; LIMBS] {
+    sub2_bounded::<LIMBS, BITS>(a, b, c, m, minus_one::<LIMBS, BITS>(m))
+}
+
+/// [`sub2`] with `m − 1` given, as [`mod_mul_bounded`].
+#[doc(hidden)]
+pub fn sub2_bounded<const LIMBS: usize, const BITS: usize>(
     a: [Field; LIMBS],
     b: [Field; LIMBS],
     c: [Field; LIMBS],

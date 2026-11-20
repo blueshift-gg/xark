@@ -582,20 +582,31 @@ impl RowFileSource {
     pub fn new(bytes: Vec<u8>) -> Result<Self, String> {
         let file = RowFile::parse(bytes)?;
         let layout = VarLayout::new(file.vars().iter().copied());
-        let mut conv = CoeffCache::default();
-        let pool = file.pool().iter().map(|f| conv.fr(f)).collect();
-        // Every referenced var must be allocated (checked once, up front).
-        let mut bad = None;
-        for w in 0..file.num_windows() {
-            file.decode_window(w, &mut |_, terms| {
-                if bad.is_none() {
-                    bad = terms
-                        .iter()
-                        .find(|t| layout.position(t.0).is_none())
-                        .map(|t| t.0);
-                }
-            })?;
-        }
+        let pool = file
+            .pool()
+            .par_iter()
+            .map_init(CoeffCache::default, |conv, f| conv.fr(f))
+            .collect();
+        // Every referenced var must be allocated (checked once, up front, windows
+        // in parallel); the first bad var in window order is reported.
+        let bad = (0..file.num_windows())
+            .into_par_iter()
+            .map(|w| {
+                let mut bad = None;
+                file.decode_window(w, &mut |_, terms| {
+                    if bad.is_none() {
+                        bad = terms
+                            .iter()
+                            .find(|t| layout.position(t.0).is_none())
+                            .map(|t| t.0);
+                    }
+                })
+                .map(|()| bad)
+            })
+            .collect::<Result<Vec<_>, String>>()?
+            .into_iter()
+            .flatten()
+            .next();
         if let Some(v) = bad {
             return Err(format!("r1cs.stream references unallocated var {v}"));
         }

@@ -14,27 +14,25 @@ set_option linter.style.longLine false
 /-!
 # witness ↔ R1CS allocation bookkeeping
 
-Two small composition lemmas that tie the per-gadget soundness theorems
-to the surrounding allocation discipline of `R1csBuilder`:
+Small lemmas about an abstract allocation and memory discipline. No
+current Rust structure in `crates/frontend` is named for what is modelled
+here; the statements stand on their own:
 
-* **`alloc_witness` is idempotent + injective.** The per-gadget theorems
-  all assume that the source witness-index → R1CS witness-wire bijection
-  holds. This file models the `R1csBuilder::alloc_witness` table as a
-  partial map (`alloc_state`) and proves both properties over any
-  allocation sequence.
+* **Allocation is idempotent + injective.** A source witness-index → R1CS
+  variable table, modelled as a partial map (`AllocState`); both properties
+  hold over any allocation sequence.
 
-* **Constant-index `MemoryOp` reduces to copy / alias.** The variable-index
-  proof in `Formal.MemoryVarIndex` already covers the hardest case. The
-  constant-index shortcut: at a literal index `k`, the gadget's selector
-  partition collapses to `s_k = 1, s_j = 0 (j ≠ k)`, so a `Read` is a
-  witness copy and a `Write` is a fresh alias of the input value.
+* **Constant-index read / write reduces to copy / alias.** The
+  variable-index case is `Formal.MemoryVarIndex`. At a literal index `k`
+  the selector partition collapses to `s_k = 1, s_j = 0 (j ≠ k)`, so a
+  read is a witness copy and a write is a fresh alias of the input value.
 -/
 
 namespace Xark
 
-/-! ## `alloc_witness` allocation table -/
+/-! ## Allocation table -/
 
-/-- Pure-Lean model of `R1csBuilder`'s witness-index → variable-index
+/-- Pure-Lean model of a witness-index → variable-index
 allocation table. `assigned i = some v` means the source witness index `i`
 has been allocated to R1CS variable `v`; `assigned i = none` means it has
 not yet been allocated. `next` is the next variable index to hand out. -/
@@ -47,7 +45,7 @@ structure AllocState where
 def AllocState.initial : AllocState :=
   { assigned := fun _ => none, next := 1 }
 
-/-- Model of `R1csBuilder::alloc_witness`. If `idx` already has an
+/-- Allocate `idx`. If `idx` already has an
 allocation, return it; otherwise allocate the next variable and record
 the binding. -/
 def AllocState.alloc (m : AllocState) (idx : ℕ) : ℕ × AllocState :=
@@ -90,7 +88,7 @@ theorem AllocState.alloc_preserves_invariant
       have hv := hm i v hassign
       omega
 
-/-- **`alloc_witness` is idempotent on a per-index basis.**
+/-- **Allocation is idempotent on a per-index basis.**
 Allocating the same `idx` twice in succession returns the same variable
 and leaves the state unchanged after the first call. -/
 theorem alloc_witness_idempotent (m : AllocState) (idx : ℕ) :
@@ -105,7 +103,7 @@ theorem alloc_witness_idempotent (m : AllocState) (idx : ℕ) :
     -- Fresh: the first alloc binds idx → m.next; the second hits the `some` branch.
     simp
 
-/-- **`alloc_witness` is injective on distinct indices.** Two
+/-- **Allocation is injective on distinct indices.** Two
 distinct source witness indices `idx₁ ≠ idx₂`, freshly allocated against the
 same starting state (both initially `none`), produce distinct R1CS
 variables. -/
@@ -122,23 +120,20 @@ theorem alloc_witness_injective
   simp only [h_fresh2']
   exact Nat.ne_of_lt (Nat.lt_succ_self _)
 
-/-! ## Constant-index `MemoryOp` wrapper
+/-! ## Constant-index read / write
 
-At a literal index `k : Fin n`, the gadget's selector vector collapses
-to the one-hot vector `s_j = [j = k]`. `Formal.MemoryVarIndex` already
-proves this is the unique witness; the constant-index case just packages
-that conclusion as the simpler "copy / alias" statement the lowering
-emits.
+At a literal index `k : Fin n`, the selector vector collapses to the
+one-hot vector `s_j = [j = k]`. `Formal.MemoryVarIndex` proves this is the
+unique witness; the constant-index case packages that conclusion as the
+simpler "copy / alias" statement.
 
-For `Read`: the gadget emits `value = arr_pre[k]`, a direct copy.
-For `Write`: the gadget emits `arr_post[k] = new_value`, and
-`arr_post[j] = arr_pre[j]` for `j ≠ k`. Both reduce to one R1CS row each
-under the constant-index path in the xark compiler's array-indexing
-lowering (`crates/frontend`). -/
+Read: `value = arr_pre[k]`, a direct copy.
+Write: `arr_post[k] = new_value`, and `arr_post[j] = arr_pre[j]` for
+`j ≠ k`. -/
 
-/-- **Const-index `MemoryOp::Read` soundness.** When the index `k` is a
-literal, the gadget skips the selector layer and emits `value = arr[k]`
-directly. The Lean statement: any witness satisfying this copy equation
+/-- **Const-index read soundness.** When the index `k` is a literal, the
+selector layer is skipped and `value = arr[k]` holds directly. The Lean
+statement: any witness satisfying this copy equation
 agrees with the variable-index `read_value_correct` conclusion at the
 singleton selector. -/
 theorem read_const_index_correct {F : Type*} [Field F] {n : ℕ}
@@ -147,8 +142,8 @@ theorem read_const_index_correct {F : Type*} [Field F] {n : ℕ}
     value = arr k :=
   h_copy
 
-/-- **Const-index `MemoryOp::Write` soundness.** For a literal index `k`,
-the gadget emits `arr_post[k] = new_value` and `arr_post[j] = arr_pre[j]`
+/-- **Const-index write soundness.** For a literal index `k`,
+`arr_post[k] = new_value` and `arr_post[j] = arr_pre[j]`
 for `j ≠ k`. These three structural facts imply the spec semantics
 (`arr_post = update arr_pre k new_value`). -/
 theorem write_const_index_correct {F : Type*} [Field F] {n : ℕ}
@@ -164,19 +159,11 @@ theorem write_const_index_correct {F : Type*} [Field F] {n : ℕ}
   · rw [Function.update_of_ne hj]
     exact h_off j hj
 
-/-! ## Inductive `allocList` reach lemma (cross-circuit `Call` memory-scope
-splice, residual)
+/-! ## Inductive `allocList` reach lemma
 
-This closes the inductive invariant cited (but left unmechanised) in
-`Formal.CallInlining.memory_scope_splice_fresh`: after the caller's
-`N`-opcode `MemoryInit` pass — modelled here as `AllocState.allocList`
-walking a list `idxs` of length `≥ N` of fresh-and-injective witness
-indices — the resulting `AllocState.next` has advanced by at least `N`.
-
-Together with the per-allocation freshness lemma already in
-`Formal.CallInlining`, this guarantees the caller's `AllocState` reaches
-the call offset before the callee's `MemoryInit` opcodes are spliced in,
-so the splice never collides.
+`AllocState.allocList` walks a list `idxs` of length `≥ N` of
+fresh-and-injective witness indices; the resulting `AllocState.next` has
+advanced by at least `N`.
 -/
 
 /-- Walk a list of witness indices, allocating each in sequence. -/
@@ -348,18 +335,9 @@ theorem alloc_list_reaches_offset
   rw [alloc_list_reaches_offset_eq m idxs h_nodup h_fresh]
   exact Nat.add_le_add_left h_len m.next
 
-/-- **`alloc_list_memory_init_invariant` (composition with the
-`MemoryInit` pass).** When the caller emits an `N`-opcode `MemoryInit`
-pass — modelled as walking a list `idxs` of length `≥ N` of fresh and
-injective witness indices — starting from any allocation state `m`
-with `m.next = caller_block_offset`, the resulting `AllocState` has
-`next ≥ caller_block_offset + N`.
-
-This is exactly the residual hypothesis cited by
-`Formal.CallInlining.memory_scope_splice_fresh`: it certifies that the
-caller's allocation state reaches the call offset before the callee's
-`MemoryInit` opcodes are spliced in, so block-id namespaces never
-collide. -/
+/-- **Offset form.** Walking a list `idxs` of length `≥ N` of fresh and
+injective witness indices from any allocation state `m` with
+`m.next = caller_block_offset` gives `next ≥ caller_block_offset + N`. -/
 theorem alloc_list_memory_init_invariant
     (m : AllocState) (idxs : List ℕ) (caller_block_offset N : ℕ)
     (h_start : m.next = caller_block_offset)

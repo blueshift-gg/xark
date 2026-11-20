@@ -15,6 +15,7 @@
 ///     base = "0x…",              // base field modulus p
 ///     scalar = "0x…",            // scalar field modulus n
 ///     a = 0,                     // curve `a` coefficient: `0` or `-3`
+///     b = [b0, b1, b2],          // curve `b` coefficient, as 3 limbs
 ///     generators = [             // the four incremental-generator points…
 ///         [x0, x1, x2, y0, y1, y2],
 ///         [x0, x1, x2, y0, y1, y2],
@@ -24,6 +25,9 @@
 ///     correction = [x0, x1, x2, y0, y1, y2],   // the offset-accumulator correction
 /// }
 /// ```
+///
+/// A leading `bits = N,` sets the limb width (default 86), for exhaustive checks
+/// of the same gadget code over a small field.
 #[macro_export]
 macro_rules! weierstrass {
     // optional limb width (default 86): `weierstrass! { bits = 4, base = …, … }` — the
@@ -91,8 +95,12 @@ macro_rules! weierstrass {
         correction = [ $cx0:literal, $cx1:literal, $cx2:literal, $cy0:literal, $cy1:literal, $cy2:literal ]
     ) => {
         // base field `Fp` (mod p), scalar field `Fq` (mod n), 3 × `$bits`-bit limbs
-        xark_bignum::fp!(pub Fp, $base, 3, $bits);
-        xark_bignum::fp!(pub Fq, $scalar, 3, $bits);
+        // Inputs read unchecked: the curve functions check the points they take
+        // canonical themselves (`assert_canonical`), so a check on reading would be
+        // paid twice. Arithmetic on `Fp`/`Fq` values from elsewhere needs
+        // `range_check` or `assert_canonical` first.
+        xark_bignum::fp!(unchecked_input pub Fp, $base, 3, $bits);
+        xark_bignum::fp!(unchecked_input pub Fq, $scalar, 3, $bits);
 
         /// An affine curve point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy, Debug)]
@@ -150,6 +158,9 @@ macro_rules! weierstrass {
         /// Pin `p` to the curve `y² = x³ + a·x + b`: canonical coordinates (`< p`, which
         /// the field gadgets' `a, b < m` precondition needs), then the equation.
         /// Required before the incomplete group law on any point from outside.
+        /// It is optional where something else already pins the point to the curve:
+        /// a public point the verifier checks off-circuit, or one the group law ties
+        /// to such a point (see `examples/ec_incomplete`), needs no check of its own.
         pub fn enforce_on_curve(p: Point) {
             p.x.assert_canonical();
             p.y.assert_canonical();
@@ -347,8 +358,9 @@ macro_rules! edwards {
         d = $d:literal $(,)?
     ) => {
         // Base field `Fp` (mod p) and scalar field `Fq` (mod L), 3 × 86-bit limbs.
-        xark_bignum::fp!(pub Fp, $base);
-        xark_bignum::fp!(pub Fq, $scalar);
+        // Inputs unchecked, as for the Weierstrass curves above.
+        xark_bignum::fp!(unchecked_input pub Fp, $base);
+        xark_bignum::fp!(unchecked_input pub Fq, $scalar);
 
         /// An affine twisted-Edwards point: two base-field (`Fp`) coordinates.
         #[derive(Clone, Copy, Debug)]

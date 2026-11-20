@@ -144,7 +144,6 @@ fn mod_mul_kats(p: &PrimitiveProgram, n: usize, bits: u32, m: &BigUint, var_m: b
         ];
         if var_m {
             vals.push(("m", limbs(m, n, bits)));
-            vals.push(("m1", limbs(&m1, n, bits)));
         }
         let ins = inputs(p, &vals);
         accepts_and_rejects_forgeries(p, &ins, &format!("mod_mul({a}, {b})"));
@@ -166,9 +165,10 @@ fn mod_mul_3x86_variable_modulus_matches_num_bigint() {
     let p = compile(
         "forged_mod_mul_3x86",
         "#[circuit]\npub fn circuit(a: Private<[Field; 3]>, b: Private<[Field; 3]>, \
-         m: Public<[Field; 3]>, m1: Public<[Field; 3]>, o: Public<[Field; 3]>) {\n\
+         m: Public<[Field; 3]>, o: Public<[Field; 3]>) {\n\
          \x20   range_check_limbs::<3, 86>(a);\n\x20   range_check_limbs::<3, 86>(b);\n\
-         \x20   let r = mod_mul::<3, 86>(a, b, m, m1);\n\
+         \x20   range_check_limbs::<3, 86>(m);\n\
+         \x20   let r = mod_mul::<3, 86>(a, b, m);\n\
          \x20   let mut i = 0;\n\x20   while i < 3 { require_eq(r[i], o[i]); i += 1; }\n}\n",
     );
     mod_mul_kats(&p, 3, 86, &big(P256), true);
@@ -180,11 +180,10 @@ fn mod_mul_4x64_constant_modulus_matches_num_bigint() {
         "forged_mod_mul_4x64",
         &format!(
             "const N: [Field; 4] = modulus_limbs::<4, 64>(\"{K1N}\");\n\
-             const N1: [Field; 4] = modulus_minus_1::<4, 64>(\"{K1N}\");\n\
              #[circuit]\npub fn circuit(a: Private<[Field; 4]>, b: Private<[Field; 4]>, \
              o: Public<[Field; 4]>) {{\n\
              \x20   range_check_limbs::<4, 64>(a);\n\x20   range_check_limbs::<4, 64>(b);\n\
-             \x20   let r = mod_mul::<4, 64>(a, b, N, N1);\n\
+             \x20   let r = mod_mul::<4, 64>(a, b, N);\n\
              \x20   let mut i = 0;\n\x20   while i < 4 {{ require_eq(r[i], o[i]); i += 1; }}\n}}\n"
         ),
     );

@@ -1,16 +1,17 @@
 [package]
 name = "xark"
-version = "0.3.0"
+version.workspace = true
 edition = "2024"
-license = "MIT"
-repository = "https://github.com/blueshift-gg/xark"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Write zero-knowledge circuits in Rust — the language prelude (no_std, stable)."
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"
 # Oldest rustc that compiles a circuit (let-chains); CI checks every example
 # circuit is identical on it, stable and beta (`cargo xtask digests`).
-rust-version = "1.89"
+rust-version.workspace = true
 
 # The language: `use xark::prelude::*;` in a circuit (no_std, stable).
 [lib]
@@ -19,7 +20,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # The `#[circuit]` / `#[gadget]` attribute macros (always available to authors).
-xark-macros = { path = "../macros", version = "0.3.0" }
+xark-macros.workspace = true
 
 # Host-only: `From<Field> for ark_bn254::Fr` (so a constructed input `Field` converts to
 # the prover's scalar). Gated on `cfg(not(xark))`: a circuit build never pulls
@@ -30,11 +31,12 @@ ark-ff = { version = "0.6", default-features = false }
 # Host-only: big-integer hints (bignum mul/inverse) computed natively; the fake-GLV
 # lattice hint as the solver computes it.
 num-bigint = "0.4"
-xark-ir = { path = "../ir", version = "0.3.0", default-features = false }
+# Kept explicit for default-features = false; bump on release.
+xark-ir = { path = "../ir", version = "0.4.0", default-features = false }
 # Host-only: values in their natural JSON forms, for `#[input]` functions
 # (`client.rs`), through the codec every client shares.
 serde_json = "1"
-xark-schema = { path = "../schema", version = "0.3.0" }
+xark-schema.workspace = true
 
 # The host-side prover (`xark::prover`): what `#[circuit]`'s validator and the
 # input traits use, so a circuit crate needs no other xark dependency. Parallel
@@ -43,15 +45,16 @@ xark-schema = { path = "../schema", version = "0.3.0" }
 # in the client build (`--cfg xark_client`: the crate's host code as `client.wasm`
 # for `xark client`), which never proves.
 [target.'cfg(all(not(xark), not(xark_client), not(target_arch = "wasm32")))'.dependencies]
-xark-prover = { path = "../prover", version = "0.3.0" }
+xark-prover.workspace = true
 [target.'cfg(all(not(xark), not(xark_client), target_arch = "wasm32"))'.dependencies]
-xark-prover = { path = "../prover", version = "0.3.0", default-features = false }
+# Kept explicit for default-features = false; bump on release.
+xark-prover = { path = "../prover", version = "0.4.0", default-features = false }
 
 [dev-dependencies]
-xark-schema = { path = "../schema", version = "0.3.0" }
-xark-test-harness = { path = "../test-harness", version = "0.3.0" }
-xark-ir = { path = "../ir", version = "0.3.0" }
-xark-prover = { path = "../prover", version = "0.3.0" }
+xark-schema = { path = "../schema" }
+xark-test-harness = { path = "../test-harness" }
+xark-ir = { path = "../ir" }
+xark-prover = { path = "../prover" }
 serde_json = "1"
 num-bigint = "0.4"
 
@@ -59,9 +62,3 @@ num-bigint = "0.4"
 # lint (1.80+) stays quiet.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)', 'cfg(xark_client)', 'cfg(xark_gadgets)'] }
-
-# The frontend runs inside the test process: optimize it even in test builds.
-[profile.dev.package.xark-frontend]
-opt-level = 3
-[profile.dev.package.xark-ir]
-opt-level = 3

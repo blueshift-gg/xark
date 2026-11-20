@@ -43,11 +43,17 @@ pub struct Args {
     /// obligations for the constant plugs the examples pass.
     #[arg(long, requires = "coverage", conflicts_with = "circuit")]
     update: bool,
+    /// With --coverage: only every n-th example, starting at k (`k/n`), for a check
+    /// spread over machines. Every call is classified as in a full run; what needs
+    /// every example at once (an allowlist entry or a committed obligation no example
+    /// uses any more) is checked only by a full run.
+    #[arg(long, requires = "coverage", conflicts_with_all = ["circuit", "update"], value_parser = crate::difftest::parse_shard)]
+    shard: Option<(usize, usize)>,
 }
 
 pub fn run(args: Args) -> Result<()> {
     if args.coverage {
-        return crate::coverage::run(&args.circuit, args.update);
+        return crate::coverage::run(&args.circuit, args.update, args.shard);
     }
     if let Some(gadget) = args.gadget {
         let (_, path, text, hash) = export(&gadget)?;

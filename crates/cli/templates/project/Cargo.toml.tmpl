@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+# Each crate is in one of `circuits/*`, `programs/*` and `clients/*/rust` (the
+# verifier crate `xark export` generates for each circuit). `xark add` and `xark
+# export` keep this line to the ones that hold a crate: cargo reads a glob that
+# matches nothing as a path that isn't there.
+members = []
+
+# The programs' release profile. A circuit builds with its own settings (`xark
+# build` sets overflow checks and size optimisation), so these don't change it.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+overflow-checks = false

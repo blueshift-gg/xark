@@ -17,9 +17,27 @@ pub fn canonical_write_to_file<T: CanonicalSerialize>(
     fs::write(path, buf)
 }
 
+/// The largest verifying key, proof or public-input file read: room for two million
+/// public inputs (32 bytes each, and a verifying key's point per input), far more
+/// than any circuit has. A larger file isn't one of these, and reading it whole
+/// could exhaust memory.
+pub const MAX_ARTIFACT_BYTES: u64 = 64 << 20;
+
+/// Decode a verifying key, proof or public inputs straight from the file: one over
+/// [`MAX_ARTIFACT_BYTES`] is refused before it's read, and one of the wrong kind
+/// fails at its first bad bytes. (A sequence's declared length doesn't pre-allocate:
+/// arkworks collects it element by element.)
 pub fn canonical_read_from_file<T: CanonicalDeserialize>(path: &Path) -> std::io::Result<T> {
-    let bytes = fs::read(path)?;
-    T::deserialize_with_mode(bytes.as_slice(), Compress::Yes, Validate::Yes)
+    let file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if len > MAX_ARTIFACT_BYTES {
+        return Err(std::io::Error::other(format!(
+            "{len} bytes, more than a verifying key, proof or public inputs can be \
+             ({MAX_ARTIFACT_BYTES} at most)"
+        )));
+    }
+    let file = std::io::BufReader::new(file);
+    T::deserialize_with_mode(file, Compress::Yes, Validate::Yes)
         .map_err(|e| std::io::Error::other(e.to_string()))
 }
 

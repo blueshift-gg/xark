@@ -94,19 +94,57 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
             "cargo install xark-cli",
         ),
     }
+    // A project's `xark build` builds its programs with `cargo build-sbf`, and its
+    // `xark test` runs the TypeScript tests with Node: there they're required;
+    // elsewhere, only for what uses them.
+    let in_project = std::env::current_dir()
+        .ok()
+        .and_then(|d| crate::xark_project::project_root(&d))
+        .is_some_and(|root| root.join("programs").is_dir());
+    let sbf = cmd_ok("cargo-build-sbf", &["--version"]);
+    let sbf_fix = "install the Solana CLI: https://solana.com/docs/intro/installation";
     let node = cmd_ok("node", &["--version"]);
-    info(
-        node.is_some(),
-        "node",
-        "optional — only for the `xark client` TypeScript output",
-        "install Node.js from https://nodejs.org",
-    );
+    let node_fix = "install Node.js from https://nodejs.org";
+    if in_project {
+        problems += check(
+            sbf.is_some(),
+            "cargo build-sbf",
+            Some("builds this project's programs (`xark build`)"),
+            sbf_fix,
+        );
+        problems += check(
+            node.is_some(),
+            "node",
+            Some("runs this project's TypeScript tests (`xark test`)"),
+            node_fix,
+        );
+    } else {
+        info(
+            sbf.is_some(),
+            "cargo build-sbf",
+            "for Solana programs (`xark add program`, then `xark build`)",
+            sbf_fix,
+        );
+        info(
+            node.is_some(),
+            "node",
+            "for the TypeScript client and a project's LiteSVM tests",
+            node_fix,
+        );
+    }
 
     println!();
     if problems == 0 {
+        let next = if in_project {
+            "xark build"
+        } else {
+            "xark init"
+        };
         println!(
             "{}",
-            crate::style::brand("✅ All required checks passed — you're ready to `xark init`.")
+            crate::style::brand(&format!(
+                "✅ All required checks passed — you're ready to `{next}`."
+            ))
         );
     } else {
         println!(

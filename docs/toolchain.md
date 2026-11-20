@@ -21,11 +21,7 @@ and `test` all share one cache (`target/xark-wasm`). Builds carry DWARF line tab
 lines; they don't change the circuit or the lowering time, and compile time is the
 same within noise (only the `.wasm` grows).
 
-Nothing in the repository needs nightly. (Earlier releases had a second frontend,
-`xark-rustc`, that read MIR through `rustc_private` on a pinned nightly. It was
-removed once the stable frontend matched or beat it on every example: setup-minimized
-circuits within +0.3% everywhere and up to 7% smaller, the same accept/reject verdict
-on every example's test inputs, and faster, smaller builds.)
+Nothing in the repository needs nightly.
 
 ## Toolchain policy
 
@@ -61,7 +57,7 @@ with the same digest, says so, and its self-check confirms the proof.
   toolchain and example, and pin the operation through an intrinsic so the
   circuit (and its digest) goes back to what it was.
 - **The lowering changed on purpose** — run `cargo xtask digests --update`,
-  review the diff, re-check the snapshot suite (`cd crates/lang && cargo test
-  --release --test snapshot -- --include-ignored`) and the Lean-model bridges, and
+  review the diff, re-check the snapshot suite (`cargo test --release -p xark
+  --test snapshot -- --include-ignored`) and the Lean-model bridges, and
   regenerate any keys built from the old circuits. Name every changed circuit in
   CHANGELOG.md and bump the minor version (see the policy above).

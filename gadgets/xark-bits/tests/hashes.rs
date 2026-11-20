@@ -334,50 +334,56 @@ fn check_hash(
     bits: usize,
     reference: fn(&[u8]) -> Vec<u8>,
 ) {
-    for &len in lens {
-        let p = compile(
-            &format!("{name}_{len}"),
-            "bn254",
-            &hash_circuit(call, len, words, bits),
-        );
-        let msg = message(len);
-        let digest = reference(&msg);
-        let bytes = bits / 8;
-        let word = |i: usize| -> String {
-            let w = &digest[i * bytes..(i + 1) * bytes];
-            // SHA-256's words are big-endian, the others little-endian.
-            if name == "sha256" {
-                BigUint::from_bytes_be(w).to_string()
-            } else {
-                BigUint::from_bytes_le(w).to_string()
-            }
-        };
-        let d: Vec<String> = (0..words).map(word).collect();
-        let m: Vec<String> = msg.iter().map(u8::to_string).collect();
-        let vals = |m: &[String], d: &[String]| {
-            let mut v = named("msg", m);
-            v.extend(named("d", d));
-            inputs(&p, &v)
-        };
-        let what = format!("{name}({len} bytes)");
-        solver::solve_and_check(&p, &vals(&m, &d)).unwrap_or_else(|e| panic!("{what}: {e:?}"));
-        let mut bad = d.clone();
-        bad[words - 1] =
-            (word(words - 1).parse::<BigUint>().unwrap() ^ BigUint::from(1u8)).to_string();
-        assert!(
-            solver::solve_and_check(&p, &vals(&m, &bad)).is_err(),
-            "{what}: wrong digest accepted"
-        );
-        if len > 0 {
-            let mut wide = m.clone();
-            wide[0] = (u32::from(msg[0]) + 256).to_string();
-            assert!(
-                solver::solve_and_check(&p, &vals(&wide, &d)).is_err(),
-                "{what}: byte ≥ 256 accepted"
-            );
+    // Each length is its own circuit and search: one thread per length.
+    std::thread::scope(|scope| {
+        for &len in lens {
+            scope.spawn(move || {
+                let p = compile(
+                    &format!("{name}_{len}"),
+                    "bn254",
+                    &hash_circuit(call, len, words, bits),
+                );
+                let msg = message(len);
+                let digest = reference(&msg);
+                let bytes = bits / 8;
+                let word = |i: usize| -> String {
+                    let w = &digest[i * bytes..(i + 1) * bytes];
+                    // SHA-256's words are big-endian, the others little-endian.
+                    if name == "sha256" {
+                        BigUint::from_bytes_be(w).to_string()
+                    } else {
+                        BigUint::from_bytes_le(w).to_string()
+                    }
+                };
+                let d: Vec<String> = (0..words).map(word).collect();
+                let m: Vec<String> = msg.iter().map(u8::to_string).collect();
+                let vals = |m: &[String], d: &[String]| {
+                    let mut v = named("msg", m);
+                    v.extend(named("d", d));
+                    inputs(&p, &v)
+                };
+                let what = format!("{name}({len} bytes)");
+                solver::solve_and_check(&p, &vals(&m, &d))
+                    .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                let mut bad = d.clone();
+                bad[words - 1] =
+                    (word(words - 1).parse::<BigUint>().unwrap() ^ BigUint::from(1u8)).to_string();
+                assert!(
+                    solver::solve_and_check(&p, &vals(&m, &bad)).is_err(),
+                    "{what}: wrong digest accepted"
+                );
+                if len > 0 {
+                    let mut wide = m.clone();
+                    wide[0] = (u32::from(msg[0]) + 256).to_string();
+                    assert!(
+                        solver::solve_and_check(&p, &vals(&wide, &d)).is_err(),
+                        "{what}: byte ≥ 256 accepted"
+                    );
+                }
+                accepts_and_rejects_forgeries(&p, &vals(&m, &d), Some(64), len == 0);
+            });
         }
-        accepts_and_rejects_forgeries(&p, &vals(&m, &d), Some(64), len == 0);
-    }
+    });
 }
 
 #[test]

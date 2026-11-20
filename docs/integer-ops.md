@@ -1,179 +1,146 @@
 # Integer operations on `Field`
 
-Status: **the `Field`-level surface is what ships.** PR #8 (`core-cmp`) *did* ship
-first-class typed integers — `U<N>`/`I<N>` wrappers with range-proved inputs and checked
-fixed-width arithmetic — but those were **removed** in favor of the `Field`-level surface here.
-Signed integers and checked fixed-width (`U<N>`-style overflow-rejecting) arithmetic are **not
-currently provided**; if reintroduced they'd be `Field` methods, not separate types (see
-[Explicitly not building](#explicitly-not-building)).
+How `Field` supports integer-flavoured operations (equality, ordering, shifts, modulus) in a
+circuit, and why the surface is shaped this way.
 
-This defines how `Field` supports integer-flavoured ops (equality, ordering, shifts, modulus) in
-circuits, and why the surface is shaped this way.
+Integers beyond this surface are native Rust integers, not `Field` methods: a circuit takes `u8`..`u128`,
+`i8`..`i128` and `bool` inputs (range-checked on entry), and native integer code on witnesses
+(signed comparisons, checked and wrapping `+ - *`, `/`, `%`, shifts, casts) lowers to range-checked
+gadgets. See [the supported subset](subset.md#supported).
 
 ## The core problem: a `Field` has no width
 
 A `Field` is a residue in `[0, p)` for the BN254 scalar field (`p ≈ 2²⁵⁴`), **not** a fixed-width
 integer: no MSB, so `<<`/`>>` have no intrinsic meaning; ordering mod `p` isn't integer ordering
 unless you fix a range. So every integer op needs a **bit-width** `N`, **enforced with a range
-check** — otherwise a malicious prover can place any residue in a wire and defeat an unchecked
-comparison/shift. The width can never be implicit; the design question is only *where it comes from*,
-and the answer is: **from the concrete integer already in the expression.**
+check**; otherwise a malicious prover can place any residue in a wire and defeat an unchecked
+comparison or shift. The width is never implicit. It comes **from the concrete integer already in
+the expression.**
 
 ## Design principles
 
-1. **Width comes from a native-int operand.** `x < 100u32`, `x >> 3u16`, `x % 8u8` — the RHS's
-   *type* supplies the domain width of `x`, its *value* the bound/amount/modulus. No new types, no
-   hidden defaults.
-2. **Cost stays visible.** The width (and its range-check cost) is spelled at the call site — the RHS
-   literal's type (`…u32`) or an explicit `::<N>` for the `Field`-vs-`Field` fallback. No global
-   default width or dataflow inference that would hide the ~`N`-constraint cost behind clean `a < b`.
-3. **Decomposition is cached, not repeated.** The compiler memoizes `to_bits::<N>` so a value bounded
-   once is shifted/compared/masked for free thereafter (see [Bit caching](#bit-caching)).
-4. **Bare `Field` stays orderless and shiftless.** `Field: PartialOrd`, `Shl for Field`,
-   `Rem for Field` (Field-on-both-sides, no width) are **not** provided — unsound-by-omission-of-a-
-   width. `<`/`>>`/`%` exist only against a native-int RHS or via an explicit-width method.
+1. **Width comes from a native-int operand.** `x < 100u32`, `x >> 3u16`, `x % 8u8`: the right-hand
+   side's *type* supplies the domain width of `x`, its *value* the bound, amount or modulus. No new
+   types, no hidden defaults.
+2. **Cost stays visible.** The width (and its range-check cost) is spelled at the call site: the
+   literal's type (`…u32`) or an explicit `::<N>` for the `Field`-vs-`Field` case. No global default
+   width hides the ~`N`-constraint cost behind a clean `a < b`.
+3. **Decomposition is cached, not repeated.** A value bounded once is shifted, compared or masked at
+   the same width for free afterwards (see [Bit caching](#bit-caching)).
+4. **Bare `Field` stays orderless and shiftless.** `PartialOrd`, `Shl` and `Rem` between two `Field`s
+   (no width) are **not** provided: they'd be unsound by omission of a width. `<`, `>>` and `%` exist
+   only against a native-int right-hand side, or through an explicit-width method.
 
 ## The surface
 
-Let `T ∈ { bool, u8, u16, u32, u64, u128 }`, `N = bitwidth(T)` (`bool → 1`, …, `u128 → 128`). Every
-op interprets its `Field` operand `x` as an `N`-bit value: it emits `to_bits::<N>(x)` (range-checks
-`x < 2ᴺ`) then does the bit-level op.
+Let `T ∈ { bool, u8, u16, u32, u64, u128 }` and `N = bitwidth(T)` (`bool → 1`, …, `u128 → 128`).
+Every op interprets its `Field` operand `x` as an `N`-bit value: it range-checks `x < 2ᴺ` by
+`to_bits::<N>(x)`, then does the bit-level op.
 
 | Trait impl (for `Field`) | Enables | Meaning |
 |---|---|---|
-| `PartialEq<T>` | `x == c`, `x != c` | equality vs constant `c` |
-| `PartialOrd<T>` | `x < c`, `<=`, `>`, `>=` | `N`-bit ordering vs constant `c` |
+| `PartialEq<T>` | `x == c`, `x != c` | equality with `c` (no range check) |
+| `PartialOrd<T>` | `x < c`, `<=`, `>`, `>=` | `N`-bit ordering against `c` |
 | `Shl<T>` (`u8..u128`) | `x << n` | `(x mod 2ᴺ) << n`, truncated to `N` bits |
 | `Shr<T>` (`u8..u128`) | `x >> n` | `(x mod 2ᴺ) >> n` = `⌊x / 2ⁿ⌋` |
 | `Rem<T>` (`u8..u64` only) | `x % m` | `x mod m` |
 
-`Shl`/`Shr` cover `u8..u128` (all sound — a shift is pure bit re-wiring and `from_bits::<N>` with
-`N ≤ 128 ≤ 253` can't wrap the field). **`Rem` is `u8..u64` only:** its general-modulus path pins a
+`PartialEq<i32>` also exists, so `x == 0` works with an untyped literal: equality needs no width.
+An ordered comparison does, so write `x < 5u32`, not `x < 5`.
+
+`Shl`/`Shr` cover `u8..u128`: a shift is pure bit re-wiring, and `from_bits::<N>` with
+`N ≤ 128 ≤ 253` can't wrap the field. **`Rem` is `u8..u64` only:** its general-modulus path pins a
 `hint_div_rem` witness `[q, r]` with `m·q + r == x`, sound only while `m·q + r` can't wrap the field,
 i.e. `2·N ≤ 253`. `u8..u64` satisfy this (`2·N ≤ 128`); `u128` (`2·N = 256 > 253`) does not, so
-`Rem<u128>` is **omitted** — `x % 5u128` fails to compile. Use a `u64`-or-narrower modulus.
+`x % 5u128` doesn't compile. Use a `u64`-or-narrower modulus.
 
-Signed `i8..i128` may be added later with the same shape (bias by `2ᴺ⁻¹` into `[0, 2ᴺ)`, reuse the
-unsigned path — how PR #8's removed `__xark_ilt` worked); out of scope for v1.
+There are no `Field` impls against signed `i8..i128` operands: signed values are native `iN`
+witnesses, whose comparisons the frontend lowers itself.
 
-### `Field`-vs-`Field` (the one case with no native RHS)
+### `Field`-vs-`Field`
 
-Comparing two *witness* values has no integer operand to carry a width, so it keeps an **explicit
+Comparing two *witness* values has no integer operand to carry a width, so it takes an **explicit
 const-generic method**:
 
 ```rust
 a.lt::<32>(b)   a.gt::<32>(b)   a.le::<32>(b)   a.ge::<32>(b)   // -> bool wire
 ```
 
-The genuinely rarer case; the `::<32>` keeps its cost honest. It lowers through `__xark_ult::<N>`
-(unsigned; a signed `ilt` variant is not currently provided). There is intentionally **no**
-`PartialOrd for Field` operator for this — see principle 4.
+The `::<32>` keeps its cost honest. There is intentionally **no** `PartialOrd` between two `Field`s
+for this; see principle 4.
 
-## Semantics & constraint cost (per op, width `N`)
+`require_lt`, `require_le`, `require_gt` and `require_ge` are generic over `PartialOrd`, so they work
+against a native-int right-hand side (`require_lt(x, 100u32)`) and on native integers.
 
-All ops first obtain `bits = to_bits::<N>(x)` — `N` rows: `N − 1` booleanity rows and one
-`b₀(b₀ − 1) = 0` for the bit computed from the others — **once per
-`(x, N)`**, then:
+## Semantics and constraint cost (per op, width `N`)
 
-* **`x == c` / `x != c`** — a bare equality needs no bits: `require`/`is_zero` on `x − c` (only
-  decompose if the same `x` is used in a width-`N` op elsewhere). ~0–2 constraints.
-* **`x < c` (const RHS)** — compare `bits` against the compile-time `c`; no second decomposition,
-  cheaper than a `Field`-vs-`Field` compare. `>`/`<=`/`>=` derive from `<` and `==`.
-* **`x >> n`** — return the high `N − n` bits recomposed; the shift is **free re-wiring**. Cost is
-  just the shared `to_bits::<N>`.
-* **`x << n`** — take bits `0..N−n`, place at `n..N`, zero-fill low, recompose. Free re-wiring.
-  **Truncates** at `2ᴺ` (integer `<<` semantics), *not* `x·2ⁿ mod p` — be explicit in the impl.
-* **`x % m`** (`u8..u64` only) — for `m = 2ᵏ`, the low `k` bits (free). General `m`: a `hint_div_rem`
-  + range checks (`r < m`, `q < 2ᴺ`), sound because `2·N ≤ 253` keeps `m·q + r` from wrapping. `u128`
-  excluded for exactly this reason; mod-by-zero lands on the general path and is unprovable (not a
-  compile error, since `m` is runtime from rustc's view).
+All ops first obtain `bits = to_bits::<N>(x)`: `N` rows (`N − 1` booleanity rows and one
+`b₀(b₀ − 1) = 0` for the bit computed from the others), **once per `(x, N)`**. Then:
+
+* **`x == c` / `x != c`**: a bare equality needs no bits, only an is-zero on `x − c`. About 0–2
+  constraints.
+* **`x < c` (constant right-hand side)**: compares `bits` against the compile-time `c`, with no
+  second decomposition: cheaper than a `Field`-vs-`Field` compare. `>`, `<=` and `>=` derive from
+  `<` and `==`.
+* **`x >> n`**: the high `N − n` bits, recomposed. The shift is free re-wiring; the cost is the
+  shared `to_bits::<N>`.
+* **`x << n`**: bits `0..N−n` placed at `n..N`, the low bits zero. Free re-wiring. It **truncates** at
+  `2ᴺ` (integer `<<`), not `x·2ⁿ mod p`.
+* **`x % m`** (`u8..u64` only): for `m = 2ᵏ`, the low `k` bits (free). A general `m`: a
+  `hint_div_rem` plus range checks (`r < m`, `q < 2ᴺ`), sound because `2·N ≤ 253` keeps `m·q + r`
+  from wrapping. Modulus zero takes the general path and is unprovable (not a compile error: `m` is
+  a runtime value to rustc).
 
 ### Soundness
 
-Each op range-checks `x < 2ᴺ` via `to_bits::<N>`. A prover holding an `x` outside the declared domain
-**cannot satisfy** the circuit (the decomposition is unsatisfiable), so no false proof is possible —
-the width is a *contract* the author states via the RHS type, enforced in-circuit. Picking too small
-an `N` makes valid large values unprovable (a liveness bug the author sees immediately), never an
-unsound accept.
+Each op range-checks `x < 2ᴺ` via `to_bits::<N>`. A prover holding an `x` outside the declared
+domain **cannot satisfy** the circuit (the decomposition is unsatisfiable), so no false proof is
+possible: the width is a *contract* the author states via the right-hand side's type, enforced in
+the circuit. Picking too small an `N` makes valid large values unprovable (a liveness bug the author
+sees at once), never an unsound accept.
 
 ## Bit caching
 
-The single optimization that makes the above cheap across repeated use. The lowering resolves every
-local to a canonical `LinearCombination` (`simplified()` → sorted, merged terms). Add a memo table:
+The frontend memoizes decompositions (`bit_cache` in `crates/frontend/src/host.rs`). When an op
+needs `to_bits::<N>(x)`, it looks up `(canonical(x), N)`, where the key is `x`'s canonical linear
+combination (sorted, merged terms): a **miss** decomposes and stores the bits, a **hit** reuses them
+and emits no rows. So `x < 100u32; x >> 3u32; x & mask_u32` on the same `x` share **one** 32-bit
+decomposition.
 
-```rust
-bit_cache: BTreeMap<(CanonicalLc, usize /* width N */), Vec<LinearCombination>>
-```
+* **Soundness:** circuit values are immutable once lowered, so cached bits never go stale; the first
+  decomposition already constrained them.
+* **Keying:** the key is canonical, so `x`, `x + 0` and `0 + x` hit the same entry.
+* **Granularity:** per exact `(x, N)`. A 32-bit request doesn't reuse the low bits of a cached 64-bit
+  decomposition.
+* **Witness-only regions** don't add to the cache: their bits aren't constrained.
+* **Already bits:** when `x` is exactly `Σᵢ<N 2ⁱ·vᵢ` over distinct variables already proven boolean,
+  `to_bits::<N>(x)` returns those `vᵢ` with no new rows (`bit_sum_shortcut` in
+  `crates/frontend/src/builder.rs`): they are `x`'s decomposition.
 
-When an op needs `to_bits::<N>(x)`: **miss** → decompose, store the bits under `(canonical(x), N)`;
-**hit** → reuse them, **skipping** the decomposition's `N` rows. So
-`x < 100u32; x >> 3u32; x & mask_u32` on the same `x` share **one** 32-bit decomposition.
-
-* **Soundness / invalidation:** circuit values are immutable in lowering (each local → a stable LC),
-  so cached bits never go stale; the first decomposition already fully constrained them.
-* **Keying:** the LC is canonical, so `x`, `x + 0`, `0 + x` normalize to the same key and hit. Needs
-  an `Ord`/hash view over `(constant: FieldConst, sorted Vec<Term>)`.
-* **v1 granularity:** cache per exact `(LC, N)`. A later refinement can answer a narrower request
-  from a wider cached split (reuse low bits of a 64-bit decomposition for a 32-bit op).
-* **Scope:** the automatic, general form of what `xark-bits` does by hand (threading `[Field; 32]`).
-  Self-contained lowering pass; no IR or surface changes.
-* **Not the solver:** caching in the witness solver would save prover *time* only; the constraint-
-  count win is entirely at lowering.
-
-This gives const-generic methods the same amortization a `U<N>` wrapper would — which is why
-`U<N>`/`I<N>` aren't needed for efficiency.
+This is the automatic form of what `xark-bits` does by hand (threading `[Field; 32]` words).
 
 ## Rust wrinkles
 
-* `PartialOrd::partial_cmp` returns `Option<Ordering>` — a native return that only makes sense for
-  the **const-folded** case (both sides compile-time). The witness case must produce a `{0,1}` *wire*,
-  so operator lowering special-cases these `Field` comparisons through `__xark_eq` / `__xark_ult`
-  rather than a normal `partial_cmp`. The trait impls exist to satisfy type-check and give syntax; the
-  compiler owns the meaning.
-* `PartialOrd<u32> for Field` gives `x < c` (Field on the left). The mirror `c < x` needs
-  `PartialOrd<Field> for u32` (allowed — `Field` is local), but simpler to write `x > c`.
+* `PartialOrd::partial_cmp` returns `Option<Ordering>`, a native value that only makes sense when
+  both sides are compile-time constants. On witnesses a comparison must produce a `{0, 1}` *wire*,
+  so the impls call the `__xark_eq` / `__xark_ult::<N>` intrinsics, which the frontend implements as
+  circuit operations. The trait impls give the syntax and type-check; the frontend owns the meaning.
+* `PartialOrd<u32> for Field` gives `x < c` (`Field` on the left). For `c < x`, write `x > c`.
 
-## Explicitly not building
+## What `Field` deliberately doesn't provide
 
-* **`PartialOrd`/`Shl`/`Shr`/`Rem` on bare `Field`** (Field-vs-Field, no width) — ill-defined without
-  a width; would need a hidden default (footgun).
-* **`Eq`/`Ord` markers** — a circuit `==` yields a *wire*, not a total relation; these would wrongly
-  imply `Field` is a valid map key / sortable.
-* **`^` as a power** — `^` is boolean XOR (`BitXor<Field>`), matching Rust's meaning; it checks
-  that each operand is 0 or 1 (free for known bits, one row otherwise), and a constant other than
-  0 or 1 doesn't build. Exponentiation is `.pow(n)`; bitwise XOR of integers is `^` on `uN`. An earlier `BitXor<u64>`-as-pow overload was removed because
-  it silently reversed the meaning of valid-looking Rust.
-* **`U<N>`/`I<N>` typed wrappers** — shipped in PR #8, then **removed**. Their only edges were
-  (a) operator sugar for `Field`-vs-`Field` and (b) cached bits; (b) is the memo table, (a) is served
-  by `a.lt::<N>(b)`. Revisit only if a lot of word-heavy code makes a first-class bounded-int type
-  worth two types + their full trait matrix. If reintroduced, `U<N>` = "a `Field` plus its cached
-  `[Field; N]` bits, operators delegating to this same surface."
-* **Signed integers (`I<N>` / `i8..i128`)** — the signed ordering/bias path (`__xark_ilt`) shipped in
-  PR #8 and was removed with `I<N>`; there is currently **no** signed comparison surface. Could return
-  as `Field::ilt::<N>` on the same bias-then-unsigned-compare pattern.
-* **Checked fixed-width arithmetic** (`U<N>`-style `+`/`-`/`*` that range-re-prove their result so
-  overflow is unsatisfiable) — shipped in PR #8, removed with the wrappers; **not currently provided**.
-  `Field` `+`/`-`/`*` are plain field ops with no width or overflow check. A future `Field` method
-  could offer opt-in checked arithmetic.
+* **`PartialOrd`/`Shl`/`Shr`/`Rem` between two `Field`s**: ill-defined without a width, and a hidden
+  default would be a footgun.
+* **`Eq`/`Ord`**: a circuit `==` yields a *wire*, not a total relation; these would wrongly suggest a
+  `Field` is a valid map key or sortable.
+* **`^` as a power**: `^` is boolean XOR (`BitXor<Field>`), as in Rust. It checks that each operand
+  is 0 or 1 (free for known bits, one row otherwise), and a constant other than 0 or 1 doesn't build.
+  Exponentiation is `.pow(n)`; bitwise XOR of integers is `^` on `uN`.
+* **Signed or overflow-checked `Field` arithmetic**: `Field` `+`/`-`/`*` are plain field operations
+  with no width. Signed values and checked fixed-width arithmetic are native `iN`/`uN` (an overflow
+  panic becomes a constraint; see [the supported subset](subset.md)).
 
-## Cleanup carried by this work
+## Constants wider than 128 bits
 
-PR #8 shipped an inconsistent state this spec resolves:
-
-* `impl PartialEq for Field` exists and works (`==`/`!=`) — keep.
-* `require_lt`/`require_le`/`require_gt`/`require_ge` call `a < b` on `Field`, which doesn't compile
-  (`E0369`, no `PartialOrd`) — they are **dead**. Either reimplement against this surface (const RHS →
-  operator; two witnesses → `.lt::<N>`) or remove until the surface lands.
-* The `lang.rs` comment claiming "`PartialOrd` on `Field`/`U<N>`/`I<N>`" is aspirational — none exist.
-  Update it to describe the real surface.
-
-## Related follow-ups (this review pass)
-
-* **`require_eq` vs `require`** — keep `require_eq` as the primitive (`(a−b)·1 = 0`);
-  `require(cond) = require_eq(cond, true)`. Do **not** invert (would make `require_eq` compute an
-  is-zero boolean). *Resolved: no change.*
-* **>128-bit constants** — `Field::from(u8..=u128)` caps at `u128` (Rust literal limit), *not* a value
-  ceiling; full-width constants use `Field::from("<dec>")` (verified sound via MiMC 254-bit round
-  constants). Ergonomic gap only.
-* **Comparison/shift width ceiling** — the intrinsics take any `N`; the real ceiling is the field width
-  (~252–253 bits), far above the `u128`-typed surface. `>128`-bit shifts are not a real need.
+`Field::from(u8..=u128)` stops at `u128`, Rust's widest integer literal. A full-width constant is
+`Field::from("<decimal>")`.

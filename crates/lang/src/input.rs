@@ -54,6 +54,7 @@
 //! | [`Encoding::Set`]          | [`Bitfield<E>`](crate::Bitfield) | a list of variant names     |
 //! | [`Encoding::Number`]       | a limbed number   | a decimal or `0x`-hex string               |
 //! | [`Encoding::Bytes`]        | a curve point, a hash | `0x`-hex bytes                         |
+//! | [`Encoding::Address`]      | [`Address`](crate::Address) | a base58 Solana address          |
 //!
 //! The leaves are named by the layout: `id.born`, `msg[3]`, `pair.0`, `q.x.limbs[2]`.
 
@@ -185,6 +186,9 @@ pub enum Encoding {
     Number { bits: usize },
     /// A byte string, split into the layout's leaves.
     Bytes(Bytes),
+    /// A Solana address: base58 in clients, its 32 bytes split as
+    /// `Bytes::Split(&[16, 16])` in the layout's two leaves.
+    Address,
 }
 
 /// How a byte-encoded type's bytes split into its leaves.
@@ -1352,6 +1356,7 @@ fn encoding_json(n: &Named, defs: &mut Defs, s: &mut String) {
             s.push_str("]}");
         }
         Encoding::Bytes(Bytes::Ed25519) => s.push_str("{\"bytes\":32,\"ed25519\":true}"),
+        Encoding::Address => s.push_str("{\"bytes\":32,\"concat\":[16,16],\"base58\":true}"),
     }
 }
 

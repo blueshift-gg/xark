@@ -9,6 +9,7 @@ edition = "2024"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 
 [lib]
 path = "src/lib.rs"

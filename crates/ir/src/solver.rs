@@ -578,6 +578,28 @@ pub(crate) fn solve_witness_streamed_dense(
     Ok(assign.slots)
 }
 
+/// `a⁻¹ mod m` by safegcd at a fixed 256 bits, for an odd `m` that fits; the
+/// same value as the Fermat inverse when `m` is prime, at a fraction of the cost.
+fn inverse_256(a: &BigUint, m: &BigUint) -> Option<BigUint> {
+    use crypto_bigint::{Odd, U256};
+    let words = |x: &BigUint| {
+        let d = x.to_u64_digits();
+        (d.len() <= 4).then(|| {
+            let mut w = [0u64; 4];
+            w[..d.len()].copy_from_slice(&d);
+            U256::from_words(w)
+        })
+    };
+    let m = Option::from(Odd::new(words(m)?))?;
+    let inv: U256 = Option::from(words(a)?.invert_odd_mod(&m))?;
+    let bytes: Vec<u8> = inv
+        .to_words()
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    Some(BigUint::from_bytes_le(&bytes))
+}
+
 /// Execute one witness-gen op, reading each input LC's value through `eval_lc`
 /// and reporting each output via `emit`. Pure over its inputs, so independent
 /// ops run concurrently.
@@ -714,9 +736,10 @@ pub(crate) fn exec_witness_op<L, V: Copy>(
             if a_big.is_zero() {
                 return Err(SolveError::DivisionByZero);
             }
-            // Fermat inverse A^(M-2) mod M (M prime — holds for the secp256k1
-            // base/scalar fields this hint targets).
-            let w = a_big.modpow(&(&m_big - BigUint::from(2u32)), &m_big);
+            // The inverse of A mod M (M prime — holds for the fields this hint
+            // targets): safegcd when M fits 256 bits, else Fermat's A^(M-2).
+            let w = inverse_256(&a_big, &m_big)
+                .unwrap_or_else(|| a_big.modpow(&(&m_big - BigUint::from(2u32)), &m_big));
             let mask = (BigUint::one() << *limb_bits as usize) - BigUint::one();
             for (i, &o) in out.iter().enumerate() {
                 let limb = (&w >> (*limb_bits as usize * i)) & &mask;
@@ -1617,5 +1640,38 @@ mod tests {
             "21888242871839275222246405745257275088548364400416034343698204186575808495617",
         );
         assert!(solve(&ok, &BTreeMap::new()).is_ok());
+    }
+
+    /// The 256-bit inverse is the Fermat inverse for the primes the hint targets,
+    /// and declines what it can't do so the caller falls back.
+    #[test]
+    fn inverse_256_is_the_fermat_inverse() {
+        let one = BigUint::one();
+        let ed = (&one << 255u32) - 19u32;
+        let k1 = (&one << 256u32) - (&one << 32u32) - 977u32;
+        for m in [&ed, &k1] {
+            let fermat = |a: &BigUint| a.modpow(&(m - 2u32), m);
+            let mut a = BigUint::from(0x1234_5678_9abc_def0u64);
+            for _ in 0..64 {
+                a = (&a * &a + 7u32) % m;
+                assert_eq!(inverse_256(&a, m), Some(fermat(&a)), "{a} mod {m}");
+            }
+            assert_eq!(inverse_256(&(m - 1u32), m), Some(fermat(&(m - 1u32))));
+            assert_eq!(inverse_256(&one, m), Some(one.clone()));
+        }
+        // Even or wider than 256 bits: no answer, so the caller uses Fermat.
+        assert_eq!(
+            inverse_256(&BigUint::from(3u32), &BigUint::from(10u32)),
+            None
+        );
+        assert_eq!(
+            inverse_256(&BigUint::from(3u32), &((&one << 256u32) + 1u32)),
+            None
+        );
+        // No inverse (a shares a factor with m).
+        assert_eq!(
+            inverse_256(&BigUint::from(3u32), &BigUint::from(9u32)),
+            None
+        );
     }
 }

@@ -13,16 +13,16 @@ set_option linter.style.longLine false
 /-!
 # secp256k1 in-circuit point-addition soundness
 
-The secp256k1 point-addition gadget (`gadgets/xark-secp256k1/src/lib.rs`)
-adds points on
+Flagged complete addition on
 
     y² = x³ + 7
 
-over the secp256k1 base field. The gadget shape — gated on-curve check,
-generic and doubling slope constraints, selector layer, 4-way output mux —
-is identical to the Grumpkin gadget in `Formal.Curve`; only the curve
-constant changes (`b = 7` instead of Grumpkin's `b = −17`). Because the
-Grumpkin theorems
+over the secp256k1 base field: the `Formal.Curve` model (gated on-curve
+check, generic and doubling slope constraints, selector layer, 4-way output
+mux) with `b = 7` instead of Grumpkin's `b = −17`. No current gadget emits
+this flagged shape; `ec_add_incomplete_secp256k1_sound` at the end covers
+the incomplete `ec_add_incomplete` of `xark_secp256k1::affine`. Because the
+`Formal.Curve` theorems
 
 * `ec_add_generic_slope_unique`  — *curve-agnostic* (works in any field)
 * `ec_add_generic_on_curve`      — *parametric in `(a, b)`*
@@ -45,16 +45,10 @@ are already general enough, this file only needs to re-instantiate the
 * `ec_add_in_circuit_secp256k1_sound` — the end-to-end soundness wrapper.
 
 Together with the `ecdsa_verify_compose` theorem in `Formal.EcdsaVerify`
-(parametric over the curve group `G : Type*` `[AddCommGroup G]`), this
-closes the chain for **concrete secp256k1 ECDSA verification** in Lean,
-modulo:
-
-* The Solana `alt_bn128` syscall ↔ Arkworks fallback agreement
-  (residual trust assumption — out of scope for FV).
-* The `secp256k1` point-group structure existing as an `AddCommGroup`
-  instance over `(x, y) | y² = x³ + 7` ∪ {∞}. The group-law associativity
-  and identity laws are standard textbook results; the gadget faithfully
-  implements them per the per-branch soundness wrapper here.
+(parametric over the curve group `G : Type*` `[AddCommGroup G]`), this gives
+an ECDSA chain over the modelled addition. The shipped verifier
+(`ecdsa_verify_packed`, fake GLV with certificates) is proven separately
+(`Formal/FakeGlvK1.lean`, `Formal/EcK1.lean`, `Formal/MulCertK1.lean`).
 
 ## Theorem index
 
@@ -63,7 +57,7 @@ modulo:
 | `gated_on_curve_secp256k1_sound`           | `is_inf = 0 ⇒ y² = x³ + 7`               |
 | `gated_on_curve_secp256k1_trivial`         | constraint is vacuous when `is_inf = 1`  |
 | `enforce_on_curve_secp256k1_sound`         | `is_inf = 1 ∨ y² = x³ + 7`               |
-| `IsValidECAddWitness_secp256k1`            | gadget intermediate-state predicate      |
+| `IsValidECAddWitness_secp256k1`            | modelled witness predicate               |
 | `EcAddSemantics_secp256k1`                 | group-law spec relation                  |
 | `ec_add_in_circuit_secp256k1_generic_sound`| generic-branch end-to-end                |
 | `ec_add_in_circuit_secp256k1_sound`        | full 4-way end-to-end                    |
@@ -113,9 +107,9 @@ theorem enforce_on_curve_secp256k1_sound {F : Type*} [Field F]
 
 Mirrors `IsValidECAddWitness` (Grumpkin) line-for-line; the only change is the
 curve constraint `y² = x³ + 7` instead of `y² = x³ − 17`. The doubling slope
-`λ·(2·y₁) = 3·x₁²` matches the gadget because secp256k1 has `a = 0`. -/
+`λ·(2·y₁) = 3·x₁²` carries over because secp256k1 has `a = 0`. -/
 
-/-- **Bundled witness predicate** for `ec_add_in_circuit` on secp256k1. -/
+/-- **Bundled witness predicate** for the modelled addition on secp256k1. -/
 structure IsValidECAddWitness_secp256k1 {F : Type*} [Field F]
     (x1 y1 is_inf1 x2 y2 is_inf2 lambda
      same_x same_y is_double is_inverse inv_dx inv_dy
@@ -169,7 +163,7 @@ inductive EcAddSemantics_secp256k1 {F : Type*} [Field F] :
 /-- **End-to-end soundness — generic branch (secp256k1).** Mirrors
 `Formal.Curve.ec_add_in_circuit_generic_sound`. Under
 `IsValidECAddWitness_secp256k1` with both inputs finite and `x1 ≠ x2`,
-the gadget output is the generic-add result with `(x3, y3)` on secp256k1. -/
+the output is the generic-add result with `(x3, y3)` on secp256k1. -/
 theorem ec_add_in_circuit_secp256k1_generic_sound {F : Type*} [Field F]
     {x1 y1 x2 y2 lambda same_x same_y is_double is_inverse
      inv_dx inv_dy xg yg x3 y3 is_inf3 : F}
@@ -342,10 +336,10 @@ theorem ec_add_in_circuit_secp256k1_sound {F : Type*} [Field F]
     exact EcAddSemantics_secp256k1.lhs_inf
 
 /-- **secp256k1 incomplete-affine addition soundness (base-field level).** The
-flag-free 3-limb `ec_add_incomplete` gadget enforces `dxinv·(x2−x1) = 1`
+flag-free 3×86-bit `xark_secp256k1::affine::ec_add_incomplete` enforces `dxinv·(x2−x1) = 1`
 (so `x1 ≠ x2`), the slope `λ·(x2−x1) = y2−y1`, and the output
 `x3 = λ²−x1−x2`, `y3 = λ·(x1−x3)−y1` — exactly the chord-addition formulas the
-Rust computes (`fp_sub`/`fp_mul`/`fp_inverse`/`sub2` in `xark-secp256k1`).
+Rust computes (`Fp`'s `-`, `*`, `inverse` and `sub2`, from `xark_curve::weierstrass!`).
 Given both inputs on `y² = x³ + 7`, the output lies on the curve and the slope —
 hence the whole output — is unique (no prover freedom). Proved from the generic
 `Curve` algebra at `(a, b) = (0, 7)`; the non-native limb constraints reduce to

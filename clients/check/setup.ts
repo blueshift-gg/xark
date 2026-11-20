@@ -2,7 +2,7 @@
 //
 // Builds the `xark` CLI and xark-wasm's node package (when missing or older than a
 // source it came from, or with XARK_REBUILD_WASM set). Then, for each example with a folder here (`cube/`,
-// `zkyc/`, …): `xark build`, dev keys from `xark setup`, and its client from
+// `zkyc/`, …): `xark build`, a seeded key from `xark setup`, and its client from
 // `xark client`, into a temporary directory. `clients.test.ts` checks those
 // against the committed clients; the examples' own tests prove and verify
 // through them.
@@ -66,7 +66,7 @@ export default function setup(project: TestProject) {
   for (const name of examples) {
     const dir = join(root, "examples", name);
     run(`${name}: xark build`, xark, ["build", dir]);
-    run(`${name}: xark setup`, xark, ["setup", dir, "--insecure-dev-mode", "--deterministic-rng", "1"]);
+    run(`${name}: xark setup`, xark, ["setup", dir, "--deterministic-rng", "1"]);
     run(`${name}: xark client`, xark, ["client", "--out", join(generated, `${name}.ts`)], dir);
   }
   project.provide("generated", generated);

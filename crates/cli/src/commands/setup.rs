@@ -1,9 +1,9 @@
 //! `xark setup` — generate Groth16 proving/verifying keys for a circuit.
 //!
-//! Reads the `circuit.xbc` produced by `xark build` and runs either the insecure
-//! dev-mode setup (`--insecure-dev-mode`) or the production phase-2 setup from a
-//! Powers-of-Tau transcript (`--ptau-file`, or one auto-detected under
-//! `target/xark/<name>/`). Keys land next to the build output as `pk.bin` / `vk.bin`.
+//! Reads the `circuit.xbc` produced by `xark build` and runs either a phase-2 setup
+//! from a Powers-of-Tau transcript (`--ptau-file`, or one auto-detected under
+//! `target/xark/<name>/`) or, without one, a single-party setup from this machine's
+//! randomness. Keys land next to the build output as `pk.bin` / `vk.bin`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -19,41 +19,47 @@ use xark_backend::keys::KeyMetadata;
 use xark_backend::serialization::canonical_write_to_file;
 use xark_prover::XarkCircuit;
 
-use super::{circuit_hash, load_backend_r1cs, num_public_inputs};
+use super::{load_backend_r1cs, num_public_inputs};
 use crate::xark_project::XarkProject;
 
 #[derive(Args, Debug)]
 pub struct SetupArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
-    /// the current directory; paths are inferred from `target/xark/<name>/`.
+    /// the current directory; the paths below are inferred from it.
     #[arg(value_hint = clap::ValueHint::DirPath)]
     pub path: Option<PathBuf>,
 
     /// Directory to write the keys and their metadata to (created if missing; a
-    /// warning if it isn't empty). Defaults to `target/xark/<name>/`.
+    /// warning if it isn't empty). Defaults to `keys/<name>/` in a project (it's
+    /// committed), and otherwise to `target/xark/<name>/`.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub out: Option<PathBuf>,
-    /// Run Groth16 setup with locally generated randomness (the OS RNG), on
-    /// purpose. It is also what setup falls back to when no `.ptau` is given or
-    /// found. Such a key has no ceremony and no transcript: fine for proving and
-    /// testing, but `xark export` refuses it. **Do not use it in production.**
-    #[arg(long, default_value_t = false)]
-    pub insecure_dev_mode: bool,
-    /// Reproducible-randomness escape hatch for test fixtures **only**.
-    /// Requires `--insecure-dev-mode`. Drives setup with
+    /// Make the key from this machine's randomness even if a `.ptau` could be
+    /// found: what `xark prove`'s first-run setup asks for. Not a flag.
+    #[arg(skip)]
+    pub without_ptau: bool,
+    /// Reproducible-randomness escape hatch for test fixtures **only**: a key
+    /// made without a `.ptau`, driven by
     /// `ChaCha20Rng::seed_from_u64(<seed>)` so two runs with the same seed
     /// produce byte-identical keys. This trivially leaks the Groth16 trapdoor
     /// and must never be used beyond regenerating committed test fixtures.
     #[arg(long, value_name = "SEED")]
     pub deterministic_rng: Option<u64>,
-    /// Production phase-2 setup from a Powers-of-Tau (`.ptau`) transcript.
-    /// Mutually exclusive with `--insecure-dev-mode`. When neither is supplied,
+    /// Phase-2 setup from a Powers-of-Tau (`.ptau`) transcript. Without it,
     /// `setup` auto-detects a `.ptau` in `target/xark/<name>/`, `target/xark/`, the
-    /// crate root, or a `ptau/` directory in any of them.
+    /// crate root, or a `ptau/` directory in any of them (not for
+    /// `--deterministic-rng` or `--domain smooth`, which need a key made without
+    /// one). With none, the key comes from this machine's randomness: a
+    /// single-party trusted setup, sound unless whoever ran it kept the
+    /// randomness, which xark never writes down. For a setup no one party has to
+    /// be trusted for, use `xark ceremony`.
     #[arg(long, value_name = "PATH", value_hint = clap::ValueHint::FilePath)]
     pub ptau_file: Option<PathBuf>,
     /// 32-byte randomness seed (hex) for the phase-2 `(γ, δ)` derivation.
-    /// Optional — auto-generated via OS RNG when not supplied.
+    /// Optional — auto-generated via OS RNG when not supplied. Whoever knows it can
+    /// forge proofs: a command-line argument is visible to other users of the
+    /// machine, so discard it, and prefer leaving it out. Only its SHA-256 is
+    /// recorded (`metadata.phase2_seed_hash`).
     #[arg(long, value_name = "HEX")]
     pub phase2_seed: Option<String>,
 
@@ -72,21 +78,17 @@ pub struct SetupArgs {
     /// * `minimized` — the boundary-minimized circuit (a few % smaller on some
     ///   circuits); setup also writes `r1cs.stream`, which prove streams.
     /// * `auto` (default) — `reduced` at or above 2^20 constraints, where the global
-    ///   minimize costs GBs of setup memory for ~0% gain (Ed25519: 576 of 2.36M
-    ///   rows); below that, `minimized` only if it shrinks the FFT domain or saves
-    ///   ≥ 1% of rows or variables (sha256: 4.9%), else `reduced`.
+    ///   minimize costs GBs of setup memory; below that, `minimized` only if it
+    ///   shrinks the FFT domain or saves ≥ 1% of rows or variables
+    ///   (secp256k1_ecdsa: 36% of variables), else `reduced`.
     #[arg(long, value_enum, default_value_t = R1csForm::Auto)]
     pub r1cs_form: R1csForm,
-
-    /// Shorthand for `--r1cs-form reduced`.
-    #[arg(long, default_value_t = false, conflicts_with = "r1cs_form")]
-    pub streamable: bool,
 
     /// QAP evaluation domain.
     ///
     /// * `smooth` — the smallest of `2^k`, `3·2^k`, `9·2^k` points. A circuit just
     ///   past a power of two gets a domain up to 44% smaller, so a smaller key and
-    ///   a faster quotient FFT and `H` MSM (Ed25519: 4.19M → 2.36M points). The
+    ///   a faster quotient FFT and `H` MSM (sha256: 32,768 → 18,432 points). The
     ///   verifier is unchanged, but only xark's provers (`xark prove`, xark-wasm)
     ///   can prove against the key — not snarkjs or rapidsnark. Dev-mode only: a
     ///   Powers-of-Tau transcript's Lagrange bases are radix-2.
@@ -325,45 +327,36 @@ pub fn run(args: SetupArgs) -> Result<()> {
     // Build first if there's no build yet; keys for a circuit older than its source
     // would prove the wrong thing.
     crate::cli::build_if_needed(&project.xark_dir, true)?;
-    let out_dir = args.out.clone().unwrap_or_else(|| project.xark_dir.clone());
+    let out_dir = args.out.clone().unwrap_or_else(|| project.key_dir());
     let prof = super::dbg_flag("XARK_BUILD_TIME");
-    let form = if args.streamable {
-        R1csForm::Reduced
-    } else {
-        args.r1cs_form
-    };
+    let form = args.r1cs_form;
 
-    // Resolve the ptau path: explicit flag, or auto-detected when neither
-    // --ptau-file nor --insecure-dev-mode is supplied.
+    // The `.ptau`: given, or found beside the build, unless the key has to come
+    // from this machine's randomness (a seed, a smooth domain, or `xark prove`'s
+    // first key, which must not turn into a phase-2 setup over a stray `.ptau`).
+    let seeded_or_smooth = args.deterministic_rng.is_some() || args.domain == QapDomain::Smooth;
     let ptau_path: Option<PathBuf> = if args.ptau_file.is_some() {
         args.ptau_file.clone()
-    } else if !args.insecure_dev_mode {
-        project.find_ptau()
-    } else {
+    } else if args.without_ptau || seeded_or_smooth {
         None
+    } else {
+        project.find_ptau()
     };
-    // Only an *explicit* `--ptau-file` conflicts with `--insecure-dev-mode`
-    // (auto-detection is skipped when `--insecure-dev-mode` is set, so any
-    // `ptau_path` here under that flag came from `--ptau-file`).
-    if ptau_path.is_some() && args.insecure_dev_mode {
+    if ptau_path.is_some() && args.deterministic_rng.is_some() {
         bail!(
-            "--ptau-file (or auto-detected .ptau) and --insecure-dev-mode are mutually exclusive"
+            "--deterministic-rng seeds a key made without a .ptau: leave out --ptau-file \
+             (the seed would decide the phase-2 randomness of a key meant for production)"
         );
     }
-    // `--deterministic-rng` leaks the trapdoor, so require `--insecure-dev-mode`
     if ptau_path.is_some() && args.domain == QapDomain::Smooth {
         bail!(
-            "--domain smooth is dev-mode only: a Powers-of-Tau transcript's Lagrange bases \
-             are for 2^k domains (use --insecure-dev-mode, or --domain radix2)"
+            "--domain smooth needs a key made without a .ptau: a Powers-of-Tau transcript's \
+             Lagrange bases are for 2^k domains (leave out --ptau-file, or use --domain radix2)"
         );
     }
-    if args.deterministic_rng.is_some() && !args.insecure_dev_mode {
-        bail!("--deterministic-rng requires --insecure-dev-mode");
-    }
-    // No `.ptau` and no explicit `--insecure-dev-mode`: fall back to insecure
-    // dev-mode so the common `xark build && xark setup && xark prove` loop just
-    // works. A real `--ptau-file` still runs production phase-2.
-    let dev_fallback = ptau_path.is_none() && !args.insecure_dev_mode;
+    // No `.ptau`: the key comes from this machine's randomness, so the common
+    // `xark build && xark setup && xark prove` loop just works.
+    let from_os = ptau_path.is_none() && args.deterministic_rng.is_none();
 
     let t_load = std::time::Instant::now();
     let (keyed, form_name, why, hash, num_constraints, num_pi, kind) =
@@ -405,7 +398,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
     };
     // Keys and metadata are written under temporary names and swapped in at the
     // end, so a failed or interrupted setup never leaves a new key beside old
-    // metadata (which could mark a dev key `production_safe`).
+    // metadata (which could mark a single-party key `production_safe`).
     let tmp = |p: &std::path::Path| {
         p.with_extension(format!(
             "{}.tmp",
@@ -459,8 +452,7 @@ pub fn run(args: SetupArgs) -> Result<()> {
         }
         let mut seed_arr = [0u8; 32];
         seed_arr.copy_from_slice(&seed_bytes);
-        let ptau_bytes =
-            fs::read(ptau_file).with_context(|| format!("reading {}", ptau_file.display()))?;
+        let ptau_bytes = super::read_ptau(ptau_file)?;
         let ptau = xark_backend::ptau::parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
         drop(ptau_bytes);
         let vk = keyed.with_source(|src| -> Result<_> {
@@ -483,16 +475,18 @@ pub fn run(args: SetupArgs) -> Result<()> {
         metadata.setup_mode = "phase2-from-ptau".into();
         metadata.production_safe = true;
         // commit to the (to-be-discarded) phase-2 seed for audit; never keep the seed
-        metadata.phase2_seed_hash = Some(circuit_hash(&phase2_seed_hex));
+        // The seed's 32 bytes, as `KeyMetadata` documents: not the argument's text,
+        // whose `0x` and letter case would change the hash.
+        metadata.phase2_seed_hash = Some(super::sha256_hex(&seed_arr));
         metadata.ptau_source = ptau_file
             .file_name()
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
         vk
     } else {
-        // Dev-mode path. Only explicit `--deterministic-rng <n>` makes the key
+        // Without a `.ptau`. Only explicit `--deterministic-rng <n>` makes the key
         // reproducible; the no-`.ptau` fallback uses OsRng (a fixed seed would make
-        // every dev key byte-identical with a known trapdoor).
+        // every such key byte-identical with a known trapdoor).
         let mut rng = match args.deterministic_rng {
             Some(seed) => {
                 eprintln!(
@@ -541,6 +535,29 @@ pub fn run(args: SetupArgs) -> Result<()> {
     println!("Wrote {}", pk_path.display());
     println!("Wrote {}", vk_path.display());
     println!("Wrote {}", meta_path.display());
+    // A key fits the build it was made from, and a project's keys are committed: the
+    // build goes with them, so a clone (another Rust, another xark) still proves with
+    // them.
+    if project.project_root().is_some() && args.out.is_none() {
+        let keyed = out_dir.join("circuit.xbc");
+        fs::copy(project.circuit_xbc(), &keyed)
+            .with_context(|| format!("writing {}", keyed.display()))?;
+        println!("Wrote {}", keyed.display());
+    }
+    // A project commits its keys; GitHub refuses a file over 100 MB and warns
+    // past 50 MB, so a key that size goes in Git LFS.
+    if project.project_root().is_some()
+        && args.out.is_none()
+        && fs::metadata(&pk_path).is_ok_and(|m| m.len() > 50 << 20)
+    {
+        eprintln!(
+            "{} {} is {} MB: commit it with Git LFS (`git lfs track \"keys/*/pk.bin\"`), as \
+             GitHub refuses a file over 100 MB",
+            crate::style::warn("note:"),
+            pk_path.display(),
+            fs::metadata(&pk_path).map(|m| m.len() >> 20).unwrap_or(0)
+        );
+    }
     println!(
         "verifying key sha256: {vk_sha256}  {}",
         crate::style::dim("# pin a client's verifier to it: { keyHash }")
@@ -558,20 +575,19 @@ pub fn run(args: SetupArgs) -> Result<()> {
             )
         );
     } else {
-        println!(
-            "\n{}",
-            crate::style::warn(
-                "⚠️  WARNING: setup_mode = insecure-dev-mode. Do not use in production."
-            )
-        );
-        if dev_fallback {
+        let trust = super::setup_trust(meta_path.parent().unwrap_or(std::path::Path::new(".")));
+        let setup = format!("\nKey: {}.", trust.summary);
+        if trust.warn {
+            println!("{}", crate::style::warn(&setup));
+        } else {
+            println!("{setup}");
+        }
+        if from_os {
             println!(
                 "{}",
-                crate::style::warn(
-                    "note: no .ptau found, so this is an insecure single-party dev key: fine \
-                     for `xark prove` and tests, but `xark export` will refuse it. For \
-                     production, download a public .ptau and run `xark setup --ptau-file \
-                     <file>`, or run the multi-party `xark ceremony` (docs/trusted-setup.md)."
+                crate::style::dim(
+                    "(no .ptau found, so xark made the key itself; for a setup no one party \
+                     has to be trusted for, see `xark ceremony` in docs/trusted-setup.md)"
                 )
             );
         }
@@ -589,6 +605,7 @@ fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, key: Option<&
     let names: Vec<String> = match fs::read(project.circuit_xbc()) {
         Ok(bytes) if super::is_function_artifact(&bytes) => {
             xark_ir::function_decode::decode_input_vars(&bytes)
+                .unwrap_or_default()
                 .into_iter()
                 .map(|v| v.name)
                 .collect()

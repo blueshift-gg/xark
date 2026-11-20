@@ -3,23 +3,21 @@
 //! * `--plan`: check every crate can publish, and print the order (CI runs this);
 //! * `--dry-run`: package every crate and build each from its own `.crate`, as
 //!   crates.io will see it, uploading nothing;
-//! * `--execute`: the real release (needs `cargo login`). `cargo publish` waits for
-//!   each crate to index before the next, so its dependencies are always there.
+//! * `--execute`: the real release (needs a crates.io token: `CARGO_REGISTRY_TOKEN`
+//!   or `cargo login`). `cargo publish` waits for each crate to index before the
+//!   next; crates already at this version are skipped, so a re-run resumes.
 //!
 //! A crate is publishable unless its manifest says `publish = false`. Every
 //! dependency of a publishable crate on another local crate (dev-dependencies
 //! included, since crates.io resolves them too) must itself be publishable and carry
-//! a `version`: a mistake fails here, not halfway through a release.
+//! a `version`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-
-/// `xark` (crates/lang) is its own workspace: published from its directory.
-const SEPARATE: &str = "crates/lang";
 
 #[derive(clap::Args)]
 #[group(required = true, multiple = false)]
@@ -45,36 +43,61 @@ pub fn run(args: Args) -> Result<()> {
     } else if args.dry_run {
         dry_run()?;
     } else {
-        for (name, dir) in &order {
+        let (mut uploaded, mut skipped) = (0, 0);
+        for (name, version) in &order {
+            if published(name, version)? {
+                skipped += 1;
+                println!(">>> {name} {version} is already on crates.io; skipped");
+                continue;
+            }
             println!(">>> publishing {name}");
-            let mut cmd = Command::new("cargo");
-            match dir {
-                Some(dir) => cmd.arg("publish").current_dir(dir),
-                None => cmd.args(["publish", "-p", name]).current_dir(crate::root()),
-            };
-            if !cmd.status()?.success() {
+            let status = Command::new("cargo")
+                .args(["publish", "-p", name])
+                .current_dir(crate::root())
+                .status()?;
+            if !status.success() {
                 bail!("publishing {name} failed");
             }
+            uploaded += 1;
         }
-        println!("All {} crates published.", order.len());
+        println!("\n{uploaded} published, {skipped} already on crates.io.");
     }
     Ok(())
 }
 
-/// The publishable crates in dependency order, each with its directory when it
-/// publishes from there (its own workspace).
-fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
+/// Whether `name@version` is already on crates.io.
+fn published(name: &str, version: &str) -> Result<bool> {
+    let out = Command::new("cargo")
+        .args([
+            "info",
+            "-q",
+            "--registry",
+            "crates-io",
+            &format!("{name}@{version}"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .context("running cargo info")?;
+
+    if out.status.success() {
+        return Ok(true);
+    }
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains(&format!("could not find `{name}@{version}`")) {
+        return Ok(false);
+    }
+
+    bail!("cargo info {name}@{version} failed:\n{}", stderr.trim())
+}
+
+/// The publishable crates in dependency order, with the version being published.
+fn plan() -> Result<Vec<(String, String)>> {
     let root = crate::root();
     let mut pkgs: BTreeMap<String, Value> = BTreeMap::new();
-    for dir in [root.clone(), root.join(SEPARATE)] {
-        for p in metadata(&dir)? {
-            if p["manifest_path"]
-                .as_str()
-                .is_some_and(|m| Path::new(m).starts_with(&root))
-            {
-                pkgs.insert(p["name"].as_str().unwrap_or_default().to_string(), p);
-            }
-        }
+    for p in metadata(&root)? {
+        pkgs.insert(p["name"].as_str().unwrap_or_default().to_string(), p);
     }
     let publishable: BTreeSet<&str> = pkgs
         .iter()
@@ -102,7 +125,7 @@ fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
             if !publishable.contains(dep) {
                 errors.push(format!("{n} -> {dep}: depends on an unpublished crate"));
             }
-            mine.insert(pkgs.get_key_value(dep).unwrap().0.as_str());
+            mine.insert(dep);
         }
     }
     errors.extend(npm_version_errors(
@@ -129,20 +152,19 @@ fn plan() -> Result<Vec<(String, Option<PathBuf>)>> {
         }
         order.extend(ready);
     }
-    let separate = root.join(SEPARATE);
     Ok(order
         .into_iter()
         .map(|n| {
-            let dir = Path::new(pkgs[n]["manifest_path"].as_str().unwrap_or_default()).parent();
-            let own = dir.filter(|d| *d == separate).map(Path::to_path_buf);
-            (n.to_string(), own)
+            (
+                n.to_string(),
+                pkgs[n]["version"].as_str().unwrap_or_default().to_string(),
+            )
         })
         .collect())
 }
 
-/// The npm package `@blueshift-gg/xark-wasm` is released with the crates: its
-/// `package.json` and its client runtime's `VERSION` (which checks a client's
-/// `schema.json` came from the same release) must carry the workspace's version.
+/// The npm package is released with the crates: `crates/wasm/package.json` and its
+/// client runtime's `VERSION` must carry the workspace's version.
 fn npm_version_errors(version: &str) -> Vec<String> {
     let wasm = crate::root().join("crates/wasm");
     let read = |f: &str| std::fs::read_to_string(wasm.join(f)).unwrap_or_default();
@@ -186,12 +208,9 @@ fn metadata(dir: &Path) -> Result<Vec<Value>> {
     Ok(v["packages"].as_array().cloned().unwrap_or_default())
 }
 
-/// Package every crate and build each from its `.crate`. A plain `cargo publish
-/// --dry-run -p <crate>` can't, before a release: it resolves the crate's xark
-/// dependencies at the new version from crates.io, where they aren't yet. `cargo
-/// package --workspace` resolves them from the other local packages instead, but
-/// `xark` is its own workspace, so this runs in a copy of HEAD where it is a member.
-/// Uncommitted changes are not included.
+/// Package every crate and build each from its `.crate`, with `cargo package
+/// --workspace` resolving the local xark packages. This runs in a copy of HEAD, so
+/// uncommitted changes are not included.
 fn dry_run() -> Result<()> {
     let root = crate::root();
     let copy = crate::target_dir().join("publish-dry");
@@ -210,17 +229,6 @@ fn dry_run() -> Result<()> {
     if !archive.wait()?.success() || !tar.success() {
         bail!("extracting HEAD into {}", copy.display());
     }
-    // `crates/lang` joins the copy's workspace: out of `exclude`, into `members`.
-    let manifest = copy.join("Cargo.toml");
-    let text = std::fs::read_to_string(&manifest)?;
-    let lang = format!("    \"{SEPARATE}\",\n");
-    let (members, rest) = text
-        .split_once("members = [\n")
-        .context("no `members = [` in Cargo.toml")?;
-    let rest = rest.replacen(&lang, "", 1);
-    std::fs::write(&manifest, format!("{members}members = [\n{lang}{rest}"))?;
-    let _ = std::fs::remove_file(copy.join(SEPARATE).join("Cargo.lock"));
-
     let mut cmd = Command::new("cargo");
     cmd.args(["package", "--workspace"])
         .current_dir(&copy)

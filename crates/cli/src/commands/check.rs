@@ -19,11 +19,6 @@ use crate::xark_project::XarkProject;
 
 pub fn run(args: CheckArgs) -> Result<()> {
     // The circuit, through the `xark build` path.
-    let mut build_argv = vec![args.crate_dir.clone()];
-    if let Some(out) = &args.out {
-        build_argv.push("--out".into());
-        build_argv.push(out.clone());
-    }
     // Locate `circuit.xbc` the same way the backend commands do: from `--out` when
     // given, else the crate's default `target/xark/`. Build it unless it's current.
     let base = args.out.clone().unwrap_or_else(|| args.crate_dir.clone());
@@ -31,7 +26,7 @@ pub fn run(args: CheckArgs) -> Result<()> {
         crate::cli::stale_build(&p.xark_dir, "circuit.xbc", Some("bn254")).is_none()
     });
     if !current {
-        let code = crate::cli::cmd_build(&build_argv);
+        let code = crate::cli::build(&args.crate_dir, args.out.as_deref(), "bn254", false, false);
         if code != 0 {
             bail!("build failed (exit {code}); fix the circuit before `xark check --inputs`");
         }

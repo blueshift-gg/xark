@@ -12,7 +12,6 @@
 #![allow(clippy::assign_op_pattern)]
 
 use core::cmp::{Ordering, PartialOrd};
-use core::marker::PhantomData;
 use core::ops::{
     Add, AddAssign, BitXor, BitXorAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Shl, Shr, Sub,
     SubAssign,
@@ -1132,7 +1131,7 @@ pub fn require_eq<A: RequireEqCircuit<B>, B>(a: A, b: B) {
 /// any value satisfies but which ties the proof to it.
 ///
 /// ```ignore
-/// pub fn withdraw(note: Private<Note>, root: Public<Field>, recipient: Public<Field>) {
+/// pub fn withdraw(note: Private<Note>, root: Public<Field>, recipient: Public<Address>) {
 ///     require_eq(note.root(), root);
 ///     bind(recipient);
 /// }
@@ -1186,7 +1185,10 @@ pub fn require_ne(a: impl Into<Field>, b: impl Into<Field>) {
 /// ops (multiplications, `hint_*` calls) still fill their witness but emit **no R1CS
 /// constraints**, and the vars they allocate are pinning-exempt. Native integer
 /// (`u8`…`u64`, `bool`) arithmetic is constrained as usual inside the region: it is
-/// plain wasm, which the optimizer may move or merge across the region's ends. This lets a
+/// plain wasm, which the optimizer may move or merge across the region's ends. So is a
+/// `Field` comparison (`==`, `!=`, `lt`, …), whose result is a `bool` that later code
+/// trusts to be 0 or 1. A region opens and closes within one arm of a witness-dependent
+/// branch, or around the whole branch; an arm that panics inside it ends it. This lets a
 /// gadget *derive* advice (an inverse chain, a GLV reduction, a decompressed
 /// coordinate) at **zero constraint cost**, then pin only the final result with
 /// normal constrained code after `witness_end`.
@@ -1329,10 +1331,50 @@ pub fn require_ge<A: PartialOrd<B>, B>(a: A, b: B) {
     __xark_require_eq_scalar(a >= b, true);
 }
 
+/// `bit ? t : f`, for a `bit` already pinned to 0 or 1 (a `to_bits` bit, a `bool`
+/// from a comparison): `f + bit·(t − f)`, one row per field element of `t`, none when
+/// `bit` or `t − f` is a constant. It doesn't check `bit`: for any other value the
+/// result is that affine combination of `t` and `f`, which a prover who chooses
+/// `bit` would choose too. So pin it first (`bit.require_bool()`), unless it is a
+/// `bool` or a decomposition's bit already.
+///
+/// `t` and `f` are a [`Field`], an array of them, or nested arrays; a gadget crate
+/// implements [`Select`] for its own point or limb types.
+///
+/// ```ignore
+/// let y = select(x.lt::<64>(limit), x, limit); // min(x, limit)
+/// ```
+#[inline]
+pub fn select<T: Select>(bit: impl Into<Field>, t: T, f: T) -> T {
+    T::select(bit.into(), t, f)
+}
+
+/// What [`select`] picks between.
+pub trait Select: Copy {
+    /// `bit ? t : f`, for a `bit` in `{0, 1}`.
+    fn select(bit: Field, t: Self, f: Self) -> Self;
+}
+
+impl Select for Field {
+    #[inline]
+    fn select(bit: Field, t: Field, f: Field) -> Field {
+        f + bit * (t - f)
+    }
+}
+
+/// Element-wise, in index order (so the rows come in that order too).
+impl<T: Select, const N: usize> Select for [T; N] {
+    #[inline]
+    fn select(bit: Field, t: [T; N], f: [T; N]) -> [T; N] {
+        let mut out = f;
+        let mut i = 0usize;
+        while i < N {
+            out[i] = T::select(bit, t[i], f[i]);
+            i += 1;
+        }
+        out
+    }
+}
+
 // The `__xark_*` intrinsics referenced above live in `crate::intrinsics` (imported
 // at the top). See that module for the constraint-vs-hint ABI and lowering docs.
-
-// Keeps `PhantomData` referenced so `#![no_std]` users pulling only this crate do
-// not trip an unused-import lint.
-#[doc(hidden)]
-pub type _FieldMarker = PhantomData<Field>;

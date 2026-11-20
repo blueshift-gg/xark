@@ -41,7 +41,7 @@ pub struct Args {
     no_build: bool,
 }
 
-fn parse_shard(s: &str) -> Result<(usize, usize), String> {
+pub fn parse_shard(s: &str) -> Result<(usize, usize), String> {
     let (k, n) = s.split_once('/').ok_or("expected k/n")?;
     let (k, n): (usize, usize) = (
         k.parse().map_err(|_| "bad k")?,
@@ -65,10 +65,40 @@ const BLINDSPOT: &[&str] = &["ec_incomplete", "ec_incomplete_r1"];
 /// instead (`signature_blocks_are_sound`).
 const UNSEARCHABLE: &[&str] = &["secp256k1_ecdsa", "secp256r1_ecdsa"];
 /// Per-search time limits (seconds) for examples that need more than the default (20),
-/// unless `XARK_SEARCH_SECS` is set: ed25519 is searched whole (2.4M rows, ~35 s a
-/// search here, more than 180 s on a CI runner, so pull requests `--skip` it and the
-/// weekly run sweeps it alone).
-const SLOW: &[(&str, u32)] = &[("ed25519", 180)];
+/// unless `XARK_SEARCH_SECS` is set: ed25519 is searched whole (396,912 rows), so
+/// pull requests `--skip` it and the weekly run sweeps it alone.
+const SLOW: &[(&str, u32)] = &[
+    ("ed25519", 180),
+    // The `HEAVY` examples' searches either decide within seconds or run out any
+    // budget (the non-native relations): at 10 s each decided and undecided count
+    // was the same as at 20 (grumpkin_ivc 18 of 51 inconclusive, on_curve_ed25519 11
+    // of 14, grumpkin_ipa_fold 8 of 34, grumpkin_augmented_step 6 of 34,
+    // grumpkin_nova_fold 6 of 34), in half the time.
+    ("grumpkin_ivc", 10),
+    ("on_curve_ed25519", 10),
+    ("grumpkin_ipa_fold", 10),
+    ("grumpkin_augmented_step", 10),
+    ("grumpkin_nova_fold", 10),
+];
+
+/// Examples whose searches mostly run out their budget (the non-native modular
+/// relations the search can't decide: `xark_ir::witness_search`), so each takes
+/// minutes where the rest take seconds: dealt out first, one per shard, before the
+/// rest. From the per-example times of CI run 42195095843 (shards of 4, `--jobs 2`):
+/// grumpkin_ivc 6 min, on_curve_ed25519 3.7, grumpkin_ipa_fold 2.7, aes_gcm 2,
+/// grumpkin_augmented_step 2, grumpkin_nova_fold 2, and aes256_gcm 5 min of decided
+/// searches one at a time (PR #52's run); every other example under a minute. Each
+/// run prints the times to check this against.
+const HEAVY: &[&str] = &[
+    "grumpkin_ivc",
+    "on_curve_ed25519",
+    "grumpkin_ipa_fold",
+    "aes_gcm",
+    "aes256_gcm",
+    "grumpkin_augmented_step",
+    "grumpkin_nova_fold",
+    "ed25519",
+];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Outcome {
@@ -85,6 +115,8 @@ struct Sweep {
     difftest: PathBuf,
     max_rows: u64,
     base: Option<PathBuf>,
+    /// Threads for one example's witness searches: its share of the cores.
+    search_threads: usize,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -107,6 +139,10 @@ pub fn run(args: Args) -> Result<()> {
         difftest: release.join("examples/difftest"),
         max_rows: args.max_rows,
         base: args.base,
+        // The time limit on a search is wall time, so no more threads than cores over
+        // the examples running at once.
+        search_threads: (std::thread::available_parallelism().map_or(1, |n| n.get()) / args.jobs)
+            .max(1),
     };
     let mut names = if args.examples.is_empty() {
         crate::circuits()?
@@ -114,6 +150,9 @@ pub fn run(args: Args) -> Result<()> {
         args.examples
     };
     names.retain(|n| !args.skip.contains(n));
+    // Heavy examples first (in `HEAVY`'s order), then the rest by name, so round-robin
+    // shards each get one heavy example before any gets two.
+    names.sort_by_key(|n| HEAVY.iter().position(|h| h == n).unwrap_or(HEAVY.len()));
     if let Some((k, n)) = args.shard {
         names = names
             .into_iter()
@@ -124,10 +163,11 @@ pub fn run(args: Args) -> Result<()> {
     }
     let results = Mutex::new(Vec::new());
     crate::parallel(names.clone(), args.jobs, |_, name| {
+        let started = std::time::Instant::now();
         let (outcome, message) = sweep
             .one(&name)
             .unwrap_or_else(|e| (Outcome::Fail, format!("FAILED — {e}")));
-        println!("{name}: {message}");
+        println!("{name}: {message} ({}s)", started.elapsed().as_secs());
         results.lock().unwrap().push((name, outcome));
     });
     let mut results = results.into_inner().unwrap();
@@ -230,6 +270,7 @@ impl Sweep {
                 let secs = SLOW.iter().find(|(s, _)| *s == n).map_or(20, |(_, s)| *s);
                 cmd.env("XARK_SEARCH_SECS", secs.to_string());
             }
+            cmd.env("XARK_SEARCH_THREADS", self.search_threads.to_string());
             let status = logged(&mut cmd, &log("diff"))?;
             Ok((
                 status.code(),

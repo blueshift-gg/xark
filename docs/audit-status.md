@@ -19,9 +19,10 @@ soundness, and what an external auditor should focus on first. Pairs with
   verifier `.so` (`xark_verifier_reference_program.so`), hash-verified in CI.
 
 ### Test suite
-Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128`, `end_to_end`,
-`fuzz`, `host`, `multi_function`, `ptau`, `randomness`, `sbpf`, `serialization`,
-`solana_format`, `xark_ir_e2e`) plus workspace unit tests, including:
+Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128` and `sbpf` as
+their own binaries; `ceremony_cli`, `end_to_end`, `fuzz`, `host`, `multi_function`, `ptau`,
+`serialization`, `solana_format`, `xark_ir_e2e` and the rest as modules of the one `it`
+binary under `it/`) plus workspace unit tests, including:
 
 * **KAT cross-checks** against `k256`, `p256`, `sha2`, `keccak`, `blake2`, `blake3`,
   `aes`, `ark-grumpkin` — each gadget vs the published reference crate.
@@ -31,71 +32,88 @@ Integration tests in `gadgets/tests/tests/` (`differential_alt_bn128`, `end_to_e
   vs reference crates. Fixtures are being regenerated directly from xark circuits.
 * **NIST/RFC official vectors** — FIPS 180-4 §B (SHA-256), FIPS 202 §C (SHA-3), RFC 7693
   §B (BLAKE2s), official BLAKE3 `test_vectors.json`, FIPS 197 §B + CAVP (AES-128).
-* **Lean ↔ R1CS bridge** (`crates/lang/tests/snapshot.rs`) — pins each frontend gadget's
-  multiplication-gate count to its Lean soundness model, so any drift forces a re-check.
+* **Lean ↔ R1CS bridge** (`crates/lang/tests/snapshot.rs`) — thirteen tests pin
+  multiplication-gate counts, most of circuits a hand-restated Lean model describes, so
+  drift there forces a re-check.
 * **Hint/advice output-pinning** — hint outputs are pinned by surrounding R1CS
   constraints, and the solver's `solve_and_check` rejects any witness that violates a
   constraint, so an unpinned hint output can't force a satisfying assignment.
 * **Ceremony enforcement** — `CeremonyError` rejection paths (Schnorr-PoK, transcript
-  hash chain, δ-consistency, dev-mode guards) exercised by the ptau/setup paths.
-* **cargo-fuzz smoke** (`gadgets/tests/tests/fuzz.rs`) — over the artifact parser,
-  witness parser, and IR→R1CS lowering. Run manually; no CI gate yet. Production fuzzing
-  is CPU-weeks.
+  hash chain, δ-consistency, seeded-key guards) exercised by the ptau/setup paths.
+* **proptest smoke** (`gadgets/tests/tests/it/fuzz.rs`) — the verifier's entry points
+  on arbitrary and mutated bytes (never panic, never accept) and the `circuit.xbc`
+  decoder on arbitrary bytes (never panic). Runs with the test suite; production
+  fuzzing is CPU-weeks.
 
 ### Lean 4 / mathlib formal proofs (`formal/`)
 
-Per-gadget soundness, most of the on-chain-verifier proofs, and the xark-IR→R1CS
-meta-theorem. CI-gated by `.github/workflows/lean.yml`; the axiom check rejects any proof
-depending on `sorryAx`. Coverage (theorem names → modules):
+Per-gadget soundness over the exported rows, hand-restated models, and the frontend's
+rewrites and minimizer certificates. CI-gated by `.github/workflows/lean.yml`; the axiom
+check rejects any proof depending on `sorryAx`. Coverage (theorem names → modules):
 
+* **Gadget templates (proofs over the exported rows)** — each `#[gadget]` harness under
+  `formal/templates/` has `Xark.Templates.<Gadget>.soundness` over the rows the frontend
+  emits, re-exported and hash-checked in CI: bit decompositions (`Formal.ToBits*`,
+  `Formal.ToBitsCanonical`), `xor` / `or` (`Formal.BoolOps`), `add32` (`Formal.Add32`),
+  `reduce::<N>` (`Formal.Reduce`), `xor3` / `maj3` / `chi` / `ch` (`Formal.HashOps`), the AES
+  S-box (`Formal.AesSbox`), `cond_swap` (`Formal.CondSwap`; `root_binds` composes the Merkle
+  levels, assuming, not proving over its rows, that `hash2` computes a function), the
+  Grumpkin scalar multiplications and Pedersen hash (`Formal.SignedMul`, `ScalarMul`,
+  `WideScalarMul`, `MultiScalarMul`, `PedersenHash`), and the signature gadgets listed
+  under *Non-native arithmetic* below. `--coverage` checks which production calls emit
+  exactly these rows.
 * **Field primitives** — `boolean_sound`, `range_unique`, `bits_unique`
-  (`Formal.Gadgets`).
-* **Bitwise** — `and_sound`, `xor_sound`, `not_sound`, `xor_n_parity_*`, `add_mod_32_*`
-  (`Formal.Bitwise` + `Formal.Arith`).
-* **SHA-256 structural** — `rotr_sound`, `shr_sound`, `Ch_bit_sound`, `Maj_bit_sound`,
-  `MessageScheduleStep_iff` (`Formal.Sha256`).
-* **Curve** — Grumpkin `ec_add_in_circuit_sound` (full algebraic closure: generic +
-  doubling + inverse + on-curve + selector mux), `secp256k1`/`secp256r1` closures
-  (`Formal.Curve / Secp256k1 / Secp256r1`).
+  (`Formal.Gadgets`): the booleanity row and `decompose_bits`, restated by hand.
+* **Bitwise** — `and_sound`, `xor_sound`, `not_sound` (`Formal.Bitwise`): `Field::and`,
+  the `emit_xor` row, `Field::not`, restated by hand. `add_mod_32_*` (`Formal.Arith`) is
+  the ℕ fact under `add32` / `reduce`; `xor_n_parity_*` models a parity row no current
+  gadget emits.
+* **SHA-256** — FIPS 180-4 definitions and per-bit lemmas (`rotr_sound`, `shr_sound`,
+  `xor32_sound`, …, `MessageScheduleStep_iff`) and the identities behind `compress`'s
+  fused reductions (`newA_of_newE`, `feedForward_fused`) (`Formal.Sha256`). `compress`'s
+  Ch, Maj and Σ/σ rows are the `ch` / `maj3` / `xor3` templates; no theorem is about its
+  whole rows.
 * **Concrete point groups** — `Secp256k1Point`, `Secp256r1Point`, `GrumpkinPoint`
   (`Formal.*Group`): all three are mathlib `WeierstrassCurve.Affine.Point` aliases
   inheriting `AddCommGroup` via `inferInstance`. The three base-field primes are proven
   prime by kernel-checked Pratt certificates (`Formal.Pratt`, `Formal.CurvePrimes`).
-* **Poseidon2** — `poseidon_permutation_determined` (width-polymorphic) and
-  `poseidon2_bn254_t3_determined` (the concrete `t = 3` instance the gadget implements)
-  (`Formal.Poseidon` + `Formal.Poseidon2Bn254T3`).
-* **ECDSA scalar mult** — `ladder_step_correct`, `ladder_correct`, `ladder_determinism`
-  (`Formal.Ecdsa`).
-* **Non-native arithmetic** — `mul_mod_via_Fr_limbwise_constraints` (4×64-bit) and
-  `mul_mod_via_Fr_limbwise_constraints_3` (3×86-bit, matching the `mod_mul_3` gadget the
-  secp curves use) — the full ℕ + Fr no-wrap chain (`Formal.NonNative`).
-* **ECDSA verifier wrapper** — `ecdsa_verify_compose` (parametric over `G : AddCommGroup`,
-  `Formal.EcdsaVerify`).
-* **GLV** — `glv_sum_eq`, `glv_via_endomorphism`, `glv_endomorphism_correct` (abstract,
-  `Formal.Glv`).
-* **Comb / Strauss-Shamir** — `windowed_scalar_mul_sound`, `joint_strauss_shamir_correct`
-  (`Formal.AdvancedGadgets`).
-* **Bit-hash gadgets** — per-primitive bit-soundness (`rotr_sound`, `xor32_sound`,
-  `Ch_bit_sound`, `and64_sound`, …) plus whole-compression round-step composition for
-  SHA-256, Keccak-f[1600], BLAKE2s, BLAKE3, transcribed from FIPS/RFC
-  (`Formal.Sha256 / Keccak / Blake`, composed in `Formal.Wrappers`). The Keccak ρ·π
-  index was **corrected to `(X + 3Y) % 5`** to match the KAT-verified `xark-keccak` gadget
-  across all 25 lanes.
+* **Poseidon2** — `sbox_sound` (the `x⁵` rows), `poseidon_permutation_determined`
+  (width-polymorphic) and `poseidon2_bn254_t3_determined` (the `t = 3` instance with
+  `xark-poseidon2`'s constants and matrices) (`Formal.Poseidon` + `Formal.Poseidon2Bn254T3`).
+  Determinism of a Lean model; the gadget's 240 S-box gates are pinned by a snapshot test.
+* **Non-native arithmetic** — the pseudo-Mersenne multiplication certificates the
+  signature gadgets use (`mul_cert_k1` / `_r1` / `_25519`: `Formal.MulCertK1 / MulCertR1 /
+  MulCert25519`), `range_check_limbs`, `require_lt` (`Formal.RangeCheckLimbs*`,
+  `Formal.RequireLt*`), the secp256k1 / P-256 add, fused double-and-add and on-curve
+  checks (`Formal.EcK1Check / EcR1Check`), Ed25519's `ed_*_check` (`Formal.EdCurveCheck`),
+  and the scalar side of fake GLV (`Formal.FakeGlvK1 / FakeGlvR1 / FakeGlv25519`, with
+  the group-side `FakeGlv.verify_sound` / `verify_sound_cofactored`), all over their
+  exported rows.
 * **secp incomplete point-add** — `ec_add_incomplete_secp256k1_sound` /
-  `_secp256r1_sound`: the flag-free 3-limb chord addition lands on the curve with a unique
-  slope (no prover freedom), from the generic `Curve` algebra at `(a,b) = (0,7)` and
-  `a = −3` (`Formal.Secp256k1 / Secp256r1`).
-* **Merkle membership** — `Xark.Templates.CondSwap.soundness`, over `cond_swap`'s exported
-  rows: the template forces its position bit boolean and its output to be the input pair in
-  one of its two orders; `root_binds` composes the levels into the Merkle root, assuming
-  (not proven over its rows) that `hash2` computes a function (`Formal.CondSwap`).
-* **R1CS ↔ Lean bridge** — ten snapshot tests in `crates/lang/tests/snapshot.rs` pin each
-  frontend gadget's multiplication-gate count to its Lean soundness model.
-* **Allocation bookkeeping** — `AllocState`, `alloc_witness_idempotent`,
-  `alloc_witness_injective`, `AllocState.alloc_preserves_invariant`,
-  `read/write_const_index_correct` (`Formal.Bookkeeping`).
-* **Public-input flow** — `public_input_projection_consistent`, `buildInstance_eq_w_on_pub`,
-  `alloc_state_pins_public_inputs` (`Formal.AdvancedGadgets`).
+  `_secp256r1_sound` (`Formal.Secp256k1 / Secp256r1`): the field equations of
+  `xark_curve`'s 3-limb `ec_add_incomplete` (`dxinv·dx = 1`, `λ·dx = dy`, the chord
+  formulas) give an on-curve output with a unique slope. No theorem connects the
+  gadget's limb rows (`mod_mul`, `mod_inverse`) to these equations.
+* **Lemmas about models no current gadget emits** — `Formal.Curve`'s
+  `ec_add_in_circuit_sound` (complete addition with infinity flags, a selector mux and
+  gated slopes; `xark_grumpkin::ec_add` is incomplete) and its secp copies in
+  `Formal.Secp256k1 / Secp256r1`; `Formal.Ecdsa`'s `ladder_*` (LSB-first double-and-add);
+  `Formal.NonNative`'s `mul_mod_via_Fr_limbwise_constraints` (3 × 86-bit columns with
+  unsigned carries; `mulmod_columns` uses biased signed carries); `Formal.EcdsaVerify`'s
+  `ecdsa_verify_compose`; `Formal.Glv` / `Formal.AdvancedGadgets` (GLV algebra, comb and
+  joint-ladder sums over any group); the Keccak / BLAKE round compositions over
+  `xor` / `and` / `not` wires (`Formal.Keccak / Blake / Wrappers`); allocation and
+  public-input bookkeeping (`Formal.Bookkeeping`, `public_input_projection_consistent`).
+* **Frontend rewrites and minimizer** — `elim_sound`, `cse_sound`, `inline_sound`,
+  `fold_sound`, `const_mul_sound`, `gated_sat`, `pin_dead`, `select_taken` (`Formal.Rewrites`):
+  each row-reducing rewrite is exact over an R1CS model; `check_sound`, `check_complete`
+  (`Formal.Minimize.Sound`): a minimizer certificate the checker accepts relates the
+  minimized rows to the original ones.
+* **R1CS ↔ Lean bridge** — thirteen `*_matches_lean_model` tests in
+  `crates/lang/tests/snapshot.rs` pin the multiplication-gate count of Poseidon2, Merkle,
+  SHA-256, Keccak, BLAKE2s, BLAKE3, AES-128/256, GHASH, AES-GCM, `fp_mul` and the
+  secp256k1 / P-256 incomplete adds. A changed count forces a re-check; an unchanged one
+  does not show the rows are the model's.
 * **Verifier — Kani** — canonicality, fail-closed (every structural error path returns
   `Err` ≠ `Ok(true)`), strict non-malleability, arity, totality with curve-op stubs
   (`totality_verify_groth16`, `totality_verify_proof_only`), and pairing operand-assembly
@@ -123,28 +141,29 @@ This is **not** an external audit. Until an external firm reviews the code, the 
 
 Rough order of "biggest blast radius if wrong":
 
-### 1. Non-native arithmetic over secp curves (`gadgets/xark-secp256k1/src/lib.rs`, `gadgets/xark-bignum/src/lib.rs`)
+### 1. Non-native arithmetic in the signature gadgets (`gadgets/xark-bignum/src/lib.rs`, `gadgets/xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`)
 
-The single largest soundness surface — every ECDSA proof depends on:
+The single largest soundness surface — every ECDSA and EdDSA proof depends on:
 
-* `bigint256_mul_mod` — limb-by-limb non-native mul with prover-aided quotient. Mechanised
-  in `Formal.NonNative.mul_mod_via_Fr_limbwise_constraints` (ℕ + Fr no-wrap, `n = 4, β = 2^64`).
-* `sub_mod` — direct subtraction (`a − b + k·m − c = 0`, `k ∈ {0,1}`).
-* `inv_mod` — modular inverse via `a·a_inv = 1`; reduces to `mul_mod` + a non-zero check.
-* `enforce_on_curve` — `y² = x³ + a·x + b mod p`. Lean lemmas exist for all three curves
-  (`enforce_on_curve_grumpkin_sound`, `Formal.Secp256k1.enforce_on_curve_secp256k1_sound`,
-  secp256r1 analogue), **but were previously not wired into the gadgets.** Grumpkin now
-  enforces it in-circuit (`y² = x³ − 17`, called by `scalar_mul`/`multi_scalar_mul`). The
-  secp256k1/secp256r1 (ECDSA) and Ed25519 gadgets do **not** yet call an on-curve check —
-  their points are public inputs, so on-curve validation is currently the caller's
-  responsibility off-circuit; wiring the (Lean-proven) non-native check in is a tracked
-  follow-up.
-* `enforce_in_range_one_to_n` — `r, s ∈ [1, n−1]`. Without it a malicious prover could
-  exploit the `inv_mod(s)` step.
-* GLV decomposition (`glv_decompose_in_circuit`) — proves `k = k1 + λ·k2 (mod n)` with
-  `|k1|, |k2| < 2^129`. Kernel proven (`glv_via_endomorphism` + `glv_endomorphism_correct`).
-* Fixed-base comb tables for `u1·G` — core proven (`windowed_scalar_mul_sound`); the
-  comb-row-2 doubling exception is in scope of the same proof.
+* `mul_cert_k1` / `mul_cert_r1` / `mul_cert_25519` — non-native multiplication by
+  pseudo-Mersenne certificates over 8×32-bit limbs, each proven sound over its exported
+  rows (`Formal.MulCertK1 / MulCertR1 / MulCert25519`).
+* `range_check_limbs` and `require_lt` — limb range checks and `x < m` against a
+  constant (`Formal.RangeCheckLimbs*`, `Formal.RequireLt*`).
+* On-curve and canonical-coordinate checks — `on_curve_k1` / `on_curve_r1` (secp) and
+  `point_in` (Ed25519) require each coordinate `< p` and the point on the curve, for the
+  public key and for the hinted `R` alike (`Formal.EcK1Check` / `EcR1Check` /
+  `EdCurveCheck`). Grumpkin's `enforce_on_curve` (`y² = x³ − 17`) is
+  native-field.
+* Scalar ranges — ECDSA requires `r, s, e < n` (`require_lt`) and `r, s ≠ 0`
+  (`assert_nonzero_limbs`); EdDSA requires `S < L` (`assert_scalar_below_order`).
+  Without them a malicious prover could exploit the hinted `s⁻¹` or malleate `S`.
+* Fake GLV (ePrint 2025/933) — the prover hints a short `(A, B)`; `fake_glv_check_k1` /
+  `_r1` / `_25519` pin the scalar relations (`Formal.FakeGlvK1 / FakeGlvR1 / FakeGlv25519`).
+* The group side — fused double-and-add steps over signed digits (`ec_double_add_k1` /
+  `_r1`, proven per step) and a fixed-base comb for the generator (`one_hot8` over
+  constant tables). How the steps are chained across the loop is covered by tests, not
+  by a whole-loop proof (see [`security.md` §6](security.md#6-recommended-audit-scope)).
 
 ### 2. Hint/advice trust-outputs assumption
 
@@ -163,8 +182,9 @@ so an unpinned hint output can't force a satisfying assignment. An auditor shoul
 Deliberately small: **no opcode dispatch.** The circuit's wasm lowers to
 `add`/`sub`/`mul`/`require_eq` + `hint_*`/advice, then directly to R1CS. Auditable points:
 
-* **Each primitive → its expected constraint.** Fixed, small footprint; FV bridge tests pin
-  every gadget's mul-gate count, so drift forces a Lean re-check.
+* **Each primitive → its expected constraint.** Fixed, small footprint; `lean-export
+  --check` fails when a proven gadget's rows drift from its template, and the snapshot
+  bridge tests pin the mul-gate count of the hand-restated models' circuits.
 * **`mul` → fresh-var alloc + the `require_eq` merge.** A `mul` allocates one fresh witness
   and emits one `A·B = C` row; the `require_eq` merge folds a trailing equality into it (this
   is what keeps difference-of-squares at one constraint). These two rules are the whole
@@ -176,10 +196,11 @@ Deliberately small: **no opcode dispatch.** The circuit's wasm lowers to
 
 * `.ptau` admissibility — degree match, subgroup membership, pairing-consistency.
 * Phase-2 contribution — Schnorr PoK per δ contribution; chain verification.
-* The deterministic-RNG path for `--insecure-dev-mode` (the only RNG path tests use) is
-  explicitly *not* production-safe; CLI guards prevent its use outside dev mode.
+* The deterministic-RNG path (`xark setup --deterministic-rng`, the only RNG path tests use)
+  is explicitly *not* production-safe: setup refuses it with a `.ptau`, `xark prove` refuses a
+  seeded prover RNG with a production key, and `xark export` warns about a seeded key.
 
-All four enforcement paths (Schnorr-PoK, transcript chain, δ consistency, dev-mode guard) are
+All four enforcement paths (Schnorr-PoK, transcript chain, δ consistency, seeded-key guard) are
 exercised by the ptau/setup paths in `gadgets/tests/tests/`.
 
 ### 5. Serialisation boundaries (`crates/backend/src/{serialization,solana}.rs`)

@@ -18,19 +18,20 @@ set_option linter.style.header false
 /-!
 # xark non-native modular-product soundness — mechanised in Lean 4 / mathlib
 
-The ECDSA verifier in `gadgets/xark-secp256k1/src/lib.rs` evaluates the
-secp256k1 base- and scalar-field arithmetic *inside* a BN254 R1CS. Both
-secp256k1 moduli are 256 bits wide and do not fit in BN254 `Fr` (~254 bits),
-so every non-native multiplication `c = a · b mod m` is lowered via the
+`xark_bignum::mod_mul` evaluates 256-bit field arithmetic *inside* a BN254
+R1CS (the 3×86-bit `Fp`/`Fq` that `xark_curve::weierstrass!` emits, e.g.
+`xark_secp256k1::affine`). The secp256k1 moduli are 256 bits wide and do not
+fit in BN254 `Fr` (~254 bits), so a non-native multiplication
+`c = a · b mod m` is lowered via the
 **prover-aided identity** pattern: the prover supplies the quotient `q` and
 remainder `c`, and the circuit checks the *integer* identity
 
     a · b = q · m + c
 
 limb-by-limb (`β = 2^86`, three limbs per 256-bit value) while a separate
-range gadget pins `0 ≤ c < m` by bit-decomposing `c`. This pattern is reused
-verbatim by `inv_mod` (`a · a⁻¹ = 1 mod m`) and by every affine point-add /
-point-double / scalar-mul step that feeds into the ECDSA verifier.
+range gadget pins `0 ≤ c < m` by bit-decomposing `c`. The same pattern
+backs `xark_bignum::mod_inverse` (`a · a⁻¹ = 1 mod m`) and the 3×86-bit
+affine point-add / point-double steps.
 
 We prove the *abstract* soundness of this pattern over `ℕ`: that the integer
 identity together with the range check on `c` already forces `c` to be the
@@ -96,7 +97,7 @@ discharges the gap between the `ℕ`-valued statement above and the actual
 * `carry_le` — the carry-budget bound: assuming the per-column ℕ-equation, the
   `k`-th carry stays below `(k + 1) · n · (β − 1)²`.
 * `mul_mod_via_Fr_limbwise_constraints` — the headline theorem for the
-  secp256k1 concrete shape (`n = 3`, `β = 2 ^ 86`): from the per-column
+  3×86-bit shape (`n = 3`, `β = 2 ^ 86`): from the per-column
   equations holding in `Fr` together with the limb / carry value bounds
   (the in-circuit range obligation), the integer-level conclusion of
   `mul_mod_via_limbwise_constraints` follows. The budget chain keeps every
@@ -122,7 +123,7 @@ theorem mul_mod_sound (a b q c m : ℕ) (hc : c < m)
 any positive modulus `m`, the division-algorithm pair
 `(q, c) = (a * b / m, a * b % m)` satisfies the integer identity
 `a · b = q · m + c` with `c < m`. So every honest evaluation is admissible —
-the gadget rejects no valid signature for lack of a witness. -/
+the gadget rejects no honest product for lack of a witness. -/
 theorem mul_mod_complete (a b m : ℕ) (hm : 0 < m) :
     ∃ q c, c < m ∧ a * b = q * m + c := by
   refine ⟨(a * b) / m, (a * b) % m, Nat.mod_lt _ hm, ?_⟩
@@ -135,7 +136,7 @@ theorem mul_mod_complete (a b m : ℕ) (hm : 0 < m) :
 `valOfLimbs ls β = Σᵢ ls i · β^i`. Models the in-circuit reconstruction
 `Σᵢ β^i · limbᵢ` emitted by the limb recomposition in `gadgets/xark-bignum/src/lib.rs`, but
 phrased generically over the number of limbs and over an arbitrary base.
-The secp256k1 lowering instantiates `n = 3`, `β = 2 ^ 86`. -/
+`Bignum<3, 86>` instantiates `n = 3`, `β = 2 ^ 86`. -/
 def valOfLimbs {n : ℕ} (ls : Fin n → ℕ) (β : ℕ) : ℕ :=
   ∑ i : Fin n, ls i * β ^ (i : ℕ)
 
@@ -149,7 +150,7 @@ theorem valOfLimbs_zero (ls : Fin 0 → ℕ) (β : ℕ) :
 /-- **Cons-style recomposition identity.** A length-`n+1` limb vector splits
 into its `0`-th limb plus `β` times the recomposition of the tail. This is the
 single inductive step you need to fold any limbwise statement into a whole-value
-statement (e.g. for the `n = 3` secp256k1 case). -/
+statement (e.g. for the `n = 3` case). -/
 theorem valOfLimbs_succ {n : ℕ} (ls : Fin (n + 1) → ℕ) (β : ℕ) :
     valOfLimbs ls β
       = ls 0 + β * valOfLimbs (fun i : Fin n => ls i.succ) β := by
@@ -191,7 +192,7 @@ def valOfNatLimbs (a : ℕ → ℕ) (n β : ℕ) : ℕ :=
 
 /-- **Column sum (partial product) of two limb sequences.**
 `colSum a b k = Σ_{i ≤ k} aᵢ · b_{k−i}` — the `k`-th column of the schoolbook
-multiplication table. The ECDSA `mul_mod` gadget enforces, per output column,
+multiplication table. `mod_mul` enforces, per output column,
 an equation that compares `colSum a b k` against `colSum (q·m + c)-limbs k` up
 to a propagating carry. -/
 def colSum (a b : ℕ → ℕ) (k : ℕ) : ℕ :=
@@ -338,7 +339,7 @@ theorem carry_telescope (carry : ℕ → ℕ) (β N : ℕ)
 with the carries pinned at the boundaries `carry 0 = 0` and `carry N = 0`, then
 the polynomial values `Σₖ colA k · β^k` and `Σₖ colQM k · β^k` agree.
 
-In the ECDSA `mul_mod` context: `N = 2n`, `colA k = colSum a b k` (column of the
+In the `mod_mul` context: `N = 2n`, `colA k = colSum a b k` (column of the
 product `a · b`), `colQM k = colSum_qm k` (column of `q · m + c`). The boundary
 carries are zero by construction, and the no-wrap condition is exactly that
 each `carry k` is an honest natural number rather than a wrapped field element. -/
@@ -536,7 +537,7 @@ theorem colSum_le (a b : ℕ → ℕ) (β k : ℕ)
 `colSum a b k + carry k = colSum q m k + ext c k + β · carry (k+1)` with limbs
 bounded by a base `β ≥ 2`, the `k`-th carry stays bounded by
 `(k + 1) · (β − 1)²` (a coarse uniform bound; tighter `n · (β − 1)` bounds are
-possible but unnecessary for the secp256k1 budget). Proved by induction on `k`,
+possible but unnecessary for the 3×86-bit budget). Proved by induction on `k`,
 using `β · carry (k+1) ≤ colSum a b k + carry k` from the equation. -/
 theorem carry_le {n : ℕ} (a b q c m : Fin n → ℕ)
     (carry : ℕ → ℕ) (β : ℕ) (hβ : 2 ≤ β)
@@ -605,7 +606,7 @@ column equation we prove sound here is
   `= (∑ i ∈ [0, k+1), qᵢ · m_{k-i}) + cₖ + (β : Fr) · carry (k+1)`
 
 where every quantity is `Fr`-valued. The "no field wrap" obligation is the
-prover-side circuit range gadget on each `carry k`. For the secp256k1
+prover-side circuit range gadget on each `carry k`. For the 3×86-bit
 instantiation `n = 3`, `β = 2 ^ 86`, the budget chain
 
   `colSum ≤ 3 · (2^86 - 1)²  <  2^175`

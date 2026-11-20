@@ -5,7 +5,8 @@
 //! constraint references `b` so the structural gate is satisfied, but booleanity
 //! alone leaves `b` two-valued and nothing pins it to the actual bit of `x` — a
 //! prover could flip `b` freely. `xark_ir::solver::analyze_underconstrained`
-//! catches this from the solved witness, so `xark prove` must reject it.
+//! catches this from the solved witness, so the circuit's tests (`check`, what
+//! the generated validator runs) reject it. `xark prove` doesn't check soundness.
 //!
 //! Contrast `examples/to_bits`, which recomposes the bits (`Σ bitᵢ·2ⁱ == x`) —
 //! that recomposition pins every bit and proves clean.
@@ -22,24 +23,24 @@ pub fn underconstrained_bit(x: Private<Field>, out: Public<Field>) {
 mod tests {
     use super::{UnderconstrainedBitInputs, underconstrained_bit};
 
-    // `check` (what `underconstrained_bit(..)` runs) verifies constraint
-    // satisfaction, not uniqueness: honest inputs pass it.
+    // `check` (what `underconstrained_bit(..)` runs) also looks for free witness
+    // variables, and finds `b`, even on honest inputs.
     #[test]
-    fn rejects_mismatched_output() {
-        assert!(underconstrained_bit(5, 5).is_ok());
-        assert!(underconstrained_bit(5, 6).is_err());
+    fn check_finds_the_free_bit() {
+        let err = underconstrained_bit(5, 5).expect_err("`b` is two-valued");
+        assert!(err.to_string().contains("under-constrained"), "{err}");
     }
 
-    // `check_constrained` also looks for free witness variables, and finds `b`.
+    // `check_satisfied` verifies constraint satisfaction alone: honest inputs
+    // pass it, a mismatched output doesn't.
     #[test]
-    fn check_constrained_finds_the_free_bit() {
-        let inputs = UnderconstrainedBitInputs {
-            x: 5.into(),
-            out: 5.into(),
+    fn honest_inputs_satisfy_it() {
+        let circuit = xark::prover::circuit("underconstrained_bit");
+        let inputs = |x: u64, out: u64| UnderconstrainedBitInputs {
+            x: x.into(),
+            out: out.into(),
         };
-        let err = xark::prover::circuit("underconstrained_bit")
-            .check_constrained(inputs)
-            .expect_err("`b` is two-valued");
-        assert!(err.to_string().contains("under-constrained"), "{err}");
+        assert!(circuit.check_satisfied(inputs(5, 5)).is_ok());
+        assert!(circuit.check_satisfied(inputs(5, 6)).is_err());
     }
 }

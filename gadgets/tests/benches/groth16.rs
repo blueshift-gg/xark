@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use ark_bn254::{Bn254, Fr};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
-use xark_backend::{test_rng, verify};
+use xark_backend::test_rng;
 use xark_groth16::{ConstraintSource, InMemoryPk, ProgramSource, Proof, ProverConfig, ProvingKey};
 use xark_ir::solver;
 use xark_ir::{R1csProgram, VarId, primitive};
@@ -76,7 +76,7 @@ fn load_and_solve(name: &str, inputs: &[(&str, &str)]) -> (R1csProgram, BTreeMap
     (r1cs, assign)
 }
 
-/// Dev-mode keys for `prog` (xark-groth16's setup, as `xark setup --insecure-dev-mode`).
+/// Keys for `prog` (xark-groth16's setup, as `xark setup` makes them without a `.ptau`).
 fn setup(prog: &R1csProgram, rng: &mut xark_backend::ChaCha20Rng) -> ProvingKey<Bn254> {
     let mut pk = Vec::new();
     xark_groth16::setup::dev_setup(
@@ -160,7 +160,7 @@ fn bench_circuit(c: &mut Criterion, name: &str, inputs: &[(&str, &str)]) {
     };
     group.bench_function("verify", |b| {
         b.iter(|| {
-            let ok = verify(&vk, &proof, &public_inputs).expect("verify");
+            let ok = xark_groth16::verify(&vk, &public_inputs, &proof).expect("verify");
             assert!(ok, "proof must verify");
         });
     });

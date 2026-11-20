@@ -1,16 +1,12 @@
 //! `xark-secp256k1`: secp256k1 ECDSA gadget over the `xark` `Field` subset.
 //!
 //! secp256k1 is `y² = x³ + 7` (short Weierstrass with **a = 0**, j-invariant 0)
-//! over the base field `p = 2^256 - 2^32 - 977`, group order `n`. 256-bit field
-//! elements are 3 little-endian 86-bit limbs (86 is the multiply-optimal size
-//! over BN254); the non-native field arithmetic lives in [`xark_bignum`] (shared
-//! with secp256r1, parameterized by modulus). This crate supplies the curve
-//! constants and the incomplete-affine group law — with `a = 0` the doubling
-//! slope is just `3x²/2y` (no `a` term).
+//! over the base field `p = 2^256 - 2^32 - 977`, group order `n`.
 //!
-//! The shipped verifier is the fake-GLV 8×32 certificate gadget below
-//! ([`Point::verify`]); the non-native field / EC arithmetic lives in [`xark_bignum`]
-//! (shared with secp256r1, parameterized by modulus). Inputs are the transparent
+//! The verifier ([`Point::verify`]) is fake GLV over 8 × 32-bit limbs whose field
+//! relations are [`xark_bignum`] certificates (shared with secp256r1, parameterized
+//! by modulus); scalars use 4 × 64-bit limbs. The eager 3×86-bit incomplete-affine
+//! curve gadget lives in the [`affine`] submodule. Inputs are the transparent
 //! compound types [`Point`] / [`Signature`] / [`Scalar`] — the caller never touches
 //! limbs. Every arithmetic building block is individually solver-validated (see the
 //! `xark` compiler snapshot tests).

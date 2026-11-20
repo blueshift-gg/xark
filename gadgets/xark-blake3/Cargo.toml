@@ -9,13 +9,14 @@ edition = "2024"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "xark_blake3"
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
-xark-bits = { path = "../xark-bits", version = "0.3.0" }
-xark-hash = { path = "../xark-hash", version = "0.3.0" }
+xark.workspace = true
+xark-bits.workspace = true
+xark-hash.workspace = true
 

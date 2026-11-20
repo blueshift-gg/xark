@@ -35,9 +35,14 @@ by another test process can't pull the file out from under a running test.
 ## Layout
 
 - `src/lib.rs` — fixture consts + the `xark` binary locator.
-- `tests/` — integration tests: CLI end-to-end and per-gadget (`aes128`,
- `keccak`, `poseidon`, …), the on-chain `sbpf` suite, public-input `binding`,
- `fuzz`, backend `ptau` / `serialization` / `solana_format` / `soundness`.
+- `tests/it/` — one test binary (`--test it`), each file a module: CLI
+ end-to-end (`end_to_end`, `ceremony_cli`, `cli_errors`, `export`, `init`, …),
+ the host verifier (`host`, `batch`), `fuzz`, backend `ptau` / `serialization` /
+ `solana_format`, and `xark_ir_e2e`. Per-gadget tests live in each gadget
+ crate's own `tests/`.
+- `tests/sbpf.rs`, `tests/differential_alt_bn128.rs` — the `#[svm_test]`
+ suites (on chain in Mollusk), their own binaries because `#[svm_test]` builds
+ them for SBF.
 - `benches/groth16.rs` — proving/verifying benchmarks (`harness = false`).
 
 Fixtures live under `gadgets/tests/fixtures/groth16/` and are

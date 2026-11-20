@@ -485,6 +485,20 @@ mod tests {
         }
     }
 
+    /// A transcript whose τ is a root of unity of its size passes every other check,
+    /// yet makes the vanishing polynomial 0 at τ, so any witness would prove: refused.
+    #[test]
+    fn a_root_of_unity_tau_is_refused() {
+        use ark_ff::FftField;
+        let (alpha, beta) = (Fr::from(5u64), Fr::from(7u64));
+        let i4 = Fr::get_root_of_unity(4).expect("a 4th root of unity");
+        for tau in [-Fr::from(1u64), i4] {
+            let ptau = fake_ptau(4, tau, alpha, beta);
+            let r = crate::ptau::setup_from_ptau(&ProgramSource::new(&square()), &ptau, &[7u8; 32]);
+            assert!(r.is_err(), "τ = {tau} was accepted");
+        }
+    }
+
     #[test]
     fn single_contribution_then_proof_verifies() {
         let mut keys = fresh_phase2_keys();

@@ -1,3 +1,14 @@
 [alias]
 # Repository tasks (`xtask/`): `cargo xtask --help`.
 xtask = "run -q --release -p xtask --"
+
+[env]
+# macOS's nano allocator (blocks up to 256 bytes) intermittently aborts the test
+# binaries with "pointer being freed was not allocated": a `Vec` the witness search
+# still owns, whose slot malloc already lists as free. `snapshot`'s
+# `small_field_curve_gadgets_are_sound` hits it in about 5% of runs on an M-series
+# Mac (12 in 237), and never with the nano allocator off (0 in 80) or under
+# `--nocapture` (0 in 60); Linux CI has never seen it. The code involved is safe
+# Rust, so until a repro says whose bug it is, the tests run without that
+# allocator. Every other platform ignores the variable.
+MallocNanoZone = "0"

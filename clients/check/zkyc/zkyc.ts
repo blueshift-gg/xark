@@ -6,11 +6,11 @@
 // `xark build` records the circuit's parameter types in target/xark/zkyc/schema.json
 // and `xark client` turns them into the types below. Don't edit this file: change
 // the circuit, then rebuild and rerun `xark client`. Values go in their natural
-// forms (dates, strings, variant names, bytes); xark-wasm encodes them against the
+// forms (dates, strings, variant names, bytes); `@blueshift-gg/xark` encodes them against the
 // schema (at the end of the imports), exactly as `xark prove
 // --inputs` does.
 
-import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type Json, type Proof, type Prover, type Text, type U16, type U64, type Verifier } from "@blueshift-gg/xark-wasm/client";
+import { CheckFailed, Circuit, Field, InputError, fromHex, toHex, type FieldInput, type Json, type Proof, type Prover, type Text, type U16, type U64, type Verifier } from "@blueshift-gg/xark/client";
 export { CheckFailed, Field, InputError, fromHex, toHex };
 
 // The circuit's schema.json.
@@ -422,7 +422,7 @@ const schema = {
     }
   },
   "version": 2,
-  "xark": "0.3.0"
+  "xark": "0.4.0"
 };
 
 /** A `Country` (an enum in the circuit): `Country.AD`, or its name, `"AD"`. */
@@ -576,7 +576,7 @@ export const Zkyc = new Circuit<ZkycInputs, ZkycPublicInputs, ZkycPublicValues, 
   schema,
   decodePublic,
   client: true,
-  digest: "514f076abbecd83e76da821618a6d19e",
+  digest: "fdbbf1a8cc83d56cd35e46bca20d5eaf",
 });
 
 export type ZkycProver = Prover<ZkycInputs, ZkycPublicInputs, ZkycPublicValues, ZkycStructs>;

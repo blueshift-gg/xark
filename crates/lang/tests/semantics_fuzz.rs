@@ -16,9 +16,11 @@
 //! * panics (overflow, `/ 0`, a failed `assert!`) → no witness proves any `out` tried
 //!   (the honest value, wrapped, 0).
 //!
-//! `XARK_FUZZ_CASES` (default 24) and `XARK_FUZZ_SEED` widen it. A circuit the
-//! frontend refuses to compile is reported, not failed: an honest rejection is never
-//! unsound. A search that can't decide is reported too.
+//! `XARK_FUZZ_CASES` (default 24) and `XARK_FUZZ_SEED` widen it. Each case draws
+//! from its own generator, seeded from the run seed and its number, so case `n` is
+//! the same program whatever the case count and the cases run across the cores. A
+//! circuit the frontend refuses to compile is reported, not failed: an honest
+//! rejection is never unsound. A search that can't decide is reported too.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -28,6 +30,28 @@ use xark_ir::witness_search::{self, WitnessSearch};
 
 /// Case splits per witness search before it gives up (reported, not failed).
 const SEARCH_BUDGET: usize = 4096;
+
+/// A case's own seed from the run seed: splitmix64 (Steele, Lea and Flood, "Fast
+/// splittable pseudorandom number generators", OOPSLA 2014; the constants are its
+/// reference implementation's) of the run seed advanced by the case number.
+fn case_seed(seed: u64, case: usize) -> u64 {
+    let mut z = seed.wrapping_add((case as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// What one case found.
+#[derive(Default)]
+struct Case {
+    compiled: bool,
+    /// The first error line, when the frontend refused the program.
+    refused: Option<String>,
+    checks: usize,
+    searches: usize,
+    inconclusive: BTreeMap<String, usize>,
+    failures: Vec<String>,
+}
 
 /// xorshift64*: deterministic, dependency-free.
 struct Rng(u64);
@@ -628,11 +652,9 @@ fn circuits_match_native_rust_semantics() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0x5eed_1234_abcd);
-    let mut r = Rng(seed | 1);
-    let (mut compiled, mut refused, mut checks) = (0usize, Vec::new(), 0usize);
-    let mut failures = Vec::new();
-    let (mut searches, mut inconclusive) = (0usize, BTreeMap::<String, usize>::new());
-    for case in 0..cases {
+    let run_case = |case: usize| -> Case {
+        let mut found = Case::default();
+        let mut r = Rng(case_seed(seed, case) | 1);
         let p = gen_prog(&mut r);
         let src = render(&p);
         let c = xark_test_harness::compile_source(&format!("fuzz_sem_{case}"), &src, "bn254");
@@ -654,7 +676,7 @@ fn circuits_match_native_rust_semantics() {
                 for _ in 0..32 {
                     let xs: Vec<u128> = (0..p.n_inputs).map(|_| gen_input(&mut r, &p)).collect();
                     if let Some(v) = eval(&p, &xs) {
-                        failures.push(format!(
+                        found.failures.push(format!(
                             "case {case} {xs:?}: refused as always panicking, but Rust gives {v}\n{src}"
                         ));
                         break;
@@ -664,10 +686,10 @@ fn circuits_match_native_rust_semantics() {
             if std::env::var_os("XARK_FUZZ_SHOW_REFUSED").is_some() {
                 eprintln!("--- refused case {case}: {first}\n{src}");
             }
-            refused.push(first);
-            continue;
+            found.refused = Some(first);
+            return found;
         }
-        compiled += 1;
+        found.compiled = true;
         let prog = c.program();
         let id = |name: &str| prog.vars.iter().find(|v| v.name == name).map(|v| v.id);
         let solve = |xs: &[u128], out: u128| {
@@ -688,11 +710,12 @@ fn circuits_match_native_rust_semantics() {
             m.insert(id("out").unwrap(), out.to_string());
             witness_search::search_witnesses(&prog, &m, SEARCH_BUDGET).unwrap()
         };
+        let (searches, inconclusive) = (&mut found.searches, &mut found.inconclusive);
         let mut adversary = |failures: &mut Vec<String>,
                              xs: &[u128],
                              out: u128,
                              want_unique: bool| {
-            searches += 1;
+            *searches += 1;
             match (search(xs, out), want_unique) {
                 (WitnessSearch::Unique(_), true) | (WitnessSearch::None, false) => {}
                 (WitnessSearch::Inconclusive(why), _) => {
@@ -712,9 +735,10 @@ fn circuits_match_native_rust_semantics() {
                 )),
             }
         };
+        let mut failures = Vec::new();
         for _ in 0..8 {
             let xs: Vec<u128> = (0..p.n_inputs).map(|_| gen_input(&mut r, &p)).collect();
-            checks += 1;
+            found.checks += 1;
             match eval(&p, &xs) {
                 Some(v) => {
                     adversary(&mut failures, &xs, v, true);
@@ -758,6 +782,41 @@ fn circuits_match_native_rust_semantics() {
                     }
                 }
             }
+        }
+        found.failures.extend(failures);
+        found
+    };
+    // Cases across the cores, reported in case order.
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let mut results: Vec<(usize, Case)> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                let run_case = &run_case;
+                s.spawn(move || {
+                    (t..cases)
+                        .step_by(threads)
+                        .map(|case| (case, run_case(case)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        // Every thread joined before any is unwrapped: a panic while one is still
+        // to be joined aborts the test binary instead of failing the test.
+        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
+        joined.into_iter().flat_map(|r| r.unwrap()).collect()
+    });
+    results.sort_by_key(|(case, _)| *case);
+    let (mut compiled, mut refused, mut checks, mut searches) =
+        (0usize, Vec::new(), 0usize, 0usize);
+    let (mut failures, mut inconclusive) = (Vec::new(), BTreeMap::<String, usize>::new());
+    for (_, c) in results {
+        compiled += usize::from(c.compiled);
+        refused.extend(c.refused);
+        checks += c.checks;
+        searches += c.searches;
+        failures.extend(c.failures);
+        for (why, n) in c.inconclusive {
+            *inconclusive.entry(why).or_default() += n;
         }
     }
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();

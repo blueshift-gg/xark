@@ -1,7 +1,8 @@
 //! Isolated validation of the fused non-native subtract `(a − b − c) mod p` over
 //! secp256k1's base field (3×86-bit limbs). Inputs are field-valued limb arrays
-//! passed as decimal strings.
+//! passed as decimal strings, so the circuit range-checks them.
 use xark::{circuit, require_eq, Field, Private, Public};
+use xark_bignum::range_check_limbs;
 
 #[circuit]
 pub fn sub2(
@@ -15,13 +16,11 @@ pub fn sub2(
         Field::constant("77371252455336267181195263"),
         Field::constant("19342813113834066795298815"),
     ];
-    let pm1 = [
-        Field::constant("77371252455336262886226990"),
-        Field::constant("77371252455336267181195263"),
-        Field::constant("19342813113834066795298815"),
-    ];
+    range_check_limbs::<3, 86>(a);
+    range_check_limbs::<3, 86>(b);
+    range_check_limbs::<3, 86>(c);
     // Qualified: the entry fn shares the gadget's name.
-    let out = xark_bignum::sub2::<3, 86>(a, b, c, p, pm1);
+    let out = xark_bignum::sub2::<3, 86>(a, b, c, p);
     require_eq(out[0], r[0]);
     require_eq(out[1], r[1]);
     require_eq(out[2], r[2]);

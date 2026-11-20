@@ -7,6 +7,7 @@
 //! circuit source with stable `rustc` against them and lowers the module with
 //! `xark-frontend`.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
@@ -130,7 +131,7 @@ impl Compiled {
     fn resolve_inputs(
         &self,
         inputs: &[(&str, &dyn bignum::LeafInput)],
-    ) -> Result<(Vec<u8>, std::collections::BTreeMap<u32, String>), String> {
+    ) -> Result<(Vec<u8>, BTreeMap<u32, String>), String> {
         use xark_ir::primitive::VarRole;
         let bytes = std::fs::read(self.out_dir.join("circuit.xbc"))
             .map_err(|e| format!("read circuit.xbc: {e}"))?;
@@ -139,7 +140,7 @@ impl Compiled {
             .iter()
             .filter(|v| matches!(v.role, VarRole::PublicInput | VarRole::PrivateInput))
             .collect();
-        let by_name: std::collections::BTreeMap<&str, u32> =
+        let by_name: BTreeMap<&str, u32> =
             input_vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
 
         let pairs: Vec<(String, String)> =
@@ -153,8 +154,7 @@ impl Compiled {
                 pairs.len(),
             ));
         }
-        let mut id_inputs: std::collections::BTreeMap<u32, String> =
-            std::collections::BTreeMap::new();
+        let mut id_inputs: BTreeMap<u32, String> = BTreeMap::new();
         for (name, val) in pairs {
             let id = by_name.get(name.as_str()).ok_or_else(|| {
                 let expected: Vec<&str> = input_vars.iter().map(|v| v.name.as_str()).collect();
@@ -171,17 +171,12 @@ impl Compiled {
     /// under-constraint analyzer, all streamed from `circuit.xbc` — the low-memory
     /// analogue of `from_json` + `solve_and_check` + `analyze_underconstrained`.
     /// `Ok(())` iff every constraint holds and no referenced var is forgeable.
-    pub fn check_named(
-        &self,
-        inputs: &std::collections::BTreeMap<String, String>,
-    ) -> Result<(), String> {
+    pub fn check_named(&self, inputs: &BTreeMap<String, String>) -> Result<(), String> {
         let xbc = self.out_dir.join("circuit.xbc");
         let bytes = std::fs::read(&xbc).map_err(|e| format!("read {}: {e}", xbc.display()))?;
         let vars = xark_ir::function_decode::decode_vars(&bytes);
-        let by_name: std::collections::BTreeMap<&str, u32> =
-            vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
-        let mut id_inputs: std::collections::BTreeMap<u32, String> =
-            std::collections::BTreeMap::new();
+        let by_name: BTreeMap<&str, u32> = vars.iter().map(|v| (v.name.as_str(), v.id)).collect();
+        let mut id_inputs: BTreeMap<u32, String> = BTreeMap::new();
         for (name, val) in inputs {
             let id = by_name
                 .get(name.as_str())
@@ -214,48 +209,125 @@ fn workspace_root() -> PathBuf {
         .expect("canonicalize workspace root")
 }
 
-/// One `--extern name=path` per circuit rlib (newest per crate; skip stray
-/// non-hashed artifacts and the non-circuit libraries).
-fn externs(deps: &Path) -> Vec<String> {
-    let mut rlibs: Vec<PathBuf> = std::fs::read_dir(deps)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            // `libxark_foo-<hash>.rlib` for the gadget crates *and*
-            // `libxark-<hash>.rlib` for the merged `xark` lib itself (the
-            // language markers), which gadgets now depend on.
-            (n.starts_with("libxark_") || n.starts_with("libxark-")) && n.ends_with(".rlib")
-        })
-        .collect();
-    rlibs.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-    rlibs.reverse(); // newest first
+/// The wasm libraries a circuit is compiled against: the `xark` lib and the
+/// gadget crates, built once per test process.
+struct WasmLibs {
+    /// The workspace root the libraries and each circuit's output live under.
+    root: PathBuf,
+    /// The `--extern` name and rlib path for every library the circuit is built against.
+    externs: BTreeMap<String, PathBuf>,
+    /// The build's artifact directories, searched for the rlibs' dependencies.
+    library_dirs: BTreeSet<PathBuf>,
+}
 
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for p in &rlibs {
-        let file = p.file_name().unwrap().to_string_lossy();
-        // `libxark_foo-<hash>.rlib` → `xark_foo`; require the `-<hash>` (skips
-        // stray non-cargo artifacts that would otherwise keep the `.rlib`).
-        let Some(stem) = file
-            .strip_prefix("lib")
-            .and_then(|s| s.strip_suffix(".rlib"))
-        else {
-            continue;
-        };
-        let Some((name, _hash)) = stem.rsplit_once('-') else {
-            continue;
-        };
-        if matches!(name, "xark_ir" | "xark_prover" | "xark_test_harness") {
-            continue;
+impl WasmLibs {
+    /// Build the libraries once for this process.
+    fn get() -> &'static Self {
+        static LIBS: OnceLock<WasmLibs> = OnceLock::new();
+        LIBS.get_or_init(Self::build)
+    }
+
+    fn build() -> Self {
+        let root = workspace_root();
+        let target = root.join("target/xark-compile-wasm");
+        let wasm_target = target.join("wasm32-unknown-unknown");
+        let mut packages: Vec<String> = std::fs::read_dir(root.join("gadgets"))
+            .expect("unable to read the workspace's gadgets/ directory")
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| name.starts_with("xark-"))
+            .collect();
+        packages.sort();
+
+        // Cargo's lib target names use underscores in place of package-name
+        // hyphens. `xark` itself is not under `gadgets/`.
+        let mut requested_targets = BTreeSet::from(["xark".to_owned()]);
+        requested_targets.extend(packages.iter().map(|name| name.replace('-', "_")));
+
+        let output = Command::new("cargo")
+            .args([
+                "build",
+                "--release",
+                "--target",
+                "wasm32-unknown-unknown",
+                "-p",
+                "xark",
+            ])
+            .args(packages.iter().flat_map(|name| ["-p", name.as_str()]))
+            .arg("--message-format=json-render-diagnostics")
+            .env("RUSTFLAGS", "--cfg xark --allow=unexpected_cfgs")
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("RUSTUP_TOOLCHAIN")
+            .current_dir(&root)
+            .output()
+            .expect("run cargo build (wasm gadgets)");
+
+        assert!(
+            output.status.success(),
+            "building wasm gadget rlibs failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let mut externs = BTreeMap::new();
+        let mut library_dirs = BTreeSet::new();
+
+        for line in output.stdout.split(|b| *b == b'\n') {
+            let Ok(msg) = serde_json::from_slice::<serde_json::Value>(line) else {
+                continue;
+            };
+            if msg["reason"] != "compiler-artifact" {
+                continue;
+            }
+            let Some(name) = msg["target"]["name"].as_str() else {
+                continue;
+            };
+
+            for file in msg["filenames"].as_array().into_iter().flatten() {
+                let Some(file) = file.as_str() else { continue };
+                let file = Path::new(file);
+
+                // -L takes directories, not files.
+                if let Some(dir) = file.parent() {
+                    library_dirs.insert(dir.to_path_buf());
+                }
+
+                // Only requested crates are externs; a target may be reported
+                // for both host and wasm, so keep the first wasm rlib.
+                if requested_targets.contains(name)
+                    && file.starts_with(&wasm_target)
+                    && file.extension().and_then(|ext| ext.to_str()) == Some("rlib")
+                {
+                    externs
+                        .entry(name.to_owned())
+                        .or_insert_with(|| file.to_path_buf());
+                }
+            }
         }
-        if seen.insert(name.to_string()) {
-            out.push(format!("{name}={}", p.display()));
+
+        assert!(
+            !externs.is_empty(),
+            "cargo build reported no circuit rlibs:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        Self {
+            root,
+            externs,
+            library_dirs,
         }
     }
-    out
+
+    /// Add these libraries to a `rustc` command: each rlib as an `--extern`,
+    /// and every artifact directory as a dependency search path.
+    fn link(&self, cmd: &mut Command) {
+        for (name, path) in &self.externs {
+            cmd.arg("--extern")
+                .arg(format!("{name}={}", path.display()));
+        }
+        for dir in &self.library_dirs {
+            cmd.arg("-L").arg(format!("dependency={}", dir.display()));
+        }
+    }
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -276,63 +348,20 @@ pub fn compile_file_json(src: &Path, out_name: &str, field: &str) -> Compiled {
     compile_file_inner(src, out_name, field, true)
 }
 
-/// The gadget crates (`gadgets/xark-*`) plus the `xark` lib, built once for wasm32
-/// with `--cfg xark`; returns `(wasm deps dir, host deps dir)` (the proc macros
-/// are host artifacts).
-fn built_wasm() -> &'static (PathBuf, PathBuf) {
-    static BUILT: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
-    BUILT.get_or_init(|| {
-        let root = workspace_root();
-        let target = root.join("target/xark-compile-wasm");
-        let mut args: Vec<String> = [
-            "build",
-            "--release",
-            "--target",
-            "wasm32-unknown-unknown",
-            "-p",
-            "xark",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        let mut names: Vec<String> = std::fs::read_dir(root.join("gadgets"))
-            .expect("read gadgets/")
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.starts_with("xark-"))
-            .collect();
-        names.sort();
-        for n in names {
-            args.push("-p".into());
-            args.push(n);
-        }
-        let ok = Command::new("cargo")
-            .args(&args)
-            .env("RUSTFLAGS", "--cfg xark --allow=unexpected_cfgs")
-            .env("CARGO_TARGET_DIR", &target)
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .current_dir(&root)
-            .status()
-            .expect("run cargo build (wasm gadgets)")
-            .success();
-        assert!(ok, "building wasm gadget rlibs failed");
-        (
-            target.join("wasm32-unknown-unknown/release/deps"),
-            target.join("release/deps"),
-        )
-    })
-}
-
 /// `target/test-out/<out_name>`, this process's until it exits: the caller reads the
 /// out dir after compiling into it, so a runner that gives each test its own process
 /// (`cargo nextest`) would otherwise let another test rewrite it meanwhile. If another
 /// process holds it, this one gets `<out_name>-<pid>` instead (never waiting, so two
-/// tests can't deadlock on two names).
+/// tests can't deadlock on two names). Each later claim in this process gets its own
+/// `<dir>.<n>`: two tests compiling the same source by the same name may run at once.
 fn claim_out_dir(test_out: &Path, out_name: &str) -> PathBuf {
-    static HELD: Mutex<Vec<(String, PathBuf, std::fs::File)>> = Mutex::new(Vec::new());
+    static HELD: Mutex<Vec<(String, PathBuf, std::fs::File, usize)>> = Mutex::new(Vec::new());
     let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, dir, _)) = held.iter().find(|(n, ..)| n == out_name) {
-        return dir.clone();
+    if let Some((_, dir, _, claims)) = held.iter_mut().find(|(n, ..)| n == out_name) {
+        *claims += 1;
+        let mut name = dir.file_name().expect("an out dir name").to_os_string();
+        name.push(format!(".{claims}"));
+        return dir.with_file_name(name);
     }
     std::fs::create_dir_all(test_out).expect("create target/test-out");
     let path = test_out.join(format!("{out_name}.lock"));
@@ -344,15 +373,13 @@ fn claim_out_dir(test_out: &Path, out_name: &str) -> PathBuf {
         }
         Err(std::fs::TryLockError::Error(e)) => panic!("locking {}: {e}", path.display()),
     };
-    held.push((out_name.to_string(), dir.clone(), file));
+    held.push((out_name.to_string(), dir.clone(), file, 0));
     dir
 }
 
 fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool) -> Compiled {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let (deps, host_deps) = built_wasm();
-    let root = workspace_root();
-    let out_dir = claim_out_dir(&root.join("target/test-out"), out_name);
+    let libs = WasmLibs::get();
+    let out_dir = claim_out_dir(&libs.root.join("target/test-out"), out_name);
     let _ = std::fs::remove_dir_all(&out_dir);
     std::fs::create_dir_all(&out_dir).expect("create out dir");
     let wasm = out_dir.join("circuit.wasm");
@@ -380,18 +407,12 @@ fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool)
         "-Cpanic=abort",
         "-Coverflow-checks=on",
     ]);
-    for e in externs(deps) {
-        cmd.arg("--extern").arg(e);
-    }
-    cmd.arg("-L")
-        .arg(format!("dependency={}", deps.display()))
-        .arg("-L")
-        .arg(format!("dependency={}", host_deps.display()));
+    libs.link(&mut cmd);
     let output = cmd
         .arg(src)
         .arg("-o")
         .arg(&wasm)
-        .current_dir(&root)
+        .current_dir(&libs.root)
         .output()
         .expect("run rustc");
     if !output.status.success() {
@@ -402,6 +423,10 @@ fn compile_file_stable(src: &Path, out_name: &str, field: &str, emit_json: bool)
         };
     }
     let bytes = std::fs::read(&wasm).expect("read circuit.wasm");
+    // One lowering at a time in this process; the rustc runs above are each their
+    // own process on their own output directory, so a test that compiles many
+    // small programs (the semantics fuzzer) compiles them across the cores.
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let spec = if field == "unknown" {
         xark_ir::FieldSpec::unknown()
     } else {
@@ -494,4 +519,31 @@ pub fn compile_source(name: &str, src: &str, field: &str) -> Compiled {
     let path = std::env::temp_dir().join(format!("xark_harness_{name}.rs"));
     std::fs::write(&path, src).expect("write temp source");
     compile_file(&path, name, field)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn libs_link_as_externs_and_search_paths() {
+        let libs = WasmLibs {
+            root: PathBuf::from("/repo"),
+            externs: BTreeMap::from([(
+                "xark".to_string(),
+                PathBuf::from("/repo/target/libxark.rlib"),
+            )]),
+            library_dirs: BTreeSet::from([PathBuf::from("/repo/target/deps")]),
+        };
+        let mut cmd = Command::new("rustc");
+        libs.link(&mut cmd);
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args.join(" "),
+            "--extern xark=/repo/target/libxark.rlib -L dependency=/repo/target/deps"
+        );
+    }
 }

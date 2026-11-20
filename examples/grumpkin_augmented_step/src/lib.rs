@@ -20,19 +20,6 @@
 
 use xark_grumpkin::prelude::*;
 
-/// Fold challenge `r = low128(Poseidon2(transcript))` (15 elements, bound to `z_next`).
-fn challenge(t: [Field; 15]) -> [Field; 128] {
-    let h = xark_poseidon2::hash(t);
-    let bits = h.to_bits_canonical();
-    let mut out = [Field::from(0u8); 128];
-    let mut i = 0usize;
-    while i < 128usize {
-        out[i] = bits[i];
-        i += 1;
-    }
-    out
-}
-
 /// The IVC IO hash `Poseidon2(i, z0, z, U)`, the instance `U` as
 /// `comm_W.x, comm_W.y, comm_E.x, comm_E.y, u, x`.
 fn io_hash(i: Field, z0: Field, z: Field, u: Instance) -> Field {
@@ -71,7 +58,7 @@ pub fn grumpkin_augmented_step(
     tr[12] = t.x;
     tr[13] = t.y;
     tr[14] = z_next;
-    let r_bits = challenge(tr);
+    let r_bits = xark_poseidon2::challenge::<15, 128>(tr);
     let r_fr = Field::from_bits::<128>(r_bits);
     let pt = |p: Affine| [p.x, p.y];
     let cw = ec_add(pt(ui.cw), scalar_mul(r_bits, pt(s.cw)));

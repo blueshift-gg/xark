@@ -3,7 +3,7 @@ import type { ProofBundle } from "../dist/web/xark_wasm.js";
 export interface StreamProveOptions {
   /** `r1cs.stream` bytes, for a key `xark setup` generated in the `minimized` form. */
   r1cs?: Uint8Array | ArrayBuffer;
-  /** Worker pool from `@blueshift-gg/xark-wasm/pool` (needs SharedArrayBuffer). */
+  /** Worker pool from `@blueshift-gg/xark/pool` (needs SharedArrayBuffer). */
   pool?: unknown;
   /** Proving-key points folded per MSM chunk (default 2^18). */
   msmChunk?: number;

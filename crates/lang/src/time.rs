@@ -294,7 +294,14 @@ impl<const UNIT: u32, const FROM: u16, const TO: u16> Input for Time<UNIT, FROM,
         },
     });
     fn read(r: &mut Reader<'_>) -> Self {
-        Time(r.uint(Self::BITS))
+        let v = r.uint(Self::BITS);
+        // `BITS` bits hold more than the range's `STEPS` steps unless that's a power of
+        // two: a value past the end of `TO` would be no `Time` of this type, so it's
+        // refused here, as the circuit reads it.
+        if Self::STEPS != 1u64 << Self::BITS {
+            crate::lang::require(v < Self::STEPS);
+        }
+        Time(v)
     }
     fn write(&self, w: &mut Writer<'_>) {
         w.field(Field::from(self.0))

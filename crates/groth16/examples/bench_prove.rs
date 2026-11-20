@@ -174,7 +174,7 @@ fn solve(xbc: &[u8], inputs_path: &str) -> BTreeMap<VarId, Fr> {
         .iter()
         .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
         .collect();
-    let vars = xark_ir::function_decode::decode_input_vars(xbc);
+    let vars = xark_ir::function_decode::decode_input_vars(xbc).unwrap();
     let ids = xark_prover::resolve_input_ids(&vars, &names).unwrap();
     drop(vars);
     let (fp, _) = xark_ir::function_decode::stream_solve_verify(xbc, &ids).unwrap();
@@ -300,7 +300,7 @@ fn main() {
             .iter()
             .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
             .collect();
-        let vars = xark_ir::function_decode::decode_input_vars(&xbc);
+        let vars = xark_ir::function_decode::decode_input_vars(&xbc).unwrap();
         let ids = xark_prover::resolve_input_ids(&vars, &names).unwrap();
         for _ in 0..2 {
             let t = Instant::now();

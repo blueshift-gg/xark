@@ -21,6 +21,11 @@
 //! `ark_bn254::Fr`), so code outside the circuit (a wallet, a test, a reference
 //! generator) gets the values the circuit commits to without a second
 //! implementation: both instantiate one generic algorithm.
+//!
+//! On top of the permutation: [`hash2`] and [`hash`], the domain-separated
+//! [`commit`] and [`nullifier`], and a Fiat–Shamir [`challenge`]. Plain
+//! functions over the permutation, so their rows are its rows and some linear
+//! combinations.
 
 #![no_std]
 // Gadget code keeps the `x = x + y` style it was written in (the old compiler
@@ -279,6 +284,94 @@ pub fn hash<const N: usize>(inputs: [Field; N]) -> Field {
     hash_in(inputs)
 }
 
+// ===========================================================================
+// Domain-separated sponges: commitments and nullifiers.
+//
+// Every function below seeds the capacity lane with `2^64 · domain + len`. The
+// existing functions seed it with `0` (`hash2`, and so every Merkle node built on
+// it) or with a length `N < 2^64` (`hash`), so for `domain ≥ 1` no two of them ever
+// start the permutation from the same capacity value. A sponge whose capacity
+// starts from distinct values computes independent functions (the sponge
+// indifferentiability argument: Bertoni, Daemen, Peeters, Van Assche, "On the
+// indifferentiability of the sponge construction", Eurocrypt 2008; the Poseidon
+// paper, eprint 2019/458 §4.2, domain-separates its modes the same way), so a
+// commitment equals a nullifier or a node only by a Poseidon2 collision.
+// ===========================================================================
+
+/// The domain of [`commit`].
+pub const DOMAIN_COMMIT: u64 = 1;
+/// The domain of [`nullifier`].
+pub const DOMAIN_NULLIFIER: u64 = 2;
+// Domain 3 is kept for authenticated encryption, which a later release may add.
+
+/// The capacity lane's first value: `2^64 · domain + len`. Constants only, so it
+/// costs no row.
+fn iv<F: Elem>(domain: u64, len: usize) -> F {
+    let two32 = F::small(1 << 32);
+    F::small(domain) * two32 * two32 + F::small(len as u64)
+}
+
+/// The sponge of [`hash`] (rate 2, capacity 1, inputs added two at a time) with
+/// the capacity seeded with [`iv`]`(domain, len)`.
+fn tagged<F: Elem>(domain: u64, inputs: &[F]) -> F {
+    let mut state = [F::small(0), F::small(0), iv(domain, inputs.len())];
+    let mut i = 0usize;
+    while i < inputs.len() {
+        state[0] = state[0] + inputs[i];
+        if i + 1 < inputs.len() {
+            state[1] = state[1] + inputs[i + 1];
+        }
+        state = perm(state);
+        i += 2;
+    }
+    state[0]
+}
+
+/// A commitment to `N ≥ 1` field elements: the [`hash`] sponge in the
+/// [`DOMAIN_COMMIT`] domain (capacity seeded with `2^64 + N`). It hides the
+/// values only when one of them is a random secret (a blinding factor, a note's
+/// randomness): put one in.
+///
+/// It never equals a [`nullifier`], a [`hash`] or a [`hash2`] (so a Merkle node)
+/// short of a Poseidon2 collision: see the domain tags above.
+pub fn commit<const N: usize>(inputs: [Field; N]) -> Field {
+    const { assert!(N >= 1, "commit::<N>: N must be at least 1") };
+    tagged(DOMAIN_COMMIT, &inputs)
+}
+
+/// A nullifier from `N ≥ 1` field elements (typically a secret key and what it
+/// nullifies: a note's commitment and position, a poll): the [`hash`] sponge in
+/// the [`DOMAIN_NULLIFIER`] domain (capacity seeded with `2 · 2^64 + N`). Never
+/// equal to a [`commit`] of the same inputs, a [`hash`] or a [`hash2`], short of a
+/// Poseidon2 collision.
+pub fn nullifier<const N: usize>(inputs: [Field; N]) -> Field {
+    const { assert!(N >= 1, "nullifier::<N>: N must be at least 1") };
+    tagged(DOMAIN_NULLIFIER, &inputs)
+}
+
+/// A Fiat–Shamir challenge: the low `BITS` bits (little-endian, each a pinned
+/// bit) of `hash(transcript)`'s canonical decomposition. Pass the bits to a
+/// scalar multiplication, or `Field::from_bits` them for the challenge as a field
+/// element. Put everything the prover has sent so far, and a label if the
+/// protocol has more than one kind of challenge, in `transcript`.
+///
+/// The decomposition is canonical (`to_bits_canonical`, 353 rows), so the bits are
+/// a function of the transcript: a prover can't pick another challenge by picking
+/// another representative. A 128-bit challenge is a Halo-style short challenge:
+/// its integer is below both BN254's and Grumpkin's orders, the same scalar on
+/// either curve. Costs `hash::<N>`'s permutations and those 353 rows.
+pub fn challenge<const N: usize, const BITS: usize>(transcript: [Field; N]) -> [Field; BITS] {
+    const { assert!(BITS <= 254, "challenge::<N, BITS>: BITS must be <= 254") };
+    let bits = hash(transcript).to_bits_canonical();
+    let mut out = [Field::from(0u8); BITS];
+    let mut i = 0usize;
+    while i < BITS {
+        out[i] = bits[i];
+        i += 1;
+    }
+    out
+}
+
 /// The same functions on the host, over `ark_bn254::Fr`: the values the circuit
 /// versions constrain, computed natively (not in a circuit build).
 ///
@@ -318,6 +411,46 @@ pub mod native {
     /// [`crate::hash`], natively.
     pub fn hash<const N: usize>(inputs: [Fr; N]) -> Fr {
         super::hash_in(inputs)
+    }
+
+    /// [`crate::commit`], natively.
+    pub fn commit<const N: usize>(inputs: [Fr; N]) -> Fr {
+        const { assert!(N >= 1, "commit::<N>: N must be at least 1") };
+        super::tagged(super::DOMAIN_COMMIT, &inputs)
+    }
+
+    /// [`commit`] of any number `≥ 1` of elements, known only at run time.
+    ///
+    /// # Panics
+    /// On no elements, which [`crate::commit`] doesn't take either.
+    pub fn commit_slice(inputs: &[Fr]) -> Fr {
+        assert!(!inputs.is_empty(), "commit: at least one element");
+        super::tagged(super::DOMAIN_COMMIT, inputs)
+    }
+
+    /// [`crate::nullifier`], natively.
+    pub fn nullifier<const N: usize>(inputs: [Fr; N]) -> Fr {
+        const { assert!(N >= 1, "nullifier::<N>: N must be at least 1") };
+        super::tagged(super::DOMAIN_NULLIFIER, &inputs)
+    }
+
+    /// [`nullifier`] of any number `≥ 1` of elements, known only at run time.
+    ///
+    /// # Panics
+    /// On no elements, which [`crate::nullifier`] doesn't take either.
+    pub fn nullifier_slice(inputs: &[Fr]) -> Fr {
+        assert!(!inputs.is_empty(), "nullifier: at least one element");
+        super::tagged(super::DOMAIN_NULLIFIER, inputs)
+    }
+
+    /// [`crate::challenge`], natively, as the field element its bits spell: the
+    /// low `BITS` bits of `hash(transcript)`.
+    pub fn challenge<const N: usize, const BITS: usize>(transcript: [Fr; N]) -> Fr {
+        const { assert!(BITS <= 254, "challenge::<N, BITS>: BITS must be <= 254") };
+        use ark_ff::{BigInteger, PrimeField};
+        let bits = hash(transcript).into_bigint().to_bits_le();
+        Fr::from_bigint(<Fr as PrimeField>::BigInt::from_bits_le(&bits[..BITS]))
+            .unwrap_or_else(|| unreachable!("fewer than 254 bits of a value below r"))
     }
 
     /// [`hash`] of any number of elements, known only at run time (a client

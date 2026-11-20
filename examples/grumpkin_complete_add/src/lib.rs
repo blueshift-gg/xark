@@ -26,11 +26,6 @@ fn inv_or_zero(x: Field) -> (Field, Field) {
     (w, z)
 }
 
-/// `sel ? a : b` for a boolean `sel`.
-fn mux(sel: Field, a: Field, b: Field) -> Field {
-    b + sel * (a - b)
-}
-
 /// Complete affine addition of flagged points `[x, y, inf]`.
 fn complete_add(p: [Field; 3], q: [Field; 3]) -> [Field; 3] {
     let one = Field::from(1u8);
@@ -50,7 +45,7 @@ fn complete_add(p: [Field; 3], q: [Field; 3]) -> [Field; 3] {
     let lam_dbl = (px * px * Field::from(3u8)) * inv_2py;
 
     // same x ⇒ doubling slope (also covers the P+(−P) branch, discarded below).
-    let lam = mux(eq_x, lam_dbl, lam_add);
+    let lam = select(eq_x, lam_dbl, lam_add);
     let x3 = lam * lam - px - qx;
     let y3 = lam * (px - x3) - py;
 
@@ -59,9 +54,9 @@ fn complete_add(p: [Field; 3], q: [Field; 3]) -> [Field; 3] {
     let (gx, gy, ginf) = (x3, y3, opp);
 
     // q = ∞ ⇒ result p ; then p = ∞ ⇒ result q  (both ∞ ⇒ ∞ via the q branch).
-    let rx = mux(pinf, qx, mux(qinf, px, gx));
-    let ry = mux(pinf, qy, mux(qinf, py, gy));
-    let rinf = mux(pinf, qinf, mux(qinf, pinf, ginf));
+    let rx = select(pinf, qx, select(qinf, px, gx));
+    let ry = select(pinf, qy, select(qinf, py, gy));
+    let rinf = select(pinf, qinf, select(qinf, pinf, ginf));
 
     // canonicalize ∞ to (0, 0).
     let notinf = one - rinf;

@@ -1,7 +1,7 @@
 // The generated `zkyc` client (`xark client`) through xark-wasm. `npm test` runs it,
 // after setup.ts builds the example and its keys.
-import { Circuit } from "@blueshift-gg/xark-wasm/client";
-import { createPool } from "@blueshift-gg/xark-wasm/pool";
+import { Circuit } from "@blueshift-gg/xark/client";
+import { createPool } from "@blueshift-gg/xark/pool";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { artifacts, outDir, serve } from "../artifacts";

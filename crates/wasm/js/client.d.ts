@@ -29,15 +29,17 @@ export class Field {
 /**
  * A value as JSON from xark-wasm or `client.wasm`: a `Field`, `bigint`, `Date` or
  * bytes as a string (decimal, an ISO 8601 date or date-time, `0x`-hex), the rest as
- * they are.
+ * they are (a branded string, such as @solana/kit's base58 `Address`, as itself).
  */
 export type Json<T> = T extends Field | bigint | Date | Uint8Array
   ? string
-  : T extends readonly unknown[]
-    ? { [K in keyof T]: Json<T[K]> }
-    : T extends object
-      ? { [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]: Json<T[K]> }
-      : T;
+  : T extends string
+    ? T
+    : T extends readonly unknown[]
+      ? { [K in keyof T]: Json<T[K]> }
+      : T extends object
+        ? { [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]: Json<T[K]> }
+        : T;
 
 /** An input value the circuit's types refuse. */
 export class InputError extends Error {
@@ -114,9 +116,19 @@ export class Proof<PublicValues> {
   toBytes(): Uint8Array;
   /** The proof compressed, 128 bytes (each point by `x` and a sign bit): a `Verifier` reads it. */
   toBytesCompressed(): Uint8Array;
+  /**
+   * The public inputs as an exported Solana verifier takes them (its `Fields`): 32
+   * bytes each, little-endian, in proof order.
+   */
+  toFields(): Uint8Array;
+  /**
+   * `toBytes()` then `toFields()`: the proof and its public inputs, for a program
+   * that takes both in its instruction data.
+   */
+  toInstructionData(): Uint8Array;
 }
 
-/** The parts of `@blueshift-gg/xark-wasm` a client uses (any of its builds). */
+/** The parts of `@blueshift-gg/xark` a client uses (any of its builds). */
 export interface Wasm {
   prove(circuit: Uint8Array, provingKey: Uint8Array, inputs: Record<string, string>, sources?: string): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit and its proving key, decoded once, for many proofs (`Prover.preload`). */
@@ -142,6 +154,8 @@ export interface Wasm {
     verify(proof: Uint8Array, publicInputs: Uint8Array): boolean;
   };
   poseidon2(inputs: string[]): string;
+  poseidon2Commit(inputs: string[]): string;
+  poseidon2Nullifier(inputs: string[]): string;
   /** The circuit digest of a `circuit.xbc` (what `xark build` prints). */
   circuitDigest(circuit: Uint8Array): string;
   /** A proof (either form) as an exported Solana verifier reads it (256 bytes). */
@@ -192,7 +206,7 @@ export interface LoadOptions {
   digest?: string;
   /**
    * A prover only: a worker pool to prove on (`createPool()` from
-   * `@blueshift-gg/xark-wasm/pool`), spreading the FFTs and MSMs over its threads
+   * `@blueshift-gg/xark/pool`), spreading the FFTs and MSMs over its threads
    * (about 4× faster with 8). It needs `SharedArrayBuffer`: in a browser, a
    * cross-origin isolated page (`parallelSupported()` says), proving off the main
    * thread. The pool is yours: `terminate()` it when done.
@@ -219,6 +233,10 @@ export class Session<PublicInputs, PublicValues, Structs> {
   fields<K extends keyof Structs & string>(type: K, value: Structs[K]): Field[];
   /** `xark_poseidon2::hash`, as the circuit computes it. */
   poseidon2(fields: readonly Field[]): Field;
+  /** `xark_poseidon2::commit` (at least one element), as the circuit computes it. */
+  commit(fields: readonly Field[]): Field;
+  /** `xark_poseidon2::nullifier` (at least one element), as the circuit computes it. */
+  nullifier(fields: readonly Field[]): Field;
 }
 
 /** Proves a circuit: from `circuit.prover(…)`. */
@@ -243,13 +261,16 @@ export class Verifier<PublicInputs, PublicValues, Structs = {}> extends Session<
   private constructor();
   /**
    * Whether `proof` proves `publicInputs`: pass the ones you require (a policy, a
-   * root). A proof's bytes (`toBytes()` or `toBytesCompressed()`) need them; a
-   * `Proof` defaults to its own. A malformed or invalid proof is `false`;
-   * `publicInputs` that don't fit the circuit's types throw an `InputError` (a
-   * mistake in the caller, not a bad proof).
+   * root). They may be omitted only for a circuit with no public inputs. A
+   * `Uint8Array` is used as the canonical public-input bytes, as given. A malformed
+   * or invalid proof is `false`; `publicInputs` that don't fit the circuit's types
+   * throw an `InputError` (a mistake in the caller, not a bad proof).
    */
-  verify(proof: Proof<PublicValues>, publicInputs?: PublicInputs | Uint8Array): boolean;
-  verify(proof: Uint8Array, publicInputs: PublicInputs | Uint8Array): boolean;
+  verify(
+    ...args: [keyof PublicInputs] extends [never]
+      ? [proof: Proof<PublicValues> | Uint8Array]
+      : [proof: Proof<PublicValues> | Uint8Array, publicInputs: PublicInputs | Uint8Array]
+  ): boolean;
 }
 
 /** A circuit as its generated client describes it. */

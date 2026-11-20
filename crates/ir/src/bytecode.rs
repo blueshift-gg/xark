@@ -71,6 +71,9 @@ pub enum BytecodeError {
     BadUtf8,
     /// Unknown opcode / role / sign tag.
     BadTag(u8),
+    /// The ops would expand past the caller's limit, or nest deeper than the
+    /// encoder ever does.
+    TooLarge,
 }
 
 impl core::fmt::Display for BytecodeError {
@@ -81,6 +84,7 @@ impl core::fmt::Display for BytecodeError {
             BytecodeError::Truncated => write!(f, "truncated bytecode buffer"),
             BytecodeError::BadUtf8 => write!(f, "invalid UTF-8 in a string field"),
             BytecodeError::BadTag(t) => write!(f, "unknown tag byte {t}"),
+            BytecodeError::TooLarge => write!(f, "rolled ops expand past the size cap"),
         }
     }
 }
@@ -451,8 +455,16 @@ impl<'a> Cursor<'a> {
             FC_ZERO => FieldConst::zero(),
             FC_ONE => FieldConst::one(),
             FC_NEG_ONE => FieldConst::from_i64(-1),
-            FC_SMALL_POS => FieldConst::from_bigint(BigInt::from(self.varint()?)),
-            FC_SMALL_NEG => FieldConst::from_bigint(-BigInt::from(self.varint()?)),
+            // Built straight into the small form where it fits, as `from_bigint`
+            // would normalize it, without allocating a `BigInt` first.
+            FC_SMALL_POS => match self.varint()? {
+                v if v <= i64::MAX as u64 => FieldConst::from_i64(v as i64),
+                v => FieldConst::from_bigint(BigInt::from(v)),
+            },
+            FC_SMALL_NEG => match self.varint()? {
+                v if v <= i64::MAX as u64 => FieldConst::from_i64(-(v as i64)),
+                v => FieldConst::from_bigint(-BigInt::from(v)),
+            },
             FC_BIG => {
                 let sign = match self.u8()? {
                     1 => Sign::Plus,
@@ -472,6 +484,10 @@ impl<'a> Cursor<'a> {
                 let k = self.varint()?;
                 if k > 4096 {
                     return Err(BytecodeError::Truncated);
+                }
+                if k < 63 {
+                    let v = 1i64 << k;
+                    return Ok(FieldConst::from_i64(if neg { -v } else { v }));
                 }
                 let v = BigInt::from(1) << k;
                 FieldConst::from_bigint(if neg { -v } else { v })
@@ -504,7 +520,7 @@ impl<'a> Cursor<'a> {
     }
     fn lcs(&mut self) -> Result<Vec<LinearCombination>, BytecodeError> {
         let n = self.varint()? as usize;
-        let mut out = Vec::with_capacity(n);
+        let mut out = Vec::with_capacity(n.min(1 << 20));
         for _ in 0..n {
             out.push(self.lc()?);
         }
@@ -1500,22 +1516,59 @@ pub fn roll_and_encode_ops_compact(
 }
 
 /// Inverse of [`roll_and_encode_ops_compact`] (`pool`: the container's constant
-/// pool, by index).
+/// pool, by index). The ops and loop iterations the expansion takes are spent
+/// from `budget`, and ops that would overspend it are refused before anything is
+/// expanded: a few bytes of nested `Repeat`s can stand for 2^64 of them.
 pub fn decode_and_expand_ops_compact(
     bytes: &[u8],
     pool: &[FieldConst],
+    budget: &mut u64,
 ) -> Result<(Vec<R1csRow>, Vec<WitnessGen>), BytecodeError> {
     let mut c = Cursor::new(bytes);
     c.pool = pool;
-    let n = c.varint()? as usize;
+    let n = c.varint()?;
+    let mut items = Vec::new();
+    for _ in 0..n {
+        items.push(c.item_compact(0)?);
+    }
+    let cost = items.iter().map(expanded_len).fold(0, u64::saturating_add);
+    *budget = budget.checked_sub(cost).ok_or(BytecodeError::TooLarge)?;
     let mut cons = Vec::new();
     let mut wit = Vec::new();
-    for _ in 0..n {
-        let it = c.item_compact()?;
-        emit_item(&it, &mut cons, &mut wit);
+    for it in &items {
+        emit_item(it, &mut cons, &mut wit);
     }
     Ok((cons, wit))
 }
+
+/// How many ops and loop iterations [`emit_item`] spends on `item` (an empty
+/// body's iterations count, as the loop still runs them).
+fn expanded_len(item: &Item) -> u64 {
+    match item {
+        Item::Op(_) => 1,
+        Item::Repeat(r) => {
+            let body = r.body.iter().map(expanded_len).fold(0, u64::saturating_add);
+            u64::from(r.count).saturating_mul(body.max(1))
+        }
+    }
+}
+
+/// How many note rules a `Repeat` over `body` carries: one per constraint, nested
+/// bodies included (as [`item_notes`] collects them).
+fn note_slots(body: &[Item]) -> usize {
+    body.iter()
+        .map(|it| match it {
+            Item::Op(Opcode::Constraint(_)) => 1,
+            Item::Op(Opcode::Witness(_)) => 0,
+            Item::Repeat(r) => note_slots(&r.body),
+        })
+        .sum()
+}
+
+/// The deepest `Repeat` nesting the decoder follows. Each rolling pass nests at
+/// most one level and the roller runs at most [`MAX_ROLL_PASSES`]; twice that
+/// leaves room while keeping a hostile nest from overflowing the stack.
+const MAX_NESTING: usize = 2 * MAX_ROLL_PASSES;
 
 fn put_ivarint(buf: &mut Vec<u8>, v: i64) {
     put_varint(buf, ((v << 1) ^ (v >> 63)) as u64);
@@ -1568,16 +1621,19 @@ impl Cursor<'_> {
         let u = self.varint()?;
         Ok(((u >> 1) as i64) ^ -((u & 1) as i64))
     }
-    /// Inverse of [`put_item_compact`].
-    fn item_compact(&mut self) -> Result<Item, BytecodeError> {
+    /// Inverse of [`put_item_compact`]; `depth` is how many `Repeat`s enclose it.
+    fn item_compact(&mut self, depth: usize) -> Result<Item, BytecodeError> {
         match self.u8()? {
             ITEM_OP => Ok(Item::Op(self.opcode()?)),
             ITEM_REPEAT => {
+                if depth >= MAX_NESTING {
+                    return Err(BytecodeError::TooLarge);
+                }
                 let count = self.vu32()?;
                 let n_body = self.varint()? as usize;
                 let mut body = Vec::with_capacity(n_body.min(1 << 16));
                 for _ in 0..n_body {
-                    body.push(self.item_compact()?);
+                    body.push(self.item_compact(depth + 1)?);
                 }
                 let n_steps = self.varint()? as usize;
                 let mut steps = Vec::with_capacity(n_steps.min(1 << 20));
@@ -1585,6 +1641,11 @@ impl Cursor<'_> {
                     steps.push(self.ivarint()?);
                 }
                 let n_notes = self.varint()? as usize;
+                // Checked before `vec!` below allocates them: an unchanged note
+                // costs no bytes, so the buffer's length doesn't bound the count.
+                if n_notes > note_slots(&body) {
+                    return Err(BytecodeError::TooLarge);
+                }
                 let notes = match self.u8()? {
                     0 => vec![NoteRule::NoChange; n_notes],
                     1 => {
@@ -1734,7 +1795,7 @@ mod tests {
     fn roll_and_encode_ops_round_trips_and_compresses() {
         let pool = std::sync::Arc::new(BTreeMap::new());
         let enc = |ops| roll_and_encode_ops_compact(ops, &pool);
-        let dec = |b: &[u8]| decode_and_expand_ops_compact(b, &[]);
+        let dec = |b: &[u8]| decode_and_expand_ops_compact(b, &[], &mut { u64::MAX });
         for n in [1u32, 2, 8, 64, 254] {
             let prim = periodic_program(n);
             let cops: Vec<Opcode> = prim

@@ -269,8 +269,7 @@ fn initial_keys(
     let num_pi = num_public_inputs(&prog);
     let circuit = XarkCircuit::for_setup(prog);
 
-    let ptau_bytes =
-        fs::read(ptau_file).with_context(|| format!("reading {}", ptau_file.display()))?;
+    let ptau_bytes = super::read_ptau(ptau_file)?;
     let ptau = parse_ptau(&ptau_bytes).context("parsing .ptau file")?;
 
     let src = xark_groth16::ProgramSource::new(circuit.prog());
@@ -351,6 +350,18 @@ fn run_verify(args: VerifyArgs) -> Result<()> {
 
 fn run_finalize(args: FinalizeArgs) -> Result<()> {
     let dir = &args.ceremony_dir.clone();
+    // No contribution yet: δ is still the one `init` derived from the seed it
+    // records in `circuit_meta.json`, so the key is as forgeable as a seeded one.
+    // Verifying an empty chain is fine (a ceremony just begun); finalizing isn't.
+    require_ceremony(dir)?;
+    if read_contribution_count(dir)? == 0 {
+        anyhow::bail!(
+            "the ceremony has no contributions: its key's δ still follows from the seed \
+             `init` recorded in circuit_meta.json, so anyone with that file could forge \
+             proofs. Add at least one with `xark ceremony contribute` (two or more for a \
+             key no single party has to be trusted for)"
+        );
+    }
     // Verify first: only keys that pass are marked production-safe.
     run_verify(args)?;
 

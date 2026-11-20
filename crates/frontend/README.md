@@ -56,7 +56,8 @@ replaces:
   `r < b`), signed comparisons, sign extension and arithmetic shifts (LLVM emits these
   for unsigned code too), and branches on "is it nonzero".
 * `==` pins its inverse advice (`inv · out = 0`, one row), so an equal pair leaves no
-  free variable for the under-constraint gate `xark prove` runs (both frontends).
+  free variable for the under-constraint search (`Circuit::check` in a circuit's
+  tests, `xark check --inputs`).
 
 ### Panics become constraints
 
@@ -84,7 +85,8 @@ muxed. What an arm emits comes in three kinds:
   a range proof's bits recompose to `g · value`. Where the arm isn't taken every hint
   sees `0` (so an untaken `inv` of 0, `to_bits` of an out-of-range value or division
   by 0 still solves) and is forced to `0`, so every variable stays determined by the
-  inputs — what `xark prove`'s under-constraint gate checks. A division's hint divides
+  inputs — what the under-constraint check in a circuit's tests (and `xark check
+  --inputs`) looks for. A division's hint divides
   by `b + 1 − g`.
 
 The Lean side is `gated_sat`, `guard_mul`, `pin_dead` and `select_taken` in
@@ -120,7 +122,12 @@ Between `witness_begin()` and `witness_end()` nothing is constrained: values are
 for the witness only, and requirements are dropped. Nothing computed there counts as
 proven afterwards — the bit-decomposition cache, select and product reuse, the set of
 proven booleans and the bounds learned from comparisons are only fed by emitted rows — so
-redoing an operation after the region constrains it again.
+redoing an operation after the region constrains it again. Native integer and `bool` ops,
+and `Field` comparisons (whose result is a `bool`), keep their rows inside a region.
+
+Each arm of a witness branch starts in the region state the branch was reached in. An arm
+that diverges is dropped with any region it opened; one that rejoins must leave the state
+as it found it, so a region that would straddle the branch is refused.
 
 ### Native-semantics fuzzing
 
@@ -137,14 +144,15 @@ Rust's result, none for result + 1, and none for any output where Rust panics; t
 honest solver must find that witness too. Over 3,000 programs / 48,000 searches have
 run clean with none undecided (`XARK_FUZZ_CASES`, `XARK_FUZZ_SEED`; CI runs 200 per
 push and 5,000 weekly on a fresh seed). `cargo xtask difftest` runs the same
-search on every example under 200k rows, on its own test inputs and mutations; all
+search on every example under `--max-rows` (2.5M by default), on its own test inputs
+and mutations; all
 are decided except the non-native EC examples (`ec_incomplete*`), whose 256-bit
 modular-inverse relations the search can't reason about. Those gadgets are checked at
 small scale instead: the same `weierstrass!` code over 3 × 2- and 3-bit limbs (p = 13,
 127) has every input decided — the right output, no witness where the formula is
 undefined, every non-canonical encoding rejected at `enforce_on_curve` — and its gate
 count is exactly affine in the limb width up to 86 bits, where it is the shipped
-secp256k1 circuit digest-for-digest (`small_field_curve_gadgets_are_sound`,
+`xark_secp256k1::affine` gadget digest-for-digest (`small_field_curve_gadgets_are_sound`,
 `scaled_curve_gadget_rows_match_secp256k1`).
 
 Mutation testing (each guard, pin and gated range check removed in turn; see the
@@ -188,7 +196,7 @@ wasm functions instead.
 cargo run -p xark-frontend --release --example stablec -- examples/ed25519 \
     [--compare other/circuit.xbc] [--out circuit.xbc]   # digest, sizes, timing; faithfulness check
 XARK_FRONTEND_TIME=1 …                     # phase timings
-cargo test --release --test snapshot                 # (in crates/lang) the snapshot suite
+cargo test --release -p xark --test snapshot         # the snapshot suite
 cargo run -p xark-frontend --release --example xbcstat -- a.xbc b.xbc   # sizes
 cargo xtask difftest                                 # examples' inputs, adversarially
 ```

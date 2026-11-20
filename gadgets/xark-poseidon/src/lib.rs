@@ -10,7 +10,8 @@
 //! matches it element-for-element.
 //!
 //! Only `variable * variable` products emit a gate, so ARK and MDS (constant folds)
-//! are free; the 240 gates come entirely from the 80 `x^5` S-boxes (3 gates each).
+//! are free; the gates come from the 80 `x^5` S-boxes (3 each), less those on
+//! constants: `hash2` and its one equality are 238 constraints (`examples/poseidon`).
 //!
 //! Subset gotcha: loop bounds must be integer *literals* (`while i < 3usize`), not
 //! named `const`s — a comparison against a named const reads as witness-dependent

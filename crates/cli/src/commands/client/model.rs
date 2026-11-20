@@ -32,6 +32,8 @@ pub enum Ty {
     },
     /// A whole number split into limbs (a non-native field element).
     Number { of: String },
+    /// A Solana address: 32 bytes, base58 where a string.
+    Address,
     /// A moment: Unix seconds.
     Timestamp,
     /// A moment in `unit`-second steps from the start of year `from` to the end of `to`.
@@ -193,6 +195,8 @@ impl Model {
             Ty::Set(variants(e))
         } else if enc.get("limbs").is_some() {
             Ty::Number { of: r.to_string() }
+        } else if enc["base58"] == true && byte_len(schema, r) == Some(32) {
+            Ty::Address
         } else if enc.is_object() {
             Ty::Bytes {
                 of: Some(r.to_string()),
@@ -461,7 +465,8 @@ mod tests {
             r#"{"version": 2, "circuit": "c",
               "inputs": [
                 {"name": "id", "visibility": "private", "type": {"ref": "Id"}},
-                {"name": "k", "visibility": "public", "type": {"ref": "Point"}}],
+                {"name": "k", "visibility": "public", "type": {"ref": "Point"}},
+                {"name": "to", "visibility": "public", "type": {"ref": "Address"}}],
               "types": {
                 "Id": {"struct": [
                   {"name": "home", "type": {"ref": "Choice<Country>"}},
@@ -475,7 +480,9 @@ mod tests {
                 "Fp": {"struct": [{"name": "limbs", "type": {"array": {"of": "field", "len": 3}}}],
                        "encoding": {"bytes": 32, "limbs": 86}},
                 "Point": {"struct": [{"name": "x", "type": {"ref": "Fp"}}, {"name": "y", "type": {"ref": "Fp"}}],
-                          "encoding": {"concat": "fields"}}},
+                          "encoding": {"concat": "fields"}},
+                "Address": {"struct": [{"name": "hi", "type": "field"}, {"name": "lo", "type": "field"}],
+                            "encoding": {"bytes": 32, "concat": [16, 16], "base58": true}}},
               "public_inputs": []}"#,
         )
         .unwrap();
@@ -497,6 +504,7 @@ mod tests {
             }
         );
         assert!(!m.structs.contains_key("Fp"));
+        assert_eq!(m.inputs[2].0.ty, Ty::Address);
     }
 
     #[test]

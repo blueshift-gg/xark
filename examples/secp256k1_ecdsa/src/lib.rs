@@ -1,6 +1,6 @@
 //! secp256k1 ECDSA verification as a `#[circuit]` by fake GLV (ePrint 2025/933: 65
 //! fused double-and-add steps over `Q ± φQ ± R ± φR` plus a fixed-base comb for `G`),
-//! ~0.27M constraints. Inputs are transparent compound types: `Point` = `[u8; 64]`
+//! 227,168 constraints. Inputs are transparent compound types: `Point` = `[u8; 64]`
 //! `x ‖ y`, `Signature` = `[u8; 64]` `r ‖ s`, `Scalar` = digest `int(hash(msg)) mod n`
 //! (`[u8; 32]`). The hinted point `R` and the lattice decomposition are derived inside
 //! the circuit (a `witness_only` region at zero constraint cost, pinned by

@@ -128,14 +128,20 @@ pub(crate) struct Recorded {
     pub(crate) publics: Vec<u32>,
 }
 
-pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
+pub fn run(circuits: &[PathBuf], update: bool, shard: Option<(usize, usize)>) -> Result<()> {
     let t = std::time::Instant::now();
     let proven = proven()?;
     let examples = circuits.is_empty();
+    // A shard classifies its examples' calls as a full run would; the checks over
+    // every example at once (below) are the full run's.
+    let whole = examples && shard.is_none();
     let targets: Vec<PathBuf> = if examples {
+        let (k, n) = shard.unwrap_or((0, 1));
         crate::circuits()?
             .into_iter()
-            .map(|n| crate::root().join("examples").join(n))
+            .enumerate()
+            .filter(|(i, _)| i % n == k)
+            .map(|(_, name)| crate::root().join("examples").join(name))
             .collect()
     } else {
         let full = circuits
@@ -190,7 +196,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
     let vectors = vectors.into_inner().unwrap();
     let mut failures = failures.into_inner().unwrap();
 
-    let (problems, missing) = obligations(&proven, &vectors, update, examples)?;
+    let (problems, missing) = obligations(&proven, &vectors, update, whole)?;
     failures.extend(problems);
     // A call whose obligation isn't committed isn't covered.
     let groups: BTreeMap<Group, usize> = groups
@@ -232,7 +238,7 @@ pub fn run(circuits: &[PathBuf], update: bool) -> Result<()> {
         };
         println!("{gadget}  {circuit}  {site}{at}: {n} {calls} {class}{verdict}");
     }
-    if examples {
+    if whole {
         for (k, (_, used)) in &allow {
             if !used {
                 failures.push(format!("{ALLOWLIST}: no call matches `{k}`; remove it"));

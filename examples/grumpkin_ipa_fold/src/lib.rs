@@ -31,18 +31,10 @@ use xark_grumpkin::prelude::*;
 
 /// Round challenge: the low 128 bits of `Poseidon2(seed, l.x, l.y, r.x, r.y)`
 /// (Halo-style short challenge), returned as 128 little-endian bits ready for the
-/// gadget's `scalar_mul`. The full output is canonically decomposed so the
-/// challenge is a deterministic, uniquely-pinned function of the transcript.
+/// gadget's `scalar_mul` (`xark_poseidon2::challenge` decomposes the hash
+/// canonically, so the challenge is a function of the transcript).
 fn challenge(seed: Field, l: [Field; 2], r: [Field; 2]) -> [Field; 128] {
-    let h = xark_poseidon2::hash([seed, l[0], l[1], r[0], r[1]]);
-    let bits = h.to_bits_canonical();
-    let mut out = [Field::from(0u8); 128];
-    let mut i = 0usize;
-    while i < 128usize {
-        out[i] = bits[i];
-        i += 1;
-    }
-    out
+    xark_poseidon2::challenge::<5, 128>([seed, l[0], l[1], r[0], r[1]])
 }
 
 /// `x²·P` as two native 128-bit scalar-muls by the in-circuit challenge `x`

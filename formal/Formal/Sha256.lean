@@ -27,17 +27,18 @@ set_option linter.flexible false
 This file builds the **structural** soundness layer for the SHA-256 compression
 gadget in `gadgets/xark-sha256/src/lib.rs`. Bit-level equivalence of
 *individual* per-bit gadgets (`and`, `xor`, `not`, boolean range checks,
-parity carry,
-wrapping-add carry) is discharged elsewhere — see `Formal/Bitwise.lean` and
-`Formal/Arith.lean`, which prove each per-bit / per-word constraint pins its
+wrapping-add carry) is discharged elsewhere — see `Formal/Bitwise.lean`,
+`Formal/Arith.lean`, and, for the rows `xark_sha256::compress` emits
+(`xark_bits::ch`, `maj3`, `xor3`, `reduce`), `Formal/HashOps.lean` and
+`Formal/Reduce.lean`, which prove each per-bit / per-word constraint pins its
 output to the intended boolean / arithmetic function over the BN254 scalar
 field.
 
 What this file does:
 
 * defines a pure Lean spec `Word32 := Fin 32 → Bool` for the 32-bit words the
-  gadget threads through SHA-256 (LSB-first, mirroring `Word32.bits` in the
-  Rust gadget);
+  gadget threads through SHA-256 (LSB-first, mirroring the `[Field; 32]`
+  words of `xark_bits`);
 * defines pure Lean specs for the FIPS 180-4 §4.1.2 primitives (`rotr`, `shr`,
   `not32`, `and32`, `xor32`, `Ch`, `Maj`, `Σ₀`, `Σ₁`, `σ₀`, `σ₁`);
 * defines the FIPS 180-4 §6.2 message-schedule recurrence in pure Lean;
@@ -47,16 +48,13 @@ What this file does:
   four sigmas) materialise field expressions that are `BitOf` of the
   pure-spec output. These compose the proven per-bit pieces — no bit-blasting.
 
-What this file does *not* do: it does **not** attempt to bit-blast SHA-256 in
-Lean. The Formal Verification Plan explicitly says bit-oriented hashes are
-better suited to SMT bit-blasting than to a proof assistant, so the
-"end-to-end" theorem (output of the R1CS circuit equals 256-bit SHA-256 hash
-of the input) is deferred to the SMT layer. The job here is the *structural*
-assembly: show that the composite operations decompose into proven per-bit
-pieces in the way `gadgets/xark-sha256/src/lib.rs` claims.
+What this file does *not* do: it does **not** bit-blast SHA-256 in Lean, and
+proves no "end-to-end" theorem (output of the R1CS circuit equals the 256-bit
+SHA-256 hash of the input). The job here is the *structural* assembly: show
+that the composite operations decompose into proven per-bit pieces.
 
 `Word32` is represented as `Fin 32 → Bool` rather than `BitVec 32`. The Rust
-gadget stores 32 ordered bit-wires (LSB first); `rotr` and `shr` are index
+gadget stores 32 ordered bit-wires (LSB first); `rotr32` and `shr32` are index
 permutations / projections on that ordered list. `Fin 32 → Bool` makes the
 permutation reasoning a single `funext + index arithmetic` rewrite, no
 `BitVec.getLsbD` unfolding.
@@ -67,19 +65,19 @@ namespace Xark
 /-! ## Word32 representation -/
 
 /-- A 32-bit word, LSB-first: `w i` is the bit at position `i` (index `0`
-matches the Rust `bits[0]`). This mirrors the storage of `Word32.bits` in
+matches the Rust `a[0]`). This mirrors the `[Field; 32]` words in
 `gadgets/xark-bits/src/lib.rs`. -/
 abbrev Word32 : Type := Fin 32 → Bool
 
 /-! ## Pure-Lean specs of the primitives -/
 
 /-- Right rotation by `k` positions: `out i = a ((i + k) mod 32)`. Matches the
-Rust `rotr` in `gadgets/xark-bits/src/lib.rs`, which produces `bits[(i + k) % 32].clone()`. -/
+Rust `rotr32` in `gadgets/xark-bits/src/lib.rs`, which produces `out[i] = a[(i + n) % 32]`. -/
 def rotr (a : Word32) (k : ℕ) : Word32 :=
   fun i => a ⟨(i.val + k) % 32, Nat.mod_lt _ (by decide)⟩
 
 /-- Right shift by `k` positions: `out i = a (i + k)` if `i + k < 32`, else
-`false`. Matches the Rust `shr` in `gadgets/xark-bits/src/lib.rs`. -/
+`false`. Matches the Rust `shr32` in `gadgets/xark-bits/src/lib.rs`. -/
 def shr (a : Word32) (k : ℕ) : Word32 :=
   fun i =>
     if h : i.val + k < 32 then a ⟨i.val + k, h⟩ else false
@@ -194,7 +192,7 @@ Each output bit is pinned by the per-bit constraint proven sound in
 `Formal/Bitwise.lean`. The "lift to a whole `Word32`" is `∀ i`-quantified
 forwarding. -/
 
-/-- **`not32` gadget soundness.** The Rust `not` returns the LC `1 − a` per
+/-- **`not32` gadget soundness.** The Rust `not32` returns the LC `1 − a` per
 bit. Given the input bit-wire `wA i` is `BitOf (a i)`, the output wire `1 -
 wA i` is `BitOf` the spec-level `!a i`. -/
 theorem not32_sound {F : Type*} [Ring F]
@@ -209,8 +207,8 @@ theorem not32_sound {F : Type*} [Ring F]
   · simp [hai] at hi; simp [hi]
   · simp [hai] at hi; simp [hi]
 
-/-- **`and32` gadget soundness.** The Rust `and` allocates `out_i` with `a_i *
-b_i = out_i`. Given input bit-wires `wA i`, `wB i` `BitOf` their bits, the
+/-- **`and32` gadget soundness.** The Rust `and32` sets `out_i = a_i * b_i`.
+Given input bit-wires `wA i`, `wB i` `BitOf` their bits, the
 field product `wA i * wB i` is `BitOf` of the spec-level `a i && b i`. -/
 theorem and32_sound {F : Type*} [Field F]
     (a b : Word32) (wA wB : Fin 32 → F)
@@ -224,7 +222,7 @@ theorem and32_sound {F : Type*} [Field F]
   cases hai : a i <;> cases hbi : b i <;>
     (simp [hai, hbi] at ha hb ⊢; rw [ha, hb]; norm_num)
 
-/-- **`xor32` gadget soundness.** The Rust `xor` allocates `out_i` with
+/-- **`xor32` gadget soundness.** The Rust `xor32` (`Field::xor` per bit) allocates `out_i` with
 `(2*a_i)*b_i = a_i + b_i - out_i`, which (per `xor_sound` in
 `Formal/Bitwise.lean`) pins `out_i = a_i + b_i - 2 a_i b_i`. That value is
 `BitOf` of the spec-level `xor (a i) (b i)`. -/
@@ -248,25 +246,17 @@ primitives above. We expose **structural-defining identities** as `rfl`-up-to-
 of the non-permutation composites (`Ch`, `Maj`) that chains the per-bit
 witness arithmetic together. -/
 
-/-- **Structural definition of `Ch`** matches its gadget implementation in
-`gadgets/xark-sha256/src/lib.rs`. The Rust loop builds
-
-```
-let e_and_f      = and(builder, &e, &f)?;
-let not_e_and_g  = and(builder, &not(&e), &g)?;
-let ch           = xor(builder, &e_and_f, &not_e_and_g)?;
-```
-
-which is precisely `xor32 (and32 e f) (and32 (not32 e) g)`. -/
+/-- **Structural definition of `Ch`** as `xor32 (and32 e f) (and32 (not32 e) g)`.
+The gadget (`ch32` in `gadgets/xark-sha256/src/lib.rs`) computes the same
+function per bit as `xark_bits::ch`, `g + e·(f − g)` (proven in
+`Formal/HashOps.lean`). -/
 theorem Ch_unfold (x y z : Word32) :
     Ch x y z = xor32 (and32 x y) (and32 (not32 x) z) := rfl
 
-/-- **Structural definition of `Maj`** matches its gadget. The Rust pattern
-uses `xor_triple` (the parity-carry form) for the outer 3-way XOR; the
-*function* computed is `xor32 (xor32 (and32 x y) (and32 x z)) (and32 y z)`.
-Soundness of the `xor_triple` shape is the parity carry of
-`Formal/Arith.lean`; we keep the per-bit obligation there and only state the
-structural composition here. -/
+/-- **Structural definition of `Maj`** as
+`xor32 (xor32 (and32 x y) (and32 x z)) (and32 y z)`. The gadget (`maj32`)
+computes it per bit with one `xark_bits::maj3` row, proven in
+`Formal/HashOps.lean`; only the structural composition is stated here. -/
 theorem Maj_unfold (x y z : Word32) :
     Maj x y z = xor32 (xor32 (and32 x y) (and32 x z)) (and32 y z) := rfl
 
@@ -289,17 +279,17 @@ theorem smallSigma1_unfold (x : Word32) :
 /-! ## End-to-end pointwise soundness for the SHA-256 primitives
 
 For `Ch` and `Maj` we give a bit-level soundness theorem: if every input bit
-is `BitOf`-witnessed, then the chained field-arithmetic expression that the
-gadget materialises for the `i`-th output bit is `BitOf` of the `i`-th
-spec-level output bit. This is the structural assembly the Formal Verification
-Plan calls for: we are *not* checking concrete field arithmetic — that's
+is `BitOf`-witnessed, then the chained field-arithmetic expression of the
+`and32`/`not32`/`xor32` composition for the `i`-th output bit is `BitOf` of
+the `i`-th spec-level output bit. This is the structural assembly: we are
+*not* checking concrete field arithmetic — that's
 discharged per-bit in `Formal/Bitwise.lean` — we are checking the composition
 tree is the intended pure function. -/
 
 /-- **`Ch` end-to-end structural soundness, per bit.** Inputs `x, y, z` are
 `BitOf`-witnessed by `wX, wY, wZ : Fin 32 → F`. Then the field-level
-expression that the gadget materialises for the `i`-th output bit — namely
-`e_and_f + not_e_and_g - 2 (e_and_f * not_e_and_g)` with `e_and_f = wX i * wY
+expression of the `and32`/`not32`/`xor32` composition for the `i`-th output
+bit — namely `e_and_f + not_e_and_g - 2 (e_and_f * not_e_and_g)` with `e_and_f = wX i * wY
 i` and `not_e_and_g = (1 - wX i) * wZ i` — is `BitOf` of the `i`-th spec-level
 `Ch x y z` bit. This composes `and32_sound`, `not32_sound`, `xor32_sound`. -/
 theorem Ch_bit_sound {F : Type*} [Field F]
@@ -326,18 +316,10 @@ theorem Ch_bit_sound {F : Type*} [Field F]
 
 /-- **`Maj` end-to-end structural soundness, per bit.** Composes three
 `and32_sound`s with two `xor32_sound`s to land on the spec-level `Maj x y z`
-bit. The witness expression matches the gadget composition
-
-```
-let a_and_b   = and(builder, &a, &b)?;   // wires: wX i * wY i
-let a_and_c   = and(builder, &a, &c)?;   // wires: wX i * wZ i
-let b_and_c   = and(builder, &b, &c)?;   // wires: wY i * wZ i
-let maj       = xor_triple(builder, &a_and_b, &a_and_c, &b_and_c)?;
-```
-
-where `xor_triple`'s parity-carry form (proven sound in `Formal/Arith.lean`)
-is here unfolded to two nested binary XORs, so the bit-level witness can be
-expressed in closed form. -/
+bit. The witness expression is the composition of three ANDs
+(`wX i * wY i`, `wX i * wZ i`, `wY i * wZ i`) under two nested binary XORs,
+so the bit-level witness can be expressed in closed form. (The gadget's
+one-row `maj3` is proven separately in `Formal/HashOps.lean`.) -/
 theorem Maj_bit_sound {F : Type*} [Field F]
     (x y z : Word32) (wX wY wZ : Fin 32 → F)
     (hX : ∀ i, BitOf (wX i) (x i)) (hY : ∀ i, BitOf (wY i) (y i))
@@ -397,9 +379,10 @@ We model the schedule's recurrence *equation* without committing to a concrete
 recursive definition (avoiding `Nat.strongRecOn` and the noncomputability it
 entails). What's important for the structural soundness story is the *shape*
 of the recurrence: `W[t]` is the wrapping-add of four terms `σ₁(W[t-2])`,
-`W[t-7]`, `σ₀(W[t-15])`, `W[t-16]`. The gadget builds it in exactly that
-shape; the soundness obligation is that the gadget's `add_mod_32` over those
-four words computes the same wrapping-add that the recurrence specifies. -/
+`W[t-7]`, `σ₀(W[t-15])`, `W[t-16]`. The gadget sums those four words as one
+field sum and reduces it with `xark_bits::reduce::<34>` (`Formal/Reduce.lean`);
+the soundness obligation is that this computes the same wrapping-add that the
+recurrence specifies. -/
 
 /-- The natural-number value of a `Word32` (LSB first). Used to lift the
 boolean-vector spec to a `ℕ`-valued spec for the wrapping-add. -/
@@ -424,16 +407,15 @@ theorem toNat_lt (w : Word32) : toNat w < 2 ^ 32 := by
 def ofNat (n : ℕ) : Word32 := fun i => (n / 2 ^ i.val) % 2 = 1
 
 /-- Wrapping 32-bit addition on `Word32`, defined via the `toNat`/`ofNat`
-round trip. Matches the `+` of FIPS 180-4 §6.2 and the semantics of the Rust
-`add_mod_32`. -/
+round trip. Matches the `+` of FIPS 180-4 §6.2 and the semantics of
+`xark_bits::add32` / `reduce`. -/
 def addMod32 (a b : Word32) : Word32 := ofNat ((toNat a + toNat b) % 2 ^ 32)
 
 /-- **Message-schedule recurrence (pure spec).** The defining equation of
 `W[t]` for `t ∈ [16, 64)` per FIPS 180-4 §6.2, written as a predicate on a
 hypothetical schedule `W : Fin 64 → Word32`. The Rust gadget builds `W[t]`
-with one `add_mod_32` call over four terms; the predicate below picks the
-same four terms (in the same order the gadget passes them) so the structural
-witness is direct. -/
+as one `reduce::<34>` of the four terms' field sum (`W[62]`, `W[63]` stay
+unreduced sums); the predicate below picks the same four terms. -/
 def MessageScheduleStep (W : Fin 64 → Word32) (t : Fin 64) (ht : 16 ≤ t.val) : Prop :=
   W t =
     addMod32
@@ -445,10 +427,10 @@ def MessageScheduleStep (W : Fin 64 → Word32) (t : Fin 64) (ht : 16 ≤ t.val)
       (smallSigma1 (W ⟨t.val - 2,  by omega⟩))
 
 /-- **Message-schedule structural identity.** Restates the recurrence as an
-`iff`-trivial form, useful when rewriting: knowing the gadget materialises
-the four-term `add_mod_32` over the *same* four words as `MessageScheduleStep`
-gives `W t = ...`, immediately. (The point is anchoring: this is the shape the
-gadget reproduces — see `gadgets/xark-sha256/src/lib.rs` lines for `i in 16..64`.) -/
+`iff`-trivial form, useful when rewriting: knowing the gadget reduces
+the four-term sum over the *same* four words as `MessageScheduleStep`
+gives `W t = ...`, immediately (the schedule loop for `t` in `16..64` of
+`compress` in `gadgets/xark-sha256/src/lib.rs`). -/
 theorem MessageScheduleStep_iff (W : Fin 64 → Word32) (t : Fin 64) (ht : 16 ≤ t.val) :
     MessageScheduleStep W t ht ↔
       W t = addMod32

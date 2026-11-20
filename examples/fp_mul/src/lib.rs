@@ -1,8 +1,9 @@
 //! Non-native base-field multiply `(a · b) mod p` over secp256k1's base field
-//! with 3×86-bit limbs (pure `mod_mul::<3, 86>`, no input range checks). Low-level
-//! bignum primitive demo: limbs are field values passed natively as decimals.
+//! with 3×86-bit limbs (`mod_mul::<3, 86>`). Low-level bignum primitive demo: limbs
+//! are field values passed natively as decimals, so the circuit range-checks them
+//! (`mod_mul`'s relation holds only for limbs `< 2^86`).
 use xark::{circuit, require_eq, Field, Private, Public};
-use xark_bignum::mod_mul;
+use xark_bignum::{mod_mul, range_check_limbs};
 
 #[circuit]
 pub fn fp_mul(a: Private<[Field; 3]>, b: Private<[Field; 3]>, c: Public<[Field; 3]>) {
@@ -11,12 +12,9 @@ pub fn fp_mul(a: Private<[Field; 3]>, b: Private<[Field; 3]>, c: Public<[Field; 
         Field::constant("77371252455336267181195263"),
         Field::constant("19342813113834066795298815"),
     ];
-    let p_m1 = [
-        Field::constant("77371252455336262886226990"),
-        Field::constant("77371252455336267181195263"),
-        Field::constant("19342813113834066795298815"),
-    ];
-    let prod = mod_mul::<3, 86>(a, b, p, p_m1);
+    range_check_limbs::<3, 86>(a);
+    range_check_limbs::<3, 86>(b);
+    let prod = mod_mul::<3, 86>(a, b, p);
     require_eq(prod[0], c[0]);
     require_eq(prod[1], c[1]);
     require_eq(prod[2], c[2]);

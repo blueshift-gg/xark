@@ -40,14 +40,44 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
       - name: Re-export every proven gadget
         run: cargo xtask lean-export --check
-      - name: Every production call of a proven gadget emits its template
-        # Builds every example with the gadget markers; a call whose rows aren't the
-        # proven template (alone or with constant plugs) fails unless
-        # formal/coverage-allowlist.txt gives a reason. One example at a time: the
-        # runner's memory holds one recorded build of the largest example.
-        run: cargo xtask lean-export --coverage
+
+  coverage:
+    # Builds every example with the gadget markers; a call whose rows aren't the
+    # proven template (alone or with constant plugs) fails unless
+    # formal/coverage-allowlist.txt gives a reason. One example at a time (the
+    # runner's memory holds one recorded build of the largest example), every
+    # fourth example per runner: 6 min on one. What needs every example at once (an
+    # allowlist entry or a committed obligation no example uses any more) is checked
+    # by the weekly full run (scheduled.yml) and `cargo xtask ci`.
+    name: every production call of a proven gadget emits its template (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install rustc 1.99.1 + wasm32
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
+      - name: This shard's examples
+        run: cargo xtask lean-export --coverage --shard ${{ matrix.shard }}/4
         env:
           XARK_JOBS: 1
 
@@ -67,6 +97,10 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
       - name: Install elan (Lean toolchain manager)
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
@@ -99,17 +133,25 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch mathlib cache
         run: lake exe cache get
-      - name: Cache the proofs' build
+      - name: Restore the proofs' build
         # Lake checks each module by content hash, so a restored build skips every
         # module whose source and imports are unchanged (the newest build of any
-        # source when this exact one isn't cached).
-        uses: actions/cache@v4
+        # source when this exact one isn't cached). Saved only from master, below:
+        # the repository's caches are capped at 10 GB and one per pull request
+        # evicted master's, so a pull request built the proofs from scratch.
+        uses: actions/cache/restore@v4
         with:
           path: formal/.lake/build
           key: formal-${{ hashFiles('formal/lean-toolchain', 'formal/lake-manifest.json') }}-${{ hashFiles('formal/**/*.lean') }}
           restore-keys: formal-${{ hashFiles('formal/lean-toolchain', 'formal/lake-manifest.json') }}-
       - name: Build proofs
         run: lake build
+      - name: Save the proofs' build
+        if: github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v4
+        with:
+          path: formal/.lake/build
+          key: formal-${{ hashFiles('formal/lean-toolchain', 'formal/lake-manifest.json') }}-${{ hashFiles('formal/**/*.lean') }}
       - name: Every harness proven; standard axioms only
         run: lake env lean AxiomCheck.lean
       - name: Each exported circuit's Lean rows hash to the compiler's
@@ -124,6 +166,10 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          shared-key: xtask
+          cache-workspace-crates: true
       - name: A mutated circuit is refused
         working-directory: .
         run: cargo test -p xtask --release lean::tests -- --ignored

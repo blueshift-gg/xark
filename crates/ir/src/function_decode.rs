@@ -41,6 +41,51 @@ fn get_iv(b: &[u8], p: &mut usize) -> i64 {
     let u = get_uv(b, p);
     ((u >> 1) as i64) ^ -((u & 1) as i64)
 }
+/// A count of things that follow at `*p`, each encoded in at least `min_width`
+/// bytes. Panics (a malformed artifact) when they can't fit in the bytes left, so
+/// a hostile count is caught before it sizes an allocation.
+fn get_len(b: &[u8], p: &mut usize, min_width: u64) -> usize {
+    let n = get_uv(b, p);
+    let left = b.len().saturating_sub(*p) as u64;
+    assert!(
+        n.checked_mul(min_width).is_some_and(|w| w <= left),
+        "count {n} overruns the artifact"
+    );
+    n as usize
+}
+
+/// The most an artifact may declare or expand to: 2^30 variables, and 2^30 rows,
+/// witness ops and template calls in all (what parsing materializes and what
+/// expanding walks are each held to it). Groth16 over BN254 keys at most 2^28 rows
+/// (the scalar field's two-adicity bounds the FFT domain) and the largest examples
+/// are under 2^23, so this rejects only artifacts no prover could use, while
+/// keeping a few hostile bytes from asking for an unbounded walk or allocation.
+const SIZE_CAP: u64 = 1 << 30;
+
+thread_local! {
+    /// What parsing the current artifact has materialized so far (rolled calls,
+    /// rolled-run ops), against [`SIZE_CAP`].
+    static SPENT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Charge `n` items parsing is about to materialize.
+fn charge(n: u64) {
+    SPENT.with(|s| {
+        let total = s.get().saturating_add(n);
+        assert!(total <= SIZE_CAP, "the artifact expands past the size cap");
+        s.set(total);
+    });
+}
+
+/// A rolled run (item tag `7`), expanded, its cost charged.
+fn rolled_run(blob: &[u8]) -> (Vec<R1csRow>, Vec<WitnessGen>) {
+    let mut left = SIZE_CAP - SPENT.with(std::cell::Cell::get);
+    let out = crate::bytecode::decode_and_expand_ops_compact(blob, &pool(), &mut left)
+        .unwrap_or_else(|e| panic!("bad rolled run: {e}"));
+    SPENT.with(|s| s.set(SIZE_CAP - left));
+    out
+}
+
 fn get_fc(b: &[u8], p: &mut usize) -> FieldConst {
     let tag = b[*p];
     *p += 1;
@@ -54,7 +99,7 @@ fn get_fc(b: &[u8], p: &mut usize) -> FieldConst {
                 t => panic!("bad constant sign {t}"),
             };
             *p += 1;
-            let n = get_uv(b, p) as usize;
+            let n = get_len(b, p, 1);
             let v = num_bigint::BigInt::from_bytes_le(sign, &b[*p..*p + n]);
             *p += n;
             FieldConst::from_bigint(v)
@@ -68,6 +113,10 @@ fn get_fc(b: &[u8], p: &mut usize) -> FieldConst {
         4 | 5 => {
             let k = get_uv(b, p);
             assert!(k < 4096, "bad exponent");
+            if k < 63 {
+                let v = 1i64 << k;
+                return FieldConst::from_i64(if tag == 5 { -v } else { v });
+            }
             let v = num_bigint::BigInt::from(1) << k;
             FieldConst::from_bigint(if tag == 5 { -v } else { v })
         }
@@ -82,7 +131,7 @@ fn get_var(b: &[u8], p: &mut usize, prev: &mut i64) -> u32 {
 }
 fn get_lc(b: &[u8], p: &mut usize) -> LinearCombination {
     let constant = get_fc(b, p);
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut terms = Vec::with_capacity(n.min(1 << 20));
     let mut prev = 0i64;
     for _ in 0..n {
@@ -93,12 +142,12 @@ fn get_lc(b: &[u8], p: &mut usize) -> LinearCombination {
     LinearCombination { constant, terms }
 }
 fn get_ids(b: &[u8], p: &mut usize) -> Vec<VarId> {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut prev = 0i64;
     (0..n).map(|_| get_var(b, p, &mut prev)).collect()
 }
 fn get_str(b: &[u8], p: &mut usize) -> String {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let s = std::str::from_utf8(&b[*p..*p + n]).unwrap().to_string();
     *p += n;
     s
@@ -122,7 +171,7 @@ fn get_witness_with(
 ) -> WitnessGen {
     let lcs =
         |b: &[u8], p: &mut usize, lc: &mut dyn FnMut(&[u8], &mut usize) -> LinearCombination| {
-            let n = get_uv(b, p) as usize;
+            let n = get_len(b, p, 1);
             (0..n).map(|_| lc(b, p)).collect::<Vec<_>>()
         };
     let tag = b[*p];
@@ -352,9 +401,9 @@ struct GDef {
 /// even: a bare variable (`1·v`), `v` = previous bare plug (initially `base`) +
 /// zigzag(header / 2); `1`: a general LC follows.
 fn get_plugs_compact(b: &[u8], p: &mut usize, base: u32) -> Vec<LinearCombination> {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut prev = i64::from(base);
-    let mut out = Vec::with_capacity(n);
+    let mut out = Vec::with_capacity(n.min(1 << 20));
     for _ in 0..n {
         let h = get_uv(b, p);
         if h & 1 == 0 {
@@ -371,21 +420,21 @@ fn get_plugs_compact(b: &[u8], p: &mut usize, base: u32) -> Vec<LinearCombinatio
 /// plugs delta-coded as in [`get_plugs_compact`] (each followed by its step).
 fn parse_rolled_calls_compact(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<LinearCombination>)> {
     let count = get_uv(b, p) as i64;
-    let period = get_uv(b, p) as usize;
+    let period = get_len(b, p, 1);
     #[allow(clippy::type_complexity)]
     let mut body: Vec<(
         u32,
         i64,
         i64,
         Vec<(FieldConst, Vec<(FieldConst, i64, i64)>)>,
-    )> = Vec::with_capacity(period);
+    )> = Vec::with_capacity(period.min(1 << 20));
     for _ in 0..period {
         let def = get_uv(b, p) as u32;
         let base0 = get_uv(b, p) as i64;
         let base_step = get_iv(b, p);
-        let nplugs = get_uv(b, p) as usize;
+        let nplugs = get_len(b, p, 1);
         let mut prev = base0;
-        let mut plugs = Vec::with_capacity(nplugs);
+        let mut plugs = Vec::with_capacity(nplugs.min(1 << 20));
         for _ in 0..nplugs {
             let h = get_uv(b, p);
             if h & 1 == 0 {
@@ -395,8 +444,8 @@ fn parse_rolled_calls_compact(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<Lin
                 plugs.push((FieldConst::zero(), vec![(FieldConst::one(), prev, step)]));
             } else {
                 let constant = get_fc(b, p);
-                let nterms = get_uv(b, p) as usize;
-                let mut terms = Vec::with_capacity(nterms);
+                let nterms = get_len(b, p, 1);
+                let mut terms = Vec::with_capacity(nterms.min(1 << 20));
                 for _ in 0..nterms {
                     let coeff = get_fc(b, p);
                     let var0 = get_uv(b, p) as i64;
@@ -408,7 +457,10 @@ fn parse_rolled_calls_compact(b: &[u8], p: &mut usize) -> Vec<(u32, u32, Vec<Lin
         }
         body.push((def, base0, base_step, plugs));
     }
-    let mut out = Vec::with_capacity(count.max(0) as usize * period);
+    // The block repeats its body `count` times: bounded by the cap, not the bytes.
+    // An empty body still costs the loop its iterations.
+    charge((count.max(0) as u64).saturating_mul(period.max(1) as u64));
+    let mut out = Vec::with_capacity((count.max(0) as usize).saturating_mul(period).min(1 << 20));
     for k in 0..count {
         for (def, base0, base_step, plugs) in &body {
             let lcs = plugs
@@ -479,7 +531,7 @@ fn push_refs(items: &[CItem], table: &mut Vec<LcRef>) {
 
 /// Parse a constraint item stream and its LC table.
 fn parse_c_items(b: &[u8], p: &mut usize) -> (Vec<CItem>, Vec<LcRef>) {
-    let n = get_uv(b, p) as usize;
+    let n = get_len(b, p, 1);
     let mut out = Vec::with_capacity(n.min(1 << 20));
     let mut table: Vec<LcRef> = Vec::new();
     for _ in 0..n {
@@ -544,12 +596,10 @@ fn parse_c_items(b: &[u8], p: &mut usize) -> (Vec<CItem>, Vec<LcRef>) {
                 }
             }
             7 => {
-                let len = get_uv(b, p) as usize;
+                let len = get_len(b, p, 1);
                 let blob = &b[*p..*p + len];
                 *p += len;
-                let (rows, _) = crate::bytecode::decode_and_expand_ops_compact(blob, &pool())
-                    .unwrap_or_default();
-                out.push(CItem::Rolled(rows));
+                out.push(CItem::Rolled(rolled_run(blob).0));
             }
             t => panic!("bad constraint item tag {t}"),
         }
@@ -560,8 +610,8 @@ fn parse_c_items(b: &[u8], p: &mut usize) -> (Vec<CItem>, Vec<LcRef>) {
 /// Parse a witness item stream. `c_items` is the same scope's constraint stream:
 /// a tag `4` reuses its CALLs (in order) instead of repeating them.
 fn parse_w_items(b: &[u8], p: &mut usize, c_items: &[CItem], table: &[LcRef]) -> Vec<WItem> {
-    let n = get_uv(b, p) as usize;
-    let mut out = Vec::with_capacity(n);
+    let n = get_len(b, p, 1);
+    let mut out = Vec::with_capacity(n.min(1 << 20));
     let mut c_calls = c_items.iter().filter_map(|it| match it {
         CItem::Call(d, base, plugs) => Some((*d, *base, plugs)),
         _ => None,
@@ -601,12 +651,10 @@ fn parse_w_items(b: &[u8], p: &mut usize, c_items: &[CItem], table: &[LcRef]) ->
                 }
             }
             7 => {
-                let len = get_uv(b, p) as usize;
+                let len = get_len(b, p, 1);
                 let blob = &b[*p..*p + len];
                 *p += len;
-                let (_, wits) = crate::bytecode::decode_and_expand_ops_compact(blob, &pool())
-                    .unwrap_or_default();
-                out.push(WItem::Rolled(wits));
+                out.push(WItem::Rolled(rolled_run(blob).1));
             }
             t => panic!("bad witness item tag {t}"),
         }
@@ -736,7 +784,7 @@ pub fn stream_field(b: &[u8]) -> Option<FieldSpec> {
     if b.len() < 6 || b[..4] != crate::bytecode::MAGIC {
         return None;
     }
-    std::panic::catch_unwind(|| decode_header(b).0).ok()
+    catch_quietly(|| decode_header(b).0).ok()
 }
 
 /// Parse the header through the signature inputs; returns the cursor after them.
@@ -744,8 +792,15 @@ fn decode_header(b: &[u8]) -> (FieldSpec, usize, Vec<Var>, usize) {
     let mut p = 6usize;
     let name = get_str(b, &mut p);
     let modulus_decimal = get_str(b, &mut p);
-    let num_vars = get_uv(b, &mut p) as usize;
-    let num_inputs = get_uv(b, &mut p) as usize;
+    let num_vars = get_uv(b, &mut p);
+    assert!(
+        num_vars <= SIZE_CAP,
+        "{num_vars} variables is past the size cap"
+    );
+    let num_vars = num_vars as usize;
+    // Each input is a role byte and a name (at least its length byte).
+    let num_inputs = get_len(b, &mut p, 2);
+    assert!(num_inputs <= num_vars, "more inputs than variables");
     let mut inputs = Vec::with_capacity(num_inputs);
     for id in 0..num_inputs {
         let role = byte_role(b[p]);
@@ -792,17 +847,19 @@ fn parse_body(
 ) {
     let version = u16::from_le_bytes([b[4], b[5]]);
     assert_eq!(version, 2, "unsupported XBC container version {version}");
-    let n = get_uv(b, &mut p) as usize;
+    let n = get_len(b, &mut p, 1);
     let pool: Vec<FieldConst> = (0..n).map(|_| get_fc(b, &mut p)).collect();
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
             POOL.with(|p| *p.borrow_mut() = std::rc::Rc::new(Vec::new()));
+            SPENT.with(|s| s.set(0));
         }
     }
     POOL.with(|p| *p.borrow_mut() = std::rc::Rc::new(pool));
+    SPENT.with(|s| s.set(0));
     let _reset = Reset;
-    let n_defs = get_uv(b, &mut p) as usize;
+    let n_defs = get_len(b, &mut p, 1);
     let mut defs = Vec::with_capacity(n_defs.min(1 << 20));
     for _ in 0..n_defs {
         let base_var = get_uv(b, &mut p) as u32;
@@ -821,7 +878,92 @@ fn parse_body(
     let (top_c, table) = parse_c_items(b, &mut p);
     let top_w = parse_w_items(b, &mut p, &top_c, &table);
     let keep_extra: std::collections::BTreeSet<u32> = get_ids(b, &mut p).into_iter().collect();
+    check_calls(&defs, &top_c, &top_w);
     (defs, top_c, top_w, keep_extra)
+}
+
+/// Reject a template call graph the expanders can't walk, before anything walks
+/// it: a call to a missing template, a cycle (expansion would recurse until the
+/// stack overflows, which aborts rather than unwinds), or nesting that expands
+/// past [`SIZE_CAP`] (template `k` calling `k - 1` twice, 40 deep, is a few
+/// hundred bytes and 2^40 rows). Templates call each other in either index order
+/// in real artifacts, so the order comes from a topological sort (Kahn's), callees
+/// first; each template's cost is then its own items plus its callees' costs.
+fn check_calls(defs: &[GDef], top_c: &[CItem], top_w: &[WItem]) {
+    let n = defs.len();
+    let c_calls = |items: &[CItem]| -> Vec<u32> {
+        items
+            .iter()
+            .filter_map(|it| match it {
+                CItem::Call(d, ..) => Some(*d),
+                _ => None,
+            })
+            .collect()
+    };
+    let w_calls = |items: &[WItem]| -> Vec<u32> {
+        items
+            .iter()
+            .filter_map(|it| match it {
+                WItem::Call(d, ..) => Some(*d),
+                _ => None,
+            })
+            .collect()
+    };
+    for d in c_calls(top_c).into_iter().chain(w_calls(top_w)) {
+        assert!((d as usize) < n, "a call to missing template {d}");
+    }
+    // Per template: its calls not yet costed; per callee: its callers, once per call.
+    let mut pending = vec![0usize; n];
+    let mut callers: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, def) in defs.iter().enumerate() {
+        for d in c_calls(&def.c_items)
+            .into_iter()
+            .chain(w_calls(&def.w_items))
+        {
+            assert!((d as usize) < n, "a call to missing template {d}");
+            pending[i] += 1;
+            callers[d as usize].push(i);
+        }
+    }
+    // The rows (or ops) and calls a stream expands to, saturating past the cap. An
+    // empty rolled run still costs its item.
+    let c_cost = |items: &[CItem], cost: &[(u64, u64)]| -> u64 {
+        items.iter().fold(0u64, |acc, it| {
+            acc.saturating_add(match it {
+                CItem::Row(_) => 1,
+                CItem::Rolled(rows) => rows.len().max(1) as u64,
+                CItem::Call(d, ..) => cost[*d as usize].0.saturating_add(1),
+            })
+        })
+    };
+    let w_cost = |items: &[WItem], cost: &[(u64, u64)]| -> u64 {
+        items.iter().fold(0u64, |acc, it| {
+            acc.saturating_add(match it {
+                WItem::Row(_) => 1,
+                WItem::Rolled(ops) => ops.len().max(1) as u64,
+                WItem::Call(d, ..) => cost[*d as usize].1.saturating_add(1),
+            })
+        })
+    };
+    let mut cost = vec![(0u64, 0u64); n];
+    let mut ready: Vec<usize> = (0..n).filter(|&i| pending[i] == 0).collect();
+    let mut costed = 0;
+    while let Some(d) = ready.pop() {
+        cost[d] = (
+            c_cost(&defs[d].c_items, &cost),
+            w_cost(&defs[d].w_items, &cost),
+        );
+        costed += 1;
+        for &i in &callers[d] {
+            pending[i] -= 1;
+            if pending[i] == 0 {
+                ready.push(i);
+            }
+        }
+    }
+    assert!(costed == n, "template calls form a cycle");
+    let total = c_cost(top_c, &cost).saturating_add(w_cost(top_w, &cost));
+    assert!(total <= SIZE_CAP, "the artifact expands past the size cap");
 }
 
 fn decode_core(b: &[u8]) -> CompactCore {
@@ -864,9 +1006,11 @@ fn decode_compact(b: &[u8]) -> CompactDecoded {
 }
 
 /// Just the signature inputs (role + name), from the header alone — what input
-/// resolution needs, without decoding templates or a table of every variable.
-pub fn decode_input_vars(b: &[u8]) -> Vec<Var> {
-    decode_header(b).2
+/// resolution needs, without decoding templates or a table of every variable. A
+/// malformed header is an `Err`.
+pub fn decode_input_vars(b: &[u8]) -> Result<Vec<Var>, String> {
+    catch_quietly(|| decode_header(b).2)
+        .map_err(|()| "malformed function artifact (XBC header decode failed)".to_string())
 }
 
 /// [`stream_solve`] returning the solver's dense slots (`slots[id]`) instead of a
@@ -878,7 +1022,11 @@ pub fn stream_solve_dense(
     let c = decode_core(b);
     let modulus = num_bigint::BigUint::parse_bytes(c.field.modulus_decimal.as_bytes(), 10)
         .ok_or_else(|| "bad modulus".to_string())?;
-    solve_streamed(&c.inputs, c.num_vars, &c.defs, &c.top_w, &modulus, inputs)
+    let slots = solve_streamed(&c.inputs, c.num_vars, &c.defs, &c.top_w, &modulus, inputs);
+    // Freeing the decoded program takes a few ms the caller needn't wait for. Where
+    // threads can't be spawned (wasm), the unrun closure frees it here instead.
+    let _ = std::thread::Builder::new().spawn(move || drop(c));
+    slots
 }
 
 /// **Streaming constraint check** — solve the witness, then verify every R1CS row
@@ -926,7 +1074,9 @@ pub fn stream_check(
 /// Rows are streamed one at a time; for naming a failure after a prover rejects
 /// a witness, whatever order its own rows are in.
 pub fn first_failing_row(b: &[u8], slots: &[Option<crate::solver::Fp>]) -> Option<usize> {
-    let (field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore {
+        field, defs, top_c, ..
+    } = decode_core(b);
     let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)?;
     let (mut i, mut failed) = (0usize, None);
     expand_c_visit(&defs, &top_c, &IDENTITY, &mut |row: R1csRow| {
@@ -964,7 +1114,7 @@ pub fn decode_vars(b: &[u8]) -> Vec<Var> {
 /// How many function templates (defs) the container holds: `0` for a circuit
 /// with no repeated calls worth templating.
 pub fn count_templates(b: &[u8]) -> usize {
-    decode_compact(b).2.len()
+    decode_core(b).defs.len()
 }
 
 // Per-variable classification flags accumulated by the streaming pass 1.
@@ -974,33 +1124,50 @@ const F_PINNED: u8 = 4; // some referencing row is linear in the var (a=0, b≠0
 
 /// Fold one row's contribution into the per-variable classification flags. For
 /// each distinct variable the row references, reduce the row to its univariate
-/// `A·v² + B·v + C` (fixing all other vars to the witness) and OR in: `SEEN`
-/// always; `RESTRICTED` if `A≠0 ∨ B≠0`; `PINNED` if the row is linear in the var
-/// (`A=0 ∧ B≠0`). `fetch_or` is commutative, so this is safe to call from
-/// parallel shards in any order.
+/// `A·v² + B·v + C` (fixing all other vars to the witness) and [`note`] it.
 fn apply_row_flags(
     row: &R1csRow,
     assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     flags: &[std::sync::atomic::AtomicU8],
+    quadratic: &[Quadratic],
 ) {
-    use std::sync::atomic::Ordering;
     for (v, (a, b, _c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
-        let mut bits = F_SEEN;
-        if !(a.is_zero() && b.is_zero()) {
-            bits |= F_RESTRICTED;
-            if a.is_zero() {
-                bits |= F_PINNED;
-            }
-        }
-        flags[v as usize].fetch_or(bits, Ordering::Relaxed);
+        note(v, a, b, flags, quadratic);
     }
 }
 
+/// Pass 1's record of one row's univariate reduction `a·v² + b·v + c` for `v`: OR
+/// in `SEEN` always, `RESTRICTED` if `a≠0 ∨ b≠0`, `PINNED` if the row is linear in
+/// the var (`a=0 ∧ b≠0`); a quadratic row (`a≠0`) is kept for pass 2. `fetch_or` is
+/// commutative, so parallel shards may call this in any order.
+fn note(
+    v: u32,
+    a: crate::solver::Fp,
+    b: crate::solver::Fp,
+    flags: &[std::sync::atomic::AtomicU8],
+    quadratic: &[Quadratic],
+) {
+    use std::sync::atomic::Ordering;
+    let mut bits = F_SEEN;
+    if !(a.is_zero() && b.is_zero()) {
+        bits |= F_RESTRICTED;
+        if a.is_zero() {
+            bits |= F_PINNED;
+        } else if let Some(q) = quadratic.get(v as usize) {
+            let _ = q.set((a, b));
+        }
+    }
+    flags[v as usize].fetch_or(bits, Ordering::Relaxed);
+}
+
+/// One row's `(a, b)` with `a ≠ 0` for a var — any of them (the first to land).
+type Quadratic = std::sync::OnceLock<(crate::solver::Fp, crate::solver::Fp)>;
+
 /// Streaming pass 1: classify every variable with a **dense flag byte** while
 /// (optionally) checking satisfiability, in a single parallel sweep of the
-/// compact constraint stream. Returns the flag array (indexed by var id) and
-/// whether every row `a·b = c` held.
+/// compact constraint stream. Returns the flag array (indexed by var id),
+/// whether every row `a·b = c` held, and each var's kept quadratic row.
 ///
 /// This is the memory win: instead of storing each row's univariate `(a,b,c)`
 /// reduction (3 field elements per var-reference — GBs on a heavy EC circuit),
@@ -1015,10 +1182,35 @@ fn classify_and_check(
     modulus: &num_bigint::BigUint,
     num_vars: usize,
     check_sat: bool,
-) -> (Vec<std::sync::atomic::AtomicU8>, bool) {
+    compiled: Option<&eval::Compiled>,
+) -> (Vec<std::sync::atomic::AtomicU8>, bool, Vec<Quadratic>) {
     use rayon::prelude::*;
     use std::sync::atomic::AtomicU8;
     let flags: Vec<AtomicU8> = (0..num_vars).map(|_| AtomicU8::new(0)).collect();
+    // Only a satisfied witness can use them (see `two_valued_satisfied`).
+    let quadratic: Vec<Quadratic> = if check_sat {
+        (0..num_vars).map(|_| Quadratic::new()).collect()
+    } else {
+        Vec::new()
+    };
+    if let Some(c) = compiled {
+        // Over BN254: the rows as the prover's evaluator compiles them (`Fr`
+        // coefficients, resolved references), each costing its field operations and
+        // nothing else, where building a row allocated three LCs and a map.
+        use crate::solver::Fp;
+        let z = bn254_values(assign);
+        let sat_ok = c
+            .top
+            .par_iter()
+            .map(|item| {
+                let mut flag = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, _c: ark_bn254::Fr| {
+                    note(v, Fp::Bn254(a), Fp::Bn254(b), &flags, &quadratic);
+                };
+                eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut flag)
+            })
+            .reduce(|| true, |x, y| x && y);
+        return (flags, !check_sat || sat_ok, quadratic);
+    }
     let sat_ok = top_c
         .par_iter()
         .map(|item| {
@@ -1034,20 +1226,30 @@ fn classify_and_check(
                     {
                         shard_ok = false;
                     }
-                    apply_row_flags(&row, assign, modulus, &flags);
+                    apply_row_flags(&row, assign, modulus, &flags, &quadratic);
                 },
             );
             shard_ok
         })
         .reduce(|| true, |x, y| x && y);
-    (flags, sat_ok)
+    (flags, sat_ok, quadratic)
 }
 
-/// Streaming pass 2 (rare path): re-stream the constraints, gathering each
-/// *suspect* var's univariate `(a,b,c)` reductions, then run the exact flat
-/// two-valued test on that small set. Suspects are vars that survived pass 1
-/// restricted-but-unpinned — for a well-constrained circuit this set is empty
-/// and pass 2 never runs. Returns the subset that is genuinely two-valued.
+/// The witness as the compiled evaluator reads it: a variable's BN254 value, zero
+/// when unassigned (as the generic path treats a missing slot).
+fn bn254_values(assign: &[Option<crate::solver::Fp>]) -> impl Fn(u32) -> ark_bn254::Fr + Sync + '_ {
+    use ark_ff::Zero;
+    move |id: u32| match assign.get(id as usize) {
+        Some(Some(crate::solver::Fp::Bn254(v))) => *v,
+        _ => ark_bn254::Fr::zero(),
+    }
+}
+
+/// Streaming pass 2 for a witness not known to satisfy every row: re-stream the
+/// constraints, gathering each *suspect* var's univariate `(a,b,c)` reductions,
+/// then run the exact flat two-valued test on them. Suspects are vars that
+/// survived pass 1 restricted-but-unpinned. Returns the subset that is
+/// genuinely two-valued.
 fn two_valued_suspects(
     defs: &[GDef],
     top_c: &[CItem],
@@ -1056,27 +1258,201 @@ fn two_valued_suspects(
     suspects: &std::collections::BTreeSet<u32>,
 ) -> std::collections::BTreeSet<u32> {
     use crate::solver::Fp;
-    // Gather every suspect's referencing rows (small: |suspects| is tiny).
+    use rayon::prelude::*;
+    // Gather every suspect's referencing rows, in parallel over the shards (a
+    // suspect's verdict doesn't depend on the order of its rows). On circuits
+    // built from multiplications nearly every derived var is a suspect.
+    let mut is_suspect = vec![false; assign.len()];
+    for &v in suspects {
+        if let Some(s) = is_suspect.get_mut(v as usize) {
+            *s = true;
+        }
+    }
+    let suspect = |v: u32| is_suspect.get(v as usize).copied().unwrap_or(false);
+    let mut found: Vec<(u32, (Fp, Fp, Fp))> = top_c
+        .par_iter()
+        .fold(Vec::new, |mut found, item| {
+            expand_c_visit(
+                defs,
+                std::slice::from_ref(item),
+                &IDENTITY,
+                &mut |row: R1csRow| {
+                    let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
+                    if !terms.any(|t| suspect(t.var)) {
+                        return;
+                    }
+                    found.extend(
+                        crate::solver::univariate_r1cs_row(&row, assign, modulus)
+                            .into_iter()
+                            .filter(|(v, _)| suspect(*v)),
+                    );
+                },
+            );
+            found
+        })
+        .reduce(Vec::new, |mut a, mut b| {
+            a.append(&mut b);
+            a
+        });
+    found.par_sort_by_key(|(v, _)| *v);
     let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
-        suspects.iter().map(|&v| (v, Vec::new())).collect();
-    expand_c_visit(defs, top_c, &IDENTITY, &mut |row: R1csRow| {
+        std::collections::BTreeMap::new();
+    for (v, poly) in found {
+        polys.entry(v).or_default().push(poly);
+    }
+    two_valued_from_polys(&polys, assign, modulus)
+}
+
+/// Streaming pass 2 for a witness that satisfies every row. A suspect `v = α`
+/// is two-valued iff some `β ≠ α` satisfies all its rows. Each row with `a ≠ 0`
+/// has the roots `α` and `−b/a − α`, so such a `β` is the other root of every
+/// one of them, and the one row pass 1 kept gives the only candidate. Same
+/// verdicts as [`two_valued_suspects`] in one parallel sweep, without gathering
+/// the rows: on circuits built from multiplications nearly every derived var
+/// is a suspect. Over BN254 the sweep runs the compiled rows, as pass 1 did.
+fn two_valued_satisfied(
+    defs: &[GDef],
+    top_c: &[CItem],
+    assign: &[Option<crate::solver::Fp>],
+    modulus: &num_bigint::BigUint,
+    suspects: &std::collections::BTreeSet<u32>,
+    quadratic: &[Quadratic],
+    compiled: Option<&eval::Compiled>,
+) -> std::collections::BTreeSet<u32> {
+    use rayon::prelude::*;
+    let test = SecondRoots::new(assign, modulus, suspects, quadratic);
+    if let Some(c) = compiled {
+        use crate::solver::Fp;
+        let z = bn254_values(assign);
+        c.top.par_iter().for_each(|item| {
+            let mut check = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, cc: ark_bn254::Fr| {
+                test.check_poly(v, &Fp::Bn254(a), &Fp::Bn254(b), &Fp::Bn254(cc));
+            };
+            eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut check);
+        });
+        return test.survivors();
+    }
+    top_c.par_iter().for_each(|item| {
+        expand_c_visit(
+            defs,
+            std::slice::from_ref(item),
+            &IDENTITY,
+            &mut |row: R1csRow| test.check(&row, assign, modulus),
+        );
+    });
+    test.survivors()
+}
+
+/// The other root of `a·v² + b·v + c` given one root `α` and `a ≠ 0`, as `n/a` with
+/// `n = −b − a·α` (no inversion); `None` when it is `α` again.
+fn other_root(
+    a: &crate::solver::Fp,
+    b: &crate::solver::Fp,
+    alpha: &crate::solver::Fp,
+) -> Option<crate::solver::Fp> {
+    let n = b.neg().sub(&a.mul(alpha));
+    (n != a.mul(alpha)).then_some(n)
+}
+
+/// Whether `n/a` is a root of `aj·v² + bj·v + cj`: `aj·n² + bj·n·a + cj·a² = 0`.
+fn vanishes(
+    (n, a): (&crate::solver::Fp, &crate::solver::Fp),
+    (aj, bj, cj): &(crate::solver::Fp, crate::solver::Fp, crate::solver::Fp),
+) -> bool {
+    aj.mul(&n.mul(n))
+        .add(&bj.mul(&n.mul(a)))
+        .add(&cj.mul(&a.mul(a)))
+        .is_zero()
+}
+
+/// Each suspect's one candidate second root (as `n/a`), and whether some row
+/// rejected it.
+struct SecondRoots {
+    beta: Vec<Option<(crate::solver::Fp, crate::solver::Fp)>>,
+    failed: Vec<std::sync::atomic::AtomicBool>,
+}
+
+impl SecondRoots {
+    fn new(
+        assign: &[Option<crate::solver::Fp>],
+        modulus: &num_bigint::BigUint,
+        suspects: &std::collections::BTreeSet<u32>,
+        quadratic: &[Quadratic],
+    ) -> Self {
+        use crate::solver::Fp;
+        use rayon::prelude::*;
+        let zero = Fp::zero(modulus);
+        let candidates: Vec<(u32, (Fp, Fp))> = suspects
+            .par_iter()
+            .filter_map(|&v| {
+                let (a, b) = quadratic.get(v as usize)?.get()?;
+                let alpha = assign
+                    .get(v as usize)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| zero.clone());
+                Some((v, (other_root(a, b, &alpha)?, a.clone())))
+            })
+            .collect();
+        let mut beta = vec![None; quadratic.len()];
+        for (v, x) in candidates {
+            beta[v as usize] = Some(x);
+        }
+        let failed = (0..beta.len())
+            .map(|_| std::sync::atomic::AtomicBool::new(false))
+            .collect();
+        SecondRoots { beta, failed }
+    }
+
+    fn candidate(&self, v: u32) -> Option<(&crate::solver::Fp, &crate::solver::Fp)> {
+        self.beta.get(v as usize)?.as_ref().map(|(n, a)| (n, a))
+    }
+
+    /// Reject the candidates `row` doesn't hold for.
+    fn check(
+        &self,
+        row: &R1csRow,
+        assign: &[Option<crate::solver::Fp>],
+        modulus: &num_bigint::BigUint,
+    ) {
         let mut terms = row.a.terms.iter().chain(&row.b.terms).chain(&row.c.terms);
-        if !terms.any(|t| suspects.contains(&t.var)) {
+        if !terms.any(|t| self.candidate(t.var).is_some()) {
             return;
         }
-        for (v, poly) in crate::solver::univariate_r1cs_row(&row, assign, modulus) {
-            if let Some(ps) = polys.get_mut(&v) {
-                ps.push(poly);
-            }
+        for (v, (a, b, c)) in crate::solver::univariate_r1cs_row(row, assign, modulus) {
+            self.check_poly(v, &a, &b, &c);
         }
-    });
-    two_valued_from_polys(&polys, assign, modulus)
+    }
+
+    /// Reject `v`'s candidate if `a·v² + b·v + c` (one of its rows) doesn't hold for it.
+    fn check_poly(
+        &self,
+        v: u32,
+        a: &crate::solver::Fp,
+        b: &crate::solver::Fp,
+        c: &crate::solver::Fp,
+    ) {
+        use std::sync::atomic::Ordering;
+        let Some(x) = self.candidate(v) else { return };
+        let failed = &self.failed[v as usize];
+        if !failed.load(Ordering::Relaxed) && !vanishes(x, &(a.clone(), b.clone(), c.clone())) {
+            failed.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn survivors(&self) -> std::collections::BTreeSet<u32> {
+        use std::sync::atomic::Ordering;
+        (0..self.beta.len())
+            .filter(|&v| self.beta[v].is_some() && !self.failed[v].load(Ordering::Relaxed))
+            .map(|v| v as u32)
+            .collect()
+    }
 }
 
 /// The exact flat two-valued test over already-gathered per-suspect univariate
 /// reductions: a suspect is under-constrained iff some second root `β≠α`
 /// satisfies *all* of its rows. Mirrors `analyze_*_cp`'s candidate loop. Runs in
-/// parallel over the (tiny) suspect set.
+/// parallel over the suspects.
 fn two_valued_from_polys(
     polys: &std::collections::BTreeMap<
         u32,
@@ -1095,22 +1471,14 @@ fn two_valued_from_polys(
                 .cloned()
                 .flatten()
                 .unwrap_or_else(|| Fp::zero(modulus));
-            let mut candidates: Vec<Fp> = Vec::new();
             for (a, b, _c) in ps {
                 if a.is_zero() {
                     continue;
                 }
-                let inv_a = a.inverse().expect("a != 0 in quadratic branch");
-                candidates.push(b.neg().mul(&inv_a).sub(&alpha));
-            }
-            for beta in &candidates {
-                if *beta == alpha {
+                let Some(n) = other_root(a, b, &alpha) else {
                     continue;
-                }
-                let satisfies_all = ps
-                    .iter()
-                    .all(|(a, b, c)| a.mul(beta).mul(beta).add(&b.mul(beta)).add(c).is_zero());
-                if satisfies_all {
+                };
+                if ps.iter().all(|p| vanishes((&n, a), p)) {
                     return Some(v);
                 }
             }
@@ -1121,9 +1489,10 @@ fn two_valued_from_polys(
 
 /// Core streaming soundness pass shared by [`stream_analyze`] and
 /// [`stream_verify`]: classify (pass 1) + optional satisfiability check, then
-/// resolve the rare suspects (pass 2), and assemble the under-constraint list in
-/// var-id order. Peak extra memory over the witness is one flag byte per var (a
-/// few MB) plus the tiny suspect set — never the flat constraint system.
+/// resolve the suspects (pass 2), and assemble the under-constraint list in
+/// var-id order. Peak extra memory over the witness is a flag byte and, when
+/// checking satisfiability, one row's `(a, b)` per var — never the flat
+/// constraint system.
 #[allow(clippy::too_many_arguments)]
 fn stream_underconstrained(
     defs: &[GDef],
@@ -1134,10 +1503,25 @@ fn stream_underconstrained(
     modulus: &num_bigint::BigUint,
     check_sat: bool,
 ) -> (bool, Vec<crate::solver::UnderConstrained>) {
-    let (flags, sat_ok) = classify_and_check(defs, top_c, assign, modulus, vars.len(), check_sat);
+    // Over BN254 both passes run the compiled rows (`eval`); compiled once here.
+    let compiled = crate::solver::is_bn254(modulus).then(|| eval::compile(defs, top_c));
+    let compiled = compiled.as_ref();
+    let (flags, sat_ok, quadratic) = classify_and_check(
+        defs,
+        top_c,
+        assign,
+        modulus,
+        vars.len(),
+        check_sat,
+        compiled,
+    );
     let suspects = select_suspects(&flags, vars);
     let two_valued = if suspects.is_empty() {
         std::collections::BTreeSet::new()
+    } else if check_sat && sat_ok {
+        two_valued_satisfied(
+            defs, top_c, assign, modulus, &suspects, &quadratic, compiled,
+        )
     } else {
         two_valued_suspects(defs, top_c, assign, modulus, &suspects)
     };
@@ -1146,7 +1530,7 @@ fn stream_underconstrained(
 }
 
 /// Vars that survived pass-1 classification restricted-but-never-pinned — the
-/// only ones that need the (expensive, rare) pass-2 two-valued test.
+/// only ones that need the pass-2 two-valued test.
 fn select_suspects(
     flags: &[std::sync::atomic::AtomicU8],
     vars: &[Var],
@@ -1278,7 +1662,7 @@ pub fn stream_solve_verify(
 /// resident set — the memory-win measurement point. Parallel over shards.
 pub fn stream_count_constraints(b: &[u8]) -> usize {
     use rayon::prelude::*;
-    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_c, .. } = decode_core(b);
     top_c
         .par_iter()
         .map(|item| {
@@ -1299,7 +1683,7 @@ pub fn stream_count_constraints(b: &[u8]) -> usize {
 /// gate-count bridges. Parallel over shards.
 pub fn stream_count_mul_gates(b: &[u8]) -> usize {
     use rayon::prelude::*;
-    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_c, .. } = decode_core(b);
     top_c
         .par_iter()
         .map(|item| {
@@ -1324,7 +1708,7 @@ pub fn stream_count_mul_gates(b: &[u8]) -> usize {
 /// count as `expand_function_blob(b).witness_gen.len()`, at a tiny fraction of
 /// the resident set — the memory-win measurement point for the streamed solve.
 pub fn stream_count_witness(b: &[u8]) -> usize {
-    let (_field, _vars, defs, _top_c, top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_w, .. } = decode_core(b);
     let mut n = 0usize;
     expand_w_visit(&defs, &top_w, &IDENTITY, &mut |_op| n += 1);
     n
@@ -1362,7 +1746,7 @@ fn digest_lc(acc: &mut u128, lc: &LinearCombination) {
 /// multi-GB expand+minimize the old constraint-count pin required. Witness-program
 /// changes that leave the R1CS intact are covered separately by the solver check.
 pub fn stream_digest(b: &[u8]) -> u128 {
-    let (_field, _vars, defs, top_c, _top_w, _keep, _num_inputs) = decode_compact(b);
+    let CompactCore { defs, top_c, .. } = decode_core(b);
     // FNV-1a 128-bit offset basis.
     let mut acc: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
     expand_c_visit(&defs, &top_c, &IDENTITY, &mut |row: R1csRow| {
@@ -1628,6 +2012,41 @@ fn solve_streamed(
         .collect())
 }
 
+thread_local! {
+    /// How many [`catch_quietly`] calls this thread is inside.
+    static QUIET: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `f`, turning a panic into `Err`, without printing it: a malformed artifact
+/// panics deep in the parser (bounds, tags, UTF-8), and one clean error line is
+/// what the caller reports. The process's panic hook is wrapped once, never
+/// swapped per call: swapping it raced between concurrent decodes and could leave
+/// a no-op installed for good. The wrapper hands every panic to the hook it
+/// wrapped unless it is on a thread inside here, so the host's hook keeps working.
+/// A panic on a rayon worker of a decode still prints (the worker isn't inside
+/// here); it is caught all the same when it resurfaces on this thread.
+fn catch_quietly<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
+    static WRAPPED: std::sync::Once = std::sync::Once::new();
+    WRAPPED.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // `try_with`: a panic while the thread's locals are torn down prints.
+            if QUIET.try_with(std::cell::Cell::get).unwrap_or(0) == 0 {
+                prev(info);
+            }
+        }));
+    });
+    struct Quiet;
+    impl Drop for Quiet {
+        fn drop(&mut self) {
+            QUIET.with(|q| q.set(q.get() - 1));
+        }
+    }
+    QUIET.with(|q| q.set(q.get() + 1));
+    let _quiet = Quiet;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| ())
+}
+
 /// Parse an `XBC` (version 2) container and expand it to a full `CircuitProgram`.
 /// The 6-byte header (`XBC` + version) is assumed already dispatched on.
 ///
@@ -1639,33 +2058,39 @@ pub fn expand_function_blob(b: &[u8]) -> Result<CircuitProgram, String> {
 }
 
 fn expand_function_blob_impl(b: &[u8]) -> Result<CircuitProgram, String> {
-    // Silence the panic printer for the expected-on-malformed-input inner panics,
-    // then restore it, so a bad artifact yields one clean error line. Decode is
-    // sequential in setup/prove, so swapping the process-global hook is safe; rayon
-    // fan-out panics propagate to this thread and are caught here too.
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        expand_function_blob_inner(b)
-    }));
-    std::panic::set_hook(prev);
-    out.map_err(|_| "malformed function artifact (XBC decode failed)".to_string())
+    // Rayon fan-out panics propagate to this thread and are caught here too.
+    catch_quietly(|| expand_function_blob_inner(b))
+        .map_err(|()| "malformed function artifact (XBC decode failed)".to_string())
+}
+
+/// The variables the prune keeps, in id order: the signature inputs (the first
+/// `inputs.len()` ids), then every other id below `num_vars` that a row references
+/// or an advice exception keeps, `Derived` and unnamed. Walks the sets, not
+/// `0..num_vars`, so a declared count costs nothing it doesn't name.
+fn kept_vars(
+    num_vars: usize,
+    inputs: Vec<Var>,
+    referenced: &std::collections::BTreeSet<u32>,
+    keep_extra: &std::collections::BTreeSet<u32>,
+) -> Vec<Var> {
+    let first = inputs.len();
+    let rest = referenced
+        .union(keep_extra)
+        .map(|&id| id as usize)
+        .filter(|&id| id >= first && id < num_vars)
+        .map(|id| Var {
+            id: id as u32,
+            name: format!("v{id}"),
+            role: VarRole::Derived,
+        });
+    inputs.into_iter().chain(rest).collect()
 }
 
 fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
-    let mut p = 6usize; // MAGIC(4) + version(2)
-    let name = get_str(b, &mut p);
-    let modulus_decimal = get_str(b, &mut p);
-    let num_vars = get_uv(b, &mut p) as usize;
-    // First `num_inputs` vars are signature inputs (role + name); all others `Derived`.
-    let num_inputs = get_uv(b, &mut p) as usize;
-    let mut roles = vec![VarRole::Derived; num_vars];
-    let mut names: Vec<Option<String>> = vec![None; num_vars];
-    for id in 0..num_inputs {
-        roles[id] = byte_role(b[p]);
-        p += 1;
-        names[id] = Some(get_str(b, &mut p));
-    }
+    // The first `num_inputs` vars are signature inputs (role + name); all others
+    // `Derived`.
+    let (field, num_vars, inputs, p) = decode_header(b);
+    let num_inputs = inputs.len();
     let (defs, top_c, top_w, keep_extra) = parse_body(b, p);
 
     // Constraints and witness are independent; expand across a rayon `join`.
@@ -1690,20 +2115,9 @@ fn expand_function_blob_inner(b: &[u8]) -> CircuitProgram {
         id < num_inputs || referenced.contains(&(id as u32)) || keep_extra.contains(&(id as u32))
     };
     witness_gen.retain(|op| keep(witness_out(op) as usize));
-    let vars = (0..num_vars)
-        .filter(|&id| keep(id))
-        .map(|id| Var {
-            id: id as u32,
-            name: names[id].take().unwrap_or_else(|| format!("v{id}")),
-            role: roles[id].clone(),
-        })
-        .collect();
     CircuitProgram {
-        field: FieldSpec {
-            name,
-            modulus_decimal,
-        },
-        vars,
+        field,
+        vars: kept_vars(num_vars, inputs, &referenced, &keep_extra),
         constraints,
         witness_gen,
     }
@@ -1882,16 +2296,10 @@ pub fn expand_function_blob_reduced_certified(
 
 fn expand_reduced(
     b: &[u8],
-    mut certs: Option<&mut Vec<Certificate>>,
+    certs: Option<&mut Vec<Certificate>>,
 ) -> Result<CircuitProgram, String> {
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        expand_reduced_inner(b, certs.as_deref_mut())
-    }));
-    std::panic::set_hook(prev);
-    let prog =
-        out.map_err(|_| "malformed function artifact (XBC reduced decode failed)".to_string())?;
+    let prog = catch_quietly(|| expand_reduced_inner(b, certs))
+        .map_err(|()| "malformed function artifact (XBC reduced decode failed)".to_string())?;
     // Every public input is pinned by a constraint at build time (the compiler's
     // pinning check), so a reduction that leaves one unreferenced has cut it loose
     // — any value would verify. Refuse rather than key such a circuit.
@@ -1918,18 +2326,9 @@ fn expand_reduced(
 }
 
 fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> CircuitProgram {
-    let mut p = 6usize;
-    let name = get_str(b, &mut p);
-    let modulus_decimal = get_str(b, &mut p);
-    let num_vars = get_uv(b, &mut p) as usize;
-    let num_inputs = get_uv(b, &mut p) as usize;
-    let mut roles = vec![VarRole::Derived; num_vars];
-    let mut names: Vec<Option<String>> = vec![None; num_vars];
-    for id in 0..num_inputs {
-        roles[id] = byte_role(b[p]);
-        p += 1;
-        names[id] = Some(get_str(b, &mut p));
-    }
+    let (field, num_vars, inputs, p) = decode_header(b);
+    let num_inputs = inputs.len();
+    let (name, modulus_decimal) = (&field.name, &field.modulus_decimal);
     let (mut defs, top_c, _top_w, keep_extra) = parse_body(b, p);
 
     // Reduce each template body (plugs + outputs pinned) and the top stream (inputs
@@ -1947,13 +2346,13 @@ fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> C
             &def.c_items,
             &base_pins,
             &iface,
-            &name,
-            &modulus_decimal,
+            name,
+            modulus_decimal,
             certs.as_deref_mut(),
         );
     }
     let input_pins: BTreeMap<u32, ()> = (0..num_inputs as u32).map(|v| (v, ())).collect();
-    let top_reduced = minimize_items(&top_c, &input_pins, &iface, &name, &modulus_decimal, certs);
+    let top_reduced = minimize_items(&top_c, &input_pins, &iface, name, modulus_decimal, certs);
 
     let mut constraints = Vec::new();
     expand_c(&defs, &top_reduced, &IDENTITY, &mut constraints);
@@ -1972,23 +2371,9 @@ fn expand_reduced_inner(b: &[u8], mut certs: Option<&mut Vec<Certificate>>) -> C
             }
         }
     }
-    let keep = |id: usize| -> bool {
-        id < num_inputs || referenced.contains(&(id as u32)) || keep_extra.contains(&(id as u32))
-    };
-    let vars = (0..num_vars)
-        .filter(|&id| keep(id))
-        .map(|id| Var {
-            id: id as u32,
-            name: names[id].take().unwrap_or_else(|| format!("v{id}")),
-            role: roles[id].clone(),
-        })
-        .collect();
     CircuitProgram {
-        field: FieldSpec {
-            name,
-            modulus_decimal,
-        },
-        vars,
+        vars: kept_vars(num_vars, inputs, &referenced, &keep_extra),
+        field,
         constraints,
         witness_gen: Vec::new(),
     }
@@ -2022,11 +2407,8 @@ impl ReducedRowStream {
     /// count rows per item and collect the referenced-var set (for the var prune).
     /// Total: a malformed artifact is a clean `Err`, never a panic.
     pub fn new(b: &[u8]) -> Result<Self, String> {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::new_inner(b)));
-        std::panic::set_hook(prev);
-        out.map_err(|_| "malformed function artifact (XBC reduced decode failed)".to_string())
+        catch_quietly(|| Self::new_inner(b))
+            .map_err(|()| "malformed function artifact (XBC reduced decode failed)".to_string())
     }
 
     fn new_inner(b: &[u8]) -> Self {
@@ -2074,6 +2456,9 @@ impl ReducedRowStream {
         let words: Vec<AtomicU64> = (0..num_vars.div_ceil(64))
             .map(|_| AtomicU64::new(0))
             .collect();
+        // A var past the table is a malformed artifact: noted here and panicked on
+        // below, on the thread that catches it, rather than on a rayon worker.
+        let past = std::sync::atomic::AtomicBool::new(false);
         let counts: Vec<usize> = top
             .par_iter()
             .map(|it| {
@@ -2083,13 +2468,17 @@ impl ReducedRowStream {
                     for lc in [&row.a, &row.b, &row.c] {
                         for t in &lc.terms {
                             let v = t.var as usize;
-                            words[v / 64].fetch_or(1 << (v % 64), Ordering::Relaxed);
+                            match words.get(v / 64) {
+                                Some(w) => _ = w.fetch_or(1 << (v % 64), Ordering::Relaxed),
+                                None => past.store(true, Ordering::Relaxed),
+                            }
                         }
                     }
                 });
                 n
             })
             .collect();
+        assert!(!past.into_inner(), "a row names a variable past the table");
         let mut item_start = Vec::with_capacity(counts.len() + 1);
         let mut acc = 0usize;
         item_start.push(0);
@@ -2206,7 +2595,7 @@ mod eval {
     use crate::primitive::{Var, VarRole, WitnessGen};
     use crate::solver::{Fp, SolveError, exec_witness_op};
     use ark_bn254::Fr;
-    use ark_ff::Zero;
+    use ark_ff::{BigInteger, PrimeField, Zero};
     use num_bigint::BigUint;
     use std::collections::BTreeMap;
 
@@ -2246,6 +2635,12 @@ mod eval {
         pub base: u32,
         pub plugs: &'a [Fr],
     }
+
+    /// The top-level frame: absolute variables, no plugs.
+    pub const TOP: Frame<'static> = Frame {
+        base: 0,
+        plugs: &[],
+    };
 
     fn resolve(v: u32, def: Option<&GDef>) -> VRef {
         match def {
@@ -2403,6 +2798,97 @@ mod eval {
                 }
             }
         }
+    }
+
+    /// A plug of the running call as terms on absolute variables: the caller's
+    /// expression with the caller's own plugs resolved, so a template row's term on
+    /// the plug is a term on each of these (its constant only moves the row's value,
+    /// which [`eval_lc`] carries).
+    pub type Flat = Vec<(u32, Fr)>;
+
+    fn flatten(l: &Lc, f: &Frame, flat: &[Flat]) -> Flat {
+        let mut out = Vec::with_capacity(l.terms.len());
+        for &(r, c) in &l.terms {
+            match r {
+                VRef::Internal(o) => out.push((f.base + o, c)),
+                VRef::Global(id) => out.push((id, c)),
+                VRef::Plug(i) => out.extend(flat[i as usize].iter().map(|&(v, pc)| (v, pc * c))),
+            }
+        }
+        out
+    }
+
+    /// For every row of `items` under `z`: whether it holds, and for each variable it
+    /// references its univariate reduction `a·v² + b·v + c` (every other variable
+    /// fixed at `z`), through `emit(var, a, b, c)`. The BN254 twin of
+    /// [`crate::solver::univariate_r1cs_terms`] over compiled rows: a call evaluates
+    /// its plugs once for the values and flattens them once for the coefficients, so
+    /// no row is ever built. `scratch` is reused across rows. Returns whether every
+    /// row held.
+    pub fn classify(
+        c: &Compiled,
+        items: &[Item],
+        f: &Frame,
+        flat: &[Flat],
+        z: &dyn Fn(u32) -> Fr,
+        scratch: &mut Vec<(u32, usize, Fr)>,
+        emit: &mut dyn FnMut(u32, Fr, Fr, Fr),
+    ) -> bool {
+        let mut ok = true;
+        for it in items {
+            match it {
+                Item::Rows(rows) => {
+                    for r in rows {
+                        let full = [
+                            eval_lc(&r[0], f, z),
+                            eval_lc(&r[1], f, z),
+                            eval_lc(&r[2], f, z),
+                        ];
+                        ok &= full[0] * full[1] == full[2];
+                        scratch.clear();
+                        for (m, l) in r.iter().enumerate() {
+                            for &(vr, coef) in &l.terms {
+                                match vr {
+                                    VRef::Internal(o) => scratch.push((f.base + o, m, coef)),
+                                    VRef::Global(id) => scratch.push((id, m, coef)),
+                                    VRef::Plug(i) => scratch.extend(
+                                        flat[i as usize].iter().map(|&(v, pc)| (v, m, pc * coef)),
+                                    ),
+                                }
+                            }
+                        }
+                        scratch.sort_unstable_by_key(|t| t.0);
+                        let mut k = 0;
+                        while k < scratch.len() {
+                            let v = scratch[k].0;
+                            let mut own = [Fr::zero(); 3];
+                            while let Some(&(_, m, coef)) = scratch.get(k).filter(|t| t.0 == v) {
+                                own[m] += coef;
+                                k += 1;
+                            }
+                            let [av, bv, cv] = own;
+                            let x = z(v);
+                            let a0 = full[0] - av * x;
+                            let b0 = full[1] - bv * x;
+                            let c0 = full[2] - cv * x;
+                            emit(v, av * bv, av * b0 + a0 * bv - cv, a0 * b0 - c0);
+                        }
+                    }
+                }
+                Item::Call { def, base, plugs } => {
+                    let pv: Vec<Fr> = plugs.iter().map(|p| eval_lc(p, f, z)).collect();
+                    let pf: Vec<Flat> = plugs.iter().map(|p| flatten(p, f, flat)).collect();
+                    let base = match *base {
+                        VRef::Internal(o) => f.base + o,
+                        VRef::Global(id) => id,
+                        VRef::Plug(_) => unreachable!("a call base is always a fresh var"),
+                    };
+                    let inner = Frame { base, plugs: &pv };
+                    ok &= classify(c, &c.defs[*def as usize], &inner, &pf, z, scratch, emit);
+                }
+            }
+        }
+        ok
     }
 
     pub fn eval(
@@ -2577,7 +3063,13 @@ mod eval {
             let mut acc = l.k;
             for &(r, c) in &l.terms {
                 let x = self.var(r, w);
-                acc += if c == ONE { x } else { x * c };
+                // Most terms are bits, so a 0 or 1 skips the multiply.
+                if x.is_zero() {
+                } else if x == ONE {
+                    acc += c;
+                } else {
+                    acc += if c == ONE { x } else { x * c };
+                }
             }
             acc
         }
@@ -2645,10 +3137,28 @@ mod eval {
         // fixed plugs, and a template that writes only its own internals.
         let fixed = f.vals.is_some();
         let last = std::cell::Cell::new(None);
+        // The carried input's canonical integer, once a `Bit` has computed it.
+        let mut repr = None;
         for it in items {
             match it {
                 WItem::Op(op, same) => {
                     let carried = last.get().filter(|_| *same && fixed);
+                    if let WitnessGen::Bit { out, input, index } = op {
+                        let x = carried.unwrap_or_else(|| {
+                            repr = None;
+                            f.lc(input, w)
+                        });
+                        last.set(Some(x));
+                        let b: &ark_ff::BigInt<4> = repr.get_or_insert_with(|| x.into_bigint());
+                        let bit = if b.get_bit(*index as usize) {
+                            ONE
+                        } else {
+                            Fr::zero()
+                        };
+                        w.put(f.out(*out), bit);
+                        continue;
+                    }
+                    repr = None;
                     let eval = |l: &Lc| {
                         let x = carried.unwrap_or_else(|| f.lc(l, w));
                         last.set(Some(x));
@@ -2701,16 +3211,25 @@ mod eval {
                 w.put(var.id, v.as_bn254_fr().expect("BN254 modulus"));
             }
         }
-        let defs: Vec<Vec<WItem>> = defs.iter().map(|d| w_items(&d.w_items, Some(d))).collect();
+        // Compiling is per template and per top-level item, so it runs in
+        // parallel; a chunk boundary only forgoes carrying a `Bit` input over.
+        use rayon::prelude::*;
+        let defs: Vec<Vec<WItem>> = defs
+            .par_iter()
+            .map(|d| w_items(&d.w_items, Some(d)))
+            .collect();
+        let top: Vec<WItem> = top
+            .par_chunks(256)
+            .map(|c| w_items(c, None))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect();
         let mut memo = vec![None; defs.len()];
         let escapes = (0..defs.len())
             .map(|d| escapes(&defs, d, &mut memo))
             .collect();
-        let p = WProgram {
-            defs,
-            escapes,
-            top: w_items(top, None),
-        };
+        let p = WProgram { defs, escapes, top };
         let top = WFrame {
             base: 0,
             plugs: Vec::new(),
@@ -2823,6 +3342,42 @@ mod tests {
         assert!(w_par.len() > top_w.len());
     }
 
+    /// The compiled BN254 classification (`eval::classify`) and the generic one (rows
+    /// built through the substitution) give every variable the same flags and the
+    /// same satisfaction verdict, on a stream of rows, rolled rows and template calls
+    /// whose plugs are expressions.
+    #[test]
+    fn compiled_classification_matches_generic() {
+        use std::sync::atomic::Ordering;
+        let m = bn254_modulus();
+        let defs = vec![make_def()];
+        let (top_c, _) = top_streams();
+        let n = 12_100usize;
+        let assign: Vec<Option<Fp>> = (0..n)
+            .map(|i| {
+                Some(Fp::from_decimal(
+                    &((i * 7919 % 1000) as i64 - 500).to_string(),
+                    &m,
+                ))
+            })
+            .collect();
+        let flags = |f: &[std::sync::atomic::AtomicU8]| -> Vec<u8> {
+            f.iter().map(|a| a.load(Ordering::Relaxed)).collect()
+        };
+        let (gf, gok, gq) = classify_and_check(&defs, &top_c, &assign, &m, n, true, None);
+        let compiled = eval::compile(&defs, &top_c);
+        let (cf, cok, _) = classify_and_check(&defs, &top_c, &assign, &m, n, true, Some(&compiled));
+        assert_eq!((flags(&gf), gok), (flags(&cf), cok));
+        assert!(flags(&gf).iter().any(|&f| f & F_PINNED != 0));
+        // Pass 2 over the same kept rows (`gq`: which row lands first varies between
+        // runs), every var a suspect: the compiled rows reject the same candidates.
+        assert!(gq.iter().filter(|q| q.get().is_some()).count() > 100);
+        let all: std::collections::BTreeSet<u32> = (0..n as u32).collect();
+        let generic = two_valued_satisfied(&defs, &top_c, &assign, &m, &all, &gq, None);
+        let compiled = two_valued_satisfied(&defs, &top_c, &assign, &m, &all, &gq, Some(&compiled));
+        assert_eq!(generic, compiled);
+    }
+
     // ---- streaming under-constraint analyzer equivalence ----
 
     use crate::solver::Fp;
@@ -2844,8 +3399,9 @@ mod tests {
             .collect();
         let assign = &assign[..];
         let flags: Vec<AtomicU8> = (0..vars.len()).map(|_| AtomicU8::new(0)).collect();
+        let quadratic: Vec<Quadratic> = (0..vars.len()).map(|_| Quadratic::new()).collect();
         for r in rows {
-            apply_row_flags(r, assign, modulus, &flags);
+            apply_row_flags(r, assign, modulus, &flags, &quadratic);
         }
         let suspects = select_suspects(&flags, vars);
         let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
@@ -2858,6 +3414,21 @@ mod tests {
             }
         }
         let two_valued = two_valued_from_polys(&polys, assign, modulus);
+        // A satisfied witness takes the one-candidate pass: same verdicts.
+        if rows
+            .iter()
+            .all(|r| crate::solver::row_satisfied(&r.a, &r.b, &r.c, assign, modulus))
+        {
+            let roots = SecondRoots::new(assign, modulus, &suspects, &quadratic);
+            for r in rows {
+                roots.check(r, assign, modulus);
+            }
+            assert_eq!(
+                roots.survivors(),
+                two_valued,
+                "one-candidate pass disagrees"
+            );
+        }
         assemble_underconstrained(&flags, vars, keep_extra, &two_valued)
     }
 
@@ -3011,5 +3582,98 @@ mod tests {
             !stream.iter().any(|(v, _)| *v == 2),
             "pinned var must be clean"
         );
+    }
+
+    /// Random small satisfied systems: the one-candidate pass a satisfied witness
+    /// takes (checked inside `analyze_rows`) and the streaming core both match
+    /// the flat analyzer, with two-valued vars among the cases.
+    #[test]
+    fn one_candidate_pass_matches_on_random_satisfied_systems() {
+        let m = bn254_modulus();
+        let fp = |n: i64| Fp::from_decimal(&n.to_string(), &m);
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let num_vars = 6u32;
+        let vars: Vec<Var> = (0..num_vars)
+            .map(|id| {
+                let role = if id == 0 {
+                    VarRole::PublicInput
+                } else {
+                    VarRole::Derived
+                };
+                dvar(id, &format!("v{id}"), role)
+            })
+            .collect();
+        let mut two_valued = 0;
+        for _ in 0..3000 {
+            let assign: std::collections::BTreeMap<u32, Fp> =
+                (0..num_vars).map(|v| (v, fp(next(4) as i64 - 1))).collect();
+            let value = |lc: &LinearCombination| {
+                lc.terms
+                    .iter()
+                    .fold(Fp::from_const(&lc.constant, &m), |acc, t| {
+                        acc.add(&Fp::from_const(&t.coeff, &m).mul(&assign[&t.var]))
+                    })
+            };
+            let row_count = 1 + next(4);
+            let mut lc = |max_terms: u64| LinearCombination {
+                constant: FieldConst::from_i64(next(5) as i64 - 2),
+                terms: (0..next(max_terms + 1))
+                    .map(|_| Term {
+                        coeff: FieldConst::from_i64(next(5) as i64 - 2),
+                        var: next(num_vars as u64) as u32,
+                    })
+                    .collect(),
+            };
+            let rows: Vec<R1csRow> = (0..row_count)
+                .map(|_| {
+                    let (a, b, mut c) = (lc(2), lc(2), lc(1));
+                    // Satisfy the row through c's constant.
+                    let rest = value(&a).mul(&value(&b)).sub(&value(&LinearCombination {
+                        constant: FieldConst::from_i64(0),
+                        terms: c.terms.clone(),
+                    }));
+                    c.constant = LinearCombination::constant(rest.to_decimal()).constant;
+                    R1csRow {
+                        a,
+                        b,
+                        c,
+                        note: None,
+                    }
+                })
+                .collect();
+            let cp = CircuitProgram {
+                field: FieldSpec {
+                    name: "bn254".into(),
+                    modulus_decimal: m.to_string(),
+                },
+                vars: vars.clone(),
+                constraints: rows.clone(),
+                witness_gen: vec![],
+            };
+            let key = |u: &crate::solver::UnderConstrained| (u.var, u.reason.clone());
+            let mut flat: Vec<_> = crate::solver::analyze_underconstrained_cp(&cp, &assign)
+                .iter()
+                .map(key)
+                .collect();
+            let mut stream: Vec<_> =
+                analyze_rows(&rows, &vars, &(0..num_vars).collect(), &assign, &m)
+                    .iter()
+                    .map(key)
+                    .collect();
+            flat.sort();
+            stream.sort();
+            assert_eq!(stream, flat, "rows {rows:?}");
+            two_valued += stream
+                .iter()
+                .filter(|(_, r)| r.contains("two-valued"))
+                .count();
+        }
+        assert!(two_valued > 100, "only {two_valued} two-valued cases");
     }
 }

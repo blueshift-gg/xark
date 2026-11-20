@@ -669,9 +669,9 @@ impl CircuitProof {
         ))
     }
 
-    /// The proof, then its public inputs, as a Solana program receives them:
-    /// `verify_instruction_data(...)` of an exported verifier checks these bytes
-    /// (`instruction_data.bin`).
+    /// The proof, then its public inputs, as a Solana program that takes both
+    /// receives them (an exported verifier's `instruction_data.bin`): 256 bytes,
+    /// then 32 per public input, which its `verify` takes as `Fields`.
     pub fn to_instruction_data(&self) -> Result<Vec<u8>, ProveError> {
         Ok([self.to_solana_proof()?, self.to_solana_public_inputs()?].concat())
     }
@@ -770,45 +770,25 @@ impl Circuit {
         Ok(id_inputs)
     }
 
-    /// Check that `inputs` **satisfy the circuit**: solve the witness and verify it
-    /// meets every constraint. Returns `Ok(())`, or an actionable `Err` naming the
-    /// first failing constraint (and its source line).
+    /// Check that `inputs` **satisfy the circuit** and leave **no witness variable
+    /// free**: solve the witness, verify it meets every constraint, and run
+    /// [`solver::analyze_underconstrained`] for any variable that could take a
+    /// second value with everything else fixed (except a variable no constraint
+    /// references — witness-only scratch, which can't change any row or output).
+    /// Returns `Ok(())`, or an actionable `Err` naming the first failing
+    /// constraint (and its source line) or the free variables.
     ///
-    /// The fast, everyday circuit test — a satisfying witness *is* the proof the
-    /// relation holds, so the positive test is `c.check(good).unwrap()` and the
-    /// negative test is `assert!(c.check(bad).is_err())`. It deliberately does
-    /// **not** run Groth16 (that exercises the backend, not the circuit); use
-    /// [`Self::prove`] for the full pipeline. Panics only on malformed `inputs`.
+    /// The everyday circuit test, and where soundness is checked: `xark prove`
+    /// doesn't. The positive test is `c.check(good).unwrap()`, and the negative
+    /// test `assert!(c.check(bad).is_err())`. The analysis looks at the paths the
+    /// given inputs take, so test with inputs that cover the circuit's branches.
+    /// It catches the common "forgot to constrain a hint" bug, not every
+    /// under-constraint. It deliberately does **not** run Groth16 (that exercises
+    /// the backend, not the circuit); use [`Self::prove`] for the full pipeline.
+    /// Panics only on malformed `inputs`.
     pub fn check<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
         let id_inputs = self.resolve_inputs(inputs)?;
-        // An unsatisfiable witness means the stated relation is false; explain
-        // *which* constraint (and its source line)
-        // failed, via the shared diagnostic.
-        self.solve_and_check(&id_inputs).map_err(|e| {
-            ProveError(xark_ir::diagnose::describe_unsatisfied(
-                &e,
-                &self.r1cs,
-                self.sources.as_ref(),
-            ))
-        })?;
-        Ok(())
-    }
-
-    /// [`Self::check`], and also that the inputs leave no witness variable free:
-    /// [`solver::analyze_underconstrained`] finds no variable that could take a
-    /// second value with everything else fixed, except a variable no constraint
-    /// references (witness-only scratch), which can't change any row or output. A necessary soundness check (it
-    /// catches the common "forgot to constrain a hint" bug, not every
-    /// under-constraint); use it on a few representative inputs.
-    pub fn check_constrained<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
-        let id_inputs = self.resolve_inputs(inputs)?;
-        let assign = self.solve_and_check(&id_inputs).map_err(|e| {
-            ProveError(xark_ir::diagnose::describe_unsatisfied(
-                &e,
-                &self.r1cs,
-                self.sources.as_ref(),
-            ))
-        })?;
+        let assign = self.satisfied(&id_inputs)?;
         // A var no constraint references (witness-only scratch) alters no row and no
         // output, so it is no forgery vector: ignored, as the test harness does.
         let holes: Vec<_> = solver::analyze_underconstrained(&self.prim, &assign)
@@ -830,12 +810,57 @@ impl Circuit {
         )))
     }
 
-    /// Prove `inputs` with the built circuit and its proving key
-    /// (`<dir>/pk.bin`, from `xark setup`) and return the proof — the same
-    /// streaming prover and the same bytes as `xark prove`, without the CLI. The
-    /// inputs are checked first, with the same diagnostics as [`Self::check`].
+    /// [`Self::check`], kept under its earlier name.
+    pub fn check_constrained<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
+        self.check(inputs)
+    }
+
+    /// Only that `inputs` satisfy the circuit — [`Self::check`] without the
+    /// under-constraint analysis, for a quick test of the relation alone.
+    pub fn check_satisfied<I: ProveInputs>(&self, inputs: I) -> Result<(), ProveError> {
+        let id_inputs = self.resolve_inputs(inputs)?;
+        self.satisfied(&id_inputs).map(|_| ())
+    }
+
+    /// Solve and check, explaining an unsatisfied witness by *which* constraint
+    /// (and its source line) failed.
+    fn satisfied(
+        &self,
+        id_inputs: &BTreeMap<VarId, String>,
+    ) -> Result<BTreeMap<VarId, Fp>, ProveError> {
+        self.solve_and_check(id_inputs).map_err(|e| {
+            ProveError(xark_ir::diagnose::describe_unsatisfied(
+                &e,
+                &self.r1cs,
+                self.sources.as_ref(),
+            ))
+        })
+    }
+
+    /// Prove `inputs` with the built circuit and its proving key (from `xark
+    /// setup`: `keys/<name>/pk.bin` in a project, otherwise `<dir>/pk.bin`) and
+    /// return the proof — the same streaming prover and the same bytes as `xark
+    /// prove`, without the CLI. The inputs must satisfy the circuit, with the same
+    /// diagnostics as [`Self::check_satisfied`]; soundness is [`Self::check`]'s job.
     pub fn prove<I: ProveInputs>(&self, inputs: I) -> Result<CircuitProof, ProveError> {
-        self.prove_with_key(self.dir.join("pk.bin"), inputs)
+        self.prove_with_key(self.proving_key(), inputs)
+    }
+
+    /// Where `xark setup` put this circuit's proving key: in a project (a
+    /// `xark.toml` above the build), `keys/<name>/` at its root, where it's
+    /// committed; otherwise beside the build.
+    fn proving_key(&self) -> std::path::PathBuf {
+        let local = self.dir.join("pk.bin");
+        let abs = std::path::absolute(&self.dir).unwrap_or_else(|_| self.dir.clone());
+        let in_project = abs
+            .ancestors()
+            .find(|d| d.join("xark.toml").is_file())
+            .zip(abs.file_name())
+            .map(|(root, name)| root.join("keys").join(name).join("pk.bin"));
+        match in_project {
+            Some(pk) if pk.exists() || !local.exists() => pk,
+            _ => local,
+        }
     }
 
     /// [`Self::prove`] with a proving key from elsewhere (e.g. a ceremony's
@@ -849,17 +874,18 @@ impl Circuit {
         use xark_groth16::PkSource;
         let pk_path = pk_path.as_ref();
         let id_inputs = self.resolve_inputs(inputs)?;
-        let assign = self.solve_and_check(&id_inputs).map_err(|e| {
-            ProveError(xark_ir::diagnose::describe_unsatisfied(
-                &e,
-                &self.r1cs,
-                self.sources.as_ref(),
-            ))
-        })?;
+        let assign = self.satisfied(&id_inputs)?;
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             ProveError(format!("circuit `{}`: {what}: {e}", self.name))
         };
-        let xbc_path = self.dir.join("circuit.xbc");
+        // A key fits the build it was made from: prove with the `circuit.xbc` kept
+        // beside it (a project's `keys/<name>/`), else this build's.
+        let beside_key = pk_path.with_file_name("circuit.xbc");
+        let xbc_path = if beside_key.is_file() {
+            beside_key
+        } else {
+            self.dir.join("circuit.xbc")
+        };
         let xbc = std::fs::read(&xbc_path)
             .map_err(|e| fail(&format!("reading {}", xbc_path.display()), &e))?;
         let mut pk = xark_groth16::SerializedPk::open(pk_path).map_err(|e| {

@@ -22,7 +22,7 @@ assert!(VERIFIER.verify(&PROOF, &public_inputs)); // public_inputs: &[[u8;32]; 1
 
 In practice you don't write this by hand: `xark export` emits a small,
 self-contained crate that bakes in your circuit's VK and exposes `verify(...)`
-/ `verify_instruction_data(...)`. Your Solana program depends on that crate;
+with typed public inputs. Your Solana program depends on that crate;
 re-export when the circuit changes and the generated crate is the only thing
 that updates. Or call `verify_groth16(vk_bytes, proof_bytes, public_inputs)`
 directly when the VK is loaded dynamically — in that case the program **must**
@@ -104,17 +104,18 @@ for the canonical encoder.
   holding a valid proof can make a different valid proof of the same public
   inputs. Never use proof bytes as a replay or dedup key; bind a nullifier,
   nonce or signer into the public inputs instead.
-- Every public input is cryptographically bound (`binding` test).
+- Every public input is cryptographically bound: a flipped input fails
+  (`tampered_public_input_rejected` in `gadgets/tests/tests/it/host.rs`).
 - `verify_groth16` never panics and never accepts adversarial bytes (`fuzz` test).
 - The entrypoint is fail-closed (anything not `Ok(true)` → reject).
 
 ## Testing
 
-The whole workspace's tests (host, fuzz, binding, and the on-chain Mollusk
-suite) live in the `xark-tests` crate:
+The whole workspace's tests (host, fuzz, and the on-chain Mollusk suite) live
+in the `xark-tests` crate:
 
 ```
-cargo test -p xark-tests # host (Arkworks path) + fuzz + binding
+cargo test -p xark-tests # host (Arkworks path) + fuzz
 cargo test -p xark-tests --test sbpf # on-chain in Mollusk (needs cargo-build-sbf)
 ```
 

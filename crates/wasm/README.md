@@ -4,7 +4,7 @@ Generate and verify **Groth16 (BN254) zero knowledge proofs** in the browser
 or other JavaScript environments with [xark](https://github.com/blueshift-gg/xark).
 
 ```js
-import init, { prove, verify } from "@blueshift-gg/xark-wasm";
+import init, { prove, verify } from "@blueshift-gg/xark";
 
 await init();
 
@@ -36,15 +36,17 @@ xark setup    # → target/xark/<name>/{pk.bin, vk.bin}
 ```
 
 `circuit.xbc` is the single self-contained build artifact: it encodes both the
-solver view (witness generation) and the backend view (the minimized R1CS the
-proving key is keyed to)
+solver view (witness generation) and the backend view (the R1CS the proving key
+is keyed to: its template-reduced rows, read straight from the bytecode, or the
+boundary-minimized circuit rebuilt from them for a `minimized` key; `xark setup`
+picks `reduced` for large circuits, see `--r1cs-form`)
 
 ## Usage
 
 ### Browser
 
 ```js
-import init, { prove, verify } from "@blueshift-gg/xark-wasm";
+import init, { prove, verify } from "@blueshift-gg/xark";
 
 await init();
 
@@ -65,7 +67,7 @@ The Node build does not require a separate `init()` step.
 
 ```js
 import { readFileSync } from "node:fs";
-import { prove, verify } from "@blueshift-gg/xark-wasm";
+import { prove, verify } from "@blueshift-gg/xark";
 
 // `readFileSync` returns a Buffer, which is a Uint8Array — pass it straight in.
 const xbc = readFileSync("examples/cube/target/xark/cube/circuit.xbc");
@@ -79,7 +81,7 @@ console.log(verify(vk, proof, publicInputs)); // true
 
 ### Performance optimization (preloading)
 
-`prove` re-expands the `.xbc` and re-minimizes the R1CS on every call. For
+`prove` re-expands the `.xbc` (and re-minimizes it for a `minimized` key) on every call. For
 repeated proofs against the same circuit + key, parse them once with `preload`
 and call `prove_preloaded`:
 
@@ -113,8 +115,8 @@ By default setup picks `reduced` for large circuits (≥ 2²⁰ constraints) and
 main thread, and the key is never buffered anywhere:
 
 ```js
-import * as xark from "@blueshift-gg/xark-wasm";
-import { proveFromStream } from "@blueshift-gg/xark-wasm/stream";
+import * as xark from "@blueshift-gg/xark";
+import { proveFromStream } from "@blueshift-gg/xark/stream";
 
 const { proof, publicInputs } = await proveFromStream(
   xark, circuit, fetch("/circuit/pk.bin"), inputs,
@@ -132,7 +134,7 @@ square root per point every time it is read — ~95% of the witness MSMs in WASM
 result and prove from it on later visits (Ed25519 with 16 workers: 3.5× faster):
 
 ```js
-import { transcodeKey } from "@blueshift-gg/xark-wasm/stream";
+import { transcodeKey } from "@blueshift-gg/xark/stream";
 
 const root = await navigator.storage.getDirectory();
 const file = await root.getFileHandle("pk.decoded.bin", { create: true });
@@ -158,7 +160,7 @@ pool, whose workers decompress their chunks in parallel.
 **Threads (optional).**
 
 ```js
-const { createPool, parallelSupported } = await import("@blueshift-gg/xark-wasm/pool");
+const { createPool, parallelSupported } = await import("@blueshift-gg/xark/pool");
 const pool = parallelSupported() ? await createPool({ threads: 8 }) : undefined;
 proveStreaming(circuit, pk, inputs, { pool });   // also accepted by proveFromStream
 await pool?.terminate();
@@ -173,7 +175,7 @@ require-corp`), and the proving call must run in a Web Worker (it blocks with
 `Atomics.wait`). Without isolation `parallelSupported()` is false and the same
 prover runs single-threaded with the same memory profile.
 
-**Smooth-domain keys** (`xark setup`'s default for dev keys: a QAP domain up to
+**Smooth-domain keys** (`xark setup`'s default for a key made without a `.ptau`: a QAP domain up to
 44% smaller) prove through every API. The key's header states its domain, so `proveFromStream` computes
 `h` as soon as the first bytes arrive, overlapping the rest of the download.
 
@@ -246,7 +248,7 @@ read the public inputs, see `decode_public_inputs` below.
 > `prove` checks the proof against the key's verifying key before returning it;
 > an unsatisfiable witness is reported as an error, never returned as a proof.
 
-### `preload(circuitXbc, pkBytes)`
+### `preload(circuitXbc, pkBytes, sources?)`
 
 Parse + cache the `.xbc` and proving key once (replaces prior cached state). The key
 is decoded into wasm memory (about 2.2× its compressed size) so repeat proofs skip
@@ -304,7 +306,7 @@ The circuit digest of a `circuit.xbc`, as `xark build` prints it: the same for e
 build of the circuit, whichever Rust compiled it. A client pins a prover to it with
 `prover(from, { digest })`.
 
-### Typed clients (`@blueshift-gg/xark-wasm/client`)
+### Typed clients (`@blueshift-gg/xark/client`)
 
 What every client `xark client` generates shares, as plain JavaScript with types:
 `Field` (a field element, checked when it's made), `Proof` (a proof and its public
@@ -356,6 +358,13 @@ circuit does:
 const fields = valueFields(schema, "Identity", JSON.stringify(id));
 poseidon2(fields); // == the circuit's `xark_poseidon2::hash(id.to_fields())`
 ```
+
+### `poseidon2Commit(inputs)`, `poseidon2Nullifier(inputs)` → `string`
+
+`xark_poseidon2::commit` and `xark_poseidon2::nullifier` of one or more field
+elements, as decimal strings: the domain-separated hashes a circuit uses for a
+note's commitment and its nullifier. A session has them as `commit` and
+`nullifier`.
 
 ## Security
 

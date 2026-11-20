@@ -30,9 +30,9 @@ Three composition theorems building on `Formal.Glv` + `Formal.Bookkeeping`:
 
 * **`public_input_projection_consistent`** — the projection `pub.map w` equals
   the R1CS instance vector when the witness map agrees with the instance at
-  every public-input slot. The witness-index bijection itself is discharged
-  by `alloc_witness_idempotent` and `alloc_witness_injective` in
-  `Formal.Bookkeeping`.
+  every public-input slot. The witness-index bijection of the
+  `Formal.Bookkeeping` allocation model is `alloc_witness_idempotent` and
+  `alloc_witness_injective`.
 -/
 
 namespace Xark
@@ -48,12 +48,11 @@ lookup table with `T i = i.val • P`. Then the comb-scan output
 `s = Σⱼ 2 ^ (w * j) * (bits j).val` is the LSB-first window
 decomposition of the scalar.
 
-This is the algebraic kernel of
-the secp256k1 fixed-base comb/GLV scalar-mul gadget
-(`gadgets/xark-secp256k1/src/lib.rs`)'s
-fixed-base half: the gadget reads `T (bits j)` from the table (one
-constraint per window) and accumulates with a per-window weight
-`2 ^ (w * j)`. The proof exposes both layers explicitly:
+This is the algebra behind a fixed-base comb such as the one in
+`xark_secp256k1`'s `ecdsa_verify_packed` (32 byte windows, entries
+selected by `xark_bignum::one_hot8` from constant per-window tables
+`COMB[j]` that fold in their own offset and weight). The proof exposes
+both layers explicitly:
 
 1. `T (bits j) = (bits j).val • P` by the precomputation hypothesis;
 2. `2 ^ (w * j) • ((bits j).val • P) = (2 ^ (w * j) * (bits j).val) • P`
@@ -77,10 +76,9 @@ theorem windowed_scalar_mul_sound {G : Type*} [AddCommGroup G]
 /-! ## 2-way joint Strauss-Shamir ladder soundness -/
 
 /-- One step of the LSB-first 2-way joint Strauss-Shamir ladder, as a
-pure function on the ambient additive group `G`. Mirrors the per-bit
-body of the interleaved variant of `scalar_mul_in_circuit`:
-conditionally add each running base to the accumulator, then double
-both running bases. -/
+pure function on the ambient additive group `G`: conditionally add each
+running base to the accumulator, then double both running bases. A
+general lemma; no current gadget runs this LSB-first ladder. -/
 def jointLadderStep {G : Type*} [AddCommGroup G]
     (b : Bool × Bool) (s : G × G × G) : G × G × G :=
   (s.1 + (if b.1 then s.2.1 else 0) + (if b.2 then s.2.2 else 0),
@@ -88,7 +86,7 @@ def jointLadderStep {G : Type*} [AddCommGroup G]
    s.2.2 + s.2.2)
 
 /-- The LSB-first 2-way joint ladder run from a given start state over a
-list of bit pairs. The gadget's loop is `bs.foldl jointLadderStep (0, P, Q)`. -/
+list of bit pairs, `bs.foldl jointLadderStep (0, P, Q)`. -/
 def jointLadder {G : Type*} [AddCommGroup G]
     (bs : List (Bool × Bool)) (s : G × G × G) : G × G × G :=
   bs.foldl (fun st b => jointLadderStep b st) s
@@ -180,10 +178,10 @@ particular, the joint ladder computes `u₁ • P + u₂ • Q` for the scalars
 encoded by the two bit-lists, while sharing the doubling cost between
 the two scalar mults.
 
-This is the algebraic content of the interleaved variant in
-the secp256k1 gadget (`gadgets/xark-secp256k1/src/lib.rs`): the per-step joint invariant
-is `acc ↦ acc + b₁ • P + b₂ • Q`, which folded over the bit list gives
-the two-term sum at the end. -/
+The per-step joint invariant is `acc ↦ acc + b₁ • P + b₂ • Q`, which
+folded over the bit list gives the two-term sum at the end. A general
+lemma: the secp gadgets' fake-GLV verifiers use signed digits, not this
+ladder. -/
 theorem joint_strauss_shamir_correct {G : Type*} [AddCommGroup G]
     (bs : List (Bool × Bool)) (P Q : G) :
     (jointLadder bs (0, P, Q)).1
@@ -210,7 +208,7 @@ is discharged elsewhere by `Formal.Bookkeeping.alloc_witness_idempotent`
 and `alloc_witness_injective`, so this theorem is what remains to wire
 the source public-input slot list to the R1CS instance vector. The
 hypothesis `h_inst i hi : inst i = w i` encodes the per-index equality
-that the `alloc_witness` bookkeeping establishes for each `i ∈ pub`. -/
+that the allocation bookkeeping establishes for each `i ∈ pub`. -/
 theorem public_input_projection_consistent
     {F : Type*} (w : ℕ → F) (inst : ℕ → F) (pub : List ℕ)
     (h_inst : ∀ i ∈ pub, inst i = w i) :
@@ -220,9 +218,8 @@ theorem public_input_projection_consistent
 /-! ### `h_inst` derived from canonical allocation bookkeeping -/
 
 /-- **Canonical instance-vector construction.** Reads `w` at every
-public-input slot, defaults to zero outside. Mirrors what
-`lower::synthesize` produces — so the `h_inst` hypothesis falls out by
-construction. -/
+public-input slot, defaults to zero outside, so the `h_inst` hypothesis
+falls out by construction. -/
 def buildInstance {F : Type*} [Zero F] (w : ℕ → F) (pub : List ℕ) : ℕ → F :=
   fun i => if i ∈ pub then w i else 0
 
@@ -267,50 +264,28 @@ theorem alloc_state_pins_public_inputs {F : Type*} [Zero F]
   rw [buildInstance_eq_w_on_pub w pub i hi]
   exact h_coh i k hk
 
-/-! ### Bridge between `buildInstance` and the xark lowering's PI construction
+/-! ### `synthesizeInstance`, a second name for `buildInstance`
 
-The xark compiler's lowering (`crates/frontend`) populates the
-constraint system's instance vector by walking the artifact's
-`public_inputs` list and reading the witness map at each slot. This is
-captured at the Lean level by `synthesizeInstance` below, which mirrors
-that loop. We then prove `synthesizeInstance = buildInstance` so the
-canonical-construction theorem `public_input_projection_consistent_canonical`
-applies to the actual lowering's output.
+For each index `i`, the instance vector's value at `i` is `w i` if `i`
+is a public-input slot, else `0`. No current Rust function is named for
+this construction. -/
 
-The Rust loop (paraphrased):
-```rust
-for (slot_idx, witness_idx) in public_inputs.iter().enumerate() {
-    cs.new_input_variable(|| witness.get(witness_idx))?;
-}
-```
-
-The Lean mirror: for each index `i`, the instance vector's value at `i`
-is `w i` if `i` is a public-input slot, else `0` (the canonical zero
-default for unused instance positions). -/
-
-/-- **Lean mirror of `lower::synthesize`'s public-input population
-loop.** Given a witness map `w : ℕ → F` and a public-input slot list
-`pub : List ℕ`, returns the instance vector built by reading `w` at each
-public-input slot, with zero default outside `pub`. The Rust loop
-walks `public_inputs` via `for (slot, idx) in pub.iter().enumerate()`
-and calls `cs.new_input_variable(|| witness.get(idx))`; the Lean mirror
-uses `decide (i ∈ pub)` which is the same membership check (the loop
-visits exactly the slots in `pub`). -/
+/-- **Instance-vector construction.** Given a witness map `w : ℕ → F`
+and a public-input slot list `pub : List ℕ`, returns the instance vector
+built by reading `w` at each public-input slot, with zero default
+outside `pub`. -/
 def synthesizeInstance {F : Type*} [Zero F] (w : ℕ → F) (pub : List ℕ) : ℕ → F :=
   fun i => if i ∈ pub then w i else 0
 
 /-- **`synthesizeInstance` equals `buildInstance`** by `rfl` — both
-functions encode the same construction; the named wrapper exists so
-the trust chain can cite the Rust loop being mirrored at each use
-site. -/
+functions encode the same construction. -/
 theorem synthesizeInstance_eq_buildInstance {F : Type*} [Zero F]
     (w : ℕ → F) (pub : List ℕ) :
     synthesizeInstance w pub = buildInstance w pub := rfl
 
-/-- **Discharged consistency for the actual Rust lowering's PI vector.**
+/-- **Discharged consistency for `synthesizeInstance`.**
 Composes `synthesizeInstance_eq_buildInstance` with
-`public_input_projection_consistent_canonical` — for the instance vector
-the Rust `lower::synthesize` actually produces, the projection equals
+`public_input_projection_consistent_canonical`: the projection equals
 the witness map read at every public-input slot. -/
 theorem public_input_projection_consistent_synthesize {F : Type*} [Zero F]
     (w : ℕ → F) (pub : List ℕ) :

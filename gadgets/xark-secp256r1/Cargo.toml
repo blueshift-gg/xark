@@ -9,14 +9,15 @@ edition = "2024"
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-xark = { path = "../../crates/lang", version = "0.3.0" }
-xark-bignum = { path = "../xark-bignum", version = "0.3.0" }
-xark-curve = { path = "../xark-curve", version = "0.3.0" }
+xark.workspace = true
+xark-bignum.workspace = true
+xark-curve.workspace = true
 
 # Host-only deps for the macro-emitted host conversions (native bytes →
 # circuit inputs). Gated on `cfg(not(xark))`: a circuit build (driver reports the
@@ -35,7 +36,7 @@ sha2 = "0.10"
 num-bigint = "0.4"
 p256 = "0.14"
 sha2 = "0.10"
-xark-test-harness = { path = "../../crates/test-harness", version = "0.3.0" }
+xark-test-harness = { path = "../../crates/test-harness" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

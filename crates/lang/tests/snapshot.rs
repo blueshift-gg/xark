@@ -330,6 +330,54 @@ fn require_ne_solves_iff_distinct() {
     );
 }
 
+/// `select(bit, t, f)` over a field element and an array: one row per element, and
+/// over every witness exactly `bit ? t : f`. With `bit` a `bool` input (pinned on
+/// entry), the search finds the one witness for the right outputs and none for a
+/// swapped or changed one; a `bool` from a comparison works as the bit too.
+#[test]
+fn select_picks_by_bit() {
+    let src = "#![no_std]\n\
+        use xark::prelude::*;\n\
+        pub fn circuit(bit: Private<bool>, t: Private<[Field; 2]>, f: Private<[Field; 2]>,\n\
+          s: Private<Field>, a: Public<[Field; 2]>, m: Public<Field>) {\n\
+        require_eq(select(bit, t, f), a);\n\
+        require_eq(select(s.lt::<8>(Field::from(5u8)), s, Field::from(5u8)), m);\n\
+        }\n";
+    let c = compile_with_field(&write_case("select", src), "select", "bn254");
+    assert!(c.status_success, "select failed: {}", c.stderr);
+    let case = |bit: &str, s: &str, a: [&str; 2], m: &str| {
+        [
+            ("bit", bit.to_string()),
+            ("t[0]", "11".into()),
+            ("t[1]", "12".into()),
+            ("f[0]", "21".into()),
+            ("f[1]", "22".into()),
+            ("s", s.into()),
+            ("a[0]", a[0].into()),
+            ("a[1]", a[1].into()),
+            ("m", m.into()),
+        ]
+    };
+    let accepts = |inputs: [(&str, String); 9]| {
+        let refs: Vec<(&str, &str)> = inputs.iter().map(|(n, v)| (*n, v.as_str())).collect();
+        accepts_exactly(&c, &refs)
+    };
+    assert!(accepts(case("1", "3", ["11", "12"], "3")));
+    assert!(accepts(case("0", "9", ["21", "22"], "5")));
+    assert!(!accepts(case("1", "3", ["21", "22"], "3")));
+    assert!(!accepts(case("0", "3", ["21", "12"], "3")));
+    assert!(!accepts(case("1", "9", ["11", "12"], "9")));
+    assert!(!accepts(case("1", "3", ["11", "12"], "5")));
+
+    // On the host, the same function.
+    use xark::Field;
+    let (t, f) = (
+        [Field::from(1u8), Field::from(2u8)],
+        [Field::from(3u8), Field::from(4u8)],
+    );
+    assert!(xark::select(true, t, f) == t && xark::select(false, t, f) == f);
+}
+
 /// Native `u64` as a first-class circuit witness: a `Private<u64>` input is range-checked
 /// to 64 bits on entry, and the *native* `<` operator lowers to the field comparison
 /// gadget — no wrapper type, no `::<64>`. A true ordering solves (analyzer-clean), a false
@@ -613,9 +661,10 @@ fn time_inputs_compare_at_their_width() {
         signed, unsigned,
         "a signed comparison of inputs costs an unsigned one's"
     );
-    // 2 × 17-bit range checks and a 17-bit comparison, against 2 × 64 and a 64-bit one.
+    // 2 × 17-bit range checks, each input's `< STEPS` check (a day past 2100 isn't
+    // one) and a 17-bit comparison, against 2 × 64 and a 64-bit one.
     assert!(
-        days_rows * 3 < signed,
+        days_rows * 2 < signed,
         "{days_rows} rows for days, {signed} for timestamps"
     );
 }
@@ -1216,33 +1265,33 @@ pub fn circuit(msg: Private<[Field; 200]>, d: Public<[Field; 4]>) {
     )
 }
 
-/// BLAKE3 single-block root over a 16-word message + length → 8-word digest via
-/// `blake3_hash_one_block`, for the Lean bridge.
-fn blake3_block_src() -> String {
-    String::from(
+/// BLAKE3 single-block root over a 16-word, `len`-byte message → 8-word digest
+/// via `blake3_hash_one_block::<len>`, for the Lean bridge and the tail check.
+fn blake3_block_src(len: usize) -> String {
+    format!(
         r#"#![no_std]
 use xark_blake3::prelude::*;
-pub fn circuit(m: Private<[Field; 16]>, len: Public<Field>, d: Public<[Field; 8]>) {
+pub fn circuit(m: Private<[Field; 16]>, d: Public<[Field; 8]>) {{
     let zero = [Field::constant("0"); 32];
     let mut w = [zero; 16];
     let mut i = 0usize;
-    while i < 16usize {
+    while i < 16usize {{
         let bits = m[i].to_bits::<32>();
         let mut j = 0usize;
-        while j < 32usize { w[i][j] = bits[j]; j += 1; }
+        while j < 32usize {{ w[i][j] = bits[j]; j += 1; }}
         i += 1;
-    }
-    let hash = blake3_hash_one_block(w, len);
+    }}
+    let hash = blake3_hash_one_block::<{len}>(w);
     let mut i = 0usize;
-    while i < 8usize {
+    while i < 8usize {{
         let mut word = zero;
         let mut j = 0usize;
-        while j < 32usize { word[j] = hash[i][j]; j += 1; }
+        while j < 32usize {{ word[j] = hash[i][j]; j += 1; }}
         require_eq(Field::from_bits::<32>(word), d[i]);
         i += 1;
-    }
-}
-"#,
+    }}
+}}
+"#
     )
 }
 
@@ -1268,32 +1317,33 @@ pub fn circuit(msg: Private<[Field; {n}]>, d: Public<[Field; 8]>) {{
     )
 }
 
-/// Unkeyed BLAKE2s single-block over a 16-word message → 8-word digest.
-fn blake2s_block_src() -> String {
-    String::from(
+/// Unkeyed BLAKE2s single-block over a 16-word, `len`-byte message → 8-word
+/// digest via `blake2s_hash_one_block::<len>`.
+fn blake2s_block_src(len: usize) -> String {
+    format!(
         r#"#![no_std]
 use xark_blake2s::prelude::*;
-pub fn circuit(m: Private<[Field; 16]>, len: Public<Field>, d: Public<[Field; 8]>) {
+pub fn circuit(m: Private<[Field; 16]>, d: Public<[Field; 8]>) {{
     let zero = [Field::constant("0"); 32];
     let mut w = [zero; 16];
     let mut i = 0usize;
-    while i < 16usize {
+    while i < 16usize {{
         let bits = m[i].to_bits::<32>();
         let mut j = 0usize;
-        while j < 32usize { w[i][j] = bits[j]; j += 1; }
+        while j < 32usize {{ w[i][j] = bits[j]; j += 1; }}
         i += 1;
-    }
-    let hash = blake2s_hash_one_block(w, len);
+    }}
+    let hash = blake2s_hash_one_block::<{len}>(w);
     let mut i = 0usize;
-    while i < 8usize {
+    while i < 8usize {{
         let mut word = zero;
         let mut j = 0usize;
-        while j < 32usize { word[j] = hash[i][j]; j += 1; }
+        while j < 32usize {{ word[j] = hash[i][j]; j += 1; }}
         require_eq(Field::from_bits::<32>(word), d[i]);
         i += 1;
-    }
-}
-"#,
+    }}
+}}
+"#
     )
 }
 
@@ -2414,7 +2464,7 @@ fn sha256_matches_lean_model() {
 #[test]
 fn blake3_matches_lean_model() {
     let c = xark_test_harness::compile_file(
-        &write_case("blake3_lean", &blake3_block_src()),
+        &write_case("blake3_lean", &blake3_block_src(64)),
         "blake3_lean_bridge",
         "bn254",
     );
@@ -2425,8 +2475,12 @@ fn blake3_matches_lean_model() {
     // (Blake.lean `add3Mod32_bit_sound`, bridged to the nested-`addMod32` spec by
     // `add3Mod32_eq_nested`) instead of two chained `add32`s — 2 fewer carry
     // decompositions per `g`, so the mult-gate count drops from 18832 to 15248.
+    // The block length is then a constant (#72): its 32-bit decomposition goes
+    // (32 rows) and the first round's XOR into `v[14]` folds (32 rows), → 15184.
+    // `Blake.lean` models the mixing, not the length input, and the zero-tail
+    // rows are linear, so the count is the same for every `LEN`.
     assert_eq!(
-        mul, 15248,
+        mul, 15184,
         "BLAKE3 mult-gate count pins blake3_round_compose_bit; got {mul}"
     );
 }
@@ -2437,7 +2491,7 @@ fn blake3_matches_lean_model() {
 #[test]
 fn blake2s_matches_lean_model() {
     let c = xark_test_harness::compile_file(
-        &write_case("blake2s_lean", &blake2s_block_src()),
+        &write_case("blake2s_lean", &blake2s_block_src(64)),
         "blake2s_lean_bridge",
         "bn254",
     );
@@ -2446,11 +2500,184 @@ fn blake2s_matches_lean_model() {
     let mul = c.mul_gate_count();
     // Same `add3` (34-bit) mixing tightening as BLAKE3 (Blake.lean
     // `add3Mod32_bit_sound`): 26720 → 21600 mult-gates; XORs with the constant IV
-    // and counter words fold: → 21536.
+    // and counter words fold: → 21536. The counter is then a constant (#72): its
+    // 32-bit decomposition goes (32 rows) and the first round's XOR into `v[12]`
+    // folds (32 rows), → 21472. `Blake.lean` models the mixing, not the length
+    // input, and the zero-tail rows are linear, so the count is the same for
+    // every `LEN`.
     assert_eq!(
-        mul, 21536,
+        mul, 21472,
         "BLAKE2s mult-gate count pins blake2s_round_compose_bit; got {mul}"
     );
+}
+
+/// The BLAKE `G` mix with the rotations both BLAKE2s and BLAKE3 use (16, 12, 8, 7).
+fn blake_g(v: &mut [u32; 16], [a, b, c, d]: [usize; 4], x: u32, y: u32) {
+    v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);
+    v[d] = (v[d] ^ v[a]).rotate_right(16);
+    v[c] = v[c].wrapping_add(v[d]);
+    v[b] = (v[b] ^ v[c]).rotate_right(12);
+    v[a] = v[a].wrapping_add(v[b]).wrapping_add(y);
+    v[d] = (v[d] ^ v[a]).rotate_right(8);
+    v[c] = v[c].wrapping_add(v[d]);
+    v[b] = (v[b] ^ v[c]).rotate_right(7);
+}
+
+const BLAKE_IV: [u32; 8] = [
+    0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
+];
+
+/// One BLAKE2s-256 unkeyed final-block compression (RFC 7693 §3.2) with counter
+/// `t`, on any 16 words: the reference for blocks no message produces too.
+fn blake2s_one_block_native(m: [u32; 16], t: u32) -> [u32; 8] {
+    const SIGMA: [[usize; 16]; 10] = [
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+        [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+        [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+        [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+        [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+        [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+        [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+        [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+        [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+    ];
+    let mut h = BLAKE_IV;
+    h[0] ^= 0x01010020; // digest_len 32, key_len 0, fanout 1, depth 1
+    let mut v = [0u32; 16];
+    v[..8].copy_from_slice(&h);
+    v[8..].copy_from_slice(&BLAKE_IV);
+    v[12] ^= t;
+    v[14] ^= u32::MAX; // final block
+    for s in SIGMA {
+        blake_g(&mut v, [0, 4, 8, 12], m[s[0]], m[s[1]]);
+        blake_g(&mut v, [1, 5, 9, 13], m[s[2]], m[s[3]]);
+        blake_g(&mut v, [2, 6, 10, 14], m[s[4]], m[s[5]]);
+        blake_g(&mut v, [3, 7, 11, 15], m[s[6]], m[s[7]]);
+        blake_g(&mut v, [0, 5, 10, 15], m[s[8]], m[s[9]]);
+        blake_g(&mut v, [1, 6, 11, 12], m[s[10]], m[s[11]]);
+        blake_g(&mut v, [2, 7, 8, 13], m[s[12]], m[s[13]]);
+        blake_g(&mut v, [3, 4, 9, 14], m[s[14]], m[s[15]]);
+    }
+    std::array::from_fn(|i| h[i] ^ v[i] ^ v[i + 8])
+}
+
+/// One BLAKE3 one-chunk root compression (flags `CHUNK_START | CHUNK_END | ROOT`,
+/// counter 0) with `block_len`, on any 16 words.
+fn blake3_one_block_native(mut m: [u32; 16], block_len: u32) -> [u32; 8] {
+    const PERMUTATION: [usize; 16] = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
+    let mut v = [0u32; 16];
+    v[..8].copy_from_slice(&BLAKE_IV);
+    v[8..12].copy_from_slice(&BLAKE_IV[..4]);
+    v[14] = block_len;
+    v[15] = 11;
+    for round in 0..7 {
+        blake_g(&mut v, [0, 4, 8, 12], m[0], m[1]);
+        blake_g(&mut v, [1, 5, 9, 13], m[2], m[3]);
+        blake_g(&mut v, [2, 6, 10, 14], m[4], m[5]);
+        blake_g(&mut v, [3, 7, 11, 15], m[6], m[7]);
+        blake_g(&mut v, [0, 5, 10, 15], m[8], m[9]);
+        blake_g(&mut v, [1, 6, 11, 12], m[10], m[11]);
+        blake_g(&mut v, [2, 7, 8, 13], m[12], m[13]);
+        blake_g(&mut v, [3, 4, 9, 14], m[14], m[15]);
+        if round < 6 {
+            m = std::array::from_fn(|i| m[PERMUTATION[i]]);
+        }
+    }
+    std::array::from_fn(|i| v[i] ^ v[i + 8])
+}
+
+/// The one-block BLAKE helpers hash a message of a compile-time length with a zero
+/// tail (#72). Before, the length was a witness range-checked only to 32 bits and
+/// the words past it were free, so a circuit proved "BLAKE compression of these
+/// words under a prover-chosen counter", not "the hash of a `len`-byte message".
+/// Here `"abc"` (`LEN = 3`) proves its real digest; the same words with a nonzero
+/// byte past the length, paired with the digest the compression gives them under
+/// that length (what the old helper accepted), find no witness; and `LEN = 65`
+/// does not compile.
+#[test]
+fn blake_one_block_pins_length_and_tail() {
+    // Little-endian words of a 32-byte digest written as hex.
+    fn words(hex: &str) -> [u32; 8] {
+        std::array::from_fn(|i| {
+            let byte = |k: usize| u32::from_str_radix(&hex[2 * k..2 * k + 2], 16).unwrap();
+            (0..4).map(|k| byte(4 * i + k) << (8 * k)).sum()
+        })
+    }
+    // (name, circuit source for a length, native compression, digest of "abc")
+    type Case = (
+        &'static str,
+        fn(usize) -> String,
+        fn([u32; 16], u32) -> [u32; 8],
+        &'static str,
+    );
+    // Published digests of "abc" (RFC 7693 Appendix B; the BLAKE3 reference
+    // implementation's `b3sum`), which also check the native models.
+    let cases: [Case; 2] = [
+        (
+            "blake2s",
+            blake2s_block_src,
+            blake2s_one_block_native,
+            "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982",
+        ),
+        (
+            "blake3",
+            blake3_block_src,
+            blake3_one_block_native,
+            "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85",
+        ),
+    ];
+    std::thread::scope(|scope| {
+        for (name, src, native, abc_hex) in cases {
+            scope.spawn(move || {
+                let abc = {
+                    let mut m = [0u32; 16];
+                    m[0] = u32::from_le_bytes([b'a', b'b', b'c', 0]);
+                    m
+                };
+                assert_eq!(native(abc, 3), words(abc_hex), "{name} native model");
+                let c = compile(&write_case(&format!("{name}_one_block_3"), &src(3)), name);
+                assert!(c.status_success, "{name}::<3> compiles: {}", c.stderr);
+                let inputs = |m: [u32; 16], d: [u32; 8]| {
+                    let mut v: Vec<(String, String)> = (0..16)
+                        .map(|i| (format!("m[{i}]"), m[i].to_string()))
+                        .collect();
+                    v.extend((0..8).map(|i| (format!("d[{i}]"), d[i].to_string())));
+                    v
+                };
+                let accepts_owned = |v: Vec<(String, String)>| {
+                    let v: Vec<(&str, &str)> =
+                        v.iter().map(|(n, x)| (n.as_str(), x.as_str())).collect();
+                    accepts(&c, &v)
+                };
+                assert!(
+                    accepts_owned(inputs(abc, words(abc_hex))),
+                    "{name}(\"abc\") must prove"
+                );
+                // A nonzero byte 3 (the first past the length), and one in the
+                // last word.
+                for (word, value) in [(0usize, 0x0100_0000u32), (15, 1)] {
+                    let mut m = abc;
+                    m[word] |= value;
+                    let d = native(m, 3);
+                    assert!(
+                        !accepts_owned(inputs(m, d)),
+                        "{name}: a nonzero tail in word {word} must not prove"
+                    );
+                }
+                let too_long = xark_test_harness::compile_file(
+                    &write_case(&format!("{name}_one_block_65"), &src(65)),
+                    &format!("{name}_one_block_65"),
+                    "bn254",
+                );
+                assert!(
+                    !too_long.status_success && too_long.stderr.contains("at most 64 bytes"),
+                    "{name}::<65> must fail its length assertion: {}",
+                    too_long.stderr
+                );
+            });
+        }
+    });
 }
 
 /// **R1CS ↔ Lean bridge (Keccak-f[1600]).** `#[ignore]` — 93k constraints.
@@ -2581,9 +2808,13 @@ fn fp_mul_matches_lean_model() {
     // Mult-gate count, streamed from `circuit.xbc` (no r1cs.json materialization).
     let mul = c.mul_gate_count();
     // 164 fewer since the remainder's `require_lt` compares chunk-wise
-    // (`formal/Formal/RequireLt.lean`); the column identity is unchanged.
+    // (`formal/Formal/RequireLt.lean`); the column identity is unchanged. Since
+    // #62/#63 the example range-checks its two inputs first (2 × 258 booleanity
+    // rows) and `mod_mul` derives `p − 1` itself (5 is-zero rows over the constant
+    // `p`, which the reduction folds): 990 + 516 + 5. The multiply's own rows are
+    // still the 990 the model is stated over.
     assert_eq!(
-        mul, 990,
+        mul, 1511,
         "fp_mul mult-gate count pins mul_mod_via_Fr_limbwise_constraints_3; got {mul}"
     );
 }
@@ -2743,8 +2974,123 @@ fn const_generic_lowers() {
     assert_eq!(r1cs.constraints.len(), 1, "const_generic → 1 constraint");
 }
 
+/// `mod_mul` takes only `m` and derives the remainder's bound `m − 1` itself (#62):
+/// with `m − 1` from the prover, `m1 = 4` admitted `(2·2) mod 3 = 4`. And a typed
+/// `Bignum` input range-checks its limbs as it's read (#63): a limb `≥ 2^BITS`
+/// (here `2⁻¹ mod Fr`) made the column identity a congruence mod `Fr`, so
+/// `(2·b) mod 3 = 1` proved for a `b` whose integer value gives 2.
+#[test]
+fn bignum_mul_bound_and_limbs_are_its_own() {
+    let half = "10944121435919637611123202872628637544274182200208017171849102093287904247809";
+    let compile_case = |name: &str, body: &str| {
+        let src = format!("#![no_std]\nuse xark::prelude::*;\nuse xark_bignum::*;\n{body}\n");
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let c = compile_case(
+        "bignum_mul_m",
+        "#[circuit]\npub fn circuit(a: Private<Bignum<1, 8>>, b: Private<Bignum<1, 8>>, \
+         m: Public<Bignum<1, 8>>, out: Public<Field>) {\n\
+         \x20   require_eq(a.mul(b, m).limbs[0], out);\n}",
+    );
+    let case = |a: &str, b: &str, m: &str, out: &str| {
+        accepts_exactly_constraints(
+            &c,
+            &[
+                ("a.limbs[0]", a),
+                ("b.limbs[0]", b),
+                ("m.limbs[0]", m),
+                ("out", out),
+            ],
+        )
+    };
+    assert!(case("2", "2", "3", "1"));
+    assert!(!case("2", "2", "3", "4"), "a non-canonical remainder (#62)");
+    assert!(!case("2", half, "3", "1"), "an out-of-range limb (#63)");
+    assert!(!case("2", "2", "0", "0"), "m = 0");
+    // `fp!` types check their limbs on reading too.
+    let c = compile_case(
+        "bignum_fp_input",
+        "xark_bignum::fp!(El, \"83\", 1, 8);\n\
+         #[circuit]\npub fn circuit(a: Private<El>, b: Private<El>, out: Public<Field>) {\n\
+         \x20   require_eq((a * b).limbs[0], out);\n}",
+    );
+    let case = |b: &str, out: &str| {
+        accepts_exactly_constraints(&c, &[("a.limbs[0]", "2"), ("b.limbs[0]", b), ("out", out)])
+    };
+    assert!(case("3", "6"));
+    assert!(!case(half, "1"), "an out-of-range `fp!` limb (#63)");
+}
+
+/// A `Days` input is a day in its range: its bits hold more than its steps (`Days<2024,
+/// 2024>`: 366 days in 9 bits), and a value past the end of `TO` is refused as the
+/// input is read, packed or not; a `Days` past `MAX` couldn't exist in Rust.
+#[test]
+fn time_inputs_stay_in_their_range() {
+    let compile_case = |name: &str, body: &str| {
+        let src = format!("#![no_std]\nuse xark::prelude::*;\n{body}\n");
+        let c = compile_with_field(&write_case(name, &src), name, "bn254");
+        assert!(c.status_success, "{name}: {}", c.stderr);
+        c
+    };
+    let c = compile_case(
+        "days_range",
+        "#[circuit]\npub fn circuit(a: Private<Days<2024, 2024>>, k: Public<Field>) {\n\
+         \x20   require_eq(Field::from(a.steps()), k);\n}",
+    );
+    for (a, ok) in [("0", true), ("365", true), ("366", false), ("511", false)] {
+        assert_eq!(
+            accepts_exactly_constraints(&c, &[("a", a), ("k", a)]),
+            ok,
+            "a = {a}"
+        );
+    }
+    let c = compile_case(
+        "days_range_packed",
+        "#[input]\npub struct S { pub a: Days<2024, 2024>, pub n: u8 }\n\
+         #[circuit]\npub fn circuit(s: Private<S>, k: Public<Field>) {\n\
+         \x20   require_eq(Field::from(s.a.steps()), k);\n}",
+    );
+    let leaf = c
+        .program()
+        .vars
+        .iter()
+        .find(|v| v.name.starts_with("s."))
+        .map(|v| v.name.clone())
+        .unwrap();
+    for (a, ok) in [(365u64, true), (400, false)] {
+        let packed = (a + (3 << 9)).to_string();
+        assert_eq!(
+            accepts_exactly_constraints(
+                &c,
+                &[(leaf.as_str(), packed.as_str()), ("k", &a.to_string())]
+            ),
+            ok,
+            "packed a = {a}"
+        );
+    }
+}
+
+/// `fp!`'s `assert_nonzero` means nonzero mod `m`: `m` itself, in range but not
+/// canonical, is refused (it passed when only the limbs were tested).
+#[test]
+fn fp_assert_nonzero_is_mod_m() {
+    let src = "#![no_std]\nuse xark::prelude::*;\nxark_bignum::fp!(El, \"83\", 1, 8);\n\
+               #[circuit]\npub fn circuit(a: Public<El>) {\n\x20   a.assert_nonzero();\n}\n";
+    let c = compile_with_field(&write_case("fp_nonzero", src), "fp_nonzero", "bn254");
+    assert!(c.status_success, "{}", c.stderr);
+    for (a, ok) in [("5", true), ("0", false), ("83", false), ("166", false)] {
+        assert_eq!(
+            accepts_exactly_constraints(&c, &[("a.limbs[0]", a)]),
+            ok,
+            "a = {a}"
+        );
+    }
+}
+
 /// **`Bignum<LIMBS, BITS>` wrapper.** The zero-cost newtype's methods
-/// (`a.mul(b, m, m1)`) forward to the free functions, so the emitted R1CS is
+/// (`a.mul(b, m)`) forward to the free functions, so the emitted R1CS is
 /// identical to calling `mod_mul::<3,86>` directly. Guards the classify fix
 /// (an inherent `mul`/`add`/… must not be mistaken for the `Field` operator)
 /// and const-generic struct-method inlining.
@@ -2756,9 +3102,11 @@ fn bignum_wrapper_lowers() {
         &std::fs::read_to_string(c.out_dir.join("r1cs.json")).expect("read r1cs.json"),
     )
     .expect("parse r1cs.json");
-    // Same as the free-fn `mod_mul::<3,86>` (a·b mod m, 3×86-bit) under bn254.
-    // 167 fewer since `require_lt` compares chunk-wise (`formal/Formal/RequireLt.lean`).
-    assert_eq!(r1cs.constraints.len(), 1022, "Bignum::mul is zero-cost");
+    // Same as the free-fn `mod_mul::<3,86>` (a·b mod m, 3×86-bit) under bn254, plus
+    // the range checks of its four typed inputs (4 × 258 rows) and the `m − 1`
+    // derived from the public `m` (24 rows), both since #62/#63. 167 fewer since
+    // `require_lt` compares chunk-wise (`formal/Formal/RequireLt.lean`).
+    assert_eq!(r1cs.constraints.len(), 2078, "Bignum::mul is zero-cost");
 }
 
 /// **`fp!` operator layer.** `xark_bignum::fp!` defines a non-native field-element
@@ -3961,8 +4309,10 @@ fn check_toy_curve(bits: u32, p: i128, ca: i128, op: &str, pairs: &[ToyPair]) {
         .map(|(co, i)| leaf("s", co, i))
         .collect();
     let mask = (1i128 << bits) - 1;
-    let (mut defined, mut undefined, mut noncanonical) = (0, 0, 0);
-    for &(a, b) in pairs {
+    // Each pair's search is independent: run them across the cores (one test is
+    // the suite's longest otherwise), checking each result on its own thread.
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let check = |&(a, b): &ToyPair| -> (u32, u32, u32) {
         let mut fixed = std::collections::BTreeMap::new();
         for (pt, v) in [("p", a), ("q", b)] {
             for (co, val) in [("x", v.0), ("y", v.1)] {
@@ -3991,16 +4341,32 @@ fn check_toy_curve(bits: u32, p: i128, ca: i128, op: &str, pairs: &[ToyPair]) {
                         .sum::<i128>()
                 };
                 assert_eq!((val(0), val(3)), (x3, y3), "{op} {a:?} {b:?}");
-                defined += 1;
+                (1, 0, 0)
             }
-            (None, Projection::None) if canonical => undefined += 1,
-            (None, Projection::None) => noncanonical += 1,
+            (None, Projection::None) if canonical => (0, 1, 0),
+            (None, Projection::None) => (0, 0, 1),
             (want, other) => panic!(
                 "{op} p={p} {a:?} {b:?} (≡ {:?} {:?}): expected {want:?}, circuit {other:?}",
                 reduce(a),
                 reduce(b)
             ),
         }
+    };
+    let (mut defined, mut undefined, mut noncanonical) = (0, 0, 0);
+    let counts: Vec<(u32, u32, u32)> = std::thread::scope(|s| {
+        let handles: Vec<_> = pairs
+            .chunks(pairs.len().div_ceil(threads).max(1))
+            .map(|chunk| s.spawn(move || chunk.iter().map(check).collect::<Vec<_>>()))
+            .collect();
+        // Every thread joined before any is unwrapped: a panic while one is still
+        // to be joined aborts the test binary instead of failing the test.
+        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
+        joined.into_iter().flat_map(|r| r.unwrap()).collect()
+    });
+    for (d, u, n) in counts {
+        defined += d;
+        undefined += u;
+        noncanonical += n;
     }
     eprintln!(
         "p = {p}, a = {ca}, {op}: {defined} defined, {undefined} undefined, {noncanonical} non-canonical rejected"
@@ -4155,7 +4521,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "mod_mul",
-            call: "(mod_mul::<3, 2>(a, b, MM, M1), Z)",
+            call: "(mod_mul::<3, 2>(a, b, MM), Z)",
             arity: 2,
             two_out: false,
             spec: |v| Some([(v[0] * v[1]) % M, 0]),
@@ -4163,7 +4529,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "mul_divmod",
-            call: "{ let (q, r) = mul_divmod::<3, 2>(a, b, MM, M1); (r, q) }",
+            call: "{ let (q, r) = mul_divmod::<3, 2>(a, b, MM); (r, q) }",
             arity: 2,
             two_out: true,
             spec: |v| Some([v[0] * v[1] % M, v[0] * v[1] / M]),
@@ -4171,7 +4537,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "mod_inverse",
-            call: "(mod_mul::<3, 2>(mod_inverse::<3, 2>(a, MM), [Field::from(1u8), Field::from(0u8), Field::from(0u8)], MM, M1), Z)",
+            call: "(mod_mul::<3, 2>(mod_inverse::<3, 2>(a, MM), [Field::from(1u8), Field::from(0u8), Field::from(0u8)], MM), Z)",
             arity: 1,
             two_out: false,
             spec: |v| (v[0] % M != 0).then(|| [(1..M).find(|y| v[0] % M * y % M == 1).unwrap(), 0]),
@@ -4179,7 +4545,7 @@ fn small_field_bignum_gadgets_are_sound() {
         },
         BignumCase {
             name: "sub2",
-            call: "(sub2::<3, 2>(a, b, c, MM, M1), Z)",
+            call: "(sub2::<3, 2>(a, b, c, MM), Z)",
             arity: 3,
             two_out: false,
             spec: |v| Some([(v[0] - v[1] - v[2]).rem_euclid(M), 0]),
@@ -5765,7 +6131,10 @@ fn pruned_arms_constrain_the_condition() {
         0xffff_fffe,
         u64::MAX,
     ];
-    for (name, body, n, native) in cases {
+    // The four shapes are independent; each searches on its own thread.
+    std::thread::scope(|scope| {
+        for (name, body, n, native) in cases {
+            scope.spawn(move || {
         let src = write_case(
             name,
             &format!(
@@ -5826,7 +6195,9 @@ fn pruned_arms_constrain_the_condition() {
                 }
             }
         }
-    }
+        });
+        }
+    });
 }
 
 /// `Field` range checks (`to_bits`), comparisons (`lt`) and
@@ -7256,6 +7627,90 @@ fn witness_regions_leave_no_proven_facts() {
     );
 }
 
+/// A `Field` comparison made in a `witness_begin()` region keeps its rows (#59): its
+/// result is a `bool` from there on, and a branch, a select or `Field::from` after the
+/// region trusts it to be 0 or 1, and to be the comparison. Without the rows it was a
+/// free witness tagged as a proven bit: `c = 1/2` proved `out = 4`, or any `out`.
+#[test]
+fn witness_regions_keep_field_comparisons() {
+    probe(
+        "wo_eq_branch",
+        "a: Private<Field>, b: Private<Field>, out: Public<Field>",
+        "witness_begin();\nlet c = a == b;\nwitness_end();\n\
+         let z = if c { Field::from(3u8) } else { Field::from(5u8) };\nrequire_eq(z, out);",
+        &[
+            (&[("a", "0"), ("b", "1"), ("out", "5")], true),
+            (&[("a", "0"), ("b", "1"), ("out", "4")], false),
+            (&[("a", "0"), ("b", "1"), ("out", "3")], false),
+            (&[("a", "1"), ("b", "1"), ("out", "3")], true),
+        ],
+    );
+    probe(
+        "wo_eq_field",
+        "a: Private<Field>, b: Private<Field>, out: Public<Field>",
+        "witness_begin();\nlet c = a == b;\nwitness_end();\n\
+         require_eq(Field::from(c) * Field::from(7u8), out);",
+        &[
+            (&[("a", "2"), ("b", "2"), ("out", "7")], true),
+            (&[("a", "2"), ("b", "3"), ("out", "0")], true),
+            (&[("a", "2"), ("b", "3"), ("out", "7")], false),
+            (&[("a", "2"), ("b", "3"), ("out", "3")], false),
+        ],
+    );
+    probe(
+        "wo_lt_branch",
+        "a: Private<Field>, b: Private<Field>, out: Public<Field>",
+        "witness_begin();\nlet c = a.lt::<8>(b);\nwitness_end();\n\
+         let z = if c { Field::from(3u8) } else { Field::from(5u8) };\nrequire_eq(z, out);",
+        &[
+            (&[("a", "1"), ("b", "2"), ("out", "3")], true),
+            (&[("a", "2"), ("b", "1"), ("out", "5")], true),
+            (&[("a", "2"), ("b", "1"), ("out", "4")], false),
+            (&[("a", "2"), ("b", "1"), ("out", "3")], false),
+        ],
+    );
+}
+
+/// An arm of a witness branch that diverges inside a `witness_begin()` region is
+/// dropped with the region (#58): the region stays closed for the other arm and
+/// everything after the branch, whose rows still bind. Before, the open region
+/// swallowed them, and `x = 0, out = 0` proved a circuit that requires `out = 42`.
+#[test]
+fn witness_regions_end_with_a_diverging_arm() {
+    probe(
+        "wo_panic_arm",
+        "x: Private<u32>, out: Public<Field>",
+        "require_eq(Field::from(x), out);\n\
+         if x == 0u32 {\nwitness_begin();\npanic!(\"boom\");\n}\n\
+         require_eq(Field::from(42u8), out);",
+        &[
+            (&[("x", "42"), ("out", "42")], true),
+            (&[("x", "0"), ("out", "0")], false),
+            (&[("x", "0"), ("out", "42")], false),
+            (&[("x", "7"), ("out", "7")], false),
+        ],
+    );
+}
+
+/// A region that opens or closes in one arm of a witness branch, and goes on past the
+/// branch, is refused: which rows it covers would depend on the witness.
+#[test]
+fn witness_regions_dont_straddle_branches() {
+    let name = "wo_straddle";
+    let src = "#![no_std]\nuse xark::prelude::*;\n\
+               pub fn circuit(x: Private<u32>, out: Public<Field>) {\n\
+               if x == 0u32 {\nwitness_begin();\n}\nrequire_eq(Field::from(x) * Field::from(x), out);\n\
+               witness_end();\n}\n";
+    let c = compile_with_field(&write_case(name, src), name, "bn254");
+    assert!(!c.status_success, "built a region that straddles a branch");
+    assert!(
+        c.stderr
+            .contains("region opens or closes inside one arm of a witness-dependent branch"),
+        "{}",
+        c.stderr
+    );
+}
+
 /// Native integer ops stay constrained inside a `witness_begin()` region: they are
 /// plain wasm, which LLVM may merge across the markers, so an integer computed there
 /// can be the very value used afterwards. A quotient taken in the region keeps its
@@ -7485,9 +7940,10 @@ fn witness_bounded_loops() {
     assert!(c.stderr.contains("nest too deeply"), "{}", c.stderr);
 }
 
-/// **The signature circuits' building blocks, searched at full size.** The ECDSA and
-/// EdDSA circuits (1.6M–3.4M rows) are too big to search whole, so each block they
-/// are built from is searched exhaustively on its own, at the real field sizes,
+/// **The signature circuits' building blocks, searched at full size.** The ECDSA
+/// circuits are made of inverses a search skips, and searching the EdDSA circuit
+/// whole is a weekly job, so each block they are built from is searched
+/// exhaustively on its own, at the real field sizes,
 /// against a native reference: the ed25519 extended add and double (the output is
 /// determined by the inputs), `on_curve` (accepts exactly the canonical points on
 /// the curve), `eq_mod_p`, the 16-way point muxes, the scalar range checks

@@ -955,6 +955,21 @@ struct Ctl {
     height: u32,
     /// Values a branch to this label carries (loop: params, block: results).
     br_arity: u16,
+    /// A loop's: branches back to it so far, and the machine state at the last
+    /// power-of-two count checked (see [`Machine::branch`]).
+    iters: u32,
+    mark: Option<LoopMark>,
+}
+
+/// What a loop iteration's state is compared by: the frame's locals and the loop's
+/// stack, and the counts that any memory or global write, import call or new
+/// symbolic value moves. Two equal marks, 2^k iterations apart, mean the machine is
+/// back where it was with nothing changed in between: it never ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LoopMark {
+    state: u64,
+    effects: u64,
+    syms: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -1019,6 +1034,8 @@ pub struct Machine {
     pub syms: Vec<Sym>,
     journals: Vec<Vec<JournalEntry>>,
     steps: u64,
+    /// Memory and global writes and import calls so far (see [`LoopMark`]).
+    effects: u64,
     /// Branch-path nesting depth (> 0 while exploring a witness-dependent branch).
     pub path_depth: u32,
     pub host_ns: u64,
@@ -1045,6 +1062,10 @@ pub trait Host {
     /// guard, for the branch check: inside an arm every constraint and hint is
     /// guarded, so the count moves only if an arm declares a circuit input.
     fn emitted(&self) -> usize;
+    /// Whether a `witness_begin` region is open; and setting it, so each arm of a
+    /// witness branch starts in the state the branch was reached in.
+    fn witness_only(&self) -> bool;
+    fn set_witness_only(&mut self, on: bool);
     /// Describe the current source location (for diagnostics).
     fn location(&self) -> Option<String>;
     /// Native integer arithmetic / comparison / truncation on witness integers
@@ -1111,6 +1132,7 @@ impl Machine {
             syms: vec![Sym::None],
             journals: Vec::new(),
             steps: 0,
+            effects: 0,
             path_depth: 0,
             host_ns: 0,
             timing: std::env::var_os("XARK_FRONTEND_TIME").is_some(),
@@ -1563,6 +1585,7 @@ impl Machine {
             buf[..n].copy_from_slice(&self.st.stack[base..]);
             self.st.stack.truncate(base);
             let args = &buf[..n];
+            self.effects += 1;
             let t0 = self.timing.then(std::time::Instant::now);
             let r = host
                 .call(self, f, args)
@@ -1600,6 +1623,8 @@ impl Machine {
             is_loop: false,
             height: self.st.stack.len() as u32,
             br_arity: ty.results.len() as u16,
+            iters: 0,
+            mark: None,
         });
         self.st.frames.push(Frame {
             func: f,
@@ -1611,8 +1636,11 @@ impl Machine {
     }
 
     /// Branch to label `depth` (0 = innermost): unwind the value stack to the
-    /// label's height keeping its branch arity, and jump.
-    fn branch(&mut self, depth: u32) -> u32 {
+    /// label's height keeping its branch arity, and jump. A loop whose state is
+    /// exactly what it was 2^k iterations ago, nothing written or called in between,
+    /// never ends (recursion rustc turned into a loop, a loop on a witness that never
+    /// moves): an error at once instead of after the step budget.
+    fn branch(&mut self, depth: u32) -> CompileResult<u32> {
         let idx = self.st.ctl.len() - 1 - depth as usize;
         let c = self.st.ctl[idx].clone();
         let keep = c.br_arity as usize;
@@ -1626,11 +1654,38 @@ impl Machine {
         if c.is_loop {
             // Re-entering the loop: keep its label.
             self.st.ctl.truncate(idx + 1);
-            c.br_pc
+            let iters = c.iters.saturating_add(1);
+            self.st.ctl[idx].iters = iters;
+            if iters >= 1 << 16 && iters.is_power_of_two() {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::hash::DefaultHasher::new();
+                let locals_base = self.st.frames.last().map_or(0, |f| f.locals_base as usize);
+                self.st.locals[locals_base..].hash(&mut h);
+                self.st.stack[c.height as usize..].hash(&mut h);
+                let mark = LoopMark {
+                    state: h.finish(),
+                    effects: self.effects,
+                    syms: self.syms.len(),
+                };
+                if c.mark == Some(mark) {
+                    return Err(CompileError::new(format!(
+                        "the loop never ends: after {} iterations its state is exactly what it \
+                         was {} iterations before, with nothing written or called in between",
+                        iters,
+                        iters / 2
+                    ))
+                    .with_note(
+                        "only loops with compile-time-constant bounds can be unrolled; \
+                         unbounded recursion is not supported (it may compile to a loop)",
+                    ));
+                }
+                self.st.ctl[idx].mark = Some(mark);
+            }
+            Ok(c.br_pc)
         } else {
             // Leaving the block: drop its label and continue after its `End`.
             self.st.ctl.truncate(idx);
-            c.br_pc + 1
+            Ok(c.br_pc + 1)
         }
     }
 
@@ -1726,6 +1781,8 @@ impl Machine {
                             is_loop: false,
                             height: (self.st.stack.len() - *params as usize) as u32,
                             br_arity: *arity,
+                            iters: 0,
+                            mark: None,
                         });
                     }
                     Op::Loop { params } => {
@@ -1734,6 +1791,8 @@ impl Machine {
                             is_loop: true,
                             height: (self.st.stack.len() - *params as usize) as u32,
                             br_arity: *params,
+                            iters: 0,
+                            mark: None,
                         });
                     }
                     Op::If {
@@ -1748,6 +1807,8 @@ impl Machine {
                             is_loop: false,
                             height: (self.st.stack.len() - *params as usize) as u32,
                             br_arity: *arity,
+                            iters: 0,
+                            mark: None,
                         };
                         let else_start = if *else_pc != 0 { *else_pc + 1 } else { *end_pc };
                         match self.cond(c, host)? {
@@ -1794,11 +1855,11 @@ impl Machine {
                         let target_idx = self.st.ctl.len() - 1 - depth as usize;
                         if target_idx == self.st.frames[fi].ctl_base as usize {
                             // Branch to the function label = return.
-                            self.branch(depth);
+                            self.branch(depth)?;
                             self.ret(fi, Some(host));
                             break;
                         }
-                        pc = self.branch(depth) as usize;
+                        pc = self.branch(depth)? as usize;
                         if self.st.ctl.len() <= stop {
                             self.st.frames[fi].pc = pc as u32;
                             return Ok(());
@@ -1812,11 +1873,11 @@ impl Machine {
                                 let depth = *d;
                                 let target_idx = self.st.ctl.len() - 1 - depth as usize;
                                 if target_idx == self.st.frames[fi].ctl_base as usize {
-                                    self.branch(depth);
+                                    self.branch(depth)?;
                                     self.ret(fi, Some(host));
                                     break;
                                 }
-                                pc = self.branch(depth) as usize;
+                                pc = self.branch(depth)? as usize;
                                 if self.st.ctl.len() <= stop {
                                     self.st.frames[fi].pc = pc as u32;
                                     return Ok(());
@@ -1834,7 +1895,7 @@ impl Machine {
                                 let mut then_st = self.st.clone();
                                 std::mem::swap(&mut self.st, &mut then_st);
                                 let to_return = target_idx == self.st.frames[fi].ctl_base as usize;
-                                let npc = self.branch(depth);
+                                let npc = self.branch(depth)?;
                                 if to_return {
                                     // The taken path's return: notified after the merge.
                                     self.ret(fi, None);
@@ -1895,7 +1956,7 @@ impl Machine {
                                 let mut then_st = self.st.clone();
                                 std::mem::swap(&mut self.st, &mut then_st);
                                 let to_return = target_idx == self.st.frames[fi].ctl_base as usize;
-                                let npc = self.branch(depth);
+                                let npc = self.branch(depth)?;
                                 if to_return {
                                     self.ret(fi, None);
                                 } else {
@@ -1915,11 +1976,11 @@ impl Machine {
                         let depth = targets[i];
                         let target_idx = self.st.ctl.len() - 1 - depth as usize;
                         if target_idx == self.st.frames[fi].ctl_base as usize {
-                            self.branch(depth);
+                            self.branch(depth)?;
                             self.ret(fi, Some(host));
                             break;
                         }
-                        pc = self.branch(depth) as usize;
+                        pc = self.branch(depth)? as usize;
                         if self.st.ctl.len() <= stop {
                             self.st.frames[fi].pc = pc as u32;
                             return Ok(());
@@ -1928,7 +1989,7 @@ impl Machine {
                     Op::Return => {
                         let depth =
                             (self.st.ctl.len() - 1 - self.st.frames[fi].ctl_base as usize) as u32;
-                        self.branch(depth);
+                        self.branch(depth)?;
                         self.ret(fi, Some(host));
                         break;
                     }
@@ -2029,6 +2090,7 @@ impl Machine {
                         self.st.stack.push(v);
                     }
                     Op::GlobalSet(i) => {
+                        self.effects += 1;
                         let v = self.st.stack.pop().unwrap();
                         self.st.globals[*i as usize] = v;
                     }
@@ -2055,6 +2117,7 @@ impl Machine {
                         self.st.stack.push(v);
                     }
                     Op::Store(kind, off) => {
+                        self.effects += 1;
                         let v = self.st.stack.pop().unwrap();
                         let a = self.st.stack.pop().unwrap();
                         let size = kind.size();
@@ -2076,6 +2139,7 @@ impl Machine {
                         self.st.stack.push(V::i32((self.mem.len() / PAGE) as u32));
                     }
                     Op::MemoryGrow => {
+                        self.effects += 1;
                         let n = self.st.stack.pop().unwrap();
                         if n.is_sym() {
                             return Err(CompileError::new(
@@ -2093,6 +2157,7 @@ impl Machine {
                         }
                     }
                     Op::MemoryCopy => {
+                        self.effects += 1;
                         let n = self.st.stack.pop().unwrap();
                         let s = self.st.stack.pop().unwrap();
                         let d = self.st.stack.pop().unwrap();
@@ -2104,6 +2169,7 @@ impl Machine {
                         self.copy(d.b as u32, s, n.b as u32)?;
                     }
                     Op::MemoryFill => {
+                        self.effects += 1;
                         let n = self.st.stack.pop().unwrap();
                         let v = self.st.stack.pop().unwrap();
                         let d = self.st.stack.pop().unwrap();
@@ -2947,10 +3013,25 @@ impl Machine {
         apply: &[(u32, u8, Option<SymByte>)],
         stop: usize,
     ) -> CompileResult<(State, Writes)> {
+        let region = host.witness_only();
         host.arm_begin(self, cond, value)?;
         let r = self.run_path(module, host, st, apply, stop);
         host.arm_end();
-        r
+        // The arms run one after another on one host: each starts in the region state
+        // the branch was reached in, and an arm that diverges is dropped with any
+        // region it left open, or that region would swallow the other arm's rows and
+        // everything after the branch. An arm that goes on must leave the state as
+        // it found it: a region can't straddle a witness branch.
+        let changed = host.witness_only() != region;
+        host.set_witness_only(region);
+        match r {
+            Ok(_) if changed => Err(CompileError::new(
+                "a `witness_begin` region opens or closes inside one arm of a witness-dependent branch",
+            )
+            .with_help("open and close the region within the arm, or around the whole branch")
+            .or_location(|| host.location())),
+            r => r,
+        }
     }
 
     fn put_byte(&mut self, a: u32, byte: u8, sb: Option<SymByte>) {

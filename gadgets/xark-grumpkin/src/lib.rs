@@ -66,7 +66,9 @@
 // rejected `+=` on `Field`; the wasm frontend accepts both).
 #![allow(clippy::assign_op_pattern)]
 
-use xark::{Field, gadget, input, require_eq, witness_begin, witness_end};
+use xark::{Field, gadget, input, require_eq, select, witness_begin, witness_end};
+
+pub mod schnorr;
 
 /// Scalar bit-length (see module docs). Kept in sync with the `128usize` loop
 /// literals below (loop bounds must be integer literals in the subset).
@@ -180,11 +182,6 @@ fn mul_add(a: Field, b: Field, c: Field) -> Field {
     it
 }
 
-/// `bit ? t : f` for a pinned bit (an arithmetic mux, two rows).
-fn mux(bit: Field, t: [Field; 2], f: [Field; 2]) -> [Field; 2] {
-    [f[0] + bit * (t[0] - f[0]), f[1] + bit * (t[1] - f[1])]
-}
-
 /// `−p`.
 fn neg(p: [Field; 2]) -> [Field; 2] {
     [p[0], -p[1]]
@@ -249,7 +246,7 @@ fn signed_mul(
         acc = dbl_add(acc, [p[0], (b + b - one) * p[1]]);
         i -= 1;
     }
-    ec_add(acc, mux(bit(0), corr, ec_add(corr, neg(p))))
+    ec_add(acc, select(bit(0), corr, ec_add(corr, neg(p))))
 }
 
 /// **Variable-base** scalar multiplication `m · p`. `bits` is the little-endian
@@ -310,10 +307,10 @@ pub fn multi_scalar_mul(scalars: [Field; K], points: [[Field; 2]; K]) -> [Field;
     // acc = 2^N·O + (s₀ − a + 1)·P₀ + (s₁ − b + 1)·P₁ for the low bits a, b.
     let (a, b) = (b0[0], b1[0]);
     let c = corr();
-    let q = mux(
+    let q = select(
         b,
-        mux(a, c, ec_add(c, neg(p0))),
-        mux(a, ec_add(c, neg(p1)), ec_add(c, neg(u))),
+        select(a, c, ec_add(c, neg(p0))),
+        select(a, ec_add(c, neg(p1)), ec_add(c, neg(u))),
     );
     ec_add(acc, q)
 }

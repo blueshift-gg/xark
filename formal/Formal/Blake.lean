@@ -37,8 +37,8 @@ theorems:
    the spec `addMod32 a b`. Proof: Fr→ℕ bridge through the BitOf
    recomposition, `Formal.Arith.add_mod_32_core`, the binary-
    recomposition round-trip for `ofNat`, and `Formal.Gadgets.bits_unique`.
-3. `blake2s_round_compose_bit`, `blake3_round_compose_bit` — final
-   composition consumed by `Formal.BitwuzlaCompose`.
+3. `blake2s_round_compose_bit`, `blake3_round_compose_bit` — the
+   round-step composition.
 -/
 
 namespace Xark
@@ -510,7 +510,7 @@ theorem add3Mod32_bit_sound (a b c : Word32)
   rw [h_wsum_eq_wcanon i]
   exact h_canon_BitOf i
 
-/-! ## BLAKE round-step composition (used by `BitwuzlaCompose`) -/
+/-! ## BLAKE round-step composition -/
 
 /-- **BLAKE2s round-step composition.** Given per-bit witness wires for
 the round-step output and a `BitOf` hypothesis at every (cell, bit)
