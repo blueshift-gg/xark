@@ -1,5 +1,6 @@
 // Prove `{{circuit}}` with its generated client, then verify the proof onchain with
-// the `{{name}}` program in LiteSVM. `xark build` makes what this reads.
+// the `{{name}}` program in LiteSVM. `xark build` makes the circuit and its client;
+// the program comes from its framework's build tools (`cargo build-sbf` for Pinocchio).
 import { generateKeyPairSigner, type Address } from "@solana/kit";
 import { circuit, funded, program, send, vm } from "@blueshift-gg/xark/testing";
 import { {{Pascal}}, type {{Pascal}}Inputs, type {{Pascal}}Prover } from "../clients/{{circuit}}/ts/{{circuit_file}}";
