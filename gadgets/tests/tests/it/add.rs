@@ -56,13 +56,19 @@ fn add_a_circuit_then_its_program() {
     );
     std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
 
+    // A missing key is bootstrapped by the build, with setup's own message.
+    let (ok, out) = xark(&["build"]);
+    assert!(
+        ok && out.contains("single-party setup from OS randomness"),
+        "{out}"
+    );
+    assert!(app.join("keys/claim/pk.bin").is_file());
+    assert!(app.join("keys/other/pk.bin").is_file());
     // CI's `xark build --check`: a project's keys are committed in `keys/`, so a
     // fresh clone builds the same clients, and a change to them is caught.
     let (ok, out) = xark(&["build"]);
     assert!(ok, "{out}");
-    assert!(
-        app.join("keys/claim/pk.bin").is_file() && app.join(".github/workflows/ci.yml").is_file()
-    );
+    assert!(app.join("keys/claim/pk.bin").is_file());
     // The build the key was made from goes with it: a key proves only with that build.
     assert!(app.join("keys/claim/circuit.xbc").is_file());
     for t in ["circuits/claim/target", "circuits/other/target"] {
@@ -76,14 +82,45 @@ fn add_a_circuit_then_its_program() {
     let (ok, out) = xark(&["build", "--check"]);
     assert!(!ok && out.contains("clients/claim/ts/claim.ts"), "{out}");
     std::fs::write(&ts, &committed).unwrap();
+    // `--check` catches a metadata record that no longer matches the key/build.
+    let meta_path = app.join("keys/claim/metadata.json");
+    let saved_meta = std::fs::read_to_string(&meta_path).unwrap();
+    let mut meta: serde_json::Value = serde_json::from_str(&saved_meta).unwrap();
+    meta["verifying_key_sha256"] = "00".repeat(32).into();
+    std::fs::write(&meta_path, meta.to_string()).unwrap();
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(!ok && out.contains("doesn't match the key"), "{out}");
+    std::fs::write(&meta_path, saved_meta).unwrap();
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(ok, "{out}");
+
     // A lost key isn't quietly replaced: the committed verifier embeds it.
     std::fs::rename(app.join("keys"), app.join("keys.lost")).unwrap();
     let (ok, out) = xark(&["build"]);
     assert!(!ok && out.contains("embeds one"), "{out}");
     std::fs::rename(app.join("keys.lost"), app.join("keys")).unwrap();
 
+    // A changed circuit rotates a plain single-party dev key: setup's own
+    // messaging says what the new key is, and the verifier changes with it.
+    let lib = app.join("circuits/claim/src/lib.rs");
+    let src = std::fs::read_to_string(&lib).unwrap();
+    let changed = src.replace(
+        "require_eq(secret * secret, result);",
+        "require_eq(secret * secret + 1, result);",
+    );
+    assert_ne!(src, changed, "the scaffold's circuit changed shape");
+    std::fs::write(&lib, &changed).unwrap();
+    let vk = std::fs::read(app.join("keys/claim/vk.bin")).unwrap();
+    let (ok, out) = xark(&["build"]);
+    assert!(ok && out.contains("making new ones"), "{out}");
+    assert_ne!(std::fs::read(app.join("keys/claim/vk.bin")).unwrap(), vk);
+    std::thread::sleep(std::time::Duration::from_millis(1100)); // mtime granularity
+    std::fs::write(&lib, &src).unwrap();
+    let (ok, out) = xark(&["build"]);
+    assert!(ok, "the restored circuit did not build:\n{out}");
+
     // The program's verifier crate and TypeScript client are generated first.
-    let (ok, out) = xark(&["add", "program", "claim"]);
+    let (ok, out) = xark(&["add", "program", "claim", "--framework", "pinocchio"]);
     assert!(ok, "{out}");
     // The framework that scaffolded the program says how to build and test it.
     assert!(
@@ -105,7 +142,43 @@ fn add_a_circuit_then_its_program() {
         members(),
         r#"members = ["circuits/*", "programs/*", "clients/*/rust"]"#
     );
+    let xark_toml = std::fs::read_to_string(app.join("xark.toml")).unwrap();
+    assert!(!xark_toml.contains("[programs."), "{xark_toml}");
+    // `xark test` stays circuit-only even with a program present.
+    let (ok, out) = xark(&["test"]);
+    assert!(ok && !out.contains("cargo build-sbf"), "{out}");
+
     // A bare `cargo build-sbf` (or `cargo test`) at the root is the programs'.
+    let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();
+    assert!(
+        manifest.contains("\ndefault-members = [\"programs/*\"]\n"),
+        "{manifest}"
+    );
+    // `xark build` and `--check` must leave the scaffold's `programs/*` and
+    // `default-members` exactly as written.
+    let before = manifest.clone();
+    let (ok, out) = xark(&["build"]);
+    assert!(ok, "{out}");
+    let (ok, out) = xark(&["build", "--check"]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        std::fs::read_to_string(app.join("Cargo.toml")).unwrap(),
+        before
+    );
+    assert!(
+        !app.join("target/deploy").exists(),
+        "xark build built a program"
+    );
+    // Deleting a program leaves `programs/*` and its default-members behind: both
+    // are cargo errors, and `xark add program` must repair them before building.
+    std::fs::remove_dir_all(app.join("programs/claim")).unwrap();
+    let (ok, out) = xark(&["add", "program", "claim"]);
+    assert!(ok, "stale program entries were not repaired:\n{out}");
+    assert!(app.join("programs/claim/src/lib.rs").is_file());
+    assert_eq!(
+        members(),
+        r#"members = ["circuits/*", "programs/*", "clients/*/rust"]"#
+    );
     let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();
     assert!(
         manifest.contains("\ndefault-members = [\"programs/*\"]\n"),
@@ -114,17 +187,40 @@ fn add_a_circuit_then_its_program() {
     // A workspace member, not a workspace of its own.
     let verifier = std::fs::read_to_string(app.join("clients/claim/rust/Cargo.toml")).unwrap();
     assert!(!verifier.contains("[workspace]"), "{verifier}");
+    let workflow = std::fs::read_to_string(app.join(".github/workflows/programs.yml")).unwrap();
+    assert!(
+        workflow.contains("cargo build-sbf") && !workflow.contains("xark test --programs"),
+        "{workflow}"
+    );
     let test = std::fs::read_to_string(app.join("tests/claim.test.ts")).unwrap();
     assert!(
-        test.contains("{ secret: 3, result: 9 }") && test.contains("toInstructionData()"),
+        test.contains("{ secret: 3, result: 9 }")
+            && test.contains("toInstructionData()")
+            && test.contains("program(\"claim\")"),
         "{test}"
     );
+
+    // Re-adding for another circuit must not keep a test generated for the first.
+    std::fs::remove_dir_all(app.join("programs/claim")).unwrap();
+    let (ok, out) = xark(&["add", "program", "claim", "--circuit", "other"]);
+    assert!(
+        !ok && out.contains("is not the generated test"),
+        "a test for another circuit was kept:\n{out}"
+    );
+    let (ok, out) = xark(&["add", "program", "claim"]);
+    assert!(ok, "couldn't restore the claim program:\n{out}");
 
     // Adding either again is refused, not overwritten.
     let (ok, out) = xark(&["add", "program", "claim"]);
     assert!(!ok && out.contains("already exists"), "{out}");
     let (ok, out) = xark(&["add", "program", "other", "--circuit", "missing"]);
     assert!(!ok && out.contains("no circuit `missing`"), "{out}");
+    // A circuit is a name under circuits/, not a path out of the project.
+    let (ok, out) = xark(&["add", "program", "other", "--circuit", "../escape"]);
+    assert!(
+        !ok && out.contains("must be a single name under circuits/"),
+        "{out}"
+    );
 
     // The whole workspace builds: the circuit (on the host), the program and its
     // verifier crate.
@@ -298,15 +394,21 @@ fn a_project_keeps_what_isnt_xarks() {
 
     // A `--check` that fails partway (a key gone) still leaves the clients as they
     // were, and names the one that differs.
+    let (ok, out) = xark(&["setup", "circuits/edge"]);
+    assert!(ok, "{out}");
+    let (ok, out) = xark(&["setup", "circuits/second"]);
+    assert!(ok, "{out}");
     let (ok, out) = xark(&["build"]);
     assert!(ok, "{out}");
     let ts = app.join("clients/edge/ts/edge.ts");
-    let edited = std::fs::read_to_string(&ts).unwrap() + "// edited\n";
+    let committed = std::fs::read_to_string(&ts).unwrap();
+    let edited = format!("{committed}// edited\n");
     std::fs::write(&ts, &edited).unwrap();
     std::fs::rename(app.join("keys/second"), tmp.path().join("second-keys")).unwrap();
     let (ok, out) = xark(&["build", "--check"]);
     assert!(!ok && out.contains("clients/edge/ts/edge.ts"), "{out}");
     assert_eq!(std::fs::read_to_string(&ts).unwrap(), edited);
+    std::fs::write(&ts, &committed).unwrap();
     std::fs::rename(tmp.path().join("second-keys"), app.join("keys/second")).unwrap();
 
     // A key kept without its build gets it back from `xark build` (the same build),
@@ -378,6 +480,8 @@ fn names_follow_the_crates_xark_makes() {
         (o.status.success(), out)
     };
     let (ok, out) = xark(&["add", "circuit", "shielded_transact"]);
+    assert!(ok, "{out}");
+    let (ok, out) = xark(&["setup", "circuits/shielded_transact"]);
     assert!(ok, "{out}");
     let (ok, out) = xark(&[
         "add",
