@@ -7,9 +7,11 @@ the Vast console before creating an instance.
 
 ## What is already verified at no GPU cost
 
-- PR #47 is open at `7755ae6f0d0b9928ade075a7f23d6676cefce3db`. The exact-head
-  checks passed, including the CLI test partitions, CUDA host build, OpenCL
-  proof/verify CLI flow, formatting, linting, and formal checks.
+- PR #47 is open. Before any GPU launch, query its current head and exact-head
+  checks with `gh pr view 47 --repo blueshift-gg/xark` and
+  `gh pr checks 47 --repo blueshift-gg/xark`. Require the PR head to match the
+  checkout commit and all required checks to pass; this runbook intentionally
+  does not treat historical CI results as current evidence.
 - `make -C crates/groth16/cuda test-host` passed the host-side arithmetic,
   representation, range, and shape suites locally.
 - `bash -n crates/groth16-cuda/scripts/run_cuda_validation.sh` and its `--help`
