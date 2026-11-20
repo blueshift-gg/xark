@@ -297,7 +297,7 @@ fn prove_streaming(
             let id_inputs = resolve_input_ids(&vars, inputs)?;
             drop(vars);
             let assign = stream_witness(&bytes, sources, &id_inputs)?;
-            anyhow::Ok((assign, id_inputs))
+            anyhow::Ok(assign)
         });
         let digest = super::recorded_digest(pk_path, &fingerprint);
         let built = row_source(args, &bytes, &fingerprint, digest.as_deref(), kind);
@@ -307,7 +307,7 @@ fn prove_streaming(
         (built, solved)
     });
     let (src, cached) = built?;
-    let (assign_fp, id_inputs) = solved?;
+    let assign_fp = solved?;
     let t_solve = t.elapsed();
     let z = src.layout().assignment(|id| {
         assign_fp
