@@ -21,46 +21,9 @@ import {
   signTransactionMessageWithSigners,
 } from "@solana/kit";
 import { FailedTransactionMetadata, LiteSVM } from "litesvm";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { artifacts, circuit, program, projectRoot } from "./testing/paths.mjs";
 
-/** The project `from` is in: the nearest directory with a `xark.toml`. */
-export function projectRoot(from = process.cwd()) {
-  for (let dir = from; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, "xark.toml"))) return dir;
-    if (dirname(dir) === dir) throw new Error(`no xark.toml in ${from} or above it: not in a xark project`);
-  }
-}
-
-/**
- * A build output directory (`target/xark/<name>/`), as a prover takes it, with
- * the keys in `keys` (by default the same directory).
- */
-export function artifacts(dir, keys = dir) {
-  const read = (d, f) => new Uint8Array(readFileSync(join(d, f)));
-  if (!existsSync(join(keys, "pk.bin"))) throw new Error(`no proving key in ${keys}: run \`xark build\``);
-  return {
-    // A key fits the build it was made from: the one kept beside it, if it is.
-    circuit: existsSync(join(keys, "circuit.xbc")) ? read(keys, "circuit.xbc") : read(dir, "circuit.xbc"),
-    provingKey: read(keys, "pk.bin"),
-    verifyingKey: read(keys, "vk.bin"),
-    sources: readFileSync(join(dir, "sources.json"), "utf8"),
-    client: existsSync(join(dir, "client.wasm")) ? read(dir, "client.wasm") : undefined,
-  };
-}
-
-/**
- * Circuit `name`'s build output (`circuits/<name>/target/xark/<name>/`) and keys
- * (`keys/<name>/`) in the project.
- */
-export function circuit(name, root = projectRoot()) {
-  return artifacts(join(root, "circuits", name, "target", "xark", name), join(root, "keys", name));
-}
-
-/** Program `name`'s build: `target/deploy/<name>_program.so` in the project. */
-export function program(name, root = projectRoot()) {
-  return join(root, "target", "deploy", `${name.replaceAll("-", "_")}_program.so`);
-}
+export { artifacts, circuit, program, projectRoot };
 
 /** A fresh LiteSVM with each program (a `.so` path) at its address. */
 export function vm(programs) {
