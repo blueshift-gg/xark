@@ -140,3 +140,46 @@ fn init_then_test() {
     let (ok, field, _) = run(&["inspect", dir_s]);
     assert!(ok && field.contains("bn254"), "{field}");
 }
+
+/// `--program none` is the explicit circuit-only scaffold; it must not create the
+/// program files or ask anything.
+#[test]
+fn init_none_scaffolds_no_program() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("plain");
+    let (ok, _, err) = run(&["init", dir.to_str().unwrap(), "--program", "none"]);
+    assert!(ok, "init failed: {err}");
+    for path in [
+        "programs",
+        "package.json",
+        "tests/plain.test.ts",
+        ".github/workflows/programs.yml",
+    ] {
+        assert!(!dir.join(path).exists(), "none scaffolded {path}");
+    }
+}
+
+#[test]
+fn init_rejects_an_unknown_program() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("bad");
+    let (ok, _, err) = run(&["init", dir.to_str().unwrap(), "--program", "nope"]);
+    assert!(!ok && err.contains("unknown program scaffolder"), "{err}");
+    assert!(!dir.join("xark.toml").exists(), "wrote a project");
+}
+
+#[test]
+fn a_program_name_needs_a_program() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("bad-name");
+    let (ok, _, err) = run(&[
+        "init",
+        dir.to_str().unwrap(),
+        "--program",
+        "none",
+        "--program-name",
+        "verifier",
+    ]);
+    assert!(!ok && err.contains("--program-name"), "{err}");
+    assert!(!dir.join("xark.toml").exists(), "wrote a project");
+}
