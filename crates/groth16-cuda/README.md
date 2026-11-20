@@ -70,6 +70,9 @@ the resulting proof with Xark's verifier.
 
 ## CUDA host validation
 
+For a credit-first Vast.ai run and a bounded $50 follow-up, see
+[`VAST_AI_RUNBOOK.md`](VAST_AI_RUNBOOK.md).
+
 Requirements: Linux, an NVIDIA GPU, CUDA Toolkit, Nsight Systems, GNU time, and the ICICLE
 CUDA backend matching the pinned v4.0.0 Rust frontend. Run from a clean checkout:
 
