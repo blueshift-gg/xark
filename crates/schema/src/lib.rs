@@ -244,7 +244,7 @@ impl Schema {
         format!("{n:?}")
     }
 
-    /// The type at input path `path` (`id`, `id.born`, `msg[3]`).
+    /// The type at input path `path` (`id`, `id.born`, `msg[3]`, `pair.0`).
     fn type_at(&self, path: &str) -> Option<Value> {
         let root = path.split(['.', '[']).next()?;
         let mut ty = self.inputs().find(|i| i["name"] == root)?["type"].clone();
@@ -256,11 +256,19 @@ impl Schema {
                     .find(['.', '['])
                     .map_or(rest.len(), |e| i + 1 + e);
                 let f = &rest[i + 1..end];
-                let def = self.def(ty["ref"].as_str()?);
-                ty = def["struct"].as_array()?.iter().find(|x| {
-                    x["name"] == f || camel(x["name"].as_str().unwrap_or_default()) == f
-                })?["type"]
-                    .clone();
+                ty = if let Some(t) = ty["tuple"].as_array() {
+                    // A tuple's elements are named by position (`pair.0`), as
+                    // `leaf_names` names them: `pair.00` or `pair.+0` would parse to
+                    // the same index but never match the leaf, so they stay unknown.
+                    let n = f.parse::<usize>().ok().filter(|n| n.to_string() == f)?;
+                    t.get(n)?.clone()
+                } else {
+                    let def = self.def(ty["ref"].as_str()?);
+                    def["struct"].as_array()?.iter().find(|x| {
+                        x["name"] == f || camel(x["name"].as_str().unwrap_or_default()) == f
+                    })?["type"]
+                        .clone()
+                };
                 i = end;
             } else if rest[i..].starts_with('[') {
                 let end = rest[i..].find(']')? + i;
@@ -1450,6 +1458,36 @@ mod tests {
                     .contains("is not a decimal or 0x-hex number"),
                 "{s}"
             );
+        }
+    }
+
+    /// A tuple's elements are leaves like any other (`pair.0`, as a missing-input
+    /// error names them), so they can be given flat, as an
+    /// array's (`msg[0]`) and a struct's (`id.born`) can: in an inputs file of
+    /// `name = value` lines that is the only way to give one.
+    #[test]
+    fn tuple_elements_are_given_by_path() {
+        let s = Schema::parse(
+            r#"{"version": 2,
+              "inputs": [
+                {"name": "pair", "visibility": "public",
+                 "type": {"tuple": [{"uint": 8}, {"int": 8}]}},
+                {"name": "pts", "visibility": "public",
+                 "type": {"array": {"of": {"tuple": [{"uint": 8}, "field"]}, "len": 1}}}],
+              "types": {}, "public_inputs": ["pair.0", "pair.1", "pts[0].0", "pts[0].1"]}"#,
+        )
+        .unwrap();
+        let nested = s
+            .public_inputs(&json!({"pair": [7, -1], "pts": [[2, "3"]]}))
+            .unwrap();
+        let flat = s
+            .public_inputs(&json!({"pair.0": "7", "pair.1": "-1", "pts[0].0": 2, "pts[0].1": 3}))
+            .unwrap();
+        assert_eq!(flat, nested);
+        // Past the tuple, or not a position: no such input.
+        for key in ["pair.2", "pair.x", "pair.0.0", "pair.00", "pair.+0"] {
+            let e = s.public_inputs(&json!({ key: 1 })).unwrap_err();
+            assert!(e.message.contains("unknown input"), "{key}: {e}");
         }
     }
 
