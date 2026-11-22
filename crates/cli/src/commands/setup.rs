@@ -104,6 +104,24 @@ pub struct SetupArgs {
     pub backend: super::gnark::Backend,
 }
 
+impl SetupArgs {
+    /// `xark setup <path>` with no other argument.
+    pub(super) fn defaults(path: Option<PathBuf>) -> Self {
+        SetupArgs {
+            path,
+            out: None,
+            without_ptau: true,
+            deterministic_rng: None,
+            ptau_file: None,
+            phase2_seed: None,
+            uncompressed: false,
+            r1cs_form: R1csForm::Auto,
+            domain: QapDomain::Auto,
+            backend: super::gnark::Backend::Xark,
+        }
+    }
+}
+
 /// See [`SetupArgs::domain`].
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QapDomain {

@@ -12,10 +12,14 @@ xark verify --backend gnark
 ```
 
 The first `prove` builds the circuit and makes a key, as it does for the default
-backend. It needs [Go](https://go.dev/dl) 1.24 or newer: the first use builds a
-small Go helper, `xark-gnark`, into `~/.cache/xark/` (and downloads gnark's
-modules). `XARK_GNARK=<path>` names a helper built ahead of time (`go build` in
-`crates/cli/gnark/`), for a machine without Go or the network.
+backend. It needs [Go](https://go.dev/dl) 1.24 or newer, and the first use needs
+the network: it builds a small Go helper, `xark-gnark`, into
+`$XDG_CACHE_HOME/xark/` (`~/.cache/xark/` without one), and `go` downloads gnark's
+modules for it, checked against the `go.sum` xark carries. `XARK_GNARK=<path>`
+names a helper built ahead of time (`go build` in `crates/cli/gnark/`), for a
+machine without Go or the network; one built from another version of xark is
+refused. With neither a cache directory nor `XARK_GNARK` there is nowhere safe to
+build it, and xark says so.
 
 ## What is written where
 
@@ -26,13 +30,29 @@ modules). `XARK_GNARK=<path>` names a helper built ahead of time (`go build` in
   pk.bin  vk.bin              # gnark's proving and verifying keys
   metadata.json
 target/xark/<name>/gnark/     # xark prove --backend gnark
-  witness.wtns                # the solved witness, iden3 format
+  witness.wtns                # the solved witness, iden3 format (see below)
   proof.bin                   # gnark's proof
   public_witness.bin          # gnark's public witness
 ```
 
 `<keys>` is where xark's own keys go: `keys/<name>/` in a project, otherwise
-`target/xark/<name>/`.
+`target/xark/<name>/`. A key put elsewhere (`xark setup --backend gnark --out
+<dir>`) is named as xark's own is: `xark prove --backend gnark --proving-key
+<dir>/gnark/pk.bin`, and `xark verify --backend gnark --verifying-key
+<dir>/gnark/vk.bin`.
+
+## The witness file
+
+gnark is another process, so the witness reaches it as a file, and the witness is
+every private input and everything derived from them. `xark prove --backend gnark`
+writes `witness.wtns` readable by you only (on unix) and removes it as soon as
+gnark has read it, whether or not a proof came of it; `--keep-witness` leaves it
+there, for a gnark program of your own to prove from. The default backend never
+writes one.
+
+`xark verify --backend gnark` exits with 2 when gnark's verifier refuses the
+proof, as the default backend does, and with 1 when the helper could not run or
+read its files: a missing Go is not a proof that failed.
 
 ## The conversion
 
@@ -53,8 +73,23 @@ whole witness, so gnark's solver has nothing to derive and only checks each row.
 The constraint count is exactly xark's.
 
 To use the circuit from your own gnark code, take `circuit.ccs` and the keys, and
-fill a witness from `witness.wtns` (`readWitness` in `crates/cli/gnark/main.go`
-is thirty lines).
+fill a witness from a kept `witness.wtns` (`readWitness` in
+`crates/cli/gnark/main.go` is sixty lines).
+
+## The two files without gnark
+
+The files are not gnark's: snarkjs and rapidsnark read them too. `xark export
+--format iden3` writes `circuit.r1cs`, and with `--inputs` the `witness.wtns`
+those inputs solve to, into `target/xark/<name>/iden3/` (or `--out`), with no Go
+involved:
+
+```sh
+xark export --format iden3 --inputs '{"secret": 3, "result": 27}'
+```
+
+The rows are the ones a key over a 2^k domain is made for, and `--r1cs-form`
+chooses them as it does for `xark setup`. xark has tested the files against gnark
+only; a witness written this way stays where you put it.
 
 ## What it does not do
 

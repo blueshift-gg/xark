@@ -2,9 +2,8 @@
 //!
 //! xark still compiles the circuit and solves the witness; gnark does the setup,
 //! the proof and the verification. The two meet in iden3's files, the formats
-//! circom writes and snarkjs reads: the keyed rows as `circuit.r1cs`
-//! (<https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md>) and
-//! the solved witness as `witness.wtns`. `xark-gnark`, a small Go program whose
+//! circom writes and snarkjs reads: the keyed rows as `circuit.r1cs` and
+//! the solved witness as `witness.wtns` (`iden3.rs` writes both). `xark-gnark`, a small Go program whose
 //! source is embedded here (`crates/cli/gnark/`), turns the rows into a gnark
 //! constraint system and runs gnark on it. It is built with `go` on first use.
 //!
@@ -15,7 +14,8 @@
 //!   pk.bin  vk.bin              # gnark's keys
 //!   metadata.json
 //! target/xark/<name>/gnark/     # `xark prove --backend gnark`
-//!   witness.wtns                # the solved witness, iden3 format
+//!   witness.wtns                # the solved witness, iden3 format: removed once
+//!                               # gnark has read it, unless `--keep-witness`
 //!   proof.bin                   # gnark's proof
 //!   public_witness.bin          # gnark's public witness
 //! ```
@@ -26,17 +26,12 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use ark_bn254::Fr;
-use ark_serialize::CanonicalSerialize;
-use xark_groth16::ConstraintSource;
-use xark_groth16::r1cs::RowChunk;
-use xark_prover::fr_from_decimal;
 
+use super::iden3::{assignment, r1cs_wires, solve, write_r1cs, write_wtns};
 use super::{prove::ProveArgs, setup, setup::SetupArgs, verify::VerifyArgs};
 use crate::xark_project::XarkProject;
 
@@ -59,126 +54,33 @@ const TOOL_SOURCES: [(&str, &str); 3] = [
     ("go.sum", include_str!("../../gnark/go.sum")),
 ];
 
-/// The BN254 scalar field's modulus, little-endian: the prime both iden3 headers
-/// carry.
-fn modulus_le() -> Vec<u8> {
-    use num_bigint::BigUint;
-    let p: BigUint = xark_ir::FieldSpec::bn254()
-        .modulus_decimal
-        .expect("bn254 has a modulus")
-        .parse()
-        .expect("a decimal modulus");
-    let mut le = p.to_bytes_le();
-    le.resize(32, 0);
-    le
-}
+/// The helper's command line and report, as this file speaks them: `protocol` in
+/// `crates/cli/gnark/main.go`. A helper named by `XARK_GNARK` may be an older
+/// build; one that reports another number is refused.
+const PROTOCOL: &str = "2";
 
-fn fr_le(v: &Fr, out: &mut impl Write) -> Result<()> {
-    // arkworks' canonical encoding of a field element is its 32 little-endian
-    // bytes, which is iden3's too.
-    v.serialize_uncompressed(out)
-        .map_err(|e| anyhow::anyhow!("encoding a field element: {e}"))
-}
+/// The helper's exit code when gnark itself said no: the witness doesn't satisfy
+/// the rows, or the proof doesn't verify (`exitRejected` in `main.go`). Any other
+/// failure is the helper's, not a verdict.
+const EXIT_REJECTED: i32 = 2;
 
-/// Write `src`'s rows as an iden3 `.r1cs` file. Wire `i` is assignment position
-/// `i`: the constant one, the public inputs, then every other variable. The
-/// header's private-input count is left at zero: the layout doesn't tell a private
-/// input from a derived variable, and no Groth16 setup reads it.
-fn write_r1cs(path: &Path, src: &dyn ConstraintSource) -> Result<()> {
-    let layout = src.layout();
-    let wires = u32::try_from(layout.num_vars()).context("more than 2^32 variables")?;
-    let rows = u32::try_from(src.num_constraints()).context("more than 2^32 constraints")?;
-    let f = fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
-    let mut w = BufWriter::with_capacity(1 << 20, f);
-    w.write_all(b"r1cs")?;
-    w.write_all(&1u32.to_le_bytes())?; // version
-    w.write_all(&3u32.to_le_bytes())?; // sections
-
-    // Section 1: the header.
-    w.write_all(&1u32.to_le_bytes())?;
-    w.write_all(&(4 + 32 + 4 * 4 + 8 + 4u64).to_le_bytes())?;
-    w.write_all(&32u32.to_le_bytes())?;
-    w.write_all(&modulus_le())?;
-    w.write_all(&wires.to_le_bytes())?;
-    w.write_all(&0u32.to_le_bytes())?; // public outputs
-    w.write_all(&(layout.num_instance() as u32 - 1).to_le_bytes())?; // public inputs
-    w.write_all(&0u32.to_le_bytes())?; // private inputs
-    w.write_all(&u64::from(wires).to_le_bytes())?; // labels
-    w.write_all(&rows.to_le_bytes())?;
-
-    // Section 2: the constraints. Its size is known only once they are written.
-    w.write_all(&2u32.to_le_bytes())?;
-    let size_at = w.stream_position()?;
-    w.write_all(&0u64.to_le_bytes())?;
-    let mut chunk = RowChunk::default();
-    // A window's worth of rows in memory at a time, as the prover streams them.
-    for window in src.windows(1 << 16) {
-        src.expand(&window, &mut chunk);
-        for row in 0..chunk.rows() {
-            for m in 0..3 {
-                let (cols, coeffs) = chunk.terms(row, m);
-                w.write_all(&(cols.len() as u32).to_le_bytes())?;
-                for (col, coeff) in cols.iter().zip(coeffs) {
-                    w.write_all(&col.to_le_bytes())?;
-                    fr_le(coeff, &mut w)?;
-                }
-            }
-        }
-    }
-    let end = w.stream_position()?;
-    w.seek(SeekFrom::Start(size_at))?;
-    w.write_all(&(end - size_at - 8).to_le_bytes())?;
-    w.seek(SeekFrom::Start(end))?;
-
-    // Section 3: wire → label, the identity.
-    w.write_all(&3u32.to_le_bytes())?;
-    w.write_all(&(8 * u64::from(wires)).to_le_bytes())?;
-    for i in 0..u64::from(wires) {
-        w.write_all(&i.to_le_bytes())?;
-    }
-    w.flush()?;
-    Ok(())
-}
-
-/// Write the assignment `z` (the constant one first) as an iden3 `.wtns` file.
-fn write_wtns(path: &Path, z: &[Fr]) -> Result<()> {
-    let f = fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
-    // The witness: readable by its owner only, where the system has such a thing.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        f.set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
-    let mut w = BufWriter::with_capacity(1 << 20, f);
-    w.write_all(b"wtns")?;
-    w.write_all(&2u32.to_le_bytes())?; // version
-    w.write_all(&2u32.to_le_bytes())?; // sections
-    w.write_all(&1u32.to_le_bytes())?;
-    w.write_all(&(4 + 32 + 4u64).to_le_bytes())?;
-    w.write_all(&32u32.to_le_bytes())?;
-    w.write_all(&modulus_le())?;
-    w.write_all(&(z.len() as u32).to_le_bytes())?;
-    w.write_all(&2u32.to_le_bytes())?;
-    w.write_all(&(32 * z.len() as u64).to_le_bytes())?;
-    for v in z {
-        fr_le(v, &mut w)?;
-    }
-    w.flush()?;
-    Ok(())
-}
-
-/// The number of wires an iden3 `.r1cs` file declares (the header is its first
-/// section here, as [`write_r1cs`] writes it).
-fn r1cs_wires(path: &Path) -> Result<usize> {
-    use std::io::Read;
-    let mut head = [0u8; 12 + 12 + 4 + 32 + 4];
-    fs::File::open(path)
-        .and_then(|mut f| f.read_exact(&mut head))
-        .with_context(|| format!("reading {}", path.display()))?;
-    if &head[..4] != b"r1cs" || head[12..16] != 1u32.to_le_bytes() {
-        bail!("{} is not a circuit.r1cs xark wrote", path.display());
-    }
-    Ok(u32::from_le_bytes(head[60..64].try_into().expect("4 bytes")) as usize)
+/// Where the built helper is kept: the user's cache directory.
+fn cache_dir() -> Result<PathBuf> {
+    // No fallback to the temporary directory: where that is shared, the helper's
+    // path there is one anybody can guess and put a program at, which this would
+    // then run.
+    std::env::var_os("XDG_CACHE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|v| !v.is_empty())
+                .map(|h| PathBuf::from(h).join(".cache"))
+        })
+        .map(|c| c.join("xark"))
+        .context(
+            "the gnark helper is built into $XDG_CACHE_HOME or $HOME/.cache, and neither              is set: set one, or point XARK_GNARK at a built `xark-gnark`",
+        )
 }
 
 /// The `xark-gnark` helper: `XARK_GNARK` if set (a prebuilt binary), otherwise
@@ -195,12 +97,10 @@ fn tool() -> Result<PathBuf> {
         h.update(text.as_bytes());
     }
     let tag = hex::encode(&h.finalize()[..8]);
-    let cache = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(std::env::temp_dir);
-    let dir = cache.join("xark").join(format!("gnark-{tag}"));
-    let bin = dir.join(format!("xark-gnark{}", std::env::consts::EXE_SUFFIX));
+    let cache = cache_dir()?;
+    let dir = cache.join(format!("gnark-{tag}"));
+    let name = format!("xark-gnark{}", std::env::consts::EXE_SUFFIX);
+    let bin = dir.join(&name);
     if bin.is_file() {
         return Ok(bin);
     }
@@ -210,45 +110,77 @@ fn tool() -> Result<PathBuf> {
         crate::style::tag(),
         dir.display()
     );
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    for (name, text) in TOOL_SOURCES {
-        fs::write(dir.join(name), text)?;
-    }
-    // Built under another name and renamed, so an interrupted build is never
-    // taken for the helper.
-    let tmp = dir.join(format!("xark-gnark.{}.tmp", std::process::id()));
-    let status = Command::new("go")
-        .args(["build", "-o"])
-        .arg(&tmp)
-        .arg(".")
-        .current_dir(&dir)
-        .status()
-        .context(
-            "running `go build` for the gnark backend: install Go (https://go.dev/dl), or \
-             point XARK_GNARK at a built `xark-gnark`",
-        )?;
-    if !status.success() {
-        bail!("`go build` of the gnark helper failed in {}", dir.display());
-    }
-    fs::rename(&tmp, &bin)?;
+    // Built in a directory of this process's own and renamed into place whole: two
+    // first runs at once (a test binary's, say) don't write each other's sources
+    // mid-build, and an interrupted build is never taken for the helper.
+    let work = cache.join(format!("gnark-{tag}.{}.tmp", std::process::id()));
+    let built = (|| {
+        fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
+        for (name, text) in TOOL_SOURCES {
+            fs::write(work.join(name), text)?;
+        }
+        let status = Command::new("go")
+            .args(["build", "-o", &name, "."])
+            .current_dir(&work)
+            .status()
+            .context(
+                "running `go build` for the gnark backend: install Go (https://go.dev/dl), \
+                 or point XARK_GNARK at a built `xark-gnark`",
+            )?;
+        if !status.success() {
+            bail!("`go build` of the gnark helper failed");
+        }
+        // Another process may have put the same build there first; a directory
+        // without the helper is an older xark's interrupted build.
+        if !bin.is_file() {
+            let _ = fs::remove_dir_all(&dir);
+            if let Err(e) = fs::rename(&work, &dir)
+                && !bin.is_file()
+            {
+                return Err(e).with_context(|| format!("moving the helper to {}", dir.display()));
+            }
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_dir_all(&work);
+    built?;
     Ok(bin)
 }
 
-/// Run the helper and return what it reported: its `name=value` output lines.
-fn run_tool(args: &[&std::ffi::OsStr]) -> Result<BTreeMap<String, String>> {
-    let out = Command::new(tool()?)
+/// What the helper reported: its `name=value` output lines.
+type Report = BTreeMap<String, String>;
+
+/// Run the helper. `Ok(None)` is gnark's own refusal ([`EXIT_REJECTED`]): a
+/// witness that doesn't satisfy the rows, a proof that doesn't verify.
+fn run_tool(args: &[&std::ffi::OsStr]) -> Result<Option<Report>> {
+    let tool = tool()?;
+    let out = Command::new(&tool)
         .args(args)
         .stderr(std::process::Stdio::inherit())
         .output()
-        .context("running xark-gnark")?;
-    if !out.status.success() {
-        bail!("gnark failed (see above)");
-    }
-    Ok(String::from_utf8_lossy(&out.stdout)
+        .with_context(|| format!("running the gnark helper {}", tool.display()))?;
+    let report: Report = String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| l.split_once('='))
         .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect())
+        .collect();
+    let rejected = out.status.code() == Some(EXIT_REJECTED);
+    if (out.status.success() || rejected)
+        && report.get("protocol").map(String::as_str) != Some(PROTOCOL)
+    {
+        bail!(
+            "{} is not this xark's gnark helper (XARK_GNARK names an older build?): \
+             build it again from crates/cli/gnark/",
+            tool.display()
+        );
+    }
+    if rejected {
+        return Ok(None);
+    }
+    if !out.status.success() {
+        bail!("the gnark helper failed (see above)");
+    }
+    Ok(Some(report))
 }
 
 fn key_dir(project: &XarkProject, out: &Option<PathBuf>) -> PathBuf {
@@ -257,11 +189,22 @@ fn key_dir(project: &XarkProject, out: &Option<PathBuf>) -> PathBuf {
         .join("gnark")
 }
 
-fn ms(report: &BTreeMap<String, String>, key: &str) -> String {
+fn ms(report: &Report, key: &str) -> String {
     report
         .get(key)
         .and_then(|v| v.parse::<f64>().ok())
         .map_or_else(|| "?".into(), |v| format!("{:.2}s", v / 1000.0))
+}
+
+/// Removes the witness file when the proof is done with it, however it ends.
+struct Unlink<'a>(Option<&'a Path>);
+
+impl Drop for Unlink<'_> {
+    fn drop(&mut self) {
+        if let Some(path) = self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 /// `xark setup --backend gnark`: export the keyed rows and run gnark's setup.
@@ -295,7 +238,8 @@ pub fn setup(args: &SetupArgs) -> Result<()> {
     drop(keyed);
     println!("Wrote {}", r1cs.display());
 
-    let report = run_tool(&["setup".as_ref(), r1cs.as_os_str(), dir.as_os_str()])?;
+    let report = run_tool(&["setup".as_ref(), r1cs.as_os_str(), dir.as_os_str()])?
+        .context("gnark refused the circuit's rows (see above)")?;
     let digest = fs::read(project.circuit_xbc())
         .ok()
         .map(|b| super::r1cs_digest(&b));
@@ -322,10 +266,15 @@ pub fn setup(args: &SetupArgs) -> Result<()> {
         ms(&report, "setup_ms")
     );
     let p = super::path_arg(&args.path);
+    // A key put elsewhere is named to `prove`, as xark's own is.
+    let key = match &args.out {
+        Some(_) => format!(" --proving-key {}", dir.join("pk.bin").display()),
+        None => String::new(),
+    };
     println!(
         "\n{}",
         crate::style::next_steps(&[(
-            format!("xark prove {p} --backend gnark --inputs '{{…}}'"),
+            format!("xark prove {p} --backend gnark{key} --inputs '{{…}}'"),
             "prove with gnark",
         )])
     );
@@ -334,59 +283,58 @@ pub fn setup(args: &SetupArgs) -> Result<()> {
 
 /// `xark prove --backend gnark`: solve the witness with xark, prove with gnark.
 pub fn prove(args: &ProveArgs) -> Result<()> {
-    if args.proving_key.is_some() || args.deterministic_rng.is_some() || args.low_memory {
+    if args.deterministic_rng.is_some() || args.low_memory || args.cache {
         bail!(
-            "--backend gnark proves with the key in the circuit's `gnark/` directory, \
-             from OS randomness and in memory: --proving-key, --deterministic-rng and \
-             --low-memory are xark's"
+            "--backend gnark proves from OS randomness, in memory, and reads its key \
+             whole each time: --deterministic-rng, --low-memory and --cache are xark's"
         );
     }
     let project = XarkProject::resolve(args.path.clone())?;
     crate::cli::build_if_needed(&project.xark_dir, true)?;
-    let keys = key_dir(&project, &None);
-    if !keys.join("pk.bin").exists() {
-        eprintln!(
-            "{} no gnark key found — making one with gnark's setup…",
-            crate::style::tag()
-        );
-        setup(&SetupArgs {
-            path: args.path.clone(),
-            out: None,
-            without_ptau: true,
-            deterministic_rng: None,
-            ptau_file: None,
-            phase2_seed: None,
-            uncompressed: false,
-            r1cs_form: setup::R1csForm::Auto,
-            domain: setup::QapDomain::Auto,
-            backend: Backend::Gnark,
-        })?;
-    }
+    // `--proving-key` names the `pk.bin` of a key made elsewhere (`xark setup
+    // --backend gnark --out`); the rest of the key is beside it.
+    let keys = match &args.proving_key {
+        Some(pk) => {
+            if !pk.is_file() {
+                bail!(
+                    "there is no {} (--proving-key names a gnark key's `pk.bin`)",
+                    pk.display()
+                );
+            }
+            match pk.parent() {
+                Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+                _ => PathBuf::from("."),
+            }
+        }
+        None => {
+            let keys = key_dir(&project, &None);
+            if !keys.join("pk.bin").exists() {
+                eprintln!(
+                    "{} no gnark key found — making one with gnark's setup…",
+                    crate::style::tag()
+                );
+                setup(&SetupArgs {
+                    backend: Backend::Gnark,
+                    ..SetupArgs::defaults(args.path.clone())
+                })?;
+            }
+            keys
+        }
+    };
     let xbc = project.circuit_xbc();
     let bytes = fs::read(&xbc).with_context(|| format!("reading {}", xbc.display()))?;
     ensure_key_fits(&keys, &bytes)?;
 
     let t = std::time::Instant::now();
-    let inputs = match &args.inputs {
-        Some(arg) => super::read_inputs(&project.xark_dir, arg)?,
-        None => Default::default(),
-    };
-    let sources = super::load_sources(&project.xark_dir);
-    let vars =
-        xark_ir::function_decode::decode_input_vars(&bytes).map_err(|e| anyhow::anyhow!(e))?;
-    let id_inputs = super::resolve_input_ids(&vars, &inputs)?;
-    drop(vars);
-    let assign = super::stream_witness(&bytes, sources.as_ref(), &id_inputs)?;
+    let super::iden3::Solved {
+        inputs: id_inputs,
+        assign,
+    } = solve(&project, &bytes, args.inputs.as_deref())?;
     // The rows the key was made for, told by their variable count as for a xark
     // key: the layout of the witness follows them.
     let wires = r1cs_wires(&keys.join("circuit.r1cs"))?;
     let src = xark_prover::rows_for_key(&bytes, wires, None).map_err(|e| anyhow::anyhow!(e))?;
-    let z = src.layout().assignment(|id| {
-        assign.get(id as usize).and_then(Option::as_ref).map(|v| {
-            v.as_bn254_fr()
-                .unwrap_or_else(|| fr_from_decimal(&v.to_decimal()))
-        })
-    });
+    let z = assignment(src.as_ref(), &assign);
     drop(assign);
     if z.len() != wires {
         bail!(
@@ -396,7 +344,7 @@ pub fn prove(args: &ProveArgs) -> Result<()> {
         );
     }
     drop(src);
-    let solve = t.elapsed();
+    let solve_time = t.elapsed();
 
     let out = args
         .out
@@ -405,27 +353,38 @@ pub fn prove(args: &ProveArgs) -> Result<()> {
         .join("gnark");
     fs::create_dir_all(&out).with_context(|| format!("creating {}", out.display()))?;
     let wtns = out.join("witness.wtns");
+    // The witness holds the private inputs: like the default prover's spill file
+    // (`--low-memory`), it doesn't outlive the proof unless asked to.
+    let _unlink = Unlink((!args.keep_witness).then_some(&wtns));
     write_wtns(&wtns, &z)?;
     drop(z);
-    let report = match run_tool(&[
+    let Some(report) = run_tool(&[
         "prove".as_ref(),
         keys.as_os_str(),
         wtns.as_os_str(),
         out.as_os_str(),
-    ]) {
-        Ok(report) => report,
-        Err(e) => {
-            // gnark names the row it found unsatisfied; say which constraint of
-            // the source that is, as `xark prove` does.
-            super::explain_unsatisfied(&bytes, sources.as_ref(), &id_inputs)?;
-            return Err(e);
-        }
+    ])?
+    else {
+        // gnark names the row it found unsatisfied; say which constraint of the
+        // source that is, as `xark prove` does.
+        super::explain_unsatisfied(
+            &bytes,
+            super::load_sources(&project.xark_dir).as_ref(),
+            &id_inputs,
+        )?;
+        bail!("gnark made no proof: the witness doesn't satisfy the key's rows (see above)");
     };
     println!("Wrote {}", out.join("proof.bin").display());
     println!("Wrote {}", out.join("public_witness.bin").display());
+    if args.keep_witness {
+        println!(
+            "Kept {} (it holds the private inputs: keep it as you keep them)",
+            wtns.display()
+        );
+    }
     println!(
         "gnark proof: solve {:.2}s, prove {} (verified in {})",
-        solve.as_secs_f64(),
+        solve_time.as_secs_f64(),
         ms(&report, "prove_ms"),
         ms(&report, "verify_ms")
     );
@@ -433,15 +392,27 @@ pub fn prove(args: &ProveArgs) -> Result<()> {
     if super::dbg_flag("PROVE_TIME") {
         eprintln!(
             "PROVE_TIME: solve = {:.3}s, gnark prove = {}ms",
-            solve.as_secs_f64(),
+            solve_time.as_secs_f64(),
             report.get("prove_ms").map_or("?", String::as_str)
         );
     }
     let p = super::path_arg(&args.path);
+    // A key and a proof put elsewhere are named to `verify`, as xark's own are.
+    let mut named = String::new();
+    if args.proving_key.is_some() {
+        named += &format!(" --verifying-key {}", keys.join("vk.bin").display());
+    }
+    if args.out.is_some() {
+        named += &format!(
+            " --proof {} --public-inputs {}",
+            out.join("proof.bin").display(),
+            out.join("public_witness.bin").display()
+        );
+    }
     println!(
         "\n{}",
         crate::style::next_steps(&[(
-            format!("xark verify {p} --backend gnark"),
+            format!("xark verify {p} --backend gnark{named}"),
             "verify the proof with gnark",
         )])
     );
@@ -494,17 +465,19 @@ pub fn verify(args: &VerifyArgs) -> Result<()> {
             );
         }
     }
+    // Only gnark's own verdict is a failed verification (exit code 2, as the
+    // default backend's); a helper that couldn't run or read a file is an error.
     match run_tool(&[
         "verify".as_ref(),
         vk.as_os_str(),
         proof.as_os_str(),
         public.as_os_str(),
-    ]) {
-        Ok(_) => {
+    ])? {
+        Some(_) => {
             println!("{}", crate::style::brand("✅ Proof verified (gnark)"));
             Ok(())
         }
-        Err(_) => {
+        None => {
             println!("{}", crate::style::err("❌ Proof verification failed"));
             std::process::exit(2);
         }

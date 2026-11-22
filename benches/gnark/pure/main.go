@@ -2,16 +2,22 @@
 // against gnark's frontend, compiled, set up and proved by gnark alone.
 //
 //	go run . <sha256|keccak256|sha256_1024|keccak256_1024|poseidon2|poseidon2_chain> <runs>
+//	go run . inputs <sha256|keccak256|sha256_1024|keccak256_1024>
 //
-// Prints `constraints=<n>` and `prove_ms=<median of the runs>`, as `xark-gnark
-// bench` does for the xark-compiled circuit.
+// The first prints `constraints=<n>`, `prove_ms=<median of the runs>` with every
+// core and `prove_1_ms` on one thread, as `xark-gnark bench` does for the
+// xark-compiled circuit. The second prints the
+// same message and digest as the inputs of the xark circuit (`xark prove
+// --inputs`), so the two sides prove one statement and `run.sh` keeps no copy.
 package main
 
 import (
 	stdsha256 "crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"time"
@@ -86,24 +92,52 @@ func (c *Digest) Define(api frontend.API) error {
 	return nil
 }
 
-func digestPair(keccak bool, size int) (circuit, assignment frontend.Circuit) {
-	// "abc", or the bytes 0, 1, …, 255 over and over, as the xark circuits' tests.
-	msg := []byte("abc")
+// message is the benchmark's message of `size` bytes and its digest: "abc", or
+// the bytes 0, 1, …, 255 over and over, as the xark circuits' tests.
+func message(keccak bool, size int) (msg, sum []byte) {
+	msg = []byte("abc")
 	if size != len(msg) {
 		msg = make([]byte, size)
 		for i := range msg {
 			msg[i] = byte(i)
 		}
 	}
-	var sum []byte
 	if keccak {
 		h := nativesha3.NewLegacyKeccak256()
 		h.Write(msg)
-		sum = h.Sum(nil)
-	} else {
-		s := stdsha256.Sum256(msg)
-		sum = s[:]
+		return msg, h.Sum(nil)
 	}
+	s := stdsha256.Sum256(msg)
+	return msg, s[:]
+}
+
+// xarkInputs is the message and its digest under the names the xark circuit
+// gives them: `msg[i]`, and the digest's halves `digest.hi` and `digest.lo`.
+func xarkInputs(keccak bool, size int) ([]byte, error) {
+	msg, sum := message(keccak, size)
+	inputs := map[string]string{
+		"digest.hi": new(big.Int).SetBytes(sum[:16]).String(),
+		"digest.lo": new(big.Int).SetBytes(sum[16:]).String(),
+	}
+	for i, b := range msg {
+		inputs["msg["+strconv.Itoa(i)+"]"] = strconv.Itoa(int(b))
+	}
+	return json.Marshal(inputs)
+}
+
+// digests are the digest circuits: Keccak-256 or SHA-256, and the message's size.
+var digests = map[string]struct {
+	keccak bool
+	size   int
+}{
+	"sha256":         {false, 3},
+	"keccak256":      {true, 3},
+	"sha256_1024":    {false, 1024},
+	"keccak256_1024": {true, 1024},
+}
+
+func digestPair(keccak bool, size int) (circuit, assignment frontend.Circuit) {
+	msg, sum := message(keccak, size)
 	a := &Digest{
 		Msg: make([]frontend.Variable, size),
 		Hi:  new(big.Int).SetBytes(sum[:16]),
@@ -168,30 +202,38 @@ func main() {
 }
 
 func run(args []string) error {
-	const usage = "usage: xark-gnark-bench <circuit> <runs>, a circuit one of sha256, keccak256, sha256_1024, keccak256_1024, poseidon2, poseidon2_chain"
+	usage := fmt.Errorf("usage: xark-gnark-bench <circuit> <runs> | inputs <circuit>, a circuit one of sha256, keccak256, sha256_1024, keccak256_1024, poseidon2, poseidon2_chain (inputs: the first four)")
 	if len(args) != 2 {
-		return fmt.Errorf(usage)
+		return usage
+	}
+	if args[0] == "inputs" {
+		d, ok := digests[args[1]]
+		if !ok {
+			return usage
+		}
+		inputs, err := xarkInputs(d.keccak, d.size)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(inputs))
+		return nil
 	}
 	runs, err := strconv.Atoi(args[1])
 	if err != nil || runs < 1 {
-		return fmt.Errorf(usage)
+		return usage
 	}
 	var circuit, assignment frontend.Circuit
-	switch args[0] {
-	case "sha256":
-		circuit, assignment = digestPair(false, 3)
-	case "keccak256":
-		circuit, assignment = digestPair(true, 3)
-	case "sha256_1024":
-		circuit, assignment = digestPair(false, 1024)
-	case "keccak256_1024":
-		circuit, assignment = digestPair(true, 1024)
-	case "poseidon2":
-		circuit, assignment = poseidon2Pair(1)
-	case "poseidon2_chain":
-		circuit, assignment = poseidon2Pair(chainPermutations)
-	default:
-		return fmt.Errorf(usage)
+	if d, ok := digests[args[0]]; ok {
+		circuit, assignment = digestPair(d.keccak, d.size)
+	} else {
+		switch args[0] {
+		case "poseidon2":
+			circuit, assignment = poseidon2Pair(1)
+		case "poseidon2_chain":
+			circuit, assignment = poseidon2Pair(chainPermutations)
+		default:
+			return usage
+		}
 	}
 	ccs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit)
 	if err != nil {
@@ -205,26 +247,31 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	times := make([]time.Duration, runs)
-	for i := range times {
-		start := time.Now()
-		proof, err := groth16.Prove(ccs, pk, w)
-		if err != nil {
-			return err
-		}
-		times[i] = time.Since(start)
-		if i == 0 {
-			public, err := w.Public()
+	fmt.Printf("constraints=%d\n", ccs.GetNbConstraints())
+	for round, name := range []string{"prove_ms", "prove_1_ms"} {
+		times := make([]time.Duration, runs)
+		for i := range times {
+			start := time.Now()
+			proof, err := groth16.Prove(ccs, pk, w)
 			if err != nil {
 				return err
 			}
-			if err := groth16.Verify(proof, vk, public); err != nil {
-				return err
+			times[i] = time.Since(start)
+			if round == 0 && i == 0 {
+				public, err := w.Public()
+				if err != nil {
+					return err
+				}
+				if err := groth16.Verify(proof, vk, public); err != nil {
+					return err
+				}
 			}
 		}
+		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+		fmt.Printf("%s=%s\n", name, strconv.FormatFloat(float64(times[runs/2].Microseconds())/1000, 'f', 3, 64))
+		// The second round runs on one thread; the compile and the setup did
+		// not have to.
+		runtime.GOMAXPROCS(1)
 	}
-	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
-	fmt.Printf("constraints=%d\n", ccs.GetNbConstraints())
-	fmt.Printf("prove_ms=%s\n", strconv.FormatFloat(float64(times[runs/2].Microseconds())/1000, 'f', 3, 64))
 	return nil
 }

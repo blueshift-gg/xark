@@ -148,10 +148,13 @@ jobs:
   gnark-backend:
     # `--backend gnark` end to end: xark's rows and witness, gnark's setup, proof
     # and verification. The Go helper is built on first use and fetches gnark's
-    # modules, which keeps these tests out of ci.yml.
-    name: gnark backend (ignored CLI tests)
+    # modules, which keeps these tests out of ci.yml. The benchmark beside it
+    # (`benches/gnark/`) is outside the workspace, so this is also where its
+    # circuits are tested and its script is run, one proof a measurement: the
+    # numbers are not looked at, only that every line of the table still comes out.
+    name: gnark backend (ignored CLI tests, the benchmark)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -170,6 +173,23 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: cargo test (gnark backend)
         run: cargo test --release -p xark-tests --test it gnark -- --ignored
+      - name: go vet (the helper, the benchmark's gnark circuits)
+        run: |
+          (cd crates/cli/gnark && go vet ./...)
+          (cd benches/gnark/pure && go vet ./...)
+      - name: Both Go modules are on one gnark
+        # Two modules, since the helper's is embedded in the published CLI and the
+        # benchmark's is not: a gnark bump that reaches only one would compare two
+        # versions of the prover.
+        run: diff <(grep consensys crates/cli/gnark/go.mod) <(grep consensys benches/gnark/pure/go.mod)
+      - name: xark test (the benchmark's circuits)
+        run: |
+          cargo build --release -p xark-cli
+          for c in poseidon2_chain sha256_1024 keccak256_1024; do
+            target/release/xark test "benches/gnark/$c"
+          done
+      - name: benches/gnark/run.sh (one proof a measurement)
+        run: benches/gnark/run.sh 1
 
   publish-dry:
     # A crates.io release rehearsal: every publishable crate is packaged and built

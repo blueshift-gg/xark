@@ -15,11 +15,13 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"time"
@@ -40,10 +42,28 @@ const usage = `usage:
   xark-gnark verify  <vk.bin> <proof.bin> <public_witness.bin>
   xark-gnark bench   <key dir> <witness.wtns> <runs>`
 
+// protocol numbers this command line and its report; `PROTOCOL` in
+// `crates/cli/src/commands/gnark.rs` is the same number. It is the first line of
+// every report, so xark can tell a helper built from another version of this file
+// (one `XARK_GNARK` names) and refuse it.
+const protocol = 2
+
+// exitRejected is the exit code for gnark's own refusal: a witness that doesn't
+// satisfy the rows, a proof that doesn't verify. Every other failure exits 1, so
+// xark never reports a helper that couldn't run as a proof that failed.
+const exitRejected = 2
+
+// rejected marks gnark's refusal among the errors.
+type rejected struct{ error }
+
 func main() {
 	logger.Disable()
+	fmt.Printf("protocol=%d\n", protocol)
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "xark-gnark:", err)
+		if errors.As(err, &rejected{}) {
+			os.Exit(exitRejected)
+		}
 		os.Exit(1)
 	}
 }
@@ -119,23 +139,28 @@ func load(dir, wtnsPath string) (constraint.ConstraintSystem, groth16.ProvingKey
 }
 
 // bench proves the same witness `runs` times with the key resident and reports
-// the median (`benches/gnark/run.sh`).
+// the median, with every core (`prove_ms`) and then on one thread
+// (`prove_1_ms`): `benches/gnark/run.sh`.
 func bench(dir, wtnsPath string, runs int) error {
 	ccs, pk, _, w, err := load(dir, wtnsPath)
 	if err != nil {
 		return err
 	}
-	times := make([]time.Duration, runs)
-	for i := range times {
-		start := time.Now()
-		if _, err := groth16.Prove(ccs, pk, w); err != nil {
-			return fmt.Errorf("prove: %w", err)
-		}
-		times[i] = time.Since(start)
-	}
-	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 	fmt.Printf("constraints=%d\n", ccs.GetNbConstraints())
-	report("prove_ms", times[runs/2])
+	for _, name := range []string{"prove_ms", "prove_1_ms"} {
+		times := make([]time.Duration, runs)
+		for i := range times {
+			start := time.Now()
+			if _, err := groth16.Prove(ccs, pk, w); err != nil {
+				return fmt.Errorf("prove: %w", err)
+			}
+			times[i] = time.Since(start)
+		}
+		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+		report(name, times[runs/2])
+		// The second round runs on one thread; reading the key did not have to.
+		runtime.GOMAXPROCS(1)
+	}
 	return nil
 }
 
@@ -145,9 +170,11 @@ func prove(dir, wtnsPath, out string) error {
 		return err
 	}
 	start := time.Now()
+	// The key and the witness are read and fit the rows by now, and every wire
+	// has its value: what is left to fail is a row the witness doesn't satisfy.
 	proof, err := groth16.Prove(ccs, pk, w)
 	if err != nil {
-		return fmt.Errorf("prove: %w", err)
+		return rejected{fmt.Errorf("prove: %w", err)}
 	}
 	report("prove_ms", time.Since(start))
 	public, err := w.Public()
@@ -182,7 +209,7 @@ func verify(vkPath, proofPath, publicPath string) error {
 		return err
 	}
 	if err := groth16.Verify(proof, vk, public); err != nil {
-		return fmt.Errorf("the proof does not verify: %w", err)
+		return rejected{fmt.Errorf("the proof does not verify: %w", err)}
 	}
 	return nil
 }
@@ -211,20 +238,33 @@ func readR1CS(path string) (constraint.ConstraintSystem, error) {
 	var ccs *cs_bn254.R1CS
 	var gate constraint.BlueprintID
 	var fieldSize int
-	var rows uint32
+	var wires, rows uint32
 	for s := uint32(0); s < sections && r.err == nil; s++ {
 		kind, size := r.u32(), r.u64()
+		start := r.n
 		switch {
 		case kind == 1:
+			if ccs != nil {
+				return nil, fmt.Errorf("%s: two headers", path)
+			}
 			fieldSize = int(r.u32())
 			if err := checkPrime(r.bytes(fieldSize)); err != nil {
 				return nil, fmt.Errorf("%s: %w", path, err)
 			}
-			wires, pubOut, pubIn := r.u32(), r.u32(), r.u32()
+			var pubOut, pubIn uint32
+			wires, pubOut, pubIn = r.u32(), r.u32(), r.u32()
 			r.u32() // private inputs: every non-public wire is a secret input here
 			r.u64() // labels
 			rows = r.u32()
-			ccs = cs_bn254.NewR1CS(int(rows))
+			if r.err != nil {
+				break
+			}
+			if uint64(pubOut)+uint64(pubIn)+1 > uint64(wires) {
+				return nil, fmt.Errorf("%s: %d public wires of %d", path, uint64(pubOut)+uint64(pubIn), wires)
+			}
+			// Room for the rows ahead of reading them, up to a bound: the count
+			// is the file's word.
+			ccs = cs_bn254.NewR1CS(int(min(rows, 1<<20)))
 			ccs.AddPublicVariable("1")
 			public := int(pubOut + pubIn)
 			for i := 1; i <= public; i++ {
@@ -240,14 +280,17 @@ func readR1CS(path string) (constraint.ConstraintSystem, error) {
 			}
 			for i := uint32(0); i < rows && r.err == nil; i++ {
 				var row constraint.R1C
-				row.L = r.lc(ccs, fieldSize)
-				row.R = r.lc(ccs, fieldSize)
-				row.O = r.lc(ccs, fieldSize)
-				ccs.AddR1C(row, gate)
+				row.L = r.lc(ccs, fieldSize, wires)
+				row.R = r.lc(ccs, fieldSize, wires)
+				row.O = r.lc(ccs, fieldSize, wires)
+				if r.err == nil {
+					ccs.AddR1C(row, gate)
+				}
 			}
 		default:
 			r.skip(size)
 		}
+		r.ends(kind, start, size)
 	}
 	if r.err != nil {
 		return nil, fmt.Errorf("%s: %w", path, r.err)
@@ -276,6 +319,7 @@ func readWitness(path string, public, secret int) (witness.Witness, error) {
 	var n uint32
 	for s := uint32(0); s < sections && r.err == nil; s++ {
 		kind, size := r.u32(), r.u64()
+		start := r.n
 		switch kind {
 		case 1:
 			fieldSize = int(r.u32())
@@ -284,6 +328,11 @@ func readWitness(path string, public, secret int) (witness.Witness, error) {
 			}
 			n = r.u32()
 		case 2:
+			// The count is the header's, and a header can say anything: the
+			// circuit's own wire count bounds what is allocated for it.
+			if int64(n) != int64(1+public+secret) {
+				return nil, fmt.Errorf("%s: %d values for a circuit of %d wires (was the key made for another build of the circuit?)", path, n, 1+public+secret)
+			}
 			values = make([]fr.Element, n)
 			for i := range values {
 				values[i] = r.element(fieldSize)
@@ -291,12 +340,13 @@ func readWitness(path string, public, secret int) (witness.Witness, error) {
 		default:
 			r.skip(size)
 		}
+		r.ends(kind, start, size)
 	}
 	if r.err != nil {
 		return nil, fmt.Errorf("%s: %w", path, r.err)
 	}
 	if len(values) != 1+public+secret {
-		return nil, fmt.Errorf("%s: %d values for a circuit of %d wires (was the key made for another build of the circuit?)", path, len(values), 1+public+secret)
+		return nil, fmt.Errorf("%s: no values for the circuit's %d wires", path, 1+public+secret)
 	}
 	w, err := witness.New(ecc.BN254.ScalarField())
 	if err != nil {
@@ -333,8 +383,18 @@ func reversed(b []byte) []byte {
 // reader reads the little-endian iden3 containers, keeping the first error.
 type reader struct {
 	r   *bufio.Reader
+	n   uint64 // bytes read so far
 	err error
 	buf [64]byte
+}
+
+// ends checks that the section begun at byte `start` took the `size` bytes its
+// header gave it: a file whose sections disagree with their sizes is not read
+// as if it were sound.
+func (r *reader) ends(kind uint32, start, size uint64) {
+	if r.err == nil && r.n-start != size {
+		r.err = fmt.Errorf("section %d is %d bytes and says %d", kind, r.n-start, size)
+	}
 }
 
 func (r *reader) bytes(n int) []byte {
@@ -345,6 +405,7 @@ func (r *reader) bytes(n int) []byte {
 		return r.buf[:0]
 	}
 	_, r.err = io.ReadFull(r.r, r.buf[:n])
+	r.n += uint64(n)
 	return r.buf[:n]
 }
 
@@ -367,6 +428,7 @@ func (r *reader) u64() uint64 {
 func (r *reader) skip(n uint64) {
 	if r.err == nil {
 		_, r.err = io.CopyN(io.Discard, r.r, int64(n))
+		r.n += n
 	}
 }
 
@@ -378,15 +440,21 @@ func (r *reader) element(size int) (e fr.Element) {
 	return e
 }
 
-func (r *reader) lc(ccs *cs_bn254.R1CS, fieldSize int) constraint.LinearExpression {
+func (r *reader) lc(ccs *cs_bn254.R1CS, fieldSize int, wires uint32) constraint.LinearExpression {
 	n := r.u32()
 	if r.err != nil {
 		return nil
 	}
-	lc := make(constraint.LinearExpression, 0, n)
+	// No more terms than wires are allocated ahead of reading them: the count
+	// is the file's word.
+	lc := make(constraint.LinearExpression, 0, min(n, wires))
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		wire := r.u32()
 		e := r.element(fieldSize)
+		if r.err == nil && wire >= wires {
+			r.err = fmt.Errorf("a term on wire %d of %d", wire, wires)
+			return nil
+		}
 		var c constraint.U64
 		copy(c[:], e[:])
 		lc = append(lc, ccs.MakeTerm(c, int(wire)))

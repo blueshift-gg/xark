@@ -78,6 +78,12 @@ pub struct ProveArgs {
     /// directory beside xark's and are not interchangeable with them).
     #[arg(long, value_enum, default_value_t = super::gnark::Backend::Xark)]
     pub backend: super::gnark::Backend,
+
+    /// With `--backend gnark`: keep `witness.wtns`, the solved witness gnark
+    /// proves from, beside the proof. It holds the private inputs, and without
+    /// this flag is removed as soon as gnark has read it.
+    #[arg(long, default_value_t = false)]
+    pub keep_witness: bool,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -120,6 +126,9 @@ impl CryptoRng for ProveRng {}
 pub fn run(args: ProveArgs) -> Result<()> {
     if args.backend == super::gnark::Backend::Gnark {
         return super::gnark::prove(&args);
+    }
+    if args.keep_witness {
+        anyhow::bail!("--keep-witness goes with --backend gnark: xark's prover writes no witness");
     }
     let project = XarkProject::resolve(args.path.clone())?;
     let pk_path = args
