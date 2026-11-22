@@ -1,7 +1,7 @@
 // The benchmark's reference: the circuits of `benches/gnark/` written directly
 // against gnark's frontend, compiled, set up and proved by gnark alone.
 //
-//	go run . <sha256|keccak256|poseidon2|poseidon2_chain> <runs>
+//	go run . <sha256|keccak256|sha256_1024|keccak256_1024|poseidon2|poseidon2_chain> <runs>
 //
 // Prints `constraints=<n>` and `prove_ms=<median of the runs>`, as `xark-gnark
 // bench` does for the xark-compiled circuit.
@@ -43,11 +43,12 @@ const (
 	partialRounds = 56
 )
 
-// Digest is `examples/sha256` or `examples/keccak256`: a private three-byte
-// message whose digest is public as two 128-bit halves (xark-hash's `Hash`), high
-// half first. `keccak` picks Keccak-256 (Ethereum's) over SHA-256.
+// Digest is `examples/sha256` or `examples/keccak256` (the three bytes "abc"), or
+// `sha256_1024` or `keccak256_1024` (1024 bytes): a private message whose digest
+// is public as two 128-bit halves (xark-hash's `Hash`), high half first. `keccak`
+// picks Keccak-256 (Ethereum's) over SHA-256.
 type Digest struct {
-	Msg    [3]frontend.Variable
+	Msg    []frontend.Variable
 	Hi, Lo frontend.Variable `gnark:",public"`
 	keccak bool
 }
@@ -85,8 +86,15 @@ func (c *Digest) Define(api frontend.API) error {
 	return nil
 }
 
-func digestPair(keccak bool) (circuit, assignment frontend.Circuit) {
+func digestPair(keccak bool, size int) (circuit, assignment frontend.Circuit) {
+	// "abc", or the bytes 0, 1, …, 255 over and over, as the xark circuits' tests.
 	msg := []byte("abc")
+	if size != len(msg) {
+		msg = make([]byte, size)
+		for i := range msg {
+			msg[i] = byte(i)
+		}
+	}
 	var sum []byte
 	if keccak {
 		h := nativesha3.NewLegacyKeccak256()
@@ -96,11 +104,15 @@ func digestPair(keccak bool) (circuit, assignment frontend.Circuit) {
 		s := stdsha256.Sum256(msg)
 		sum = s[:]
 	}
-	return &Digest{keccak: keccak}, &Digest{
-		Msg: [3]frontend.Variable{msg[0], msg[1], msg[2]},
+	a := &Digest{
+		Msg: make([]frontend.Variable, size),
 		Hi:  new(big.Int).SetBytes(sum[:16]),
 		Lo:  new(big.Int).SetBytes(sum[16:]),
 	}
+	for i := range msg {
+		a.Msg[i] = msg[i]
+	}
+	return &Digest{Msg: make([]frontend.Variable, size), keccak: keccak}, a
 }
 
 // Poseidon2 is `examples/poseidon2` (one permutation) or `poseidon2_chain` (a
@@ -156,7 +168,7 @@ func main() {
 }
 
 func run(args []string) error {
-	const usage = "usage: xark-gnark-bench <sha256|keccak256|poseidon2|poseidon2_chain> <runs>"
+	const usage = "usage: xark-gnark-bench <circuit> <runs>, a circuit one of sha256, keccak256, sha256_1024, keccak256_1024, poseidon2, poseidon2_chain"
 	if len(args) != 2 {
 		return fmt.Errorf(usage)
 	}
@@ -167,9 +179,13 @@ func run(args []string) error {
 	var circuit, assignment frontend.Circuit
 	switch args[0] {
 	case "sha256":
-		circuit, assignment = digestPair(false)
+		circuit, assignment = digestPair(false, 3)
 	case "keccak256":
-		circuit, assignment = digestPair(true)
+		circuit, assignment = digestPair(true, 3)
+	case "sha256_1024":
+		circuit, assignment = digestPair(false, 1024)
+	case "keccak256_1024":
+		circuit, assignment = digestPair(true, 1024)
 	case "poseidon2":
 		circuit, assignment = poseidon2Pair(1)
 	case "poseidon2_chain":

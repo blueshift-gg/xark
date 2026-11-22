@@ -68,6 +68,8 @@ bench() {
 
 bench sha256 "$root/examples/sha256" "$here/sha256.inputs.json" "sha256 (3-byte message)"
 bench keccak256 "$root/examples/keccak256" "$here/keccak256.inputs.json" "keccak256 (3-byte message)"
+bench sha256_1024 "$here/sha256_1024" "$here/sha256_1024/inputs.json" "sha256 (1024-byte message)"
+bench keccak256_1024 "$here/keccak256_1024" "$here/keccak256_1024/inputs.json" "keccak256 (1024-byte message)"
 bench poseidon2 "$root/examples/poseidon2" "$here/poseidon2.inputs.json" "poseidon2 (1 permutation)"
 bench poseidon2_chain "$here/poseidon2_chain" "$here/poseidon2_chain/inputs.json" "poseidon2 (1000 permutations)"
 
