@@ -12,18 +12,18 @@ The same function, four ways:
 
 | function | frontend + backend | R1CS constraints | prove (ms) |
 |---|---|---:|---:|
-| fibonacci (1000 steps) | xark + arkworks | 1 | 1.5 |
-| | xark + xark-groth16 | 1 | 3.2 |
-| | xark + gnark | 1 | 0.5 |
-| | pure gnark | 1 | 0.6 |
-| poseidon2 (1 permutation) | xark + arkworks | 243 | 7.4 |
-| | xark + xark-groth16 | 243 | 5.7 |
-| | xark + gnark | 243 | 1.8 |
+| sha256 (3-byte message) | xark + arkworks | 16,472 | 67 |
+| | xark + xark-groth16 | 16,472 | 38 |
+| | xark + gnark | 16,472 | 22 |
+| | pure gnark | 156,681 | 242 |
+| poseidon2 (1 permutation) | xark + arkworks | 243 | 7.7 |
+| | xark + xark-groth16 | 243 | 5.9 |
+| | xark + gnark | 243 | 1.9 |
 | | pure gnark | 243 | 1.7 |
-| poseidon2 (1000 permutations) | xark + arkworks | 240,003 | 1084 |
-| | xark + xark-groth16 | 240,003 | 392 |
-| | xark + gnark | 240,003 | 401 |
-| | pure gnark | 240,003 | 449 |
+| poseidon2 (1000 permutations) | xark + arkworks | 240,003 | 1129 |
+| | xark + xark-groth16 | 240,003 | 396 |
+| | xark + gnark | 240,003 | 411 |
+| | pure gnark | 240,003 | 459 |
 
 Apple M4 Max (16 cores), 2026-11-22: gnark 0.14.0, ark-groth16 0.6, Rust 1.99.1,
 Go 1.25.5; the median of 9 proofs. `./run.sh [runs]` prints the table for your
@@ -31,28 +31,36 @@ machine.
 
 ## Reading it
 
-- **The constraint counts are equal.** Both frontends fold additions and
-  multiplications by constants into linear combinations and spend a row only on a
-  product of two variables or an assertion. Fibonacci's recurrence is linear, so
-  the whole circuit is its closing equality. A Poseidon2 permutation (t = 3,
-  R_F = 8, R_P = 56) has 80 S-boxes of three rows each, plus three rows for the
-  public outputs. The xark + gnark count is xark's by construction: the conversion
+- **Poseidon2 costs the same in both frontends.** Each folds additions and
+  multiplications by constants into linear combinations and spends a row only on
+  a product of two variables or an assertion: a permutation (t = 3, R_F = 8,
+  R_P = 56) has 80 S-boxes of three rows each, plus three rows for the public
+  outputs. The xark + gnark count is xark's by construction: the conversion
   carries the rows over one for one.
+- **SHA-256 does not.** gnark's `std/hash/sha2` works on bytes through lookup
+  tables (`uints`), and most of its 156,681 rows are a fixed cost: a second block
+  adds 26,500 (183,152 rows for a 67-byte message), which leaves about 130,000
+  that do not depend on the message. One block is the worst case for it; over a
+  long message that cost amortizes, and each further block still costs more than
+  the 16,472 rows of the whole xark circuit.
 - **A time is the proof alone**, with the key in memory and every core, after the
   witness is solved. gnark's times include its solver, which for a xark circuit
   only checks the rows (xark solved the witness) and for the pure circuit computes
   it. xark's witness solve, not in the table, is 0.11 s for the 1000 permutations.
-- **The first two functions are too small to rank provers by**: at 1 and 243
-  constraints a proof is a few fixed-cost multi-scalar multiplications and
-  thread start-up. The 1000-permutation chain is there to have something to time.
+  gnark's lookup tables also add a commitment to the pure SHA-256 proof, which
+  its time includes.
+- **One Poseidon2 permutation is too small to rank provers by**: at 243
+  constraints a proof is a few fixed-cost multi-scalar multiplications and thread
+  start-up. The 1000-permutation chain is there to have something to time.
 - gnark-crypto derives its own Poseidon2 round constants, so the pure gnark
   circuit computes a different permutation of the same shape as xark-poseidon2's:
   the same rows and the same cost, other outputs.
 
 ## What is here
 
-- `fibonacci/`, `poseidon2_chain/`: the xark circuits, with the inputs they are
-  proved with (`inputs.json`). The single permutation is `examples/poseidon2`.
+- `poseidon2_chain/`: the xark circuit of the 1000 permutations, with the inputs
+  it is proved with (`inputs.json`). SHA-256 and the single permutation are
+  `examples/sha256` and `examples/poseidon2`, with their inputs beside this file.
 - `pure/`: the three circuits in gnark, one Go program.
 - `run.sh`: builds everything, keys each circuit's template-reduced rows over a
   2^k domain for every backend (the form arkworks' prover takes), and measures

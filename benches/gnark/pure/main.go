@@ -1,14 +1,16 @@
 // The benchmark's reference: the circuits of `benches/gnark/` written directly
 // against gnark's frontend, compiled, set up and proved by gnark alone.
 //
-//	go run . <fibonacci|poseidon2|poseidon2_chain> <runs>
+//	go run . <sha256|poseidon2|poseidon2_chain> <runs>
 //
 // Prints `constraints=<n>` and `prove_ms=<median of the runs>`, as `xark-gnark
 // bench` does for the xark-compiled circuit.
 package main
 
 import (
+	stdsha256 "crypto/sha256"
 	"fmt"
+	"math/big"
 	"os"
 	"sort"
 	"strconv"
@@ -21,14 +23,13 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/logger"
+	"github.com/consensys/gnark/std/hash/sha2"
+	"github.com/consensys/gnark/std/math/uints"
 	"github.com/consensys/gnark/std/permutation/poseidon2"
 )
 
-// The sizes of `fibonacci/src/lib.rs` and `poseidon2_chain/src/lib.rs`.
-const (
-	fibonacciSteps    = 1000
-	chainPermutations = 1000
-)
+// The size of `poseidon2_chain/src/lib.rs`.
+const chainPermutations = 1000
 
 // Poseidon2 as xark-poseidon2 has it: t = 3, R_F = 8, R_P = 56, x^5. gnark-crypto
 // derives its own round constants, so the two compute different permutations of
@@ -39,20 +40,49 @@ const (
 	partialRounds = 56
 )
 
-// Fibonacci is `fibonacci/src/lib.rs`: private A0, A1, public Result after
-// `fibonacciSteps` additions.
-type Fibonacci struct {
-	A0, A1 frontend.Variable
-	Result frontend.Variable `gnark:",public"`
+// Sha256 is `examples/sha256`: a private three-byte message whose SHA-256 digest
+// is public as two 128-bit halves (xark-hash's `Hash`), high half first.
+type Sha256 struct {
+	Msg    [3]frontend.Variable
+	Hi, Lo frontend.Variable `gnark:",public"`
 }
 
-func (c *Fibonacci) Define(api frontend.API) error {
-	a, b := c.A0, c.A1
-	for i := 0; i < fibonacciSteps; i++ {
-		a, b = b, api.Add(a, b)
+func (c *Sha256) Define(api frontend.API) error {
+	bytes, err := uints.New[uints.U32](api)
+	if err != nil {
+		return err
 	}
-	api.AssertIsEqual(b, c.Result)
+	h, err := sha2.New(api)
+	if err != nil {
+		return err
+	}
+	// A message byte is range-checked on the way in, as a xark `u8` input is.
+	msg := make([]uints.U8, len(c.Msg))
+	for i := range msg {
+		msg[i] = bytes.ByteValueOf(c.Msg[i])
+	}
+	h.Write(msg)
+	digest := h.Sum()
+	half := func(b []uints.U8) frontend.Variable {
+		var acc frontend.Variable = 0
+		for _, v := range b {
+			acc = api.Add(api.Mul(acc, 256), v.Val)
+		}
+		return acc
+	}
+	api.AssertIsEqual(half(digest[:16]), c.Hi)
+	api.AssertIsEqual(half(digest[16:]), c.Lo)
 	return nil
+}
+
+func sha256Pair() (circuit, assignment frontend.Circuit) {
+	msg := []byte("abc")
+	sum := stdsha256.Sum256(msg)
+	return &Sha256{}, &Sha256{
+		Msg: [3]frontend.Variable{msg[0], msg[1], msg[2]},
+		Hi:  new(big.Int).SetBytes(sum[:16]),
+		Lo:  new(big.Int).SetBytes(sum[16:]),
+	}
 }
 
 // Poseidon2 is `examples/poseidon2` (one permutation) or `poseidon2_chain` (a
@@ -99,16 +129,6 @@ func poseidon2Pair(n int) (circuit, assignment frontend.Circuit) {
 	return &Poseidon2{n: n}, a
 }
 
-func fibonacciPair() (circuit, assignment frontend.Circuit) {
-	var a, b fr.Element
-	a.SetOne()
-	b.SetOne()
-	for i := 0; i < fibonacciSteps; i++ {
-		a, b = b, *new(fr.Element).Add(&a, &b)
-	}
-	return &Fibonacci{}, &Fibonacci{A0: 1, A1: 1, Result: b}
-}
-
 func main() {
 	logger.Disable()
 	if err := run(os.Args[1:]); err != nil {
@@ -118,7 +138,7 @@ func main() {
 }
 
 func run(args []string) error {
-	const usage = "usage: xark-gnark-bench <fibonacci|poseidon2|poseidon2_chain> <runs>"
+	const usage = "usage: xark-gnark-bench <sha256|poseidon2|poseidon2_chain> <runs>"
 	if len(args) != 2 {
 		return fmt.Errorf(usage)
 	}
@@ -128,8 +148,8 @@ func run(args []string) error {
 	}
 	var circuit, assignment frontend.Circuit
 	switch args[0] {
-	case "fibonacci":
-		circuit, assignment = fibonacciPair()
+	case "sha256":
+		circuit, assignment = sha256Pair()
 	case "poseidon2":
 		circuit, assignment = poseidon2Pair(1)
 	case "poseidon2_chain":

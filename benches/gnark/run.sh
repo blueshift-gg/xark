@@ -66,7 +66,7 @@ bench() {
     rows+=("| | pure gnark | $(echo "$p" | field constraints) | $(echo "$p" | field prove_ms) |")
 }
 
-bench fibonacci "$here/fibonacci" "$here/fibonacci/inputs.json" "fibonacci (1000 steps)"
+bench sha256 "$root/examples/sha256" "$here/sha256.inputs.json" "sha256 (3-byte message)"
 bench poseidon2 "$root/examples/poseidon2" "$here/poseidon2.inputs.json" "poseidon2 (1 permutation)"
 bench poseidon2_chain "$here/poseidon2_chain" "$here/poseidon2_chain/inputs.json" "poseidon2 (1000 permutations)"
 
