@@ -145,6 +145,32 @@ jobs:
       - name: grumpkin_reference builds
         run: cd examples/grumpkin_reference && cargo build --release
 
+  gnark-backend:
+    # `--backend gnark` end to end: xark's rows and witness, gnark's setup, proof
+    # and verification. The Go helper is built on first use and fetches gnark's
+    # modules, which keeps these tests out of ci.yml.
+    name: gnark backend (ignored CLI tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install stable Rust + wasm32
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache-dependency-path: crates/cli/gnark/go.sum
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: cargo test (gnark backend)
+        run: cargo test --release -p xark-tests --test it gnark -- --ignored
+
   publish-dry:
     # A crates.io release rehearsal: every publishable crate is packaged and built
     # from its own `.crate`, as crates.io will see it (`cargo xtask publish --dry-run`).

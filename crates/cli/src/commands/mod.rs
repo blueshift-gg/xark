@@ -40,6 +40,7 @@ pub mod client;
 pub mod completions;
 pub mod doctor;
 pub mod export;
+pub mod gnark;
 pub mod inspect;
 pub mod profile;
 pub mod project;

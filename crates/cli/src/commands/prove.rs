@@ -72,6 +72,12 @@ pub struct ProveArgs {
     /// outlives the process. For proving the largest circuits on small machines.
     #[arg(long, default_value_t = false)]
     pub low_memory: bool,
+
+    /// The Groth16 implementation: xark's own (the default), or `gnark` (through a
+    /// Go helper built on first use; its keys and proofs live in a `gnark/`
+    /// directory beside xark's and are not interchangeable with them).
+    #[arg(long, value_enum, default_value_t = super::gnark::Backend::Xark)]
+    pub backend: super::gnark::Backend,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -112,6 +118,9 @@ impl RngCore for ProveRng {
 impl CryptoRng for ProveRng {}
 
 pub fn run(args: ProveArgs) -> Result<()> {
+    if args.backend == super::gnark::Backend::Gnark {
+        return super::gnark::prove(&args);
+    }
     let project = XarkProject::resolve(args.path.clone())?;
     let pk_path = args
         .proving_key
@@ -591,6 +600,7 @@ fn autobuild_and_setup(
             uncompressed: false,
             r1cs_form: setup::R1csForm::Auto,
             domain: setup::QapDomain::Auto,
+            backend: super::gnark::Backend::Xark,
         })?;
     }
     Ok(())

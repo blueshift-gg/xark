@@ -7,7 +7,8 @@ focused crates with strict layering so that:
 * the circuit-author surface (`xark`'s prelude: `Field`, `require`/`require_eq`,
   `Private`/`Public`, `#[circuit]`, `#[input]`) stays small and stable,
 * Rust → xark-IR → R1CS lowering can be tested without a proving system,
-* the Groth16 layer can be swapped without touching lowering,
+* the Groth16 layer can be swapped without touching lowering (`--backend gnark`
+  proves the same rows with gnark: [`gnark.md`](gnark.md)),
 * the on-chain verifier stays tiny, `no_std`, and dependency-light,
 * gadgets are ordinary Rust library crates, not per-gadget backend opcodes.
 

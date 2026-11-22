@@ -49,6 +49,10 @@ party has to be trusted for, use `xark ceremony`.
 | `clean` | Removes xark's build output |
 | `completions` | Prints shell completions |
 
+`setup`, `prove` and `verify` take `--backend gnark` to use gnark's Groth16 in
+place of xark's (needs Go): see
+[docs/gnark.md](https://github.com/blueshift-gg/xark/blob/master/docs/gnark.md).
+
 Each command takes the circuit crate's directory, the current one by default.
 `xark <command> --help` lists its options.
 

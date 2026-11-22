@@ -96,6 +96,12 @@ pub struct SetupArgs {
     /// * `auto` (default) — `smooth`, except `radix2` for a Powers-of-Tau setup.
     #[arg(long, value_enum, default_value_t = QapDomain::Auto)]
     pub domain: QapDomain,
+
+    /// The Groth16 implementation: xark's own (the default), or `gnark` (through a
+    /// Go helper built on first use; its keys and proofs live in a `gnark/`
+    /// directory beside xark's and are not interchangeable with them).
+    #[arg(long, value_enum, default_value_t = super::gnark::Backend::Xark)]
+    pub backend: super::gnark::Backend,
 }
 
 /// See [`SetupArgs::domain`].
@@ -218,7 +224,7 @@ fn write_row_file(out_dir: &std::path::Path, fingerprint: &str, circuit: &XarkCi
 }
 
 /// The circuit the key is generated for, as a row source.
-enum Keyed {
+pub(super) enum Keyed {
     /// The template-reduced rows, streamed straight from `circuit.xbc`.
     Bytecode(xark_groth16::BytecodeSource),
     /// The boundary-minimized program (small circuits, or a debug flat build).
@@ -226,7 +232,10 @@ enum Keyed {
 }
 
 impl Keyed {
-    fn with_source<T>(&self, f: impl FnOnce(&dyn xark_groth16::ConstraintSource) -> T) -> T {
+    pub(super) fn with_source<T>(
+        &self,
+        f: impl FnOnce(&dyn xark_groth16::ConstraintSource) -> T,
+    ) -> T {
         match self {
             Keyed::Bytecode(src) => f(src),
             Keyed::Program(circ) => f(&xark_groth16::ProgramSource::new(circ.prog())),
@@ -240,7 +249,7 @@ impl Keyed {
 /// pass. Returns `(source, form, reason, fingerprint, reduced rows, public inputs,
 /// QAP domain kind)`.
 #[allow(clippy::type_complexity)]
-fn plan_keyed(
+pub(super) fn plan_keyed(
     args: &SetupArgs,
     project: &XarkProject,
     form: R1csForm,
@@ -323,6 +332,9 @@ fn plan_keyed(
 }
 
 pub fn run(args: SetupArgs) -> Result<()> {
+    if args.backend == super::gnark::Backend::Gnark {
+        return super::gnark::setup(&args);
+    }
     let project = XarkProject::resolve(args.path.clone())?;
     // Build first if there's no build yet; keys for a circuit older than its source
     // would prove the wrong thing.

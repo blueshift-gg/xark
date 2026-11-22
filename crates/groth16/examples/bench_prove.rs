@@ -342,7 +342,7 @@ fn main() {
             )
             .unwrap();
             println!(
-                "warm prove: arkworks {ark:.2}s  streaming {:.2}s",
+                "warm prove: arkworks {ark:.4}s  streaming {:.4}s",
                 t.elapsed().as_secs_f64()
             );
         }
