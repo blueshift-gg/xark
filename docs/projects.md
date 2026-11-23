@@ -43,7 +43,7 @@ claim/
   package.json  tsconfig.json  vitest.config.ts
   circuits/claim/       # the starter circuit and its tests
   programs/claim/       # Pinocchio: lib.rs, errors.rs, instructions/verify.rs
-  clients/claim/rust/   # generated, committed: the verifier crate `claim-verifier`
+  clients/claim/rust/   # generated, committed: the verifier crate `claim-client`
   clients/claim/ts/     # generated, committed: the TypeScript client
   keys/claim/           # committed: pk.bin, vk.bin, metadata.json, circuit.xbc
   tests/claim.test.ts   # LiteSVM
@@ -60,7 +60,7 @@ claim/
   programs as the default, a bare `cargo build-sbf` at the root builds them alone.
   A bare `cargo test` is the programs' too; `xark test` runs everything.
 - **Crate names.** A workspace can't hold two packages of one name: the program in
-  `programs/claim/` is the crate `claim-program`, the client `claim-verifier`.
+  `programs/claim/` is the crate `claim-program`, the client `claim-client`.
   `xark add program claim` uses the circuit of the same name; `--circuit` picks
   another.
 - **One workspace is safe for circuits.** The circuit build sets its own
@@ -116,7 +116,7 @@ packs them into field elements as `#[input]` does, from the packing `schema.json
 records (`"packed": { "offset", "bits" }`), so a program never does it by hand:
 
 ```rust
-use zkyc_verifier::{Bitfield, Country, Days, Policy, PublicInputs};
+use zkyc_client::{Bitfield, Country, Days, Policy, PublicInputs};
 
 let today = Days::<1900, 2100>::from_unix(clock.unix_timestamp).ok_or(…)?;
 let inputs = PublicInputs {
@@ -129,7 +129,7 @@ let inputs = PublicInputs {
     },
     holder: holder.address().to_bytes(), // an `Address`: its 32 bytes, split into hi/lo for you
 };
-if !zkyc_verifier::verify(&proof, inputs) { … }
+if !zkyc_client::verify(&proof, inputs) { … }
 ```
 
 `verify` takes `impl Into<Fields>` (`[[u8; 32]; N]`), so `PublicInputs` is a

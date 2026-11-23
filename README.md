@@ -115,15 +115,15 @@ generated clients embed the verifying key, and the CI workflow `xark init` wrote
 checks they match the source (`xark build --check`).
 
 The program depends on `clients/my-circuit/rust/`, the verifier crate `xark build`
-generates (`my-circuit-verifier`). Its `PublicInputs` has the circuit's public
+generates (`my-circuit-client`). Its `PublicInputs` has the circuit's public
 inputs by name, packed for you, and `verify` takes it:
 
 ```rust
-let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);
-let inputs = my_circuit_verifier::PublicInputs {
+let proof = my_circuit_client::Proof::from_le_bytes(proof_bytes);
+let inputs = my_circuit_client::PublicInputs {
     result: /* from your program's state, 32 bytes little-endian */,
 };
-if !my_circuit_verifier::verify(&proof, inputs) {
+if !my_circuit_client::verify(&proof, inputs) {
     return Err(ProgramError::InvalidArgument);
 }
 ```
@@ -190,7 +190,7 @@ xark-poseidon2 = "0.4"
 
 ## Examples
 
-[`examples/`](examples) has 74 runnable circuits, from `cube` to `zkyc` (a private
+[`examples/`](examples) has 75 runnable circuits, from `cube` to `zkyc` (a private
 credential check against a public policy), with the gadgets above at work. Test
 any of them with `xark test examples/<name>`.
 

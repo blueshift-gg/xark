@@ -239,3 +239,32 @@ pub const fn parse_public_inputs<const N: usize, const L: usize>(
     }
     out
 }
+
+/// What can go wrong parsing or verifying. `#[repr(u32)]`, and `u32::from` gives
+/// its code, so a program can return it as `ProgramError::Custom(e.into())`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum XarkError {
+    /// Instruction data shorter than the proof and its public inputs.
+    Truncated = 1,
+    /// The proof did not verify — a non-holding pairing or a malformed point.
+    InvalidProof = 2,
+    /// Instruction data longer than the proof and its public inputs: bytes the
+    /// proof says nothing about.
+    TrailingBytes = 3,
+}
+
+impl From<XarkError> for u32 {
+    fn from(e: XarkError) -> u32 {
+        e as u32
+    }
+}
+
+/// A circuit proof that can be checked against its public inputs with the circuit's
+/// embedded verifying key. The generated per-circuit struct (`Sod2Proof`) implements
+/// it, so a program can be written generic over `impl Verifiable`, and the trait can
+/// grow without changing call sites. `no_std`: no `String`, no `Vec`, no `alloc`.
+pub trait Verifiable {
+    /// Verify with the embedded key. `Ok(())` only if the proof holds for its inputs.
+    fn verify(&self) -> Result<(), XarkError>;
+}

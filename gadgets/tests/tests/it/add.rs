@@ -339,7 +339,7 @@ fn a_project_keeps_what_isnt_xarks() {
 
 /// `xark init --circuit` names the first circuit apart from the project, and a
 /// circuit with an underscore gets a program depending on the crate `xark export`
-/// names (`shielded_transact` → `shielded-transact-verifier`).
+/// names (`shielded_transact` → `shielded-transact-client`).
 #[test]
 fn names_follow_the_crates_xark_makes() {
     let tmp = tempdir();
@@ -382,14 +382,14 @@ fn names_follow_the_crates_xark_makes() {
     let program = std::fs::read_to_string(app.join("programs/transfer/Cargo.toml")).unwrap();
     assert!(
         program.contains(
-            "shielded-transact-verifier = { path = \"../../clients/shielded_transact/rust\" }"
+            "shielded-transact-client = { path = \"../../clients/shielded_transact/rust\" }"
         ),
         "{program}"
     );
     let verifier =
         std::fs::read_to_string(app.join("clients/shielded_transact/rust/Cargo.toml")).unwrap();
     assert!(
-        verifier.contains("name = \"shielded-transact-verifier\""),
+        verifier.contains("name = \"shielded-transact-client\""),
         "{verifier}"
     );
     // After a proof, the next step in a project is `xark build`.

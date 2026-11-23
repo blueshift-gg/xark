@@ -6,12 +6,53 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 
 ## Unreleased
 
+The generated client crate is named `<name>-client` and carries the circuit's proof
+as one type, and with the `prover` feature it proves on a host too.
+
 The prover is faster on every circuit of the gnark comparison (#84), with every
 core and on one thread, and no proof changed: for the same randomness each is
 byte-identical to arkworks', as the tests check. No circuit changed.
 
+### Moving from 0.4.0
+
+- **Nothing to do for an existing crate.** `xark export` over an earlier export
+  keeps that crate's name, so a 0.4.0 project's `<name>-verifier` and the
+  programs depending on it build as before. A new export is named
+  `<name>-client`; `--crate-name` still picks the name.
+- A circuit's name can now end in `-verifier`, and can't end in `-client`.
+
 ### Changes
 
+- A new client crate is `<name>-client` (it was `<name>-verifier`), and `xark add
+  program` depends on the client crate by the name it has.
+- The client crate has a `<Name>Proof` struct: the 256-byte proof and the public
+  inputs by name, `no_std`. It implements `xark_verifier::Verifiable`, whose
+  `verify()` returns `Result<(), XarkError>`. When every public input is a byte
+  array, `<Name>Proof::try_from(data)` parses `proof || public inputs` from
+  instruction data, and refuses data that is short (`Truncated`) or long
+  (`TrailingBytes`). A circuit with a public input named `proof` gets no
+  `<Name>Proof`.
+- `xark_verifier::XarkError`, `#[repr(u32)]` with `u32::from` for a program's
+  `ProgramError::Custom` code.
+- The client crate's `prover` feature adds `prover::Prover`, which proves from the
+  circuit's build directory on a host: `prove_fields` takes `(name, decimal)`
+  pairs and `prove_json` a JSON object of them (plain field values only, not yet
+  structs). The default build is the on-chain verifier and doesn't pull it in.
+- The client crate depends on `xark-verifier = "<version>"`, a semver-compatible
+  requirement, instead of an exact `"=<version>"`, so it takes the verifier's
+  patch releases.
+- `#[circuit]` emits its wasm entry on every build, with the wasm-only
+  attributes applied by `cfg_attr`, so rust-analyzer no longer greys out the
+  circuit function as inactive code. The circuit build is the same.
+- A circuit crate can depend on another circuit crate, to reuse its `#[input]`
+  types and their methods (an `Identity` and its `commitment()`): only the crate
+  `xark` builds exports its `#[circuit]`, and a dependency's is an ordinary
+  function. It failed to link before (`duplicate symbol: __xark_main`), so a
+  circuit crate meant as a library had to put its `#[circuit]` behind a feature.
+  `examples/zkyc_nationality` proves a nationality against `examples/zkyc`'s
+  identity commitment, and no circuit changed. See
+  [docs/inputs.md](docs/inputs.md#reusing-types-from-another-circuit). Two
+  `#[circuit]`s in one crate are still an error.
 - A proof is no longer verified against its key before it is returned: its
   soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
   --verify`, `{ verify: true }` in the wasm prover's options (`prove` takes

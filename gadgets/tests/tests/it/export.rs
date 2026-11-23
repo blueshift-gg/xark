@@ -142,6 +142,16 @@ fn a_proof_is_optional() {
     let proof = out.join("proof.bin");
     let (ok, _, err) = export(&["--proof", proof.to_str().unwrap()]);
     assert!(!ok && err.contains("doesn't verify"), "{err}");
+
+    // Exported again without a name, the crate keeps the one it has, so a program
+    // depending on it (a 0.4.0 `<name>-verifier`) still builds.
+    let (ok, _, err) = run(&["export", out_s, "--out", verifier.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    let manifest = std::fs::read_to_string(verifier.join("Cargo.toml")).unwrap();
+    assert!(
+        manifest.contains("name = \"proofless-verifier\""),
+        "{manifest}"
+    );
 }
 
 /// The exported crate's `PublicInputs` packs every kind of input as `#[input]`
@@ -193,6 +203,14 @@ fn typed_public_inputs_match_the_proof() {
     let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
     assert!(lib.contains("pub struct PublicInputs {"), "{lib}");
     assert!(lib.contains("    pub to: [u8; 32],"), "{lib}");
+    // The proof and its inputs as one type, named after the circuit; with inputs
+    // that aren't all byte arrays, it has no parser from instruction data.
+    assert!(lib.contains("pub struct KindsProof {"), "{lib}");
+    assert!(
+        lib.contains("impl xark_verifier::Verifiable for KindsProof"),
+        "{lib}"
+    );
+    assert!(!lib.contains("TryFrom<&[u8]> for KindsProof"), "{lib}");
     let log = cargo_test(&verifier);
     assert!(log.contains("2 passed"), "{log}");
 }

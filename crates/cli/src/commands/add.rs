@@ -229,8 +229,11 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
             .context("reading the circuit's schema")?,
     )?;
     let circuit_fn = schema["circuit"].as_str().unwrap_or(circuit).to_string();
-    // As `xark export` names it (`shielded_transact` → `shielded-transact-verifier`).
-    let verifier = super::export::sanitize_crate_name(&format!("{circuit}-verifier"));
+    // As `xark export` named it: `shielded_transact` → `shielded-transact-client`, or
+    // the `-verifier` a 0.4.0 project's crate keeps.
+    let verifier =
+        crate::xark_project::read_pkg_name(&root.join("clients").join(circuit).join("rust"))
+            .unwrap_or_else(|| super::export::client_crate_name(circuit));
     let pascal = super::client::ts::pascal(&circuit_fn);
     let error = format!(
         "{}Error",
@@ -296,24 +299,21 @@ fn add_program(root: &Path, name: &str, circuit: &str) -> Result<()> {
 
 /// A circuit's name: a crate name (one path component), and not one the crates
 /// xark adds beside it could clash with in the workspace (`<name>-program`,
-/// `<name>-verifier`).
+/// `<name>-client`).
 pub fn check_circuit_name(root: &Path, name: &str) -> Result<()> {
     crate::cli::check_crate_name(name)
         .map_err(|why| anyhow::anyhow!("can't name a circuit `{name}`: {why}"))?;
-    for suffix in ["-program", "_program", "-verifier", "_verifier"] {
+    for suffix in ["-program", "_program", "-client", "_client"] {
         if name.ends_with(suffix) {
             bail!(
                 "can't name a circuit `{name}`: `xark add` names its program `<name>-program` \
-                 and its verifier crate `<name>-verifier`, so a circuit's name can't end in \
+                 and its client crate `<name>-client`, so a circuit's name can't end in \
                  `{suffix}`"
             );
         }
     }
     let names = package_names(root);
-    for taken in [
-        name.to_string(),
-        super::export::sanitize_crate_name(&format!("{name}-verifier")),
-    ] {
+    for taken in [name.to_string(), super::export::client_crate_name(name)] {
         if names.contains(&taken) {
             bail!("the workspace already has a crate `{taken}`: pick another name");
         }
