@@ -4,16 +4,20 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
-## Unreleased
+## 0.5.0
 
 The generated client crate is named `<name>-client` and carries the circuit's proof
-as one type, and with the `prover` feature it proves on a host too.
+as one type, and with the `prover` feature it proves on a host too. A circuit crate
+can depend on another for its input types. No circuit changed: keys made with 0.4
+still verify (its digests are the same; `zkyc_nationality` is a new example).
 
 The prover is faster on every circuit of the gnark comparison (#84), with every
 core and on one thread, and no proof changed: for the same randomness each is
 byte-identical to arkworks', as the tests check. No circuit changed.
 
 ### Moving from 0.4.0
+
+The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating-to-0.5.md).
 
 - **Nothing to do for an existing crate.** `xark export` over an earlier export
   keeps that crate's name, so a 0.4.0 project's `<name>-verifier` and the
