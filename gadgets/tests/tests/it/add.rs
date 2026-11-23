@@ -49,9 +49,10 @@ fn add_a_circuit_then_its_program() {
         .unwrap();
     let mut manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();
     manifest += &format!(
-        "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\n",
+        "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\nxark-prover = {{ path = \"{}\" }}\n",
         root.join("crates/lang").display(),
-        root.join("crates/verifier").display()
+        root.join("crates/verifier").display(),
+        root.join("crates/prover").display()
     );
     std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
 
@@ -250,9 +251,10 @@ fn a_project_keeps_what_isnt_xarks() {
             r#"members = ["circuits/*", "shared"] # and ours"#,
         )
         + &format!(
-            "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\n",
+            "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\nxark-prover = {{ path = \"{}\" }}\n",
             root.join("crates/lang").display(),
-            root.join("crates/verifier").display()
+            root.join("crates/verifier").display(),
+            root.join("crates/prover").display()
         );
     std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
     let (ok, out) = xark(&["add", "circuit", "second"]);
@@ -354,9 +356,10 @@ fn names_follow_the_crates_xark_makes() {
         .unwrap();
     let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap()
         + &format!(
-            "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\n",
+            "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\nxark-prover = {{ path = \"{}\" }}\n",
             root.join("crates/lang").display(),
-            root.join("crates/verifier").display()
+            root.join("crates/verifier").display(),
+            root.join("crates/prover").display()
         );
     std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
     let xark = |args: &[&str]| {

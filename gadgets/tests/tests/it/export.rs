@@ -291,8 +291,9 @@ fn cargo_test(verifier: &Path) -> String {
     let manifest = verifier.join("Cargo.toml");
     let mut toml = std::fs::read_to_string(&manifest).unwrap();
     toml += &format!(
-        "\n[patch.crates-io]\nxark-verifier = {{ path = \"{}\" }}\n",
-        root.join("crates/verifier").display()
+        "\n[patch.crates-io]\nxark-verifier = {{ path = \"{}\" }}\nxark-prover = {{ path = \"{}\" }}\n",
+        root.join("crates/verifier").display(),
+        root.join("crates/prover").display()
     );
     std::fs::write(&manifest, toml).unwrap();
     let o = std::process::Command::new("cargo")
