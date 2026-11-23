@@ -316,36 +316,88 @@ fn main() {
         return;
     }
     if mode == "warm" {
-        // Key already resident (prove-many server): prove time only, both provers.
+        // Key already resident (prove-many server): prove time only, both provers,
+        // a line a proof: `warm <xbc> <pk> <inputs> [proofs, 3 by default]`.
+        let runs: u64 = args
+            .get(5)
+            .map_or(3, |n| n.parse().expect("a number of proofs"));
         let assign = solve(&xbc, &args[4]);
         let pk = xark_backend::Groth16Keys::read_proving_key(&pk_path).unwrap();
         let circ = XarkCircuit::for_proving_preminimized(reduced(&xbc), assign.clone());
         let src = BytecodeSource::new(&xbc).unwrap();
         let z = src.layout().assignment_from_map(&assign);
         let ark_pk: ark_groth16::ProvingKey<Bn254> = convert(&pk);
-        for i in 0..3 {
+        // Each prover's proofs back to back, as a prove-many server makes them
+        // (and as gnark's benchmark times its own), not one interleaved with the
+        // other's: a millisecond proof right after an arkworks one measures the
+        // arkworks proof's cache and pool aftermath too.
+        let ark: Vec<f64> = (0..runs)
+            .map(|i| {
+                let t = Instant::now();
+                Groth16::<Bn254>::prove(
+                    &ark_pk,
+                    ArkCircuit::of(&circ),
+                    &mut ChaCha20Rng::seed_from_u64(i),
+                )
+                .unwrap();
+                t.elapsed().as_secs_f64()
+            })
+            .collect();
+        let ours: Vec<f64> = (0..runs)
+            .map(|i| {
+                let t = Instant::now();
+                xark_groth16::prove(
+                    &src,
+                    &z,
+                    &mut xark_groth16::InMemoryPk::new(&pk),
+                    &mut ChaCha20Rng::seed_from_u64(i),
+                    &ProverConfig::default(),
+                )
+                .unwrap();
+                t.elapsed().as_secs_f64()
+            })
+            .collect();
+        for (ark, ours) in ark.iter().zip(&ours) {
+            println!("warm prove: arkworks {ark:.6}s  streaming {ours:.6}s");
+        }
+        return;
+    }
+    if mode == "phases" {
+        // `phases <xbc> <pk> <inputs> [proofs]`: the streaming prover alone, key
+        // resident, a phase breakdown a proof (NO_CHECK=1 skips the self-check).
+        let runs: u64 = args.get(5).map_or(5, |n| n.parse().unwrap());
+        let assign = solve(&xbc, &args[4]);
+        let pk = xark_backend::Groth16Keys::read_proving_key(&pk_path).unwrap();
+        let src = BytecodeSource::new(&xbc).unwrap();
+        let z = src.layout().assignment_from_map(&assign);
+        let cfg = ProverConfig {
+            self_check: std::env::var("NO_CHECK").is_err(),
+            ..ProverConfig::default()
+        };
+        let mut totals = Vec::new();
+        for i in 0..runs {
+            let mut rng = ChaCha20Rng::seed_from_u64(i);
+            use ark_ff::UniformRand;
+            let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+            let mut ph = Phases::new();
             let t = Instant::now();
-            Groth16::<Bn254>::prove(
-                &ark_pk,
-                ArkCircuit::of(&circ),
-                &mut ChaCha20Rng::seed_from_u64(i),
-            )
-            .unwrap();
-            let ark = t.elapsed().as_secs_f64();
-            let t = Instant::now();
-            xark_groth16::prove(
+            xark_groth16::prove_with_randomness(
                 &src,
                 &z,
                 &mut xark_groth16::InMemoryPk::new(&pk),
-                &mut ChaCha20Rng::seed_from_u64(i),
-                &ProverConfig::default(),
+                r,
+                s,
+                &cfg,
+                &mut ph,
             )
             .unwrap();
-            println!(
-                "warm prove: arkworks {ark:.2}s  streaming {:.2}s",
-                t.elapsed().as_secs_f64()
-            );
+            totals.push(t.elapsed().as_secs_f64() * 1e3);
+            if i + 1 == runs {
+                ph.print("phases (last proof)");
+            }
         }
+        totals.sort_by(f64::total_cmp);
+        println!("median_ms={:.2}", totals[totals.len() / 2]);
         return;
     }
     if mode == "proof-hex" {

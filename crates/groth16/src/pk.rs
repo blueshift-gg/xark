@@ -196,6 +196,11 @@ pub trait PkSource {
     ) -> Result<bool, PkError> {
         Ok(false)
     }
+    /// The whole key, when it is already in memory: the prover then runs its
+    /// MSMs side by side rather than in the key's order.
+    fn resident(&self) -> Option<&ProvingKey<Bn254>> {
+        None
+    }
 }
 
 /// Any of the five point vectors (G1 except [`KeyVector::BG2`]).
@@ -259,6 +264,9 @@ impl<'a> InMemoryPk<'a> {
 impl PkSource for InMemoryPk<'_> {
     fn header(&self) -> &PkHeader {
         &self.header
+    }
+    fn resident(&self) -> Option<&ProvingKey<Bn254>> {
+        Some(self.pk)
     }
     fn stream_g1(
         &mut self,

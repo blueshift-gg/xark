@@ -320,8 +320,14 @@ fn proof_is_byte_identical_to_arkworks_and_verifies() {
 
         let src = ProgramSource::new(&prog);
         let z = src.layout().assignment_from_map(&assign);
+        // A resident key's small circuit takes three merged MSMs by default;
+        // `merge_below: 0` keeps the five.
         let cfgs = [
             ProverConfig::default(),
+            ProverConfig {
+                merge_below: 0,
+                ..ProverConfig::default()
+            },
             ProverConfig {
                 rows_per_window: 3,
                 msm_chunk: 5,
@@ -332,6 +338,7 @@ fn proof_is_byte_identical_to_arkworks_and_verifies() {
                 self_check: true,
                 spill_dir: None,
                 domain: None,
+                merge_below: 0,
             },
         ];
         for cfg in &cfgs {
