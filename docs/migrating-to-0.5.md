@@ -6,15 +6,23 @@ its `prover` feature proves on a host. A circuit crate can also depend on anothe
 one for its input types. **No circuit changed**: every digest is the same, so keys
 made with 0.4 still verify, and a deployed program keeps working.
 
-**Nothing has to change.** A project from 0.4.0 builds under 0.5 as it is: `xark
-export` over an earlier export keeps that crate's name, so `<name>-verifier` and
-the programs depending on it stay as they are. The rest of this guide is what you
-can take up, and the one name `xark add` now refuses.
+**Your code doesn't have to change.** Update the versions as below, and a project
+from 0.4.0 builds under 0.5: `xark export` over an earlier export keeps that
+crate's name, so `<name>-verifier` and the programs depending on it stay as they
+are. The rest of this guide is what you can take up, and the one name `xark add`
+now refuses.
 
 ## Update xark
 
 ```sh
 cargo install xark-cli --version 0.5.0 --locked
+```
+
+```toml
+# xark.toml, at a project's root: the release it's made with (until it says 0.5,
+# every command warns that this xark is another release)
+[project]
+xark = "0.5"
 ```
 
 ```toml
