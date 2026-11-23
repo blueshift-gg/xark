@@ -299,7 +299,7 @@ impl WasmLibs {
                 {
                     externs
                         .entry(name.to_owned())
-                        .or_insert_with(|| file.to_path_buf());
+                        .or_insert_with(|| stable_rlib(file));
                 }
             }
         }
@@ -316,7 +316,40 @@ impl WasmLibs {
             library_dirs,
         }
     }
+}
 
+/// The `deps/lib<name>-<hash>.rlib` that `rlib` (cargo's uplifted
+/// `release/lib<name>.rlib`) is a copy of, or `rlib` when there's none. Every
+/// `cargo build`, a fresh one too, removes and writes the uplifted file again, so
+/// with nextest's test processes each building the libraries, one process's build
+/// could remove it while another linked against it (`cannot open libxark.rlib`).
+/// The hashed file is written once, for that exact build.
+fn stable_rlib(rlib: &Path) -> PathBuf {
+    let (Some(dir), Some(stem)) = (rlib.parent(), rlib.file_stem().and_then(|s| s.to_str())) else {
+        return rlib.to_path_buf();
+    };
+    let Ok(bytes) = std::fs::read(rlib) else {
+        return rlib.to_path_buf();
+    };
+    let prefix = format!("{stem}-");
+    std::fs::read_dir(dir.join("deps"))
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension().is_some_and(|e| e == "rlib")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&prefix))
+        })
+        .find(|p| {
+            std::fs::metadata(p).is_ok_and(|m| m.len() == bytes.len() as u64)
+                && std::fs::read(p).is_ok_and(|b| b == bytes)
+        })
+        .unwrap_or_else(|| rlib.to_path_buf())
+}
+
+impl WasmLibs {
     /// Add these libraries to a `rustc` command: each rlib as an `--extern`,
     /// and every artifact directory as a dependency search path.
     fn link(&self, cmd: &mut Command) {
