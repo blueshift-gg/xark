@@ -11,8 +11,8 @@ buffers go up to 32 limbs of 86 bits, room for RSA-2048).
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-bignum = "0.4"
+xark = "0.5"
+xark-bignum = "0.5"
 ```
 
 ## Use

@@ -8,8 +8,8 @@ matches the `blake2` crate's `Blake2s256`.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-blake2s = "0.4"
+xark = "0.5"
+xark-blake2s = "0.5"
 ```
 
 ## Use

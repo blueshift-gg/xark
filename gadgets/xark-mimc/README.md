@@ -11,8 +11,8 @@ Noir system already using MiMC.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-mimc = "0.4"
+xark = "0.5"
+xark-mimc = "0.5"
 ```
 
 ## Use

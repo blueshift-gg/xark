@@ -8,8 +8,8 @@ matches the `blake3` crate's `hash`.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-blake3 = "0.4"
+xark = "0.5"
+xark-blake3 = "0.5"
 ```
 
 ## Use

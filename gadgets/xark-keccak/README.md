@@ -8,8 +8,8 @@ facts about Ethereum-style hashes. Its output matches `sha3::Keccak256`.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-keccak = "0.4"
+xark = "0.5"
+xark-keccak = "0.5"
 ```
 
 ## Use

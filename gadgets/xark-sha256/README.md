@@ -9,8 +9,8 @@ SHA-256 digest, or to hash bytes inside a larger circuit. Its output matches the
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-sha256 = "0.4"
+xark = "0.5"
+xark-sha256 = "0.5"
 ```
 
 ## Use

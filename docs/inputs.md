@@ -112,7 +112,7 @@ depend on its crate and use its `#[input]` types and methods as they are:
 
 ```toml
 [dependencies]
-xark = "0.4"
+xark = "0.5"
 zkyc = { path = "../zkyc" }
 ```
 

@@ -26,7 +26,7 @@ pub fn root_at(arg: Option<&str>) -> Option<PathBuf> {
 }
 
 /// Warn when this `xark` is another release than the project's (`xark.toml`'s
-/// `xark = "0.4"`): a circuit can change between releases (its digest, and so its
+/// `xark = "0.5"`): a circuit can change between releases (its digest, and so its
 /// keys and verifier), so the project builds with the one it records.
 pub fn check_release(root: &Path) {
     let Ok(text) = std::fs::read_to_string(root.join(PROJECT_FILE)) else {
