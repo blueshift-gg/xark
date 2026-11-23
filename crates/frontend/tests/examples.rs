@@ -144,3 +144,34 @@ fn two_circuits_in_one_crate_are_explained() {
         );
     }
 }
+
+/// A circuit crate is also a library: `zkyc_nationality` depends on `zkyc` for its
+/// `Identity` and `commitment()`, and only the crate being built exports its
+/// `#[circuit]` (two would clash at link time). Built in one target directory, in
+/// turn as the entry and as the dependency, as CI's shared examples cache does:
+/// `zkyc`'s circuit is the same before and after, so neither build reuses the
+/// other's artifact.
+#[test]
+fn a_circuit_crate_is_a_library() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("library_circuits");
+    let build = |name: &str| {
+        let dir = root.join(name).canonicalize().unwrap();
+        let wasm = xark_frontend::build_crate(&dir, &target).unwrap_or_else(|e| panic!("{e}"));
+        // One entry's name, not two run together.
+        assert_eq!(
+            xark_frontend::custom_section(&wasm, "xark.entry"),
+            name.as_bytes(),
+            "{name}"
+        );
+        let l =
+            xark_frontend::lower_module(&wasm, xark_ir::FieldSpec::named("bn254"), false, false)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(l.entry.as_deref(), Some(name));
+        l.output.xbc
+    };
+    let zkyc = build("zkyc");
+    let nationality = build("zkyc_nationality");
+    assert_eq!(build("zkyc"), zkyc, "zkyc built after its dependent");
+    assert_eq!(build("zkyc_nationality"), nationality);
+}

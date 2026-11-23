@@ -12,7 +12,7 @@ set_option linter.unusedSimpArgs false
 namespace Xark.Templates.ToBits17.Consts
 open Xark.Template
 
-/-- LC plugs of calls in zkyc. -/
+/-- LC plugs of calls in zkyc, zkyc_nationality. -/
 theorem soundness_free (σ : TVar → F) (h : template.Sat σ) :
     Spec (template.ins σ) (template.outs σ) :=
   soundness σ h

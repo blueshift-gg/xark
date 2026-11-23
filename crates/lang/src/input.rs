@@ -1427,6 +1427,28 @@ impl<const N: usize> Binder<N> {
     }
 }
 
+/// Host stub of [`Binder`]. The `#[circuit]` macro emits the `__xark_main` entry
+/// *unconditionally* (so rust-analyzer doesn't dim the circuit fn as inactive code),
+/// applying its wasm-only attributes via `cfg_attr`. Off the circuit build that entry is
+/// dead, unexported code, but it still has to *type-check* — which needs a `Binder` here.
+/// Its methods are never reached (the entry is only ever *called* in the wasm circuit
+/// build, where the real `Binder` above is used instead), so they are `unreachable!()`.
+#[cfg(not(all(xark, target_arch = "wasm32")))]
+#[doc(hidden)]
+pub struct Binder<const N: usize>;
+
+#[cfg(not(all(xark, target_arch = "wasm32")))]
+impl<const N: usize> Binder<N> {
+    pub fn new(_circuit: &str, _params: &[Param; N]) -> Binder<N> {
+        unreachable!("xark::input::Binder is a host stub; the entry runs only in the wasm build")
+    }
+    pub fn bind<const I: usize, T: Input>(&mut self, _public: bool) -> T {
+        unreachable!()
+    }
+    pub fn inputs_done(&self) {}
+    pub fn finish(self, _params: &[Param; N]) {}
+}
+
 /// `value`'s `(leaf name, value)` pairs under `name`, for the prover.
 #[cfg(not(xark))]
 #[doc(hidden)]
