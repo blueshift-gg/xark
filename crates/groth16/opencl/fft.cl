@@ -26,6 +26,13 @@ __kernel void fr_scale(__global uint *buf, __global const uint *factors, const u
   store_fr(buf, i, fr_mul(load_fr(buf, i), load_fr(factors, i)));
 }
 
+// `buf[i] *= factor[0]`: the inverse DFT's 1/n, where no coset factor rides along.
+__kernel void fr_scale_one(__global uint *buf, __global const uint *factor, const uint count) {
+  const uint i = get_global_id(0);
+  if (i >= count) return;
+  store_fr(buf, i, fr_mul(load_fr(buf, i), load_fr(factor, 0)));
+}
+
 // One Stockham pass; `p` doubles each pass from 1 to n/2 (= halfn), `tw[j]` = ω^j.
 __kernel void fr_fft_radix2(__global const uint *x, __global uint *y,
                             __global const uint *tw, const uint p, const uint halfn) {

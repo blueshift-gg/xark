@@ -122,6 +122,12 @@ fn coset_transforms_match_the_cpu_domain() {
         assert!(got == expected, "to_coset log {log}");
 
         let mut expected = input.clone();
+        dom.ifft_to_t(&mut expected);
+        let mut got = input.clone();
+        assert!(gpu.ifft_to_t(&dom, &mut got), "log {log}");
+        assert!(got == expected, "ifft_to_t log {log}");
+
+        let mut expected = input.clone();
         dom.from_coset_to_t(&mut expected, Fr::GENERATOR.inverse().unwrap());
         let mut got = input;
         assert!(gpu.from_coset_to_t(&dom, &mut got), "log {log}");

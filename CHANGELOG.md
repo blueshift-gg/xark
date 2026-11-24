@@ -86,9 +86,10 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   line says "Proof produced", with " and verified" when it was.
 - The quotient takes six transforms of the domain instead of seven: `C` takes
   an inverse FFT where it took a coset FFT and its inverse, since
-  `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. On domains up to 2^18 points `C` is
+  `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. On domains up to 2^20 points `C` is
   `A∘B` (the rows hold for a witness that proves), without a second pass over
-  the rows.
+  the rows. A device that offers the inverse DFT (`Accelerator::ifft_to_t`,
+  which OpenCL does) gets the six transforms too.
 - The FFT's butterfly adds and subtracts on the Montgomery limbs: 12.0 ns where
   it was 17.6 (2^20 points on one thread: 161 ms, was 220). The row FFTs of a
   domain under 2^17 points ran as one task; they now spread over the pool. The

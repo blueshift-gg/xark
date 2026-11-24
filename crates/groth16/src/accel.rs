@@ -32,6 +32,13 @@ pub trait Accelerator {
     fn from_coset_to_t(&mut self, _dom: &Domain, _buf: &mut [Fr]) -> bool {
         false
     }
+    /// In place: evaluations on the domain → coefficients in T-layout (the
+    /// inverse DFT, `1/N` included). A device that takes this saves the
+    /// quotient a transform: `C` needs one inverse DFT instead of a coset DFT
+    /// and back.
+    fn ifft_to_t(&mut self, _dom: &Domain, _buf: &mut [Fr]) -> bool {
+        false
+    }
     /// A proof over a domain of `domain_size` points is coming; called before the
     /// witness is solved, so set-up that doesn't need it (tables, warming the
     /// device) can overlap the solve. A hint: the default ignores it.

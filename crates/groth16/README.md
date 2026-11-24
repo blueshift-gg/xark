@@ -13,7 +13,7 @@ never materializes the constraint system or the proving key.
 | `decode` | Compressed point decoding, the same points as arkworks' (tested bit-for-bit) with cheaper square roots: a windowed exponentiation, and one exponentiation instead of a Legendre symbol, root and inversion inside the `Fq2` root. 1.24× (G1) and 1.74× (G2) faster per point; with a compressed key this is most of a proof's work. |
 | `pk` | Chunked proving-key readers: `SerializedPk` (a `pk.bin` file, or bytes, decoded one chunk at a time) and `InMemoryPk`. |
 | `fft` | Blocked four-step FFT with tiled column gathers and a tiled transpose. Transforms alternate natural ↔ "T-layout", so the quotient step needs no standalone transpose: the only one is fused into the final `h → integer` conversion. Domains of `2^k`, `3·2^k` and `9·2^k` points (radix-3 layers in the column FFTs). |
-| `qap` | `h = (A·B − C)/Z`, bit-identical to `LibsnarkReduction::witness_map`, in six transforms: `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. Rows are streamed twice (A, B, then C), so the peak is two domain vectors; up to 2^18 points, once, with `C = A∘B` as a third. |
+| `qap` | `h = (A·B − C)/Z`, bit-identical to `LibsnarkReduction::witness_map`, in six transforms: `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. Rows are streamed twice (A, B, then C), so the peak is two domain vectors; up to 2^20 points, once, with `C = A∘B` as a third. |
 | `accel` | Hooks + pure kernels to offload FFT sweeps and MSM chunks (used by xark-wasm's Web-Worker pool). |
 
 ```rust

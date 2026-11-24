@@ -204,7 +204,7 @@ impl Accelerator for OpenClMsm {
         gpu_fft_enabled()
             && self
                 .runtime()
-                .and_then(|runtime| runtime.coset_transform(dom, buf, true))
+                .and_then(|runtime| runtime.coset_transform(dom, buf, fft::Transform::ToCoset))
                 .is_some()
     }
 
@@ -212,7 +212,15 @@ impl Accelerator for OpenClMsm {
         gpu_fft_enabled()
             && self
                 .runtime()
-                .and_then(|runtime| runtime.coset_transform(dom, buf, false))
+                .and_then(|runtime| runtime.coset_transform(dom, buf, fft::Transform::FromCosetToT))
+                .is_some()
+    }
+
+    fn ifft_to_t(&mut self, dom: &xark_groth16::Domain, buf: &mut [Fr]) -> bool {
+        gpu_fft_enabled()
+            && self
+                .runtime()
+                .and_then(|runtime| runtime.coset_transform(dom, buf, fft::Transform::IfftToT))
                 .is_some()
     }
 
@@ -230,8 +238,9 @@ impl Accelerator for OpenClMsm {
             }
             if let Some(dom) = xark_groth16::Domain::new(fft::MIN_GPU_FFT, Default::default()) {
                 let mut buf = vec![Fr::from(1u64); dom.n];
-                runtime.coset_transform(&dom, &mut buf, true);
-                runtime.coset_transform(&dom, &mut buf, false);
+                runtime.coset_transform(&dom, &mut buf, fft::Transform::ToCoset);
+                runtime.coset_transform(&dom, &mut buf, fft::Transform::FromCosetToT);
+                runtime.coset_transform(&dom, &mut buf, fft::Transform::IfftToT);
             }
         }
         let count = BUCKET_THRESHOLD * 2;

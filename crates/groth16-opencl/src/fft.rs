@@ -31,17 +31,32 @@ pub(crate) struct Tables {
     /// (1/n)·g^i and (1/n)·g^-i for i < n.
     to_coset: Buffer<u64>,
     from_coset: Buffer<u64>,
+    /// 1/n, for the plain inverse DFT.
+    n_inv: Buffer<u64>,
+}
+
+/// The three transforms the quotient asks of the device.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Transform {
+    /// Evaluations → coset evaluations, natural order.
+    ToCoset,
+    /// Coset evaluations → coefficients in the domain's T-layout.
+    FromCosetToT,
+    /// Evaluations → coefficients in the domain's T-layout.
+    IfftToT,
 }
 
 impl Runtime {
-    /// `to_coset`: evaluations → coset evaluations, natural order.
-    /// Otherwise: coset evaluations → coefficients in the domain's T-layout.
+    /// `buf` through `transform`: an inverse DFT, a scaling (by the coset's
+    /// factors with the `1/n` folded in, or `1/n` alone), then a forward DFT
+    /// onto the coset or a transpose into T-layout.
     pub(crate) fn coset_transform(
         &mut self,
         dom: &Domain,
         buf: &mut [Fr],
-        to_coset: bool,
+        transform: Transform,
     ) -> Option<()> {
+        let to_coset = transform == Transform::ToCoset;
         let n = dom.n;
         if !n.is_power_of_two() || n < MIN_GPU_FFT || buf.len() != n || dom.n1 * dom.n2 != n {
             return None;
@@ -79,12 +94,12 @@ impl Runtime {
         mark("upload", &mut lap);
         let mut current = self.passes(&buffers, 0, &tables.inverse, n)?;
         mark("inverse passes", &mut lap);
-        let factors = if to_coset {
-            &tables.to_coset
-        } else {
-            &tables.from_coset
+        let (factors, scale) = match transform {
+            Transform::ToCoset => (&tables.to_coset, "fr_scale"),
+            Transform::FromCosetToT => (&tables.from_coset, "fr_scale"),
+            Transform::IfftToT => (&tables.n_inv, "fr_scale_one"),
         };
-        let kernel = Kernel::create(&self.program, "fr_scale").ok()?;
+        let kernel = Kernel::create(&self.program, scale).ok()?;
         // SAFETY: argument order matches the kernel; one item per element.
         unsafe {
             ExecuteKernel::new(&kernel)
@@ -125,10 +140,10 @@ impl Runtime {
         if profile {
             eprintln!(
                 "  opencl {}: n=2^{} {:.1} ms",
-                if to_coset {
-                    "to_coset"
-                } else {
-                    "from_coset_to_t"
+                match transform {
+                    Transform::ToCoset => "to_coset",
+                    Transform::FromCosetToT => "from_coset_to_t",
+                    Transform::IfftToT => "ifft_to_t",
                 },
                 n.trailing_zeros(),
                 started.elapsed().as_secs_f64() * 1e3
@@ -148,6 +163,7 @@ impl Runtime {
             inverse: table(omega.inverse()?, Fr::one(), n / 2)?,
             to_coset: table(g, n_inv, n)?,
             from_coset: table(g.inverse()?, n_inv, n)?,
+            n_inv: table(Fr::one(), n_inv, 1)?,
         })
     }
 
