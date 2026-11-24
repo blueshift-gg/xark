@@ -71,6 +71,12 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   proof bytes. `Cpu` is xark's prover (key streamed or resident), and the tests
   and `bench_prove warm` run arkworks through it too; a test holds them all to
   arkworks' proof.
+- `xark-groth16`'s public API grows, and nothing that compiled stops compiling:
+  - New: `Prover`, `Cpu`, `Accelerated` and `prove_with_rng` (above).
+  - `Accelerator` gains `prepare`, `wants_proof`, `wants_msm_for` and
+    `ifft_to_t`, and `PkSource` gains `fork`; each has a default, so an
+    existing implementation is unchanged.
+  - `prove`, `prove_with_randomness` and `prove_accelerated` are as they were.
 - `xark prove --prover opencl` (an `xark` built with `--features opencl`) puts
   the quotient and the H MSM on an OpenCL GPU while the CPU takes A, B and L
   (`xark_groth16::Accelerated`, with `xark-groth16-opencl` as its device; from
@@ -94,7 +100,9 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   an inverse FFT where it took a coset FFT and its inverse, since
   `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. On domains up to 2^20 points `C` is
   `A∘B` (the rows hold for a witness that proves), without a second pass over
-  the rows. A device that offers the inverse DFT (`Accelerator::ifft_to_t`,
+  the rows; past 2^18 points that holds one more domain vector (16 MiB at 2^19,
+  32 MiB at 2^20: keccak256 of 1024 bytes peaked at 820 MB, was 797), unless
+  `ProverConfig::spill_dir` is set. A device that offers the inverse DFT (`Accelerator::ifft_to_t`,
   which OpenCL does) gets the six transforms too.
 - The FFT's butterfly adds and subtracts on the Montgomery limbs: 12.0 ns where
   it was 17.6 (2^20 points on one thread: 161 ms, was 220). The row FFTs of a

@@ -201,3 +201,12 @@ go: depend on the crate as it is, and its circuit still builds on its own. See [
   requirement, where 0.4 pinned it exactly (`"=0.4.0"`): it takes the verifier's
   patch releases.
 - rust-analyzer no longer greys out a `#[circuit]` function as inactive code.
+- `xark-groth16` gains a prover interface, `Prover`, with `Cpu` (its prover)
+  and `Accelerated` (a device beside the CPU), and `prove_with_rng` to draw
+  `(r, s)` as arkworks does. `prove`, `prove_with_randomness` and
+  `prove_accelerated` are unchanged, and an `Accelerator` or `PkSource` you
+  implemented still compiles: the methods they gained (`prepare`,
+  `wants_proof`, `wants_msm_for`, `ifft_to_t`; `fork`) have defaults.
+- A circuit whose QAP domain has 2^19 or 2^20 points proves faster but holds one
+  more domain vector while it does (16 or 32 MiB), unless it proves with
+  `ProverConfig::spill_dir` (`xark prove --low-memory`).
