@@ -115,7 +115,7 @@ $ npm install && npm test
 ```
 
 Commit everything `xark setup`, `xark build`, `xark add program` and the program
-tools write, the keys in `keys/` and `.github/workflows/programs.yml` included:
+tools write, the keys in `keys/` and `.github/workflows/<name>-program.yml` included:
 the generated clients embed the verifying key, and CI checks they match the
 source (`xark build --check`) while the program workflow runs the native SBF and
 LiteSVM steps.

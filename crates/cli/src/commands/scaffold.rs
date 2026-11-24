@@ -303,15 +303,16 @@ fn pinocchio(request: &ProgramScaffold<'_>) -> Result<()> {
     } else {
         write_new(root, &test_path, &test_text)?;
     }
-    // The program's framework owns its build and tests: give the Pinocchio
-    // program its own workflow, so the project's `ci.yml` stays circuit-only.
-    let workflow = ".github/workflows/programs.yml";
-    if root.join(workflow).is_file() {
+    // The program's framework owns its build and tests: give this program its own
+    // workflow, scoped to it, so programs from another framework are left alone
+    // and the project's `ci.yml` stays circuit-only.
+    let workflow = format!(".github/workflows/{name}-program.yml");
+    if root.join(&workflow).is_file() {
         eprintln!("{} keeping your {workflow}", crate::style::tag());
     } else {
-        let text =
-            template!("github/programs.yml").replace("{{xark_version}}", env!("CARGO_PKG_VERSION"));
-        write_new(root, workflow, &text)?;
+        let text = fill(template!("github/pinocchio-program.yml"))
+            .replace("{{xark_version}}", env!("CARGO_PKG_VERSION"));
+        write_new(root, &workflow, &text)?;
     }
     Ok(())
 }

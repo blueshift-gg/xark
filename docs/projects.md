@@ -57,7 +57,7 @@ claim/
   keys/claim/           # committed: pk.bin, vk.bin, metadata.json, circuit.xbc
   tests/claim.test.ts   # LiteSVM
   .github/workflows/ci.yml   # xark build --check, xark test (circuits)
-  .github/workflows/programs.yml   # optional: cargo build-sbf, cargo test-sbf, npm test
+  .github/workflows/claim-program.yml   # optional: this program's build, SBF and LiteSVM tests
 ```
 
 - **Fixed folders.** `circuits/*`, `programs/*` and `clients/*/rust` are globbed
@@ -78,10 +78,12 @@ claim/
   stale `programs/*` entry. `xark test` tests the circuits only; the program has
   its own commands.
 - **Programs are native.** The Pinocchio scaffold writes a LiteSVM test and an
-  optional `.github/workflows/programs.yml` that runs `cargo build-sbf`, the
-  4 KiB stack check, `cargo test-sbf`, the generated verifier self-tests, and
-  `npm test`. `xark` does not build or test programs. `xark add program` is the
-  incremental path; the init wizard is the normal one.
+  optional `.github/workflows/<name>-program.yml` that runs that one program's
+  `cargo build-sbf` (with the 4 KiB stack check), `cargo test-sbf` and LiteSVM
+  test, scoped by `--manifest-path` so programs from another framework are left
+  alone. The generated verifier self-tests run in `ci.yml`. `xark` does not build
+  or test programs. `xark add program` is the incremental path; the init wizard is
+  the normal one.
 - **Crate names.** A workspace can't hold two packages of one name: the program in
   `programs/claim/` is the crate `claim-program`, the client `claim-client`.
   `xark add program claim` uses the circuit of the same name; `--circuit` picks
@@ -198,9 +200,10 @@ writes the sample's public inputs by name, packs them and verifies the proof.
   programs see ordinary cargo diagnostics.
 
 `xark init --program pinocchio` and `xark add program` scaffold one Pinocchio
-program with a LiteSVM test. `programs.yml` is optional and owned by the
-scaffolder; it installs the framework tools and runs the native program steps.
-The circuit workflow runs `xark build --check` and `xark test` only.
+program with a LiteSVM test. Each program's `.github/workflows/<name>-program.yml`
+is optional and owned by the scaffolder; it installs the framework tools and runs
+that program's native steps. The circuit workflow runs `xark build --check`,
+`xark test` and the verifier self-tests only.
 
 ## Upgrading from 0.4
 
@@ -208,9 +211,9 @@ An existing 0.4 project's old `.github/workflows/ci.yml` calls `xark build --che
 and `xark test`. Those stay circuit-only, so their programs need the native
 program workflow. Remove any `[programs]` metadata; xark ignores it. To move:
 
-- add `.github/workflows/programs.yml` (copy it from a fresh `xark add program`
-  project): it runs `cargo build-sbf`, the stack check, `cargo test-sbf`, the
-  verifier self-tests, and `npm test`;
+- add `.github/workflows/<name>-program.yml` (copy it from a fresh `xark add
+  program` project): it runs that program's `cargo build-sbf`, the stack check,
+  `cargo test-sbf` and LiteSVM test; the verifier self-tests run in `ci.yml`;
 - keys stay committed; `xark build` bootstraps a missing key and rotates a plain
   dev key, while a ceremony key needs `xark ceremony` again;
 - keep `programs/*` in the workspace's `members` and, for bare cargo commands,

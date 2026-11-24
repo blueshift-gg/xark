@@ -1,4 +1,4 @@
-name: programs
+name: {{name}} program (Pinocchio)
 
 on:
   push:
@@ -20,6 +20,9 @@ env:
   # The xark this project is made with (its `xark.toml`).
   XARK_CLI_VERSION: {{xark_version}}
 
+# This workflow is about one program. The workspace may hold programs from other
+# frameworks, whose build and test commands differ: each program has its own
+# workflow, and each step here names this one's manifest.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -50,7 +53,6 @@ jobs:
       # Both binaries build from source, once, then come from this cache.
       - name: Cached tools
         id: tools
-        if: hashFiles('programs/**/Cargo.toml') != ''
         uses: actions/cache@v4
         with:
           path: |
@@ -59,46 +61,31 @@ jobs:
           key: sbf-${{ runner.os }}-${{ env.CARGO_BUILD_SBF_VERSION }}
 
       - name: Install cargo-build-sbf
-        if: steps.tools.outputs.cache-hit != 'true' && hashFiles('programs/**/Cargo.toml') != ''
+        if: steps.tools.outputs.cache-hit != 'true'
         run: cargo install cargo-build-sbf --version "$CARGO_BUILD_SBF_VERSION" --locked
 
       - uses: actions/setup-node@v4
-        if: hashFiles('package.json') != ''
         with:
           node-version: 22
 
       - name: Install the TypeScript tests' packages
-        if: hashFiles('package.json') != ''
         run: npm install
 
-      - name: Build the programs
-        if: hashFiles('programs/**/Cargo.toml') != ''
+      - name: Build the program
         shell: bash
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/cargo-build-sbf.log"
-          cargo build-sbf 2>&1 | tee "$log"
+          cargo build-sbf --manifest-path programs/{{name}}/Cargo.toml 2>&1 | tee "$log"
           if grep -q "overflows the maximum allowed frame space" "$log"; then
             echo "::error::a stack frame is past the SBF limit of 4 KiB (the warning above): the program would overwrite its own stack at run time. Move the big work out of line with #[inline(never)], as the generated verify is."
             exit 1
           fi
 
-      - name: Test the programs
-        if: hashFiles('programs/**/Cargo.toml') != ''
-        run: cargo test-sbf
+      - name: Test the program
+        run: cargo test-sbf --manifest-path programs/{{name}}/Cargo.toml
 
-      # The generated verifier's self-test checks its bundled sample proof.
-      - name: Test the generated verifier crates
-        if: hashFiles('clients/*/rust/Cargo.toml') != ''
-        env:
-          CARGO_PROFILE_RELEASE_LTO: "false"
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-        run: |
-          for crate in clients/*/rust; do
-            [ -f "$crate/Cargo.toml" ] || continue
-            cargo test --release --manifest-path "$crate/Cargo.toml"
-          done
-
-      - name: TypeScript tests
-        if: hashFiles('package.json') != ''
-        run: npm test
+      # Only this program's LiteSVM test: `npm test` alone would run every
+      # program's.
+      - name: TypeScript test
+        run: npm test -- tests/{{name}}.test.ts

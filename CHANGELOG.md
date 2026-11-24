@@ -32,11 +32,12 @@ breaking change. No circuit changed: every digest is the same.
   byte-compares them with `clients/`. It writes nothing under `clients/`, `keys/`
   or the workspace manifest, and does not build programs.
 - `xark add program` remains as the incremental/advanced scaffold: it adds
-  `programs/*` and `default-members`, writes the program test and the optional
-  `programs.yml`, and leaves builds/tests to the framework. It no longer writes
-  `[programs]` metadata.
-- `.github/workflows/ci.yml` is circuit-only: `xark build --check` and `xark test`.
-  `.github/workflows/programs.yml` runs the native program steps.
+  `programs/*` and `default-members`, writes the program test and its optional
+  workflow, `.github/workflows/<name>-program.yml`, and leaves builds/tests to
+  the framework. It no longer writes `[programs]` metadata.
+- `.github/workflows/ci.yml` is circuit-only: `xark build --check`, `xark test`
+  and the verifier self-tests. `.github/workflows/<name>-program.yml` runs that
+  program's native steps, scoped by `--manifest-path`.
 - `@blueshift-gg/xark/testing`'s `program(name, root?)` keeps the v0.4 name
   convention and accepts `{ root, dir, file }` options for another build path. It
   is a test helper, not a sandbox. A manual program uses `vm()` with its `.so` path.
@@ -47,9 +48,10 @@ breaking change. No circuit changed: every digest is the same.
 ### Moving from 0.4
 
 An existing 0.4 project's old `ci.yml` calls `xark build --check` and `xark test`.
-Those remain circuit-only. Add the new `.github/workflows/programs.yml` (copy it
-from a fresh `xark add program` project): it runs `cargo build-sbf`, the stack
-check, `cargo test-sbf`, the verifier self-tests, and `npm test`.
+Those remain circuit-only. Add the new `.github/workflows/<name>-program.yml`
+(copy it from a fresh `xark add program` project): it runs that program's
+`cargo build-sbf`, the stack check, `cargo test-sbf` and LiteSVM test. The
+verifier self-tests run in `ci.yml`.
 
 Remove any `[programs]` metadata from `xark.toml`; xark ignores it. Keys stay
 committed; `xark build` bootstraps a missing key and rotates a plain dev key when
@@ -58,8 +60,8 @@ the circuit changes; ceremony keys need `xark ceremony` again.
 [Upgrading from 0.4](projects.md#upgrading-from-04).
 
 The CLI release containing this change must be pinned in `xark.toml` (and bumped
-in the workspace and npm package): the generated `programs.yml` embeds that
-version.
+in the workspace and npm package): the generated `<name>-program.yml` embeds
+that version.
 
 ## 0.5.0
 

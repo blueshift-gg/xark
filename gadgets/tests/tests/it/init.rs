@@ -153,7 +153,7 @@ fn init_none_scaffolds_no_program() {
         "programs",
         "package.json",
         "tests/plain.test.ts",
-        ".github/workflows/programs.yml",
+        ".github/workflows/plain-program.yml",
     ] {
         assert!(!dir.join(path).exists(), "none scaffolded {path}");
     }

@@ -187,9 +187,12 @@ fn add_a_circuit_then_its_program() {
     // A workspace member, not a workspace of its own.
     let verifier = std::fs::read_to_string(app.join("clients/claim/rust/Cargo.toml")).unwrap();
     assert!(!verifier.contains("[workspace]"), "{verifier}");
-    let workflow = std::fs::read_to_string(app.join(".github/workflows/programs.yml")).unwrap();
+    let workflow =
+        std::fs::read_to_string(app.join(".github/workflows/claim-program.yml")).unwrap();
     assert!(
-        workflow.contains("cargo build-sbf") && !workflow.contains("xark test --programs"),
+        workflow.contains("--manifest-path programs/claim/Cargo.toml")
+            && workflow.contains("tests/claim.test.ts")
+            && !workflow.contains("xark test --programs"),
         "{workflow}"
     );
     let test = std::fs::read_to_string(app.join("tests/claim.test.ts")).unwrap();

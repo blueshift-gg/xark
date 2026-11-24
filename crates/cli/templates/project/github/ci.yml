@@ -46,3 +46,15 @@ jobs:
 
       - name: xark test
         run: xark test
+
+      # The generated verifier's self-test checks its bundled sample proof.
+      - name: Test the generated verifier crates
+        if: hashFiles('clients/*/rust/Cargo.toml') != ''
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: |
+          for crate in clients/*/rust; do
+            [ -f "$crate/Cargo.toml" ] || continue
+            cargo test --release --manifest-path "$crate/Cargo.toml"
+          done
