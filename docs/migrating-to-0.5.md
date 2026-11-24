@@ -166,11 +166,14 @@ let data = proof.to_instruction_data(); // proof || public inputs
 `prove_json` a JSON object of them. Neither encodes a struct or a natural value
 (a date, a string) yet: for those, use `xark prove` or the TypeScript client.
 
-## Prove on a GPU (optional)
+## Prove on a GPU (experimental, optional)
 
 An `xark` built with OpenCL proves large circuits with the quotient and the H
-MSM on the GPU, beside the CPU's MSMs. The same proofs, byte for byte, and the
-same keys:
+MSM on the GPU, beside the CPU's MSMs, with the same keys. It is tested on
+Apple Silicon (and in CI on POCL); other GPUs should work but haven't been run.
+Every proof it makes is verified before it's written, and one that fails
+although your inputs satisfy the circuit is proved again on the CPU, with a
+warning:
 
 ```sh
 cargo install xark-cli --version 0.5.0 --locked --features opencl

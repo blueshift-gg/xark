@@ -15,7 +15,7 @@ The prover is faster on every circuit of the gnark comparison (#84), with every
 core and on one thread: for the same randomness each proof is byte-identical to
 arkworks', as the tests check. It no longer verifies a proof before returning
 it unless asked to (`xark prove --verify`). On a GPU, `xark prove --prover
-opencl` puts the quotient and the H MSM beside the CPU's MSMs (Ed25519: 215 ms
+opencl` (experimental) puts the quotient and the H MSM beside the CPU's MSMs (Ed25519: 215 ms
 instead of 370 on an Apple M3 Max), through `xark_groth16::Prover`, the one
 interface every prover now shares.
 
@@ -79,6 +79,9 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   included; a circuit under a 2^18-point domain stays on the CPU, where the
   GPU's fixed cost would lose. A GPU MSM is variable-time, so it
   needs `--acknowledge-gpu-side-channel-risk`.
+  Experimental: tested on Apple Silicon, and in CI on POCL (OpenCL on a CPU).
+  The device's proof is always verified, and one that fails although the
+  inputs satisfy the circuit is proved again on the CPU, with a warning.
 - A proof is no longer verified against its key before it is returned: its
   soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
   --verify`, `{ verify: true }` in the wasm prover's options (`prove` takes
