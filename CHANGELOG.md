@@ -71,8 +71,8 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
 - `xark prove --prover opencl` (an `xark` built with `--features opencl`) puts
   the quotient and the H MSM on an OpenCL GPU while the CPU takes A, B and L
   (`xark_groth16::Accelerated`, with `xark-groth16-opencl` as its device; from
-  Aryan Putta's #47). On an Apple M3 Max, `xark prove` of Ed25519 takes 287 ms
-  instead of 370 and secp256r1 ECDSA 274 instead of 354, the device's set-up
+  Aryan Putta's #47). On an Apple M3 Max, `xark prove` of Ed25519 takes 243 ms
+  instead of 364 and secp256r1 ECDSA 260 instead of 351, the device's set-up
   included; a circuit under a 2^18-point domain stays on the CPU, where the
   GPU's fixed cost would lose. A GPU MSM is variable-time, so it
   needs `--acknowledge-gpu-side-channel-risk`.

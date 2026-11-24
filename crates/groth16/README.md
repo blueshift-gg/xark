@@ -45,9 +45,9 @@ domain too small to repay its fixed cost (`Accelerator::wants_proof`). The
 OpenCL device is `xark-groth16-opencl` (kept out of the workspace, since it
 links the system's OpenCL library); `xark prove --prover opencl`, in an `xark`
 built with `--features opencl`, proves through it. On an Apple M3 Max, `xark
-prove` of Ed25519 (397k constraints) takes 287 ms instead of 370 and secp256r1
-ECDSA 274 instead of 354, the device's set-up included (about 250 ms, mostly
-beside the witness solve); circuits under a 2^18-point domain stay on the CPU.
+prove` of Ed25519 (397k constraints) takes 243 ms instead of 364 and secp256r1
+ECDSA 260 instead of 351, the device's set-up included (about 80 ms, beside the
+witness solve); circuits under a 2^18-point domain stay on the CPU.
 
 ## GPU MSM security boundary
 
