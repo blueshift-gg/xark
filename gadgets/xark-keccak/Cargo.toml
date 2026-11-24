@@ -5,7 +5,7 @@ keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,3 +19,6 @@ path = "src/lib.rs"
 xark.workspace = true
 xark-bits.workspace = true
 xark-hash.workspace = true
+
+[lints]
+workspace = true
