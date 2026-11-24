@@ -107,7 +107,7 @@ theorem prime_of_certificate (p a : ℕ) (L : List (ℕ × ℕ)) (hp : 2 ≤ p)
     rwa [h1p] at this
 
 /-- Sanity check of the machinery on a small prime (`65537 - 1 = 2^16`). -/
-example : Nat.Prime 65537 :=
+theorem prime_65537 : Nat.Prime 65537 :=
   prime_of_certificate 65537 3 [(2, 16)] (by norm_num) (by decide) (by norm_num)
     (by norm_num) (by decide)
     (by decide)

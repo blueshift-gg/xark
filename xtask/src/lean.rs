@@ -667,4 +667,41 @@ mod tests {
             "refused for another reason: {text}"
         );
     }
+
+    /// The axiom check refuses each way a proof can lean on more than the kernel: a
+    /// copy of `AxiomCheck.lean` with one bad theorem added fails, naming it.
+    #[test]
+    #[ignore = "needs lake and the built Formal; lean.yml runs it"]
+    fn the_axiom_check_refuses_sorry_native_decide_and_axioms() {
+        let formal = crate::root().join("formal");
+        let check = std::fs::read_to_string(formal.join("AxiomCheck.lean")).unwrap();
+        let probe = crate::target_dir().join("axiom-check-test");
+        std::fs::create_dir_all(&probe).unwrap();
+        for mutant in [
+            "theorem mutant : 1 = 1 := sorry",
+            "theorem mutant : 2 + 2 = 4 := by native_decide",
+            "axiom mutantAx : False\ntheorem mutant : 1 = 2 := mutantAx.elim",
+        ] {
+            let file = probe.join("Mutant.lean");
+            let text = check.replacen(
+                "open Lean Elab Command",
+                &format!("{mutant}\n\nopen Lean Elab Command"),
+                1,
+            );
+            assert_ne!(text, check, "AxiomCheck.lean lost its `open` line");
+            std::fs::write(&file, text).unwrap();
+            let out = std::process::Command::new("lake")
+                .args(["env", "lean", file.to_str().unwrap()])
+                .current_dir(&formal)
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stdout).to_string()
+                + &String::from_utf8_lossy(&out.stderr);
+            assert!(!out.status.success(), "`{mutant}` passed: {text}");
+            assert!(
+                text.contains("axiom check failed") && text.contains("mutant"),
+                "`{mutant}` refused for another reason: {text}"
+            );
+        }
+    }
 }

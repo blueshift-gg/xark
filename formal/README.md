@@ -53,7 +53,9 @@ What a statement says less than its name suggests:
 CI (`lean.yml`) runs `lake build`, then [`AxiomCheck.lean`](AxiomCheck.lean) fails unless every harness has its
 `soundness` theorem (and its `Consts` module, when it has one), and
 every declaration in `Formal` depends only on `propext`,
-`Classical.choice` and `Quot.sound`: no `sorry`, no `axiom`, no `native_decide`. The
+`Classical.choice` and `Quot.sound`: no `sorry`, no `axiom`, no `native_decide`. A
+`Formal` file may not use `example`, which leaves no declaration for the check to see.
+`cargo test -p xtask lean::tests -- --ignored` shows the check refusing each of the three. The
 secp256k1, secp256r1 and BN254 primes are proven prime by kernel-checked Pratt
 certificates ([`Formal/CurvePrimes.lean`](Formal/CurvePrimes.lean), machinery in
 [`Formal/Pratt.lean`](Formal/Pratt.lean)).

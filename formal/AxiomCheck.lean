@@ -11,7 +11,10 @@ The axiom check CI runs after `lake build` (`lake env lean AxiomCheck.lean`).
    `Assumptions`, or a `Spec` that is `True`); statements are reviewed by hand.
 2. Every declaration of every `Formal.*` module may depend only on `propext`,
    `Classical.choice` and `Quot.sound`: no `sorryAx`, no declared `axiom`, no
-   `native_decide`.
+   `native_decide`. So may this file's own: a copy with a bad theorem added is how
+   `xtask`'s `lean::tests` show the check refusing it.
+3. No `Formal` file uses `example`: it leaves no declaration, so (2) never sees its
+   axioms.
 
 It prints every theorem it checked, one per line, after `checked:`.
 -/
@@ -46,14 +49,19 @@ run_cmd do
     if ← System.FilePath.pathExists s!"Formal/Templates/Consts/{m}.lean" then
       unless (env.getModuleIdx? consts).isSome do
         errors := errors.push s!"{h}: {consts} is not imported by Formal.lean"
-  let mut checked := #[]
+  let mut decls := env.constants.map₂.toList.map (·.1, `this)
   for mod in env.header.moduleNames, data in env.header.moduleData do
-    unless (`Formal).isPrefixOf mod do continue
-    for c in data.constNames do
-      let axioms ← collectAxioms c
-      let bad := axioms.filter (!standard.contains ·)
-      unless bad.isEmpty do errors := errors.push s!"{c} ({mod}) depends on {bad.toList}"
-      if (env.find? c).any (·.isThm) && !c.isInternalDetail then checked := checked.push c
+    if (`Formal).isPrefixOf mod then decls := decls ++ data.constNames.toList.map (·, mod)
+  let mut checked := #[]
+  for (c, mod) in decls do
+    let bad := (← collectAxioms c).filter (!standard.contains ·)
+    unless bad.isEmpty do errors := errors.push s!"{c} ({mod}) depends on {bad.toList}"
+    if (env.find? c).any (·.isThm) && !c.isInternalDetail then checked := checked.push c
+  for f in ← System.FilePath.walkDir "Formal" do
+    unless f.extension == some "lean" do continue
+    for line in (← IO.FS.lines f), i in [1:1000000] do
+      if ["example ", "example:"].any (line.trimLeft.startsWith ·) then
+        errors := errors.push s!"{f}:{i}: `example` hides its axioms; name it"
   logInfo m!"checked:\n{"\n".intercalate (checked.qsort Name.lt |>.map toString).toList}"
   unless errors.isEmpty do
     throwError "axiom check failed:\n{"\n".intercalate errors.toList}"
