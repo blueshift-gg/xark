@@ -1494,6 +1494,8 @@ mod tests {
             let e = s.public_inputs(&json!({ key: 1 })).unwrap_err();
             assert!(e.message.contains("unknown input"), "{key}: {e}");
         }
+    }
+
     /// Hex bytes are pairs of hex digits and nothing else, as the client's `fromHex`
     /// reads them: no sign on a pair (`u8::from_str_radix` takes `+a`), and a
     /// character past ASCII is an error, not a slice through the middle of it.
