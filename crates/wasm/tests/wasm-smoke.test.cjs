@@ -17,7 +17,7 @@ const { join } = require("node:path");
 const { readFileSync } = require("node:fs");
 
 const {
-  prove, proveStreaming, verify, preload, prove_preloaded,
+  prove, verify, preload, prove_preloaded,
   decode_public_inputs,
 } = require("../dist/node/xark_wasm.js");
 
@@ -76,7 +76,7 @@ test("verify throws on a malformed proof (does not silently return false)", () =
 test("prove with verify throws on an unsatisfiable witness", () => {
   // Named as the inputs' fault, not the key's, with the failing constraint.
   assert.throws(
-    () => proveStreaming(xbc, pk, { secret: "3", result: "26" }, { verify: true }),
+    () => prove(xbc, pk, { secret: "3", result: "26" }, undefined, { verify: true }),
     /inputs don't satisfy the circuit: constraint #\d+ fails/,
   );
 });
@@ -84,7 +84,7 @@ test("prove with verify throws on an unsatisfiable witness", () => {
 test("prove with verify names the failing source line given sources.json", () => {
   const sources = readFileSync(join(D, "sources.json"), "utf8");
   assert.throws(
-    () => proveStreaming(xbc, pk, { secret: "3", result: "26" }, { verify: true, sources }),
+    () => prove(xbc, pk, { secret: "3", result: "26" }, sources, { verify: true }),
     /the inputs fail the check at src\/lib\.rs:\d+:\d+: `.+`/,
   );
   assert.throws(() => prove(xbc, pk, { secret: "3", result: "26" }, "{"), /parsing sources\.json/);

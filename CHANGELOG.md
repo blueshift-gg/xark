@@ -14,8 +14,9 @@ byte-identical to arkworks', as the tests check. No circuit changed.
 
 - A proof is no longer verified against its key before it is returned: its
   soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
-  --verify`, `verify: true` in the wasm prover's options and
-  `ProverConfig::self_check` turn the check back on. Without it, inputs that
+  --verify`, `{ verify: true }` in the wasm prover's options (`prove` takes
+  options now too), `prover.prove(inputs, { verify: true })` in a generated
+  client and `ProverConfig::self_check` turn the check back on. Without it, inputs that
   break a constraint, or a key from another build of the circuit, give a proof
   no verifier accepts instead of an error naming the constraint; the success
   line says "Proof produced", with " and verified" when it was.

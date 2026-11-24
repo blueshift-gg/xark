@@ -270,13 +270,15 @@ impl ProvingSession {
 ///
 /// Uses the streaming prover: the key is read from `pk_bytes` a chunk of points
 /// at a time and the constraint rows are streamed, so memory stays far below the
-/// key and circuit sizes (Ed25519 verification fits). The proof is not checked
-/// against the key before it is returned; `proveStreaming` with `verify` does.
+/// key and circuit sizes (Ed25519 verification fits).
+///
+/// `options` (optional) are `proveStreaming`'s; `verify: true` checks the proof
+/// against the key before returning it (off by default).
 ///
 /// Throws an `Error` on any error: a malformed `.xbc`, unknown input, or
 /// inputs the witness solver rejects. Inputs that solve but break a constraint
-/// give a proof no verifier accepts; `proveStreaming` with `verify` throws for
-/// them instead, naming the source line when given the build's `sources.json`:
+/// give a proof no verifier accepts; with `verify` they throw instead, naming
+/// the source line when given the build's `sources.json`:
 /// `the inputs fail the check at src/lib.rs:77:20: \`…require_one_of(allowed);\``.
 #[wasm_bindgen]
 pub fn prove(
@@ -284,9 +286,10 @@ pub fn prove(
     pk_bytes: &Bytes,
     inputs: JsValue,
     sources: Option<String>,
+    options: JsValue,
 ) -> Result<ProofBundle, js_sys::Error> {
     let mut p = streaming::prepare_auto(circuit_xbc, pk_bytes, false, sources)?;
-    streaming::prove_auto(&mut p, inputs, &JsValue::UNDEFINED)
+    streaming::prove_auto(&mut p, inputs, &options)
 }
 
 /// Verify a Groth16 proof against its public inputs, in memory.

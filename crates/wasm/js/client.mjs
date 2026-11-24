@@ -508,11 +508,10 @@ export class Prover extends Session {
       const encoded = this.codec.encodeInputs(toJson(inputs));
       const pool = this.pool;
       const options = { ...(pool && { pool }), ...(verify && { verify }) };
-      const plain = !pool && !verify;
-      if (this.session) return plain ? this.session.prove(encoded) : this.session.prove(encoded, options);
-      return plain
-        ? this.wasm.prove(circuit, provingKey, encoded, sources)
-        : this.wasm.proveStreaming(circuit, provingKey, encoded, { ...options, sources });
+      if (this.session) return this.session.prove(encoded, options);
+      return pool
+        ? this.wasm.proveStreaming(circuit, provingKey, encoded, { ...options, sources })
+        : this.wasm.prove(circuit, provingKey, encoded, sources, options);
     });
     return new Proof(proof.slice(), this.decodePublicInputs(publicInputs), publicInputs.slice(), this.wasm);
   }

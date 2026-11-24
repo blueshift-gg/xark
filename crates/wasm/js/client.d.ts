@@ -130,7 +130,13 @@ export class Proof<PublicValues> {
 
 /** The parts of `@blueshift-gg/xark` a client uses (any of its builds). */
 export interface Wasm {
-  prove(circuit: Uint8Array, provingKey: Uint8Array, inputs: Record<string, string>, sources?: string): { proof: Uint8Array; publicInputs: Uint8Array };
+  prove(
+    circuit: Uint8Array,
+    provingKey: Uint8Array,
+    inputs: Record<string, string>,
+    sources?: string,
+    options?: { verify?: boolean },
+  ): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit and its proving key, decoded once, for many proofs (`Prover.preload`). */
   ProvingSession: new (circuit: Uint8Array, provingKey: Uint8Array, sources?: string) => {
     prove(inputs: Record<string, string>, options?: { pool?: WorkerPool; verify?: boolean }): { proof: Uint8Array; publicInputs: Uint8Array };

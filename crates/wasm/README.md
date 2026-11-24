@@ -184,7 +184,7 @@ and parks the other in a JS buffer.
 
 ## API
 
-### `prove(circuitXbc, pkBytes, inputs, sources?)`
+### `prove(circuitXbc, pkBytes, inputs, sources?, options?)`
 
 Generates a Groth16 proof, streaming the constraint rows and reading the key a
 chunk at a time. For a `minimized` key it rebuilds that circuit from `circuitXbc`
@@ -196,6 +196,7 @@ itself, so no `r1cs.stream` is needed.
 | `pkBytes`    | `Uint8Array` \| `ArrayBuffer` | Proving key (`pk.bin`, binary)                        |
 | `inputs`     | `object`                      | Witness values; see [Inputs](#inputs)                 |
 | `sources`    | `string` (optional)           | `sources.json` (text) from the same build             |
+| `options`    | `object` (optional)           | `{ verify: true }` checks the proof before returning it |
 
 Returns a `ProofBundle`:
 
@@ -205,9 +206,11 @@ Returns a `ProofBundle`:
 | `publicInputs`    | `Uint8Array` |
 | `numPublicInputs` | `number`     |
 
-Throws on a malformed `.xbc`, unknown input, unsatisfiable witness, or malformed key.
-Inputs that fail a check are reported as the statement that fails when `sources`
-is given (`xark build` writes `sources.json` beside `circuit.xbc`):
+Throws on a malformed `.xbc`, unknown input, or malformed key. Inputs that break
+a constraint give a proof no verifier accepts, unless `options.verify` is set:
+then the proof is checked against the key first, and inputs that fail a check
+are reported as the statement that fails when `sources` is given (`xark build`
+writes `sources.json` beside `circuit.xbc`):
 
 ```text
 the inputs fail the check at src/lib.rs:77:20: `id.nationality.require_one_of(allowed);`
@@ -245,8 +248,10 @@ still work and can be mixed with nested values.
 host's `proof.bin` / `public_inputs.bin`) — pass them straight to `verify`. To
 read the public inputs, see `decode_public_inputs` below.
 
-> `prove` checks the proof against the key's verifying key before returning it;
-> an unsatisfiable witness is reported as an error, never returned as a proof.
+> With `{ verify: true }`, `prove` checks the proof against the key's verifying
+> key before returning it, and an unsatisfiable witness is an error, never a
+> proof. The check costs one pairing; it is off by default because a verifier
+> checks the proof anyway.
 
 ### `preload(circuitXbc, pkBytes, sources?)`
 
@@ -263,7 +268,8 @@ hasn't been called.
 
 What `preload` caches, as an object of its own: `session.prove(inputs)` proves as
 `prove` does, without parsing the circuit or decoding the key again. Each holds its
-own circuit, so several can be loaded at once. A typed client's `prover.preload()`
+own circuit, so several can be loaded at once. `session.prove(inputs, { verify:
+true })` checks the proof as `prove` does. A typed client's `prover.preload()`
 makes one.
 
 ### `verify(vkBytes, proofBytes, publicInputsBytes)`
