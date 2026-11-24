@@ -343,28 +343,31 @@ fn check_clients(root: &Path, circuit: &Path) -> Result<(), i32> {
             let _ = std::fs::copy(from, rust.join(sample));
         }
     }
+
     // The name the committed crate has: an earlier export keeps its own (0.4.0
     // named it `<name>-verifier`), so `--check` must ask for that one to compare.
     let crate_name = crate::xark_project::read_pkg_name(&committed.join("rust"))
         .unwrap_or_else(|| super::export::client_crate_name(&pkg));
     let dir = circuit.display().to_string();
-    let export = vec![
-        "export".to_string(),
-        dir.clone(),
-        "--out".to_string(),
-        rust.display().to_string(),
-        "--crate-name".to_string(),
-        crate_name,
-        "--member".to_string(),
-    ];
-    xark_owned(root, &export)?;
-    let client = vec![
-        "client".to_string(),
-        dir,
-        "--out".to_string(),
-        ts.display().to_string(),
-    ];
-    xark_owned(root, &client)?;
+    let rust_out = rust.display().to_string();
+
+    xark(
+        root,
+        &[
+            "export",
+            dir.as_str(),
+            "--out",
+            rust_out.as_str(),
+            "--crate-name",
+            crate_name.as_str(),
+            "--member",
+        ],
+    )?;
+
+    let ts_out = ts.display().to_string();
+
+    xark(root, &["client", dir.as_str(), "--out", ts_out.as_str()])?;
+
     let changes = diff_tree(&committed, &staged);
     if !changes.is_empty() {
         eprintln!(
@@ -377,7 +380,9 @@ fn check_clients(root: &Path, circuit: &Path) -> Result<(), i32> {
         }
         return Err(1);
     }
+
     let _ = std::fs::remove_dir_all(&stage_root);
+
     Ok(())
 }
 
@@ -615,11 +620,6 @@ pub fn check(root: &Path, json: bool) -> i32 {
 }
 
 /// Run `xark` (this binary) with `args` in `dir`.
-fn xark_owned(dir: &Path, args: &[String]) -> Result<(), i32> {
-    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    xark(dir, &refs)
-}
-
 fn xark(dir: &Path, args: &[&str]) -> Result<(), i32> {
     let exe = std::env::current_exe().map_err(|_| 1)?;
     run(
