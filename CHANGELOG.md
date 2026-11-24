@@ -12,8 +12,9 @@ can depend on another for its input types. No circuit changed: keys made with 0.
 still verify (its digests are the same; `zkyc_nationality` is a new example).
 
 The prover is faster on every circuit of the gnark comparison (#84), with every
-core and on one thread, and no proof changed: for the same randomness each is
-byte-identical to arkworks', as the tests check. No circuit changed.
+core and on one thread: for the same randomness each proof is byte-identical to
+arkworks', as the tests check. It no longer verifies a proof before returning
+it unless asked to (`xark prove --verify`).
 
 ### Moving from 0.4.0
 
@@ -24,6 +25,11 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   programs depending on it build as before. A new export is named
   `<name>-client`; `--crate-name` still picks the name.
 - A circuit's name can now end in `-verifier`, and can't end in `-client`.
+- **A proof isn't verified before it is returned unless you ask.** Inputs that
+  break a constraint used to fail `xark prove` (and the wasm and TypeScript
+  provers) with the constraint's source line; now they give a proof no verifier
+  accepts. Where you relied on that error, pass `--verify`, or `{ verify: true }`
+  to the wasm `prove` or a client's `prover.prove(inputs, …)`.
 
 ### Changes
 

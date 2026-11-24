@@ -9,8 +9,10 @@ made with 0.4 still verify, and a deployed program keeps working.
 **Your code doesn't have to change.** Update the versions as below, and a project
 from 0.4.0 builds under 0.5: `xark export` over an earlier export keeps that
 crate's name, so `<name>-verifier` and the programs depending on it stay as they
-are. The rest of this guide is what you can take up, and the one name `xark add`
-now refuses.
+are. The one behavior to check is that a prover no longer verifies its proof
+before returning it unless you ask ([below](#verify-a-proof-before-its-returned)).
+The rest of this guide is what you can take up, and the one name `xark add` now
+refuses.
 
 ## Update xark
 
@@ -37,6 +39,37 @@ npm install @blueshift-gg/xark@0.5
 
 Then run `xark build` at the project's root (or `xark export` beside a circuit
 crate) and commit what it writes: the client crate gains the types below.
+
+## Verify a proof before it's returned
+
+In 0.4 every prover checked its proof against the proving key's verifying key
+before returning it, so inputs that break a constraint were an error naming the
+constraint and its source line. In 0.5 the check is off by default: a proof's
+soundness doesn't depend on it, and a verifier checks the proof anyway. Without
+it, such inputs give a proof that no verifier accepts, and `xark prove` prints
+`✅ Proof produced` as for any other.
+
+Where you relied on that error (a test that bad inputs are refused, or a UI that
+shows the failing check), ask for the check. It costs one pairing, under a
+millisecond natively:
+
+```sh
+xark prove --verify --inputs '{"secret": 3, "result": 10}'
+```
+
+```ts
+// A generated TypeScript client
+prover.prove(inputs, { verify: true }); // throws a CheckFailed naming the statement
+
+// @blueshift-gg/xark directly
+prove(xbc, pk, inputs, sources, { verify: true });
+proveStreaming(xbc, pk, inputs, { verify: true, sources });
+session.prove(inputs, { verify: true });
+```
+
+From Rust, `xark_groth16::ProverConfig { self_check: true, .. }`. A Rust client
+crate's `prover::Prover` checks the inputs against every constraint before
+proving, as before, so it still refuses bad inputs without the check.
 
 ## Circuit names
 
