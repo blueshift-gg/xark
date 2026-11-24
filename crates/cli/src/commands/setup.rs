@@ -99,6 +99,26 @@ pub struct SetupArgs {
     pub domain: QapDomain,
 }
 
+impl SetupArgs {
+    /// A key from this machine's randomness, never from a `.ptau`: what `xark
+    /// build` bootstraps and `xark prove`'s first proof makes. `path` is the
+    /// circuit crate (or its build directory); everything else is the CLI's
+    /// default.
+    pub(crate) fn dev_key(path: Option<PathBuf>) -> Self {
+        Self {
+            path,
+            out: None,
+            without_ptau: true,
+            deterministic_rng: None,
+            ptau_file: None,
+            phase2_seed: None,
+            uncompressed: false,
+            r1cs_form: R1csForm::Auto,
+            domain: QapDomain::Auto,
+        }
+    }
+}
+
 /// See [`SetupArgs::domain`].
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QapDomain {
@@ -620,51 +640,38 @@ pub struct SetupReport {
 }
 
 impl SetupReport {
-    /// Print the `xark prove` step that follows an explicit `xark setup`.
-    pub fn print_next_steps(&self) {
+    /// Print the `xark prove` step that follows an explicit `xark setup`. The
+    /// `--inputs` template it points at is seeded by `xark build`; this only
+    /// reads it.
+    fn print_next_steps(&self) {
         let project = &self.project;
         let path = &self.path;
         let key = self.key.as_deref();
-        // Only the *declared* inputs — never the witnesses the solver derives (e.g.
-        // `to_bits` range-check bits). `circuit.xbc`'s header lists them, in order, so
-        // nothing is expanded.
-        let names: Vec<String> = match fs::read(project.circuit_xbc()) {
-            Ok(bytes) if super::is_function_artifact(&bytes) => {
-                xark_ir::function_decode::decode_input_vars(&bytes)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|v| v.name)
-                    .collect()
-            }
-            _ => Vec::new(),
-        };
-        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let p = super::path_arg(path);
-        // From `schema.json`: one entry per declared input, in its natural form (a hash's
-        // `0x…` bytes, not its leaves), written to a file to fill in. Never inline: a
-        // command full of placeholders looks runnable and isn't.
-        let file = project.xark_dir.join("inputs.example.json");
-        let written = match super::load_schema(&project.xark_dir).map(|s| s.summary()) {
-            Some(inputs) if !inputs.is_empty() => {
-                // In declaration order (a `serde_json::Map` would sort the keys).
-                let entries: Vec<String> = inputs
-                    .iter()
-                    .map(|i| format!("{:?}: {}", i.name, i.template))
-                    .collect();
-                let text = format!("{{\n  {}\n}}\n", entries.join(",\n  "));
-                fs::write(&file, text).is_ok()
-            }
-            _ => false,
-        };
-        let (hint, what) = if written {
+        let example = project.xark_dir.join("inputs.example.json");
+        let (hint, what) = if example.is_file() {
             let cwd = std::env::current_dir().unwrap_or_default();
-            let shown = file.strip_prefix(&cwd).unwrap_or(&file);
+            let shown = example.strip_prefix(&cwd).unwrap_or(&example);
             (
                 format!("--inputs {}", shown.display()),
                 "replace the placeholders in that file with your values, then this solves \
-             the witness and produces a proof",
+                 the witness and produces a proof",
             )
         } else {
+            // Only the *declared* inputs — never the witnesses the solver derives
+            // (e.g. `to_bits` range-check bits). `circuit.xbc`'s header lists them,
+            // in order, so nothing is expanded.
+            let names: Vec<String> = match fs::read(project.circuit_xbc()) {
+                Ok(bytes) if super::is_function_artifact(&bytes) => {
+                    xark_ir::function_decode::decode_input_vars(&bytes)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|v| v.name)
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
             (
                 super::inputs_hint(&name_refs),
                 "with your values: solve the witness and produce a proof",
@@ -677,5 +684,21 @@ impl SetupReport {
             "\n{}",
             crate::style::next_steps(&[(format!("xark prove {p}{key} {hint}"), what,)])
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SetupArgs;
+
+    #[test]
+    fn a_dev_key_is_os_random_and_never_a_ptau() {
+        let args = SetupArgs::dev_key(Some(std::path::PathBuf::from("circuit")));
+        assert!(args.without_ptau);
+        assert!(args.deterministic_rng.is_none());
+        assert!(args.ptau_file.is_none());
+        assert!(args.phase2_seed.is_none());
+        assert!(!args.uncompressed);
+        assert_eq!(args.path.as_deref(), Some(std::path::Path::new("circuit")));
     }
 }

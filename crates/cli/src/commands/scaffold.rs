@@ -272,10 +272,11 @@ fn pinocchio(request: &ProgramScaffold<'_>) -> Result<()> {
         bail!("couldn't build `{circuit}` and its clients (see above)");
     }
     let xark_dir = circuit_dir.join("target/xark").join(circuit);
-    let schema: Value = serde_json::from_str(
-        &fs::read_to_string(xark_dir.join("schema.json"))
-            .context("reading the circuit's schema")?,
-    )?;
+    let schema_text =
+        fs::read_to_string(xark_dir.join("schema.json")).context("reading the circuit's schema")?;
+    let schema: Value = serde_json::from_str(&schema_text)?;
+    let input_schema =
+        xark_schema::Schema::parse(&schema_text).map_err(|e| anyhow::anyhow!("{e}"))?;
     let circuit_fn = schema["circuit"].as_str().unwrap_or(circuit).to_string();
     // The name `xark export` gave the crate: a new one is `<name>-client`
     // (`shielded_transact` → `shielded-transact-client`); a 0.4.0 project's keeps
@@ -288,7 +289,7 @@ fn pinocchio(request: &ProgramScaffold<'_>) -> Result<()> {
         "{}Error",
         super::client::ts::pascal(&name.replace('-', "_"))
     );
-    let (inputs, inputs_doc, test) = sample_inputs(&schema, &xark_dir, &pascal);
+    let (inputs, inputs_doc, test) = sample_inputs(&schema, &input_schema, &pascal);
 
     let fill = |t: &str| {
         t.replace("{{name}}", name)
@@ -384,7 +385,11 @@ fn ensure_ts_setup(root: &Path) -> Result<()> {
 /// known answer, run; or the circuit's `inputs.example.json` (camelCase, as the
 /// client takes them) to fill in, its test skipped until then so the project's
 /// tests (and CI) stay green.
-fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, String, &'static str) {
+fn sample_inputs(
+    schema: &Value,
+    input_schema: &xark_schema::Schema,
+    pascal: &str,
+) -> (String, String, &'static str) {
     let names: Vec<(&str, &str)> = schema["inputs"]
         .as_array()
         .into_iter()
@@ -398,8 +403,8 @@ fn sample_inputs(schema: &Value, xark_dir: &Path, pascal: &str) -> (String, Stri
             "test",
         );
     }
-    let example = fs::read_to_string(xark_dir.join("inputs.example.json"))
-        .ok()
+    let example = input_schema
+        .inputs_example()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .unwrap_or(Value::Object(Default::default()));
     // Placeholders aren't values of the input types: the cast goes once they're

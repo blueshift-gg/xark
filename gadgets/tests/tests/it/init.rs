@@ -66,6 +66,24 @@ fn init_then_test() {
         out.contains("2 passed"),
         "expected the scaffold's 2 tests:\n{out}"
     );
+    // The first build seeds the `--inputs` template the `xark setup` hint points
+    // at, with every declared input in its natural form.
+    let example = circuit.join("target/xark/zk-demo/inputs.example.json");
+    assert!(
+        example.is_file(),
+        "the build didn't seed inputs.example.json"
+    );
+    let text = std::fs::read_to_string(&example).unwrap();
+    assert!(
+        text.contains("\"secret\"") && text.contains("\"result\""),
+        "{text}"
+    );
+    // `xark setup`'s prove step points at the template the build seeded.
+    let out = xark(&["setup", circuit_s]);
+    assert!(
+        out.contains("inputs.example.json"),
+        "setup's next step doesn't point at the template:\n{out}"
+    );
     // Arguments after `--` reach the test binary.
     let out = xark(&["test", dir_s, "--", "--list"]);
     assert!(

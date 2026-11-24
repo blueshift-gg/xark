@@ -457,13 +457,13 @@ fn build_stable(
         );
         return 1;
     }
+    let schema_json = serde_json::to_string_pretty(&lowered.schema).unwrap_or_default() + "\n";
     let wrote = std::fs::write(out_abs.join("digest"), format!("{digest}\n")).is_ok();
-    let wrote = wrote
-        & std::fs::write(
-            out_abs.join("schema.json"),
-            serde_json::to_string_pretty(&lowered.schema).unwrap_or_default() + "\n",
-        )
-        .is_ok();
+    let wrote = wrote & std::fs::write(out_abs.join("schema.json"), &schema_json).is_ok();
+    // The template the `prove` hint points at: seeded once, then the user's (they
+    // fill it in place, so a rebuild leaves it alone). Best-effort: it isn't a
+    // build output, and a build without it is still complete.
+    seed_inputs_example(out_abs, &schema_json);
     // The source files the circuit came from, gadgets included: how a plain `cargo
     // test` notices the circuit is out of date (`xark_prover::circuit`). Written
     // last: a build is only complete with it (`stale_build`), so one stopped
@@ -588,6 +588,22 @@ pub fn cmd_clean() -> i32 {
 
 /// `xark test [crate-dir] [-- <cargo test args>]`
 ///
+/// Seed `inputs.example.json` beside the schema — the `--inputs` template the
+/// `xark prove` hint points at — if it isn't there. Written once and left alone:
+/// the hint says to replace its placeholders in place.
+fn seed_inputs_example(out: &std::path::Path, schema_json: &str) {
+    let file = out.join("inputs.example.json");
+    if file.exists() {
+        return;
+    }
+    let Ok(schema) = xark_schema::Schema::parse(schema_json) else {
+        return;
+    };
+    if let Some(example) = schema.inputs_example() {
+        let _ = std::fs::write(file, example);
+    }
+}
+
 /// One-shot circuit testing: build the crate (`xark build`) so its
 /// `target/xark/<pkg>/` artifacts exist, then run `cargo test` in the crate so
 /// the in-crate `cargo test` circuit tests can load them. `forwarded` goes to
@@ -1149,4 +1165,44 @@ fn tests_template(name: &str) -> String {
          \x20   }}\n\
          }}\n"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seed_inputs_example;
+
+    const SCHEMA: &str = r#"{"version": 2, "circuit": "demo",
+        "inputs": [{"name": "x", "visibility": "private", "type": "field"},
+                   {"name": "result", "visibility": "public", "type": "field"}],
+        "public_inputs": ["result"], "types": {}}"#;
+
+    fn tempdir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "xark-seed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_inputs_template_is_seeded_once_and_then_left_alone() {
+        let dir = tempdir();
+        seed_inputs_example(&dir, SCHEMA);
+        let file = dir.join("inputs.example.json");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("\"x\": \"<field>\""), "{text}");
+        assert!(text.contains("\"result\": \"<field>\""), "{text}");
+
+        // A filled-in copy is the user's: the next build must not replace it.
+        let filled = "{\"x\": \"3\", \"result\": \"9\"}";
+        std::fs::write(&file, filled).unwrap();
+        seed_inputs_example(&dir, SCHEMA);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), filled);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

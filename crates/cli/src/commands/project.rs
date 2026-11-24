@@ -162,17 +162,9 @@ fn build_all(root: &Path, check: bool) -> i32 {
 /// `xark build` does: never a phase-2 key from a stray `.ptau`. Run in-process
 /// so asking for it needn't be a flag on the CLI.
 fn setup_dev_key(circuit: &Path) -> Result<(), i32> {
-    super::setup::make(super::setup::SetupArgs {
-        path: Some(circuit.to_path_buf()),
-        out: None,
-        without_ptau: true,
-        deterministic_rng: None,
-        ptau_file: None,
-        phase2_seed: None,
-        uncompressed: false,
-        r1cs_form: super::setup::R1csForm::Auto,
-        domain: super::setup::QapDomain::Auto,
-    })
+    super::setup::make(super::setup::SetupArgs::dev_key(Some(
+        circuit.to_path_buf(),
+    )))
     .map_err(|e| {
         eprintln!("{} {e:#}", crate::style::err("error:"));
         1

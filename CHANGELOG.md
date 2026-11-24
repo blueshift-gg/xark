@@ -153,6 +153,9 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   run `xark setup` yourself. A changed plain single-party dev key is rotated with
   the same warning as before, while a ceremony or phase-2 key stops with
   `xark setup`/`xark ceremony`.
+- `xark build` seeds `inputs.example.json` beside each circuit's `schema.json`
+  the first time it builds it — the template `xark setup`'s `xark prove` step
+  points at — and leaves it alone after, so a filled-in copy survives a rebuild.
 - `xark build --check` stages generated clients under `target/xark/check/` and
   byte-compares them with `clients/`. It writes nothing under `clients/`, `keys/`
   or the workspace manifest, and does not build programs.
