@@ -379,7 +379,12 @@ fn build_stable(
     // Every build carries DWARF line tables (free; see `BuildOptions`), so errors
     // and `--profile` attribution name source lines.
     let target_dir = crate_abs.join("target/xark-wasm");
-    let built = xark_frontend::build_crate_with(crate_abs, &target_dir, &Default::default());
+    // `xark_frontend::build_crate_with` runs `cargo rustc --quiet`: on a first
+    // build it can take minutes without a line of its own.
+    let built = {
+        let _spinner = crate::progress::Spinner::start("compiling the circuit (cargo)");
+        xark_frontend::build_crate_with(crate_abs, &target_dir, &Default::default())
+    };
     let built = match built {
         Ok(b) => b,
         Err(e) => {
@@ -401,12 +406,16 @@ fn build_stable(
     if !clear() {
         return 1;
     }
-    let mut lowered = match xark_frontend::lower_module(
-        &built.wasm,
-        xark_ir::FieldSpec::named(field),
-        profile,
-        emit_json,
-    ) {
+    let lowered = {
+        let _spinner = crate::progress::Spinner::start("lowering the circuit to R1CS");
+        xark_frontend::lower_module(
+            &built.wasm,
+            xark_ir::FieldSpec::named(field),
+            profile,
+            emit_json,
+        )
+    };
+    let mut lowered = match lowered {
         Ok(l) => l,
         Err(e) => {
             eprintln!("{} {e}", crate::style::err("error:"));

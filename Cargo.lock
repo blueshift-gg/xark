@@ -4899,6 +4899,7 @@ dependencies = [
  "ark-serialize 0.6.0",
  "clap",
  "clap_complete",
+ "console",
  "dialoguer",
  "hex",
  "mimalloc",
