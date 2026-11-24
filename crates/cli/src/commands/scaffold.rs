@@ -3,10 +3,11 @@
 //! xark prints, but does not run, the framework's commands.
 
 use std::fs;
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use dialoguer::{Input, Select, theme::ColorfulTheme};
 use serde_json::Value;
 
 use super::add::{package_names, write_new};
@@ -29,6 +30,7 @@ pub struct ProgramScaffold<'a> {
 
 pub struct ProgramScaffolder {
     pub id: &'static str,
+    /// The menu's name for it, saying what the program is tested with.
     pub label: &'static str,
     pub scaffold: fn(&ProgramScaffold<'_>) -> Result<()>,
     /// What to run after `scaffold`: the circuit's tests, then the framework's
@@ -49,7 +51,7 @@ impl ProgramScaffolder {
 
 pub const PINOCCHIO: ProgramScaffolder = ProgramScaffolder {
     id: "pinocchio",
-    label: "Pinocchio (LiteSVM)",
+    label: "Pinocchio + LiteSVM test",
     scaffold: pinocchio,
     next_steps: &[
         ("xark test", "build the circuits and run their tests"),
@@ -84,7 +86,8 @@ pub fn resolve_program_choice(arg: Option<&str>, interactive: bool) -> Result<Pr
         return choice_from_id(id);
     }
     if interactive {
-        prompt_choice(&mut io::stdin().lock(), &mut io::stderr())
+        print_banner();
+        choose_program()
     } else {
         Ok(ProgramChoice::None)
     }
@@ -102,67 +105,65 @@ fn choice_from_id(id: &str) -> Result<ProgramChoice> {
     })
 }
 
-/// Ask for a scaffolder. Blank or EOF is `none`; invalid input asks again.
-pub fn prompt_choice<R: BufRead, W: Write>(input: &mut R, out: &mut W) -> Result<ProgramChoice> {
-    let none = SCAFFOLDERS.len() + 1;
-    loop {
-        writeln!(out, "Program scaffold:")?;
-        for (i, scaffolder) in SCAFFOLDERS.iter().enumerate() {
-            writeln!(out, "  {}) {}", i + 1, scaffolder.label)?;
-        }
-        writeln!(out, "  {none}) None (circuit only) [default]")?;
-        write!(out, "Choose [{none}]: ")?;
-        out.flush()?;
+/// The banner a terminal `xark init` opens with: the wordmark and the one-line
+/// description, so the wizard reads as xark's from the first line.
+fn print_banner() {
+    eprintln!();
+    eprintln!("  {}", crate::style::brand("xark"));
+    eprintln!(
+        "  {}",
+        crate::style::dim("Zero-knowledge circuits in plain Rust, verified on Solana.")
+    );
+    eprintln!();
+}
 
-        let mut line = String::new();
-        if input.read_line(&mut line)? == 0 {
-            writeln!(out)?;
-            return Ok(ProgramChoice::None);
-        }
-        let choice = line.trim();
-        if choice.is_empty() {
-            return Ok(ProgramChoice::None);
-        }
-        if let Ok(n) = choice.parse::<usize>() {
-            if n == none {
-                return Ok(ProgramChoice::None);
-            }
-            if (1..none).contains(&n) {
-                return Ok(ProgramChoice::Scaffold(&SCAFFOLDERS[n - 1]));
-            }
-        }
-        if choice == "none" {
-            return Ok(ProgramChoice::None);
-        }
-        if let Some(scaffolder) = find(choice) {
-            return Ok(ProgramChoice::Scaffold(scaffolder));
-        }
-        writeln!(
-            out,
-            "Please choose one of the numbers above, or a scaffolder id."
-        )?;
+/// Ask for a scaffolder. The arrow keys move and Enter picks the highlighted
+/// item; Esc cancels the wizard.
+fn choose_program() -> Result<ProgramChoice> {
+    let mut items: Vec<&str> = vec!["None (circuit only)"];
+    items.extend(SCAFFOLDERS.iter().map(|s| s.label));
+    let none = 0;
+    let picked = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Add a Solana program")
+        .items(&items)
+        .default(none)
+        .interact_opt()
+        .context("asking which program to scaffold")?;
+    let Some(i) = picked else {
+        bail!("cancelled");
+    };
+    if i == none {
+        Ok(ProgramChoice::None)
+    } else {
+        Ok(ProgramChoice::Scaffold(&SCAFFOLDERS[i - 1]))
     }
 }
 
-/// Ask for a program name, defaulting to the circuit.
-pub fn prompt_program_name<R: BufRead, W: Write>(
-    input: &mut R,
-    out: &mut W,
-    default: &str,
-) -> Result<String> {
-    write!(out, "Program name [{default}]: ")?;
-    out.flush()?;
-    let mut line = String::new();
-    if input.read_line(&mut line)? == 0 {
-        writeln!(out)?;
-        return Ok(default.to_string());
-    }
-    let name = line.trim();
-    Ok(if name.is_empty() {
-        default.to_string()
-    } else {
-        name.to_string()
-    })
+/// Why a program can't take this name, as a prompt shows it.
+fn validate_program_name(name: &str) -> Result<(), String> {
+    let name = name.trim();
+    crate::cli::check_crate_name(name)
+        .map_err(|why| format!("can't name a program `{name}`: {why}"))
+}
+
+/// Ask for a program name, defaulting to the circuit. A name that can't be a
+/// crate is refused and asked for again, rather than failing the whole `init`.
+pub fn prompt_program_name(default: &str) -> Result<String> {
+    eprintln!(
+        "  {}",
+        crate::style::dim("The program's crate gets a `-program` suffix.")
+    );
+
+    let name = Input::<String>::with_theme(&ColorfulTheme::default())
+        .with_prompt("Program name")
+        .default(default.to_string())
+        .validate_with(|input: &String| validate_program_name(input))
+        .report(false)
+        .interact_text()
+        .context("asking for the program's name")?;
+    let name = name.trim();
+
+    Ok(name.to_string())
 }
 
 pub fn scaffold_program(
@@ -365,42 +366,26 @@ fn camel_keys(v: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
-
-    fn choose(input: &str) -> ProgramChoice {
-        let mut out = Vec::new();
-        prompt_choice(&mut Cursor::new(input), &mut out).unwrap()
-    }
 
     fn is_pinocchio(choice: ProgramChoice) -> bool {
         matches!(choice, ProgramChoice::Scaffold(s) if s.id == PINOCCHIO.id)
     }
 
     #[test]
-    fn blank_and_eof_mean_no_program() {
-        assert!(matches!(choose("\n"), ProgramChoice::None));
-        assert!(matches!(choose(""), ProgramChoice::None));
+    fn the_flag_picks_a_scaffolder_by_id() {
+        assert!(is_pinocchio(choice_from_id("pinocchio").unwrap()));
+        assert!(matches!(
+            choice_from_id("none").unwrap(),
+            ProgramChoice::None
+        ));
+        assert!(choice_from_id("nope").is_err());
     }
 
     #[test]
-    fn a_number_or_id_selects_a_scaffolder() {
-        assert!(is_pinocchio(choose("1\n")));
-        assert!(is_pinocchio(choose("pinocchio\n")));
-        assert!(matches!(choose("2\n"), ProgramChoice::None));
-    }
-
-    #[test]
-    fn invalid_input_asks_again() {
-        assert!(is_pinocchio(choose("0\nnope\n1\n")));
-    }
-
-    #[test]
-    fn a_blank_program_name_defaults_to_the_circuit() {
-        let mut out = Vec::new();
-        let name = prompt_program_name(&mut Cursor::new("\n"), &mut out, "claim").unwrap();
-        assert_eq!(name, "claim");
-        let name = prompt_program_name(&mut Cursor::new("verifier\n"), &mut out, "claim").unwrap();
-        assert_eq!(name, "verifier");
+    fn a_program_name_must_be_a_crate_name() {
+        assert!(validate_program_name("verifier").is_ok());
+        assert!(validate_program_name("Bad Name").is_err());
+        assert!(validate_program_name("1st").is_err());
     }
 
     /// xark prints but never runs a framework's commands: a scaffolder that prints

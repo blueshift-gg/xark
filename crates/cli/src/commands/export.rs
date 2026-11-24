@@ -331,7 +331,10 @@ pub fn run(args: ExportArgs) -> Result<()> {
             "run inside the generated crate to self-check the bundled proof",
         ));
     }
-    println!("\n{}", crate::style::next_steps(&next));
+    let steps = crate::style::next_steps(&next);
+    if !steps.is_empty() {
+        println!("\n{steps}");
+    }
     Ok(())
 }
 

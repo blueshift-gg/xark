@@ -221,6 +221,9 @@ pub fn run(args: ClientArgs) -> Result<()> {
         format!("await {name}.prover(\"<url serving {}/>\")", dir.display()),
         "after `xark setup`; then .prove(inputs), and `.verifier(…)` to verify",
     ));
-    eprintln!("{}", crate::style::next_steps(&steps));
+    let steps = crate::style::next_steps(&steps);
+    if !steps.is_empty() {
+        eprintln!("{steps}");
+    }
     Ok(())
 }

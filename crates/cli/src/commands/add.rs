@@ -75,8 +75,7 @@ pub fn run(args: AddArgs) -> Result<()> {
             };
             super::scaffold::scaffold_program(&request, scaffolder)?;
             eprintln!(
-                "{} added program `{name}-program` in {}, verifying `{circuit}`",
-                crate::style::tag(),
+                "✅ Solana program `{name}-program` in {}, verifying `{circuit}`",
                 root.join("programs").join(&name).display()
             );
             eprintln!("{}", crate::style::next_steps(&scaffolder.next_steps()));
@@ -90,7 +89,7 @@ pub fn run(args: AddArgs) -> Result<()> {
 pub fn init_project(dir: &Path, name: &str) -> Result<()> {
     if dir.join(PROJECT_FILE).exists() {
         bail!(
-            "{} is already a xark project: `xark add` grows it",
+            "{} is already a xark project: run `xark add` to add a circuit or a program",
             dir.display()
         );
     }

@@ -203,7 +203,8 @@ pub struct InitArgs {
     /// omitting it kicks off the wizard.
     #[arg(long)]
     pub program: Option<String>,
-    /// Program name. Defaults to the first circuit's name.
+    /// Program name; its crate is `<name>-program`. Defaults to the first
+    /// circuit's name.
     #[arg(long = "program-name")]
     pub program_name: Option<String>,
 }

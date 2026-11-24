@@ -889,11 +889,7 @@ pub fn cmd_init(
     };
     if scaffold.is_some() && program_name.is_none() {
         if interactive && program_arg.is_none() {
-            match crate::commands::scaffold::prompt_program_name(
-                &mut std::io::stdin().lock(),
-                &mut std::io::stderr(),
-                &name,
-            ) {
+            match crate::commands::scaffold::prompt_program_name(&name) {
                 Ok(n) => program_name = Some(n),
                 Err(e) => {
                     eprintln!("{} {e:#}", crate::style::err("error:"));
@@ -939,10 +935,11 @@ pub fn cmd_init(
             return 1;
         }
         eprintln!(
-            "{} added program `{}-program` in {}",
-            crate::style::tag(),
-            program_name,
-            dir.join("programs").join(program_name).display()
+            "{}",
+            crate::style::brand(&format!(
+                "✅ added program `{program_name}-program` for `{name}` in {}",
+                dir.join("programs").join(program_name).display()
+            ))
         );
         steps.extend(scaffolder.next_steps());
     } else {
@@ -951,6 +948,18 @@ pub fn cmd_init(
             "build the circuit and run its tests",
         ));
     }
+    let project = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(name.as_str());
+    eprintln!();
+    eprintln!(
+        "🚀 {} `{}` {}",
+        crate::style::brand("Created"),
+        crate::style::brand(project),
+        crate::style::brand("project")
+    );
+    eprintln!();
     eprintln!("{}", crate::style::next_steps(&steps));
     0
 }
@@ -1048,7 +1057,8 @@ pub fn scaffold_circuit(dir: &std::path::Path, in_project: bool) -> Result<Strin
     }
 
     eprintln!(
-        "xark: scaffolded circuit `{name}` ({created} files) in {}",
+        "{}: scaffolded circuit `{name}` ({created} files) in {}",
+        crate::style::tag(),
         dir.display()
     );
     Ok(name)

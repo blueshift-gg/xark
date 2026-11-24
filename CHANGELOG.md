@@ -20,10 +20,11 @@ instead of 370 on an Apple M3 Max), through `xark_groth16::Prover`, the one
 interface every prover now shares.
 
 `xark build` and `xark test` at a project's root are circuit-only. `xark init`
-gains a wizard: it asks whether to scaffold a Pinocchio (LiteSVM) program, with
-`--program pinocchio`, `--program none`, and `--program-name`. Programs are
-built natively (`cargo build-sbf`) and tested by their LiteSVM test (`npm test`);
-`xark add program` remains for existing projects and a second program.
+gains a wizard: it asks whether to add a Pinocchio program and its LiteSVM
+test, with `--program pinocchio`, `--program none`, and `--program-name`.
+Programs are built natively (`cargo build-sbf`) and tested by their LiteSVM
+test (`npm test`); `xark add program` remains for existing projects and a
+second program.
 `xark build` bootstraps a missing key and rotates a plain single-party dev key
 when constraints change; ceremony and phase-2 keys require explicit setup
 (`xark prove` keeps its first-proof convenience). `xark build --check` writes

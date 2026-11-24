@@ -25,10 +25,9 @@ where `cargo clean` deletes it.
 
 `xark init my-app` makes a project: a directory with a `xark.toml`, one Cargo
 workspace, and a starter circuit in `circuits/my-app/`. On a terminal it asks
-whether to scaffold a Pinocchio (LiteSVM) program; `--program pinocchio` and
-`--program none` skip the question, and `--program-name` names it (default: the
-first circuit). `xark add` grows it, and refuses to run
-outside one.
+whether to add a Pinocchio program and its LiteSVM test; `--program pinocchio`
+and `--program none` skip the question, and `--program-name` names it (default:
+the first circuit). `xark add` grows it, and refuses to run outside one.
 
 ```console
 $ xark init claim --program pinocchio && cd claim
