@@ -16,7 +16,28 @@ name: Lean (gadget soundness)
 on:
   push:
     branches: [master]
+  # A pull request that touches only what no proof reads skips the workflow: the
+  # jobs build xtask (xark-frontend, xark-ir), compile the gadgets and examples
+  # through it and check `formal/`, so the prover side, the clients, the test
+  # harness and the docs never reach them. This mirrors `affected` in
+  # `xtask/src/ci.rs`; a path added there belongs here too. master still runs it all.
   pull_request:
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!LICENSE*"
+      - "!.github/**"
+      - ".github/workflows/lean.yml"
+      - "!crates/backend/**"
+      - "!crates/cli/**"
+      - "!crates/groth16/**"
+      - "!crates/prover/**"
+      - "!crates/schema/**"
+      - "!crates/verifier/**"
+      - "!crates/wasm/**"
+      - "!crates/test-harness/**"
+      - "!clients/**"
   workflow_dispatch:
 
 concurrency:
