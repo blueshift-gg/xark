@@ -42,9 +42,13 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   inputs by name, `no_std`. It implements `xark_verifier::Verifiable`, whose
   `verify()` returns `Result<(), XarkError>`. When every public input is a byte
   array, `<Name>Proof::try_from(data)` parses `proof || public inputs` from
-  instruction data, and refuses data that is short (`Truncated`) or long
-  (`TrailingBytes`). A circuit with a public input named `proof` gets no
-  `<Name>Proof`.
+  instruction data, each input as its own bytes (a hash is its 32), and refuses
+  data that is short (`Truncated`) or long (`TrailingBytes`). A circuit with a
+  public input named `proof` gets no `<Name>Proof`.
+- `xark_verifier::RawProof<N>`, which the client crate re-exports, parses
+  instruction data as `to_instruction_data()` writes it: the proof and `N` field
+  elements of 32 bytes (a hash is its two halves), for any circuit, refusing the
+  same short or long data.
 - `xark_verifier::XarkError`, `#[repr(u32)]` with `u32::from` for a program's
   `ProgramError::Custom` code.
 - The client crate's `prover` feature adds `prover::Prover`, which proves from the

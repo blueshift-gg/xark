@@ -462,6 +462,42 @@ fn gen_lib_rs(
             String::new(),
         ),
     };
+    // The proof type's `TryFrom` reads each input as its own bytes (a hash is its 32),
+    // not the field elements: the sample's, after its proof.
+    let parse_test = typed
+        .filter(|_| sample)
+        .and_then(|t| Some((t.bundle.as_ref()?, t.parses.as_ref()?, t.sample.as_ref()?)))
+        .map_or(String::new(), |(ty, names, lit)| {
+            let inputs: String = names
+                .iter()
+                .map(|n| format!("        data.extend_from_slice(&inputs.{n});\n"))
+                .collect();
+            format!(
+                r#"
+    /// The sample as instruction data, the proof then each input as its own bytes,
+    /// parses into `{ty}` with the sample's inputs and verifies; a byte short
+    /// or long, it doesn't parse.
+    #[test]
+    fn typed_instruction_data_parses_and_verifies() {{
+        let inputs = {lit};
+        let mut data = include_bytes!("../proof.solana.bin").to_vec();
+{inputs}        let proof = {ty}::try_from(&data[..]).unwrap();
+        assert_eq!(proof.to_fields(), inputs.to_fields());
+        assert_eq!(proof.verify(), Ok(()));
+        assert_eq!({ty}::try_from(&data[..data.len() - 1]), Err(XarkError::Truncated));
+        data.push(0);
+        assert_eq!({ty}::try_from(&data[..]), Err(XarkError::TrailingBytes));
+    }}
+"#
+            )
+        });
+    // A circuit named `raw` has its own `RawProof`: the generic one is then
+    // `xark_verifier::RawProof`, as the self-test names it anyway.
+    let raw = if typed.and_then(|t| t.bundle.as_deref()) == Some("RawProof") {
+        ""
+    } else {
+        "RawProof, "
+    };
     let tests = if sample {
         format!(
             r#"
@@ -487,7 +523,23 @@ mod tests {{
             assert!(!verify(&proof, fields));
         }}
     }}
-{typed_test}}}
+
+    /// The bundled instruction data, the field elements as `to_instruction_data()`
+    /// writes them, parses into a `RawProof` with the sample's proof and field
+    /// elements, which verify; a byte short or long, it doesn't parse.
+    #[test]
+    fn raw_instruction_data_parses_and_verifies() {{
+        type Raw = xark_verifier::RawProof<NUM_PUBLIC_INPUTS>;
+        let mut data = include_bytes!("../instruction_data.bin").to_vec();
+        let raw = Raw::try_from(&data[..]).unwrap();
+        assert_eq!(raw.proof, Proof::from_le_bytes(include_bytes!("../proof.solana.bin")));
+        assert_eq!(raw.inputs.as_flattened(), &include_bytes!("../public_inputs.solana.bin")[..]);
+        assert!(verify(&raw.proof, raw.inputs));
+        assert_eq!(Raw::try_from(&data[..data.len() - 1]), Err(XarkError::Truncated));
+        data.push(0);
+        assert_eq!(Raw::try_from(&data[..]), Err(XarkError::TrailingBytes));
+    }}
+{typed_test}{parse_test}}}
 "#
         )
     } else {
@@ -507,7 +559,7 @@ mod tests {{
 #![allow(clippy::all)]
 #![cfg_attr(any(target_os = "solana", target_arch = "bpf"), no_std)]
 
-pub use xark_verifier::{{Proof, Verifiable, Verifier, VerifierError, XarkError}};
+pub use xark_verifier::{{Proof, {raw}Verifiable, Verifier, VerifierError, XarkError}};
 
 /// Number of public inputs this circuit exposes.
 pub const NUM_PUBLIC_INPUTS: usize = {n};
