@@ -166,6 +166,23 @@ let data = proof.to_instruction_data(); // proof || public inputs
 `prove_json` a JSON object of them. Neither encodes a struct or a natural value
 (a date, a string) yet: for those, use `xark prove` or the TypeScript client.
 
+## Prove on a GPU (optional)
+
+An `xark` built with OpenCL proves large circuits with the quotient and the H
+MSM on the GPU, beside the CPU's MSMs. The same proofs, byte for byte, and the
+same keys:
+
+```sh
+cargo install xark-cli --version 0.5.0 --locked --features opencl
+xark prove --prover opencl --acknowledge-gpu-side-channel-risk --inputs inputs.json
+```
+
+A circuit under a 2^18-point QAP domain (up to about 131k constraints) proves
+on the CPU, where the GPU's fixed cost would lose; the command says which proved it. A
+GPU MSM is variable-time and its buffers aren't guaranteed to be erased, hence
+the flag: use it on trusted, single-tenant hardware only. From Rust, the provers
+share `xark_groth16::Prover`: `Cpu` and `Accelerated` with a device.
+
 ## Reuse another circuit's types
 
 A circuit crate can depend on another circuit crate and use its `#[input]` types

@@ -14,7 +14,10 @@ still verify (its digests are the same; `zkyc_nationality` is a new example).
 The prover is faster on every circuit of the gnark comparison (#84), with every
 core and on one thread: for the same randomness each proof is byte-identical to
 arkworks', as the tests check. It no longer verifies a proof before returning
-it unless asked to (`xark prove --verify`).
+it unless asked to (`xark prove --verify`). On a GPU, `xark prove --prover
+opencl` puts the quotient and the H MSM beside the CPU's MSMs (Ed25519: 215 ms
+instead of 370 on an Apple M3 Max), through `xark_groth16::Prover`, the one
+interface every prover now shares.
 
 ### Moving from 0.4.0
 
