@@ -12,8 +12,9 @@ use ark_bn254::{Bn254, Fr};
 use ark_ff::UniformRand;
 use rand::RngCore;
 
+use crate::accel::Accelerator;
 use crate::pk::PkSource;
-use crate::prover::{ProveError, ProverConfig, prove_with_randomness};
+use crate::prover::{ProveError, ProverConfig, prove_overlapped, prove_with_randomness};
 use crate::r1cs::ConstraintSource;
 use crate::types::Proof;
 
@@ -76,5 +77,63 @@ impl<P: PkSource> Prover for Cpu<P> {
         s: Fr,
     ) -> Result<Proof<Bn254>, ProveError> {
         prove_with_randomness(src, z, &mut self.pk, r, s, &self.cfg, &mut ())
+    }
+}
+
+/// xark's prover with a device beside the CPU: the device takes the quotient
+/// and then the H MSM, from a second reader of the key, while the CPU takes A,
+/// B and L (a key that can't be read twice leaves the device the quotient beside
+/// A and B, then H and L). The device decides by the domain whether to take a
+/// proof at all ([`Accelerator::wants_proof`]); a proof it declines runs on the
+/// CPU alone, as [`Cpu`] would.
+pub struct Accelerated<D, P> {
+    pub device: D,
+    pub pk: P,
+    pub cfg: ProverConfig,
+    name: String,
+}
+
+impl<D: Accelerator + Send, P: PkSource> Accelerated<D, P> {
+    pub fn new(name: impl Into<String>, device: D, pk: P, cfg: ProverConfig) -> Self {
+        Accelerated {
+            device,
+            pk,
+            cfg,
+            name: name.into(),
+        }
+    }
+
+    /// The QAP domain the key was made for (its `h_query` has one point fewer).
+    pub fn domain_size(&self) -> usize {
+        self.pk.header().h_len + 1
+    }
+}
+
+impl<D: Accelerator + Send, P: PkSource> Prover for Accelerated<D, P> {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn prove(
+        &mut self,
+        src: &dyn ConstraintSource,
+        z: &[Fr],
+        r: Fr,
+        s: Fr,
+    ) -> Result<Proof<Bn254>, ProveError> {
+        if self.device.wants_proof(self.domain_size()) {
+            prove_overlapped(
+                src,
+                z,
+                &mut self.pk,
+                r,
+                s,
+                &self.cfg,
+                &mut (),
+                &mut self.device,
+            )
+        } else {
+            prove_with_randomness(src, z, &mut self.pk, r, s, &self.cfg, &mut ())
+        }
     }
 }

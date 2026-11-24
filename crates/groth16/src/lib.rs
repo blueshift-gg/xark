@@ -41,7 +41,7 @@ pub use pk::{InMemoryPk, PkSource, SerializedPk};
 pub use prover::{
     Probe, ProveError, ProverConfig, prove, prove_accelerated, prove_with_randomness,
 };
-pub use provers::{Cpu, Prover, prove_with_rng};
+pub use provers::{Accelerated, Cpu, Prover, prove_with_rng};
 pub use push::PushProver;
 pub use r1cs::{
     BytecodeSource, ConstraintSource, ProgramSource, RowFileSource, VarLayout, first_unsatisfied,
