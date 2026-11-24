@@ -133,14 +133,14 @@ export interface Wasm {
   prove(circuit: Uint8Array, provingKey: Uint8Array, inputs: Record<string, string>, sources?: string): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit and its proving key, decoded once, for many proofs (`Prover.preload`). */
   ProvingSession: new (circuit: Uint8Array, provingKey: Uint8Array, sources?: string) => {
-    prove(inputs: Record<string, string>, options?: { pool?: WorkerPool }): { proof: Uint8Array; publicInputs: Uint8Array };
+    prove(inputs: Record<string, string>, options?: { pool?: WorkerPool; verify?: boolean }): { proof: Uint8Array; publicInputs: Uint8Array };
   };
   /** `prove` with options: a prover with a `pool` proves through it. */
   proveStreaming(
     circuit: Uint8Array,
     provingKey: Uint8Array,
     inputs: Record<string, string>,
-    options: { pool?: WorkerPool; sources?: string },
+    options: { pool?: WorkerPool; sources?: string; verify?: boolean },
   ): { proof: Uint8Array; publicInputs: Uint8Array };
   /** A circuit's `schema.json`, parsed once. */
   Schema: new (schema: string) => {
@@ -250,10 +250,11 @@ export class Prover<Inputs, PublicInputs, PublicValues, Structs = {}> extends Se
   preload(): void;
   /**
    * Prove `inputs`. Throws an `InputError` if one is malformed (its `path` naming
-   * it), or a `CheckFailed` if they fail a check (its `site` the statement, when
-   * `sources` was given).
+   * it). Inputs that break a constraint give a proof no verifier accepts; with
+   * `verify`, the proof is checked first and they throw a `CheckFailed` (its
+   * `site` the statement, when `sources` was given).
    */
-  prove(inputs: Inputs): Proof<PublicValues>;
+  prove(inputs: Inputs, options?: { verify?: boolean }): Proof<PublicValues>;
 }
 
 /** Verifies a circuit's proofs: from `circuit.verifier(…)`. */

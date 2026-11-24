@@ -502,15 +502,17 @@ export class Prover extends Session {
     this.session ??= typed(() => new this.wasm.ProvingSession(circuit, provingKey, sources));
   }
 
-  prove(inputs) {
+  prove(inputs, { verify = false } = {}) {
     const { circuit, provingKey, sources } = this.parts;
     const { proof, publicInputs } = typed(() => {
       const encoded = this.codec.encodeInputs(toJson(inputs));
       const pool = this.pool;
-      if (this.session) return pool ? this.session.prove(encoded, { pool }) : this.session.prove(encoded);
-      return pool
-        ? this.wasm.proveStreaming(circuit, provingKey, encoded, { pool, sources })
-        : this.wasm.prove(circuit, provingKey, encoded, sources);
+      const options = { ...(pool && { pool }), ...(verify && { verify }) };
+      const plain = !pool && !verify;
+      if (this.session) return plain ? this.session.prove(encoded) : this.session.prove(encoded, options);
+      return plain
+        ? this.wasm.prove(circuit, provingKey, encoded, sources)
+        : this.wasm.proveStreaming(circuit, provingKey, encoded, { ...options, sources });
     });
     return new Proof(proof.slice(), this.decodePublicInputs(publicInputs), publicInputs.slice(), this.wasm);
   }

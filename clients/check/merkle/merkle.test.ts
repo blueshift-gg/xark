@@ -24,6 +24,6 @@ test("proves membership", () => {
 });
 
 test("refuses a non-member", () => {
-  expect(() => prover.prove({ ...inputs, leaf: 8 })).toThrow();
+  expect(() => prover.prove({ ...inputs, leaf: 8 }, { verify: true })).toThrow();
   expect(() => prover.prove(short)).toThrow(/siblings/);
 });

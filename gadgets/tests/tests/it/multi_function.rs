@@ -24,7 +24,7 @@ fn multi_function_build_prove_verify() {
     let (ok, err) = xark_prove(&out, &[("x", "6"), ("y", "36")]);
     assert!(ok, "prove/verify failed: {err}");
     assert!(
-        err.contains("Proof produced and self-checked"),
+        err.contains("Proof produced and verified"),
         "unexpected prove output: {err}"
     );
 }
@@ -44,7 +44,7 @@ fn nested_calls_build_prove_verify() {
     let (ok, err) = xark_prove(&out, &[("x", "6"), ("y", "37")]);
     assert!(ok, "prove/verify failed: {err}");
     assert!(
-        err.contains("Proof produced and self-checked"),
+        err.contains("Proof produced and verified"),
         "unexpected prove output: {err}"
     );
 }

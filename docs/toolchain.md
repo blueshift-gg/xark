@@ -31,7 +31,7 @@ that `xark build` prints and writes to `target/xark/<name>/digest`. Keys record 
 (`metadata.json`'s `digest`), and a key fits every build with that digest. The
 `circuit.xbc` file itself can differ between Rust versions (how calls were inlined
 decides how repeats are stored), so `xark prove` accepts a key from another build
-with the same digest, says so, and its self-check confirms the proof.
+with the same digest and says so; `--verify` confirms the proof.
 
 - **Rust version.** Any stable Rust from 1.89 on builds circuits, and a circuit's
   digest is the same on every one of them. That is a tested guarantee, not a

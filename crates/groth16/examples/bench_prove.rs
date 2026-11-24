@@ -364,14 +364,14 @@ fn main() {
     }
     if mode == "phases" {
         // `phases <xbc> <pk> <inputs> [proofs]`: the streaming prover alone, key
-        // resident, a phase breakdown a proof (NO_CHECK=1 skips the self-check).
+        // resident, a phase breakdown a proof (CHECK=1 adds the self-check).
         let runs: u64 = args.get(5).map_or(5, |n| n.parse().unwrap());
         let assign = solve(&xbc, &args[4]);
         let pk = xark_backend::Groth16Keys::read_proving_key(&pk_path).unwrap();
         let src = BytecodeSource::new(&xbc).unwrap();
         let z = src.layout().assignment_from_map(&assign);
         let cfg = ProverConfig {
-            self_check: std::env::var("NO_CHECK").is_err(),
+            self_check: std::env::var("CHECK").is_ok(),
             ..ProverConfig::default()
         };
         let mut totals = Vec::new();

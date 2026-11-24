@@ -605,7 +605,7 @@ pub fn satisfaction_check(
 /// **Streaming** witness solve for `xark prove`, straight from the compact
 /// `circuit.xbc` bytes — never materializing the full flat program
 /// (`witness_gen` is the multi-GB bulk on non-native folding/IVC circuits). No
-/// constraint check or soundness analysis: the proof self-verifies, and
+/// constraint check or soundness analysis: `--verify` checks the proof, and
 /// soundness is checked by the circuit's tests and `xark check --inputs`.
 ///
 /// Returns each variable's value by id (`None` where the solve set none). If
@@ -824,7 +824,7 @@ pub enum KeyFit {
     Same,
     /// Made from another build of the same constraint system (another Rust version
     /// laid out `circuit.xbc` differently). It may not fit: a key fits the build it
-    /// was made from, and the prover's self-check catches one whose rows don't.
+    /// was made from, and `xark prove --verify` catches one whose rows don't.
     SameCircuit,
     /// Made for a different circuit.
     Different,

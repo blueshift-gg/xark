@@ -184,7 +184,7 @@ pub fn quotient<S: ConstraintSource + ?Sized>(
             // A witness that satisfies the rows has ⟨C_i,z⟩ = ⟨A_i,z⟩·⟨B_i,z⟩ (and
             // 0 = A·0 on the input rows), so C on the domain is A∘B, without a
             // second pass over the rows. One that doesn't gets an h no proof
-            // verifies with: its self-check fails and reports the row, as
+            // verifies with: the self-check, if on, fails and reports the row, as
             // before. The price is a third vector, so only on domains up to
             // 2^18 points (8 MiB a vector).
             let c_early: Option<Vec<Fr>> = (dom.n <= 1 << 18).then(|| {

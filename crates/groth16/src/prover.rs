@@ -36,7 +36,11 @@ pub struct ProverConfig {
     /// Proving-key points per streamed MSM chunk.
     pub msm_chunk: usize,
     pub fft: FftConfig,
-    /// Verify the proof against the key's embedded `vk` before returning.
+    /// Verify the proof against the key's embedded `vk` before returning. Off
+    /// by default: a proof's soundness doesn't depend on it, and a verifier
+    /// checks it anyway. On, a witness that breaks a row or a key for another
+    /// circuit is an error ([`ProveError::Unsatisfied`] names the row) instead of
+    /// a proof that won't verify, for one multi-pairing (under a millisecond).
     pub self_check: bool,
     /// Low-memory mode: park quotient vectors in a temp file in this directory,
     /// so only one domain-sized vector is resident (rows stream once more).
@@ -59,7 +63,7 @@ impl Default for ProverConfig {
             rows_per_window: 1 << 14,
             msm_chunk: 1 << 19,
             fft: FftConfig::default(),
-            self_check: true,
+            self_check: false,
             spill_dir: None,
             domain: None,
             merge_below: 1 << 12,

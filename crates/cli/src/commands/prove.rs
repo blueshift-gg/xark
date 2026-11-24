@@ -72,6 +72,13 @@ pub struct ProveArgs {
     /// outlives the process. For proving the largest circuits on small machines.
     #[arg(long, default_value_t = false)]
     pub low_memory: bool,
+
+    /// Verify the proof against the key before writing it (one pairing check,
+    /// under a millisecond). Without it, inputs that break a constraint, or a key
+    /// made for another build of the circuit, give a proof no verifier accepts;
+    /// with it, they are an error naming the constraint and its source line.
+    #[arg(long, default_value_t = false)]
+    pub verify: bool,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -178,7 +185,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
 }
 
 /// How long the two halves of a proof took: solving the witness (with the row
-/// source built beside it) and the Groth16 prove (key read, MSMs and self-check).
+/// source built beside it) and the Groth16 prove (key read, MSMs and, with `--verify`, the check).
 struct ProveTimes {
     solve: std::time::Duration,
     prove: std::time::Duration,
@@ -250,7 +257,7 @@ fn prove_streaming(
     let bytes = std::fs::read(xbc).with_context(|| format!("reading {}", xbc.display()))?;
     let fingerprint = super::sha256_hex(&bytes);
     // A key made for another circuit can't prove this one: say so, rather than
-    // failing the self-verification below. One made from another build of the same
+    // give a proof that doesn't verify. One made from another build of the same
     // circuit (another Rust version) may not fit either: a key fits the build it
     // was made from (a project keeps that build beside its key).
     match super::key_fit(pk_path, &bytes) {
@@ -262,7 +269,7 @@ fn prove_streaming(
         super::KeyFit::SameCircuit => eprintln!(
             "note: {} was made from another build of this circuit (the same constraints, \
              compiled differently, e.g. by another Rust version); proving with it, but a \
-             key fits the build it was made from: if the proof fails its self-check, run \
+             key fits the build it was made from: if the proof doesn't verify, run \
              `xark setup` for a new key",
             pk_path.display()
         ),
@@ -338,13 +345,14 @@ fn prove_streaming(
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_else(std::env::temp_dir)
         }),
+        self_check: args.verify,
         ..xark_groth16::ProverConfig::default()
     };
     let proof = match xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg) {
         Ok(proof) => proof,
         Err(e) => {
-            // A witness that doesn't satisfy the circuit fails the proof's
-            // self-verification: name the constraint (and source line) it breaks.
+            // With `--verify`, a witness that doesn't satisfy the circuit fails the
+            // proof's check: name the constraint (and source line) it breaks.
             explain_unsatisfied(&bytes, sources, &id_inputs)?;
             anyhow::bail!("streaming prove: {e}")
         }
@@ -473,7 +481,8 @@ fn write_outputs(
     println!(
         "\n{}",
         crate::style::brand(&format!(
-            "✅ Proof produced and self-checked ({} public input(s)).",
+            "✅ Proof produced{} ({} public input(s)).",
+            if args.verify { " and verified" } else { "" },
             public.len()
         ))
     );

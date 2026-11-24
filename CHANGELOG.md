@@ -12,6 +12,13 @@ byte-identical to arkworks', as the tests check. No circuit changed.
 
 ### Changes
 
+- A proof is no longer verified against its key before it is returned: its
+  soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
+  --verify`, `verify: true` in the wasm prover's options and
+  `ProverConfig::self_check` turn the check back on. Without it, inputs that
+  break a constraint, or a key from another build of the circuit, give a proof
+  no verifier accepts instead of an error naming the constraint; the success
+  line says "Proof produced", with " and verified" when it was.
 - The quotient takes six transforms of the domain instead of seven: `C` takes
   an inverse FFT where it took a coset FFT and its inverse, since
   `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. On domains up to 2^18 points `C` is
@@ -19,7 +26,9 @@ byte-identical to arkworks', as the tests check. No circuit changed.
   the rows.
 - The FFT's butterfly adds and subtracts on the Montgomery limbs: 12.0 ns where
   it was 17.6 (2^20 points on one thread: 161 ms, was 220). The row FFTs of a
-  domain under 2^17 points ran as one task; they now spread over the pool.
+  domain under 2^17 points ran as one task; they now spread over the pool. The
+  coset transforms fold their per-row factor into the column twiddle, one
+  multiplication an element fewer.
 - MSMs split full-width scalars with the GLV endomorphism (G1 and G2) while
   points × threads ≤ 2^16, pick window widths from a cost model fitted to
   batch-affine accumulation, skip points at infinity, and subtract on the limbs
@@ -28,7 +37,7 @@ byte-identical to arkworks', as the tests check. No circuit changed.
   quotient; a circuit of under 4096 variables gets its proof from three MSMs
   instead of five, with `r` and `s`'s terms folded in as points
   (`ProverConfig::merge_below`).
-- The self-check is one multi-pairing with one final exponentiation (it was a
+- The self-check, when on, is one multi-pairing with one final exponentiation (it was a
   multi-pairing and a pairing), its key-only half kept from proof to proof, and
   its Miller loops made beside the MSMs.
 

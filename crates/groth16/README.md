@@ -28,8 +28,9 @@ Row sources match the key's R1CS form (`metadata.json` `r1cs_form`, chosen by
 **template-reduced** circuit straight from `circuit.xbc`; `RowFileSource` streams
 the **boundary-minimized** circuit from the compact `r1cs.stream` setup writes next
 to a `minimized` key. `xark prove` picks the right one automatically. A key/circuit
-mismatch is rejected up front (`ProveError::KeyMismatch`), and every proof is
-self-verified before it is returned. A proof that fails that check says why:
+mismatch is rejected up front (`ProveError::KeyMismatch`). With
+`ProverConfig::self_check` (off by default; `xark prove --verify`) the proof is
+verified before it is returned, and one that fails says why:
 `ProveError::Unsatisfied { row }` when the witness breaks a row,
 `SelfCheckFailed` when every row holds (the key is for another circuit).
 

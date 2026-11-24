@@ -36,7 +36,7 @@ fn arithmetic_square_build_prove_verify() {
     let (ok, err) = xark_prove(&out, &[("x", "3"), ("y", "9")]);
     assert!(ok, "prove/verify failed: {err}");
     assert!(
-        err.contains("Proof produced and self-checked"),
+        err.contains("Proof produced and verified"),
         "unexpected prove output: {err}"
     );
 }
@@ -172,7 +172,7 @@ fn range_basic_build_prove_verify() {
     let (ok, err) = xark_prove(&out, &[("x", "200"), ("out", "200")]);
     assert!(ok, "prove/verify failed: {err}");
     assert!(
-        err.contains("Proof produced and self-checked"),
+        err.contains("Proof produced and verified"),
         "unexpected prove output: {err}"
     );
 }
@@ -182,7 +182,7 @@ fn range_basic_build_prove_verify() {
 /// pinned only boolean (`b*b == b`) — a two-valued variable the witness-based
 /// `solver::analyze_underconstrained` flags. `Circuit::check` (what a circuit's
 /// tests and its generated validator call) rejects it; `xark prove` only solves,
-/// proves and self-verifies, so it proves it.
+/// proves and verifies, so it proves it.
 #[test]
 fn soundness_is_checked_by_tests_not_prove() {
     let tmp = tempdir();

@@ -428,7 +428,10 @@ fn reordering_variables_breaks_the_proof() {
         &z,
         &mut InMemoryPk::new(&pk),
         &mut ChaCha20Rng::seed_from_u64(2),
-        &ProverConfig::default(),
+        &ProverConfig {
+            self_check: true,
+            ..ProverConfig::default()
+        },
     );
     assert!(matches!(res, Err(ProveError::SelfCheckFailed)), "{res:?}");
     // Which `first_unsatisfied` tells apart from a bad witness.
@@ -467,7 +470,10 @@ fn first_unsatisfied_finds_the_failing_row() {
         &z,
         &mut InMemoryPk::new(&pk),
         &mut ChaCha20Rng::seed_from_u64(2),
-        &ProverConfig::default(),
+        &ProverConfig {
+            self_check: true,
+            ..ProverConfig::default()
+        },
     );
     assert!(
         matches!(res, Err(ProveError::Unsatisfied { row: r }) if r == row),
@@ -1032,14 +1038,17 @@ fn dev_setup_is_byte_identical_to_arkworks() {
     // The streamed key proves.
     let assign = kyc_witness();
     let z = src.layout().assignment_from_map(&assign);
-    prove(
+    let mut pk = SerializedPk::from_bytes(&ours).unwrap();
+    let proof = prove(
         &src,
         &z,
-        &mut SerializedPk::from_bytes(&ours).unwrap(),
+        &mut pk,
         &mut ChaCha20Rng::seed_from_u64(7),
         &ProverConfig::default(),
     )
     .unwrap();
+    let public = &z[1..src.layout().num_instance()];
+    assert!(xark_groth16::verify(&xark_groth16::PkSource::header(&pk).vk, public, &proof).unwrap());
 }
 
 /// A consistent Powers-of-Tau transcript for 2^power from known (τ, α, β).

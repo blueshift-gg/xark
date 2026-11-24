@@ -135,8 +135,8 @@ fn clean_does_not_follow_symlinks() {
     );
 }
 
-/// A proving key made for an earlier build is named as stale, not left to fail
-/// the proof's self-verification.
+/// A proving key made for an earlier build is named as stale, not left to give a
+/// proof that doesn't verify.
 #[test]
 fn stale_proving_key_is_named() {
     let tmp = tempdir();

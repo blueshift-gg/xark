@@ -251,8 +251,8 @@ impl ProvingSession {
     }
 
     /// Prove: the same arguments (bar the artifacts) and result as [`prove`].
-    /// `options` (optional): `pool`, a worker pool from `js/pool.mjs`, as for
-    /// `proveStreaming`.
+    /// `options` (optional): `pool`, a worker pool from `js/pool.mjs`, and
+    /// `verify`, as for `proveStreaming`.
     pub fn prove(
         &mut self,
         inputs: JsValue,
@@ -270,13 +270,14 @@ impl ProvingSession {
 ///
 /// Uses the streaming prover: the key is read from `pk_bytes` a chunk of points
 /// at a time and the constraint rows are streamed, so memory stays far below the
-/// key and circuit sizes (Ed25519 verification fits). The proof is checked
-/// against the key's verifying key before it is returned.
+/// key and circuit sizes (Ed25519 verification fits). The proof is not checked
+/// against the key before it is returned; `proveStreaming` with `verify` does.
 ///
-/// Throws an `Error` on any error: a malformed `.xbc`, unknown input,
-/// an unsatisfiable witness, or a proving key for a different circuit. Pass the
-/// build's `sources.json` (text) as `sources` and inputs that fail a check name
-/// it: `the inputs fail the check at src/lib.rs:77:20: \`…require_one_of(allowed);\``.
+/// Throws an `Error` on any error: a malformed `.xbc`, unknown input, or
+/// inputs the witness solver rejects. Inputs that solve but break a constraint
+/// give a proof no verifier accepts; `proveStreaming` with `verify` throws for
+/// them instead, naming the source line when given the build's `sources.json`:
+/// `the inputs fail the check at src/lib.rs:77:20: \`…require_one_of(allowed);\``.
 #[wasm_bindgen]
 pub fn prove(
     circuit_xbc: &Bytes,
@@ -673,8 +674,8 @@ fn key_format(bytes: &[u8]) -> Result<xark_groth16::pk::KeyFormat, js_sys::Error
 }
 
 /// Deserialize a whole `pk.bin` from a reader (honoring its `XKPK` header),
-/// unchecked: the key is the caller's own setup
-/// output, and every proof is self-verified against its embedded `vk`.
+/// unchecked: the key is the caller's own setup output (and a proof made with
+/// `verify` is checked against its embedded `vk`).
 pub(crate) fn deserialize_proving_key_from(
     mut r: impl std::io::Read,
 ) -> Result<ProvingKey<Bn254>, js_sys::Error> {
