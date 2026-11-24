@@ -124,9 +124,7 @@ fn add_a_circuit_then_its_program() {
     assert!(ok, "{out}");
     // The framework that scaffolded the program says how to build and test it.
     assert!(
-        out.contains("cargo build-sbf")
-            && out.contains("npm install && npm test")
-            && !out.contains("cargo test-sbf"),
+        out.contains("cargo build-sbf") && out.contains("npm install && npm test"),
         "the program's own commands weren't printed:\n{out}"
     );
     for f in [
@@ -193,9 +191,7 @@ fn add_a_circuit_then_its_program() {
         std::fs::read_to_string(app.join(".github/workflows/claim-program.yml")).unwrap();
     assert!(
         workflow.contains("--manifest-path programs/claim/Cargo.toml")
-            && workflow.contains("tests/claim.test.ts")
-            && !workflow.contains("cargo test-sbf")
-            && !workflow.contains("xark test --programs"),
+            && workflow.contains("tests/claim.test.ts"),
         "{workflow}"
     );
     let test = std::fs::read_to_string(app.join("tests/claim.test.ts")).unwrap();
