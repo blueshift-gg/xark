@@ -620,11 +620,10 @@ fn autobuild_and_setup(
         // From this machine's randomness: the convenience loop must not silently run
         // a phase-2 setup just because a stray `.ptau` is discoverable. A key from a
         // transcript stays an explicit `xark setup`.
-        setup::run(setup::SetupArgs {
+        setup::make(setup::SetupArgs {
             path: args.path.clone(),
             out: None,
             without_ptau: true,
-            nested: false,
             deterministic_rng: None,
             ptau_file: None,
             phase2_seed: None,

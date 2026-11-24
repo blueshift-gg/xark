@@ -39,10 +39,6 @@ pub struct SetupArgs {
     /// set it in code. Not a flag.
     #[arg(skip)]
     pub without_ptau: bool,
-    /// Set when a project-wide command (`xark build`) runs setup in-process: it
-    /// prints what's next itself, so setup doesn't.
-    #[arg(skip)]
-    pub nested: bool,
     /// Reproducible-randomness escape hatch for test fixtures **only**: a key
     /// made without a `.ptau`, driven by
     /// `ChaCha20Rng::seed_from_u64(<seed>)` so two runs with the same seed
@@ -327,7 +323,15 @@ fn plan_keyed(
     ))
 }
 
+/// `xark setup`: make the keys, then say what's next.
 pub fn run(args: SetupArgs) -> Result<()> {
+    make(args)?.print_next_steps();
+    Ok(())
+}
+
+/// Make the keys; returns what the CLI's next-step hint needs. `xark build` and
+/// `xark prove` reuse it and drop the report: they own what to say next.
+pub(crate) fn make(args: SetupArgs) -> Result<SetupReport> {
     let project = XarkProject::resolve(args.path.clone())?;
     // Build first if there's no build yet; keys for a circuit older than its source
     // would prove the wrong thing.
@@ -598,64 +602,80 @@ pub fn run(args: SetupArgs) -> Result<()> {
         }
     }
     // Keys written elsewhere (`--out`): `xark prove` must be pointed at them.
-    let key = (pk_path != project.proving_key()).then_some(pk_path.as_path());
-    if !args.nested {
-        print_next_steps(&project, &args.path, key);
-    }
-    Ok(())
+    let key = (pk_path != project.proving_key()).then(|| pk_path.clone());
+    Ok(SetupReport {
+        project,
+        path: args.path.clone(),
+        key,
+    })
 }
 
-fn print_next_steps(project: &XarkProject, path: &Option<PathBuf>, key: Option<&std::path::Path>) {
-    // Only the *declared* inputs — never the witnesses the solver derives (e.g.
-    // `to_bits` range-check bits). `circuit.xbc`'s header lists them, in order, so
-    // nothing is expanded.
-    let names: Vec<String> = match fs::read(project.circuit_xbc()) {
-        Ok(bytes) if super::is_function_artifact(&bytes) => {
-            xark_ir::function_decode::decode_input_vars(&bytes)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|v| v.name)
-                .collect()
-        }
-        _ => Vec::new(),
-    };
-    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    let p = super::path_arg(path);
-    // From `schema.json`: one entry per declared input, in its natural form (a hash's
-    // `0x…` bytes, not its leaves), written to a file to fill in. Never inline: a
-    // command full of placeholders looks runnable and isn't.
-    let file = project.xark_dir.join("inputs.example.json");
-    let written = match super::load_schema(&project.xark_dir).map(|s| s.summary()) {
-        Some(inputs) if !inputs.is_empty() => {
-            // In declaration order (a `serde_json::Map` would sort the keys).
-            let entries: Vec<String> = inputs
-                .iter()
-                .map(|i| format!("{:?}: {}", i.name, i.template))
-                .collect();
-            let text = format!("{{\n  {}\n}}\n", entries.join(",\n  "));
-            fs::write(&file, text).is_ok()
-        }
-        _ => false,
-    };
-    let (hint, what) = if written {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let shown = file.strip_prefix(&cwd).unwrap_or(&file);
-        (
-            format!("--inputs {}", shown.display()),
-            "replace the placeholders in that file with your values, then this solves \
+/// What a setup made, for the CLI's "Next: `xark prove`" step. Programmatic
+/// callers (`xark build`, `xark prove`) drop it: the outer command says what's
+/// next.
+pub struct SetupReport {
+    project: XarkProject,
+    path: Option<PathBuf>,
+    key: Option<PathBuf>,
+}
+
+impl SetupReport {
+    /// Print the `xark prove` step that follows an explicit `xark setup`.
+    pub fn print_next_steps(&self) {
+        let project = &self.project;
+        let path = &self.path;
+        let key = self.key.as_deref();
+        // Only the *declared* inputs — never the witnesses the solver derives (e.g.
+        // `to_bits` range-check bits). `circuit.xbc`'s header lists them, in order, so
+        // nothing is expanded.
+        let names: Vec<String> = match fs::read(project.circuit_xbc()) {
+            Ok(bytes) if super::is_function_artifact(&bytes) => {
+                xark_ir::function_decode::decode_input_vars(&bytes)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|v| v.name)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let p = super::path_arg(path);
+        // From `schema.json`: one entry per declared input, in its natural form (a hash's
+        // `0x…` bytes, not its leaves), written to a file to fill in. Never inline: a
+        // command full of placeholders looks runnable and isn't.
+        let file = project.xark_dir.join("inputs.example.json");
+        let written = match super::load_schema(&project.xark_dir).map(|s| s.summary()) {
+            Some(inputs) if !inputs.is_empty() => {
+                // In declaration order (a `serde_json::Map` would sort the keys).
+                let entries: Vec<String> = inputs
+                    .iter()
+                    .map(|i| format!("{:?}: {}", i.name, i.template))
+                    .collect();
+                let text = format!("{{\n  {}\n}}\n", entries.join(",\n  "));
+                fs::write(&file, text).is_ok()
+            }
+            _ => false,
+        };
+        let (hint, what) = if written {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let shown = file.strip_prefix(&cwd).unwrap_or(&file);
+            (
+                format!("--inputs {}", shown.display()),
+                "replace the placeholders in that file with your values, then this solves \
              the witness and produces a proof",
-        )
-    } else {
-        (
-            super::inputs_hint(&name_refs),
-            "with your values: solve the witness and produce a proof",
-        )
-    };
-    let key = key.map_or_else(String::new, |k| {
-        format!(" --proving-key {}", super::shown(k))
-    });
-    println!(
-        "\n{}",
-        crate::style::next_steps(&[(format!("xark prove {p}{key} {hint}"), what,)])
-    );
+            )
+        } else {
+            (
+                super::inputs_hint(&name_refs),
+                "with your values: solve the witness and produce a proof",
+            )
+        };
+        let key = key.map_or_else(String::new, |k| {
+            format!(" --proving-key {}", super::shown(k))
+        });
+        println!(
+            "\n{}",
+            crate::style::next_steps(&[(format!("xark prove {p}{key} {hint}"), what,)])
+        );
+    }
 }
