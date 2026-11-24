@@ -1141,6 +1141,11 @@ fn bytes(v: &Value) -> Result<Vec<u8>, String> {
                 .strip_prefix("0x")
                 .or_else(|| s.trim().strip_prefix("0X"))
                 .ok_or_else(|| format!("expected 0x-hex bytes, got {s:?}"))?;
+            // Hex digits only: `from_str_radix` below would take a sign (`+a` as
+            // 10), and the pairs are cut by byte, so every character must be ASCII.
+            if !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(format!("invalid hex {s:?}"));
+            }
             if h.len() % 2 != 0 {
                 return Err(format!("{s:?} has an odd number of hex digits"));
             }
@@ -1489,6 +1494,22 @@ mod tests {
             let e = s.public_inputs(&json!({ key: 1 })).unwrap_err();
             assert!(e.message.contains("unknown input"), "{key}: {e}");
         }
+    /// Hex bytes are pairs of hex digits and nothing else, as the client's `fromHex`
+    /// reads them: no sign on a pair (`u8::from_str_radix` takes `+a`), and a
+    /// character past ASCII is an error, not a slice through the middle of it.
+    #[test]
+    fn hex_bytes_are_hex_digits_only() {
+        assert_eq!(bytes(&json!("0x0aFf")).unwrap(), [0x0a, 0xff]);
+        assert_eq!(bytes(&json!(" 0X6162 ")).unwrap(), [0x61, 0x62]);
+        for bad in ["0x+a+b", "0x-1", "0x6g", "0xa\u{e9}1", "0x\u{e9}"] {
+            let e = bytes(&json!(bad)).unwrap_err();
+            assert!(e.contains("invalid hex"), "{bad}: {e}");
+        }
+        // Through an input: a `[u8; 2]` given as signed digits is refused, by name.
+        let mut v = inputs();
+        v["msg"] = json!("0x+a+b");
+        let e = schema().leaves(&v).unwrap_err();
+        assert_eq!(e.path, "msg", "{e}");
     }
 
     #[test]

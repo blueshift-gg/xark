@@ -421,7 +421,7 @@ pub fn read_public_inputs(xark_dir: &std::path::Path, arg: &str) -> Result<Vec<F
 pub fn parse_input_text(text: &str, source: &std::path::Path) -> Result<BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
     for (lineno, raw) in text.lines().enumerate() {
-        let line = raw.split('#').next().unwrap_or("").trim();
+        let line = uncommented(raw).trim();
         if line.is_empty() {
             continue;
         }
@@ -436,6 +436,24 @@ pub fn parse_input_text(text: &str, source: &std::path::Path) -> Result<BTreeMap
         out.insert(name.trim().to_string(), value.to_string());
     }
     Ok(out)
+}
+
+/// `line` of an inputs file without its `#` comment. A `#` inside a quoted value
+/// (`document = "Apt #4"`) is part of the value: there, only one after the closing
+/// quote starts a comment.
+fn uncommented(line: &str) -> &str {
+    let quoted = line.split_once('=').and_then(|(name, value)| {
+        let v = value.trim_start();
+        let quote = v.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        let close = v[1..].find(quote).filter(|_| !name.contains('#'))?;
+        // Past the closing quote: the opening one, the value and the closing one.
+        Some(line.len() - v.len() + close + 2)
+    });
+    let from = quoted.unwrap_or(0);
+    match line[from..].find('#') {
+        Some(i) => &line[..from + i],
+        None => line,
+    }
 }
 
 /// Render a copy-pasteable `--inputs` JSON template naming every declared input,
@@ -872,6 +890,37 @@ mod tests {
 
         assert_eq!(inputs.get("path[0]").map(String::as_str), Some("12"));
         assert_eq!(inputs.get("amount").map(String::as_str), Some("34"));
+    }
+
+    /// A `#` inside a quoted value is part of the value (a `Text` such as a flat
+    /// number): only one outside the quotes starts a comment.
+    #[test]
+    fn a_hash_in_a_quoted_value_is_kept() {
+        let inputs = parse_input_text(
+            r##"# doc = "ignored"
+doc = "Apt #4"  # the flat
+tag = '#1'
+n = 5 # five
+bare = Apt #4
+open = "Apt # 4
+"##,
+            Path::new("witness.inputs"),
+        )
+        .unwrap();
+        let got: Vec<(&str, &str)> = inputs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("bare", "Apt"),
+                ("doc", "Apt #4"),
+                ("n", "5"),
+                ("open", "Apt"),
+                ("tag", "#1"),
+            ]
+        );
     }
 
     /// `--inputs` is read against `schema.json`: values in natural forms, ranges
