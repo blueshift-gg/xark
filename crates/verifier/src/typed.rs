@@ -268,3 +268,43 @@ pub trait Verifiable {
     /// Verify with the embedded key. `Ok(())` only if the proof holds for its inputs.
     fn verify(&self) -> Result<(), XarkError>;
 }
+
+/// A proof and its `N` public inputs as field elements, parsed from instruction data
+/// laid out as a client's `to_instruction_data()` writes it: `proof (256 B) || N × 32 B`,
+/// each input a little-endian field element in proof order. It works for any
+/// circuit, but the program then holds field elements, packed as the circuit's
+/// `#[input]` packs them, rather than its inputs. When every public input is a byte
+/// array, the circuit's own `<Name>Proof` parses each input as its own type: prefer it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawProof<const N: usize> {
+    /// The proof.
+    pub proof: Proof,
+    /// The public inputs, as [`Verifier::verify`] takes them.
+    pub inputs: [[u8; FR_BYTES]; N],
+}
+
+impl<const N: usize> TryFrom<&[u8]> for RawProof<N> {
+    type Error = XarkError;
+
+    /// Parse `proof (256 B) || N × 32 B`. The inputs come from the caller — bind them
+    /// to your program's state before trusting.
+    fn try_from(data: &[u8]) -> Result<Self, XarkError> {
+        let (proof, rest) = data
+            .split_first_chunk::<PROOF_BYTES>()
+            .ok_or(XarkError::Truncated)?;
+        if rest.len() < N * FR_BYTES {
+            return Err(XarkError::Truncated);
+        }
+        if rest.len() > N * FR_BYTES {
+            return Err(XarkError::TrailingBytes);
+        }
+        let mut inputs = [[0u8; FR_BYTES]; N];
+        for (input, bytes) in inputs.iter_mut().zip(rest.as_chunks::<FR_BYTES>().0) {
+            *input = *bytes;
+        }
+        Ok(Self {
+            proof: Proof::from_le_bytes(proof),
+            inputs,
+        })
+    }
+}

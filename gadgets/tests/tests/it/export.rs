@@ -75,8 +75,8 @@ fn exported_verifier_passes_its_own_test() {
 
     let log = cargo_test(&verifier);
     assert!(
-        log.contains("2 passed"),
-        "expected the bundled-proof and typed-inputs tests:\n{log}"
+        log.contains("4 passed"),
+        "expected the bundled-proof, raw, typed-inputs and typed instruction-data tests:\n{log}"
     );
 }
 
@@ -204,7 +204,8 @@ fn typed_public_inputs_match_the_proof() {
     assert!(lib.contains("pub struct PublicInputs {"), "{lib}");
     assert!(lib.contains("    pub to: [u8; 32],"), "{lib}");
     // The proof and its inputs as one type, named after the circuit; with inputs
-    // that aren't all byte arrays, it has no parser from instruction data.
+    // that aren't all byte arrays, it has no parser from instruction data, but the
+    // generic `RawProof` still reads the field elements.
     assert!(lib.contains("pub struct KindsProof {"), "{lib}");
     assert!(
         lib.contains("impl xark_verifier::Verifiable for KindsProof"),
@@ -212,8 +213,128 @@ fn typed_public_inputs_match_the_proof() {
     );
     assert!(!lib.contains("TryFrom<&[u8]> for KindsProof"), "{lib}");
     let log = cargo_test(&verifier);
-    assert!(log.contains("2 passed"), "{log}");
+    assert!(log.contains("3 passed"), "{log}");
 }
+
+/// With every public input a byte array, the proof type parses from instruction data
+/// with each input as its own bytes (a hash is its 32), while the generic `RawProof`
+/// reads the elements as the prover writes them, 32 bytes each (a `Field` is one, a
+/// `[u8; 3]` one per byte, a hash and an address two halves each). The self-tests
+/// parse the sample both ways; a test of our own checks the values the typed one
+/// reads, that they pack to the prover's elements, and that neither reads the
+/// other's layout.
+#[test]
+fn byte_inputs_parse_from_instruction_data() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("byte_inputs");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"byte_inputs\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[workspace]\n\
+             [dependencies]\nxark = {{ path = {:?} }}\nxark-hash = {{ path = {:?} }}\n\
+             [lints.rust]\nunexpected_cfgs = {{ level = \"warn\", check-cfg = ['cfg(xark)'] }}\n",
+            root.join("crates/lang").display().to_string(),
+            root.join("gadgets/xark-hash").display().to_string(),
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), BYTE_INPUTS).unwrap();
+    std::fs::write(dir.join("inputs.json"), BYTE_INPUTS_INPUTS).unwrap();
+    let d = dir.to_str().unwrap();
+    for args in [
+        vec!["build", d],
+        vec!["setup", d],
+        vec![
+            "prove",
+            d,
+            "--inputs",
+            dir.join("inputs.json").to_str().unwrap(),
+        ],
+        vec!["export", d],
+    ] {
+        let (ok, _, err) = run(&args);
+        assert!(ok, "`xark {}` failed: {err}", args[0]);
+    }
+    let verifier = dir.join("clients/rust");
+    let lib = std::fs::read_to_string(verifier.join("src/lib.rs")).unwrap();
+    assert!(lib.contains("TryFrom<&[u8]> for ByteInputsProof"), "{lib}");
+    std::fs::create_dir_all(verifier.join("tests")).unwrap();
+    std::fs::write(verifier.join("tests/parse.rs"), BYTE_INPUTS_PARSE).unwrap();
+    let log = cargo_test(&verifier);
+    assert!(
+        log.contains("4 passed") && log.contains("1 passed"),
+        "expected the crate's 4 tests and the parse test:\n{log}"
+    );
+}
+
+const BYTE_INPUTS: &str = r#"#![cfg_attr(xark, no_std)]
+use xark::prelude::*;
+use xark_hash::Hash;
+
+#[circuit]
+pub fn byte_inputs(
+    x: Private<Field>,
+    y: Public<Field>,
+    bytes: Public<[u8; 3]>,
+    digest: Public<Hash>,
+    to: Public<Address>,
+) {
+    require_eq(x * x, y);
+    bind(bytes);
+    bind(digest);
+    bind(to);
+}
+"#;
+
+const BYTE_INPUTS_INPUTS: &str = r#"{"x": 3, "y": 9, "bytes": "0x01ff7e",
+ "digest": "0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f",
+ "to": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"}
+"#;
+
+/// The exported crate's `tests/parse.rs`. As their own bytes, the inputs are `y`'s
+/// 32 (a `Field` is its element), `bytes`' 3, then the digest's and the address's
+/// 32; as elements, `y`, `bytes[0..3]`, then the digest's and the address's halves.
+const BYTE_INPUTS_PARSE: &str = r#"use byte_inputs_client::{
+    verify, ByteInputsProof, RawProof, Verifiable, XarkError, NUM_PUBLIC_INPUTS,
+};
+
+fn hex(s: &str) -> [u8; 32] {
+    core::array::from_fn(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap())
+}
+
+const DIGEST: &str = "00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f";
+// TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+const TO: &str = "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9";
+
+#[test]
+fn each_layout_parses_with_its_own_type_only() {
+    let fields = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/instruction_data.bin")).unwrap();
+    assert_eq!(fields.len(), 256 + 8 * 32);
+    let raw = RawProof::<NUM_PUBLIC_INPUTS>::try_from(&fields[..]).unwrap();
+    assert!(verify(&raw.proof, raw.inputs));
+
+    let mut typed = fields[..256].to_vec();
+    typed.extend_from_slice(&raw.inputs[0]);
+    typed.extend_from_slice(&[0x01, 0xff, 0x7e]);
+    typed.extend_from_slice(&hex(DIGEST));
+    typed.extend_from_slice(&hex(TO));
+    assert_eq!(typed.len(), 256 + 32 + 3 + 32 + 32);
+    let p = ByteInputsProof::try_from(&typed[..]).unwrap();
+    assert_eq!(p.bytes, [0x01, 0xff, 0x7e]);
+    assert_eq!(p.digest, hex(DIGEST));
+    assert_eq!(p.to, hex(TO));
+    assert_eq!(p.to_fields(), raw.inputs);
+    assert_eq!(p.verify(), Ok(()));
+
+    assert_eq!(ByteInputsProof::try_from(&fields[..]), Err(XarkError::TrailingBytes));
+    assert_eq!(RawProof::<NUM_PUBLIC_INPUTS>::try_from(&typed[..]), Err(XarkError::Truncated));
+}
+"#;
 
 const KINDS: &str = r#"#![cfg_attr(xark, no_std)]
 use xark::prelude::*;

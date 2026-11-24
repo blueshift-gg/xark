@@ -30,6 +30,11 @@ pub struct Typed {
     pub items: String,
     /// The sample's public inputs as a `PublicInputs` expression, for the self-test.
     pub sample: Option<String>,
+    /// The proof type (`{marker}Proof`), when there is one.
+    pub bundle: Option<String>,
+    /// Its inputs' names, when it parses from instruction data (`TryFrom<&[u8]>`),
+    /// for the self-test.
+    pub parses: Option<Vec<String>>,
 }
 
 /// The typed public inputs for `schema`, or `None` when one of them has no Rust form
@@ -130,7 +135,9 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
 
     // `TryFrom<&[u8]>` for the bundle — only when every public input is a fixed byte array
     // (`[u8; N]`: keys, hashes, nullifiers), the common on-chain case. Reads `proof (256) ||
-    // each input`, no `alloc`.
+    // each input` as its type holds it (a hash is its 32 bytes), no `alloc`. The field
+    // elements `to_instruction_data()` writes are `xark_verifier::RawProof`'s to parse.
+    let mut parses = None;
     if bundle
         && let Some(widths) = field_list
             .iter()
@@ -153,14 +160,17 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
             items,
             "\nimpl ::core::convert::TryFrom<&[u8]> for {marker}Proof {{\n    \
              type Error = xark_verifier::XarkError;\n    \
-             /// Parse `proof (256 B) || public inputs` from instruction data. The inputs\n    \
-             /// come from the caller — bind them to your program's state before trusting.\n    \
+             /// Parse `proof (256 B) || public inputs` from instruction data, each input\n    \
+             /// as its own bytes (a hash is its 32). For the field elements\n    \
+             /// `to_instruction_data()` writes, `RawProof`. The inputs come from the\n    \
+             /// caller — bind them to your program's state before trusting.\n    \
              fn try_from(data: &[u8]) -> ::core::result::Result<Self, xark_verifier::XarkError> {{\n        \
              let (proof, __rest) = data.split_first_chunk::<256>().ok_or(xark_verifier::XarkError::Truncated)?;\n\
              {parse}        if !__rest.is_empty() {{\n            \
              return ::core::result::Result::Err(xark_verifier::XarkError::TrailingBytes);\n        }}\n        \
              ::core::result::Result::Ok(Self {{ proof: *proof, {inits}}})\n    }}\n}}\n"
         );
+        parses = Some(field_list.iter().map(|(name, _)| name.clone()).collect());
     }
     // A sample that can't be written out typed only loses the self-test.
     let sample = sample.and_then(|values| {
@@ -177,7 +187,12 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
         lit.push_str("        }");
         Some(lit)
     });
-    Some(Typed { items, sample })
+    Some(Typed {
+        items,
+        sample,
+        bundle: bundle.then(|| format!("{marker}Proof")),
+        parses,
+    })
 }
 
 /// `[u8; N]` → `Some(N)`; any other type → `None`. Used to decide whether a

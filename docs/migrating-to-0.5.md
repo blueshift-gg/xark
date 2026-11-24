@@ -108,9 +108,35 @@ whose `verify()` returns `Result<(), XarkError>`.
 
 When every public input is a byte array (`[u8; N]`: keys, hashes, nullifiers),
 `MyCircuitProof::try_from(data)` parses `proof || public inputs` from instruction
-data, and refuses data that is too short (`XarkError::Truncated`) or too long
-(`XarkError::TrailingBytes`). The instruction parsing `xark add program` wrote
-becomes:
+data, each input as its own bytes in the order `PublicInputs` declares them (a
+hash is its 32), and refuses data that is too short (`XarkError::Truncated`) or
+too long (`XarkError::TrailingBytes`). It is the one to reach for: the program gets
+its inputs by name, as their own types, and never handles a field element.
+
+```rust
+use my_circuit_client::{MyCircuitProof, Verifiable};
+let proof = MyCircuitProof::try_from(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+proof.verify().map_err(|_| MyError::InvalidProof)?;
+```
+
+Map an `XarkError` to your program's own error, as above, rather than returning
+its code: its codes (`Truncated` 1, `InvalidProof` 2, `TrailingBytes` 3) are
+`ProgramError::Custom` codes too, and would read as your program's.
+
+The public inputs parsed from instruction data come from whoever sent it. Check
+them against your program's state (a policy, a Merkle root, the signer) before
+you act on the proof, as with `PublicInputs`. A circuit whose public inputs aren't
+all byte arrays gets `MyCircuitProof` without `try_from`: fill it from your
+state. A circuit with a public input named `proof` gets no `MyCircuitProof`, and
+`PublicInputs` and `verify` work as before.
+
+`to_instruction_data()`, the TypeScript client's `toInstructionData()` and the
+parsing `xark add program` wrote use another layout: the field elements the proof
+is over, 32 bytes each (a hash takes 64, its two halves). `RawProof<N>`, which the
+client crate re-exports from `xark_verifier`, parses that layout for any circuit,
+with the same errors; the program then holds field elements, packed as the
+circuit's `#[input]` packs them, rather than its inputs. With its client as it is,
+the instruction parsing `xark add program` wrote becomes:
 
 ```rust
 // Before: split, check the length and copy by hand
@@ -127,21 +153,12 @@ if !verify(&Proof::from_le_bytes(proof), inputs) {
 }
 
 // After
-use my_circuit_client::{MyCircuitProof, Verifiable};
-let proof = MyCircuitProof::try_from(data).map_err(|_| ProgramError::InvalidInstructionData)?;
-proof.verify().map_err(|_| MyError::InvalidProof)?;
+use my_circuit_client::{verify, RawProof, NUM_PUBLIC_INPUTS};
+let raw = RawProof::<NUM_PUBLIC_INPUTS>::try_from(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+if !verify(&raw.proof, raw.inputs) {
+    return Err(MyError::InvalidProof.into());
+}
 ```
-
-Map an `XarkError` to your program's own error, as above, rather than returning
-its code: its codes (`Truncated` 1, `InvalidProof` 2, `TrailingBytes` 3) are
-`ProgramError::Custom` codes too, and would read as your program's.
-
-The public inputs parsed from instruction data come from whoever sent it. Check
-them against your program's state (a policy, a Merkle root, the signer) before
-you act on the proof, as with `PublicInputs`. A circuit whose public inputs aren't
-all byte arrays gets `MyCircuitProof` without `try_from`: fill it from your
-state. A circuit with a public input named `proof` gets no `MyCircuitProof`, and
-`PublicInputs` and `verify` work as before.
 
 ## Prove from Rust (optional)
 
@@ -159,7 +176,7 @@ use my_circuit_client::prover::Prover;
 // keys/my-circuit/; outside one, beside the build.
 let prover = Prover::new("circuits/my-circuit/target/xark/my-circuit");
 let proof = prover.prove_fields([("x", "3"), ("y", "9")])?;
-let data = proof.to_instruction_data(); // proof || public inputs
+let data = proof.to_instruction_data(); // proof || field elements, for RawProof
 ```
 
 `prove_fields` takes every input as a `(name, decimal field value)` pair, and
