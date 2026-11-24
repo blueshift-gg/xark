@@ -276,6 +276,30 @@ pub struct TestArgs {
     pub cargo_args: Vec<String>,
 }
 
+/// The flags `xark test` owns, peeled off before the rest goes to `cargo test`.
+#[derive(Default)]
+struct TestFlags {
+    /// `--check`: verify the committed clients and keys before testing.
+    check: bool,
+}
+
+/// `rest` without `xark test`'s own flags. A literal `--` ends the peel: past it
+/// every argument belongs to the test binary, `--check` included.
+fn peel_flags(rest: &[String]) -> (Vec<String>, TestFlags) {
+    let mut kept = Vec::with_capacity(rest.len());
+    let mut flags = TestFlags::default();
+    let mut literal = false;
+    for arg in rest {
+        if !literal && arg == "--check" {
+            flags.check = true;
+            continue;
+        }
+        literal |= arg == "--";
+        kept.push(arg.clone());
+    }
+    (kept, flags)
+}
+
 impl TestArgs {
     /// `(crate dir, cargo test args, check)`, read from the raw command
     /// line: clap swallows a `--` that `cargo test` needs (`xark test . -- --list`
@@ -287,30 +311,15 @@ impl TestArgs {
         let Some(i) = raw.iter().skip(1).position(|a| a == "test") else {
             return (self.crate_dir.clone(), self.cargo_args.clone(), self.check);
         };
-        let rest = &raw[i + 2..];
-        // `--check` is xark's; everything else is cargo's. After a literal `--`,
-        // it belongs to the test binary, so stop recognizing it.
-        let mut filtered = Vec::new();
-        let mut check = false;
-        let mut literal = false;
-        for arg in rest {
-            if !literal && arg == "--check" {
-                check = true;
-                continue;
-            }
-            if arg == "--" {
-                literal = true;
-            }
-            filtered.push(arg.clone());
-        }
+        let (filtered, flags) = peel_flags(&raw[i + 2..]);
         match filtered.first() {
             Some(d)
                 if !d.starts_with('-')
                     && (std::path::Path::new(d).is_dir() || looks_like_path(d)) =>
             {
-                (d.clone(), filtered[1..].to_vec(), check)
+                (d.clone(), filtered[1..].to_vec(), flags.check)
             }
-            _ => (".".to_string(), filtered, check),
+            _ => (".".to_string(), filtered, flags.check),
         }
     }
 }
@@ -920,8 +929,21 @@ pub fn ensure_key_matches_circuit(key: &std::path::Path, xbc: &std::path::Path) 
 
 #[cfg(test)]
 mod tests {
-    use super::{inputs_hint, parse_input_text, read_inputs, recorded_digest};
+    use super::{inputs_hint, parse_input_text, peel_flags, read_inputs, recorded_digest};
     use std::path::Path;
+
+    #[test]
+    fn test_flags_are_peeled_only_before_a_literal_double_dash() {
+        let args = |xs: &[&str]| xs.iter().map(ToString::to_string).collect::<Vec<_>>();
+
+        let (kept, flags) = peel_flags(&args(&["--check", "cube", "--", "--check"]));
+        assert!(flags.check);
+        assert_eq!(kept, ["cube", "--", "--check"]);
+
+        let (kept, flags) = peel_flags(&args(&["--", "--check"]));
+        assert!(!flags.check);
+        assert_eq!(kept, ["--", "--check"]);
+    }
 
     #[test]
     fn parses_line_input_file() {
