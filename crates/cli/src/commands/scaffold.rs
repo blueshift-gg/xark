@@ -23,9 +23,59 @@ macro_rules! template {
 /// The inputs a scaffolder needs: the project, the circuit it verifies, and the
 /// program's name.
 pub struct ProgramScaffold<'a> {
-    pub root: &'a Path,
-    pub circuit: &'a str,
-    pub name: &'a str,
+    root: &'a Path,
+    circuit: &'a str,
+    name: &'a str,
+}
+
+impl<'a> ProgramScaffold<'a> {
+    pub fn new(root: &'a Path, circuit: &'a str, name: &'a str) -> Result<Self> {
+        Self::check_name(name)?;
+        // A circuit is a directory name in `circuits/`, not a path: joining an
+        // unvalidated `--circuit` would let it read outside the project.
+        let mut parts = Path::new(circuit).components();
+        if !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some()
+        {
+            bail!("circuit name `{circuit}` must be a single name under circuits/, not a path");
+        }
+        if !root
+            .join("circuits")
+            .join(circuit)
+            .join("Cargo.toml")
+            .is_file()
+        {
+            bail!(
+                "no circuit `{circuit}` in {}: add it with `xark add circuit {circuit}`, or \
+                 name another with `--circuit`",
+                root.join("circuits").display()
+            );
+        }
+        let dir = root.join("programs").join(name);
+        if dir.exists() {
+            bail!("{} already exists", dir.display());
+        }
+        let crate_name = format!("{name}-program");
+        if package_names(root).contains(&crate_name) {
+            bail!("the workspace already has a crate `{crate_name}`: pick another program name");
+        }
+        Ok(Self {
+            root,
+            circuit,
+            name,
+        })
+    }
+
+    /// Just the crate-name check, for `xark init` to run before it writes
+    /// anything: the circuit [`ProgramScaffold::new`] would look for doesn't
+    /// exist until the project does.
+    fn check_name(name: &str) -> Result<()> {
+        crate::cli::check_crate_name(name).map_err(|why| {
+            anyhow::anyhow!(
+                "can't name a program `{name}`: {why}: pick another name, e.g. `{}`",
+                crate::cli::suggest_crate_name(name)
+            )
+        })
+    }
 }
 
 pub struct ProgramScaffolder {
@@ -166,6 +216,34 @@ pub fn prompt_program_name(default: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
+/// The program `xark init` scaffolds, if any: the flag's choice or the wizard's,
+/// then a name — prompted on a terminal, otherwise `default_name`, the first
+/// circuit's (`--circuit` can name it apart from the project). Runs before the
+/// project is written, so a refused name doesn't leave one behind.
+pub fn init_program(
+    default_name: &str,
+    program: Option<&str>,
+    program_name: Option<&str>,
+    interactive: bool,
+) -> Result<Option<(&'static ProgramScaffolder, String)>> {
+    let scaffolder = match resolve_program_choice(program, interactive)? {
+        ProgramChoice::None => {
+            if program_name.is_some() {
+                bail!("`--program-name` needs a program (drop `--program none`, or pick one)");
+            }
+            return Ok(None);
+        }
+        ProgramChoice::Scaffold(scaffolder) => scaffolder,
+    };
+    let name = match program_name {
+        Some(name) => name.to_string(),
+        None if interactive && program.is_none() => prompt_program_name(default_name)?,
+        None => default_name.to_string(),
+    };
+    ProgramScaffold::check_name(&name)?;
+    Ok(Some((scaffolder, name)))
+}
+
 pub fn scaffold_program(
     request: &ProgramScaffold<'_>,
     scaffolder: &ProgramScaffolder,
@@ -179,54 +257,14 @@ fn pinocchio(request: &ProgramScaffold<'_>) -> Result<()> {
         circuit,
         name,
     } = request;
-    crate::cli::check_crate_name(name)
-        .map_err(|why| anyhow::anyhow!("can't name a program `{name}`: {why}"))?;
-    // A circuit is a directory name in `circuits/`, not a path: joining an
-    // unvalidated `--circuit` would let it read outside the project.
-    let mut parts = Path::new(circuit).components();
-    if !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some() {
-        bail!("circuit name `{circuit}` must be a single name under circuits/, not a path");
-    }
     let circuit_dir = root.join("circuits").join(circuit);
-    if !circuit_dir.join("Cargo.toml").is_file() {
-        bail!(
-            "no circuit `{circuit}` in {}: add it with `xark add circuit {circuit}`, or name \
-             another with `--circuit`",
-            root.join("circuits").display()
-        );
-    }
     let dir = root.join("programs").join(name);
-    if dir.exists() {
-        bail!("{} already exists", dir.display());
-    }
     let crate_name = format!("{name}-program");
-    if package_names(root).contains(&crate_name) {
-        bail!("the workspace already has a crate `{crate_name}`: pick another program name");
-    }
     // A `programs/*` member left behind by a deleted program is a cargo error, and
     // `build_circuit` below loads the workspace: repair the members first.
     crate::xark_project::sync_members(root)?;
 
-    // The TypeScript tests' setup, once per project (first, so the client
-    // generated below finds the runtime listed).
-    let project = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("xark-project")
-        .to_string();
-    let npm = env!("CARGO_PKG_VERSION");
-    for (path, text) in [
-        ("package.json", template!("package.json")),
-        ("tsconfig.json", template!("tsconfig.json")),
-        ("vitest.config.ts", template!("vitest.config.ts")),
-    ] {
-        if !root.join(path).exists() {
-            let text = text
-                .replace("{{project}}", &project)
-                .replace("{{xark_npm}}", npm);
-            write_new(root, path, &text)?;
-        }
-    }
+    ensure_ts_setup(root)?;
     // The program depends on the circuit's verifier crate, and the test on its
     // TypeScript client: generate them as `xark build` does. A missing key is
     // bootstrapped there; a changed dev key is rotated.
@@ -313,6 +351,31 @@ fn pinocchio(request: &ProgramScaffold<'_>) -> Result<()> {
         let text = fill(template!("github/pinocchio-program.yml"))
             .replace("{{xark_version}}", env!("CARGO_PKG_VERSION"));
         write_new(root, &workflow, &text)?;
+    }
+    Ok(())
+}
+
+/// The TypeScript tests' setup, once per project: `package.json`, `tsconfig.json`
+/// and `vitest.config.ts`. Written before the client is generated, so it finds
+/// the runtime listed.
+fn ensure_ts_setup(root: &Path) -> Result<()> {
+    let project = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("xark-project")
+        .to_string();
+    let npm = env!("CARGO_PKG_VERSION");
+    for (path, text) in [
+        ("package.json", template!("package.json")),
+        ("tsconfig.json", template!("tsconfig.json")),
+        ("vitest.config.ts", template!("vitest.config.ts")),
+    ] {
+        if !root.join(path).exists() {
+            let text = text
+                .replace("{{project}}", &project)
+                .replace("{{xark_npm}}", npm);
+            write_new(root, path, &text)?;
+        }
     }
     Ok(())
 }
@@ -407,5 +470,88 @@ mod tests {
                 scaffolder.id
             );
         }
+    }
+
+    /// A project root with one circuit crate, for the request checks.
+    fn project_with(circuit: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "xark-scaffold-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("circuits").join(circuit)).unwrap();
+        std::fs::write(
+            root.join("circuits").join(circuit).join("Cargo.toml"),
+            format!("[package]\nname = \"{circuit}\"\nversion = \"0.1.0\"\n"),
+        )
+        .unwrap();
+        root
+    }
+
+    #[test]
+    fn init_program_asks_only_on_a_terminal_and_needs_a_program_for_a_name() {
+        assert!(
+            init_program("demo", Some("none"), None, false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(init_program("demo", None, None, false).unwrap().is_none());
+        assert!(init_program("demo", Some("none"), Some("app"), false).is_err());
+
+        let (scaffolder, name) = init_program("demo", Some("pinocchio"), None, false)
+            .unwrap()
+            .expect("a program");
+        assert_eq!(scaffolder.id, PINOCCHIO.id);
+        assert_eq!(name, "demo");
+
+        let (_, named) = init_program("demo", Some("pinocchio"), Some("app"), false)
+            .unwrap()
+            .expect("a program");
+        assert_eq!(named, "app");
+        assert!(init_program("demo", Some("pinocchio"), Some("Bad Name"), false).is_err());
+    }
+
+    #[test]
+    fn a_program_defaults_to_the_circuit_it_verifies() {
+        let root = project_with("foo");
+        // `xark init demo --circuit foo`: the first circuit is `foo`, whatever the
+        // directory is called, so the program defaults to `foo` too.
+        let (_, name) = init_program("foo", Some("pinocchio"), None, false)
+            .unwrap()
+            .expect("a program");
+        assert_eq!(name, "foo");
+        let request = ProgramScaffold::new(&root, "foo", &name).expect("a valid request");
+        assert_eq!(request.circuit, "foo");
+        assert_eq!(request.name, "foo");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_program_request_is_checked_before_a_scaffolder_sees_it() {
+        let root = project_with("claim");
+        assert!(ProgramScaffold::new(&root, "claim", "app").is_ok());
+        assert!(ProgramScaffold::new(&root, "../claim", "app").is_err());
+        assert!(ProgramScaffold::new(&root, "claim/sub", "app").is_err());
+        assert!(ProgramScaffold::new(&root, "missing", "app").is_err());
+        assert!(ProgramScaffold::new(&root, "claim", "Bad Name").is_err());
+        std::fs::create_dir_all(root.join("programs/app")).unwrap();
+        assert!(ProgramScaffold::new(&root, "claim", "app").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_program_name_a_crate_already_has_is_refused() {
+        let root = project_with("claim");
+        std::fs::create_dir_all(root.join("programs/other")).unwrap();
+        std::fs::write(
+            root.join("programs/other/Cargo.toml"),
+            "[package]\nname = \"app-program\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        assert!(ProgramScaffold::new(&root, "claim", "app").is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

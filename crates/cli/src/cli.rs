@@ -879,46 +879,18 @@ pub fn cmd_init(
         return 2;
     }
 
-    let interactive = crate::commands::scaffold::is_interactive();
-    let choice = match crate::commands::scaffold::resolve_program_choice(program_arg, interactive) {
-        Ok(choice) => choice,
+    let program = match crate::commands::scaffold::init_program(
+        &name,
+        program_arg,
+        program_name_arg,
+        crate::commands::scaffold::is_interactive(),
+    ) {
+        Ok(program) => program,
         Err(e) => {
             eprintln!("{} {e:#}", crate::style::err("error:"));
             return 2;
         }
     };
-    let mut program_name = program_name_arg.map(str::to_string);
-    if program_name.is_some() && matches!(choice, crate::commands::scaffold::ProgramChoice::None) {
-        eprintln!("error: `--program-name` needs a program (drop `--program none`, or pick one)");
-        return 2;
-    }
-    let scaffold = match choice {
-        crate::commands::scaffold::ProgramChoice::Scaffold(scaffolder) => Some(scaffolder),
-        crate::commands::scaffold::ProgramChoice::None => None,
-    };
-    if scaffold.is_some() && program_name.is_none() {
-        if interactive && program_arg.is_none() {
-            match crate::commands::scaffold::prompt_program_name(&name) {
-                Ok(n) => program_name = Some(n),
-                Err(e) => {
-                    eprintln!("{} {e:#}", crate::style::err("error:"));
-                    return 2;
-                }
-            }
-        } else {
-            program_name = Some(name.clone());
-        }
-    }
-    if let Some(n) = &program_name
-        && let Err(why) = check_crate_name(n)
-    {
-        eprintln!(
-            "error: can't name a program `{n}`: {why}\n  pick another name, e.g. \
-             `--program-name {}`",
-            suggest_crate_name(n)
-        );
-        return 2;
-    }
 
     if let Err(e) = crate::commands::add::init_project(&dir, &name) {
         eprintln!("{} {e:#}", crate::style::err("error:"));
@@ -932,13 +904,15 @@ pub fn cmd_init(
             "the project's root: the commands below run there",
         ));
     }
-    if let Some(scaffolder) = scaffold {
-        let program_name = program_name.as_deref().expect("program name");
-        let request = crate::commands::scaffold::ProgramScaffold {
-            root: &dir,
-            circuit: &name,
-            name: program_name,
-        };
+    if let Some((scaffolder, program_name)) = program {
+        let request =
+            match crate::commands::scaffold::ProgramScaffold::new(&dir, &name, &program_name) {
+                Ok(request) => request,
+                Err(e) => {
+                    eprintln!("{} {e:#}", crate::style::err("error:"));
+                    return 1;
+                }
+            };
         if let Err(e) = crate::commands::scaffold::scaffold_program(&request, scaffolder) {
             eprintln!("{} {e:#}", crate::style::err("error:"));
             return 1;
@@ -947,7 +921,7 @@ pub fn cmd_init(
             "{}",
             crate::style::brand(&format!(
                 "✅ added program `{program_name}-program` for `{name}` in {}",
-                dir.join("programs").join(program_name).display()
+                dir.join("programs").join(&program_name).display()
             ))
         );
         steps.extend(scaffolder.next_steps());
@@ -1101,7 +1075,7 @@ pub(crate) fn check_crate_name(name: &str) -> Result<(), &'static str> {
 
 /// A valid name close to a refused one: `type` → `type_circuit`,
 /// `1st` → `circuit_1st`, `a b` → `a_b`.
-fn suggest_crate_name(name: &str) -> String {
+pub(crate) fn suggest_crate_name(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| {

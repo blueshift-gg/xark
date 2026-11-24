@@ -183,3 +183,30 @@ fn a_program_name_needs_a_program() {
     assert!(!ok && err.contains("--program-name"), "{err}");
     assert!(!dir.join("xark.toml").exists(), "wrote a project");
 }
+
+/// `--circuit` names the starter circuit apart from the directory. The program
+/// that `init` can also scaffold takes its default name from that circuit (the
+/// unit test in `scaffold.rs` covers the seam; a program scaffold here would
+/// build against the published `xark`, which a pre-release doesn't have).
+#[test]
+fn init_circuit_names_the_starter_circuit_apart_from_the_directory() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("demo");
+    let (ok, _, err) = run(&[
+        "init",
+        dir.to_str().unwrap(),
+        "--circuit",
+        "foo",
+        "--program",
+        "none",
+    ]);
+    assert!(ok, "init failed: {err}");
+    let circuit = dir.join("circuits/foo");
+    assert!(circuit.join("Cargo.toml").is_file(), "no circuits/foo");
+    assert!(
+        !dir.join("circuits/demo").exists(),
+        "named the circuit after the directory"
+    );
+    let toml = std::fs::read_to_string(circuit.join("Cargo.toml")).unwrap();
+    assert!(toml.contains("name = \"foo\""), "{toml}");
+}

@@ -68,11 +68,7 @@ pub fn run(args: AddArgs) -> Result<()> {
                     super::scaffold::ids().join(", ")
                 )
             })?;
-            let request = super::scaffold::ProgramScaffold {
-                root: &root,
-                circuit: &circuit,
-                name: &name,
-            };
+            let request = super::scaffold::ProgramScaffold::new(&root, &circuit, &name)?;
             super::scaffold::scaffold_program(&request, scaffolder)?;
             eprintln!(
                 "✅ Solana program `{name}-program` in {}, verifying `{circuit}`",
