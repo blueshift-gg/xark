@@ -11,9 +11,10 @@ use std::time::Duration;
 /// The rotating glyphs: braille, which monospace fonts have.
 const GLYPHS: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+const CLEAR_LINE: &str = "\r\x1b[2K";
+
 /// The gradient's ends: the brand's neon green, and the dark green it dims to
-/// and comes back from. The dark end is a floor, not black: a glyph that fades
-/// out reads as a blink.
+/// and comes back from.
 const BRAND: (u8, u8, u8) = (153, 255, 0);
 const DARK: (u8, u8, u8) = (46, 110, 0);
 
@@ -43,18 +44,24 @@ impl Spinner {
                 // A cache-hit build finishes in a blink: don't flash a line for it.
                 thread::park_timeout(Duration::from_millis(120));
                 let mut frame = 0;
+                let mut drew = false;
                 while !stop_thread.load(Ordering::Relaxed) {
                     {
                         let mut err = io::stderr().lock();
-                        let _ = write!(err, "\r\x1b[2K  {}", line(frame, &message));
+                        let _ = write!(err, "{CLEAR_LINE}  {}", line(frame, &message));
                         let _ = err.flush();
                     }
+                    drew = true;
                     frame += 1;
                     thread::park_timeout(Duration::from_millis(50));
                 }
-                let mut err = io::stderr().lock();
-                let _ = write!(err, "\r\x1b[2K");
-                let _ = err.flush();
+                // A step that ended inside the grace period drew nothing: clearing
+                // the line would erase whatever another writer printed meanwhile.
+                if drew {
+                    let mut err = io::stderr().lock();
+                    let _ = write!(err, "{CLEAR_LINE}");
+                    let _ = err.flush();
+                }
             })
             .ok();
         Self { stop, handle }
