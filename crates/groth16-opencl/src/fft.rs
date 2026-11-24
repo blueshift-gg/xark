@@ -84,15 +84,16 @@ impl Runtime {
         let tables = self.twiddles.get(&n)?;
 
         let words = n.checked_mul(4)?;
-        let input = self.upload_with::<u64>(CL_MEM_READ_WRITE, words, |limbs| {
+        let input = self.stage_with::<u64>("fft.a", CL_MEM_READ_WRITE, words, |limbs| {
             limbs
                 .par_chunks_mut(4)
                 .zip(buf.par_iter())
                 .for_each(|(out, x)| out.copy_from_slice(&x.0.0))
         })?;
-        let buffers = [input, self.alloc_io::<u64>(words)?];
+        let other = self.lease_host::<u64>("fft.b", CL_MEM_READ_WRITE, words)?;
+        let buffers: [&Buffer<u64>; 2] = [&input, &other];
         mark("upload", &mut lap);
-        let mut current = self.passes(&buffers, 0, &tables.inverse, n)?;
+        let mut current = self.passes(buffers, 0, &tables.inverse, n)?;
         mark("inverse passes", &mut lap);
         let (factors, scale) = match transform {
             Transform::ToCoset => (&tables.to_coset, "fr_scale"),
@@ -103,7 +104,7 @@ impl Runtime {
         // SAFETY: argument order matches the kernel; one item per element.
         unsafe {
             ExecuteKernel::new(&kernel)
-                .set_arg(&buffers[current])
+                .set_arg(buffers[current])
                 .set_arg(factors)
                 .set_arg(&n_arg)
                 .set_global_work_size(n)
@@ -112,7 +113,7 @@ impl Runtime {
         }
         mark("scale", &mut lap);
         if to_coset {
-            current = self.passes(&buffers, current, &tables.forward, n)?;
+            current = self.passes(buffers, current, &tables.forward, n)?;
         } else if dom.n1 > 1 {
             let kernel = Kernel::create(&self.program, "fr_transpose").ok()?;
             let (n1, n2) = (dom.n1 as u32, dom.n2 as u32);
@@ -120,8 +121,8 @@ impl Runtime {
             // of the destination, which is disjoint from the source.
             unsafe {
                 ExecuteKernel::new(&kernel)
-                    .set_arg(&buffers[current])
-                    .set_arg(&buffers[1 - current])
+                    .set_arg(buffers[current])
+                    .set_arg(buffers[1 - current])
                     .set_arg(&n1)
                     .set_arg(&n2)
                     .set_global_work_size(n)
@@ -131,7 +132,7 @@ impl Runtime {
             current = 1 - current;
         }
         mark("forward passes", &mut lap);
-        self.download_with(&buffers[current], words, |limbs| {
+        self.download_with(buffers[current], words, |limbs| {
             buf.par_iter_mut()
                 .zip(limbs.par_chunks(4))
                 .for_each(|(x, l)| *x = Fr::new_unchecked(ark_ff::BigInt([l[0], l[1], l[2], l[3]])))
@@ -171,7 +172,7 @@ impl Runtime {
     /// index holding the result.
     fn passes(
         &self,
-        buffers: &[Buffer<u64>; 2],
+        buffers: [&Buffer<u64>; 2],
         mut current: usize,
         twiddles: &Buffer<u64>,
         n: usize,
@@ -184,8 +185,8 @@ impl Runtime {
             // buffer and writes the other.
             unsafe {
                 ExecuteKernel::new(&kernel)
-                    .set_arg(&buffers[current])
-                    .set_arg(&buffers[1 - current])
+                    .set_arg(buffers[current])
+                    .set_arg(buffers[1 - current])
                     .set_arg(twiddles)
                     .set_arg(&p)
                     .set_arg(&half)

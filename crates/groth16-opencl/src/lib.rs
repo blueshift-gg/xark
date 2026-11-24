@@ -52,6 +52,7 @@ use opencl3::{
 };
 use xark_groth16::{Accelerator, msm::Scalar};
 mod fft;
+mod pool;
 mod scheduler;
 use scheduler::DeviceScheduler;
 
@@ -243,6 +244,7 @@ impl Accelerator for OpenClMsm {
                 runtime.coset_transform(&dom, &mut buf, fft::Transform::IfftToT);
             }
         }
+        runtime.prewarm(domain_size);
         let count = BUCKET_THRESHOLD * 2;
         let mut points = Vec::new();
         let g = G1Affine::generator();
@@ -310,6 +312,8 @@ struct Runtime {
     device_info: OpenClDeviceInfo,
     /// Per domain size: twiddles and coset factors.
     twiddles: std::collections::HashMap<usize, fft::Tables>,
+    /// Buffers kept from call to call (see [`pool`]).
+    pool: pool::Pool,
 }
 
 impl Runtime {
@@ -347,6 +351,7 @@ impl Runtime {
             scheduler,
             device_info,
             twiddles: Default::default(),
+            pool: pool::Pool::default(),
         })
     }
 
@@ -596,17 +601,26 @@ impl Runtime {
         let status = self.upload(&[0u32], CL_MEM_READ_WRITE)?;
         let (points, flags) = match encoding {
             Compress::No => {
-                let raw = self.upload(point_bytes, CL_MEM_READ_ONLY)?;
-                let points = self.alloc::<u32>(CL_MEM_READ_WRITE, count.checked_mul(16)?)?;
-                let flags = self.alloc::<u32>(CL_MEM_READ_WRITE, count)?;
+                // On unified memory the mapped buffer is the GPU's: one parallel
+                // copy, no staging and no driver copy behind it.
+                let raw =
+                    self.stage_with::<u8>("msm.raw", CL_MEM_READ_ONLY, point_bytes.len(), |dst| {
+                        dst.par_chunks_mut(1 << 20)
+                            .zip(point_bytes.par_chunks(1 << 20))
+                            .for_each(|(d, s)| d.copy_from_slice(s))
+                    })?;
+                let raw = &*raw;
+                let points =
+                    self.lease::<u32>("msm.points", CL_MEM_READ_WRITE, count.checked_mul(16)?)?;
+                let flags = self.lease::<u32>("msm.flags", CL_MEM_READ_WRITE, count)?;
                 let kernel = Kernel::create(&self.program, "msm_prepare_uncompressed").ok()?;
                 // SAFETY: argument order matches the kernel; one item per point.
                 unsafe {
                     ExecuteKernel::new(&kernel)
-                        .set_arg(&raw)
+                        .set_arg(raw)
                         .set_arg(&count_arg)
-                        .set_arg(&points)
-                        .set_arg(&flags)
+                        .set_arg(&*points)
+                        .set_arg(&*flags)
                         .set_arg(&status)
                         .set_global_work_size(count)
                         .enqueue_nd_range(&self.queue)
@@ -624,30 +638,47 @@ impl Runtime {
                         point.is_on_curve().then_some(point)
                     })
                     .collect::<Option<_>>()?;
-                let mut words = zeroed_vec(count.checked_mul(16)?, 0u32)?;
-                words
-                    .par_chunks_mut(16)
-                    .zip(decoded.par_iter())
-                    .for_each(|(out, point)| {
-                        if !point.is_zero() {
-                            out[..8].copy_from_slice(&montgomery_words(&point.x.0.0));
-                            out[8..].copy_from_slice(&montgomery_words(&point.y.0.0));
-                        }
-                    });
-                let flags: Vec<u32> = decoded.par_iter().map(|p| p.is_zero() as u32).collect();
-                (
-                    self.upload(&words, CL_MEM_READ_ONLY)?,
-                    self.upload(&flags, CL_MEM_READ_ONLY)?,
-                )
+                let words = self.stage_with::<u32>(
+                    "msm.words",
+                    CL_MEM_READ_ONLY,
+                    count.checked_mul(16)?,
+                    |words| {
+                        words
+                            .par_chunks_mut(16)
+                            .zip(decoded.par_iter())
+                            .for_each(|(out, point)| {
+                                if point.is_zero() {
+                                    out.fill(0);
+                                } else {
+                                    out[..8].copy_from_slice(&montgomery_words(&point.x.0.0));
+                                    out[8..].copy_from_slice(&montgomery_words(&point.y.0.0));
+                                }
+                            })
+                    },
+                )?;
+                let flags =
+                    self.stage_with::<u32>("msm.word_flags", CL_MEM_READ_ONLY, count, |flags| {
+                        flags
+                            .par_iter_mut()
+                            .zip(decoded.par_iter())
+                            .for_each(|(f, p)| *f = p.is_zero() as u32)
+                    })?;
+                (words, flags)
             }
         };
-        let mut limbs = zeroed_vec(count.checked_mul(4)?, 0u64)?;
-        limbs
-            .par_chunks_mut(4)
-            .zip(scalars.par_iter())
-            .for_each(|(out, scalar)| out.copy_from_slice(&scalar.0));
-        let scalar_buffer = self.upload(&limbs, CL_MEM_READ_ONLY)?;
-        drop(limbs);
+        let (points, flags) = (&*points, &*flags);
+        let scalar_buffer = self.stage_with::<u64>(
+            "msm.scalars",
+            CL_MEM_READ_ONLY,
+            count.checked_mul(4)?,
+            |limbs| {
+                limbs
+                    .par_chunks_mut(4)
+                    .zip(scalars.par_iter())
+                    .for_each(|(out, scalar)| out.copy_from_slice(&scalar.0))
+            },
+        )?;
+        let scalar_buffer = &*scalar_buffer;
         mark("upload+prepare");
 
         let bits = env_usize("XARK_OPENCL_WINDOW_BITS")
@@ -658,44 +689,53 @@ impl Runtime {
         let buckets = 1usize << (bits - 1);
         let bucket_total = windows * buckets;
         let (bits_arg, windows_arg) = (bits as u32, windows as u32);
-        let counts = self.upload(&zeroed_vec(bucket_total, 0u32)?, CL_MEM_READ_WRITE)?;
-        let digits = self.alloc::<i16>(CL_MEM_READ_WRITE, count.checked_mul(windows)?)?;
+        let counts =
+            self.stage_with::<u32>("msm.counts", CL_MEM_READ_WRITE, bucket_total, |c| {
+                c.par_iter_mut().for_each(|x| *x = 0)
+            })?;
+        let counts = &*counts;
+        let digits =
+            self.lease::<i16>("msm.digits", CL_MEM_READ_WRITE, count.checked_mul(windows)?)?;
+        let digits = &*digits;
         let kernel = Kernel::create(&self.program, "msm_signed_digits").ok()?;
         // SAFETY: argument order matches the kernel; one item per scalar.
         unsafe {
             ExecuteKernel::new(&kernel)
-                .set_arg(&scalar_buffer)
+                .set_arg(scalar_buffer)
                 .set_arg(&count_arg)
                 .set_arg(&bits_arg)
                 .set_arg(&windows_arg)
-                .set_arg(&flags)
-                .set_arg(&digits)
-                .set_arg(&counts)
+                .set_arg(flags)
+                .set_arg(digits)
+                .set_arg(counts)
                 .set_arg(&status)
                 .set_global_work_size(count)
                 .enqueue_nd_range(&self.queue)
                 .ok()?;
         }
         mark("digits");
-        let bucket_counts = self.download(&counts, bucket_total)?;
         if self.download(&status, 1)?[0] != 0 {
             return None;
         }
-
-        let mut starts = Vec::with_capacity(bucket_total);
-        let mut bounds = Vec::new();
-        let mut bucket_segments = Vec::with_capacity(bucket_total + 1);
-        let mut total = 0u32;
-        for &n in &bucket_counts {
-            starts.push(total);
-            bucket_segments.push(u32::try_from(bounds.len()).ok()?);
-            let (mut lo, hi) = (total, total.checked_add(n)?);
-            while lo < hi {
-                bounds.push(lo);
-                lo = lo.saturating_add(seg_len as u32).min(hi);
-            }
-            total = hi;
-        }
+        // The scan reads the histogram where the GPU wrote it.
+        let (starts, mut bounds, mut bucket_segments, total) =
+            self.download_with(counts, bucket_total, |bucket_counts| {
+                let mut starts = Vec::with_capacity(bucket_total);
+                let mut bounds = Vec::new();
+                let mut bucket_segments = Vec::with_capacity(bucket_total + 1);
+                let mut total = 0u32;
+                for &n in bucket_counts {
+                    starts.push(total);
+                    bucket_segments.push(u32::try_from(bounds.len()).ok()?);
+                    let (mut lo, hi) = (total, total.checked_add(n)?);
+                    while lo < hi {
+                        bounds.push(lo);
+                        lo = lo.saturating_add(seg_len as u32).min(hi);
+                    }
+                    total = hi;
+                }
+                Some((starts, bounds, bucket_segments, total))
+            })??;
         if total == 0 {
             return Some(G1Projective::zero());
         }
@@ -712,26 +752,46 @@ impl Runtime {
         for l in 1..by_length.len() {
             by_length[l] += by_length[l - 1];
         }
-        let mut segments = zeroed_vec(segment_count.checked_mul(3)?, 0u32)?;
-        for (k, w) in bounds.windows(2).enumerate() {
-            let at = &mut by_length[seg_len - (w[1] - w[0]) as usize];
-            segments[3 * *at as usize..3 * *at as usize + 3]
-                .copy_from_slice(&[w[0], w[1], k as u32]);
-            *at += 1;
-        }
-        let cursor = self.upload(&starts, CL_MEM_READ_WRITE)?;
-        let order = self.alloc::<u32>(CL_MEM_READ_WRITE, total as usize)?;
-        let bounds = self.upload(&segments, CL_MEM_READ_ONLY)?;
+        let bounds = self.stage_with::<u32>(
+            "msm.bounds",
+            CL_MEM_READ_ONLY,
+            segment_count.checked_mul(3)?,
+            |segments| {
+                for (k, w) in bounds.windows(2).enumerate() {
+                    let at = &mut by_length[seg_len - (w[1] - w[0]) as usize];
+                    segments[3 * *at as usize..3 * *at as usize + 3]
+                        .copy_from_slice(&[w[0], w[1], k as u32]);
+                    *at += 1;
+                }
+            },
+        )?;
+        let bounds = &*bounds;
+        let cursor =
+            self.stage_with::<u32>("msm.cursor", CL_MEM_READ_WRITE, starts.len(), |c| {
+                c.copy_from_slice(&starts)
+            })?;
+        let cursor = &*cursor;
+        let order = self.lease::<u32>("msm.order", CL_MEM_READ_WRITE, total as usize)?;
+        let order = &*order;
         let bucket_segments_host = bucket_segments;
         mark("host scan+upload");
-        let partials =
-            self.alloc::<u32>(CL_MEM_READ_WRITE, segment_count.checked_mul(TERM_WORDS)?)?;
-        let bucket_points =
-            self.alloc::<u32>(CL_MEM_READ_WRITE, bucket_total.checked_mul(TERM_WORDS)?)?;
+        let partials = self.lease::<u32>(
+            "msm.partials",
+            CL_MEM_READ_WRITE,
+            segment_count.checked_mul(TERM_WORDS)?,
+        )?;
+        let partials = &*partials;
+        let bucket_points = self.lease::<u32>(
+            "msm.bucket_points",
+            CL_MEM_READ_WRITE,
+            bucket_total.checked_mul(TERM_WORDS)?,
+        )?;
+        let bucket_points = &*bucket_points;
         let span = 64usize;
         let ranges = buckets.div_ceil(span);
         let reduced = windows * ranges;
-        let out = self.alloc::<u32>(CL_MEM_WRITE_ONLY, reduced * TERM_WORDS)?;
+        let out = self.lease_host::<u32>("msm.out", CL_MEM_WRITE_ONLY, reduced * TERM_WORDS)?;
+        let out = &*out;
         let (bucket_arg, span_arg, ranges_arg) = (bucket_total as u32, span as u32, ranges as u32);
         let per_window_arg = buckets as u32;
         let scatter = Kernel::create(&self.program, "msm_scatter").ok()?;
@@ -742,12 +802,12 @@ impl Runtime {
         // disjoint slot, and the in-order queue sequences the stages.
         unsafe {
             ExecuteKernel::new(&scatter)
-                .set_arg(&digits)
+                .set_arg(digits)
                 .set_arg(&count_arg)
                 .set_arg(&bits_arg)
                 .set_arg(&windows_arg)
-                .set_arg(&cursor)
-                .set_arg(&order)
+                .set_arg(cursor)
+                .set_arg(order)
                 .set_global_work_size(count)
                 .enqueue_nd_range(&self.queue)
                 .ok()?;
@@ -756,11 +816,11 @@ impl Runtime {
         // SAFETY: as above.
         unsafe {
             ExecuteKernel::new(&sums)
-                .set_arg(&points)
-                .set_arg(&order)
-                .set_arg(&bounds)
+                .set_arg(points)
+                .set_arg(order)
+                .set_arg(bounds)
                 .set_arg(&segment_arg)
-                .set_arg(&partials)
+                .set_arg(partials)
                 .set_global_work_size(segment_count)
                 .enqueue_nd_range(&self.queue)
                 .ok()?;
@@ -770,7 +830,7 @@ impl Runtime {
         // rounds of at most `group` partials, so no work item runs a long
         // serial chain; the last round leaves each bucket ≤ `group` partials.
         let group = 16u32;
-        let mut level = partials;
+        let mut folded: Option<Buffer<u32>> = None;
         let mut per_bucket = bucket_segments_host;
         while per_bucket.windows(2).any(|w| w[1] - w[0] > group) {
             let mut bounds = Vec::new();
@@ -790,9 +850,10 @@ impl Runtime {
             let out = self.alloc::<u32>(CL_MEM_READ_WRITE, groups as usize * TERM_WORDS)?;
             // SAFETY: argument order matches the kernel; each work item sums one
             // disjoint range of the previous level into its own slot.
+            let level = folded.as_ref().unwrap_or(partials);
             unsafe {
                 ExecuteKernel::new(&fold)
-                    .set_arg(&level)
+                    .set_arg(level)
                     .set_arg(&bounds)
                     .set_arg(&groups)
                     .set_arg(&out)
@@ -800,17 +861,24 @@ impl Runtime {
                     .enqueue_nd_range(&self.queue)
                     .ok()?;
             }
-            level = out;
+            folded = Some(out);
             per_bucket = next;
         }
-        let bucket_segments = self.upload(&per_bucket, CL_MEM_READ_ONLY)?;
+        let bucket_segments = self.stage_with::<u32>(
+            "msm.bucket_segments",
+            CL_MEM_READ_ONLY,
+            per_bucket.len(),
+            |b| b.copy_from_slice(&per_bucket),
+        )?;
+        let bucket_segments = &*bucket_segments;
+        let level = folded.as_ref().unwrap_or(partials);
         // SAFETY: as above.
         unsafe {
             ExecuteKernel::new(&fold)
-                .set_arg(&level)
-                .set_arg(&bucket_segments)
+                .set_arg(level)
+                .set_arg(bucket_segments)
                 .set_arg(&bucket_arg)
-                .set_arg(&bucket_points)
+                .set_arg(bucket_points)
                 .set_global_work_size(bucket_total)
                 .enqueue_nd_range(&self.queue)
                 .ok()?;
@@ -819,17 +887,17 @@ impl Runtime {
         // SAFETY: as above.
         unsafe {
             ExecuteKernel::new(&reduce)
-                .set_arg(&bucket_points)
+                .set_arg(bucket_points)
                 .set_arg(&per_window_arg)
                 .set_arg(&span_arg)
                 .set_arg(&ranges_arg)
                 .set_arg(&windows_arg)
-                .set_arg(&out)
+                .set_arg(out)
                 .set_global_work_size(reduced)
                 .enqueue_nd_range(&self.queue)
                 .ok()?;
         }
-        let words = self.download(&out, reduced * TERM_WORDS)?;
+        let words = self.download(out, reduced * TERM_WORDS)?;
         mark("window reduce");
 
         let mut result = G1Projective::zero();
@@ -858,42 +926,125 @@ impl Runtime {
         unsafe { Buffer::<T>::create(&self.context, flags, len.max(1), std::ptr::null_mut()) }.ok()
     }
 
-    /// A read-write buffer the host may map, when mapping is enabled.
-    pub(crate) fn alloc_io<T>(&self, len: usize) -> Option<Buffer<T>> {
+    /// Lease and touch every buffer a proof over `domain_size` points uses
+    /// (the H MSM of an uncompressed key and the quotient's transforms), so
+    /// its pages are in place before the proof (see [`pool`]). Sizes that
+    /// depend on the scalars take their bounds.
+    fn prewarm(&self, domain_size: usize) {
+        let count = domain_size.saturating_sub(1).max(1);
+        let bits = env_usize("XARK_OPENCL_WINDOW_BITS")
+            .unwrap_or_else(|| (count.ilog2() as usize).saturating_sub(3))
+            .clamp(4, 16);
+        let seg_len = env_usize("XARK_OPENCL_SEGMENT").unwrap_or(32).max(1);
+        let windows = 256usize.div_ceil(bits);
+        let bucket_total = windows << (bits - 1);
+        let entries = count * windows;
+        let segments = entries / seg_len + bucket_total;
+        let host: [(&'static str, u64, usize); 3] = [
+            ("msm.scalars", CL_MEM_READ_ONLY, count * 4),
+            ("fft.a", CL_MEM_READ_WRITE, domain_size * 4),
+            ("fft.b", CL_MEM_READ_WRITE, domain_size * 4),
+        ];
+        for (role, flags, len) in host {
+            drop(self.stage_with::<u64>(role, flags, len, |b| b.fill(0)));
+        }
+        drop(self.stage_with::<u8>("msm.raw", CL_MEM_READ_ONLY, count * 64, |b| b.fill(0)));
+        let host32: [(&'static str, u64, usize); 5] = [
+            ("msm.out", CL_MEM_WRITE_ONLY, 1 << 16),
+            ("msm.counts", CL_MEM_READ_WRITE, bucket_total),
+            ("msm.cursor", CL_MEM_READ_WRITE, bucket_total),
+            ("msm.bounds", CL_MEM_READ_ONLY, segments * 3),
+            ("msm.bucket_segments", CL_MEM_READ_ONLY, bucket_total + 1),
+        ];
+        for (role, flags, len) in host32 {
+            drop(self.stage_with::<u32>(role, flags, len, |b| b.fill(0)));
+        }
+        let device: [(&'static str, usize); 5] = [
+            ("msm.points", count * 16),
+            ("msm.flags", count),
+            ("msm.order", entries),
+            ("msm.partials", segments * TERM_WORDS),
+            ("msm.bucket_points", bucket_total * TERM_WORDS),
+        ];
+        for (role, len) in device {
+            if let Some(mut b) = self.lease::<u32>(role, CL_MEM_READ_WRITE, len) {
+                // SAFETY: the fill covers the leased buffer, which nothing else
+                // uses until it is given back.
+                let _ = unsafe {
+                    self.queue
+                        .enqueue_fill_buffer(&mut b, &[0u32], 0, len * 4, &[])
+                };
+            }
+        }
+        if let Some(mut b) = self.lease::<i16>("msm.digits", CL_MEM_READ_WRITE, entries) {
+            // SAFETY: as above.
+            let _ = unsafe {
+                self.queue
+                    .enqueue_fill_buffer(&mut b, &[0i16], 0, entries * 2, &[])
+            };
+        }
+        let _ = self.queue.finish();
+    }
+
+    /// A device-only buffer of at least `len` elements for `role`, kept from
+    /// call to call (see [`pool`]).
+    pub(crate) fn lease<T: Send + 'static>(
+        &self,
+        role: &'static str,
+        flags: u64,
+        len: usize,
+    ) -> Option<pool::Lease<'_, T>> {
+        self.pool.lease(&self.context, role, flags, len)
+    }
+
+    /// [`lease`](Self::lease) in host-visible memory the host can map (shared
+    /// with the GPU on unified memory), when mapping is enabled.
+    pub(crate) fn lease_host<T: Send + 'static>(
+        &self,
+        role: &'static str,
+        flags: u64,
+        len: usize,
+    ) -> Option<pool::Lease<'_, T>> {
         let host = if mapped_enabled() {
             CL_MEM_ALLOC_HOST_PTR
         } else {
             0
         };
-        self.alloc::<T>(CL_MEM_READ_WRITE | host, len)
+        self.pool.lease(&self.context, role, flags | host, len)
     }
 
-    /// A buffer of `len` elements written in place by `fill`. With mapping
-    /// enabled the buffer lives in host-visible memory (shared with the GPU on
-    /// unified-memory devices) and `fill` writes it directly; otherwise `fill`
-    /// writes a staging vector that is copied over.
-    pub(crate) fn upload_with<T: Clone + Default>(
+    /// [`lease_host`](Self::lease_host), its first `len` elements written in
+    /// place by `fill` (through a staging copy when mapping is disabled).
+    pub(crate) fn stage_with<T: Clone + Default + Send + 'static>(
         &self,
+        role: &'static str,
         flags: u64,
         len: usize,
         fill: impl FnOnce(&mut [T]),
-    ) -> Option<Buffer<T>> {
-        if !mapped_enabled() {
-            let mut staging = zeroed_vec(len, T::default())?;
-            fill(&mut staging);
-            return self.upload(&staging, flags);
-        }
-        let buffer = self.alloc::<T>(flags | CL_MEM_ALLOC_HOST_PTR, len)?;
+    ) -> Option<pool::Lease<'_, T>> {
+        let mut buffer = self.lease_host::<T>(role, flags, len)?;
         if len == 0 {
             return Some(buffer);
         }
+        if !mapped_enabled() {
+            let mut staging = zeroed_vec(len, T::default())?;
+            fill(&mut staging);
+            // SAFETY: `staging` covers the start of the buffer and the write
+            // blocks until the copy completes.
+            unsafe {
+                self.queue
+                    .enqueue_write_buffer(&mut buffer, CL_TRUE, 0, &staging, &[])
+                    .ok()?;
+            }
+            return Some(buffer);
+        }
         let mut ptr = std::ptr::null_mut();
-        // SAFETY: a blocking map of the whole buffer for writing; the slice
-        // lives until the unmap below, and nothing else touches the buffer.
+        // SAFETY: a blocking map of the first `len` elements for writing; the
+        // slice lives until the unmap below, and nothing else touches them.
         unsafe {
             self.queue
                 .enqueue_map_buffer(
-                    &buffer,
+                    &*buffer,
                     CL_TRUE,
                     CL_MAP_WRITE_INVALIDATE_REGION,
                     0,
