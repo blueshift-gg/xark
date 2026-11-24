@@ -299,6 +299,16 @@ pub(crate) fn build_circuit(root: &Path, circuit: &Path, check: bool) -> Result<
     xark(root, &["client", &dir])
 }
 
+/// Removes a staged tree when the check ends, on every path out: a failed
+/// export, a failed client, a diff, or success.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// Stage this circuit's clients under `target/xark/check/` and compare them with
 /// the committed `clients/<pkg>/`.
 fn check_clients(root: &Path, circuit: &Path) -> Result<(), i32> {
@@ -322,6 +332,7 @@ fn check_clients(root: &Path, circuit: &Path) -> Result<(), i32> {
         return Err(2);
     }
     let staged = stage_root.join("clients").join(&pkg);
+    let _stage = RemoveOnDrop(stage_root.clone());
     if let Err(e) = std::fs::remove_dir_all(&stage_root)
         && e.kind() != std::io::ErrorKind::NotFound
     {
@@ -381,13 +392,19 @@ fn check_clients(root: &Path, circuit: &Path) -> Result<(), i32> {
         return Err(1);
     }
 
-    let _ = std::fs::remove_dir_all(&stage_root);
-
     Ok(())
 }
 
 /// File-level differences between a committed tree and a staged one.
+///
+/// Build output the generator never writes is left out: a `target/` from
+/// building the generated crate in place, and the `Cargo.lock` that build makes,
+/// would otherwise be reported as "missing" on every check.
 fn diff_tree(committed: &Path, staged: &Path) -> Vec<(&'static str, PathBuf)> {
+    fn ungenerated(rel: &Path) -> bool {
+        rel.file_name().is_some_and(|name| name == "Cargo.lock")
+            || rel.components().any(|c| c.as_os_str() == "target")
+    }
     fn files(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
         let mut out = std::collections::BTreeMap::new();
         let mut stack = vec![root.to_path_buf()];
@@ -402,6 +419,7 @@ fn diff_tree(committed: &Path, staged: &Path) -> Vec<(&'static str, PathBuf)> {
                 } else if meta.is_file()
                     && let Ok(bytes) = std::fs::read(&path)
                     && let Ok(rel) = path.strip_prefix(root)
+                    && !ungenerated(rel)
                 {
                     out.insert(rel.to_path_buf(), bytes);
                 }
@@ -641,7 +659,7 @@ fn run(dir: &Path, cmd: &mut Command) -> Result<(), i32> {
 
 #[cfg(test)]
 mod tests {
-    use super::plain_dev_key_dir;
+    use super::{RemoveOnDrop, diff_tree, plain_dev_key_dir};
 
     fn metadata(json: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -681,5 +699,69 @@ mod tests {
             assert!(!plain_dev_key_dir(&dir), "{json}");
             std::fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    #[test]
+    fn a_client_diff_ignores_what_the_generator_never_writes() {
+        let root = std::env::temp_dir().join(format!(
+            "xark-diff-tree-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let write = |dir: &std::path::Path, files: &[&str]| {
+            for rel in files {
+                let path = dir.join(rel);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, rel).unwrap();
+            }
+        };
+        let committed = root.join("committed");
+        write(
+            &committed,
+            &[
+                "rust/src/lib.rs",
+                "rust/Cargo.lock",
+                "rust/target/debug/libxark.d",
+                "ts/circuit.ts",
+                "rust/old.rs",
+            ],
+        );
+        let staged = root.join("staged");
+        write(
+            &staged,
+            &["rust/src/lib.rs", "ts/circuit.ts", "rust/new.rs"],
+        );
+
+        let changes = diff_tree(&committed, &staged);
+        assert_eq!(
+            changes,
+            vec![
+                ("new", std::path::PathBuf::from("rust/new.rs")),
+                ("missing", std::path::PathBuf::from("rust/old.rs")),
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_staging_guard_removes_the_tree_on_drop() {
+        let dir = std::env::temp_dir().join(format!(
+            "xark-staging-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("clients")).unwrap();
+        std::fs::write(dir.join("clients/circuit.ts"), "// generated").unwrap();
+        {
+            let _guard = RemoveOnDrop(dir.clone());
+            assert!(dir.exists());
+        }
+        assert!(!dir.exists());
     }
 }
