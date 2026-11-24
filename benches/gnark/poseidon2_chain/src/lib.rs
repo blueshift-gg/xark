@@ -4,7 +4,7 @@
 //! milliseconds, most of it fixed cost; this one is large enough to time.
 use xark_poseidon2::prelude::*;
 
-/// The number of permutations; `pure/main.go` takes the same.
+/// The number of permutations; `go/pure/main.go` takes the same.
 const PERMUTATIONS: usize = 1000;
 
 #[circuit]

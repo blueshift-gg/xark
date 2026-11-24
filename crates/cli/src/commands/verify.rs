@@ -43,18 +43,9 @@ pub struct VerifyArgs {
     /// Public inputs file. Inferred as `<crate>/target/xark/<name>/public_inputs.bin`.
     #[arg(long, value_hint = clap::ValueHint::FilePath)]
     pub public_inputs: Option<PathBuf>,
-
-    /// The Groth16 implementation: xark's own (the default), or `gnark` (through a
-    /// Go helper built on first use; its keys and proofs live in a `gnark/`
-    /// directory beside xark's and are not interchangeable with them).
-    #[arg(long, value_enum, default_value_t = super::gnark::Backend::Xark)]
-    pub backend: super::gnark::Backend,
 }
 
 pub fn run(args: VerifyArgs) -> Result<()> {
-    if args.backend == super::gnark::Backend::Gnark {
-        return super::gnark::verify(&args);
-    }
     let project = XarkProject::resolve(args.path.clone())?;
     let vk_path = args
         .verifying_key

@@ -73,7 +73,7 @@ pub struct ExportArgs {
 
     /// What to export: `solana` (the default), the verifier crate above, or
     /// `iden3`, the circuit's keyed rows as `circuit.r1cs` in the format circom
-    /// writes and snarkjs, rapidsnark and gnark read (into `--out`, by default
+    /// writes and snarkjs and rapidsnark read (into `--out`, by default
     /// `<crate>/target/xark/<name>/iden3/`).
     #[arg(long, value_enum, default_value_t = ExportFormat::Solana)]
     pub format: ExportFormat,

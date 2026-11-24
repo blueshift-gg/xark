@@ -1,11 +1,11 @@
 // The benchmark's reference: the circuits of `benches/gnark/` written directly
 // against gnark's frontend, compiled, set up and proved by gnark alone.
 //
-//	go run . <sha256|keccak256|sha256_1024|keccak256_1024|poseidon2|poseidon2_chain> <runs>
-//	go run . inputs <sha256|keccak256|sha256_1024|keccak256_1024>
+//	go run ./pure <sha256|keccak256|sha256_1024|keccak256_1024|poseidon2|poseidon2_chain> <runs>
+//	go run ./pure inputs <sha256|keccak256|sha256_1024|keccak256_1024>
 //
 // The first prints `constraints=<n>`, `prove_ms=<median of the runs>` with every
-// core and `prove_1_ms` on one thread, as `xark-gnark bench` does for the
+// core and `prove_1_ms` on one thread, as `../iden3` does for the
 // xark-compiled circuit. The second prints the
 // same message and digest as the inputs of the xark circuit (`xark prove
 // --inputs`), so the two sides prove one statement and `run.sh` keeps no copy.
@@ -202,7 +202,7 @@ func main() {
 }
 
 func run(args []string) error {
-	usage := fmt.Errorf("usage: xark-gnark-bench <circuit> <runs> | inputs <circuit>, a circuit one of sha256, keccak256, sha256_1024, keccak256_1024, poseidon2, poseidon2_chain (inputs: the first four)")
+	usage := fmt.Errorf("usage: pure-gnark <circuit> <runs> | inputs <circuit>, a circuit one of sha256, keccak256, sha256_1024, keccak256_1024, poseidon2, poseidon2_chain (inputs: the first four)")
 	if len(args) != 2 {
 		return usage
 	}

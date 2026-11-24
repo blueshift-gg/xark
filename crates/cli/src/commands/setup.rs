@@ -96,12 +96,6 @@ pub struct SetupArgs {
     /// * `auto` (default) — `smooth`, except `radix2` for a Powers-of-Tau setup.
     #[arg(long, value_enum, default_value_t = QapDomain::Auto)]
     pub domain: QapDomain,
-
-    /// The Groth16 implementation: xark's own (the default), or `gnark` (through a
-    /// Go helper built on first use; its keys and proofs live in a `gnark/`
-    /// directory beside xark's and are not interchangeable with them).
-    #[arg(long, value_enum, default_value_t = super::gnark::Backend::Xark)]
-    pub backend: super::gnark::Backend,
 }
 
 impl SetupArgs {
@@ -117,7 +111,6 @@ impl SetupArgs {
             uncompressed: false,
             r1cs_form: R1csForm::Auto,
             domain: QapDomain::Auto,
-            backend: super::gnark::Backend::Xark,
         }
     }
 }
@@ -350,9 +343,6 @@ pub(super) fn plan_keyed(
 }
 
 pub fn run(args: SetupArgs) -> Result<()> {
-    if args.backend == super::gnark::Backend::Gnark {
-        return super::gnark::setup(&args);
-    }
     let project = XarkProject::resolve(args.path.clone())?;
     // Build first if there's no build yet; keys for a circuit older than its source
     // would prove the wrong thing.

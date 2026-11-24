@@ -14,7 +14,7 @@ mod tests {
     use super::sha256_1024;
     use sha2::{Digest, Sha256};
 
-    /// `inputs.json`: the bytes 0, 1, …, 255, four times over; `pure/main.go`
+    /// The bytes 0, 1, …, 255, four times over; `go/pure/main.go`
     /// hashes the same.
     fn msg() -> [u8; 1024] {
         core::array::from_fn(|i| i as u8)

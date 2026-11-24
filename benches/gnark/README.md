@@ -5,39 +5,41 @@ The same function, four ways:
 - **xark + arkworks**: a xark circuit, proved by `ark-groth16`.
 - **xark + xark-groth16**: the same circuit, proved by xark's own prover (what
   `xark prove` runs; its keys and proofs are arkworks').
-- **xark + gnark**: the same circuit, proved by gnark (`xark prove --backend
-  gnark`, see [docs/gnark.md](../../docs/gnark.md)).
+- **xark + gnark**: the same circuit and the witness xark solves, exported in
+  iden3's files (`xark export --format iden3`, see
+  [docs/iden3.md](../../docs/iden3.md)) and proved by gnark
+  ([`go/iden3/main.go`](go/iden3/main.go) reads them into gnark).
 - **pure gnark**: the function written against gnark's frontend
-  ([`pure/main.go`](pure/main.go)) and proved by gnark.
+  ([`go/pure/main.go`](go/pure/main.go)) and proved by gnark.
 
 | function | frontend + backend | R1CS constraints | prove (ms) | prove, 1 thread (ms) |
 |---|---|---:|---:|---:|
-| sha256 (3-byte message) | xark + arkworks | 16,472 | 63 | 167 |
-| | xark + xark-groth16 | 16,472 | 35 | 129 |
-| | xark + gnark | 16,472 | 22 | 142 |
-| | pure gnark | 156,681 | 239 | 1645 |
-| keccak256 (3-byte message) | xark + arkworks | 89,375 | 201 | 681 |
-| | xark + xark-groth16 | 89,375 | 69 | 505 |
-| | xark + gnark | 89,375 | 65 | 500 |
-| | pure gnark | 187,607 | 298 | 2410 |
-| sha256 (1024-byte message) | xark + arkworks | 299,978 | 651 | 2561 |
-| | xark + xark-groth16 | 299,978 | 206 | 1923 |
-| | xark + gnark | 299,978 | 243 | 2055 |
-| | pure gnark | 580,217 | 1151 | 9677 |
-| keccak256 (1024-byte message) | xark + arkworks | 752,576 | 1425 | 5593 |
-| | xark + xark-groth16 | 752,576 | 414 | 4157 |
-| | xark + gnark | 752,576 | 450 | 3827 |
-| | pure gnark | 583,346 | 1251 | 10754 |
-| poseidon2 (1 permutation) | xark + arkworks | 243 | 7.1 | 14 |
-| | xark + xark-groth16 | 243 | 5.8 | 15 |
-| | xark + gnark | 243 | 1.7 | 14 |
+| sha256 (3-byte message) | xark + arkworks | 16,472 | 64 | 179 |
+| | xark + xark-groth16 | 16,472 | 37 | 139 |
+| | xark + gnark | 16,472 | 22 | 155 |
+| | pure gnark | 156,681 | 241 | 1784 |
+| keccak256 (3-byte message) | xark + arkworks | 89,375 | 215 | 736 |
+| | xark + xark-groth16 | 89,375 | 69 | 548 |
+| | xark + gnark | 89,375 | 66 | 538 |
+| | pure gnark | 187,607 | 313 | 2593 |
+| sha256 (1024-byte message) | xark + arkworks | 299,978 | 676 | 2692 |
+| | xark + xark-groth16 | 299,978 | 207 | 2031 |
+| | xark + gnark | 299,978 | 249 | 2188 |
+| | pure gnark | 580,217 | 1154 | 10095 |
+| keccak256 (1024-byte message) | xark + arkworks | 752,576 | 1478 | 5703 |
+| | xark + xark-groth16 | 752,576 | 417 | 4246 |
+| | xark + gnark | 752,576 | 443 | 3946 |
+| | pure gnark | 583,346 | 1249 | 11084 |
+| poseidon2 (1 permutation) | xark + arkworks | 243 | 7.4 | 14 |
+| | xark + xark-groth16 | 243 | 6.2 | 15 |
+| | xark + gnark | 243 | 1.9 | 15 |
 | | pure gnark | 243 | 1.7 | 13 |
-| poseidon2 (1000 permutations) | xark + arkworks | 240,003 | 1076 | 5764 |
-| | xark + xark-groth16 | 240,003 | 392 | 3969 |
-| | xark + gnark | 240,003 | 399 | 4434 |
-| | pure gnark | 240,003 | 442 | 4000 |
+| poseidon2 (1000 permutations) | xark + arkworks | 240,003 | 1147 | 5863 |
+| | xark + xark-groth16 | 240,003 | 394 | 4027 |
+| | xark + gnark | 240,003 | 402 | 4508 |
+| | pure gnark | 240,003 | 459 | 4017 |
 
-Apple M4 Max (16 cores), 2026-11-22: gnark 0.14.0, ark-groth16 0.6, Rust 1.99.1,
+Apple M4 Max (16 cores), 2026-11-24: gnark 0.14.0, ark-groth16 0.6, Rust 1.99.1,
 Go 1.25.5; the median of 5 proofs, made one after another in one process with
 the key in memory. The first time is with every core. The second is on one thread
 (`RAYON_NUM_THREADS=1`, and `GOMAXPROCS` lowered to 1): the number about the work
@@ -64,15 +66,15 @@ rather than the machine. `./run.sh [runs]` prints the table for your machine.
   takes a row a byte for each two-input operation and a rotation by other than
   whole bytes splits every byte. Keccak-256 (8 blocks) is 94,100 rows a block in
   xark and 56,500 in gnark, so there the gnark circuit is the smaller one.
-- **gnark's smaller Keccak-256 circuit is not the faster proof**: 1251 ms for
-  583,346 rows written in gnark against 450 ms for xark's 752,576 rows on the
-  same prover, and 10.8 s against 3.8 s on one thread. The benchmark times a
+- **gnark's smaller Keccak-256 circuit is not the faster proof**: 1249 ms for
+  583,346 rows written in gnark against 443 ms for xark's 752,576 rows on the
+  same prover, and 11.1 s against 3.9 s on one thread. The benchmark times a
   proof whole, so it does not say which part of gnark's prover the difference
   is in.
 - **On one thread xark-groth16 and gnark are within an eighth of each other** on
   every xark circuit, and neither is first throughout (xark-groth16 on the
   SHA-256 circuits and the Poseidon2 chain, gnark on the long Keccak-256);
-  arkworks' prover takes 1.2 to 1.45 times the faster of the two. With every
+  arkworks' prover takes 1.3 to 1.5 times the faster of the two. With every
   core it takes two to three and a half times as long as they do past a few
   thousand rows.
 - **A time is the proof alone**, with the key in memory, after the witness is
@@ -94,7 +96,9 @@ rather than the machine. `./run.sh [runs]` prints the table for your machine.
   the 1000 permutations and the 1024-byte messages. The three-byte SHA-256 and
   Keccak-256 and the single permutation are `examples/sha256`,
   `examples/keccak256` and `examples/poseidon2`.
-- `pure/`: the six circuits in gnark, one Go program, each on gnark's standard
+- `go/`: one Go module, the only Go in the repository, with two programs.
+  `go/iden3` reads a `circuit.r1cs` and a `witness.wtns` into gnark, makes a key
+  and proves. `go/pure` is the six circuits in gnark, each on gnark's standard
   library (`std/hash/sha2`, `std/hash/sha3`, `std/permutation/poseidon2`). It
   also writes the inputs of the four digest circuits for xark (`pure-gnark
   inputs <circuit>`), so both sides prove the same message and digest. The
@@ -102,6 +106,6 @@ rather than the machine. `./run.sh [runs]` prints the table for your machine.
   `poseidon2_chain/inputs.json`): the two sides' permutations differ.
 - `run.sh`: builds everything, keys each circuit's template-reduced rows over a
   2^k domain for every backend (the form arkworks' prover takes), and measures
-  with `bench_prove warm` (arkworks and xark-groth16), `xark-gnark bench` (xark +
-  gnark) and `pure/` (pure gnark). slow.yml runs it with one proof a measurement,
+  with `bench_prove warm` (arkworks and xark-groth16), `go/iden3` (xark + gnark)
+  and `go/pure` (pure gnark). slow.yml runs it with one proof a measurement,
   and the three circuits' tests.

@@ -1,26 +1,27 @@
-// xark-gnark proves xark circuits with gnark's Groth16 (BN254).
+// The benchmark's "xark + gnark" line: a circuit xark compiled and a witness
+// xark solved, proved by gnark's Groth16 (BN254).
 //
-// `xark setup|prove|verify --backend gnark` drives it. xark hands over the
-// circuit as an iden3 `.r1cs` file and the solved witness as an iden3 `.wtns`
-// file; this tool turns the rows into a gnark constraint system (`circuit.ccs`,
-// readable by any gnark program with `groth16.NewCS(ecc.BN254).ReadFrom`) and
-// runs gnark's setup, prover and verifier on it.
+//	go run ./iden3 <circuit.r1cs> <witness.wtns> <runs>
 //
-// Every xark variable becomes a gnark input wire (the public inputs public, the
-// rest secret) and none an internal one: xark's solver has already computed the
-// whole witness, so gnark's solver has nothing to derive and only checks each
-// row before proving.
+// The two files are iden3's, as `xark export --format iden3 --inputs …` writes
+// them. gnark has no reader for them, so this is one: the rows become a gnark
+// constraint system, every xark variable a gnark input wire (the public inputs
+// public, the rest secret) and none an internal one. xark's solver has already
+// computed the whole witness, so gnark's solver has nothing to derive and only
+// checks each row before proving. It is also the code to start from to prove a
+// xark circuit with gnark in a program of your own.
+//
+// Prints `constraints=<n>`, `prove_ms=<median of the runs>` with every core and
+// `prove_1_ms` on one thread, as `../pure` does for the circuit written in gnark.
 package main
 
 import (
 	"bufio"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -35,189 +36,61 @@ import (
 	"github.com/consensys/gnark/logger"
 )
 
-const usage = `usage:
-  xark-gnark convert <circuit.r1cs> <circuit.ccs>
-  xark-gnark setup   <circuit.r1cs> <key dir>
-  xark-gnark prove   <key dir> <witness.wtns> <out dir>
-  xark-gnark verify  <vk.bin> <proof.bin> <public_witness.bin>
-  xark-gnark bench   <key dir> <witness.wtns> <runs>`
-
-// protocol numbers this command line and its report; `PROTOCOL` in
-// `crates/cli/src/commands/gnark.rs` is the same number. It is the first line of
-// every report, so xark can tell a helper built from another version of this file
-// (one `XARK_GNARK` names) and refuse it.
-const protocol = 2
-
-// exitRejected is the exit code for gnark's own refusal: a witness that doesn't
-// satisfy the rows, a proof that doesn't verify. Every other failure exits 1, so
-// xark never reports a helper that couldn't run as a proof that failed.
-const exitRejected = 2
-
-// rejected marks gnark's refusal among the errors.
-type rejected struct{ error }
-
 func main() {
 	logger.Disable()
-	fmt.Printf("protocol=%d\n", protocol)
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "xark-gnark:", err)
-		if errors.As(err, &rejected{}) {
-			os.Exit(exitRejected)
-		}
+		fmt.Fprintln(os.Stderr, "iden3-gnark:", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
-	switch {
-	case len(args) == 3 && args[0] == "convert":
-		ccs, err := readR1CS(args[1])
-		if err != nil {
-			return err
-		}
-		return writeTo(args[2], ccs)
-	case len(args) == 3 && args[0] == "setup":
-		return setup(args[1], args[2])
-	case len(args) == 4 && args[0] == "prove":
-		return prove(args[1], args[2], args[3])
-	case len(args) == 4 && args[0] == "verify":
-		return verify(args[1], args[2], args[3])
-	case len(args) == 4 && args[0] == "bench":
-		runs, err := strconv.Atoi(args[3])
-		if err != nil || runs < 1 {
-			return fmt.Errorf("%s", usage)
-		}
-		return bench(args[1], args[2], runs)
+	usage := fmt.Errorf("usage: iden3-gnark <circuit.r1cs> <witness.wtns> <runs>")
+	if len(args) != 3 {
+		return usage
 	}
-	return fmt.Errorf("%s", usage)
-}
-
-func setup(r1csPath, dir string) error {
-	ccs, err := readR1CS(r1csPath)
+	runs, err := strconv.Atoi(args[2])
+	if err != nil || runs < 1 {
+		return usage
+	}
+	ccs, err := readR1CS(args[0])
 	if err != nil {
 		return err
 	}
-	if err := writeTo(filepath.Join(dir, "circuit.ccs"), ccs); err != nil {
-		return err
-	}
-	start := time.Now()
 	pk, vk, err := groth16.Setup(ccs)
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
-	report("setup_ms", time.Since(start))
-	// Raw (uncompressed) points: the key is read back on every proof.
-	if err := writeRawTo(filepath.Join(dir, "pk.bin"), pk); err != nil {
-		return err
-	}
-	if err := writeTo(filepath.Join(dir, "vk.bin"), vk); err != nil {
-		return err
-	}
-	fmt.Printf("constraints=%d\n", ccs.GetNbConstraints())
-	fmt.Printf("public=%d\n", ccs.GetNbPublicVariables()-1)
-	fmt.Printf("secret=%d\n", ccs.GetNbSecretVariables())
-	return nil
-}
-
-// load reads what a proof needs: the constraint system and keys `setup` wrote,
-// and the witness xark solved.
-func load(dir, wtnsPath string) (constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey, witness.Witness, error) {
-	ccs := groth16.NewCS(ecc.BN254)
-	if err := readFrom(filepath.Join(dir, "circuit.ccs"), ccs); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	pk := groth16.NewProvingKey(ecc.BN254)
-	if err := readFrom(filepath.Join(dir, "pk.bin"), unsafeReader{pk}); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	vk := groth16.NewVerifyingKey(ecc.BN254)
-	if err := readFrom(filepath.Join(dir, "vk.bin"), vk); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	w, err := readWitness(wtnsPath, ccs.GetNbPublicVariables()-1, ccs.GetNbSecretVariables())
-	return ccs, pk, vk, w, err
-}
-
-// bench proves the same witness `runs` times with the key resident and reports
-// the median, with every core (`prove_ms`) and then on one thread
-// (`prove_1_ms`): `benches/gnark/run.sh`.
-func bench(dir, wtnsPath string, runs int) error {
-	ccs, pk, _, w, err := load(dir, wtnsPath)
+	w, err := readWitness(args[1], ccs.GetNbPublicVariables()-1, ccs.GetNbSecretVariables())
 	if err != nil {
 		return err
 	}
 	fmt.Printf("constraints=%d\n", ccs.GetNbConstraints())
-	for _, name := range []string{"prove_ms", "prove_1_ms"} {
+	for round, name := range []string{"prove_ms", "prove_1_ms"} {
 		times := make([]time.Duration, runs)
 		for i := range times {
 			start := time.Now()
-			if _, err := groth16.Prove(ccs, pk, w); err != nil {
+			proof, err := groth16.Prove(ccs, pk, w)
+			if err != nil {
 				return fmt.Errorf("prove: %w", err)
 			}
 			times[i] = time.Since(start)
+			if round == 0 && i == 0 {
+				public, err := w.Public()
+				if err != nil {
+					return err
+				}
+				if err := groth16.Verify(proof, vk, public); err != nil {
+					return fmt.Errorf("the proof does not verify: %w", err)
+				}
+			}
 		}
 		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
-		report(name, times[runs/2])
-		// The second round runs on one thread; reading the key did not have to.
+		fmt.Printf("%s=%s\n", name, strconv.FormatFloat(float64(times[runs/2].Microseconds())/1000, 'f', 3, 64))
+		// The second round runs on one thread; the setup did not have to.
 		runtime.GOMAXPROCS(1)
 	}
 	return nil
-}
-
-func prove(dir, wtnsPath, out string) error {
-	ccs, pk, vk, w, err := load(dir, wtnsPath)
-	if err != nil {
-		return err
-	}
-	start := time.Now()
-	// The key and the witness are read and fit the rows by now, and every wire
-	// has its value: what is left to fail is a row the witness doesn't satisfy.
-	proof, err := groth16.Prove(ccs, pk, w)
-	if err != nil {
-		return rejected{fmt.Errorf("prove: %w", err)}
-	}
-	report("prove_ms", time.Since(start))
-	public, err := w.Public()
-	if err != nil {
-		return err
-	}
-	start = time.Now()
-	if err := groth16.Verify(proof, vk, public); err != nil {
-		return fmt.Errorf("the proof does not verify: %w", err)
-	}
-	report("verify_ms", time.Since(start))
-	if err := writeTo(filepath.Join(out, "proof.bin"), proof); err != nil {
-		return err
-	}
-	return writeTo(filepath.Join(out, "public_witness.bin"), public)
-}
-
-func verify(vkPath, proofPath, publicPath string) error {
-	vk := groth16.NewVerifyingKey(ecc.BN254)
-	if err := readFrom(vkPath, vk); err != nil {
-		return err
-	}
-	proof := groth16.NewProof(ecc.BN254)
-	if err := readFrom(proofPath, proof); err != nil {
-		return err
-	}
-	public, err := witness.New(ecc.BN254.ScalarField())
-	if err != nil {
-		return err
-	}
-	if err := readFrom(publicPath, public); err != nil {
-		return err
-	}
-	if err := groth16.Verify(proof, vk, public); err != nil {
-		return rejected{fmt.Errorf("the proof does not verify: %w", err)}
-	}
-	return nil
-}
-
-// report prints a duration as `name=<milliseconds>`, the form xark and the
-// benchmark script read.
-func report(name string, d time.Duration) {
-	fmt.Printf("%s=%s\n", name, strconv.FormatFloat(float64(d.Microseconds())/1000, 'f', 3, 64))
 }
 
 // readR1CS reads an iden3 `.r1cs` file (the format circom writes and snarkjs
@@ -460,53 +333,4 @@ func (r *reader) lc(ccs *cs_bn254.R1CS, fieldSize int, wires uint32) constraint.
 		lc = append(lc, ccs.MakeTerm(c, int(wire)))
 	}
 	return lc
-}
-
-// unsafeReader reads a proving key without the subgroup checks: the key is this
-// tool's own output, and the checks cost more than the proof.
-type unsafeReader struct {
-	pk groth16.ProvingKey
-}
-
-func (u unsafeReader) ReadFrom(r io.Reader) (int64, error) {
-	return u.pk.UnsafeReadFrom(r)
-}
-
-func readFrom(path string, into io.ReaderFrom) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := into.ReadFrom(bufio.NewReaderSize(f, 1<<20)); err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
-	}
-	return nil
-}
-
-func writeTo(path string, from io.WriterTo) error {
-	return write(path, from.WriteTo)
-}
-
-func writeRawTo(path string, from interface {
-	WriteRawTo(io.Writer) (int64, error)
-}) error {
-	return write(path, from.WriteRawTo)
-}
-
-func write(path string, to func(io.Writer) (int64, error)) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	w := bufio.NewWriterSize(f, 1<<20)
-	if _, err := to(w); err != nil {
-		f.Close()
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	if err := w.Flush(); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
 }

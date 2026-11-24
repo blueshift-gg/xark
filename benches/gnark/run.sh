@@ -23,11 +23,9 @@ mkdir -p "$out"
 cd "$root"
 cargo build --release -q -p xark-cli
 cargo build --release -q -p xark-groth16 --example bench_prove
-(cd crates/cli/gnark && go build -o "$out/xark-gnark" .)
-(cd "$here/pure" && go build -o "$out/pure-gnark" .)
+(cd "$here/go" && go build -o "$out/iden3-gnark" ./iden3 && go build -o "$out/pure-gnark" ./pure)
 xark=$root/target/release/xark
 bench_prove=$root/target/release/examples/bench_prove
-export XARK_GNARK=$out/xark-gnark
 
 # The median of the numbers on stdin.
 median() { sort -n | awk '{ v[NR] = $1 } END { print v[int((NR + 1) / 2)] }'; }
@@ -41,8 +39,8 @@ bench() {
     rm -rf "$keys"
     # The template-reduced rows over a 2^k domain for every backend: the form
     # arkworks' prover takes, and so the same rows on each line of the table.
+    # gnark makes its own key for them, from the files xark exports.
     "$xark" setup "$crate" --out "$keys" --r1cs-form reduced --domain radix2 >/dev/null 2>&1
-    "$xark" setup "$crate" --out "$keys" --r1cs-form reduced --backend gnark >/dev/null 2>&1
     local built
     built=$(dirname "$(find "$crate/target/xark" -name circuit.xbc | head -1)")
     local count
@@ -55,14 +53,14 @@ bench() {
     ark() { awk '/warm prove/ { sub("s", "", $4); print $4 * 1000 }' | median; }
     stream() { awk '/warm prove/ { sub("s", "", $6); print $6 * 1000 }' | median; }
 
-    # The witness xark solves, kept as the file gnark proves from.
-    "$xark" prove "$crate" --backend gnark --proving-key "$keys/gnark/pk.bin" \
-        --out "$keys" --keep-witness --inputs "$inputs" >/dev/null 2>&1
+    # The same rows and the witness xark solves, as the files gnark proves from.
+    "$xark" export "$crate" --format iden3 --r1cs-form reduced --inputs "$inputs" \
+        --out "$keys/iden3" >/dev/null 2>&1
     local g p
-    g=$("$XARK_GNARK" bench "$keys/gnark" "$keys/gnark/witness.wtns" "$runs")
+    g=$("$out/iden3-gnark" "$keys/iden3/circuit.r1cs" "$keys/iden3/witness.wtns" "$runs")
     # The witness holds the inputs; the benchmark's are no secret, but nothing
     # is left behind that a real one would be.
-    rm -f "$keys/gnark/witness.wtns"
+    rm -f "$keys/iden3/witness.wtns"
     p=$("$out/pure-gnark" "$name" "$runs")
 
     rows+=("| $label | xark + arkworks | $count | $(echo "$warm" | ark) | $(echo "$warm1" | ark) |")
@@ -71,7 +69,7 @@ bench() {
     rows+=("| | pure gnark | $(echo "$p" | field constraints) | $(echo "$p" | field prove_ms) | $(echo "$p" | field prove_1_ms) |")
 }
 
-# A digest circuit's inputs are the message and digest `pure/` proves, written
+# A digest circuit's inputs are the message and digest `go/pure` proves, written
 # out by it under the xark circuit's names.
 digest_inputs() {
     "$out/pure-gnark" inputs "$1" >"$out/$1.inputs.json"

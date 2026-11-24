@@ -2,9 +2,9 @@
 //! keyed rows as `circuit.r1cs`
 //! (<https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md>) and a
 //! solved witness as `witness.wtns`. `xark export --format iden3` writes them for
-//! any prover that takes them; `--backend gnark` (`gnark.rs`) hands them to gnark.
+//! any prover that takes them: snarkjs and rapidsnark as they are, gnark through
+//! a reader of the format (`benches/gnark/go/iden3/` has one).
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -14,7 +14,6 @@ use ark_bn254::Fr;
 use ark_serialize::CanonicalSerialize;
 use xark_groth16::ConstraintSource;
 use xark_groth16::r1cs::RowChunk;
-use xark_ir::VarId;
 use xark_ir::solver::Fp;
 use xark_prover::fr_from_decimal;
 
@@ -45,7 +44,7 @@ fn fr_le(v: &Fr, out: &mut impl Write) -> Result<()> {
 /// `i`: the constant one, the public inputs, then every other variable. The
 /// header's private-input count is left at zero: the layout doesn't tell a private
 /// input from a derived variable, and no Groth16 setup reads it.
-pub(super) fn write_r1cs(path: &Path, src: &dyn ConstraintSource) -> Result<()> {
+fn write_r1cs(path: &Path, src: &dyn ConstraintSource) -> Result<()> {
     let layout = src.layout();
     let wires = u32::try_from(layout.num_vars()).context("more than 2^32 variables")?;
     let rows = u32::try_from(src.num_constraints()).context("more than 2^32 constraints")?;
@@ -104,7 +103,7 @@ pub(super) fn write_r1cs(path: &Path, src: &dyn ConstraintSource) -> Result<()> 
 /// Write the assignment `z` (the constant one first) as an iden3 `.wtns` file,
 /// readable by its owner only where the system has such a thing: it holds the
 /// private inputs.
-pub(super) fn write_wtns(path: &Path, z: &[Fr]) -> Result<()> {
+fn write_wtns(path: &Path, z: &[Fr]) -> Result<()> {
     // A file of this name from an earlier run keeps its own permissions, so it
     // goes first and the new one is made private from its first byte.
     match fs::remove_file(path) {
@@ -141,46 +140,14 @@ pub(super) fn write_wtns(path: &Path, z: &[Fr]) -> Result<()> {
     Ok(())
 }
 
-/// The number of wires an iden3 `.r1cs` file declares (the header is its first
-/// section here, as [`write_r1cs`] writes it).
-pub(super) fn r1cs_wires(path: &Path) -> Result<usize> {
-    use std::io::Read;
-    let mut head = [0u8; 12 + 12 + 4 + 32 + 4];
-    fs::File::open(path)
-        .and_then(|mut f| f.read_exact(&mut head))
-        .with_context(|| format!("reading {}", path.display()))?;
-    if &head[..4] != b"r1cs" || head[12..16] != 1u32.to_le_bytes() {
-        bail!("{} is not a circuit.r1cs xark wrote", path.display());
-    }
-    Ok(u32::from_le_bytes(head[60..64].try_into().expect("4 bytes")) as usize)
-}
-
 /// The value of every wire of `src`, in wire order, from a solved witness.
-pub(super) fn assignment(src: &dyn ConstraintSource, assign: &[Option<Fp>]) -> Vec<Fr> {
+fn assignment(src: &dyn ConstraintSource, assign: &[Option<Fp>]) -> Vec<Fr> {
     src.layout().assignment(|id| {
         assign.get(id as usize).and_then(Option::as_ref).map(|v| {
             v.as_bn254_fr()
                 .unwrap_or_else(|| fr_from_decimal(&v.to_decimal()))
         })
     })
-}
-
-/// The inputs `--inputs` names, by variable, and the witness they solve to.
-pub(super) struct Solved {
-    pub inputs: BTreeMap<VarId, String>,
-    pub assign: Vec<Option<Fp>>,
-}
-
-pub(super) fn solve(project: &XarkProject, xbc: &[u8], arg: Option<&str>) -> Result<Solved> {
-    let inputs = match arg {
-        Some(arg) => super::read_inputs(&project.xark_dir, arg)?,
-        None => Default::default(),
-    };
-    let sources = super::load_sources(&project.xark_dir);
-    let vars = xark_ir::function_decode::decode_input_vars(xbc).map_err(|e| anyhow::anyhow!(e))?;
-    let inputs = super::resolve_input_ids(&vars, &inputs)?;
-    let assign = super::stream_witness(xbc, sources.as_ref(), &inputs)?;
-    Ok(Solved { inputs, assign })
 }
 
 /// `xark export --format iden3`: the keyed rows as `circuit.r1cs` and, with
@@ -217,8 +184,15 @@ pub fn export(args: &ExportArgs) -> Result<()> {
     if let Some(inputs) = &args.inputs {
         let xbc = project.circuit_xbc();
         let bytes = fs::read(&xbc).with_context(|| format!("reading {}", xbc.display()))?;
-        let solved = solve(&project, &bytes, Some(inputs))?;
-        let z = keyed.with_source(|src| assignment(src, &solved.assign));
+        let sources = super::load_sources(&project.xark_dir);
+        let vars =
+            xark_ir::function_decode::decode_input_vars(&bytes).map_err(|e| anyhow::anyhow!(e))?;
+        let id_inputs =
+            super::resolve_input_ids(&vars, &super::read_inputs(&project.xark_dir, inputs)?)?;
+        drop(vars);
+        let assign = super::stream_witness(&bytes, sources.as_ref(), &id_inputs)?;
+        let z = keyed.with_source(|src| assignment(src, &assign));
+        drop(assign);
         let wtns = dir.join("witness.wtns");
         write_wtns(&wtns, &z)?;
         println!(
