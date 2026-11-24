@@ -4,7 +4,7 @@ description = "xark's stable-Rust circuit frontend: lowers a circuit compiled to
 keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 version.workspace = true
-edition = "2024"
+edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -19,3 +19,6 @@ num-bigint = "0.4"
 rayon = "1"
 addr2line = { version = "0.25", default-features = false, features = ["std", "rustc-demangle"] }
 rustc-demangle = "0.1"
+
+[lints]
+workspace = true

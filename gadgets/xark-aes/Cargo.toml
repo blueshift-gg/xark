@@ -5,7 +5,7 @@ keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -24,3 +24,6 @@ xark-ir = { path = "../../crates/ir" }
 # Independent reference for the GCM GF(2^128) field (GHASH): `GHash::new(H).update(Y)`
 # = Y·H, exactly the `gf128_mul` we validate.
 ghash = "0.5"
+
+[lints]
+workspace = true

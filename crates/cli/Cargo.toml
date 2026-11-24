@@ -1,7 +1,7 @@
 [package]
 name = "xark-cli"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -44,3 +44,6 @@ rand_chacha = "0.3"
 ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
 ark-serialize = { version = "0.6", default-features = false }
 mimalloc = "0.1"
+
+[lints]
+workspace = true

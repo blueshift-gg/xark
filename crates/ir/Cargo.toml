@@ -5,7 +5,7 @@ keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
 categories = ["cryptography"]
 readme = "README.md"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -38,3 +38,6 @@ ark-bn254.workspace = true
 # parallel feature is enabled by default
 ark-ff = { version = "0.6", default-features = false, features = ["std"] }
 crypto-bigint = { version = "0.7", default-features = false }
+
+[lints]
+workspace = true
