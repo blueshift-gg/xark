@@ -71,7 +71,8 @@ pub struct Cli {
 pub enum Command {
     /// Check your toolchain is set up to build & prove circuits.
     Doctor(doctor::DoctorArgs),
-    /// Scaffold a starter circuit crate (rust-analyzer ready).
+    /// Start a project: a workspace, a starter circuit and, optionally, a Pinocchio
+    /// program.
     #[command(alias = "new")]
     Init(InitArgs),
     /// Add a circuit or a Solana program to an existing project:
@@ -79,7 +80,7 @@ pub enum Command {
     Add(add::AddArgs),
     /// Compile circuits (Rust → wasm32 → R1CS) and their clients.
     Build(BuildArgs),
-    /// Validate a circuit crate and report subset rejections as diagnostics.
+    /// Validate circuits and report subset rejections as diagnostics.
     Check(CheckArgs),
     /// Build each circuit, then run its tests.
     Test(TestArgs),
@@ -263,8 +264,8 @@ pub struct TestArgs {
     /// Circuit crate directory to build and test.
     #[arg(default_value = ".", value_hint = clap::ValueHint::DirPath)]
     pub crate_dir: String,
-    /// At a project's root, verify the committed clients/keys instead of refreshing
-    /// them.
+    /// At a project's root, verify the committed clients and keys first (as `xark
+    /// build --check` does), then run the tests.
     #[arg(long)]
     pub check: bool,
     /// Arguments for `cargo test`, passed through verbatim, as you'd give them to

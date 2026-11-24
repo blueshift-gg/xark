@@ -94,9 +94,9 @@ pub fn run(_args: DoctorArgs) -> Result<()> {
             "cargo install xark-cli",
         ),
     }
-    // A project's programs are built and tested by their framework, so only \
-    // `cargo-build-sbf` is checked. Node is informational as it may be needed
-    // to run the programs' LiteSV test and generate TypeScript clients.
+    // A project's programs are built and tested by their framework, so only
+    // `cargo-build-sbf` is checked. Node is informational: the programs' LiteSVM
+    // test and the TypeScript client's runtime need it, but xark itself doesn't.
     let in_project = std::env::current_dir()
         .ok()
         .and_then(|d| crate::xark_project::project_root(&d))

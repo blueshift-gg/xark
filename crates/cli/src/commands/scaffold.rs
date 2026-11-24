@@ -31,8 +31,8 @@ pub struct ProgramScaffolder {
     pub id: &'static str,
     pub label: &'static str,
     pub scaffold: fn(&ProgramScaffold<'_>) -> Result<()>,
-    /// What builds and tests what `scaffold` wrote: the framework's commands,
-    /// which xark prints but does not run.
+    /// What to run after `scaffold`: the circuit's tests, then the framework's
+    /// commands for the program. xark prints them but does not run them.
     next_steps: &'static [(&'static str, &'static str)],
 }
 
@@ -52,7 +52,7 @@ pub const PINOCCHIO: ProgramScaffolder = ProgramScaffolder {
     label: "Pinocchio (LiteSVM)",
     scaffold: pinocchio,
     next_steps: &[
-        ("xark build --check", "the circuit, its clients and keys"),
+        ("xark test", "build the circuits and run their tests"),
         ("cargo build-sbf", "the program"),
         ("npm install && npm test", "the program's LiteSVM test"),
     ],
