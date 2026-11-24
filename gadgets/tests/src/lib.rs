@@ -81,9 +81,14 @@ pub fn xark_bin() -> std::path::PathBuf {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos());
         // Still called `xark`: its usage text names it.
-        let dir = workspace_root
-            .join("target/xark-test-bin")
-            .join(format!("{}-{stamp}", meta.len()));
+        // Separate test processes can initialize this helper concurrently.
+        // A same-name rename would replace an executable that another test
+        // process may already be launching, producing a `(deleted)` path.
+        let dir = workspace_root.join("target/xark-test-bin").join(format!(
+            "{}-{stamp}-{}",
+            meta.len(),
+            std::process::id()
+        ));
         let copy = dir.join(exe);
         if !copy.exists() {
             std::fs::create_dir_all(&dir).expect("create target/xark-test-bin");
