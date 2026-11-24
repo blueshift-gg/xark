@@ -48,7 +48,8 @@ generates.
 ```text
 claim/
   xark.toml             # the pinned xark release
-  Cargo.toml            # the workspace: members, the programs' profile (and default-members with a program)
+  Cargo.toml            # the workspace: members, the programs' release
+                        # profile, and their default-members
   rust-analyzer.toml    # `xark check .` at the root (and .vscode/settings.json)
   package.json  tsconfig.json  vitest.config.ts
   circuits/claim/       # the starter circuit and its tests
@@ -58,7 +59,7 @@ claim/
   keys/claim/           # committed: pk.bin, vk.bin, metadata.json, circuit.xbc
   tests/claim.test.ts   # LiteSVM
   .github/workflows/ci.yml   # xark build --check, xark test (circuits)
-  .github/workflows/claim-program.yml   # optional: this program's build, SBF and LiteSVM tests
+  .github/workflows/claim-program.yml   # this program's SBF build and LiteSVM test
 ```
 
 - **Fixed folders.** `circuits/*`, `programs/*` and `clients/*/rust` are globbed
@@ -69,20 +70,22 @@ claim/
   Restoring that program from git restores its directory but not the manifest
   entries: since `xark add program` refuses an existing directory, add
   `programs/*` (and `default-members`) back by hand.
-- **The Pinocchio scaffold makes the programs the default members.** `xark add
-  program` sets `default-members = ["programs/*"]` (keeping any of your own
-  entries) so a bare `cargo test` or `cargo build` at the root targets the
-  programs. `cargo build-sbf` does not use `default-members`: it selects the
-  workspace's `cdylib` members, which is why a bare command works here (and would
-  also build another `cdylib` member), whatever the default-members say. `xark build` leaves the setting alone, dropping only a
-  stale `programs/*` entry. `xark test` tests the circuits only; the program has
-  its own commands.
-- **Programs are native.** The Pinocchio scaffold writes a LiteSVM test and an
-  optional `.github/workflows/<name>-program.yml` that runs that one program's
+- **The Pinocchio scaffold makes the programs the default members.** `xark init
+  --program pinocchio` and `xark add program` set
+  `default-members = ["programs/*"]` (keeping any of your own entries) so a bare
+  `cargo test` or `cargo build` at the root targets the programs. `cargo build-sbf`
+  does not use `default-members`: it selects the workspace's `cdylib` members,
+  which is why a bare command works here (and would also build another `cdylib`
+  member), whatever the default-members say. `xark build` leaves the setting
+  alone, dropping only a stale `programs/*` entry. `xark test` tests the circuits
+  only; the program has its own commands.
+- **Programs are native.** The Pinocchio scaffold writes a LiteSVM test and a
+  `.github/workflows/<name>-program.yml` that runs that one program's
   `cargo build-sbf` (with the 4 KiB stack check) and LiteSVM test, scoped by
-  `--manifest-path` so programs from another framework are left alone. The generated verifier self-tests run in `ci.yml`. `xark` does not build
-  or test programs. `xark add program` is the incremental path; the init wizard is
-  the normal one.
+  `--manifest-path` so programs from another framework are left alone. The
+  generated verifier self-tests run in `ci.yml`. `xark` does not build or test
+  programs. `xark add program` is the incremental path; the init wizard is the
+  normal one.
 - **Crate names.** A workspace can't hold two packages of one name: the program in
   `programs/claim/` is the crate `claim-program`, the client `claim-client`.
   `xark add program claim` uses the circuit of the same name; `--circuit` picks
@@ -103,9 +106,10 @@ claim/
   change (saying the verifier changes too). A ceremony key, a phase-2 key from a
   `.ptau`, a seeded test key, or a key with no metadata is never rotated by a
   build: use `xark setup`/`xark ceremony`. A missing key is bootstrapped from OS
-  randomness, ignoring a `.ptau`. `xark prove` keeps its first-proof
-  convenience. A proving key over 50 MB belongs in Git LFS (the zKYC circuit's is
-  265 KB, SHA-256's 3.2 MB, Ed25519's 450 MB).
+  randomness, ignoring a `.ptau` — unless a committed verifier embeds one: then a
+  build stops rather than replace it, and `xark setup` makes a new one on purpose.
+  `xark prove` keeps its first-proof convenience. A proving key over 50 MB belongs
+  in Git LFS (the zKYC circuit's is 265 KB, SHA-256's 3.2 MB, Ed25519's 450 MB).
 - **Stable clients.** A rebuild leaves `clients/` byte for byte as it was: the
   sample proof a verifier crate bundles is kept while it verifies, since a proof
   is randomized and only whoever proved last has one. `xark build --check` (CI)
@@ -135,8 +139,7 @@ clone builds the program without running xark first; CI checks it is up to date.
   program's `Fields`.
 
 The tests use `@blueshift-gg/xark/testing`: a circuit's build output by name
-(`circuit("claim")`), a LiteSVM with the project's programs
-(`program("claim")`),
+(`circuit("claim")`), a LiteSVM with the project's programs (`program("claim")`),
 a funded payer and `send`. Every example carried its own copy of these.
 
 ## Typed public inputs
@@ -192,23 +195,24 @@ writes the sample's public inputs by name, packs them and verifies the proof.
   `xark setup` from OS randomness, not a stray `.ptau`; a changed plain
   single-party dev key is rotated with the old warning, while a ceremony or
   phase-2 key stops with `xark setup`/`xark ceremony`.
-- `xark test`: each circuit's tests and those of a library beside them.
-  `--check` verifies the committed clients/keys instead of refreshing them.
+- `xark test`: each circuit's tests and those of a library beside them. With
+  `--check` it also verifies the committed clients and keys, as `xark build
+  --check` does, before running the tests.
 - `xark check` (what rust-analyzer runs): `cargo check --workspace` once, then
   xark's own validation of each circuit. One override for the whole workspace;
   programs see ordinary cargo diagnostics.
 
 `xark init --program pinocchio` and `xark add program` scaffold one Pinocchio
 program with a LiteSVM test. Each program's `.github/workflows/<name>-program.yml`
-is optional and owned by the scaffolder; it installs the framework tools and runs
-that program's native steps. The circuit workflow runs `xark build --check`,
-`xark test` and the verifier self-tests only.
+is generated by the scaffolder and safe to edit; it installs the framework tools
+and runs that program's native steps. The circuit workflow runs `xark build
+--check`, `xark test` and the verifier self-tests only.
 
 ## Upgrading from 0.4
 
 An existing 0.4 project's old `.github/workflows/ci.yml` calls `xark build --check`
 and `xark test`. Those stay circuit-only, so their programs need the native
-program workflow. Remove any `[programs]` metadata; xark ignores it. To move:
+program workflow. To move:
 
 - add `.github/workflows/<name>-program.yml` (copy it from a fresh `xark add
   program` project): it runs that program's `cargo build-sbf`, the stack check

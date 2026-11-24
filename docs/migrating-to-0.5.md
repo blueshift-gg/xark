@@ -6,12 +6,15 @@ its `prover` feature proves on a host. A circuit crate can also depend on anothe
 one for its input types. **No circuit changed**: every digest is the same, so keys
 made with 0.4 still verify, and a deployed program keeps working.
 
-**Your code doesn't have to change.** Update the versions as below, and a project
-from 0.4.0 builds under 0.5: `xark export` over an earlier export keeps that
-crate's name, so `<name>-verifier` and the programs depending on it stay as they
-are. The one behavior to check is that a prover no longer verifies its proof
-before returning it unless you ask ([below](#verify-a-proof-before-its-returned)).
-The rest of this guide is what you can take up, and the one name `xark add` now
+**Your circuit code doesn't have to change.** Update the versions as below, and a
+project from 0.4.0 builds under 0.5: `xark export` over an earlier export keeps
+that crate's name, so `<name>-verifier` and the programs depending on it stay as
+they are. A project with programs moves its build and test steps to the
+framework's commands
+([below](#programs-are-built-and-tested-by-their-framework)). The one behavior to
+check is that a prover no longer verifies its proof before returning it unless
+you ask ([below](#verify-a-proof-before-its-returned)). Apart from the programs,
+the rest of this guide is what you can take up, and the one name `xark add` now
 refuses.
 
 ## Update xark
@@ -39,6 +42,19 @@ npm install @blueshift-gg/xark@0.5
 
 Then run `xark build` at the project's root (or `xark export` beside a circuit
 crate) and commit what it writes: the client crate gains the types below.
+
+## Programs are built and tested by their framework
+
+`xark build` and `xark test` at a project's root stop at the circuits and their
+clients: they no longer run `cargo build-sbf` or the LiteSVM tests. A 0.4
+project's `ci.yml` still runs `xark build --check` and `xark test`, which keep
+doing what they did for circuits. Each program gets its own
+`.github/workflows/<name>-program.yml` that runs that program's `cargo build-sbf`
+(with the 4 KiB stack check) and `npm test -- tests/<name>.test.ts`; copy it from
+a fresh `xark init <name> --program pinocchio` project, or from `xark add
+program`, which adds a program to an existing one. A bare `cargo build-sbf` at
+the root still builds the workspace's programs. See
+[Upgrading from 0.4](projects.md#upgrading-from-04).
 
 ## Verify a proof before it's returned
 

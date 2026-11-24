@@ -145,8 +145,8 @@ The verifier crate's `SETUP` constant says which kind of key it embeds.
 - [Editor diagnostics](docs/editor.md): circuit errors inline in rust-analyzer
 
 **Using proofs**
-- [Migrating from 0.4](docs/migrating-to-0.5.md): nothing to change; the client
-  crate's proof type, host prover and new name, to take up when you like
+- [Migrating from 0.4](docs/migrating-to-0.5.md): the client crate's proof type,
+  host prover and new name, and a project's program build and test steps
 - [Migrating from 0.3](docs/migrating-to-0.4.md): keep a circuit crate, or move it
   into a project, keeping your keys
 - [TypeScript clients](docs/typescript.md): typed provers and verifiers for Node
