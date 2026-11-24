@@ -193,12 +193,22 @@ pub const PROJECT_FILE: &str = "xark.toml";
 /// entry whose crate was deleted is dropped, with its default-members entry: cargo
 /// cannot load either, and `xark build` has to load the workspace to repair it.
 pub fn sync_members(root: &Path) -> Result<()> {
-    sync_workspace(root, &["circuits/*", "clients/*/rust"], None, true)
+    sync_workspace(
+        root,
+        &["circuits/*", "clients/*/rust"],
+        None,
+        SyncMode::Write,
+    )
 }
 
 /// Verify the members `xark build` would write without touching `Cargo.toml`.
 pub fn check_members(root: &Path) -> Result<()> {
-    sync_workspace(root, &["circuits/*", "clients/*/rust"], None, false)
+    sync_workspace(
+        root,
+        &["circuits/*", "clients/*/rust"],
+        None,
+        SyncMode::Check,
+    )
 }
 
 /// The workspace entries `xark add program` writes for its Pinocchio scaffold:
@@ -214,15 +224,25 @@ pub fn sync_program_members(root: &Path) -> Result<()> {
         root,
         &["circuits/*", "programs/*", "clients/*/rust"],
         Some(&["programs/*"]),
-        true,
+        SyncMode::Write,
     )
+}
+
+/// Whether [`sync_workspace`] writes a repaired manifest or simply performs
+/// a check.
+#[derive(Clone, Copy)]
+enum SyncMode {
+    /// Write the members the project needs.
+    Write,
+    /// Leave `Cargo.toml` as it is, failing when it is stale.
+    Check,
 }
 
 fn sync_workspace(
     root: &Path,
     ours: &[&str],
     default_members: Option<&[&str]>,
-    write: bool,
+    mode: SyncMode,
 ) -> Result<()> {
     let has_crate = |pattern: &str| -> bool {
         let (dir, rest) = pattern.split_once("/*").unwrap_or((pattern, ""));
@@ -310,14 +330,14 @@ fn sync_workspace(
     }
     let new = doc.to_string();
     if new != text {
-        if !write {
-            bail!(
+        match mode {
+            SyncMode::Write => std::fs::write(&manifest, new)
+                .with_context(|| format!("writing {}", manifest.display()))?,
+            SyncMode::Check => bail!(
                 "{} has stale workspace members: run `xark build` and commit them",
                 manifest.display()
-            );
+            ),
         }
-        std::fs::write(&manifest, new)
-            .with_context(|| format!("writing {}", manifest.display()))?;
     }
     Ok(())
 }
@@ -665,6 +685,21 @@ mod tests {
         let doc: toml_edit::DocumentMut = text.parse().unwrap();
         assert_eq!(entries(&doc, "members"), ["circuits/*"]);
         assert!(entries(&doc, "default-members").is_empty());
+    }
+
+    #[test]
+    fn check_members_refuses_a_stale_manifest_and_leaves_it_alone() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "circuits/app");
+        let manifest = "[workspace]\nmembers = []\n";
+        fs::write(temp.0.join("Cargo.toml"), manifest).unwrap();
+
+        let err = super::check_members(&temp.0).unwrap_err();
+        assert!(err.to_string().contains("stale workspace members"), "{err}");
+        assert_eq!(
+            fs::read_to_string(temp.0.join("Cargo.toml")).unwrap(),
+            manifest
+        );
     }
 
     #[test]
