@@ -448,6 +448,76 @@ fn a_project_keeps_what_isnt_xarks() {
     assert_eq!(std::fs::read(app.join("keys/edge/vk.bin")).unwrap(), vk);
 }
 
+/// `xark test --check` at a project's root verifies the committed clients and keys
+/// before it runs the circuits' tests: a stale client or a missing key stops it,
+/// and `--` still reaches `cargo test`.
+#[test]
+fn test_check_verifies_the_clients_first() {
+    let tmp = tempdir();
+    let app = tmp.path().join("ci");
+    let (ok, _, err) = crate::common::run(&["init", app.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap()
+        + &format!(
+            "\n[patch.crates-io]\nxark = {{ path = \"{}\" }}\nxark-verifier = {{ path = \"{}\" }}\nxark-prover = {{ path = \"{}\" }}\n",
+            root.join("crates/lang").display(),
+            root.join("crates/verifier").display(),
+            root.join("crates/prover").display()
+        );
+    std::fs::write(app.join("Cargo.toml"), manifest).unwrap();
+    let xark = |args: &[&str]| {
+        let o = Command::new(crate::common::xark_bin())
+            .args(args)
+            .current_dir(&app)
+            .output()
+            .expect("invoke xark");
+        let out =
+            String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+        (o.status.success(), out)
+    };
+    let (ok, out) = xark(&["build"]);
+    assert!(ok, "{out}");
+
+    // Current clients and keys: the check passes and the circuit's tests run.
+    let (ok, out) = xark(&["test", "--check"]);
+    assert!(ok && out.contains("tests::accepts_valid"), "{out}");
+
+    // A committed client that isn't what the build generates stops it before the
+    // tests run, and is left as it was.
+    let ts = app.join("clients/ci/ts/ci.ts");
+    let committed = std::fs::read_to_string(&ts).unwrap();
+    let edited = format!("{committed}// edited\n");
+    std::fs::write(&ts, &edited).unwrap();
+    let (ok, out) = xark(&["test", "--check"]);
+    assert!(
+        !ok && out.contains("clients/ci/ts/ci.ts") && !out.contains("tests::accepts_valid"),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&ts).unwrap(), edited);
+    std::fs::write(&ts, &committed).unwrap();
+
+    // A key that went missing is reported, not bootstrapped, before the tests.
+    std::fs::rename(app.join("keys"), app.join("keys.lost")).unwrap();
+    let (ok, out) = xark(&["test", "--check"]);
+    assert!(!ok && out.contains("has no key"), "{out}");
+    std::fs::rename(app.join("keys.lost"), app.join("keys")).unwrap();
+
+    // `--` still reaches `cargo test`: a filter after it selects one test.
+    let (ok, out) = xark(&["test", "--check", "--", "accepts_valid"]);
+    assert!(
+        ok && out.contains("tests::accepts_valid") && !out.contains("tests::rejects_invalid"),
+        "{out}"
+    );
+
+    // Outside a project's root there is nothing to verify.
+    let (ok, out) = xark(&["test", "--check", "circuits/ci"]);
+    assert!(!ok && out.contains("project's root"), "{out}");
+}
+
 /// `xark init --circuit` names the first circuit apart from the project, and a
 /// circuit with an underscore gets a program depending on the crate `xark export`
 /// names (`shielded_transact` → `shielded-transact-client`).
