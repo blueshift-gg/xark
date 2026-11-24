@@ -166,6 +166,26 @@ let data = proof.to_instruction_data(); // proof || public inputs
 `prove_json` a JSON object of them. Neither encodes a struct or a natural value
 (a date, a string) yet: for those, use `xark prove` or the TypeScript client.
 
+## Prove on a GPU (experimental, optional)
+
+An `xark` built with OpenCL proves large circuits with the quotient and the H
+MSM on the GPU, beside the CPU's MSMs, with the same keys. It is tested on
+Apple Silicon (and in CI on POCL); other GPUs should work but haven't been run.
+Every proof it makes is verified before it's written, and one that fails
+although your inputs satisfy the circuit is proved again on the CPU, with a
+warning:
+
+```sh
+cargo install xark-cli --version 0.5.0 --locked --features opencl
+xark prove --prover opencl --acknowledge-gpu-side-channel-risk --inputs inputs.json
+```
+
+A circuit under a 2^18-point QAP domain (up to about 131k constraints) proves
+on the CPU, where the GPU's fixed cost would lose; the command says which proved it. A
+GPU MSM is variable-time and its buffers aren't guaranteed to be erased, hence
+the flag: use it on trusted, single-tenant hardware only. From Rust, the provers
+share `xark_groth16::Prover`: `Cpu` and `Accelerated` with a device.
+
 ## Reuse another circuit's types
 
 A circuit crate can depend on another circuit crate and use its `#[input]` types
@@ -181,3 +201,12 @@ go: depend on the crate as it is, and its circuit still builds on its own. See [
   requirement, where 0.4 pinned it exactly (`"=0.4.0"`): it takes the verifier's
   patch releases.
 - rust-analyzer no longer greys out a `#[circuit]` function as inactive code.
+- `xark-groth16` gains a prover interface, `Prover`, with `Cpu` (its prover)
+  and `Accelerated` (a device beside the CPU), and `prove_with_rng` to draw
+  `(r, s)` as arkworks does. `prove`, `prove_with_randomness` and
+  `prove_accelerated` are unchanged, and an `Accelerator` or `PkSource` you
+  implemented still compiles: the methods they gained (`prepare`,
+  `wants_proof`, `wants_msm_for`, `ifft_to_t`; `fork`) have defaults.
+- A circuit whose QAP domain has 2^19 or 2^20 points proves faster but holds one
+  more domain vector while it does (16 or 32 MiB), unless it proves with
+  `ProverConfig::spill_dir` (`xark prove --low-memory`).

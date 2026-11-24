@@ -201,6 +201,11 @@ pub trait PkSource {
     fn resident(&self) -> Option<&ProvingKey<Bn254>> {
         None
     }
+    /// A second, independent reader of the same key, so two vectors can stream
+    /// at once. `None` when the source can't open one.
+    fn fork(&self) -> Option<Box<dyn PkSource + Send>> {
+        None
+    }
 }
 
 /// Any of the five point vectors (G1 except [`KeyVector::BG2`]).
@@ -308,11 +313,13 @@ pub struct SerializedPk<R: Read + Seek> {
     offsets: [u64; 5],
     bytes: Vec<u8>,
     tee: Option<Tee>,
+    /// The file it was opened from, for [`PkSource::fork`].
+    path: Option<std::path::PathBuf>,
 }
 
 /// Re-encodes the decoded points, uncompressed, as the prover reads them.
 struct Tee {
-    w: Box<dyn std::io::Write>,
+    w: Box<dyn std::io::Write + Send>,
     /// The next vector (file order) it expects; any other order disables it.
     next: usize,
     ok: bool,
@@ -321,7 +328,9 @@ struct Tee {
 impl SerializedPk<BufReader<File>> {
     /// Stream a proving key from disk.
     pub fn open(path: &Path) -> Result<Self, PkError> {
-        Self::new(BufReader::with_capacity(1 << 20, File::open(path)?))
+        let mut pk = Self::new(BufReader::with_capacity(1 << 20, File::open(path)?))?;
+        pk.path = Some(path.to_path_buf());
+        Ok(pk)
     }
 }
 
@@ -385,6 +394,7 @@ impl<R: Read + Seek> SerializedPk<R> {
             offsets,
             bytes: Vec::new(),
             tee: None,
+            path: None,
         })
     }
 
@@ -397,7 +407,10 @@ impl<R: Read + Seek> SerializedPk<R> {
     /// points are decoded anyway), so later proofs can skip decompression. The
     /// copy is only complete if every vector is read in file order — check with
     /// [`finish_tee`](Self::finish_tee).
-    pub fn tee_uncompressed(&mut self, mut w: Box<dyn std::io::Write>) -> std::io::Result<()> {
+    pub fn tee_uncompressed(
+        &mut self,
+        mut w: Box<dyn std::io::Write + Send>,
+    ) -> std::io::Result<()> {
         use ark_serialize::CanonicalSerialize;
         let io = |e: ark_serialize::SerializationError| std::io::Error::other(e.to_string());
         w.write_all(&KeyFormat::header(false, self.header.domain))?;
@@ -583,5 +596,14 @@ impl<R: Read + Seek> PkSource for SerializedPk<R> {
             Ok(())
         })?;
         Ok(true)
+    }
+    /// The same file opened again. Not while teeing: the tee needs every
+    /// vector read through it, in order.
+    fn fork(&self) -> Option<Box<dyn PkSource + Send>> {
+        if self.tee.is_some() {
+            return None;
+        }
+        let pk = SerializedPk::open(self.path.as_deref()?).ok()?;
+        (pk.header == self.header).then(|| Box::new(pk) as Box<dyn PkSource + Send>)
     }
 }

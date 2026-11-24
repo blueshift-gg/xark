@@ -21,14 +21,18 @@ use ark_snark::SNARK;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use xark_groth16::{
-    BytecodeSource, ConstraintSource, FftConfig, Probe, ProgramSource, ProverConfig, SerializedPk,
+    BytecodeSource, ConstraintSource, Cpu, FftConfig, Probe, ProgramSource, Prover, ProverConfig,
+    SerializedPk, prove_with_rng,
 };
 use xark_ir::VarId;
 use xark_prover::XarkCircuit;
 
 #[path = "../tests/support/ark.rs"]
 mod ark;
+#[path = "../tests/support/arkworks_prover.rs"]
+mod arkworks_prover;
 use ark::{ArkCircuit, convert};
+use arkworks_prover::Arkworks;
 
 struct PeakAlloc;
 static CUR: AtomicUsize = AtomicUsize::new(0);
@@ -316,49 +320,46 @@ fn main() {
         return;
     }
     if mode == "warm" {
-        // Key already resident (prove-many server): prove time only, both provers,
+        // Key already resident (prove-many server): prove time only, every prover,
         // a line a proof: `warm <xbc> <pk> <inputs> [proofs, 3 by default]`.
         let runs: u64 = args
             .get(5)
             .map_or(3, |n| n.parse().expect("a number of proofs"));
         let assign = solve(&xbc, &args[4]);
         let pk = xark_backend::Groth16Keys::read_proving_key(&pk_path).unwrap();
-        let circ = XarkCircuit::for_proving_preminimized(reduced(&xbc), assign.clone());
         let src = BytecodeSource::new(&xbc).unwrap();
         let z = src.layout().assignment_from_map(&assign);
-        let ark_pk: ark_groth16::ProvingKey<Bn254> = convert(&pk);
+        let mut provers: Vec<Box<dyn Prover + '_>> = vec![
+            Box::new(Arkworks::new(&pk)),
+            Box::new(Cpu::new(
+                xark_groth16::InMemoryPk::new(&pk),
+                ProverConfig::default(),
+            )),
+        ];
         // Each prover's proofs back to back, as a prove-many server makes them
         // (and as gnark's benchmark times its own), not one interleaved with the
         // other's: a millisecond proof right after an arkworks one measures the
         // arkworks proof's cache and pool aftermath too.
-        let ark: Vec<f64> = (0..runs)
-            .map(|i| {
-                let t = Instant::now();
-                Groth16::<Bn254>::prove(
-                    &ark_pk,
-                    ArkCircuit::of(&circ),
-                    &mut ChaCha20Rng::seed_from_u64(i),
-                )
-                .unwrap();
-                t.elapsed().as_secs_f64()
+        let times: Vec<Vec<f64>> = provers
+            .iter_mut()
+            .map(|p| {
+                (0..runs)
+                    .map(|i| {
+                        let t = Instant::now();
+                        prove_with_rng(&mut **p, &src, &z, &mut ChaCha20Rng::seed_from_u64(i))
+                            .unwrap();
+                        t.elapsed().as_secs_f64()
+                    })
+                    .collect()
             })
             .collect();
-        let ours: Vec<f64> = (0..runs)
-            .map(|i| {
-                let t = Instant::now();
-                xark_groth16::prove(
-                    &src,
-                    &z,
-                    &mut xark_groth16::InMemoryPk::new(&pk),
-                    &mut ChaCha20Rng::seed_from_u64(i),
-                    &ProverConfig::default(),
-                )
-                .unwrap();
-                t.elapsed().as_secs_f64()
-            })
-            .collect();
-        for (ark, ours) in ark.iter().zip(&ours) {
-            println!("warm prove: arkworks {ark:.6}s  streaming {ours:.6}s");
+        for i in 0..runs as usize {
+            let line: Vec<String> = provers
+                .iter()
+                .zip(&times)
+                .map(|(p, t)| format!("{} {:.6}s", p.name(), t[i]))
+                .collect();
+            println!("warm prove: {}", line.join("  "));
         }
         return;
     }

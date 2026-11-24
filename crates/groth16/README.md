@@ -13,7 +13,7 @@ never materializes the constraint system or the proving key.
 | `decode` | Compressed point decoding, the same points as arkworks' (tested bit-for-bit) with cheaper square roots: a windowed exponentiation, and one exponentiation instead of a Legendre symbol, root and inversion inside the `Fq2` root. 1.24× (G1) and 1.74× (G2) faster per point; with a compressed key this is most of a proof's work. |
 | `pk` | Chunked proving-key readers: `SerializedPk` (a `pk.bin` file, or bytes, decoded one chunk at a time) and `InMemoryPk`. |
 | `fft` | Blocked four-step FFT with tiled column gathers and a tiled transpose. Transforms alternate natural ↔ "T-layout", so the quotient step needs no standalone transpose: the only one is fused into the final `h → integer` conversion. Domains of `2^k`, `3·2^k` and `9·2^k` points (radix-3 layers in the column FFTs). |
-| `qap` | `h = (A·B − C)/Z`, bit-identical to `LibsnarkReduction::witness_map`, in six transforms: `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. Rows are streamed twice (A, B, then C), so the peak is two domain vectors; up to 2^18 points, once, with `C = A∘B` as a third. |
+| `qap` | `h = (A·B − C)/Z`, bit-identical to `LibsnarkReduction::witness_map`, in six transforms: `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. Rows are streamed twice (A, B, then C), so the peak is two domain vectors; up to 2^20 points, once, with `C = A∘B` as a third. |
 | `accel` | Hooks + pure kernels to offload FFT sweeps and MSM chunks (used by xark-wasm's Web-Worker pool). |
 
 ```rust
@@ -33,6 +33,39 @@ mismatch is rejected up front (`ProveError::KeyMismatch`). With
 verified before it is returned, and one that fails says why:
 `ProveError::Unsatisfied { row }` when the witness breaks a row,
 `SelfCheckFailed` when every row holds (the key is for another circuit).
+
+Every prover can stand in for another through `Prover` (`provers.rs`): it
+holds its key and proves with the caller's `(r, s)`, so two provers give the
+same proof bytes. `Cpu` is this crate's prover; the tests and `bench_prove warm`
+run arkworks through the same interface (`tests/support/arkworks_prover.rs`).
+
+`Accelerated<D, P>` is the prover with a device beside the CPU: the device
+takes the quotient and the H MSM while the CPU takes A, B and L, and declines a
+domain too small to repay its fixed cost (`Accelerator::wants_proof`). The
+OpenCL device (experimental: tested on Apple Silicon, and in CI on POCL) is
+`xark-groth16-opencl` (it loads the OpenCL library at run
+time, so it builds anywhere); `xark prove --prover opencl`, in an `xark`
+built with `--features opencl`, proves through it. On an Apple M3 Max, `xark
+prove` of Ed25519 (397k constraints) takes 215 ms instead of 370 and secp256r1
+ECDSA 256 instead of 354, the device's set-up included (beside the witness
+solve); circuits under a 2^18-point domain stay on the CPU. The device keeps
+its buffers from call to call and fills them in place: on unified memory
+(Apple silicon) the GPU reads the host's own pages, so after the first touch
+an input costs one write, not an allocation and a copy.
+
+## GPU MSM security boundary
+
+GPU MSM execution is not verified constant-time. The OpenCL kernels branch on
+scalar bits and on intermediate curve values, so their execution time can depend
+on the prover's scalars. GPU execution also relies on the device runtime and
+driver, which this crate does not audit. Scalar staging and intermediate device
+buffers are released without a guaranteed secure wipe. `xark prove --prover
+opencl` therefore requires `--acknowledge-gpu-side-channel-risk`. That flag
+records acceptance of this risk; it does not make the backend constant-time.
+
+Do not prove on a GPU on shared or untrusted devices, or when the threat model
+requires witness secrecy from the device runtime. The CPU prover has not been
+certified constant-time either.
 
 Other entry points:
 
