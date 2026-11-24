@@ -79,6 +79,17 @@ pub struct ProveArgs {
     /// with it, they are an error naming the constraint and its source line.
     #[arg(long, default_value_t = false)]
     pub verify: bool,
+
+    /// The prover: `cpu`, or `opencl` to put the quotient and the H MSM on a GPU
+    /// beside the CPU (a GPU proves a circuit from a 2^18-point domain on; a
+    /// smaller one proves on the CPU).
+    #[arg(long, value_enum, default_value_t)]
+    pub prover: super::device::ProverKind,
+
+    /// Prove on a GPU although its MSM is variable-time and its buffers aren't
+    /// guaranteed to be erased: only on trusted, single-tenant hardware.
+    #[arg(long, default_value_t = false)]
+    pub acknowledge_gpu_side_channel_risk: bool,
 }
 
 /// See `setup::SetupRng` for rationale: `prove` bounds its RNG by
@@ -119,6 +130,9 @@ impl RngCore for ProveRng {
 impl CryptoRng for ProveRng {}
 
 pub fn run(args: ProveArgs) -> Result<()> {
+    // A device sets up from the start, beside everything up to the prove.
+    let device =
+        super::device::Pending::start(args.prover, args.acknowledge_gpu_side_channel_risk)?;
     let project = XarkProject::resolve(args.path.clone())?;
     let pk_path = args
         .proving_key
@@ -180,6 +194,7 @@ pub fn run(args: ProveArgs) -> Result<()> {
         &inputs,
         sources.as_ref(),
         timing,
+        device,
     )?;
     write_outputs(&args, &proof_out, &out_dir, proof, public, times)
 }
@@ -240,6 +255,7 @@ enum StreamKind {
 /// program, then prove with `xark-groth16` — rows expanded window-by-window from
 /// the bytecode and the key read chunk-by-chunk, so neither the R1CS nor the key
 /// is ever resident. Self-verified against the key's `vk`.
+#[allow(clippy::too_many_arguments)]
 fn prove_streaming(
     args: &ProveArgs,
     xbc: &std::path::Path,
@@ -248,6 +264,7 @@ fn prove_streaming(
     inputs: &BTreeMap<String, String>,
     sources: Option<&xark_ir::SourceMap>,
     timing: bool,
+    mut device: Option<super::device::Pending>,
 ) -> Result<(
     xark_groth16::Proof<ark_bn254::Bn254>,
     Vec<ark_bn254::Fr>,
@@ -289,6 +306,9 @@ fn prove_streaming(
         });
         let digest = super::recorded_digest(pk_path, &fingerprint);
         let built = row_source(args, &bytes, &fingerprint, digest.as_deref(), kind);
+        if let (Ok((src, _)), Some(device)) = (&built, device.as_mut()) {
+            device.hint((src.num_constraints() + src.layout().num_instance()).next_power_of_two());
+        }
         let solved = solved
             .join()
             .unwrap_or_else(|e| std::panic::resume_unwind(e));
@@ -348,7 +368,16 @@ fn prove_streaming(
         self_check: args.verify,
         ..xark_groth16::ProverConfig::default()
     };
-    let proof = match xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg) {
+    let proved = match device {
+        Some(device) => {
+            let (proved, back, report) = device.prove(&*src, &z, pk, &mut rng, cfg);
+            pk = back;
+            eprintln!("{report}");
+            proved
+        }
+        None => xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg),
+    };
+    let proof = match proved {
         Ok(proof) => proof,
         Err(e) => {
             // With `--verify`, a witness that doesn't satisfy the circuit fails the

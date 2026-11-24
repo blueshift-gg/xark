@@ -39,6 +39,30 @@ holds its key and proves with the caller's `(r, s)`, so two provers give the
 same proof bytes. `Cpu` is this crate's prover; the tests and `bench_prove warm`
 run arkworks through the same interface (`tests/support/arkworks_prover.rs`).
 
+`Accelerated<D, P>` is the prover with a device beside the CPU: the device
+takes the quotient and the H MSM while the CPU takes A, B and L, and declines a
+domain too small to repay its fixed cost (`Accelerator::wants_proof`). The
+OpenCL device is `xark-groth16-opencl` (kept out of the workspace, since it
+links the system's OpenCL library); `xark prove --prover opencl`, in an `xark`
+built with `--features opencl`, proves through it. On an Apple M3 Max, `xark
+prove` of Ed25519 (397k constraints) takes 287 ms instead of 370 and secp256r1
+ECDSA 274 instead of 354, the device's set-up included (about 250 ms, mostly
+beside the witness solve); circuits under a 2^18-point domain stay on the CPU.
+
+## GPU MSM security boundary
+
+GPU MSM execution is not verified constant-time. The OpenCL kernels branch on
+scalar bits and on intermediate curve values, so their execution time can depend
+on the prover's scalars. GPU execution also relies on the device runtime and
+driver, which this crate does not audit. Scalar staging and intermediate device
+buffers are released without a guaranteed secure wipe. `xark prove --prover
+opencl` therefore requires `--acknowledge-gpu-side-channel-risk`. That flag
+records acceptance of this risk; it does not make the backend constant-time.
+
+Do not prove on a GPU on shared or untrusted devices, or when the threat model
+requires witness secrecy from the device runtime. The CPU prover has not been
+certified constant-time either.
+
 Other entry points:
 
 * `PushProver` — feed the serialized key **as it arrives** (any chunking, e.g. a

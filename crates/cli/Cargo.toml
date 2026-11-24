@@ -19,8 +19,11 @@ path = "src/main.rs"
 [features]
 # Opt-in developer diagnostics — forwards to `xark-ir`/`xark-prover`'s `debug`.
 debug = ["xark-ir/debug", "xark-prover/debug"]
+# `xark prove --prover opencl`: needs an OpenCL runtime (and links its library).
+opencl = ["dep:xark-groth16-opencl"]
 
 [dependencies]
+xark-groth16-opencl = { path = "../groth16-opencl", optional = true }
 num-bigint = "0.4"
 xark-ir.workspace = true
 xark-prover.workspace = true
