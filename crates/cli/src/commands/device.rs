@@ -74,7 +74,7 @@ impl Pending {
 
 #[cfg(feature = "opencl")]
 mod opencl {
-    use std::sync::mpsc;
+    use std::sync::{Mutex, OnceLock, mpsc};
     use std::thread::JoinHandle;
 
     use ark_bn254::{Bn254, Fr};
@@ -151,23 +151,78 @@ mod opencl {
             }
             // An unsent hint ends the set-up thread's wait.
             drop(self.hint.take());
-            let set_up = self
-                .handle
-                .join()
-                .unwrap_or_else(|e| std::panic::resume_unwind(e));
-            let Some((device, name)) = set_up else {
-                let mut cpu = xark_groth16::Cpu::new(pk, cfg);
-                let proved = prove_with_rng(&mut cpu, src, z, rng);
-                return (
-                    proved,
-                    cpu.pk,
-                    "OpenCL isn't available here: proved on the CPU".into(),
-                );
+            let device = Lazy {
+                min_domain: self.min_domain,
+                handle: Mutex::new(Some(self.handle)),
+                ready: OnceLock::new(),
             };
             let mut prover = Accelerated::new("opencl", device, pk, cfg);
-            let report = format!("proved with OpenCL on {name}");
             let proved = prove_with_rng(&mut prover, src, z, rng);
+            let report = match prover.device.ready.get() {
+                Some(Some((_, name))) => format!("proved with OpenCL on {name}"),
+                _ => "OpenCL isn't available here: proved on the CPU".into(),
+            };
             (proved, prover.pk, report)
+        }
+    }
+
+    /// The device as the prover sees it: joined the first time the prover asks
+    /// it for work, so the CPU's MSMs start at once and only the device's first
+    /// transform waits for what is left of the set-up (the quotient evaluates
+    /// its rows first, on the CPU). Without OpenCL every request declines and
+    /// the CPU does the work.
+    struct Lazy {
+        min_domain: usize,
+        handle: Mutex<Option<JoinHandle<SetUp>>>,
+        ready: OnceLock<SetUp>,
+    }
+
+    impl Lazy {
+        fn get(&self) -> Option<&OpenClMsm> {
+            self.ready
+                .get_or_init(|| {
+                    let handle = self.handle.lock().ok()?.take()?;
+                    handle
+                        .join()
+                        .unwrap_or_else(|e| std::panic::resume_unwind(e))
+                })
+                .as_ref()
+                .map(|(d, _)| d)
+        }
+
+        fn get_mut(&mut self) -> Option<&mut OpenClMsm> {
+            self.get()?;
+            self.ready.get_mut()?.as_mut().map(|(d, _)| d)
+        }
+    }
+
+    impl Accelerator for Lazy {
+        fn wants_proof(&self, domain_size: usize) -> bool {
+            domain_size >= self.min_domain
+        }
+        fn to_coset(&mut self, dom: &xark_groth16::Domain, buf: &mut [Fr]) -> bool {
+            self.get_mut().is_some_and(|d| d.to_coset(dom, buf))
+        }
+        fn from_coset_to_t(&mut self, dom: &xark_groth16::Domain, buf: &mut [Fr]) -> bool {
+            self.get_mut().is_some_and(|d| d.from_coset_to_t(dom, buf))
+        }
+        fn ifft_to_t(&mut self, dom: &xark_groth16::Domain, buf: &mut [Fr]) -> bool {
+            self.get_mut().is_some_and(|d| d.ifft_to_t(dom, buf))
+        }
+        fn wants_msm(&self) -> bool {
+            self.get().is_some_and(|d| d.wants_msm())
+        }
+        fn wants_msm_for(&self, g2: bool, scalars: &[xark_groth16::msm::Scalar]) -> bool {
+            self.get().is_some_and(|d| d.wants_msm_for(g2, scalars))
+        }
+        fn msm(
+            &mut self,
+            g2: bool,
+            points: &[u8],
+            compressed: bool,
+            scalars: &[xark_groth16::msm::Scalar],
+        ) -> Option<Vec<u8>> {
+            self.get_mut()?.msm(g2, points, compressed, scalars)
         }
     }
 }
