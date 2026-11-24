@@ -203,8 +203,8 @@ pub fn check_members(root: &Path) -> Result<()> {
 
 /// The workspace entries `xark add program` writes for its Pinocchio scaffold:
 /// `programs/*` joins the members, and the programs become the default-members
-/// for bare `cargo test`/`cargo build`. `cargo build-sbf`/`cargo test-sbf` select
-/// the workspace's `cdylib` members themselves, so they do not need the setting.
+/// for bare `cargo test`/`cargo build`. `cargo build-sbf` selects the workspace's
+/// `cdylib` members itself, so it does not need the setting.
 ///
 /// This is deliberately not part of [`sync_members`]: only the Pinocchio scaffold
 /// opts into it. Default-members of your own are kept, after the programs; `xark

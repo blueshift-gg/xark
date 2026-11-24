@@ -5,7 +5,7 @@
 //!   missing key is bootstrapped; a changed plain dev key is rotated; other keys
 //!   are read-only. Programs are built by their framework outside xark.
 //! * `test`: each circuit's tests and those of a library beside them. Program
-//!   tests are run by the framework (`cargo test-sbf`/`npm test` for Pinocchio).
+//!   tests are run by the framework (`npm test` for Pinocchio's LiteSVM test).
 //! * `check`: what rust-analyzer runs. `cargo check` over the workspace once, then
 //!   xark's own validation of each circuit.
 

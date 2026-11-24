@@ -17,19 +17,17 @@ It needs stable Rust 1.89 or newer. `xark build` adds the
 ## From a new circuit to a proof
 
 ```sh
-xark init my-circuit --program none && cd my-circuit    # a project, with a circuit and its tests
+xark init my-circuit --program pinocchio && cd my-circuit  # a project, a circuit and its program
 xark test                                               # build it, run its tests
 xark prove --inputs '{"secret": 3, "result": 9}'
 xark verify
-xark add program my-circuit                             # a Solana program verifying it, and a LiteSVM test
-xark build --check                                      # circuit, clients and keys
-cargo build-sbf && cargo test-sbf                       # the program
+cargo build-sbf                                         # the program
 npm install && npm test                                 # its LiteSVM test
 ```
 
-The first `prove` makes the key from your machine's randomness: a single-party
-trusted setup, sound unless whoever made it kept that randomness. For a key no one
-party has to be trusted for, use `xark ceremony`.
+A build bootstraps a dev key from your machine's randomness (the `init` scaffold
+did): a single-party trusted setup, sound unless whoever made it kept that
+randomness. For a key no one party has to be trusted for, use `xark ceremony`.
 
 ## Commands
 

@@ -54,7 +54,6 @@ pub const PINOCCHIO: ProgramScaffolder = ProgramScaffolder {
     next_steps: &[
         ("xark build --check", "the circuit, its clients and keys"),
         ("cargo build-sbf", "the program"),
-        ("cargo test-sbf", "the program's SBF tests"),
         ("npm install && npm test", "the program's LiteSVM test"),
     ],
 };

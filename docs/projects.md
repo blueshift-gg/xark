@@ -33,16 +33,17 @@ outside one.
 ```console
 $ xark init claim --program pinocchio && cd claim
 $ xark test                   # the circuit loop: build + witness tests, no keys
-$ xark setup                  # optional: an explicit key; a build bootstraps a dev one
-$ xark build --check          # circuit, clients and keys
+$ xark setup                  # optional: an explicit key, replacing the dev one
+$ xark build                  # regenerate the clients with that key
 $ cargo build-sbf             # the program
-$ cargo test-sbf              # its SBF tests
 $ npm install && npm test     # its LiteSVM test
 ```
 
 `xark build` and `xark test` are circuit-only. Program builds and tests use the
 framework's own commands; `xark add program` can add a Pinocchio program to an
-existing project or add a second one.
+existing project or add a second one. CI runs `xark build --check`, the same
+build without writing: it fails when the committed clients aren't what the source
+generates.
 
 ```text
 claim/
@@ -71,17 +72,15 @@ claim/
 - **The Pinocchio scaffold makes the programs the default members.** `xark add
   program` sets `default-members = ["programs/*"]` (keeping any of your own
   entries) so a bare `cargo test` or `cargo build` at the root targets the
-  programs. The SBF commands do not use `default-members`: `cargo build-sbf` and
-  `cargo test-sbf` select the workspace's `cdylib` members, which is why a bare
-  command works here (and would also build another `cdylib` member), whatever the
-  default-members say. `xark build` leaves the setting alone, dropping only a
+  programs. `cargo build-sbf` does not use `default-members`: it selects the
+  workspace's `cdylib` members, which is why a bare command works here (and would
+  also build another `cdylib` member), whatever the default-members say. `xark build` leaves the setting alone, dropping only a
   stale `programs/*` entry. `xark test` tests the circuits only; the program has
   its own commands.
 - **Programs are native.** The Pinocchio scaffold writes a LiteSVM test and an
   optional `.github/workflows/<name>-program.yml` that runs that one program's
-  `cargo build-sbf` (with the 4 KiB stack check), `cargo test-sbf` and LiteSVM
-  test, scoped by `--manifest-path` so programs from another framework are left
-  alone. The generated verifier self-tests run in `ci.yml`. `xark` does not build
+  `cargo build-sbf` (with the 4 KiB stack check) and LiteSVM test, scoped by
+  `--manifest-path` so programs from another framework are left alone. The generated verifier self-tests run in `ci.yml`. `xark` does not build
   or test programs. `xark add program` is the incremental path; the init wizard is
   the normal one.
 - **Crate names.** A workspace can't hold two packages of one name: the program in
@@ -212,8 +211,8 @@ and `xark test`. Those stay circuit-only, so their programs need the native
 program workflow. Remove any `[programs]` metadata; xark ignores it. To move:
 
 - add `.github/workflows/<name>-program.yml` (copy it from a fresh `xark add
-  program` project): it runs that program's `cargo build-sbf`, the stack check,
-  `cargo test-sbf` and LiteSVM test; the verifier self-tests run in `ci.yml`;
+  program` project): it runs that program's `cargo build-sbf`, the stack check
+  and LiteSVM test; the verifier self-tests run in `ci.yml`;
 - keys stay committed; `xark build` bootstraps a missing key and rotates a plain
   dev key, while a ceremony key needs `xark ceremony` again;
 - keep `programs/*` in the workspace's `members` and, for bare cargo commands,

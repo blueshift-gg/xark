@@ -9,7 +9,7 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 `xark build` and `xark test` at a project's root are circuit-only. `xark init`
 gains a wizard: it asks whether to scaffold a Pinocchio (LiteSVM) program, with
 `--program pinocchio`, `--program none`, and `--program-name`. Programs are
-built and tested natively (`cargo build-sbf`, `cargo test-sbf`, `npm test`);
+built natively (`cargo build-sbf`) and tested by their LiteSVM test (`npm test`);
 `xark add program` remains for existing projects and a second program.
 `[programs]` metadata is removed. `xark build` bootstraps a missing key and
 rotates a plain single-party dev key when constraints change; ceremony and
@@ -50,8 +50,8 @@ breaking change. No circuit changed: every digest is the same.
 An existing 0.4 project's old `ci.yml` calls `xark build --check` and `xark test`.
 Those remain circuit-only. Add the new `.github/workflows/<name>-program.yml`
 (copy it from a fresh `xark add program` project): it runs that program's
-`cargo build-sbf`, the stack check, `cargo test-sbf` and LiteSVM test. The
-verifier self-tests run in `ci.yml`.
+`cargo build-sbf`, the stack check and LiteSVM test. The verifier self-tests
+run in `ci.yml`.
 
 Remove any `[programs]` metadata from `xark.toml`; xark ignores it. Keys stay
 committed; `xark build` bootstraps a missing key and rotates a plain dev key when

@@ -15,7 +15,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # `cargo-build-sbf` and `cargo-test-sbf` come from this one crate.
   CARGO_BUILD_SBF_VERSION: 4.2.0
   # The xark this project is made with (its `xark.toml`).
   XARK_CLI_VERSION: {{xark_version}}
@@ -50,14 +49,12 @@ jobs:
       - name: Build the circuit artifacts the tests read
         run: xark build --check
 
-      # Both binaries build from source, once, then come from this cache.
+      # It builds from source, once, then comes from this cache.
       - name: Cached tools
         id: tools
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/bin/cargo-build-sbf
-            ~/.cargo/bin/cargo-test-sbf
+          path: ~/.cargo/bin/cargo-build-sbf
           key: sbf-${{ runner.os }}-${{ env.CARGO_BUILD_SBF_VERSION }}
 
       - name: Install cargo-build-sbf
@@ -81,9 +78,6 @@ jobs:
             echo "::error::a stack frame is past the SBF limit of 4 KiB (the warning above): the program would overwrite its own stack at run time. Move the big work out of line with #[inline(never)], as the generated verify is."
             exit 1
           fi
-
-      - name: Test the program
-        run: cargo test-sbf --manifest-path programs/{{name}}/Cargo.toml
 
       # Only this program's LiteSVM test: `npm test` alone would run every
       # program's.
