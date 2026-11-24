@@ -23,7 +23,7 @@ debug = ["xark-ir/debug", "xark-prover/debug"]
 opencl = ["dep:xark-groth16-opencl"]
 
 [dependencies]
-xark-groth16-opencl = { path = "../groth16-opencl", optional = true }
+xark-groth16-opencl = { workspace = true, optional = true }
 num-bigint = "0.4"
 xark-ir.workspace = true
 xark-prover.workspace = true

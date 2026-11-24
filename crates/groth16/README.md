@@ -42,8 +42,8 @@ run arkworks through the same interface (`tests/support/arkworks_prover.rs`).
 `Accelerated<D, P>` is the prover with a device beside the CPU: the device
 takes the quotient and the H MSM while the CPU takes A, B and L, and declines a
 domain too small to repay its fixed cost (`Accelerator::wants_proof`). The
-OpenCL device is `xark-groth16-opencl` (kept out of the workspace, since it
-links the system's OpenCL library); `xark prove --prover opencl`, in an `xark`
+OpenCL device is `xark-groth16-opencl` (it loads the OpenCL library at run
+time, so it builds anywhere); `xark prove --prover opencl`, in an `xark`
 built with `--features opencl`, proves through it. On an Apple M3 Max, `xark
 prove` of Ed25519 (397k constraints) takes 215 ms instead of 370 and secp256r1
 ECDSA 256 instead of 354, the device's set-up included (beside the witness

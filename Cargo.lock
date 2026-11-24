@@ -4940,8 +4940,11 @@ dependencies = [
  "ark-ff 0.6.0",
  "ark-serialize 0.6.0",
  "opencl3",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
  "rayon",
  "xark-groth16",
+ "xark-ir",
 ]
 
 [[package]]

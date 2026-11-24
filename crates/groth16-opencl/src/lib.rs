@@ -5,9 +5,8 @@
 //! scalar's 64 four-bit digits once in a compact byte table, which bucket scans
 //! reuse instead of extracting from scalar limbs for every bucket. The dispatch
 //! point is an initial heuristic, not a measured crossover; run
-//! `cargo run --release --example msm_bench
-//! --manifest-path crates/groth16-opencl/Cargo.toml` on the target GPU before
-//! treating it as a performance choice. Both kernels are variable-time.
+//! `cargo run --release -p xark-groth16-opencl --example msm_bench` on the target
+//! GPU before treating it as a performance choice. Both kernels are variable-time.
 //! The benchmark's `XARK_OPENCL_DEVICE_INDEX` selects a zero-based OpenCL GPU
 //! in platform enumeration order and defaults to 0; it prints device identity
 //! with every benchmark report.
@@ -57,15 +56,15 @@ mod scheduler;
 use scheduler::DeviceScheduler;
 
 const MSM_SOURCE: &str = concat!(
-    include_str!("../../groth16/opencl/msm_pointwise.cl"),
+    include_str!("../kernels/msm_pointwise.cl"),
     "\n",
-    include_str!("../../groth16/opencl/msm_digits.cl"),
+    include_str!("../kernels/msm_digits.cl"),
     "\n",
-    include_str!("../../groth16/opencl/msm_bucket.cl"),
+    include_str!("../kernels/msm_bucket.cl"),
     "\n",
-    include_str!("../../groth16/opencl/msm_sorted.cl"),
+    include_str!("../kernels/msm_sorted.cl"),
     "\n",
-    include_str!("../../groth16/opencl/fft.cl"),
+    include_str!("../kernels/fft.cl"),
 );
 const POINT_WORDS: usize = 17;
 const TERM_WORDS: usize = 24;
@@ -1545,7 +1544,7 @@ mod tests {
 
     #[test]
     fn msm_kernels_compile_as_opencl_12_when_clang_is_available() {
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../groth16/opencl");
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernels");
         let output = std::process::Command::new("make")
             .arg("-C")
             .arg(directory)
