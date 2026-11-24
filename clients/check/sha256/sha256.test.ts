@@ -37,6 +37,6 @@ test("proves a preimage", () => {
 
 test("refuses bad inputs", () => {
   expect(() => prover.prove({ msg, digest: new Uint8Array(1) })).toThrow(/digest/); // a short hash
-  expect(() => prover.prove({ msg: new TextEncoder().encode("abd"), digest })).toThrow(); // the wrong message
+  expect(() => prover.prove({ msg: new TextEncoder().encode("abd"), digest }, { verify: true })).toThrow(); // the wrong message
   expect(() => prover.prove({ msg: new TextEncoder().encode("ab"), digest })).toThrow(/msg/); // a short message
 });

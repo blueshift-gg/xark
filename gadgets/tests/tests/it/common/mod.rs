@@ -250,11 +250,11 @@ fn inputs_json(inputs: &[(&str, &str)]) -> String {
     format!("{{{body}}}")
 }
 
-/// `xark prove <out-dir> --inputs '{...}'` (solve witness + Groth16 prove/verify).
+/// `xark prove <out-dir> --verify --inputs '{...}'` (solve witness + Groth16 prove/verify).
 /// Returns `(success, combined stdout+stderr)`.
 pub fn xark_prove(out: &Path, inputs: &[(&str, &str)]) -> (bool, String) {
     let mut c = Command::new(xark_bin());
-    c.arg("prove").arg(out);
+    c.arg("prove").arg(out).arg("--verify");
     c.arg("--inputs").arg(inputs_json(inputs));
     let o = c
         .stdout(Stdio::piped())

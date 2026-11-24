@@ -68,7 +68,7 @@ test("a broken verifying key fails when the verifier is made", async () => {
 });
 
 test("refuses bad inputs", () => {
-  expect(() => prover.prove({ ...inputs, result: 28 })).toThrow();
+  expect(() => prover.prove({ ...inputs, result: 28 }, { verify: true })).toThrow();
   // Checked as a `Field` would be, naming the input: never wrapped or rounded.
   expect(() => prover.prove({ ...inputs, secret: p + 3n })).toThrow(/secret/);
   expect(() => prover.prove({ ...inputs, secret: -1 })).toThrow(/secret/);

@@ -1092,8 +1092,8 @@ pub fn first_failing_row(b: &[u8], slots: &[Option<crate::solver::Fp>]) -> Optio
 
 /// **Streaming witness solve** — the assignment only, with no constraint check or
 /// analysis: the hint program is expanded op-by-op straight out of the bytecode, so
-/// neither the flat program nor the flat R1CS is ever materialized. For a prover
-/// that checks satisfaction itself (a Groth16 proof self-verifies).
+/// neither the flat program nor the flat R1CS is ever materialized. For a prover,
+/// whose proof a verifier checks (and `xark prove --verify` before writing it).
 pub fn stream_solve(
     b: &[u8],
     inputs: &std::collections::BTreeMap<u32, String>,

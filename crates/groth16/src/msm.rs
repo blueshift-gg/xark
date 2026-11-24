@@ -14,7 +14,7 @@
 
 use ark_bn254::Fr;
 use ark_ec::CurveGroup;
-use ark_ff::{BigInteger, One, PrimeField, Zero};
+use ark_ff::{BigInteger, Field, One, PrimeField, Zero};
 use ark_serialize::CanonicalSerialize;
 use rayon::prelude::*;
 
@@ -22,17 +22,22 @@ use rayon::prelude::*;
 pub type Scalar = <Fr as PrimeField>::BigInt;
 
 /// Short-Weierstrass groups: affine coordinates for batch-affine accumulation.
-pub trait SwCurve: CurveGroup<ScalarField = Fr> {
+pub trait SwCurve: CurveGroup<ScalarField = Fr, BaseField: crate::limbs::FastSub> {
     /// `(x, y)`, or `None` for the point at infinity.
     fn xy(a: &Self::Affine) -> Option<(Self::BaseField, Self::BaseField)>;
     /// The affine point `(x, y)` (on the curve by construction).
     fn from_xy(x: Self::BaseField, y: Self::BaseField) -> Self::Affine;
     /// The curve's `a` coefficient (for the doubling slope `(3x² + a)/2y`).
     fn coeff_a() -> Self::BaseField;
+    /// The group's GLV decomposition, and its endomorphism `φ` on a point.
+    fn glv() -> &'static crate::glv::Glv;
+    fn endo(a: &Self::Affine) -> Self::Affine;
 }
 
-impl<P: ark_ec::short_weierstrass::SWCurveConfig<ScalarField = Fr>> SwCurve
-    for ark_ec::short_weierstrass::Projective<P>
+impl<P> SwCurve for ark_ec::short_weierstrass::Projective<P>
+where
+    P: ark_ec::scalar_mul::glv::GLVConfig<ScalarField = Fr>,
+    P::BaseField: crate::limbs::FastSub,
 {
     #[inline(always)]
     fn xy(a: &Self::Affine) -> Option<(P::BaseField, P::BaseField)> {
@@ -46,12 +51,32 @@ impl<P: ark_ec::short_weierstrass::SWCurveConfig<ScalarField = Fr>> SwCurve
     fn coeff_a() -> P::BaseField {
         P::COEFF_A
     }
+    fn glv() -> &'static crate::glv::Glv {
+        use ark_ec::scalar_mul::glv::GLVConfig;
+        if P::LAMBDA == ark_bn254::g1::Config::LAMBDA {
+            crate::glv::g1()
+        } else {
+            assert!(
+                P::LAMBDA == ark_bn254::g2::Config::LAMBDA,
+                "not a BN254 group"
+            );
+            crate::glv::g2()
+        }
+    }
+    #[inline(always)]
+    fn endo(a: &Self::Affine) -> Self::Affine {
+        P::endomorphism_affine(a)
+    }
 }
 
 /// Accumulate buckets in affine coordinates with batched inversions (default
 /// on); a switch so `examples/bench_kernels.rs` and `bench_prove.rs` can compare
 /// against XYZZ accumulation.
 pub static BATCH_AFFINE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Split full-width scalars with the GLV endomorphism (default on); a switch so
+/// `examples/bench_msm.rs` can compare.
+pub static GLV: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// Additions per shared inversion.
 const BATCH: usize = 512;
@@ -150,6 +175,7 @@ impl<G: SwCurve> AffineBuckets<G> {
     }
 
     fn flush(&mut self) {
+        use crate::limbs::FastSub;
         use ark_ff::{AdditiveGroup, Field};
         let one = G::BaseField::one();
         self.den.clear();
@@ -158,7 +184,7 @@ impl<G: SwCurve> AffineBuckets<G> {
         for &(b, px, py) in &self.batch {
             let (x1, y1) = (self.x[b as usize], self.y[b as usize]);
             let d = if x1 != px {
-                px - x1
+                px.fsub(&x1)
             } else if y1 == py && !y1.is_zero() {
                 y1.double() // doubling
             } else {
@@ -176,15 +202,15 @@ impl<G: SwCurve> AffineBuckets<G> {
             inv *= self.den[i];
             let (x1, y1) = (self.x[bi], self.y[bi]);
             let lambda = if x1 != px {
-                (py - y1) * inv_i
+                py.fsub(&y1) * inv_i
             } else if y1 == py && !y1.is_zero() {
                 (x1.square().double() + x1.square() + G::coeff_a()) * inv_i
             } else {
                 self.used[bi] = false;
                 continue;
             };
-            let x3 = lambda.square() - x1 - px;
-            self.y[bi] = lambda * (x1 - x3) - y1;
+            let x3 = lambda.square().fsub(&x1).fsub(&px);
+            self.y[bi] = (lambda * x1.fsub(&x3)).fsub(&y1);
             self.x[bi] = x3;
         }
         self.batch.clear();
@@ -317,14 +343,36 @@ fn booth_digit(s: &Scalar, w: usize, c: usize) -> i64 {
     v + carry - (((v >> (c - 1)) & 1) << c)
 }
 
-/// Window width for `n` points of `bits`-bit magnitude, from the cost model
-/// `windows(c) · (n mixed adds + 2·2^(c−1) bucket-reduction adds)` (a full
-/// addition ≈ 1.4 mixed ones), minimized over `c ∈ [2, 15]` (≤ 15 keeps every
-/// signed digit in an `i16`). Unlike a size-only `ln n` rule this shrinks the
-/// window for narrow scalars, where fewer windows can't be bought back with more
-/// buckets.
-fn window_bits(n: usize, bits: usize) -> usize {
-    let cost = |c: usize| (bits + 1).div_ceil(c) as f64 * (n as f64 + 1.4 * (1u64 << c) as f64);
+/// Window width for `n` points of `bits`-bit magnitude in a group whose base
+/// field has extension degree `ext` (1 for G1, 2 for G2), from the cost model
+/// `windows(c) · (n · add(c) + 0.8 · 2^c)` in mixed XYZZ additions, minimized
+/// over `c ∈ [2, 15]` (≤ 15 keeps every signed digit in an `i16`). Unlike a
+/// size-only `ln n` rule this shrinks the window for narrow scalars, where fewer
+/// windows can't be bought back with more buckets. Where [`pippenger`]
+/// accumulates batch-affine (`2^(c−1) ≥ 64` buckets, `n ≥ 4·2^(c−1)`) an
+/// addition costs 0.6, plus its share of the batch's inversion (30 in G1, 10 in
+/// G2, whose additions cost more and inversion barely more; a batch holds at most
+/// one addition a bucket), plus 0.1 for the additions a full batch turns away
+/// (from 256 buckets, fewer the more buckets there are). The constants are fitted
+/// to `examples/bench_msm.rs` on one thread, 2^8–2^14 points of either group: the
+/// model picks the fastest width at every size measured, where the previous one
+/// (every addition a mixed one, reduction 1.4) was up to 17% slower.
+fn window_bits(n: usize, bits: usize, ext: u64) -> usize {
+    let inv = if ext == 1 { 30.0 } else { 10.0 };
+    let cost = |c: usize| {
+        let nb = 1usize << (c - 1);
+        let add = if nb >= 64 && n >= 4 * nb {
+            let turned_away = if nb >= 256 {
+                0.1 * (BATCH as f64 / nb as f64).min(1.0)
+            } else {
+                0.0
+            };
+            0.6 + inv / nb.min(BATCH) as f64 + turned_away
+        } else {
+            1.0
+        };
+        (bits + 1).div_ceil(c) as f64 * (n as f64 * add + 0.8 * (1u64 << c) as f64)
+    };
     (2..=15)
         .min_by(|&a, &b| cost(a).total_cmp(&cost(b)))
         .unwrap()
@@ -346,19 +394,73 @@ impl DigitPtr {
 }
 
 /// Signed-digit Pippenger over `entries` (point index + sign), each of whose
-/// magnitude fits in `bits` bits.
+/// magnitude fits in `bits` bits. Full-width scalars are first split with the
+/// GLV endomorphism (`k·P = k₁·P + k₂·φ(P)`, halves of [`HALF_BITS`]): twice the
+/// points over half the windows, so each window's fixed cost (its bucket
+/// reduction, `c` doublings) is paid half as often.
+///
+/// [`HALF_BITS`]: crate::glv::HALF_BITS
 fn pippenger<G: SwCurve>(
     bases: &[G::Affine],
     scalars: &[Scalar],
     entries: &[u32],
     bits: usize,
 ) -> G {
+    // Fewer windows also means fewer tasks, and twice the points larger bucket
+    // sweeps: measured (`examples/bench_msm.rs`), the split is 4–19% faster up
+    // to 2^18 points on one thread and 2^12 on sixteen, 7–17% slower past 2^19
+    // and 2^15. So it is taken while points × threads ≤ 2^18.
+    if bits <= crate::glv::HALF_BITS
+        || entries.is_empty()
+        || entries.len() * rayon::current_num_threads() > 1 << 16
+        || !GLV.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return pippenger_core(bases, scalars, entries, bits, false);
+    }
+    let glv = G::glv();
+    let modulus = Fr::MODULUS;
+    let n = entries.len();
+    let mut pts = vec![G::Affine::default(); 2 * n];
+    let mut sc = vec![Scalar::default(); 2 * n];
+    pts.par_chunks_mut(2 * 1024)
+        .zip(sc.par_chunks_mut(2 * 1024))
+        .zip(entries.par_chunks(1024))
+        .for_each(|((p, k), es)| {
+            for (j, &e) in es.iter().enumerate() {
+                // A class entry's sign only picked its magnitude: split s itself.
+                let i = (e & !NEG) as usize;
+                let mut s = scalars[i];
+                while s >= modulus {
+                    s.sub_with_borrow(&modulus);
+                }
+                let ((s1, k1), (s2, k2)) = glv.decompose(&s);
+                let b = bases[i];
+                let phi = G::endo(&b);
+                p[2 * j] = if s1 { b } else { -b };
+                p[2 * j + 1] = if s2 { phi } else { -phi };
+                k[2 * j] = k1;
+                k[2 * j + 1] = k2;
+            }
+        });
+    let ids: Vec<u32> = (0..2 * n as u32).collect();
+    pippenger_core(&pts, &sc, &ids, crate::glv::HALF_BITS, true)
+}
+
+/// [`pippenger`] without the split. `identity`: `entries[k] == k`, so the points
+/// are already contiguous and need no gather.
+fn pippenger_core<G: SwCurve>(
+    bases: &[G::Affine],
+    scalars: &[Scalar],
+    entries: &[u32],
+    bits: usize,
+    identity: bool,
+) -> G {
     let n = entries.len();
     if n == 0 {
         return G::zero();
     }
     // ≤ 15-bit windows so every signed digit (|d| ≤ 2^(c−1)) fits an i16.
-    let c = window_bits(n, bits);
+    let c = window_bits(n, bits, G::BaseField::extension_degree());
     let windows = (bits + 1).div_ceil(c);
     let threads = rayon::current_num_threads().max(1);
     // Split points so `windows × parts` covers the pool ~2× over, but keep slices
@@ -397,9 +499,10 @@ fn pippenger<G: SwCurve>(
 
     // With several windows, gather this class's points contiguously once so every
     // window pass streams them sequentially instead of striding the shared array.
-    let gathered: Option<Vec<G::Affine>> = (windows > 1).then(|| {
+    let gathered: Option<Vec<G::Affine>> = (windows > 1 && !identity).then(|| {
         entries
             .par_iter()
+            .with_min_len(4096)
             .map(|&e| bases[(e & !NEG) as usize])
             .collect()
     });
@@ -418,8 +521,13 @@ fn pippenger<G: SwCurve>(
                 }
             };
             let nb = 1usize << (c - 1);
-            // Batch-affine pays off once a task has many points per bucket.
-            if BATCH_AFFINE.load(std::sync::atomic::Ordering::Relaxed) && hi - lo >= 4 * nb {
+            // Batch-affine pays off once a task has many points per bucket, and
+            // enough buckets that a batch (one per bucket at most) shares its
+            // inversion widely: with 32, it is 3.7× slower at 64 points.
+            if BATCH_AFFINE.load(std::sync::atomic::Ordering::Relaxed)
+                && nb >= 64
+                && hi - lo >= 4 * nb
+            {
                 let mut ab = AffineBuckets::<G>::new(nb);
                 for (k, &d) in row.iter().enumerate().take(hi).skip(lo) {
                     if d == 0 {
@@ -498,9 +606,10 @@ pub fn msm<G: SwCurve>(bases: &[G::Affine], scalars: &[Scalar]) -> G {
     let modulus = Fr::MODULUS;
 
     // Partition by magnitude: each entry goes to the class of min(|s|, |r−s|).
+    // A point at infinity (a variable absent from the key's matrix) adds nothing.
     let classify = |i: usize| -> Option<(usize, u32)> {
         let s = &scalars[i];
-        if s.is_zero() {
+        if s.is_zero() || G::xy(&bases[i]).is_none() {
             return None;
         }
         let pos_bits = s.num_bits() as usize;
@@ -523,8 +632,11 @@ pub fn msm<G: SwCurve>(bases: &[G::Affine], scalars: &[Scalar]) -> G {
         let class = CLASS_BITS.iter().position(|&b| bits <= b).unwrap();
         Some((class, i as u32 | if neg { NEG } else { 0 }))
     };
+    // Each task takes thousands of scalars: a few hundred would wake the whole
+    // pool for microseconds of work.
     let classes: [Vec<u32>; 6] = (0..n)
         .into_par_iter()
+        .with_min_len(4096)
         .fold(
             || std::array::from_fn(|_| Vec::new()),
             |mut acc: [Vec<u32>; 6], i| {

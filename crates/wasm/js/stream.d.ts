@@ -13,6 +13,12 @@ export interface StreamProveOptions {
    * this, `h` is computed up front instead (before any key bytes).
    */
   domainSize?: number;
+  /**
+   * Check the proof against the key before returning it: inputs that break a
+   * constraint, or a key for another build of the circuit, then throw instead
+   * of giving a proof no verifier accepts.
+   */
+  verify?: boolean;
   /** Testing only: deterministic prover randomness. */
   seed?: number;
   /** Called after each chunk with the key bytes consumed so far. */

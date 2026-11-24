@@ -99,13 +99,13 @@ test("proves a compliant holder", () => {
 
 test("names the check a holder fails", () => {
   const fails = (rules: Partial<Policy>) => () =>
-    prover.prove({ id, commitment, policy: { ...policy, ...rules } });
+    prover.prove({ id, commitment, policy: { ...policy, ...rules } }, { verify: true });
   expect(fails({ allowed: ["GB", "FR"] })).toThrow(
     /the inputs fail the check at src\/lib\.rs:\d+:\d+: `id\.nationality\.require_in\(policy\.allowed\);`/,
   );
   expect(fails({ bornBy: new Date("1989-12-31") })).toThrow(/`require\(id\.born <= policy\.born_by\);`/);
   expect(fails({ minNetWorth: 2_000_000 })).toThrow(/`require\(id\.net_worth >= policy\.min_net_worth\);`/);
-  expect(() => prover.prove({ id, commitment: new Field(1), policy })).toThrow(
+  expect(() => prover.prove({ id, commitment: new Field(1), policy }, { verify: true })).toThrow(
     /`require_eq\(id\.commitment\(\), commitment\);`/,
   );
   // A `CheckFailed`, whose `site` a UI can point at.
@@ -226,8 +226,8 @@ test("a preloaded prover keeps its key decoded, and proves as before", async () 
   expect(verifier.verify(proof.toBytes(), { commitment, policy })).toBe(true);
   expect(proof.publicInputs).toEqual(prover.prove({ id, commitment, policy }).publicInputs);
   // A failed check still names its statement (the preloaded key keeps `sources.json`).
-  expect(() => fast.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } })).toThrow(CheckFailed);
-  expect(() => fast.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } })).toThrow(
+  expect(() => fast.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } }, { verify: true })).toThrow(CheckFailed);
+  expect(() => fast.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } }, { verify: true })).toThrow(
     /`id\.nationality\.require_in\(policy\.allowed\);`/,
   );
 });
@@ -241,7 +241,7 @@ test("a prover with a worker pool proves through it", async () => {
       const proof = pooled.prove({ id, commitment, policy });
       expect(verifier.verify(proof.toBytes(), { commitment, policy })).toBe(true);
       // A failed check still names its statement.
-      expect(() => pooled.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } })).toThrow(
+      expect(() => pooled.prove({ id, commitment, policy: { ...policy, allowed: ["GB", "FR"] } }, { verify: true })).toThrow(
         /`id\.nationality\.require_in\(policy\.allowed\);`/,
       );
     }

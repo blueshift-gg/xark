@@ -9,11 +9,11 @@ never materializes the constraint system or the proving key.
 | piece | what it does |
 |---|---|
 | `r1cs` | The ordering contract (`VarLayout`: `1`, publics, then the rest, each in id order — arkworks' `gr1cs` allocation) and chunked row sources: `BytecodeSource` expands rows window-by-window straight from `circuit.xbc`; `ProgramSource` chunks an in-memory `R1csProgram`. |
-| `msm` | Our Pippenger (magnitude-classed scalars, cost-model window widths, signed Booth digits, parallel over windows × slices, **batch-affine bucket accumulation** with XYZZ side buckets for conflicts), a naive double-and-add oracle, and `StreamingMsm`. |
+| `msm` | Our Pippenger (magnitude-classed scalars, full-width ones split with the GLV endomorphism (`glv`), cost-model window widths, signed Booth digits, parallel over windows × slices, **batch-affine bucket accumulation** with XYZZ side buckets for conflicts), a naive double-and-add oracle, and `StreamingMsm`. |
 | `decode` | Compressed point decoding, the same points as arkworks' (tested bit-for-bit) with cheaper square roots: a windowed exponentiation, and one exponentiation instead of a Legendre symbol, root and inversion inside the `Fq2` root. 1.24× (G1) and 1.74× (G2) faster per point; with a compressed key this is most of a proof's work. |
 | `pk` | Chunked proving-key readers: `SerializedPk` (a `pk.bin` file, or bytes, decoded one chunk at a time) and `InMemoryPk`. |
 | `fft` | Blocked four-step FFT with tiled column gathers and a tiled transpose. Transforms alternate natural ↔ "T-layout", so the quotient step needs no standalone transpose: the only one is fused into the final `h → integer` conversion. Domains of `2^k`, `3·2^k` and `9·2^k` points (radix-3 layers in the column FFTs). |
-| `qap` | `h = (A·B − C)/Z`, bit-identical to `LibsnarkReduction::witness_map`; rows are streamed twice (A, B, then C), so the peak is two domain vectors. |
+| `qap` | `h = (A·B − C)/Z`, bit-identical to `LibsnarkReduction::witness_map`, in six transforms: `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. Rows are streamed twice (A, B, then C), so the peak is two domain vectors; up to 2^18 points, once, with `C = A∘B` as a third. |
 | `accel` | Hooks + pure kernels to offload FFT sweeps and MSM chunks (used by xark-wasm's Web-Worker pool). |
 
 ```rust
@@ -28,8 +28,9 @@ Row sources match the key's R1CS form (`metadata.json` `r1cs_form`, chosen by
 **template-reduced** circuit straight from `circuit.xbc`; `RowFileSource` streams
 the **boundary-minimized** circuit from the compact `r1cs.stream` setup writes next
 to a `minimized` key. `xark prove` picks the right one automatically. A key/circuit
-mismatch is rejected up front (`ProveError::KeyMismatch`), and every proof is
-self-verified before it is returned. A proof that fails that check says why:
+mismatch is rejected up front (`ProveError::KeyMismatch`). With
+`ProverConfig::self_check` (off by default; `xark prove --verify`) the proof is
+verified before it is returned, and one that fails says why:
 `ProveError::Unsatisfied { row }` when the witness breaks a row,
 `SelfCheckFailed` when every row holds (the key is for another circuit).
 
@@ -42,7 +43,9 @@ Other entry points:
   proof), so later proofs skip per-point decompression (`xark prove --cache`
   writes `pk.decoded.bin`; Ed25519 2.1× faster natively, 3.5× in WASM).
 * `InMemoryPk` — prove against an already-decoded key (no per-proof point
-  decompression: Ed25519 3.7 s vs arkworks' 6.2 s with the key resident).
+  decompression: Ed25519 3.7 s vs arkworks' 6.2 s with the key resident). Its
+  MSMs run side by side with the quotient, and a small circuit's proof
+  (`ProverConfig::merge_below`) takes three MSMs instead of five.
 * `ProverConfig::spill_dir` — low-memory mode: one domain-sized vector resident
   during the quotient step, the other parked in a temp file.
 

@@ -289,7 +289,8 @@ impl<S: ConstraintSource> PushProver<S> {
             })
     }
 
-    /// Assemble (and self-check) the proof once the whole key has been pushed.
+    /// Assemble the proof (and with `self_check`, verify it) once the whole key
+    /// has been pushed.
     pub fn finish(self) -> Result<Proof<Bn254>, ProveError> {
         if !self.ks.is_complete() {
             return Err(ProveError::KeyMismatch(format!(

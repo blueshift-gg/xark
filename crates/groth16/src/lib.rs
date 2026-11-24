@@ -17,7 +17,9 @@
 pub mod accel;
 pub mod decode;
 pub mod fft;
+pub mod glv;
 pub mod keystream;
+pub mod limbs;
 pub mod msm;
 pub mod pk;
 pub mod prover;

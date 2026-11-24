@@ -136,16 +136,25 @@ fn radix2_fft_strided(a: &mut [Fr], tw: &[Fr], s: usize) {
             let (lo, hi) = block.split_at_mut(m);
             // j = 0: twiddle is 1.
             let t = hi[0];
-            hi[0] = lo[0] - t;
-            lo[0] += t;
+            butterfly(&mut lo[0], &mut hi[0], &t);
             for j in 1..m {
                 let t = hi[j] * tw[j * stride * s];
-                hi[j] = lo[j] - t;
-                lo[j] += t;
+                butterfly(&mut lo[j], &mut hi[j], &t);
             }
         }
         m *= 2;
     }
+}
+
+/// `(lo, hi) ← (lo + t, lo − t)`, on the Montgomery limbs ([`crate::limbs`]):
+/// the same elements as `lo + t`, `lo − t`, a third of the butterfly's time less.
+#[inline(always)]
+fn butterfly(lo: &mut Fr, hi: &mut Fr, t: &Fr) {
+    use ark_ff::{BigInt, PrimeField};
+    const P: [u64; 4] = <Fr as PrimeField>::MODULUS.0;
+    let (a, b) = (lo.0.0, t.0.0);
+    lo.0 = BigInt(crate::limbs::add(&a, &b, &P));
+    hi.0 = BigInt(crate::limbs::sub(&a, &b, &P));
 }
 
 /// In-place DFT of length `L = 3^b·2^a`, natural order in and out, with
@@ -334,9 +343,10 @@ impl Domain {
     }
 
     /// Column-tile kernel on `b` columns starting at `c0`, stored **column-major**
-    /// in `cols` (`b × N1`): Bailey twiddle × `scale` (before the FFTs for
-    /// [`Twiddle::Pre`], after for [`Twiddle::Post`]) plus the length-`N1` FFTs.
-    fn cols_core(&self, cols: &mut [Fr], c0: usize, t: &Tables, tw: Twiddle, scale: Fr) {
+    /// in `cols` (`b × N1`): Bailey twiddle × `scale` × `rho^r` on row `r`
+    /// (before the FFTs for [`Twiddle::Pre`], after for [`Twiddle::Post`]) plus
+    /// the length-`N1` FFTs. A row factor rides on the twiddle's step for free.
+    fn cols_core(&self, cols: &mut [Fr], c0: usize, t: &Tables, tw: Twiddle, scale: Fr, rho: Fr) {
         let n1 = self.n1;
         let twiddle = |col: &mut [Fr], step: Fr| {
             let mut cur = scale;
@@ -347,7 +357,7 @@ impl Domain {
         };
         let mut scratch = Vec::new();
         for (j, col) in cols.chunks_exact_mut(n1).enumerate() {
-            let step = t.col_step[c0 + j];
+            let step = t.col_step[c0 + j] * rho;
             if tw == Twiddle::Pre {
                 twiddle(col, step);
             }
@@ -361,7 +371,7 @@ impl Domain {
     /// Column FFTs, `tile` columns at a time: gather the block into a contiguous
     /// column-major scratch (one cache-line-friendly run per row), run
     /// [`cols_core`](Self::cols_core), scatter back.
-    fn col_pass(&self, buf: &mut [Fr], t: &Tables, tw: Twiddle, scale: Fr) {
+    fn col_pass(&self, buf: &mut [Fr], t: &Tables, tw: Twiddle, scale: Fr, rho: Fr) {
         let (n1, n2, tile) = (self.n1, self.n2, self.tile);
         let ptr = SyncPtr(buf.as_mut_ptr());
         (0..n2.div_ceil(tile)).into_par_iter().for_each_init(
@@ -380,7 +390,7 @@ impl Domain {
                         }
                     }
                 }
-                self.cols_core(&mut scratch[..b * n1], c0, t, tw, scale);
+                self.cols_core(&mut scratch[..b * n1], c0, t, tw, scale, rho);
                 unsafe {
                     for r in 0..n1 {
                         let row = base.add(r * n2 + c0);
@@ -428,7 +438,7 @@ impl Domain {
         let mut cm = vec![Fr::zero(); block.len()];
         transpose_map(block, &mut cm, n1, b, self.tile, |x| *x);
         let (t, tw, scale) = self.col_op(op);
-        self.cols_core(&mut cm, c0, t, tw, scale);
+        self.cols_core(&mut cm, c0, t, tw, scale, Fr::one());
         transpose_map(&cm, block, b, n1, self.tile, |x| *x);
     }
 
@@ -440,12 +450,23 @@ impl Domain {
     }
 
     fn rows_pass(&self, buf: &mut [Fr], stages: &[RowStage]) {
+        self.rows_map(buf, |rows, first| self.rows_kernel(rows, first, stages));
+    }
+
+    /// `f(rows, first_row)` over the rows, a few whole rows a task.
+    fn rows_map(&self, buf: &mut [Fr], f: impl Fn(&mut [Fr], usize) + Sync) {
         let n2 = self.n2;
-        // A few rows per task keeps scheduling overhead negligible.
-        let per = (1usize << 15).div_ceil(n2).max(1);
+        // A few rows per task keeps scheduling overhead negligible, but no more
+        // than gives every thread four tasks: a 2^15-point domain is otherwise
+        // one task, and its row FFTs (half the transform) run on one core.
+        let threads = rayon::current_num_threads();
+        let per = (1usize << 15)
+            .div_ceil(n2)
+            .min(self.n1.div_ceil(4 * threads))
+            .max(1);
         buf.par_chunks_mut(n2 * per)
             .enumerate()
-            .for_each(|(i, rows)| self.rows_kernel(rows, i * per, stages));
+            .for_each(|(i, rows)| f(rows, i * per));
     }
 
     /// Evaluations on the domain (natural) → evaluations on the coset `g·{ωⁱ}`
@@ -458,11 +479,22 @@ impl Domain {
             self.coset_scale_t(buf, g);
             return self.fft_from_t(buf);
         }
+        // The coset factor of position (k1, k2) is g^k1·(g^N1)^k2. The row
+        // iFFT is linear, so g^k1 goes in before it, on the column twiddle's
+        // step, and (g^N1)^k2 is one table shared by every row: a
+        // multiplication an element instead of [`RowStage::Coset`]'s two.
         let (t, tw, k) = self.col_op(ColOp::InversePost);
-        self.col_pass(buf, t, tw, k);
-        self.rows_pass(buf, &[RowStage::Ifft, RowStage::Coset(g), RowStage::Fft]);
+        self.col_pass(buf, t, tw, k, g);
+        let cols = powers(g.pow([self.n1 as u64]), self.n2);
+        self.rows_map(buf, |rows, _| {
+            for row in rows.chunks_exact_mut(self.n2) {
+                radix2_fft(row, &self.inv.tw_n2);
+                row.iter_mut().zip(&cols).for_each(|(v, c)| *v *= c);
+                radix2_fft(row, &self.fwd.tw_n2);
+            }
+        });
         let (t, tw, k) = self.col_op(ColOp::ForwardPre);
-        self.col_pass(buf, t, tw, k);
+        self.col_pass(buf, t, tw, k, Fr::one());
     }
 
     /// Coset evaluations (natural) → coefficients in **T-layout**:
@@ -473,9 +505,16 @@ impl Domain {
             self.ifft_to_t(buf);
             return self.coset_scale_t(buf, g_inv);
         }
+        // As in `to_coset`, g⁻ᵏ¹ rides on the column twiddle.
         let (t, tw, k) = self.col_op(ColOp::InversePost);
-        self.col_pass(buf, t, tw, k);
-        self.rows_pass(buf, &[RowStage::Ifft, RowStage::Coset(g_inv)]);
+        self.col_pass(buf, t, tw, k, g_inv);
+        let cols = powers(g_inv.pow([self.n1 as u64]), self.n2);
+        self.rows_map(buf, |rows, _| {
+            for row in rows.chunks_exact_mut(self.n2) {
+                radix2_fft(row, &self.inv.tw_n2);
+                row.iter_mut().zip(&cols).for_each(|(v, c)| *v *= c);
+            }
+        });
     }
 
     fn scale(&self, buf: &mut [Fr], k: Fr) {
@@ -492,7 +531,7 @@ impl Domain {
         if !self.is_blocked() {
             return radix2_fft(buf, &self.fwd.tw_n2);
         }
-        self.col_pass(buf, &self.fwd, Twiddle::Post, Fr::one());
+        self.col_pass(buf, &self.fwd, Twiddle::Post, Fr::one(), Fr::one());
         self.rows_pass(buf, &[RowStage::Fft]);
     }
 
@@ -503,7 +542,7 @@ impl Domain {
             return radix2_fft(buf, &self.fwd.tw_n2);
         }
         self.rows_pass(buf, &[RowStage::Fft]);
-        self.col_pass(buf, &self.fwd, Twiddle::Pre, Fr::one());
+        self.col_pass(buf, &self.fwd, Twiddle::Pre, Fr::one(), Fr::one());
     }
 
     /// Inverse DFT (incl. `1/N`), natural order → T-layout.
@@ -513,7 +552,7 @@ impl Domain {
             radix2_fft(buf, &self.inv.tw_n2);
             return self.scale(buf, self.size_inv);
         }
-        self.col_pass(buf, &self.inv, Twiddle::Post, self.size_inv);
+        self.col_pass(buf, &self.inv, Twiddle::Post, self.size_inv, Fr::one());
         self.rows_pass(buf, &[RowStage::Ifft]);
     }
 
@@ -525,7 +564,7 @@ impl Domain {
             return self.scale(buf, self.size_inv);
         }
         self.rows_pass(buf, &[RowStage::Ifft]);
-        self.col_pass(buf, &self.inv, Twiddle::Pre, self.size_inv);
+        self.col_pass(buf, &self.inv, Twiddle::Pre, self.size_inv, Fr::one());
     }
 
     /// Multiply the element holding index `i` by `g^i`, for a T-layout buffer.

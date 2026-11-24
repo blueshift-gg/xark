@@ -9,19 +9,24 @@
 //! 2. `h` — rows streamed twice from the [`ConstraintSource`]; blocked FFT. Without
 //!    an accelerator it is computed on the thread pool while 1. runs.
 //! 3. `H`, `L` MSMs — streamed the same way; `h` is dropped right after `H`.
+//!
+//! A key already in memory ([`PkSource::resident`]) needs no order: its five MSMs
+//! and the quotient run side by side.
 
 use crate::types::Proof;
 use ark_bn254::{Bn254, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::CurveGroup;
+use ark_ec::pairing::Pairing;
 use ark_ff::{PrimeField, UniformRand, Zero};
 use rand::RngCore;
 
 use crate::accel::{Accelerator, Local, sum_g1, sum_g2, valid_msm_output};
 use crate::fft::FftConfig;
-use crate::msm::{Scalar, StreamingMsm};
+use crate::msm::{Scalar, StreamingMsm, SwCurve};
 use crate::pk::{G1Query, KeyVector, PkError, PkSource};
 use crate::qap;
 use crate::r1cs::ConstraintSource;
+use crate::types::Prepared;
 
 /// Prover tuning.
 #[derive(Clone, Debug)]
@@ -31,7 +36,11 @@ pub struct ProverConfig {
     /// Proving-key points per streamed MSM chunk.
     pub msm_chunk: usize,
     pub fft: FftConfig,
-    /// Verify the proof against the key's embedded `vk` before returning.
+    /// Verify the proof against the key's embedded `vk` before returning. Off
+    /// by default: a proof's soundness doesn't depend on it, and a verifier
+    /// checks it anyway. On, a witness that breaks a row or a key for another
+    /// circuit is an error ([`ProveError::Unsatisfied`] names the row) instead of
+    /// a proof that won't verify, for one multi-pairing (under a millisecond).
     pub self_check: bool,
     /// Low-memory mode: park quotient vectors in a temp file in this directory,
     /// so only one domain-sized vector is resident (rows stream once more).
@@ -42,6 +51,10 @@ pub struct ProverConfig {
     /// costs one recomputation, never a wrong proof. Pull-based proving reads
     /// the domain from the key and ignores this.
     pub domain: Option<usize>,
+    /// A circuit with fewer variables than this, proved from a resident key
+    /// ([`PkSource::resident`]), gets its proof from three MSMs rather than five
+    /// (see `prove_merged`). Past it, a witness of bits keeps its MSMs narrow.
+    pub merge_below: usize,
 }
 
 impl Default for ProverConfig {
@@ -50,9 +63,10 @@ impl Default for ProverConfig {
             rows_per_window: 1 << 14,
             msm_chunk: 1 << 19,
             fft: FftConfig::default(),
-            self_check: true,
+            self_check: false,
             spill_dir: None,
             domain: None,
+            merge_below: 1 << 12,
         }
     }
 }
@@ -227,6 +241,129 @@ fn stream_msm_g2<P: PkSource + ?Sized>(
     Ok(acc.finish())
 }
 
+/// A small circuit's proof from a resident key in three MSMs instead of five, the
+/// terms that need only `r` and `s` folded in as extra points:
+///
+/// * `A = Σ zᵢ·Aᵢ + α + r·δ`,
+/// * `B = Σ zᵢ·B₂ᵢ + β + s·δ`,
+/// * `C = s·A + Σ r·zᵢ·B₁ᵢ + r·β + Σ zⱼ·Lⱼ + Σ hₖ·Hₖ`, since `C = s·A + r·B₁ − rs·δ
+///   + L + H` and `B₁ = Σ zᵢ·B₁ᵢ + β + s·δ` is used nowhere else.
+///
+/// Each small Pippenger pays its windows' fixed costs (bucket reductions,
+/// doublings) whatever its length, so one MSM over B₁, L and H costs well under
+/// three; the price is `r·zᵢ` being full width even where `zᵢ` is a bit, which is
+/// why this is for small circuits only ([`ProverConfig::merge_below`]).
+fn prove_merged<S: ConstraintSource + ?Sized>(
+    src: &S,
+    z: &[Fr],
+    key: &crate::types::ProvingKey<Bn254>,
+    dom: &crate::fft::Domain,
+    r: Fr,
+    s: Fr,
+    cfg: &ProverConfig,
+) -> Result<Proof<Bn254>, ProveError> {
+    use crate::msm::msm;
+    let ninst = key.vk.gamma_abc_g1.len();
+    let zs: Vec<Scalar> = z.iter().map(|x| x.into_bigint()).collect();
+    let one = Fr::from(1u64).into_bigint();
+    let (mut ab, mut rest, mut prep) = (None, None, None);
+    let check = cfg.self_check;
+    // The self-check's Miller loops split along the proof: with C = s·A + rest,
+    // e(A, B)·e(C, −δ) = e(A, B − s·δ)·e(rest, −δ), and B − s·δ = β + Σ zᵢ·B₂ᵢ,
+    // so one loop follows A and B, one follows rest, and only the final
+    // exponentiation is left after both.
+    type G2Prepared = <Bn254 as Pairing>::G2Prepared;
+    rayon::scope(|sc| {
+        sc.spawn(|_| {
+            let (b_msm, g_a) = rayon::join(
+                || {
+                    let mut pts = key.b_g2_query.clone();
+                    pts.push(key.vk.beta_g2);
+                    let mut k = zs.clone();
+                    k.push(one);
+                    msm::<G2Projective>(&pts, &k)
+                },
+                || {
+                    let mut pts = key.a_query.clone();
+                    pts.extend([key.vk.alpha_g1, key.delta_g1]);
+                    let mut k = zs.clone();
+                    k.extend([one, r.into_bigint()]);
+                    msm::<G1Projective>(&pts, &k)
+                },
+            );
+            let a = g_a.into_affine();
+            let ((b, sa), ml) = rayon::join(
+                || ((b_msm + key.vk.delta_g2 * s).into_affine(), g_a * s),
+                || check.then(|| Bn254::multi_miller_loop([a], [b_msm.into_affine()]).0),
+            );
+            ab = Some((a, b, sa, ml));
+        });
+        sc.spawn(|_| {
+            let (c, neg_delta) = rayon::join(
+                || {
+                    quotient_for(src, z, dom, cfg, &mut Local, &mut ()).map(|h| {
+                        let n = key.b_g1_query.len() + key.l_query.len() + key.h_query.len() + 1;
+                        let mut pts = Vec::with_capacity(n);
+                        let mut k = Vec::with_capacity(n);
+                        if !r.is_zero() {
+                            pts.push(key.beta_g1);
+                            k.push(r.into_bigint());
+                            pts.extend_from_slice(&key.b_g1_query);
+                            k.extend(z.iter().map(|x| (*x * r).into_bigint()));
+                        }
+                        pts.extend_from_slice(&key.l_query);
+                        k.extend_from_slice(&zs[ninst..]);
+                        pts.extend_from_slice(&key.h_query);
+                        k.extend(h.chunk(0, key.h_query.len()));
+                        msm::<G1Projective>(&pts, &k)
+                    })
+                },
+                || check.then(|| G2Prepared::from(-key.vk.delta_g2)),
+            );
+            rest = Some(c.map(|c| {
+                let ml = neg_delta.map(|nd| Bn254::multi_miller_loop([c.into_affine()], [nd]).0);
+                (c, ml)
+            }));
+        });
+        if check {
+            sc.spawn(|_| prep = Some(Prepared::new(&key.vk, &z[1..ninst])));
+        }
+    });
+    let joined = "the scope joined every task";
+    let (a, b, sa, ml_ab) = ab.expect(joined);
+    let (rest, ml_rest) = rest.expect(joined)?;
+    let proof = Proof {
+        a,
+        b,
+        c: (sa + rest).into_affine(),
+    };
+    if check {
+        let made = "made when self-checking";
+        let ok = prep
+            .expect(joined)
+            .is_ok_and(|p| p.verify_with(ml_ab.expect(made) * ml_rest.expect(made)));
+        if !ok {
+            return Err(self_check_failure(src, z));
+        }
+    }
+    Ok(proof)
+}
+
+/// `Σ sᵢ·Pᵢ` over a resident key vector, `chunk` points at a time (bounding
+/// the MSM's digit tables, as a streamed key's chunks do).
+fn resident_msm<G: SwCurve>(
+    v: &[G::Affine],
+    chunk: usize,
+    sc: &(dyn Fn(usize, usize) -> Vec<Scalar> + Sync),
+) -> G {
+    let chunk = chunk.max(1);
+    let mut acc = StreamingMsm::<G>::new();
+    for (i, c) in v.chunks(chunk).enumerate() {
+        acc.feed(c, &sc(i * chunk, c.len()));
+    }
+    acc.finish()
+}
+
 /// The quotient, spilling per the accelerator or `cfg.spill_dir`.
 pub(crate) fn quotient_for<S: ConstraintSource + ?Sized>(
     src: &S,
@@ -333,59 +470,120 @@ where
         use rayon::prelude::*;
         z[off..off + len]
             .par_iter()
+            .with_min_len(1 << 12)
             .map(|x| x.into_bigint())
             .collect()
     };
     let aux_sc = |off: usize, len: usize| z_sc(ninst + off, len);
 
     // 1) A, B₁, B₂ (key file order). Each `query[0]` pairs with z[0] = 1.
-    let witness_msms = |pk: &mut P, accel: &mut dyn Accelerator| {
+    let witness_msms = |pk: &mut P, accel: &mut dyn Accelerator, probe: &mut dyn Probe| {
         let a = stream_msm_g1(pk, accel, G1Query::A, chunk, &z_sc)?;
+        probe.mark("msm_a");
         let b1 = if r.is_zero() {
             G1Projective::zero()
         } else {
             stream_msm_g1(pk, accel, G1Query::BG1, chunk, &z_sc)?
         };
+        probe.mark("msm_b1");
         let b2 = stream_msm_g2(pk, accel, chunk, &z_sc)?;
         Ok::<_, PkError>((a, b1, b2))
     };
-    // 2) h. Alone, 1) leaves cores idle (key reads, small digit classes, the
-    // tail of each chunk), which the quotient's work fills.
-    let ((a_acc, b1_acc, b2_acc), h) = if concurrent {
+    // The terms of A, B and C that need only r and s, and the self-check's half
+    // that needs no proof: both made while the MSMs run. With
+    // A = α + A_msm + r·δ and B₁ = β + B₁_msm + s·δ (only C uses B₁),
+    // C = s·A + r·B₁ − rs·δ + L + H = s·α + r·β + rs·δ + s·A_msm + r·B₁_msm + L + H.
+    let fixed = || {
+        let rs_term = if r.is_zero() {
+            hdr.vk.alpha_g1 * s
+        } else {
+            hdr.vk.alpha_g1 * s + hdr.beta_g1 * r + hdr.delta_g1 * (r * s)
+        };
+        (hdr.delta_g1 * r, hdr.vk.delta_g2 * s, rs_term)
+    };
+    let mut fixed_terms = None;
+    let mut prep = None;
+    let merged = concurrent
+        && pk
+            .resident()
+            .is_some_and(|k| k.a_query.len() < cfg.merge_below);
+    if merged {
+        let key = pk.resident().expect("checked above");
+        let proof = prove_merged(src, z, key, &dom, r, s, cfg)?;
+        probe.mark("msm+qap_h+self_check");
+        return Ok(proof);
+    }
+    let (a_acc, b1_acc, b2_acc, l_acc, h_acc) = if concurrent && pk.resident().is_some() {
+        // 2) A resident key: each MSM is a task beside the quotient, so a small
+        // circuit's MSMs, too short to fill the pool one at a time, fill it
+        // together, and H starts as soon as h is ready.
+        let key = pk.resident().expect("checked above");
+        let (mut a, mut b1, mut b2, mut l) = (None, None, None, None);
         let mut h = None;
-        let abc = rayon::in_place_scope(|sc| {
-            sc.spawn(|_| h = Some(quotient_for(src, z, &dom, cfg, &mut Local, &mut ())));
-            witness_msms(pk, accel)
+        rayon::scope(|sc| {
+            sc.spawn(|_| {
+                h = Some(
+                    quotient_for(src, z, &dom, cfg, &mut Local, &mut ())
+                        .map(|h| resident_msm(&key.h_query, chunk, &|off, len| h.chunk(off, len))),
+                )
+            });
+            sc.spawn(|_| a = Some(resident_msm(&key.a_query, chunk, &z_sc)));
+            if !r.is_zero() {
+                sc.spawn(|_| b1 = Some(resident_msm(&key.b_g1_query, chunk, &z_sc)));
+            }
+            sc.spawn(|_| b2 = Some(resident_msm(&key.b_g2_query, chunk, &z_sc)));
+            sc.spawn(|_| l = Some(resident_msm(&key.l_query, chunk, &aux_sc)));
+            if cfg.self_check {
+                sc.spawn(|_| prep = Some(Prepared::new(&hdr.vk, &z[1..ninst])));
+            }
+            sc.spawn(|_| fixed_terms = Some(fixed()));
         });
-        probe.mark("msm_ab+qap_h");
-        (abc?, h.expect("the scope joined the quotient")?)
+        probe.mark("msm+qap_h");
+        let h = h.expect("the scope joined the quotient")?;
+        let some = |p: Option<G1Projective>| p.expect("the scope joined every MSM");
+        (
+            some(a),
+            b1.unwrap_or_default(),
+            b2.expect("the scope joined every MSM"),
+            some(l),
+            h,
+        )
     } else {
-        let abc = witness_msms(pk, accel)?;
-        probe.mark("msm_ab");
-        let h = quotient_for(src, z, &dom, cfg, accel, probe)?;
-        probe.mark("qap_h");
-        (abc, h)
+        // 2) h. Alone, 1) leaves cores idle (key reads, small digit classes, the
+        // tail of each chunk), which the quotient's work fills.
+        let ((a, b1, b2), h) = if concurrent {
+            let mut h = None;
+            let abl = rayon::in_place_scope(|sc| {
+                sc.spawn(|_| h = Some(quotient_for(src, z, &dom, cfg, &mut Local, &mut ())));
+                if cfg.self_check {
+                    sc.spawn(|_| prep = Some(Prepared::new(&hdr.vk, &z[1..ninst])));
+                }
+                sc.spawn(|_| fixed_terms = Some(fixed()));
+                witness_msms(pk, accel, &mut ())
+            });
+            probe.mark("msm_ab+qap_h");
+            (abl?, h.expect("the scope joined the quotient")?)
+        } else {
+            let abl = witness_msms(pk, accel, probe)?;
+            probe.mark("msm_ab");
+            let h = quotient_for(src, z, &dom, cfg, accel, probe)?;
+            probe.mark("qap_h");
+            (abl, h)
+        };
+        // 3) H, L, in the key's order (a tee re-writes the key as it is read).
+        let hq = stream_msm_g1(pk, accel, G1Query::H, chunk, &|off, len| h.chunk(off, len))?;
+        drop(h);
+        probe.mark("msm_h");
+        let l = stream_msm_g1(pk, accel, G1Query::L, chunk, &aux_sc)?;
+        probe.mark("msm_l");
+        (a, b1, b2, l, hq)
     };
 
-    // 3) H, L.
-    let h_acc = stream_msm_g1(pk, accel, G1Query::H, chunk, &|off, len| h.chunk(off, len))?;
-    drop(h);
-    probe.mark("msm_h");
-    let l_acc = stream_msm_g1(pk, accel, G1Query::L, chunk, &aux_sc)?;
-    probe.mark("msm_l");
-
-    let g_a = hdr.delta_g1 * r + a_acc + hdr.vk.alpha_g1;
-    let g1_b = if r.is_zero() {
-        G1Projective::zero()
-    } else {
-        hdr.delta_g1 * s + b1_acc + hdr.beta_g1
-    };
-    let g2_b = hdr.vk.delta_g2 * s + b2_acc + hdr.vk.beta_g2;
-    let mut g_c = g_a * s;
-    g_c += g1_b * r;
-    g_c -= hdr.delta_g1 * (r * s);
-    g_c += l_acc;
-    g_c += h_acc;
+    let (delta_r, delta2_s, rs_term) = fixed_terms.unwrap_or_else(fixed);
+    let g_a = delta_r + a_acc + hdr.vk.alpha_g1;
+    let g2_b = delta2_s + b2_acc + hdr.vk.beta_g2;
+    let (a_s, b1_r) = rayon::join(|| a_acc * s, || b1_acc * r);
+    let g_c = rs_term + a_s + b1_r + l_acc + h_acc;
 
     let proof = Proof {
         a: g_a.into_affine(),
@@ -393,7 +591,8 @@ where
         c: g_c.into_affine(),
     };
     if cfg.self_check {
-        if !crate::types::verify(&hdr.vk, &z[1..ninst], &proof).unwrap_or(false) {
+        let prep = prep.unwrap_or_else(|| Prepared::new(&hdr.vk, &z[1..ninst]));
+        if !prep.is_ok_and(|p| p.verify(&proof)) {
             return Err(self_check_failure(src, z));
         }
         probe.mark("self_check");

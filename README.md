@@ -76,14 +76,16 @@ test tests::rejects_invalid ... ok
 ```console
 $ xark prove --inputs '{"secret": 3, "result": 9}'
 ...
-✅ Proof produced and self-checked (1 public input(s)).
+✅ Proof produced (1 public input(s)).
    solved in 0.00s, proved in 0.00s
 ```
 
-Try inputs that don't satisfy the circuit, and xark shows you where:
+`--verify` checks the proof before writing it. Try it with inputs that don't
+satisfy the circuit, and xark shows you where (without it, they give a proof no
+verifier accepts):
 
 ```console
-$ xark prove --inputs '{"secret": 3, "result": 10}'
+$ xark prove --verify --inputs '{"secret": 3, "result": 10}'
 error: witness does not satisfy the circuit
 
   src/lib.rs:6:16  require_eq(secret * secret, result);

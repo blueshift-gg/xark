@@ -9,7 +9,8 @@
 //! instance assignment at rows `m..m+ℓ` (libsnark's input-consistency rows).
 //!
 //! Peak memory is two domain-sized vectors (`A`+`B`, then `AB`+`C`), or one with
-//! a [`Spill`]; rows are re-streamed instead of being held.
+//! a [`Spill`]; rows are re-streamed instead of being held. Domains up to 2^18
+//! points hold a third, `C = A∘B`, instead of re-streaming the rows for it.
 
 use ark_bn254::Fr;
 use ark_ff::{FftField, Field, PrimeField, Zero};
@@ -102,6 +103,10 @@ impl Quotient {
     }
 }
 
+/// Elements a task takes in the element-wise steps: fewer would wake the whole
+/// pool for a small circuit's microseconds of work.
+const MIN_LEN: usize = 1 << 12;
+
 /// Spill block: elements read back per step when combining with a spilled vector.
 const SPILL_BLOCK: usize = 1 << 16;
 
@@ -176,21 +181,63 @@ pub fn quotient<S: ConstraintSource + ?Sized>(
             );
             probe.mark("qap_rows");
             a[m..m + ninst].copy_from_slice(&z[..ninst]);
-            to_coset(dom, &mut a, accel);
+            // A witness that satisfies the rows has ⟨C_i,z⟩ = ⟨A_i,z⟩·⟨B_i,z⟩ (and
+            // 0 = A·0 on the input rows), so C on the domain is A∘B, without a
+            // second pass over the rows. One that doesn't gets an h no proof
+            // verifies with: the self-check, if on, fails and reports the row, as
+            // before. The price is a third vector, so only on domains up to
+            // 2^18 points (8 MiB a vector).
+            let c_early: Option<Vec<Fr>> = (dom.n <= 1 << 18).then(|| {
+                a.par_iter()
+                    .with_min_len(MIN_LEN)
+                    .zip(b.par_iter())
+                    .map(|(x, y)| *x * y)
+                    .collect()
+            });
+            let offloaded = accel.to_coset(dom, &mut a);
+            if !offloaded {
+                dom.to_coset(&mut a, Fr::GENERATOR);
+            }
             to_coset(dom, &mut b, accel);
             probe.mark("qap_fft");
             a.par_iter_mut()
+                .with_min_len(MIN_LEN)
                 .zip(b.par_iter())
                 .for_each(|(x, y)| *x *= y);
             drop(b);
-            let mut c = vec![Fr::zero(); dom.n];
-            eval_rows(src, z, rows_per_window, [None, None, Some(&mut c[..m])]);
-            probe.mark("qap_rows");
-            to_coset(dom, &mut c, accel);
-            a.par_iter_mut().zip(c.par_iter()).for_each(|(x, y)| {
-                *x -= y;
-                *x *= z_inv;
+            let mut c = c_early.unwrap_or_else(|| {
+                let mut c = vec![Fr::zero(); dom.n];
+                eval_rows(src, z, rows_per_window, [None, None, Some(&mut c[..m])]);
+                c
             });
+            probe.mark("qap_rows");
+            if !offloaded {
+                // The coset iFFT is linear and undoes C's coset FFT, so
+                // h = (coset_iFFT(A·B) − iFFT(C)) / Z(g): C takes one transform
+                // instead of two, the same field elements as the path below.
+                dom.from_coset_to_t(&mut a, Fr::GENERATOR.inverse().unwrap());
+                dom.ifft_to_t(&mut c);
+                a.par_iter_mut()
+                    .with_min_len(MIN_LEN)
+                    .zip(c.par_iter())
+                    .for_each(|(x, y)| {
+                        *x -= y;
+                        *x *= z_inv;
+                    });
+                return Ok(Quotient {
+                    t: a,
+                    n1: dom.n1,
+                    n2: dom.n2,
+                });
+            }
+            to_coset(dom, &mut c, accel);
+            a.par_iter_mut()
+                .with_min_len(MIN_LEN)
+                .zip(c.par_iter())
+                .for_each(|(x, y)| {
+                    *x -= y;
+                    *x *= z_inv;
+                });
         }
     }
     // Coset iFFT back to coefficients (T-layout).

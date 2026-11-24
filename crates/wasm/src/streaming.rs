@@ -336,7 +336,7 @@ fn witness(
 }
 
 /// Prover settings + randomness from `options` (`msmChunk`, `tile`, `seed`,
-/// `domainSize`).
+/// `domainSize`, `verify`).
 fn config(options: &JsValue) -> (ProverConfig, Fr, Fr) {
     let mut cfg = ProverConfig {
         msm_chunk: 1 << 18,
@@ -345,6 +345,7 @@ fn config(options: &JsValue) -> (ProverConfig, Fr, Fr) {
     // Optional for streamed proofs: the key's header states the domain. With it,
     // `h` is computed before any key bytes; a wrong value costs a recomputation,
     // never a wrong proof.
+    cfg.self_check = opt_get(options, "verify").and_then(|v| v.as_bool()) == Some(true);
     if let Some(n) = opt_get(options, "domainSize").and_then(|v| v.as_f64()) {
         cfg.domain = Some(n as usize);
     }
@@ -463,7 +464,7 @@ pub(crate) fn prepare_auto(
 }
 
 /// Prove with a [`prepare_auto`]d circuit and `options` as for
-/// [`prove_streaming`] (`pool`, `msmChunk`, `seed`), or none.
+/// [`prove_streaming`] (`pool`, `msmChunk`, `seed`, `verify`), or none.
 pub(crate) fn prove_auto(
     p: &mut Prepared,
     inputs: JsValue,
@@ -526,9 +527,13 @@ fn prove_prepared(
 ///   name its source line.
 /// * `seed` — **testing only**: deterministic prover randomness (breaks
 ///   zero-knowledge across proofs). Default: the platform CSPRNG.
+/// * `verify` — check the proof against the key before returning it (under a
+///   millisecond natively): inputs that break a constraint, or a key for
+///   another build of the circuit, then throw instead of giving a proof no
+///   verifier accepts.
 ///
 /// A key for a different R1CS form is rejected with a clear error, never a bad
-/// proof. The proof is self-verified before it is returned. To prove repeatedly,
+/// proof. To prove repeatedly,
 /// use [`preload_streaming`] + [`prove_streaming_preloaded`].
 #[wasm_bindgen(js_name = proveStreaming)]
 pub fn prove_streaming(
@@ -718,7 +723,8 @@ impl StreamingProof {
         self.inner.as_ref().is_some_and(|p| p.is_complete())
     }
 
-    /// Assemble and self-verify the proof (after the whole key has been pushed).
+    /// Assemble the proof, and with `verify` check it (after the whole key has
+    /// been pushed).
     pub fn finish(&mut self) -> Result<ProofBundle, js_sys::Error> {
         let inner = self
             .inner
