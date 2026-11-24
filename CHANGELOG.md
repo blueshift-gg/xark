@@ -63,6 +63,11 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   identity commitment, and no circuit changed. See
   [docs/inputs.md](docs/inputs.md#reusing-types-from-another-circuit). Two
   `#[circuit]`s in one crate are still an error.
+- Provers share one interface, `xark_groth16::Prover`: a prover holds its key
+  and proves a witness with the caller's `(r, s)`, so any two give the same
+  proof bytes. `Cpu` is xark's prover (key streamed or resident), and the tests
+  and `bench_prove warm` run arkworks through it too; a test holds them all to
+  arkworks' proof.
 - A proof is no longer verified against its key before it is returned: its
   soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
   --verify`, `{ verify: true }` in the wasm prover's options (`prove` takes

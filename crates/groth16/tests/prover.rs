@@ -35,6 +35,8 @@ use xark_prover::XarkCircuit;
 
 #[path = "support/ark.rs"]
 mod ark;
+#[path = "support/arkworks_prover.rs"]
+mod arkworks_prover;
 #[path = "support/phase2_ark.rs"]
 mod phase2_ark;
 use ark::{ArkCircuit, convert};
@@ -592,6 +594,45 @@ fn bytecode_streamed_proof_matches_arkworks() {
         }
         .unwrap();
         assert_eq!(got, want, "{label}");
+    }
+}
+
+/// Every prover behind the `Prover` interface, given the same `(r, s)`, makes the
+/// same proof: xark's with the key resident and streamed, and arkworks' from the
+/// same rows, all equal to arkworks' proof of the circuit itself.
+#[test]
+fn every_prover_makes_the_same_proof() {
+    let assign = kyc_witness();
+    let reduced = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let circ = XarkCircuit::for_proving_preminimized(reduced, assign.clone());
+    let (pk, _) =
+        ArkG16::circuit_specific_setup(circ.clone(), &mut ChaCha20Rng::seed_from_u64(9)).unwrap();
+    let want = ArkG16::prove(&pk, circ, &mut ChaCha20Rng::seed_from_u64(10)).unwrap();
+    let src = BytecodeSource::new(KYC_XBC).unwrap();
+    let z = src.layout().assignment_from_map(&assign);
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let provers: Vec<Box<dyn xark_groth16::Prover + '_>> = vec![
+        Box::new(xark_groth16::Cpu::new(
+            InMemoryPk::new(&pk),
+            ProverConfig::default(),
+        )),
+        Box::new(xark_groth16::Cpu::new(
+            SerializedPk::from_bytes(&bytes).unwrap(),
+            ProverConfig::default(),
+        )),
+        Box::new(arkworks_prover::Arkworks::new(&pk)),
+    ];
+    for mut prover in provers {
+        let got = xark_groth16::prove_with_rng(
+            &mut *prover,
+            &src,
+            &z,
+            &mut ChaCha20Rng::seed_from_u64(10),
+        )
+        .unwrap();
+        assert_eq!(got, want, "{}", prover.name());
     }
 }
 

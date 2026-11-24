@@ -34,6 +34,11 @@ verified before it is returned, and one that fails says why:
 `ProveError::Unsatisfied { row }` when the witness breaks a row,
 `SelfCheckFailed` when every row holds (the key is for another circuit).
 
+Every prover can stand in for another through `Prover` (`provers.rs`): it
+holds its key and proves with the caller's `(r, s)`, so two provers give the
+same proof bytes. `Cpu` is this crate's prover; the tests and `bench_prove warm`
+run arkworks through the same interface (`tests/support/arkworks_prover.rs`).
+
 Other entry points:
 
 * `PushProver` — feed the serialized key **as it arrives** (any chunking, e.g. a
