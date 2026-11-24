@@ -316,14 +316,18 @@ fn main() {
         return;
     }
     if mode == "warm" {
-        // Key already resident (prove-many server): prove time only, both provers.
+        // Key already resident (prove-many server): prove time only, both provers,
+        // a line a proof: `warm <xbc> <pk> <inputs> [proofs, 3 by default]`.
+        let runs: u64 = args
+            .get(5)
+            .map_or(3, |n| n.parse().expect("a number of proofs"));
         let assign = solve(&xbc, &args[4]);
         let pk = xark_backend::Groth16Keys::read_proving_key(&pk_path).unwrap();
         let circ = XarkCircuit::for_proving_preminimized(reduced(&xbc), assign.clone());
         let src = BytecodeSource::new(&xbc).unwrap();
         let z = src.layout().assignment_from_map(&assign);
         let ark_pk: ark_groth16::ProvingKey<Bn254> = convert(&pk);
-        for i in 0..3 {
+        for i in 0..runs {
             let t = Instant::now();
             Groth16::<Bn254>::prove(
                 &ark_pk,
@@ -342,7 +346,7 @@ fn main() {
             )
             .unwrap();
             println!(
-                "warm prove: arkworks {ark:.2}s  streaming {:.2}s",
+                "warm prove: arkworks {ark:.4}s  streaming {:.4}s",
                 t.elapsed().as_secs_f64()
             );
         }

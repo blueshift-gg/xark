@@ -4,6 +4,22 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
+## Unreleased
+
+- `xark setup`, `xark prove` and `xark verify` take `--backend gnark`: the
+  circuit is compiled and its witness solved by xark, and gnark sets up, proves
+  and verifies. xark writes the keyed rows and the witness in iden3's `.r1cs` and
+  `.wtns` formats, and a Go helper built on first use (needs `go`) turns them
+  into a gnark constraint system. The keys and proofs are gnark's, in a `gnark/`
+  directory beside xark's; the default backend is unchanged. The witness file
+  is removed once gnark has read it (`--keep-witness` keeps it). See
+  [docs/gnark.md](docs/gnark.md), and [benches/gnark/](benches/gnark/README.md)
+  for constraint counts and proving times against arkworks and a circuit written
+  in gnark. No circuit changed.
+- `xark export --format iden3` writes those two files on their own: the keyed
+  rows as `circuit.r1cs` and, with `--inputs`, the solved witness as
+  `witness.wtns`, for any prover that reads them.
+
 ## 0.4.0
 
 A project for a circuit and the Solana program that verifies it: `xark init`

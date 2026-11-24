@@ -44,10 +44,14 @@ party has to be trusted for, use `xark ceremony`.
 | `ceremony` | Runs a multi-party trusted setup |
 | `prove` | Solves the witness from `--inputs` and makes a proof |
 | `verify` | Checks a proof against the verifying key |
-| `export` | Writes the Solana verifier crate, with the key embedded |
+| `export` | Writes the Solana verifier crate, with the key embedded (`--format iden3`: the circuit as snarkjs' `circuit.r1cs`) |
 | `client` | Writes a typed TypeScript client |
 | `clean` | Removes xark's build output |
 | `completions` | Prints shell completions |
+
+`setup`, `prove` and `verify` take `--backend gnark` to use gnark's Groth16 in
+place of xark's (needs Go): see
+[docs/gnark.md](https://github.com/blueshift-gg/xark/blob/master/docs/gnark.md).
 
 Each command takes the circuit crate's directory, the current one by default.
 `xark <command> --help` lists its options.

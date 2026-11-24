@@ -13,6 +13,7 @@ mod common;
 mod end_to_end;
 mod export;
 mod fuzz;
+mod gnark;
 mod host;
 mod init;
 mod keyed_rows;

@@ -70,9 +70,38 @@ pub struct ExportArgs {
     /// to that directory's name.
     #[arg(long)]
     pub crate_name: Option<String>,
+
+    /// What to export: `solana` (the default), the verifier crate above, or
+    /// `iden3`, the circuit's keyed rows as `circuit.r1cs` in the format circom
+    /// writes and snarkjs, rapidsnark and gnark read (into `--out`, by default
+    /// `<crate>/target/xark/<name>/iden3/`).
+    #[arg(long, value_enum, default_value_t = ExportFormat::Solana)]
+    pub format: ExportFormat,
+    /// With `--format iden3`: circuit inputs, as `xark prove --inputs` takes them.
+    /// Their solved witness is written beside the rows as `witness.wtns`, which
+    /// holds the private inputs.
+    #[arg(long = "inputs", value_name = "JSON|FILE")]
+    pub inputs: Option<String>,
+    /// With `--format iden3`: which rows to write, as `xark setup --r1cs-form`
+    /// chooses the rows of a key.
+    #[arg(long, value_enum, default_value_t = super::setup::R1csForm::Auto)]
+    pub r1cs_form: super::setup::R1csForm,
+}
+
+/// See [`ExportArgs::format`].
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportFormat {
+    Solana,
+    Iden3,
 }
 
 pub fn run(args: ExportArgs) -> Result<()> {
+    if args.format == ExportFormat::Iden3 {
+        return super::iden3::export(&args);
+    }
+    if args.inputs.is_some() || args.r1cs_form != super::setup::R1csForm::Auto {
+        anyhow::bail!("--inputs and --r1cs-form go with --format iden3");
+    }
     let project = XarkProject::resolve(args.path.clone())?;
     // The export carries the keys as they are: a newer source means they may be for
     // an older circuit.
