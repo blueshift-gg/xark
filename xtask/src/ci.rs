@@ -61,8 +61,8 @@ const ALL: &[&str] = &[
 /// The steps a change to `path` can affect. What compiles circuits (the language,
 /// the frontend, the IR, the macros, the gadgets, the examples) affects nearly all of
 /// them; the prover side the tests, the wasm build, the clients and the on-chain
-/// tests; `formal/` the Lean steps; xtask its own tasks. Docs affect none; anything
-/// not listed, all.
+/// tests; `formal/` the Lean steps and the workspace tests; xtask its own tasks. Docs
+/// affect none; anything not listed, all.
 fn affected(path: &str) -> &'static [&'static str] {
     const CIRCUITS: &[&str] = &[
         "workspace",
@@ -76,8 +76,12 @@ fn affected(path: &str) -> &'static [&'static str] {
         "publish",
     ];
     const PROVER: &[&str] = &["workspace", "wasm32", "clients", "sbpf", "publish"];
+    // The harnesses under `formal/templates/` are workspace crates, and xtask's
+    // coverage tests read `formal/Formal/` and the allowlist, so the workspace
+    // tests are the Lean side's too.
     const LEAN: &[&str] = &[
         "lake",
+        "workspace",
         "xtask-ignored",
         "lean-check",
         "coverage",
@@ -530,6 +534,8 @@ mod tests {
         assert!(affected("crates/groth16/src/accel.rs").contains(&"wasm32"));
         assert!(!affected("crates/groth16/src/accel.rs").contains(&"lake"));
         assert_eq!(affected("formal/Formal/RequireLt.lean")[0], "lake");
+        assert!(affected("formal/coverage-allowlist.txt").contains(&"workspace"));
+        assert!(affected("formal/templates/ch/src/lib.rs").contains(&"workspace"));
         assert_eq!(affected("clients/check/zkyc/zkyc.test.ts"), ["clients"]);
         assert_eq!(affected("crates/test-harness/src/lib.rs"), ["workspace"]);
         assert_eq!(affected("rust-toolchain.toml"), ALL);

@@ -3,7 +3,14 @@ name: CI
 on:
   push:
     branches: [master]
+  # A pull request that changes only prose skips it: no Rust source includes a
+  # markdown file, and a crate's `readme` only has to exist to package. master
+  # still runs it all.
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE*"
   workflow_dispatch:
 
 concurrency:

@@ -19,7 +19,17 @@ name: Kani (formal verification)
 on:
   push:
     branches: [master]
+  # The harnesses are `xark-verifier`'s, which depends on no other crate of the
+  # workspace, so a pull request runs them only when the verifier, the
+  # workspace's manifest, lock or cargo config, or this file change. master
+  # still runs them all.
   pull_request:
+    paths:
+      - "crates/verifier/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - ".github/workflows/kani.yml"
   workflow_dispatch:
 
 concurrency:

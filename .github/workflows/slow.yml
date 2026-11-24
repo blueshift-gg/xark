@@ -3,13 +3,20 @@ name: Slow checks
 # The heavy checks of this repository's own code, too slow for ci.yml's quick
 # jobs: known-answer vectors for the hash and curve circuits, the Ed25519 and
 # secp256k1/r1 gadget vectors, the adversarial sweep over every example, and the
-# crates.io release rehearsal. They run on every pull request, side by side with
+# crates.io release rehearsal. They run on every pull request that changes code, side by side with
 # ci.yml, so a break shows on the PR that caused it.
 
 on:
   push:
     branches: [master]
+  # A pull request that changes only prose skips it: no Rust source includes a
+  # markdown file, and a crate's `readme` only has to exist to package. master
+  # still runs it all.
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE*"
   workflow_dispatch:
 
 concurrency:
