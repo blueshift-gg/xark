@@ -81,13 +81,28 @@ The run executes host checks, builds both adapters and all three CLI variants,
 requires CUDA for ICICLE and custom MSM comparisons and verified proofs, and
 proves then verifies the cube example through the CUDA CLI on both backends.
 It also records a CPU CLI proof and verification as an end-to-end reference.
+Release CLI builds enable Xark's `debug` feature only so `PROVE_TIME=1` emits
+the solve/prove phase breakdown; the numerical kernel path stays the release
+path. GNU time records total process wall time and peak RSS separately.
+`xark-gpu` defaults to CPU, while CUDA requires the matching build feature, an
+explicit `--accelerator cuda`, and the side-channel acknowledgment. The CLI
+self-checks accelerator proofs and retries once with CPU only when a valid
+witness produces a proof that fails verification. Other errors, including an
+unsatisfied witness, do not trigger a retry.
+`proof-cli-timings.csv` records prove-command wall time, solve and prove phase
+times, the separate verifier command time, their prove-plus-verify command-wall
+sum, and whether CPU retry occurred. The
+prove phase includes its in-process proof self-check; the external verifier is
+an additional artifact check, so those columns must remain separate when
+comparing runtimes.
 The GPU CLI log must show accepted
 GPU G1 chunks, so a CPU fallback cannot pass as GPU CLI coverage. The script
 writes benchmark CSVs comparing both GPU adapters with CPU Pippenger, captures
 Nsight Systems traces at 65,536 and 524,288 points, and samples GPU utilization,
 power, clocks, temperature, and memory while the run is active. It saves the
 source revision, toolchain and GPU details, test and CLI logs, CSVs, profiler
-reports, and artifact checksums under `out/cuda-validation/<commit>/`.
+reports, and artifact checksums under `out/cuda-validation/<commit>/`. GPU
+telemetry is scoped to the same selected GPU used to choose NVCC's architecture.
 
 The default MSM sweep is 512, 1,023, 1,024, 1,025, 4,096, 16,384, 65,536,
 262,144, and 524,288 points with both compressed and uncompressed point

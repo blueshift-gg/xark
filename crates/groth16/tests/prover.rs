@@ -11,7 +11,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ark_bn254::{Bn254, Fr};
+use ark_bn254::{Bn254, Fr, G1Affine};
+use ark_ec::AffineRepr;
 use ark_ff::{UniformRand, Zero};
 use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP};
 use ark_poly::GeneralEvaluationDomain;
@@ -689,6 +690,33 @@ impl xark_groth16::Accelerator for InvalidMsm {
     }
 }
 
+/// Returns a canonically encoded but incorrect G1 result. This models a faulty
+/// GPU that returns a valid point with the wrong arithmetic result.
+struct WrongG1Msm;
+
+impl xark_groth16::Accelerator for WrongG1Msm {
+    fn wants_msm(&self) -> bool {
+        true
+    }
+
+    fn msm(
+        &mut self,
+        g2: bool,
+        _points: &[u8],
+        _compressed: bool,
+        _scalars: &[xark_groth16::msm::Scalar],
+    ) -> Option<Vec<u8>> {
+        if g2 {
+            return None;
+        }
+        let mut identity = Vec::new();
+        G1Affine::zero()
+            .serialize_uncompressed(&mut identity)
+            .unwrap();
+        Some(identity)
+    }
+}
+
 #[derive(Default)]
 struct FirstG1ThenDecline {
     accepted_g1: usize,
@@ -696,6 +724,10 @@ struct FirstG1ThenDecline {
 }
 
 impl xark_groth16::Accelerator for FirstG1ThenDecline {
+    fn wants_qap(&self, _dom: &xark_groth16::Domain) -> bool {
+        false
+    }
+
     fn wants_msm(&self) -> bool {
         true
     }
@@ -831,6 +863,32 @@ fn malformed_worker_sums_fall_back_to_cpu_in_both_provers() {
 }
 
 #[test]
+fn valid_but_incorrect_accelerator_result_fails_proof_self_check() {
+    let (prog, assign) = random_program(54, 40);
+    let circ = XarkCircuit::for_proving_preminimized(prog.clone(), assign.clone());
+    let (pk, _) = ArkG16::circuit_specific_setup(circ, &mut ChaCha20Rng::seed_from_u64(3)).unwrap();
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let src = ProgramSource::new(&prog);
+    let z = src.layout().assignment_from_map(&assign);
+    let mut accelerator = WrongG1Msm;
+    let result = xark_groth16::prove_accelerated(
+        &src,
+        &z,
+        &mut SerializedPk::from_bytes(&bytes).unwrap(),
+        Fr::from(11u64),
+        Fr::from(13u64),
+        &ProverConfig {
+            msm_chunk: 11,
+            self_check: true,
+            ..ProverConfig::default()
+        },
+        &mut (),
+        &mut accelerator,
+    );
+    assert!(matches!(result, Err(ProveError::SelfCheckFailed)));
+}
+
+#[test]
 fn partial_g1_acceleration_falls_back_to_cpu_in_both_provers() {
     let (prog, assign) = random_program(52, 40);
     let circ = XarkCircuit::for_proving_preminimized(prog.clone(), assign.clone());
@@ -850,6 +908,7 @@ fn partial_g1_acceleration_falls_back_to_cpu_in_both_provers() {
     let src = ProgramSource::new(&prog);
     let z = src.layout().assignment_from_map(&assign);
     let mut accelerator = FirstG1ThenDecline::default();
+    let mut phases = PhaseMarks::default();
     let got = xark_groth16::prove_accelerated(
         &src,
         &z,
@@ -857,13 +916,17 @@ fn partial_g1_acceleration_falls_back_to_cpu_in_both_provers() {
         r,
         s,
         &cfg,
-        &mut (),
+        &mut phases,
         &mut accelerator,
     )
     .unwrap();
     assert_eq!(got, want);
     assert!(accelerator.accepted_g1 > 0);
     assert!(accelerator.declined_g1 > 0);
+    assert!(
+        phases.0.contains(&"msm_ab+qap_h"),
+        "an MSM-only adapter should overlap CPU quotient work"
+    );
 
     let src = ProgramSource::new(&prog);
     let mut accelerator = FirstG1ThenDecline::default();

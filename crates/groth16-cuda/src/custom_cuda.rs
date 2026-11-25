@@ -147,6 +147,10 @@ fn decode_result(words: &[u32; 17]) -> Option<Vec<u8>> {
 }
 
 impl Accelerator for CustomCudaMsm {
+    fn wants_qap(&self, _dom: &xark_groth16::Domain) -> bool {
+        false
+    }
+
     fn wants_msm(&self) -> bool {
         #[cfg(feature = "custom-cuda")]
         {

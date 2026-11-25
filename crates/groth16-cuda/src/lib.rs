@@ -196,6 +196,10 @@ fn prepare_g1_inputs(
 }
 
 impl Accelerator for IcicleMsm {
+    fn wants_qap(&self, _dom: &xark_groth16::Domain) -> bool {
+        false
+    }
+
     fn wants_msm(&self) -> bool {
         cuda_device_ready()
     }

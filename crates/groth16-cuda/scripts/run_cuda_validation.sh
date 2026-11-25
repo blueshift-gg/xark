@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export LC_ALL=C
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../../.." && pwd)
@@ -183,7 +184,7 @@ if [[ -n ${ICICLE_BACKEND_INSTALL_DIR:-} && -d "$ICICLE_BACKEND_INSTALL_DIR" ]];
     | xargs -0 -r sha256sum >"$results_dir/icicle-backend-files.sha256"
 fi
 
-nvidia-smi dmon -s pucm -d 1 >"$results_dir/gpu-dmon.log" 2>&1 &
+nvidia-smi dmon --id="$gpu_selector" -s pucm -d 1 >"$results_dir/gpu-dmon.log" 2>&1 &
 gpu_monitor_pid=$!
 cargo test --manifest-path "$manifest" --lib 2>&1 \
   | tee "$results_dir/adapter-unit-tests.log"
@@ -201,23 +202,22 @@ XARK_CUDA_REQUIRED=1 cargo test --manifest-path "$manifest" \
   --features custom-cuda --test gpu_custom_cuda 2>&1 \
   | tee "$results_dir/custom-gpu-msm-proof-test.log"
 
-cargo build --release -p xark-cli 2>&1 \
+cargo build --release -p xark-cli --features debug 2>&1 \
   | tee "$results_dir/cuda-cli-cpu-build.log"
-cargo build --release --manifest-path "$gpu_cli_manifest" --features cuda-msm \
+cargo build --release --manifest-path "$gpu_cli_manifest" --features cuda-msm,debug \
   --bin xark-gpu 2>&1 | tee "$results_dir/cuda-cli-icicle-build.log"
-cargo build --release --manifest-path "$gpu_cli_manifest" --features custom-cuda-msm \
+cargo build --release --manifest-path "$gpu_cli_manifest" --features custom-cuda-msm,debug \
   --bin xark-gpu 2>&1 | tee "$results_dir/cuda-cli-custom-build.log"
 
 /usr/bin/time -v cargo run --release -p xark-cli -- setup examples/cube 2>&1 \
   | tee "$results_dir/cuda-cli-setup.log"
-PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" \
-  --bin xark-gpu -- prove examples/cube \
-  --inputs '{"secret":"3","result":"27"}' --accelerator cpu 2>&1 \
+PROVE_TIME=1 /usr/bin/time -v cargo run --release -p xark-cli --features debug -- \
+  prove examples/cube --inputs '{"secret":"3","result":"27"}' 2>&1 \
   | tee "$results_dir/cuda-cli-cpu-prove.log"
-cargo run --release -p xark-cli -- verify examples/cube 2>&1 \
+/usr/bin/time -v cargo run --release -p xark-cli -- verify examples/cube 2>&1 \
   | tee "$results_dir/cuda-cli-cpu-verify.log"
 
-PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" --features cuda-msm \
+PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" --features cuda-msm,debug \
   --bin xark-gpu -- prove examples/cube \
   --inputs '{"secret":"3","result":"27"}' --accelerator cuda \
   --acknowledge-gpu-side-channel-risk 2>&1 \
@@ -227,7 +227,7 @@ grep -E 'MSM backend: Cuda; status=.*; GPU G1 chunks=[1-9][0-9]* points=' \
 PROVE_TIME=1 /usr/bin/time -v cargo run --release -p xark-cli -- verify examples/cube 2>&1 \
   | tee "$results_dir/cuda-cli-icicle-verify.log"
 
-PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" --features custom-cuda-msm \
+PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" --features custom-cuda-msm,debug \
   --bin xark-gpu -- prove examples/cube \
   --inputs '{"secret":"3","result":"27"}' --accelerator cuda \
   --acknowledge-gpu-side-channel-risk 2>&1 \
@@ -296,5 +296,63 @@ if [[ "$capture_nsys" == 1 ]]; then
     done
   done
 fi
+
+python3 - "$results_dir" <<'PY' >"$results_dir/proof-cli-timings.csv"
+import csv
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+rows = []
+
+def wall_seconds(path):
+    text = path.read_text(errors="replace")
+    match = re.search(
+        r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): ([0-9:.]+)", text
+    )
+    if not match:
+        raise SystemExit(f"could not read GNU time wall duration from {path}")
+    value = [float(part) for part in match.group(1).split(":")]
+    seconds = value[-1]
+    if len(value) > 1:
+        seconds += value[-2] * 60
+    if len(value) > 2:
+        seconds += value[-3] * 3600
+    return seconds
+
+def duration_seconds(value):
+    units = {"h": 3600, "m": 60, "s": 1, "ms": 1e-3, "µs": 1e-6, "ns": 1e-9}
+    parts = re.findall(r"([0-9]+(?:\.[0-9]+)?)(ms|µs|ns|h|m|s)", value)
+    if not parts:
+        raise SystemExit(f"could not parse Rust duration {value!r}")
+    return sum(float(amount) * units[unit] for amount, unit in parts)
+
+for label in ("cpu", "icicle", "custom"):
+    prove_log = root / f"cuda-cli-{label}-prove.log"
+    verify_log = root / f"cuda-cli-{label}-verify.log"
+    prove_text = prove_log.read_text(errors="replace")
+    phases = re.findall(
+        r"PROVE_TIME: \[streaming\] solve=(.*?) prove=(\S+)", prove_text
+    )
+    solve_s = sum(duration_seconds(solve) for solve, _ in phases)
+    prove_internal_s = sum(duration_seconds(prove) for _, prove in phases)
+    prove_wall_s = wall_seconds(prove_log)
+    verify_wall_s = wall_seconds(verify_log)
+    rows.append({
+        "backend": label,
+        "prove_command_wall_s": f"{prove_wall_s:.6f}",
+        "prove_internal_solve_s": f"{solve_s:.6f}",
+        "prove_internal_prove_s": f"{prove_internal_s:.6f}",
+        "external_verify_wall_s": f"{verify_wall_s:.6f}",
+        "prove_plus_external_verify_wall_s": f"{prove_wall_s + verify_wall_s:.6f}",
+        "self_check_retry_cpu": str("retrying once with CPU" in prove_text).lower(),
+        "phase_reports": str(len(phases)),
+    })
+
+writer = csv.DictWriter(sys.stdout, fieldnames=list(rows[0]))
+writer.writeheader()
+writer.writerows(rows)
+PY
 
 printf 'CUDA validation artifacts: %s\n' "$results_dir"

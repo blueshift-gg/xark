@@ -32,6 +32,13 @@ pub trait Accelerator {
     fn from_coset_to_t(&mut self, _dom: &Domain, _buf: &mut [Fr]) -> bool {
         false
     }
+    /// Whether this adapter owns quotient transforms or spill storage. When it
+    /// returns false, the prover may compute the quotient on CPU while streaming
+    /// MSM chunks through this adapter. Defaults to true to preserve scheduling
+    /// for existing adapters.
+    fn wants_qap(&self, _dom: &Domain) -> bool {
+        true
+    }
     /// Whether [`msm`](Self::msm) should be offered raw key chunks.
     fn wants_msm(&self) -> bool {
         false

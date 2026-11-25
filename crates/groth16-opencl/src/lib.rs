@@ -148,6 +148,10 @@ impl OpenClMsm {
 }
 
 impl Accelerator for OpenClMsm {
+    fn wants_qap(&self, _dom: &xark_groth16::Domain) -> bool {
+        false
+    }
+
     fn wants_msm(&self) -> bool {
         find_device(self.device_type, self.device_index).is_some()
     }

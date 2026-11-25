@@ -290,9 +290,9 @@ where
     prove_impl(src, z, pk, r, s, cfg, probe, Some(accel))
 }
 
-/// With no accelerator and no `cfg.spill_dir`, `h` is computed on the thread pool
-/// while this thread streams the A, B₁, B₂ MSMs; an accelerator may own the workers
-/// (and is not `Send`), and spilling caps peak memory, so then the steps run in turn.
+/// If the accelerator does not own QAP work and spilling is disabled, `h` is
+/// computed on the thread pool while this thread streams the A, B₁, B₂ MSMs.
+/// FFT/spill adapters keep the steps serialized because they own those resources.
 #[allow(clippy::too_many_arguments)]
 fn prove_impl<S, P>(
     src: &S,
@@ -309,12 +309,12 @@ where
     P: PkSource + ?Sized,
 {
     let mut local = Local;
-    let (concurrent, accel) = match accel {
-        Some(a) => (false, a),
-        None => (cfg.spill_dir.is_none(), &mut local as &mut dyn Accelerator),
-    };
     probe.mark("start");
     let dom = qap::key_domain(src, pk.header().h_len, cfg.fft).map_err(ProveError::KeyMismatch)?;
+    let (concurrent, accel) = match accel {
+        Some(a) => (cfg.spill_dir.is_none() && !a.wants_qap(&dom), a),
+        None => (cfg.spill_dir.is_none(), &mut local as &mut dyn Accelerator),
+    };
     if let Some(n) = pk.header().domain
         && n != dom.n
     {

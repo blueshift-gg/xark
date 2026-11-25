@@ -17,13 +17,13 @@ use rand_chacha::ChaCha20Rng;
 
 use xark_backend::proof::ProofBundle;
 use xark_backend::serialization::write_public_inputs;
-use xark_groth16::{Accelerator, ConstraintSource, Local, PkSource};
+use xark_groth16::{Accelerator, ConstraintSource, PkSource};
 use xark_prover::{XarkCircuit, fr_from_decimal};
 
 use super::{resolve_input_ids, setup, stream_witness};
 use crate::xark_project::XarkProject;
 
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct ProveArgs {
     /// Circuit crate directory (or its `target/xark/<name>/` output dir). Defaults to
     /// the current directory; the paths below are inferred from it.
@@ -112,11 +112,83 @@ impl RngCore for ProveRng {
 impl CryptoRng for ProveRng {}
 
 pub fn run(args: ProveArgs) -> Result<()> {
-    run_with_accelerator(args, &mut Local)
+    run_inner(args, None)
 }
 
 /// Run the normal streaming CLI prove path with a caller-selected accelerator.
-pub fn run_with_accelerator(args: ProveArgs, accelerator: &mut dyn Accelerator) -> Result<()> {
+pub fn run_with_accelerator(args: ProveArgs, accelerator: &mut dyn Accelerator) -> Result<bool> {
+    let cpu_args = args.clone();
+    retry_cpu_after_self_check_failure(run_inner(args, accelerator), || run_inner(cpu_args, None))
+        .map(|(_, retried_on_cpu)| retried_on_cpu)
+}
+
+fn retry_cpu_after_self_check_failure<T>(
+    accelerated: Result<T>,
+    cpu_retry: impl FnOnce() -> Result<T>,
+) -> Result<(T, bool)> {
+    match accelerated {
+        Err(gpu_error) if is_self_check_failure(&gpu_error) => {
+            eprintln!(
+                "warning: accelerated proof failed self-verification; retrying once with CPU"
+            );
+            cpu_retry()
+                .with_context(|| {
+                    format!("CPU retry after accelerated proof self-check failure: {gpu_error:#}")
+                })
+                .map(|value| (value, true))
+        }
+        Ok(value) => Ok((value, false)),
+        Err(error) => Err(error),
+    }
+}
+
+fn is_self_check_failure(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<xark_groth16::ProveError>(),
+            Some(xark_groth16::ProveError::SelfCheckFailed)
+        )
+    })
+}
+
+#[cfg(test)]
+mod accelerator_retry_tests {
+    use std::cell::Cell;
+
+    use anyhow::Context;
+
+    use super::{is_self_check_failure, retry_cpu_after_self_check_failure};
+
+    #[test]
+    fn retries_cpu_only_after_a_valid_witness_self_check_failure() {
+        let retried = Cell::new(false);
+        let error = anyhow::Error::new(xark_groth16::ProveError::SelfCheckFailed)
+            .context("streaming prove");
+        let result = retry_cpu_after_self_check_failure(Err(error), || {
+            retried.set(true);
+            Ok(42)
+        });
+        assert_eq!(result.unwrap(), (42, true));
+        assert!(retried.get());
+    }
+
+    #[test]
+    fn does_not_retry_cpu_for_unsatisfied_inputs() {
+        let retried = Cell::new(false);
+        let error = anyhow::Error::new(xark_groth16::ProveError::Unsatisfied { row: 7 })
+            .context("streaming prove");
+        assert!(!is_self_check_failure(&error));
+        let result: anyhow::Result<((), bool)> =
+            retry_cpu_after_self_check_failure(Err(error), || {
+                retried.set(true);
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(!retried.get());
+    }
+}
+
+fn run_inner(args: ProveArgs, accelerator: Option<&mut dyn Accelerator>) -> Result<()> {
     let project = XarkProject::resolve(args.path.clone())?;
     let pk_path = args
         .proving_key
@@ -241,7 +313,7 @@ struct StreamingContext<'a> {
     inputs: &'a BTreeMap<String, String>,
     sources: Option<&'a xark_ir::SourceMap>,
     timing: bool,
-    accelerator: &'a mut dyn Accelerator,
+    accelerator: Option<&'a mut dyn Accelerator>,
 }
 
 /// The streaming path: solve by streaming the hint
@@ -357,18 +429,23 @@ fn prove_streaming(
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_else(std::env::temp_dir)
         }),
+        self_check: true,
         ..xark_groth16::ProverConfig::default()
     };
-    let proof = xark_groth16::prove_accelerated_with_rng(
-        &*src,
-        &z,
-        &mut pk,
-        &mut rng,
-        &cfg,
-        &mut (),
-        accelerator,
-    )
-    .map_err(|e| anyhow::anyhow!("streaming prove: {e}"))?;
+    let proof = match accelerator {
+        Some(accelerator) => xark_groth16::prove_accelerated_with_rng(
+            &*src,
+            &z,
+            &mut pk,
+            &mut rng,
+            &cfg,
+            &mut (),
+            accelerator,
+        ),
+        None => xark_groth16::prove(&*src, &z, &mut pk, &mut rng, &cfg),
+    }
+    .map_err(anyhow::Error::new)
+    .context("streaming prove")?;
     if let Some(tmp) = tee_tmp {
         if pk.finish_tee()? {
             fs::rename(&tmp, &decoded).with_context(|| format!("writing {}", decoded.display()))?;
