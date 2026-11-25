@@ -214,7 +214,7 @@ cargo build --release --manifest-path "$gpu_cli_manifest" --features custom-cuda
 PROVE_TIME=1 /usr/bin/time -v cargo run --release -p xark-cli --features debug -- \
   prove examples/cube --inputs '{"secret":"3","result":"27"}' 2>&1 \
   | tee "$results_dir/cuda-cli-cpu-prove.log"
-/usr/bin/time -v cargo run --release -p xark-cli -- verify examples/cube 2>&1 \
+/usr/bin/time -v cargo run --release -p xark-cli --features debug -- verify examples/cube 2>&1 \
   | tee "$results_dir/cuda-cli-cpu-verify.log"
 
 PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" --features cuda-msm,debug \
@@ -224,7 +224,7 @@ PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_mani
   | tee "$results_dir/cuda-cli-icicle-prove.log"
 grep -E 'MSM backend: Cuda; status=.*; GPU G1 chunks=[1-9][0-9]* points=' \
   "$results_dir/cuda-cli-icicle-prove.log"
-PROVE_TIME=1 /usr/bin/time -v cargo run --release -p xark-cli -- verify examples/cube 2>&1 \
+/usr/bin/time -v cargo run --release -p xark-cli --features debug -- verify examples/cube 2>&1 \
   | tee "$results_dir/cuda-cli-icicle-verify.log"
 
 PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_manifest" --features custom-cuda-msm,debug \
@@ -234,7 +234,7 @@ PROVE_TIME=1 /usr/bin/time -v cargo run --release --manifest-path "$gpu_cli_mani
   | tee "$results_dir/cuda-cli-custom-prove.log"
 grep -E 'MSM backend: Cuda; status=.*; GPU G1 chunks=[1-9][0-9]* points=' \
   "$results_dir/cuda-cli-custom-prove.log"
-PROVE_TIME=1 /usr/bin/time -v cargo run --release -p xark-cli -- verify examples/cube 2>&1 \
+/usr/bin/time -v cargo run --release -p xark-cli --features debug -- verify examples/cube 2>&1 \
   | tee "$results_dir/cuda-cli-custom-verify.log"
 
 if [[ ${XARK_CUDA_SANITIZE:-0} == 1 ]]; then
