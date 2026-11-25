@@ -110,6 +110,13 @@ fn concurrent_provers_publish_complete_decoded_key_cache() {
     assert!(warm.status.success(), "{stderr}");
     assert!(stderr.contains("using decoded key cache"), "{stderr}");
     assert!(stale.is_dir());
+    assert!(!out.read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".xark-decoded-")
+    }));
 }
 
 #[test]

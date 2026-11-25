@@ -353,11 +353,20 @@ fn prove_streaming(
                     .parent()
                     .filter(|path| !path.as_os_str().is_empty())
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let tmp = tempfile::NamedTempFile::new_in(dir)
+                let mut staging = tempfile::Builder::new();
+                staging.prefix(".xark-decoded-");
+                // Preserve access to the shared proving key cache, subject to the umask.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    staging.permissions(fs::Permissions::from_mode(0o666));
+                }
+                let tmp = staging
+                    .tempfile_in(dir)
                     .with_context(|| format!("staging {}", decoded.display()))?;
                 pk.tee_uncompressed(Box::new(std::io::BufWriter::with_capacity(
                     1 << 20,
-                    tmp.reopen()?,
+                    tmp.as_file().try_clone()?,
                 )))?;
                 tee_tmp = Some(tmp);
             }
