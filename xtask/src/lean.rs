@@ -21,7 +21,7 @@ use xark_ir::{FieldConst, LinearCombination};
 #[derive(clap::Args)]
 pub struct Args {
     /// The gadget to export: a harness under formal/templates/.
-    #[arg(required_unless_present_any = ["check", "coverage", "example"])]
+    #[arg(required_unless_present_any = ["check", "coverage", "example", "witnesses"])]
     gadget: Option<String>,
     /// Re-export every harness and every exported example circuit; fail if one differs
     /// from its committed Lean file.
@@ -49,9 +49,17 @@ pub struct Args {
     /// uses any more) is checked only by a full run.
     #[arg(long, requires = "coverage", conflicts_with_all = ["circuit", "update"], value_parser = crate::difftest::parse_shard)]
     shard: Option<(usize, usize)>,
+    /// Write formal/Formal/Templates/Witness/: for each harness, the plug values a
+    /// production call received in an example's tests and the solver's witness, which
+    /// prove its soundness theorem's hypotheses satisfiable (see `witness.rs`).
+    #[arg(long, conflicts_with_all = ["gadget", "check", "coverage", "example"])]
+    witnesses: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    if args.witnesses {
+        return crate::witness::run();
+    }
     if args.coverage {
         return crate::coverage::run(&args.circuit, args.update, args.shard);
     }
@@ -699,7 +707,8 @@ mod tests {
                 + &String::from_utf8_lossy(&out.stderr);
             assert!(!out.status.success(), "`{mutant}` passed: {text}");
             assert!(
-                text.contains("axiom check failed") && text.contains("mutant"),
+                // The refusal itself: the theorem list it prints first names `mutant` too.
+                text.contains("mutant (this) depends on"),
                 "`{mutant}` refused for another reason: {text}"
             );
         }

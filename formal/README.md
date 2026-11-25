@@ -22,8 +22,8 @@ reasons are prose; `Formal/Circuits/` is the first step, below); the Groth16 lay
 minimizer the keyed rows go through.
 
 Trusted Rust, by line count: the recorder and exporter that cut a call's rows into a
-template (`crates/frontend/src/gadgets.rs`, 794 lines; `xtask/src/lean.rs`, 670) and the
-coverage classifier (`xtask/src/coverage.rs`, 1089). The fixed-base
+template (`crates/frontend/src/gadgets.rs`, 794 lines; `xtask/src/lean.rs`, 715) and the
+coverage classifier (`xtask/src/coverage.rs`, 1100). The fixed-base
 comb tables and offset points the ECDSA and Ed25519 circuits read (`COMB`, `OH`, `HH` from
 `gadgets/xark-secp256k1/build.rs`, `xark-secp256r1/build.rs`, `xark-ed25519/build.rs`,
 94 + 94 + 144 lines of `k256`/`p256`/`curve25519` arithmetic) are constants no Lean
@@ -55,8 +55,23 @@ CI (`lean.yml`) runs `lake build`, then [`AxiomCheck.lean`](AxiomCheck.lean) fai
 every declaration in `Formal` depends only on `propext`,
 `Classical.choice` and `Quot.sound`: no `sorry`, no `axiom`, no `native_decide`. A
 `Formal` file may not use `example`, which leaves no declaration for the check to see.
-`cargo test -p xtask lean::tests -- --ignored` shows the check refusing each of the three. The
-secp256k1, secp256r1 and BN254 primes are proven prime by kernel-checked Pratt
+`cargo test -p xtask lean::tests -- --ignored` shows the check refusing each of the three.
+
+No harness's `soundness` holds vacuously: each harness also has `satisfiable`
+([`Formal/Templates/Witness/`](Formal/Templates/Witness/), written by `cargo xtask
+lean-export --witnesses`), proving `obligation% soundness`
+([`Formal/TemplateSolve.lean`](Formal/TemplateSolve.lean)): some assignment meets
+every hypothesis of `soundness`, `Assumptions` and `Sat` together. The assignment is
+the plug values a production call received while an example's `xark test` ran (zeros,
+for a gadget no example calls; each file's header says which), and the witness
+`xark_ir::solver` computes from them; `decide +kernel` checks it, so neither the values
+nor the code that produced them is trusted. `AxiomCheck.lean` requires each
+`satisfiable` and that its statement is `obligation soundness`. Not covered: the
+`soundness_consts` instances and the `Consts/` obligations, which carry `soundness` to
+calls with constant plugs, and a `Spec` that says too little (`True`); both are for
+review.
+
+The secp256k1, secp256r1 and BN254 primes are proven prime by kernel-checked Pratt
 certificates ([`Formal/CurvePrimes.lean`](Formal/CurvePrimes.lean), machinery in
 [`Formal/Pratt.lean`](Formal/Pratt.lean)).
 
@@ -238,8 +253,11 @@ in `Rewrites.lean`'s `Sat`:
 `cargo xtask minimize-check` runs the checker on every example and requires the
 certified rows to hash to the example's line in `tests/stable-digests.txt`, so the
 certified rows are the keyed rows. Trusted: the certificate encoding (Rust writer,
-`MinimizeCheck.lean` reader) and that the writer gives the minimizer's real input and
-output rows.
+`MinimizeCheck.lean` reader), that the writer gives the minimizer's real input and
+output rows, `MinimizeCheck.lean`'s call of `check` on what it decodes, and the Lean
+compiler. That the compiled `check` is the one `Sound.lean` is about is checked: `AxiomCheck.lean` refuses `implemented_by`, `extern`, `opaque`
+(what `partial` makes) and `unsafe` in `Formal.Minimize`, where all of `check` lives
+while `Check.lean` imports nothing but core Lean.
 
 ## Proofs over the exact R1CS: gadget templates
 

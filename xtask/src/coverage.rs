@@ -68,7 +68,7 @@ pub(crate) struct Proven {
     /// Its soundness theorem assumes nothing of the inputs.
     trivial: bool,
     /// The Lean module of its proof (`Formal.BoolOps` for `xor`).
-    proof: String,
+    pub(crate) proof: String,
 }
 
 /// The proof of template `module`: the one file under `formal/Formal/` importing
@@ -126,6 +126,20 @@ pub(crate) struct Recorded {
     pub(crate) calls: Vec<Call>,
     pub(crate) rows: Vec<[LinearCombination; 3]>,
     pub(crate) publics: Vec<u32>,
+    /// The circuit, in the numbering `var_map` takes the recorded variables to.
+    pub(crate) program: xark_ir::primitive::PrimitiveProgram,
+    pub(crate) var_map: Vec<xark_ir::VarId>,
+}
+
+/// Each example's flat-rows digest in `tests/stable-digests.txt`
+/// (`<example> <keyed> <flat>`).
+pub(crate) fn flat_digests() -> Result<BTreeMap<String, String>> {
+    let digests = std::fs::read_to_string(crate::root().join("tests/stable-digests.txt"))?;
+    Ok(digests
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(n, d)| (n.to_string(), d.rsplit(' ').next().unwrap_or(d).to_string()))
+        .collect())
 }
 
 pub fn run(circuits: &[PathBuf], update: bool, shard: Option<(usize, usize)>) -> Result<()> {
@@ -149,17 +163,12 @@ pub fn run(circuits: &[PathBuf], update: bool, shard: Option<(usize, usize)>) ->
             .map(|c| c.canonicalize().with_context(|| c.display().to_string()));
         full.collect::<Result<_>>()?
     };
-    let digests = std::fs::read_to_string(crate::root().join("tests/stable-digests.txt"))?;
-    // `<example> <keyed> <flat>`: the flat digest. The markers keep a gadget's body
-    // out of line (they make it bigger), which can change how rows group into
-    // template bodies, and so the keyed rows, but never the flat rows: the
-    // constraint system the proofs are about. The keyed rows follow from the flat
-    // ones by the minimizer (`cargo xtask minimize-check` certifies each run).
-    let digests: BTreeMap<&str, &str> = digests
-        .lines()
-        .filter_map(|l| l.split_once(' '))
-        .map(|(n, d)| (n, d.rsplit(' ').next().unwrap_or(d)))
-        .collect();
+    // The flat digest. The markers keep a gadget's body out of line (they make it
+    // bigger), which can change how rows group into template bodies, and so the keyed
+    // rows, but never the flat rows: the constraint system the proofs are about. The
+    // keyed rows follow from the flat ones by the minimizer (`cargo xtask
+    // minimize-check` certifies each run).
+    let digests = flat_digests()?;
 
     let groups = Mutex::new(BTreeMap::<Group, usize>::new());
     // Each (gadget, circuit, site)'s source position, for the report.
@@ -464,6 +473,8 @@ pub(crate) fn calls(
         calls,
         rows,
         publics,
+        program: out.primitive,
+        var_map: out.var_map,
     })
 }
 

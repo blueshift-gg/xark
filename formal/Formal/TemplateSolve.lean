@@ -19,6 +19,13 @@ any satisfying assignment agrees with `solve` on them, and `decide +kernel` eval
 writes and reads only plugs and earlier variables (`ordered`, checked by `decide`), each
 hint's equation holds at `solve` (`Template.solve_hint`) and the plugs are kept
 (`Template.solve_plug`).
+
+`obligation thm` is what a soundness theorem `∀ σ, H₁ σ → … → Hₙ σ → C σ` holds
+vacuously without: `∃ σ, H₁ σ ∧ … ∧ Hₙ σ`. Each harness's `satisfiable`
+(`Formal/Templates/Witness/*.lean`, written by `cargo xtask lean-export --witnesses`)
+proves it with an `assign` of plug values a production call passed and the witness
+the solver computed from them, which `decide +kernel` checks row by row; the values
+come from Rust, so the kernel checks them and trusts nothing that computed them.
 -/
 
 namespace Xark.Template
@@ -170,5 +177,49 @@ theorem solve_hint (t : Template) (x : ℕ → F) (h : ordered 0 t.hints = true)
   Xark.Template.solve_hint _ 0 _ h
 
 end Template
+
+/-! ### A witness of a soundness theorem's hypotheses -/
+
+/-- The assignment with plug values `p` and witness values `w`, in chunks of `n`. A
+lookup in one flat list takes `j` kernel steps, each cached for the whole proof: a
+3567-witness template took more than 12 GB. In chunks of 64 it takes about
+`j / 64 + 64` and stays under 4 GB. `n` is an argument, not the first chunk's length,
+so that it is a numeral the kernel divides by natively: `List.length` of a literal is
+not, and `Nat.div` by it unfolds well-founded recursion. -/
+def assign (p : List F) (n : ℕ) (w : List (List F)) : TVar → F
+  | .plug i => p.getD i 0
+  | .wit j => (w.getD (j / n) []).getD (j % n) 0
+
+/-- `∀ v ∈ l, p v` over field elements, decided by walking `l`. Without it `decide`
+finds Mathlib's `Fintype.decidableForallFintype` first (`ZMod r` is finite), which
+enumerates all `r` elements: `decide +kernel` on an `Assumptions` never ends. Scoped:
+it changes instance selection only where `Xark.Template` is open. -/
+scoped instance (priority := high) decidableBAllF (l : List F) (p : F → Prop) [DecidablePred p] :
+    Decidable (∀ v ∈ l, p v) :=
+  List.decidableBAll p l
+
+scoped instance (t : Template) (σ : TVar → F) : Decidable (t.Sat σ) :=
+  inferInstanceAs (Decidable (∀ r ∈ t.rows, r.a.eval σ * r.b.eval σ = r.c.eval σ))
+
+open Lean Meta Elab Term in
+/-- `∃ σ, H₁ σ ∧ … ∧ Hₙ σ` for `thm : ∀ σ, H₁ σ → … → Hₙ σ → C σ`, with the
+definitions of `Xark.Templates` other than the templates unfolded (`Assumptions`,
+`IsBit`), so that `decide` evaluates it at a concrete `σ`. -/
+def obligation (thm : Name) : MetaM Expr := do
+  forallTelescope (← getConstInfo thm).type fun xs _ => do
+    let some σ := xs[0]? | throwError "{thm} has no assignment"
+    unless ← isDefEq (← inferType σ) (← mkArrow (mkConst ``TVar) (mkConst ``F)) do
+      throwError "{thm}'s first binder isn't an assignment `TVar → F`"
+    let hs ← xs[1:].toArray.mapM inferType
+    for h in hs do
+      unless ← isProp h do throwError "{thm} has a binder after `σ` that isn't a hypothesis"
+    let body ← deltaExpand (mkAndN hs.toList) fun n =>
+      (`Xark.Templates).isPrefixOf n && n.getString! != "template"
+    mkAppM ``Exists #[← mkLambdaFVars #[σ] body]
+
+open Lean Elab Term in
+/-- `obligation% soundness`: the proposition `obligation` builds. -/
+elab "obligation% " thm:ident : term => do
+  obligation (← realizeGlobalConstNoOverloadWithInfo thm)
 
 end Xark.Template

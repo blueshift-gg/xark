@@ -36,7 +36,10 @@ the publish plan.
   `formal/templates/`; `--coverage` checks every production call of it. Changing
   such a gadget means re-exporting and re-proving in `formal/`. Pull requests run
   the coverage in four shards; a stale allowlist entry or constant-plug obligation
-  shows up in the full run (`cargo xtask ci`, and weekly on master).
+  shows up in the full run (`cargo xtask ci`, and weekly on master). A new or
+  changed harness also needs `cargo xtask lean-export --witnesses`: its
+  `satisfiable` shows its soundness hypotheses can hold, and `AxiomCheck.lean`
+  requires one per harness.
 - **The keyed rows are certified.** `cargo xtask minimize-check` runs the Lean
   checker over every minimizer run; a minimizer change must still pass it.
 - **Kept tests are end to end** and live in `gadgets/tests/tests/it/` (CLI and
