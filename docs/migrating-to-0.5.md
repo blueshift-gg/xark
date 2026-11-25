@@ -180,6 +180,10 @@ cargo install xark-cli --version 0.5.0 --locked --features opencl
 xark prove --prover opencl --acknowledge-gpu-side-channel-risk --inputs inputs.json
 ```
 
+On an NVIDIA GPU, an `xark` built with `--features cuda` (it needs the CUDA
+toolkit's `nvcc`) proves the same way with `--prover cuda`; it has been run on
+an RTX 4060 Ti only.
+
 A circuit under a 2^18-point QAP domain (up to about 131k constraints) proves
 on the CPU, where the GPU's fixed cost would lose; the command says which proved it. A
 GPU MSM is variable-time and its buffers aren't guaranteed to be erased, hence

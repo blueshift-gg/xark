@@ -5,6 +5,7 @@ members = [
     "crates/verifier",
     "crates/groth16",
     "crates/groth16-opencl",
+    "crates/groth16-cuda",
     "crates/frontend",
     "gadgets/tests",
     "gadgets/xark-aes",
@@ -93,6 +94,7 @@ xark-curve = { path = "gadgets/xark-curve", version = "0.5.0" }
 xark-frontend = { path = "crates/frontend", version = "0.5.0" }
 xark-groth16 = { path = "crates/groth16", version = "0.5.0" }
 xark-groth16-opencl = { path = "crates/groth16-opencl", version = "0.5.0" }
+xark-groth16-cuda = { path = "crates/groth16-cuda", version = "0.5.0" }
 xark-hash = { path = "gadgets/xark-hash", version = "0.5.0" }
 xark-ir = { path = "crates/ir", version = "0.5.0" }
 xark-macros = { path = "crates/macros", version = "0.5.0" }

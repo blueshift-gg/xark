@@ -22,7 +22,7 @@ use xark_groth16::{
 /// reports it. Returns the result, the key and device back, and whether the
 /// CPU had to prove again.
 // Built without a device too, so its test runs in every build.
-#[cfg_attr(not(feature = "opencl"), allow(dead_code))]
+#[cfg_attr(not(any(feature = "opencl", feature = "cuda")), allow(dead_code))]
 pub(crate) fn prove_checked<D: Accelerator + Send, P: PkSource>(
     name: &str,
     device: D,
@@ -54,12 +54,17 @@ pub enum ProverKind {
     /// The quotient and the H MSM on an OpenCL GPU, the rest on the CPU (an
     /// `xark` built with `--features opencl`).
     Opencl,
+    /// The quotient and the H MSM on an NVIDIA GPU, the rest on the CPU (an
+    /// `xark` built with `--features cuda`).
+    Cuda,
 }
 
 /// A device being set up.
 pub enum Pending {
     #[cfg(feature = "opencl")]
-    OpenCl(opencl::Pending),
+    OpenCl(gpu::Pending<xark_groth16_opencl::OpenClMsm>),
+    #[cfg(feature = "cuda")]
+    Cuda(gpu::Pending<xark_groth16_cuda::CudaMsm>),
 }
 
 impl Pending {
@@ -68,16 +73,22 @@ impl Pending {
     pub fn start(kind: ProverKind, acknowledged: bool) -> Result<Option<Pending>> {
         match kind {
             ProverKind::Cpu => Ok(None),
-            ProverKind::Opencl if !acknowledged => anyhow::bail!(
+            ProverKind::Opencl | ProverKind::Cuda if !acknowledged => anyhow::bail!(
                 "a GPU MSM is variable-time and its buffers aren't guaranteed to be erased: \
                  prove on the CPU for secret inputs on shared or untrusted hardware, or pass \
                  --acknowledge-gpu-side-channel-risk for a trusted single-tenant device"
             ),
             #[cfg(feature = "opencl")]
-            ProverKind::Opencl => Ok(Some(Pending::OpenCl(opencl::Pending::start()))),
+            ProverKind::Opencl => Ok(Some(Pending::OpenCl(gpu::Pending::start()))),
             #[cfg(not(feature = "opencl"))]
             ProverKind::Opencl => anyhow::bail!(
                 "this xark was built without OpenCL: `cargo install xark-cli --features opencl`"
+            ),
+            #[cfg(feature = "cuda")]
+            ProverKind::Cuda => Ok(Some(Pending::Cuda(gpu::Pending::start()))),
+            #[cfg(not(feature = "cuda"))]
+            ProverKind::Cuda => anyhow::bail!(
+                "this xark was built without CUDA: `cargo install xark-cli --features cuda`"
             ),
         }
     }
@@ -88,6 +99,8 @@ impl Pending {
         match *self {
             #[cfg(feature = "opencl")]
             Pending::OpenCl(ref mut p) => p.hint(_domain_size),
+            #[cfg(feature = "cuda")]
+            Pending::Cuda(ref mut p) => p.hint(_domain_size),
         }
     }
 
@@ -104,12 +117,65 @@ impl Pending {
         match self {
             #[cfg(feature = "opencl")]
             Pending::OpenCl(p) => p.prove(_src, _z, _pk, _rng, _cfg),
+            #[cfg(feature = "cuda")]
+            Pending::Cuda(p) => p.prove(_src, _z, _pk, _rng, _cfg),
         }
     }
 }
 
+/// What the CLI needs from a GPU device beyond [`Accelerator`]: OpenCL and
+/// CUDA are set up and reported the same way.
+#[cfg(any(feature = "opencl", feature = "cuda"))]
+pub(crate) trait Device: Accelerator + Send + 'static {
+    /// The runtime's name in the command's report.
+    const RUNTIME: &'static str;
+    /// The device's name for [`Accelerated`].
+    const LABEL: &'static str;
+    fn from_env() -> Self;
+    fn min_domain(&self) -> usize;
+    /// Load the runtime; false where it can't start.
+    fn initialize(&mut self) -> bool;
+    fn name(&mut self) -> Option<String>;
+}
+
 #[cfg(feature = "opencl")]
-mod opencl {
+impl Device for xark_groth16_opencl::OpenClMsm {
+    const RUNTIME: &'static str = "OpenCL";
+    const LABEL: &'static str = "opencl";
+    fn from_env() -> Self {
+        Self::from_env()
+    }
+    fn min_domain(&self) -> usize {
+        self.min_domain()
+    }
+    fn initialize(&mut self) -> bool {
+        self.initialize()
+    }
+    fn name(&mut self) -> Option<String> {
+        self.device_info().map(|d| d.name.clone())
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl Device for xark_groth16_cuda::CudaMsm {
+    const RUNTIME: &'static str = "CUDA";
+    const LABEL: &'static str = "cuda";
+    fn from_env() -> Self {
+        Self::from_env()
+    }
+    fn min_domain(&self) -> usize {
+        self.min_domain()
+    }
+    fn initialize(&mut self) -> bool {
+        self.initialize()
+    }
+    fn name(&mut self) -> Option<String> {
+        self.device_name().map(str::to_string)
+    }
+}
+
+#[cfg(any(feature = "opencl", feature = "cuda"))]
+mod gpu {
     use std::sync::{Mutex, OnceLock, mpsc};
     use std::thread::JoinHandle;
 
@@ -118,32 +184,31 @@ mod opencl {
     use xark_groth16::{
         Accelerator, ConstraintSource, PkSource, Proof, ProveError, ProverConfig, prove_with_rng,
     };
-    use xark_groth16_opencl::OpenClMsm;
 
-    /// The device and its name, or `None` where OpenCL can't start.
-    type SetUp = Option<(OpenClMsm, String)>;
+    use super::Device;
 
-    pub struct Pending {
+    /// The device and its name, or `None` where its runtime can't start.
+    type SetUp<D> = Option<(D, String)>;
+
+    pub struct Pending<D> {
         hint: Option<mpsc::Sender<usize>>,
-        handle: JoinHandle<SetUp>,
+        handle: JoinHandle<SetUp<D>>,
         /// The device's smallest domain, known before its set-up ends, so a
         /// proof it would decline doesn't wait for that.
         min_domain: usize,
     }
 
-    impl Pending {
+    impl<D: Device> Pending<D> {
         pub fn start() -> Self {
             let (hint, hinted) = mpsc::channel::<usize>();
-            let device = OpenClMsm::from_env();
+            let device = D::from_env();
             let min_domain = device.min_domain();
             let handle = std::thread::spawn(move || {
                 let mut device = device;
                 if !device.initialize() {
                     return None;
                 }
-                let name = device
-                    .device_info()
-                    .map_or_else(|| "OpenCL".to_string(), |d| d.name.clone());
+                let name = device.name().unwrap_or_else(|| D::RUNTIME.to_string());
                 if let Ok(n) = hinted.recv()
                     && device.wants_proof(n)
                 {
@@ -172,6 +237,7 @@ mod opencl {
             rng: &mut impl RngCore,
             cfg: ProverConfig,
         ) -> (Result<Proof<Bn254>, ProveError>, P, String) {
+            let runtime = D::RUNTIME;
             // A domain the device declines proves on the CPU now, leaving the
             // set-up thread to the process's exit.
             let n = pk.header().h_len + 1;
@@ -179,7 +245,7 @@ mod opencl {
                 let mut cpu = xark_groth16::Cpu::new(pk, cfg);
                 let proved = prove_with_rng(&mut cpu, src, z, rng);
                 let report = format!(
-                    "proved on the CPU: OpenCL takes domains from {} points, this one has {n}",
+                    "proved on the CPU: {runtime} takes domains from {} points, this one has {n}",
                     self.min_domain
                 );
                 return (proved, cpu.pk, report);
@@ -192,14 +258,14 @@ mod opencl {
                 ready: OnceLock::new(),
             };
             let (proved, pk, device, again) =
-                super::prove_checked("opencl", device, pk, cfg, src, z, rng);
+                super::prove_checked(D::LABEL, device, pk, cfg, src, z, rng);
             let report = match device.ready.get() {
                 Some(Some((_, name))) if again => format!(
-                    "warning: the proof from OpenCL on {name} didn't verify although the inputs \
+                    "warning: the proof from {runtime} on {name} didn't verify although the inputs \
                      satisfy the circuit; proved again on the CPU"
                 ),
-                Some(Some((_, name))) => format!("proved with OpenCL on {name}, and verified"),
-                _ => "OpenCL isn't available here: proved on the CPU".into(),
+                Some(Some((_, name))) => format!("proved with {runtime} on {name}, and verified"),
+                _ => format!("{runtime} isn't available here: proved on the CPU"),
             };
             (proved, pk, report)
         }
@@ -208,16 +274,16 @@ mod opencl {
     /// The device as the prover sees it: joined the first time the prover asks
     /// it for work, so the CPU's MSMs start at once and only the device's first
     /// transform waits for what is left of the set-up (the quotient evaluates
-    /// its rows first, on the CPU). Without OpenCL every request declines and
-    /// the CPU does the work.
-    struct Lazy {
+    /// its rows first, on the CPU). Without its runtime every request declines
+    /// and the CPU does the work.
+    struct Lazy<D> {
         min_domain: usize,
-        handle: Mutex<Option<JoinHandle<SetUp>>>,
-        ready: OnceLock<SetUp>,
+        handle: Mutex<Option<JoinHandle<SetUp<D>>>>,
+        ready: OnceLock<SetUp<D>>,
     }
 
-    impl Lazy {
-        fn get(&self) -> Option<&OpenClMsm> {
+    impl<D> Lazy<D> {
+        fn get(&self) -> Option<&D> {
             self.ready
                 .get_or_init(|| {
                     let handle = self.handle.lock().ok()?.take()?;
@@ -229,13 +295,13 @@ mod opencl {
                 .map(|(d, _)| d)
         }
 
-        fn get_mut(&mut self) -> Option<&mut OpenClMsm> {
+        fn get_mut(&mut self) -> Option<&mut D> {
             self.get()?;
             self.ready.get_mut()?.as_mut().map(|(d, _)| d)
         }
     }
 
-    impl Accelerator for Lazy {
+    impl<D: Accelerator> Accelerator for Lazy<D> {
         fn wants_proof(&self, domain_size: usize) -> bool {
             domain_size >= self.min_domain
         }

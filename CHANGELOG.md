@@ -88,6 +88,13 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   Experimental: tested on Apple Silicon, and in CI on POCL (OpenCL on a CPU).
   The device's proof is always verified, and one that fails although the
   inputs satisfy the circuit is proved again on the CPU, with a warning.
+- `xark prove --prover cuda` (an `xark` built with `--features cuda`, which needs
+  `nvcc`) does the same on an NVIDIA GPU, with `xark-groth16-cuda` as the
+  device: the OpenCL device's sorted-bucket MSM and radix-2 transforms as CUDA
+  kernels. On an RTX 4060 Ti beside 12 CPU threads, with the keys cached, the
+  prove of Ed25519 takes 0.49 s instead of 0.67 and AES-256-GCM 0.22 instead of
+  0.33; the whole command gains less (Ed25519: 0.76 s instead of 0.85).
+  Experimental: run on that GPU only, and not in CI, which has no NVIDIA GPU.
 - A proof is no longer verified against its key before it is returned: its
   soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
   --verify`, `{ verify: true }` in the wasm prover's options (`prove` takes
