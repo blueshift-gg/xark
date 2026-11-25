@@ -41,7 +41,7 @@ fn setup(out: &Path) -> (bool, String) {
 }
 
 /// `xark prove` with `PROVE_TIME=1` so the `cached=true/false` marker is emitted.
-fn prove(out: &Path, cache: bool) -> (bool, String) {
+fn prove_command(out: &Path, cache: bool) -> Command {
     let mut c = Command::new(xark_bin());
     c.arg("prove").arg(out).env("PROVE_TIME", "1");
     if cache {
@@ -55,7 +55,11 @@ fn prove(out: &Path, cache: bool) -> (bool, String) {
         .collect::<Vec<_>>()
         .join(", ");
     c.arg("--inputs").arg(format!("{{{body}}}"));
-    let o = c
+    c
+}
+
+fn prove(out: &Path, cache: bool) -> (bool, String) {
+    let o = prove_command(out, cache)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -66,6 +70,46 @@ fn prove(out: &Path, cache: bool) -> (bool, String) {
         String::from_utf8_lossy(&o.stderr),
     );
     (o.status.success(), combined)
+}
+
+#[test]
+fn concurrent_provers_publish_complete_decoded_key_cache() {
+    let tmp = tempdir();
+    let out = tmp.path().join("out");
+    let target = tmp.path().join("target");
+    let (ok, err) = xark_build("bignum_ops", &out, &target);
+    assert!(ok, "build failed: {err}");
+    let (ok, err) = setup(&out);
+    assert!(ok, "setup failed: {err}");
+
+    // A leftover entry at the former shared path must not block cache warming.
+    let stale = out.join("pk.decoded.bin.tmp");
+    std::fs::create_dir(&stale).unwrap();
+    let prove_to = |name: &str, cache| {
+        prove_command(&out, cache)
+            .arg("--out")
+            .arg(tmp.path().join(name))
+            .arg("--verify")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let first = prove_to("proof-one", true);
+    let second = prove_to("proof-two", true);
+    for child in [first, second] {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let warm = prove_to("proof-warm", false).wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&warm.stderr);
+    assert!(warm.status.success(), "{stderr}");
+    assert!(stderr.contains("using decoded key cache"), "{stderr}");
+    assert!(stale.is_dir());
 }
 
 #[test]

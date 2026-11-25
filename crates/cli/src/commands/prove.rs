@@ -348,10 +348,17 @@ fn prove_streaming(
                 pk = c;
             }
             _ if args.cache => {
-                let tmp = decoded.with_extension("bin.tmp");
-                let f = fs::File::create(&tmp)
-                    .with_context(|| format!("creating {}", tmp.display()))?;
-                pk.tee_uncompressed(Box::new(std::io::BufWriter::with_capacity(1 << 20, f)))?;
+                // Each prover owns its staging file until the complete key is published.
+                let dir = decoded
+                    .parent()
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let tmp = tempfile::NamedTempFile::new_in(dir)
+                    .with_context(|| format!("staging {}", decoded.display()))?;
+                pk.tee_uncompressed(Box::new(std::io::BufWriter::with_capacity(
+                    1 << 20,
+                    tmp.reopen()?,
+                )))?;
                 tee_tmp = Some(tmp);
             }
             _ => {}
@@ -389,10 +396,10 @@ fn prove_streaming(
     };
     if let Some(tmp) = tee_tmp {
         if pk.finish_tee()? {
-            fs::rename(&tmp, &decoded).with_context(|| format!("writing {}", decoded.display()))?;
+            tmp.persist(&decoded)
+                .map_err(|e| e.error)
+                .with_context(|| format!("writing {}", decoded.display()))?;
             println!("Wrote {} (decoded key cache)", decoded.display());
-        } else {
-            let _ = fs::remove_file(&tmp);
         }
     }
     let times = ProveTimes {
