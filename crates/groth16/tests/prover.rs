@@ -1197,6 +1197,32 @@ fn compiled_template_evaluation_equals_expansion() {
     assert_eq!(c_only, expanded.2);
 }
 
+#[test]
+fn compiled_row_check_reports_the_same_first_failure_as_expansion() {
+    let src = BytecodeSource::new(KYC_XBC).unwrap();
+    let mut expanded = BytecodeSource::new(KYC_XBC).unwrap();
+    expanded.set_compiled(false);
+
+    let z = src.layout().assignment_from_map(&kyc_witness());
+    assert_eq!(first_unsatisfied(&src, &z), None);
+    assert_eq!(first_unsatisfied(&expanded, &z), None);
+
+    let mut wrong_public = z.clone();
+    wrong_public[1] += Fr::from(1u64);
+    let expected = first_unsatisfied(&expanded, &wrong_public).expect("wrong public input");
+    assert_eq!(
+        first_unsatisfied(&Box::new(&src), &wrong_public),
+        Some(expected)
+    );
+
+    let mut wrong_constant = z;
+    wrong_constant[0] = Fr::zero();
+    assert_eq!(
+        first_unsatisfied(&src, &wrong_constant),
+        first_unsatisfied(&expanded, &wrong_constant)
+    );
+}
+
 // ---- streaming setup ---------------------------------------------------------------
 
 fn ark_pk_bytes(prog: &R1csProgram, seed: u64, compress: Compress) -> Vec<u8> {
