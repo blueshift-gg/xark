@@ -20,7 +20,7 @@ pub fn cmd_build(crate_dir: &str) -> i32 {
 /// other commands run first — `test`, `profile`, `prove`'s — stay quiet about
 /// it.)
 pub fn cmd_build_command(args: &crate::commands::BuildArgs) -> i32 {
-    // At a project's root: every circuit, its keys and clients, then the programs.
+    // At a project's root: every circuit and its clients.
     if let Some(root) = crate::commands::project::root_at(Some(&args.crate_dir)) {
         return crate::commands::project::build(&root, args.check);
     }
@@ -379,7 +379,12 @@ fn build_stable(
     // Every build carries DWARF line tables (free; see `BuildOptions`), so errors
     // and `--profile` attribution name source lines.
     let target_dir = crate_abs.join("target/xark-wasm");
-    let built = xark_frontend::build_crate_with(crate_abs, &target_dir, &Default::default());
+    // `xark_frontend::build_crate_with` runs `cargo rustc --quiet`: on a first
+    // build it can take minutes without a line of its own.
+    let built = {
+        let _spinner = crate::progress::Spinner::start("compiling the circuit (cargo)");
+        xark_frontend::build_crate_with(crate_abs, &target_dir, &Default::default())
+    };
     let built = match built {
         Ok(b) => b,
         Err(e) => {
@@ -401,12 +406,16 @@ fn build_stable(
     if !clear() {
         return 1;
     }
-    let mut lowered = match xark_frontend::lower_module(
-        &built.wasm,
-        xark_ir::FieldSpec::named(field),
-        profile,
-        emit_json,
-    ) {
+    let lowered = {
+        let _spinner = crate::progress::Spinner::start("lowering the circuit to R1CS");
+        xark_frontend::lower_module(
+            &built.wasm,
+            xark_ir::FieldSpec::named(field),
+            profile,
+            emit_json,
+        )
+    };
+    let mut lowered = match lowered {
         Ok(l) => l,
         Err(e) => {
             eprintln!("{} {e}", crate::style::err("error:"));
@@ -448,13 +457,13 @@ fn build_stable(
         );
         return 1;
     }
+    let schema_json = serde_json::to_string_pretty(&lowered.schema).unwrap_or_default() + "\n";
     let wrote = std::fs::write(out_abs.join("digest"), format!("{digest}\n")).is_ok();
-    let wrote = wrote
-        & std::fs::write(
-            out_abs.join("schema.json"),
-            serde_json::to_string_pretty(&lowered.schema).unwrap_or_default() + "\n",
-        )
-        .is_ok();
+    let wrote = wrote & std::fs::write(out_abs.join("schema.json"), &schema_json).is_ok();
+    // The template the `prove` hint points at: seeded once, then the user's (they
+    // fill it in place, so a rebuild leaves it alone). Best-effort: it isn't a
+    // build output, and a build without it is still complete.
+    seed_inputs_example(out_abs, &schema_json);
     // The source files the circuit came from, gadgets included: how a plain `cargo
     // test` notices the circuit is out of date (`xark_prover::circuit`). Written
     // last: a build is only complete with it (`stale_build`), so one stopped
@@ -579,16 +588,29 @@ pub fn cmd_clean() -> i32 {
 
 /// `xark test [crate-dir] [-- <cargo test args>]`
 ///
+/// Seed `inputs.example.json` beside the schema — the `--inputs` template the
+/// `xark prove` hint points at — if it isn't there. Written once and left alone:
+/// the hint says to replace its placeholders in place.
+fn seed_inputs_example(out: &std::path::Path, schema_json: &str) {
+    let file = out.join("inputs.example.json");
+    if file.exists() {
+        return;
+    }
+    let Ok(schema) = xark_schema::Schema::parse(schema_json) else {
+        return;
+    };
+    if let Some(example) = schema.inputs_example() {
+        let _ = std::fs::write(file, example);
+    }
+}
+
 /// One-shot circuit testing: build the crate (`xark build`) so its
 /// `target/xark/<pkg>/` artifacts exist, then run `cargo test` in the crate so
 /// the in-crate `cargo test` circuit tests can load them. `forwarded` goes to
 /// `cargo test` verbatim, so `xark test . -- --include-ignored` is `cargo test --
-/// --include-ignored`.
+/// --include-ignored`. The project-root dispatch lives in
+/// `commands::project::test`.
 pub fn cmd_test(crate_dir: &str, forwarded: &[String]) -> i32 {
-    // At a project's root: every circuit's tests, then the programs'.
-    if let Some(root) = crate::commands::project::root_at(Some(crate_dir)) {
-        return crate::commands::project::test(&root, forwarded);
-    }
     let crate_dir = crate_root(crate_dir);
 
     // Build first so the tests' artifacts are present + current, unless they are.
@@ -840,9 +862,15 @@ fn check_diagnostic_json(crate_abs: &std::path::Path, e: &xark_frontend::Compile
 
 /// `xark init [name]` — start a project in `name/` (or the current directory): a
 /// `xark.toml`, a Cargo workspace, and a starter circuit crate in
-/// `circuits/<name>/`, pre-wired for rust-analyzer so unsupported constructs surface
-/// inline as you type (via `xark check`). `xark add` grows it.
-pub fn cmd_init(name_arg: Option<&str>, circuit_arg: Option<&str>) -> i32 {
+/// `circuits/<name>/`, pre-wired for rust-analyzer. On a terminal it asks whether
+/// to scaffold a Pinocchio program; `--program` and `--program-name` make the
+/// choice non-interactive. `xark add` grows it.
+pub fn cmd_init(
+    name_arg: Option<&str>,
+    circuit_arg: Option<&str>,
+    program_arg: Option<&str>,
+    program_name_arg: Option<&str>,
+) -> i32 {
     let cwd = std::env::current_dir().expect("cwd");
     // The argument may be a path (`xark init apps/demo`): the project and its first
     // circuit are named after its last component.
@@ -866,10 +894,25 @@ pub fn cmd_init(name_arg: Option<&str>, circuit_arg: Option<&str>) -> i32 {
         eprintln!("error: can't name a crate `{name}`: {why}\n  {how}");
         return 2;
     }
+
+    let program = match crate::commands::scaffold::init_program(
+        &name,
+        program_arg,
+        program_name_arg,
+        crate::commands::scaffold::is_interactive(),
+    ) {
+        Ok(program) => program,
+        Err(e) => {
+            eprintln!("{} {e:#}", crate::style::err("error:"));
+            return 2;
+        }
+    };
+
     if let Err(e) = crate::commands::add::init_project(&dir, &name) {
         eprintln!("{} {e:#}", crate::style::err("error:"));
         return 1;
     }
+
     let mut steps = Vec::new();
     if let Some(n) = name_arg {
         steps.push((
@@ -877,14 +920,45 @@ pub fn cmd_init(name_arg: Option<&str>, circuit_arg: Option<&str>) -> i32 {
             "the project's root: the commands below run there",
         ));
     }
-    steps.push((
-        "xark test".to_string(),
-        "build the circuit and run its tests",
-    ));
-    steps.push((
-        format!("xark add program {name}"),
-        "a Solana program that verifies its proofs, with a LiteSVM test",
-    ));
+    if let Some((scaffolder, program_name)) = program {
+        let request =
+            match crate::commands::scaffold::ProgramScaffold::new(&dir, &name, &program_name) {
+                Ok(request) => request,
+                Err(e) => {
+                    eprintln!("{} {e:#}", crate::style::err("error:"));
+                    return 1;
+                }
+            };
+        if let Err(e) = crate::commands::scaffold::scaffold_program(&request, scaffolder) {
+            eprintln!("{} {e:#}", crate::style::err("error:"));
+            return 1;
+        }
+        eprintln!(
+            "{}",
+            crate::style::brand(&format!(
+                "✅ added program `{program_name}-program` for `{name}` in {}",
+                dir.join("programs").join(&program_name).display()
+            ))
+        );
+        steps.extend(scaffolder.next_steps());
+    } else {
+        steps.push((
+            "xark test".to_string(),
+            "build the circuit and run its tests",
+        ));
+    }
+    let project = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(name.as_str());
+    eprintln!();
+    eprintln!(
+        "🚀 {} `{}` {}",
+        crate::style::brand("Created"),
+        crate::style::brand(project),
+        crate::style::brand("project")
+    );
+    eprintln!();
     eprintln!("{}", crate::style::next_steps(&steps));
     0
 }
@@ -982,7 +1056,8 @@ pub fn scaffold_circuit(dir: &std::path::Path, in_project: bool) -> Result<Strin
     }
 
     eprintln!(
-        "xark: scaffolded circuit `{name}` ({created} files) in {}",
+        "{}: scaffolded circuit `{name}` ({created} files) in {}",
+        crate::style::tag(),
         dir.display()
     );
     Ok(name)
@@ -1016,7 +1091,7 @@ pub(crate) fn check_crate_name(name: &str) -> Result<(), &'static str> {
 
 /// A valid name close to a refused one: `type` → `type_circuit`,
 /// `1st` → `circuit_1st`, `a b` → `a_b`.
-fn suggest_crate_name(name: &str) -> String {
+pub(crate) fn suggest_crate_name(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| {
@@ -1090,4 +1165,44 @@ fn tests_template(name: &str) -> String {
          \x20   }}\n\
          }}\n"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seed_inputs_example;
+
+    const SCHEMA: &str = r#"{"version": 2, "circuit": "demo",
+        "inputs": [{"name": "x", "visibility": "private", "type": "field"},
+                   {"name": "result", "visibility": "public", "type": "field"}],
+        "public_inputs": ["result"], "types": {}}"#;
+
+    fn tempdir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "xark-seed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_inputs_template_is_seeded_once_and_then_left_alone() {
+        let dir = tempdir();
+        seed_inputs_example(&dir, SCHEMA);
+        let file = dir.join("inputs.example.json");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("\"x\": \"<field>\""), "{text}");
+        assert!(text.contains("\"result\": \"<field>\""), "{text}");
+
+        // A filled-in copy is the user's: the next build must not replace it.
+        let filled = "{\"x\": \"3\", \"result\": \"9\"}";
+        std::fs::write(&file, filled).unwrap();
+        seed_inputs_example(&dir, SCHEMA);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), filled);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

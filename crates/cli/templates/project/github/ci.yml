@@ -15,7 +15,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_SBF_VERSION: 4.2.0
   # The xark this project is made with (its `xark.toml`).
   XARK_CLI_VERSION: {{xark_version}}
 
@@ -29,31 +28,17 @@ jobs:
       - name: The wasm32 target circuits build for
         run: rustup target add wasm32-unknown-unknown
 
-      # Neither tool has a prebuilt binary: both build from source, once, then come
-      # from this cache.
-      - name: Cached tools
+      # xark builds from source, once, then comes from this cache.
+      - name: Cached xark
         id: tools
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/bin/cargo-build-sbf
-            ~/.cargo/bin/xark
-          key: tools-${{ runner.os }}-sbf-${{ env.CARGO_BUILD_SBF_VERSION }}-xark-${{ env.XARK_CLI_VERSION }}
+          path: ~/.cargo/bin/xark
+          key: xark-${{ runner.os }}-${{ env.XARK_CLI_VERSION }}
 
-      - name: Install cargo-build-sbf and xark
+      - name: Install xark
         if: steps.tools.outputs.cache-hit != 'true'
-        run: |
-          cargo install cargo-build-sbf --version "$CARGO_BUILD_SBF_VERSION" --locked
-          cargo install xark-cli --version "$XARK_CLI_VERSION" --locked
-
-      - uses: actions/setup-node@v4
-        if: hashFiles('package.json') != ''
-        with:
-          node-version: 22
-
-      - name: Install the TypeScript tests' packages
-        if: hashFiles('package.json') != ''
-        run: npm install
+        run: cargo install xark-cli --version "$XARK_CLI_VERSION" --locked
 
       # The committed keys and generated clients are what this source builds.
       - name: xark build --check
@@ -61,3 +46,15 @@ jobs:
 
       - name: xark test
         run: xark test
+
+      # The generated verifier's self-test checks its bundled sample proof.
+      - name: Test the generated verifier crates
+        if: hashFiles('clients/*/rust/Cargo.toml') != ''
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: |
+          for crate in clients/*/rust; do
+            [ -f "$crate/Cargo.toml" ] || continue
+            cargo test --release --manifest-path "$crate/Cargo.toml"
+          done

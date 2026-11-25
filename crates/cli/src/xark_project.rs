@@ -180,16 +180,70 @@ pub fn project_root(dir: &Path) -> Option<PathBuf> {
 /// What makes a directory a project.
 pub const PROJECT_FILE: &str = "xark.toml";
 
-/// The project's workspace members: each of `circuits/*`, `programs/*` and
-/// `clients/*/rust` that holds a crate. Cargo reads a glob that matches nothing as
-/// a path that isn't there, so one is listed only once something is in it. The
-/// `default-members` are the programs, so a bare `cargo build-sbf` (or `cargo
-/// test`) at the root builds them alone: built together with the circuits, the
-/// circuits' host dependencies would join the SBF build. Only these globs are
-/// added or removed; anything else in the manifest (members of your own, comments,
-/// layout) stays as it is.
+/// The project's workspace members: each of `circuits/*` and `clients/*/rust`
+/// that holds a crate. Cargo reads a glob that matches nothing as a path that
+/// isn't there, so one is listed only once something is in it. Entries of your
+/// own stay as they are, and an unchanged array is left byte for byte; a changed
+/// one keeps its surrounding layout (though not per-element comments).
+/// `default-members` is left alone: a program framework owns that setting.
+///
+/// A program in `programs/*` is the framework's crate. [`sync_program_members`]
+/// adds it (and the Pinocchio scaffold's `default-members`) for `xark add program`;
+/// xark's own build and test paths never need to know about it. A `programs/*`
+/// entry whose crate was deleted is dropped, with its default-members entry: cargo
+/// cannot load either, and `xark build` has to load the workspace to repair it.
 pub fn sync_members(root: &Path) -> Result<()> {
-    const OURS: [&str; 3] = ["circuits/*", "programs/*", "clients/*/rust"];
+    sync_workspace(
+        root,
+        &["circuits/*", "clients/*/rust"],
+        None,
+        SyncMode::Write,
+    )
+}
+
+/// Verify the members `xark build` would write without touching `Cargo.toml`.
+pub fn check_members(root: &Path) -> Result<()> {
+    sync_workspace(
+        root,
+        &["circuits/*", "clients/*/rust"],
+        None,
+        SyncMode::Check,
+    )
+}
+
+/// The workspace entries `xark add program` writes for its Pinocchio scaffold:
+/// `programs/*` joins the members, and the programs become the default-members
+/// for bare `cargo test`/`cargo build`. `cargo build-sbf` selects the workspace's
+/// `cdylib` members itself, so it does not need the setting.
+///
+/// This is deliberately not part of [`sync_members`]: only the Pinocchio scaffold
+/// opts into it. Default-members of your own are kept, after the programs; `xark
+/// build` leaves the setting alone.
+pub fn sync_program_members(root: &Path) -> Result<()> {
+    sync_workspace(
+        root,
+        &["circuits/*", "programs/*", "clients/*/rust"],
+        Some(&["programs/*"]),
+        SyncMode::Write,
+    )
+}
+
+/// Whether [`sync_workspace`] writes a repaired manifest or simply performs
+/// a check.
+#[derive(Clone, Copy)]
+enum SyncMode {
+    /// Write the members the project needs.
+    Write,
+    /// Leave `Cargo.toml` as it is, failing when it is stale.
+    Check,
+}
+
+fn sync_workspace(
+    root: &Path,
+    ours: &[&str],
+    default_members: Option<&[&str]>,
+    mode: SyncMode,
+) -> Result<()> {
     let has_crate = |pattern: &str| -> bool {
         let (dir, rest) = pattern.split_once("/*").unwrap_or((pattern, ""));
         std::fs::read_dir(root.join(dir)).is_ok_and(|entries| {
@@ -201,6 +255,11 @@ pub fn sync_members(root: &Path) -> Result<()> {
             })
         })
     };
+    // A `programs/*` member whose crate is gone is a cargo error. The Pinocchio
+    // scaffold is what adds both that member and its default-members entry, so
+    // drop them here rather than wedging the workspace (and `xark build`, which
+    // cannot repair what cargo will not load).
+    let has_programs = has_crate("programs/*");
     let manifest = root.join("Cargo.toml");
     let text = std::fs::read_to_string(&manifest)
         .with_context(|| format!("reading {}", manifest.display()))?;
@@ -210,47 +269,75 @@ pub fn sync_members(root: &Path) -> Result<()> {
     let Some(ws) = doc.get_mut("workspace").and_then(|w| w.as_table_like_mut()) else {
         bail!("{} has no [workspace]", manifest.display());
     };
-    // `key`'s entries: ours that hold a crate, then whatever else was there.
-    let mut set = |key: &str, ours: &[&str]| {
-        let others: Vec<String> = ws
-            .get(key)
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str())
-            .filter(|v| !OURS.contains(v))
-            .map(str::to_string)
-            .collect();
-        let wanted: Vec<String> = ours
-            .iter()
-            .filter(|p| has_crate(p))
-            .map(|p| p.to_string())
-            .chain(others)
-            .collect();
-        if wanted.is_empty() && key == "default-members" {
-            ws.remove(key);
-            return;
-        }
-        // Changed in place, so the comments around it stay.
-        match ws.get_mut(key).and_then(|v| v.as_array_mut()) {
-            Some(array) => {
-                let current: Vec<&str> = array.iter().filter_map(|v| v.as_str()).collect();
-                if current != wanted {
-                    array.clear();
-                    array.extend(wanted.iter().map(String::as_str));
+    {
+        // `key`'s entries: ours that hold a crate, then whatever else was there.
+        let mut set = |key: &str, groups: &[&str]| {
+            let others: Vec<String> = ws
+                .get(key)
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+                .filter(|v| !ours.contains(v))
+                .filter(|v| *v != "programs/*" || has_programs)
+                .map(str::to_string)
+                .collect();
+            let wanted: Vec<String> = groups
+                .iter()
+                .filter(|p| has_crate(p))
+                .map(|p| p.to_string())
+                .chain(others)
+                .collect();
+            if wanted.is_empty() && key == "default-members" {
+                ws.remove(key);
+                return;
+            }
+            // Changed in place, so the comments around it stay.
+            match ws.get_mut(key).and_then(|v| v.as_array_mut()) {
+                Some(array) => {
+                    let mut current: Vec<&str> = array.iter().filter_map(|v| v.as_str()).collect();
+                    let mut wanted_sorted: Vec<&str> = wanted.iter().map(String::as_str).collect();
+                    current.sort_unstable();
+                    wanted_sorted.sort_unstable();
+                    // Same entries in another order (a framework's, or one written
+                    // by an older xark) is not a change: rewriting it would make
+                    // `xark build --check` see a manifest diff it just caused.
+                    // Sorting also catches duplicates, which must be rewritten.
+                    if current != wanted_sorted {
+                        array.clear();
+                        array.extend(wanted.iter().map(String::as_str));
+                    }
+                }
+                None => {
+                    ws.insert(key, toml_edit::value(toml_edit::Array::from_iter(wanted)));
                 }
             }
-            None => {
-                ws.insert(key, toml_edit::value(toml_edit::Array::from_iter(wanted)));
+        };
+        set("members", ours);
+        if let Some(default) = default_members {
+            set("default-members", default);
+        }
+    }
+    if !has_programs {
+        // Remove only the scaffold's default-members entry, keeping any of your
+        // own. `retain` keeps the comments on the entries that stay.
+        if let Some(array) = ws.get_mut("default-members").and_then(|v| v.as_array_mut()) {
+            array.retain(|v| v.as_str() != Some("programs/*"));
+            if array.is_empty() {
+                ws.remove("default-members");
             }
         }
-    };
-    set("members", &OURS);
-    set("default-members", &["programs/*"]);
+    }
     let new = doc.to_string();
     if new != text {
-        std::fs::write(&manifest, new)
-            .with_context(|| format!("writing {}", manifest.display()))?;
+        match mode {
+            SyncMode::Write => std::fs::write(&manifest, new)
+                .with_context(|| format!("writing {}", manifest.display()))?,
+            SyncMode::Check => bail!(
+                "{} has stale workspace members: run `xark build` and commit them",
+                manifest.display()
+            ),
+        }
     }
     Ok(())
 }
@@ -389,7 +476,8 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
                         .split_once('\'')
                         .map(|(name, _)| name)?
                 };
-                if !val.is_empty() {
+                // Never let a malformed manifest turn this into a path.
+                if !val.is_empty() && val != "." && val != ".." && !val.contains(['/', '\\', ':']) {
                     return Some(val.to_string());
                 }
             }
@@ -400,7 +488,7 @@ pub(crate) fn read_pkg_name(crate_dir: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::XarkProject;
+    use super::{XarkProject, read_pkg_name};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -492,6 +580,23 @@ mod tests {
     }
 
     #[test]
+    fn package_name_is_a_single_path_component() {
+        let temp = TestDir::new();
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[package]\nname = \"../escape\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(read_pkg_name(&temp.0), None);
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[package]\nname = \"claim\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(read_pkg_name(&temp.0).as_deref(), Some("claim"));
+    }
+
+    #[test]
     fn package_name_accepts_a_toml_literal_string() {
         let temp = TestDir::new();
         fs::write(
@@ -504,5 +609,188 @@ mod tests {
             super::read_pkg_name(&temp.0).as_deref(),
             Some("example-circuit")
         );
+    }
+
+    fn write_crate(root: &std::path::Path, dir: &str) {
+        fs::create_dir_all(root.join(dir)).unwrap();
+        fs::write(
+            root.join(dir).join("Cargo.toml"),
+            "[package]\nname = \"example\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+    }
+
+    fn entries(doc: &toml_edit::DocumentMut, key: &str) -> Vec<String> {
+        doc.get("workspace")
+            .and_then(|w| w.as_table_like())
+            .and_then(|t| t.get(key))
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn core_sync_leaves_program_entries_and_default_members_alone() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "programs/app");
+        write_crate(&temp.0, "circuits/app");
+        write_crate(&temp.0, "clients/app/rust");
+        let manifest = "[workspace]\nmembers = [\"programs/*\", \"circuits/*\", \"clients/*/rust\"]\n\
+                        default-members = [\"programs/*\"]\n";
+        fs::write(temp.0.join("Cargo.toml"), manifest).unwrap();
+
+        super::sync_members(&temp.0).unwrap();
+
+        // Same entries in another order: keep the order the framework wrote, and
+        // leave the file byte for byte as it was (`--check` compares it).
+        assert_eq!(
+            fs::read_to_string(temp.0.join("Cargo.toml")).unwrap(),
+            manifest
+        );
+    }
+
+    #[test]
+    fn core_sync_does_not_add_programs_or_default_members() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "programs/app");
+        write_crate(&temp.0, "circuits/app");
+        fs::write(temp.0.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+        super::sync_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(entries(&doc, "members"), ["circuits/*"]);
+        assert!(entries(&doc, "default-members").is_empty());
+    }
+
+    #[test]
+    fn core_sync_removes_stale_program_entries() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "circuits/app");
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"circuits/*\", \"programs/*\"]\n\
+             default-members = [\"programs/*\"]\n",
+        )
+        .unwrap();
+
+        super::sync_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(entries(&doc, "members"), ["circuits/*"]);
+        assert!(entries(&doc, "default-members").is_empty());
+    }
+
+    #[test]
+    fn check_members_refuses_a_stale_manifest_and_leaves_it_alone() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "circuits/app");
+        let manifest = "[workspace]\nmembers = []\n";
+        fs::write(temp.0.join("Cargo.toml"), manifest).unwrap();
+
+        let err = super::check_members(&temp.0).unwrap_err();
+        assert!(err.to_string().contains("stale workspace members"), "{err}");
+        assert_eq!(
+            fs::read_to_string(temp.0.join("Cargo.toml")).unwrap(),
+            manifest
+        );
+    }
+
+    #[test]
+    fn core_sync_keeps_custom_default_members() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "circuits/app");
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"circuits/*\"]\n\
+             default-members = [\"circuits/*\"]\n",
+        )
+        .unwrap();
+
+        super::sync_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(entries(&doc, "default-members"), ["circuits/*"]);
+    }
+
+    #[test]
+    fn core_sync_removes_only_the_stale_program_default() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "circuits/app");
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"circuits/*\"]\n\
+             default-members = [\"programs/*\", \"circuits/*\"]\n",
+        )
+        .unwrap();
+
+        super::sync_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(entries(&doc, "default-members"), ["circuits/*"]);
+    }
+
+    #[test]
+    fn core_sync_rewrites_duplicate_members() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "circuits/app");
+        write_crate(&temp.0, "clients/app/rust");
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"circuits/*\", \"circuits/*\"]\n",
+        )
+        .unwrap();
+
+        super::sync_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(entries(&doc, "members"), ["circuits/*", "clients/*/rust"]);
+    }
+
+    #[test]
+    fn the_program_scaffold_adds_programs_and_default_members() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "programs/app");
+        write_crate(&temp.0, "circuits/app");
+        write_crate(&temp.0, "clients/app/rust");
+        fs::write(temp.0.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+        super::sync_program_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(
+            entries(&doc, "members"),
+            ["circuits/*", "programs/*", "clients/*/rust"]
+        );
+        assert_eq!(entries(&doc, "default-members"), ["programs/*"]);
+    }
+
+    #[test]
+    fn the_program_scaffold_keeps_custom_default_members() {
+        let temp = TestDir::new();
+        write_crate(&temp.0, "programs/app");
+        write_crate(&temp.0, "circuits/app");
+        write_crate(&temp.0, "clients/app/rust");
+        fs::write(
+            temp.0.join("Cargo.toml"),
+            "[workspace]\nmembers = []\ndefault-members = [\"tools/*\"]\n",
+        )
+        .unwrap();
+
+        super::sync_program_members(&temp.0).unwrap();
+
+        let text = fs::read_to_string(temp.0.join("Cargo.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(entries(&doc, "default-members"), ["programs/*", "tools/*"]);
     }
 }

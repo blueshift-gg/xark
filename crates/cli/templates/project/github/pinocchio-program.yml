@@ -1,0 +1,85 @@
+name: {{name}} program (Pinocchio)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch or pull request makes the older run moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_SBF_VERSION: 4.2.0
+  # The xark this project is made with (its `xark.toml`).
+  XARK_CLI_VERSION: {{xark_version}}
+
+# This workflow is about one program. The workspace may hold programs from other
+# frameworks, whose build and test commands differ: each program has its own
+# workflow, and each step here names this one's manifest.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The wasm32 target circuits build for
+        run: rustup target add wasm32-unknown-unknown
+
+      # xark builds from source, once, then comes from this cache.
+      - name: Cached xark
+        id: xark
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/xark
+          key: xark-${{ runner.os }}-${{ env.XARK_CLI_VERSION }}
+
+      - name: Install xark
+        if: steps.xark.outputs.cache-hit != 'true'
+        run: cargo install xark-cli --version "$XARK_CLI_VERSION" --locked
+
+      # The generated test's `circuit()` reads the circuit's `target/xark/`
+      # artifacts, which are not committed: build them before the program tests.
+      - name: Build the circuit artifacts the tests read
+        run: xark build --check
+
+      # It builds from source, once, then comes from this cache.
+      - name: Cached tools
+        id: tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-build-sbf
+          key: sbf-${{ runner.os }}-${{ env.CARGO_BUILD_SBF_VERSION }}
+
+      - name: Install cargo-build-sbf
+        if: steps.tools.outputs.cache-hit != 'true'
+        run: cargo install cargo-build-sbf --version "$CARGO_BUILD_SBF_VERSION" --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the TypeScript tests' packages
+        run: npm install
+
+      - name: Build the program
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/cargo-build-sbf.log"
+          cargo build-sbf --manifest-path programs/{{name}}/Cargo.toml 2>&1 | tee "$log"
+          if grep -q "overflows the maximum allowed frame space" "$log"; then
+            echo "::error::a stack frame is past the SBF limit of 4 KiB (the warning above): the program would overwrite its own stack at run time. Move the big work out of line with #[inline(never)], as the generated verify is."
+            exit 1
+          fi
+
+      # Only this program's LiteSVM test: `npm test` alone would run every
+      # program's.
+      - name: TypeScript test
+        run: npm test -- tests/{{name}}.test.ts

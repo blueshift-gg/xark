@@ -121,7 +121,13 @@ pub fn run(args: ClientArgs) -> Result<()> {
     // functions from the module's descriptions.
     if let Some(krate) = project.crate_dir().filter(|_| !args.no_functions) {
         let path = project.xark_dir.join("client.wasm");
-        match xark_frontend::build_client(&krate, &krate.join("target/xark-client")) {
+        // `xark_frontend::build_client` runs `cargo rustc --quiet`: without a
+        // line of its own, the step sits silent.
+        let built = {
+            let _spinner = crate::progress::Spinner::start("compiling the client's Rust functions");
+            xark_frontend::build_client(&krate, &krate.join("target/xark-client"))
+        };
+        match built {
             Ok(wasm) => {
                 let lines = xark_frontend::custom_section(&wasm, "xark.exports");
                 let skipped = model.add_exports(&schema, &String::from_utf8_lossy(&lines))?;
@@ -221,6 +227,9 @@ pub fn run(args: ClientArgs) -> Result<()> {
         format!("await {name}.prover(\"<url serving {}/>\")", dir.display()),
         "after `xark setup`; then .prove(inputs), and `.verifier(…)` to verify",
     ));
-    eprintln!("{}", crate::style::next_steps(&steps));
+    let steps = crate::style::next_steps(&steps);
+    if !steps.is_empty() {
+        eprintln!("{steps}");
+    }
     Ok(())
 }

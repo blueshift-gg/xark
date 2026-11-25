@@ -39,4 +39,8 @@ circuit does. `zkyc`'s tests make the issuer's commitment with
 
 `xark test` passes its arguments after `--` on to `cargo test`, such as
 `xark test -- --nocapture`. At a project's root it tests every circuit with them;
-`xark test circuits/my-circuit -- --nocapture` tests one.
+`xark test circuits/my-circuit -- --nocapture` tests one. `xark test` is
+circuit-only. Pinocchio programs build with `cargo build-sbf`; their LiteSVM test
+runs with `npm test`, and Rust tests written into a program run with
+`cargo test-sbf`. At a project's root, `xark test --check` also verifies the
+committed clients and keys first, as `xark build --check` does.

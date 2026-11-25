@@ -17,27 +17,27 @@ It needs stable Rust 1.89 or newer. `xark build` adds the
 ## From a new circuit to a proof
 
 ```sh
-xark init my-circuit && cd my-circuit                   # a project, with a circuit and its tests
+xark init my-circuit --program pinocchio && cd my-circuit  # a project, a circuit and its program
 xark test                                               # build it, run its tests
 xark prove --inputs '{"secret": 3, "result": 9}'
 xark verify
-xark add program my-circuit                             # a Solana program verifying it, and a LiteSVM test
-xark build                                              # the circuit, its clients, the program
+cargo build-sbf                                         # the program
+npm install && npm test                                 # its LiteSVM test
 ```
 
-The first `prove` makes the key from your machine's randomness: a single-party
-trusted setup, sound unless whoever made it kept that randomness. For a key no one
-party has to be trusted for, use `xark ceremony`.
+A build bootstraps a dev key from your machine's randomness (the `init` scaffold
+did): a single-party trusted setup, sound unless whoever made it kept that
+randomness. For a key no one party has to be trusted for, use `xark ceremony`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `doctor` | Checks your toolchain |
-| `init` | Creates a circuit crate, set up for rust-analyzer |
-| `build` | Compiles a circuit crate into `target/xark/<name>/` |
+| `init` | Creates a project and optionally a program |
+| `build` | Compiles circuits and clients |
 | `check` | Reports unsupported Rust as compiler diagnostics, for your editor |
-| `test` | Builds the circuit, then runs the crate's `cargo test` |
+| `test` | Builds each circuit, then runs its tests |
 | `inspect` | Prints the circuit's size: variables, constraints, public inputs |
 | `profile` | Shows which source lines the constraints come from (`--html` for a shaded view) |
 | `setup` | Makes the proving and verifying keys |

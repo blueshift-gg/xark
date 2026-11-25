@@ -19,6 +19,17 @@ opencl` (experimental) puts the quotient and the H MSM beside the CPU's MSMs (Ed
 instead of 370 on an Apple M3 Max), through `xark_groth16::Prover`, the one
 interface every prover now shares.
 
+`xark build` and `xark test` at a project's root are circuit-only. `xark init`
+gains a wizard: it asks whether to add a Pinocchio program and its LiteSVM
+test, with `--program pinocchio`, `--program none`, and `--program-name`.
+Programs are built natively (`cargo build-sbf`) and tested by their LiteSVM
+test (`npm test`); `xark add program` remains for existing projects and a
+second program.
+`xark build` bootstraps a missing key and rotates a plain single-party dev key
+when constraints change; ceremony and phase-2 keys require explicit setup
+(`xark prove` keeps its first-proof convenience). `xark build --check` writes
+nothing that is committed.
+
 ### Moving from 0.4.0
 
 The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating-to-0.5.md).
@@ -33,6 +44,17 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
   provers) with the constraint's source line; now they give a proof no verifier
   accepts. Where you relied on that error, pass `--verify`, or `{ verify: true }`
   to the wasm `prove` or a client's `prover.prove(inputs, …)`.
+- **A project's programs are built and tested by their framework.** `xark build --check`
+  and `xark test` at the root stay circuit-only; add
+  `.github/workflows/<name>-program.yml` (copy it from a fresh `xark add program`
+  project), which runs the program's `cargo build-sbf`, the stack check and LiteSVM
+  test; the verifier self-tests run in `ci.yml`. Keys stay committed: `xark build`
+  bootstraps a missing key and rotates a plain dev key when the circuit changes,
+  and ceremony keys need `xark ceremony` again. Keep `programs/*` in the workspace's
+  `members` and, for bare cargo commands, `default-members`: `xark build` no longer
+  adds them, and if you restore a program directory from git after xark dropped a
+  stale `programs/*` entry, add the entries back by hand. See
+  [Upgrading from 0.4](projects.md#upgrading-from-04).
 
 ### Changes
 
@@ -120,6 +142,35 @@ The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating
 - The self-check, when on, is one multi-pairing with one final exponentiation (it was a
   multi-pairing and a pairing), its key-only half kept from proof to proof, and
   its Miller loops made beside the MSMs.
+- `xark init` prompts for a program on a terminal. `--program none` is the
+  default and skips the prompt; `--program pinocchio` scaffolds a program and
+  its LiteSVM test; `--program-name <name>` names the program (defaulting to 
+  the circuit name).
+- `xark build` at a project's root builds each circuit and its clients.
+  `xark test` tests the circuits and the libraries beside them. Neither builds
+  nor tests programs. A missing key is bootstrapped with `xark setup` from OS
+  randomness, unless a committed verifier embeds one: then restore the keys or
+  run `xark setup` yourself. A changed plain single-party dev key is rotated with
+  the same warning as before, while a ceremony or phase-2 key stops with
+  `xark setup`/`xark ceremony`.
+- `xark build` seeds `inputs.example.json` beside each circuit's `schema.json`
+  the first time it builds it — the template `xark setup`'s `xark prove` step
+  points at — and leaves it alone after, so a filled-in copy survives a rebuild.
+- `xark build --check` stages generated clients under `target/xark/check/` and
+  byte-compares them with `clients/`. It writes nothing under `clients/`, `keys/`
+  or the workspace manifest, and does not build programs.
+- `xark add program` remains as the incremental/advanced scaffold: it adds
+  `programs/*` and `default-members`, writes the program test and its
+  workflow, `.github/workflows/<name>-program.yml`, and leaves builds/tests to
+  the framework.
+- `.github/workflows/ci.yml` is circuit-only: `xark build --check`, `xark test`
+  and the verifier self-tests. `.github/workflows/<name>-program.yml` runs that
+  program's native steps, scoped by `--manifest-path`.
+- `@blueshift-gg/xark/testing`'s `program(name, root?)` keeps the v0.4 name
+  convention and accepts `{ root, dir, file }` options for another build path.
+- `xark doctor` requires `cargo-build-sbf` in a project with programs — a Solana
+  program can't be compiled without it — and reports it as informational
+  elsewhere; Node.js presence check is informational only.
 
 ## 0.4.0
 

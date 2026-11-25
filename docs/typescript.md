@@ -97,9 +97,14 @@ project's programs in LiteSVM:
 import { circuit, funded, program, send, vm } from "@blueshift-gg/xark/testing";
 
 const prover = await Claim.prover(circuit("claim")); // circuits/claim's build
-const svm = vm({ [id]: program("claim") });           // target/deploy/claim_program.so
+const svm = vm({ [id]: program("claim") });
 await send(svm, await funded(svm), { programAddress: id, data: proof.toInstructionData() });
 ```
+
+`program()` takes a program name and builds the path `target/deploy/<name>_program.so`.
+Its second argument is either a project root or `{ root, dir, file }` options for
+another build directory or file; `vm()` takes a direct `.so` path for anything
+outside the project.
 
 To be sure the prover runs the circuit the client was generated from, and not
 whatever a deployment serves, pin it: `Zkyc.prover(url, { digest: Zkyc.digest })`

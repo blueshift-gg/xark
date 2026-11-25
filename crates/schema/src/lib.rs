@@ -817,6 +817,29 @@ impl Schema {
             .collect()
     }
 
+    /// The `--inputs` JSON for this schema: one entry per declared input, in
+    /// declaration order, each a placeholder in its natural form. `xark build`
+    /// writes it as `inputs.example.json`, and `xark setup`'s `xark prove` hint
+    /// points at it. `None` when the circuit declares no inputs.
+    #[must_use]
+    pub fn inputs_example(&self) -> Option<String> {
+        let inputs = self.summary();
+        if inputs.is_empty() {
+            return None;
+        }
+        // Interpolated, not a `serde_json::Map`: declaration order, and each
+        // template is already JSON text. The key goes through the serializer, so
+        // a name with a control character stays valid JSON.
+        let entries: Vec<String> = inputs
+            .iter()
+            .map(|i| {
+                let key = serde_json::Value::String(i.name.clone()).to_string();
+                format!("{key}: {}", i.template)
+            })
+            .collect();
+        Some(format!("{{\n  {}\n}}\n", entries.join(",\n  ")))
+    }
+
     /// A placeholder for a value of `ty` in its natural form, as JSON text.
     fn template(&self, ty: &Value) -> String {
         let q = |s: &str| format!("{s:?}");
@@ -1874,5 +1897,35 @@ mod tests {
             x.to_string(),
             "15112221349535400772501151409588531511454012693041857206046113283949847762202"
         );
+    }
+
+    #[test]
+    fn the_inputs_example_lists_every_input_in_declaration_order() {
+        let text = schema().inputs_example().expect("inputs");
+        let order: Vec<usize> = [
+            "\"id\"",
+            "\"born_before\"",
+            "\"allowed\"",
+            "\"home\"",
+            "\"k\"",
+            "\"h\"",
+            "\"msg\"",
+            "\"ok\"",
+        ]
+        .iter()
+        .map(|name| {
+            text.find(name)
+                .unwrap_or_else(|| panic!("{name} missing: {text}"))
+        })
+        .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{text}");
+        assert!(text.contains("\"ok\": false"), "{text}");
+        assert!(text.ends_with("}\n"), "{text:?}");
+    }
+
+    #[test]
+    fn a_circuit_with_no_inputs_has_no_example() {
+        let empty = Schema::parse(r#"{"version": 2, "inputs": [], "types": {}}"#).unwrap();
+        assert!(empty.inputs_example().is_none());
     }
 }

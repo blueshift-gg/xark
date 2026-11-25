@@ -1,3 +1,5 @@
+> This guide is for 0.4. For changes after 0.4, see [Upgrading from 0.4](projects.md#upgrading-from-04).
+
 # Migrating from 0.3 to 0.4
 
 0.4 adds projects: one directory for a circuit, the Solana program that verifies

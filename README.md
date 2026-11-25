@@ -52,10 +52,12 @@ xark doctor
 ```
 
 **2. Start a project.** `xark init` makes a project with the square-root circuit
-above, and two tests, in `circuits/my-circuit/`:
+above, and two tests, in `circuits/my-circuit/`. On a terminal it asks whether to
+scaffold a Pinocchio program too; `--program pinocchio` or `--program none` skips
+the question:
 
 ```sh
-xark init my-circuit && cd my-circuit
+xark init my-circuit --program pinocchio && cd my-circuit
 ```
 
 **3. Test it.** At the project's root, `xark test` builds the circuit, then runs its
@@ -71,7 +73,8 @@ test tests::accepts_valid ... ok
 test tests::rejects_invalid ... ok
 ```
 
-**4. Prove.** The first proof also makes the key, from your machine's randomness:
+**4. Prove.** The project's build bootstrapped a dev key from this machine's
+randomness (`xark setup` makes one explicitly); the proof uses it:
 
 ```console
 $ xark prove --inputs '{"secret": 3, "result": 9}'
@@ -91,28 +94,26 @@ error: witness does not satisfy the circuit
   src/lib.rs:6:16  require_eq(secret * secret, result);
 ```
 
-**5. Verify it on Solana.** `xark add program` writes a Pinocchio program that
-verifies the circuit's proofs, and a LiteSVM test that proves with the generated
-TypeScript client and sends the proof to it. `xark build` builds the circuit, its
-clients and the program; `xark test` runs every test. You need the
-[Solana CLI](https://solana.com/docs/intro/installation) for `cargo build-sbf`, and
-Node:
+**5. Verify it on Solana.** `xark init` scaffolded a Pinocchio program that
+verifies the circuit's proofs, with a LiteSVM test that proves with the generated
+TypeScript client and sends the proof to it. A project started without one can add
+it later with `xark add program my-circuit`. Program builds and tests are the
+framework's own; xark's `build` and `test` stay circuit-only. You need the
+[Solana CLI](https://solana.com/docs/intro/installation) and Node:
 
 ```console
-$ xark add program my-circuit
-$ xark build
+$ cargo build-sbf
 ...
-✅ Onchain verifier crate ready (verifying key embedded).
-✅ TypeScript client for `my_circuit` at clients/my-circuit/ts/my_circuit.ts
-xark building the programs (cargo build-sbf)
-$ npm install && xark test
+$ npm install && npm test
 ...
  Test Files  1 passed (1)
 ```
 
-Commit everything `xark build` writes, the keys in `keys/` included: the
-generated clients embed the verifying key, and the CI workflow `xark init` wrote
-checks they match the source (`xark build --check`).
+Commit everything `xark init`, `xark setup`, `xark build` and the program tools
+write, the keys in `keys/` and `.github/workflows/<name>-program.yml` included:
+the generated clients embed the verifying key, and CI checks they match the
+source (`xark build --check`) while the program workflow runs the native SBF and
+LiteSVM steps.
 
 The program depends on `clients/my-circuit/rust/`, the verifier crate `xark build`
 generates (`my-circuit-client`). Its `PublicInputs` has the circuit's public
@@ -144,8 +145,8 @@ The verifier crate's `SETUP` constant says which kind of key it embeds.
 - [Editor diagnostics](docs/editor.md): circuit errors inline in rust-analyzer
 
 **Using proofs**
-- [Migrating from 0.4](docs/migrating-to-0.5.md): nothing to change; the client
-  crate's proof type, host prover and new name, to take up when you like
+- [Migrating from 0.4](docs/migrating-to-0.5.md): the client crate's proof type,
+  host prover and new name, and a project's program build and test steps
 - [Migrating from 0.3](docs/migrating-to-0.4.md): keep a circuit crate, or move it
   into a project, keeping your keys
 - [TypeScript clients](docs/typescript.md): typed provers and verifiers for Node

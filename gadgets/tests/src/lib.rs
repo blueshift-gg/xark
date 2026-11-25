@@ -89,7 +89,20 @@ pub fn xark_bin() -> std::path::PathBuf {
             std::fs::create_dir_all(&dir).expect("create target/xark-test-bin");
             let tmp = dir.join(format!("{exe}.{}.tmp", std::process::id()));
             std::fs::copy(&built, &tmp).expect("copy the built `xark`");
-            std::fs::rename(&tmp, &copy).expect("place the copy of `xark`");
+            // Create it if it isn't there, and never replace one: test processes
+            // start together, and a rename would unlink the copy another one is
+            // running, so every command that process runs itself fails with "No
+            // such file or directory" (its `current_exe()` is deleted).
+            match std::fs::hard_link(&tmp, &copy) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&tmp);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = std::fs::remove_file(&tmp);
+                }
+                // A filesystem without hard links: replace it, as before.
+                Err(_) => std::fs::rename(&tmp, &copy).expect("place the copy of `xark`"),
+            }
         }
         copy
     })

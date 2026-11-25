@@ -66,6 +66,24 @@ fn init_then_test() {
         out.contains("2 passed"),
         "expected the scaffold's 2 tests:\n{out}"
     );
+    // The first build seeds the `--inputs` template the `xark setup` hint points
+    // at, with every declared input in its natural form.
+    let example = circuit.join("target/xark/zk-demo/inputs.example.json");
+    assert!(
+        example.is_file(),
+        "the build didn't seed inputs.example.json"
+    );
+    let text = std::fs::read_to_string(&example).unwrap();
+    assert!(
+        text.contains("\"secret\"") && text.contains("\"result\""),
+        "{text}"
+    );
+    // `xark setup`'s prove step points at the template the build seeded.
+    let out = xark(&["setup", circuit_s]);
+    assert!(
+        out.contains("inputs.example.json"),
+        "setup's next step doesn't point at the template:\n{out}"
+    );
     // Arguments after `--` reach the test binary.
     let out = xark(&["test", dir_s, "--", "--list"]);
     assert!(
@@ -139,4 +157,74 @@ fn init_then_test() {
     );
     let (ok, field, _) = run(&["inspect", dir_s]);
     assert!(ok && field.contains("bn254"), "{field}");
+}
+
+/// `--program none` is the explicit circuit-only scaffold; it must not create the
+/// program files or ask anything.
+#[test]
+fn init_none_scaffolds_no_program() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("plain");
+    let (ok, _, err) = run(&["init", dir.to_str().unwrap(), "--program", "none"]);
+    assert!(ok, "init failed: {err}");
+    for path in [
+        "programs",
+        "package.json",
+        "tests/plain.test.ts",
+        ".github/workflows/plain-program.yml",
+    ] {
+        assert!(!dir.join(path).exists(), "none scaffolded {path}");
+    }
+}
+
+#[test]
+fn init_rejects_an_unknown_program() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("bad");
+    let (ok, _, err) = run(&["init", dir.to_str().unwrap(), "--program", "nope"]);
+    assert!(!ok && err.contains("unknown program scaffolder"), "{err}");
+    assert!(!dir.join("xark.toml").exists(), "wrote a project");
+}
+
+#[test]
+fn a_program_name_needs_a_program() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("bad-name");
+    let (ok, _, err) = run(&[
+        "init",
+        dir.to_str().unwrap(),
+        "--program",
+        "none",
+        "--program-name",
+        "verifier",
+    ]);
+    assert!(!ok && err.contains("--program-name"), "{err}");
+    assert!(!dir.join("xark.toml").exists(), "wrote a project");
+}
+
+/// `--circuit` names the starter circuit apart from the directory. The program
+/// that `init` can also scaffold takes its default name from that circuit (the
+/// unit test in `scaffold.rs` covers the seam; a program scaffold here would
+/// build against the published `xark`, which a pre-release doesn't have).
+#[test]
+fn init_circuit_names_the_starter_circuit_apart_from_the_directory() {
+    let tmp = tempdir();
+    let dir = tmp.path().join("demo");
+    let (ok, _, err) = run(&[
+        "init",
+        dir.to_str().unwrap(),
+        "--circuit",
+        "foo",
+        "--program",
+        "none",
+    ]);
+    assert!(ok, "init failed: {err}");
+    let circuit = dir.join("circuits/foo");
+    assert!(circuit.join("Cargo.toml").is_file(), "no circuits/foo");
+    assert!(
+        !dir.join("circuits/demo").exists(),
+        "named the circuit after the directory"
+    );
+    let toml = std::fs::read_to_string(circuit.join("Cargo.toml")).unwrap();
+    assert!(toml.contains("name = \"foo\""), "{toml}");
 }

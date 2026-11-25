@@ -566,7 +566,7 @@ fn write_outputs(
     if in_project {
         steps.push((
             "xark build".to_string(),
-            "the verifier crate and TypeScript client (clients/), then the programs",
+            "the verifier crate and TypeScript client (clients/)",
         ));
     } else {
         steps.push((
@@ -620,17 +620,7 @@ fn autobuild_and_setup(
         // From this machine's randomness: the convenience loop must not silently run
         // a phase-2 setup just because a stray `.ptau` is discoverable. A key from a
         // transcript stays an explicit `xark setup`.
-        setup::run(setup::SetupArgs {
-            path: args.path.clone(),
-            out: None,
-            without_ptau: true,
-            deterministic_rng: None,
-            ptau_file: None,
-            phase2_seed: None,
-            uncompressed: false,
-            r1cs_form: setup::R1csForm::Auto,
-            domain: setup::QapDomain::Auto,
-        })?;
+        setup::make(setup::SetupArgs::dev_key(args.path.clone()))?;
     }
     Ok(())
 }

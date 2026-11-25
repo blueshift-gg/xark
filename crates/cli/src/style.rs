@@ -13,15 +13,20 @@ const DIM: &str = "\x1b[2m"; // faint — for inline `# comment` hints
 const RESET: &str = "\x1b[0m";
 
 /// Whether to emit escape codes: only for an interactive stderr, and never when
-/// `NO_COLOR` is set (<https://no-color.org>). Cached after the first check.
-fn enabled() -> bool {
+/// `NO_COLOR` is set (<https://no-color.org>) or the terminal is dumb (terminfo's
+/// `dumb`: no cursor addressing or colors; `TERM=dumb`, or unset on Unix).
+/// Cached after the first check.
+pub(crate) fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         if std::env::var_os("NO_COLOR").is_some() {
             return false; // https://no-color.org
         }
         // `CLICOLOR_FORCE` forces color even when piped (e.g. into a pager).
-        std::env::var_os("CLICOLOR_FORCE").is_some() || std::io::stderr().is_terminal()
+        if std::env::var_os("CLICOLOR_FORCE").is_some() {
+            return true;
+        }
+        !console::is_dumb() && std::io::stderr().is_terminal()
     })
 }
 
