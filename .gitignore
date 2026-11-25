@@ -8,6 +8,7 @@ Cargo.lock.bak
 # build artifacts from circuit compilation / snapshot tests
 /*.rlib
 /target/test-out/
+/out/cuda-validation/
 examples/*/Cargo.lock
 formal/templates/*/Cargo.lock
 

@@ -70,9 +70,6 @@ the resulting proof with Xark's verifier.
 
 ## CUDA host validation
 
-For a credit-first Vast.ai run and a bounded $50 follow-up, see
-[`VAST_AI_RUNBOOK.md`](VAST_AI_RUNBOOK.md).
-
 Requirements: Linux, an NVIDIA GPU, CUDA Toolkit, Nsight Systems, GNU time, and the ICICLE
 CUDA backend matching the pinned v4.0.0 Rust frontend. Run from a clean checkout:
 
@@ -80,21 +77,54 @@ CUDA backend matching the pinned v4.0.0 Rust frontend. Run from a clean checkout
 crates/groth16-cuda/scripts/run_cuda_validation.sh
 ```
 
-The run executes host checks, builds both adapters, requires CUDA for ICICLE and
-custom MSM comparisons and verified proofs, and proves then verifies the cube
-example through the CUDA CLI on both backends. The CLI log must show accepted
+The run executes host checks, builds both adapters and all three CLI variants,
+requires CUDA for ICICLE and custom MSM comparisons and verified proofs, and
+proves then verifies the cube example through the CUDA CLI on both backends.
+It also records a CPU CLI proof and verification as an end-to-end reference.
+The GPU CLI log must show accepted
 GPU G1 chunks, so a CPU fallback cannot pass as GPU CLI coverage. The script
-writes benchmark CSVs and captures Nsight Systems traces at 65,536 and 524,288
-points for both backends. It saves the source revision, toolchain and GPU
-details, test and CLI logs, CSVs, and profiler reports under
-`out/cuda-validation/<commit>/`.
+writes benchmark CSVs comparing both GPU adapters with CPU Pippenger, captures
+Nsight Systems traces at 65,536 and 524,288 points, and samples GPU utilization,
+power, clocks, temperature, and memory while the run is active. It saves the
+source revision, toolchain and GPU details, test and CLI logs, CSVs, profiler
+reports, and artifact checksums under `out/cuda-validation/<commit>/`.
+
+The default MSM sweep is 512, 1,023, 1,024, 1,025, 4,096, 16,384, 65,536,
+262,144, and 524,288 points with both compressed and uncompressed point
+encodings. The four sizes around 1,024 help expose behavior around the host
+parallel-decoding threshold. The other sizes show how per-call overhead and
+throughput change as workloads grow. Every timed result is checked against CPU
+Pippenger; the benchmark is an MSM comparison, not a claim that Xark's full
+Groth16 prover beats gnark.
+
+For a shorter local 4060 check before the complete sweep:
+
+```sh
+XARK_CUDA_SANITIZE=1 XARK_CUDA_CAPTURE_NSYS=0 \
+  XARK_MSM_SIZES=512,1024,1025,65536 XARK_MSM_ENCODINGS=compressed \
+  XARK_MSM_REPEATS=3 XARK_MSM_BACKEND_PASSES=1 \
+  crates/groth16-cuda/scripts/run_cuda_validation.sh
+```
+
+The full default run enables Nsight Systems, uses seven repetitions, and
+measures the backends in both orders to expose clock and thermal order effects.
+It can take substantially longer because it runs both encodings and both GPU
+backends across the full size sweep twice. The Nsight captures use compressed
+inputs for consistent profiling workloads. On NVIDIA hosts, the script records
+the selected visible GPU's compute capability and asks NVCC to compile for
+that GPU unless an explicit architecture is supplied through
+`NVCC_PREPEND_FLAGS` or `NVCC_APPEND_FLAGS`. NVCC's `-arch=sm_XY` shorthand
+emits code for the selected GPU and its matching PTX fallback. For an RTX 4060,
+the expected capability is 8.9; the actual detected value is saved in the run
+metadata. See NVIDIA's [NVCC architecture options](https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/#gpu-architecture).
 
 The run script sets `CXXFLAGS` to include `stdint.h` for the pinned ICICLE
 native frontend. Existing flags are preserved.
 
 Set `ICICLE_BACKEND_INSTALL_DIR` for a non-default backend path. Workload and
-output settings are available through `XARK_MSM_SIZES`, `XARK_PROFILE_SIZES`,
-`XARK_MSM_REPEATS`, `XARK_MSM_SEED`, and `XARK_CUDA_RESULTS_DIR`. Set
+output settings are available through `XARK_MSM_SIZES`, `XARK_MSM_ENCODINGS`,
+`XARK_PROFILE_SIZES`, `XARK_MSM_REPEATS`, `XARK_MSM_SEED`,
+`XARK_MSM_BACKEND_PASSES`, and `XARK_CUDA_RESULTS_DIR`. Set
 `XARK_CUDA_CAPTURE_NSYS=0` for a correctness and timing smoke run when Nsight
 Systems is not installed; the default full run requires it and captures traces.
 Set `XARK_CUDA_SANITIZE=1` to run the custom CUDA integration tests under
