@@ -16,6 +16,7 @@ mod lean;
 mod minimize_check;
 mod publish;
 mod wasm;
+mod witness;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

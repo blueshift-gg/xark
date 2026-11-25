@@ -21,7 +21,7 @@ use xark_ir::{FieldConst, LinearCombination};
 #[derive(clap::Args)]
 pub struct Args {
     /// The gadget to export: a harness under formal/templates/.
-    #[arg(required_unless_present_any = ["check", "coverage", "example"])]
+    #[arg(required_unless_present_any = ["check", "coverage", "example", "witnesses"])]
     gadget: Option<String>,
     /// Re-export every harness and every exported example circuit; fail if one differs
     /// from its committed Lean file.
@@ -49,9 +49,17 @@ pub struct Args {
     /// uses any more) is checked only by a full run.
     #[arg(long, requires = "coverage", conflicts_with_all = ["circuit", "update"], value_parser = crate::difftest::parse_shard)]
     shard: Option<(usize, usize)>,
+    /// Write formal/Formal/Templates/Witness/: for each harness, the plug values a
+    /// production call received in an example's tests and the solver's witness, which
+    /// prove its soundness theorem's hypotheses satisfiable (see `witness.rs`).
+    #[arg(long, conflicts_with_all = ["gadget", "check", "coverage", "example"])]
+    witnesses: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    if args.witnesses {
+        return crate::witness::run();
+    }
     if args.coverage {
         return crate::coverage::run(&args.circuit, args.update, args.shard);
     }
@@ -666,5 +674,43 @@ mod tests {
             text.contains("first differing segment: s"),
             "refused for another reason: {text}"
         );
+    }
+
+    /// The axiom check refuses each way a proof can lean on more than the kernel: a
+    /// copy of `AxiomCheck.lean` with one bad theorem added fails, naming it.
+    #[test]
+    #[ignore = "needs lake and the built Formal; lean.yml runs it"]
+    fn the_axiom_check_refuses_sorry_native_decide_and_axioms() {
+        let formal = crate::root().join("formal");
+        let check = std::fs::read_to_string(formal.join("AxiomCheck.lean")).unwrap();
+        let probe = crate::target_dir().join("axiom-check-test");
+        std::fs::create_dir_all(&probe).unwrap();
+        for mutant in [
+            "theorem mutant : 1 = 1 := sorry",
+            "theorem mutant : 2 + 2 = 4 := by native_decide",
+            "axiom mutantAx : False\ntheorem mutant : 1 = 2 := mutantAx.elim",
+        ] {
+            let file = probe.join("Mutant.lean");
+            let text = check.replacen(
+                "open Lean Elab Command",
+                &format!("{mutant}\n\nopen Lean Elab Command"),
+                1,
+            );
+            assert_ne!(text, check, "AxiomCheck.lean lost its `open` line");
+            std::fs::write(&file, text).unwrap();
+            let out = std::process::Command::new("lake")
+                .args(["env", "lean", file.to_str().unwrap()])
+                .current_dir(&formal)
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stdout).to_string()
+                + &String::from_utf8_lossy(&out.stderr);
+            assert!(!out.status.success(), "`{mutant}` passed: {text}");
+            assert!(
+                // The refusal itself: the theorem list it prints first names `mutant` too.
+                text.contains("mutant (this) depends on"),
+                "`{mutant}` refused for another reason: {text}"
+            );
+        }
     }
 }

@@ -29,3 +29,33 @@ pub fn bignum_wide(
         i += 1;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::bignum_wide;
+
+    /// Limbs in base `2^86`, low first: the listed ones, then zeros.
+    fn limbs(low: &[u64]) -> [u64; 24] {
+        let mut l = [0; 24];
+        l[..low.len()].copy_from_slice(low);
+        l
+    }
+
+    /// `m = 2^(86·23)`: its top (24th) limb is the one set, so every limb is read.
+    fn m() -> [u64; 24] {
+        let mut l = [0; 24];
+        l[23] = 1;
+        l
+    }
+
+    #[test]
+    fn accepts_valid() {
+        // a = 2^86 + 5, b = 3: a·b = 3·2^86 + 15 < m, carried into the second limb.
+        bignum_wide(limbs(&[5, 1]), limbs(&[3]), m(), limbs(&[15, 3])).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid() {
+        assert!(bignum_wide(limbs(&[5, 1]), limbs(&[3]), m(), limbs(&[15, 4])).is_err());
+    }
+}
