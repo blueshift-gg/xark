@@ -98,9 +98,13 @@ output settings are available through `XARK_MSM_SIZES`, `XARK_PROFILE_SIZES`,
 `XARK_CUDA_CAPTURE_NSYS=0` for a correctness and timing smoke run when Nsight
 Systems is not installed; the default full run requires it and captures traces.
 Set `XARK_CUDA_SANITIZE=1` to run the custom CUDA integration tests under
-Compute Sanitizer's memory checker with device leak checking enabled. This checks
-CUDA memory accesses and device allocations; it does not measure host RSS.
-Each benchmark log also records peak process RSS through GNU time.
+Compute Sanitizer's memcheck, initcheck, racecheck, and synccheck tools. The
+script saves one log per tool. Memcheck also enables device leak checking.
+Memcheck and initcheck target memory faults. The current custom kernels use no
+shared memory or barriers, so racecheck and synccheck are low-yield guards for
+future kernel changes. None of these tools establishes MSM arithmetic
+correctness or measures host RSS. Each benchmark log also records peak process
+RSS through GNU time.
 
 The custom path converts canonical arkworks points and scalars to the native
 input layout, checks curve coordinates and scalar bounds, then runs window

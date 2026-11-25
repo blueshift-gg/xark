@@ -19,7 +19,7 @@ Optional environment:
   XARK_MSM_REPEATS            benchmark repetitions (default: 7)
   XARK_MSM_SEED               deterministic input seed
   XARK_CUDA_CAPTURE_NSYS=0     skip Nsight traces for a correctness smoke run
-  XARK_CUDA_SANITIZE=1        run the custom CUDA tests under Compute Sanitizer
+  XARK_CUDA_SANITIZE=1        run custom CUDA tests under all Compute Sanitizer tools
 EOF
   exit 0
 fi
@@ -160,9 +160,16 @@ PY
     printf 'custom CUDA test executable was not built\n' >&2
     exit 2
   fi
-  compute-sanitizer --tool memcheck --leak-check full --error-exitcode 1 \
-    "$custom_test_binary" --test-threads=1 2>&1 \
-    | tee "$results_dir/custom-cuda-memcheck.log"
+  # Keep racecheck and synccheck in the matrix for future shared-memory kernels.
+  for sanitizer_tool in memcheck initcheck racecheck synccheck; do
+    sanitizer_options=(--tool "$sanitizer_tool" --error-exitcode 1)
+    if [[ "$sanitizer_tool" == memcheck ]]; then
+      sanitizer_options+=(--leak-check full)
+    fi
+    XARK_CUDA_REQUIRED=1 compute-sanitizer "${sanitizer_options[@]}" \
+      "$custom_test_binary" --test-threads=1 2>&1 \
+      | tee "$results_dir/custom-cuda-${sanitizer_tool}.log"
+  done
 fi
 cargo build --release --manifest-path "$manifest" --features custom-cuda \
   --example msm_bench 2>&1 | tee "$results_dir/msm-benchmark-build.log"
