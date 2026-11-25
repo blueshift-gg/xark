@@ -55,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wrong() {
+    fn rejects_invalid() {
         assert!(bignum_wide(limbs(&[5, 1]), limbs(&[3]), m(), limbs(&[15, 4])).is_err());
     }
 }
