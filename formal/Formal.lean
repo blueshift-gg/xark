@@ -116,6 +116,7 @@ import Formal.Templates.Consts.GroupedColumnStep
 import Formal.GroupedColumnStep
 import Formal.GroupedColumns
 import Formal.GroupedCarry
+import Formal.RsaChain
 import Formal.RangeDerived
 import Formal.RangeCheckQ
 import Formal.RangeCheckR

@@ -25,8 +25,11 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   `square_lazy` and `fused_final` as the `b = a` and `r = em` cases), and
   the field→integer carry step (`Formal/GroupedCarry.lean`: the template's output
   is the numerator times `2^-164`, and a canonical numerator below `2^253` gives
-  `num = 2^164 · k` over the integers). The chain composition around them is
-  still hand-proved (`docs/security.md` §2.18). The
+  `num = 2^164 · k` over the integers), and the chain's top level
+  (`Formal/RsaChain.lean`: the 2048-bit modulus bound, the 16-squaring
+  congruence, and `em ≡ sig^65537 (mod n)` from the step identities). The rows
+  that instantiate those identities are still hand-proved
+  (`docs/security.md` §2.18). The
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key
   made for the example before this change must be made again; no released key
   used it.

@@ -409,7 +409,12 @@ the template's output combination is the numerator times `2^-164` (`outputs_eq`,
 numerator in the field), and when the numerator is canonical
 (`0 ≤ num < r`) and the carry below `2^89`, `num = 2^164 · k` holds over the
 integers, not only mod `r` (`carry_row`; both sides are then below `2^253 < r`).
-That is the whole no-wrap argument, given the column bounds.
+That is the whole no-wrap argument, given the column bounds. `Formal/RsaChain.lean`
+then states the chain's top level: `n_bits` (the modulus is 2048 bits from the
+`n_top` pin), `squarings` (16 squarings keep `acc ≡ sig^(2^k)`), and `chain`
+(16 squarings plus the terminal `acc·sig = q·n + em` give
+`em ≡ sig^65537 (mod n)`). Each step's identity is the model theorem above; what
+is hand-proved is that the rows instantiate those step identities.
 
 Still hand-proved, and therefore audit residuals: the bridge from
 `grouped_columns`' actual rows to the `GroupedColumns` model — that the column
