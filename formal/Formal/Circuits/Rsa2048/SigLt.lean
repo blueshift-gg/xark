@@ -1709,4 +1709,611 @@ theorem T (σ : ℕ → F) (h : Sat circuit σ) : (ZLC.toF (borrow 25)).eval σ 
       show (s544.rows[100]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
   simpa [ZLC.toF, Xark.R1cs.LC.eval] using hrow
 
+/-- The `is_zero` bit of limb `i`, as a field value. -/
+def bF (i : ℕ) (σ : ℕ → F) : F := 1 - zF i σ
+
+/-- The borrow vector as a field value. -/
+def borrowF (i : ℕ) (σ : ℕ → F) : F := (ZLC.toF (borrow i)).eval σ
+
+theorem bBit_0 (σ : ℕ → F) (h : Sat circuit σ) : bF 0 σ = 0 ∨ bF 0 σ = 1 := by
+  by_cases hn : nF 0 σ = 0
+  · right
+    have e1 := E1_0 σ h
+    rw [hn] at e1
+    have hz : zF 0 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_0 σ h
+    have hb : 1 - zF 0 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_1 (σ : ℕ → F) (h : Sat circuit σ) : bF 1 σ = 0 ∨ bF 1 σ = 1 := by
+  by_cases hn : nF 1 σ = 0
+  · right
+    have e1 := E1_1 σ h
+    rw [hn] at e1
+    have hz : zF 1 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_1 σ h
+    have hb : 1 - zF 1 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_2 (σ : ℕ → F) (h : Sat circuit σ) : bF 2 σ = 0 ∨ bF 2 σ = 1 := by
+  by_cases hn : nF 2 σ = 0
+  · right
+    have e1 := E1_2 σ h
+    rw [hn] at e1
+    have hz : zF 2 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_2 σ h
+    have hb : 1 - zF 2 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_3 (σ : ℕ → F) (h : Sat circuit σ) : bF 3 σ = 0 ∨ bF 3 σ = 1 := by
+  by_cases hn : nF 3 σ = 0
+  · right
+    have e1 := E1_3 σ h
+    rw [hn] at e1
+    have hz : zF 3 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_3 σ h
+    have hb : 1 - zF 3 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_4 (σ : ℕ → F) (h : Sat circuit σ) : bF 4 σ = 0 ∨ bF 4 σ = 1 := by
+  by_cases hn : nF 4 σ = 0
+  · right
+    have e1 := E1_4 σ h
+    rw [hn] at e1
+    have hz : zF 4 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_4 σ h
+    have hb : 1 - zF 4 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_5 (σ : ℕ → F) (h : Sat circuit σ) : bF 5 σ = 0 ∨ bF 5 σ = 1 := by
+  by_cases hn : nF 5 σ = 0
+  · right
+    have e1 := E1_5 σ h
+    rw [hn] at e1
+    have hz : zF 5 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_5 σ h
+    have hb : 1 - zF 5 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_6 (σ : ℕ → F) (h : Sat circuit σ) : bF 6 σ = 0 ∨ bF 6 σ = 1 := by
+  by_cases hn : nF 6 σ = 0
+  · right
+    have e1 := E1_6 σ h
+    rw [hn] at e1
+    have hz : zF 6 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_6 σ h
+    have hb : 1 - zF 6 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_7 (σ : ℕ → F) (h : Sat circuit σ) : bF 7 σ = 0 ∨ bF 7 σ = 1 := by
+  by_cases hn : nF 7 σ = 0
+  · right
+    have e1 := E1_7 σ h
+    rw [hn] at e1
+    have hz : zF 7 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_7 σ h
+    have hb : 1 - zF 7 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_8 (σ : ℕ → F) (h : Sat circuit σ) : bF 8 σ = 0 ∨ bF 8 σ = 1 := by
+  by_cases hn : nF 8 σ = 0
+  · right
+    have e1 := E1_8 σ h
+    rw [hn] at e1
+    have hz : zF 8 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_8 σ h
+    have hb : 1 - zF 8 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_9 (σ : ℕ → F) (h : Sat circuit σ) : bF 9 σ = 0 ∨ bF 9 σ = 1 := by
+  by_cases hn : nF 9 σ = 0
+  · right
+    have e1 := E1_9 σ h
+    rw [hn] at e1
+    have hz : zF 9 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_9 σ h
+    have hb : 1 - zF 9 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_10 (σ : ℕ → F) (h : Sat circuit σ) : bF 10 σ = 0 ∨ bF 10 σ = 1 := by
+  by_cases hn : nF 10 σ = 0
+  · right
+    have e1 := E1_10 σ h
+    rw [hn] at e1
+    have hz : zF 10 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_10 σ h
+    have hb : 1 - zF 10 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_11 (σ : ℕ → F) (h : Sat circuit σ) : bF 11 σ = 0 ∨ bF 11 σ = 1 := by
+  by_cases hn : nF 11 σ = 0
+  · right
+    have e1 := E1_11 σ h
+    rw [hn] at e1
+    have hz : zF 11 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_11 σ h
+    have hb : 1 - zF 11 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_12 (σ : ℕ → F) (h : Sat circuit σ) : bF 12 σ = 0 ∨ bF 12 σ = 1 := by
+  by_cases hn : nF 12 σ = 0
+  · right
+    have e1 := E1_12 σ h
+    rw [hn] at e1
+    have hz : zF 12 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_12 σ h
+    have hb : 1 - zF 12 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_13 (σ : ℕ → F) (h : Sat circuit σ) : bF 13 σ = 0 ∨ bF 13 σ = 1 := by
+  by_cases hn : nF 13 σ = 0
+  · right
+    have e1 := E1_13 σ h
+    rw [hn] at e1
+    have hz : zF 13 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_13 σ h
+    have hb : 1 - zF 13 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_14 (σ : ℕ → F) (h : Sat circuit σ) : bF 14 σ = 0 ∨ bF 14 σ = 1 := by
+  by_cases hn : nF 14 σ = 0
+  · right
+    have e1 := E1_14 σ h
+    rw [hn] at e1
+    have hz : zF 14 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_14 σ h
+    have hb : 1 - zF 14 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_15 (σ : ℕ → F) (h : Sat circuit σ) : bF 15 σ = 0 ∨ bF 15 σ = 1 := by
+  by_cases hn : nF 15 σ = 0
+  · right
+    have e1 := E1_15 σ h
+    rw [hn] at e1
+    have hz : zF 15 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_15 σ h
+    have hb : 1 - zF 15 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_16 (σ : ℕ → F) (h : Sat circuit σ) : bF 16 σ = 0 ∨ bF 16 σ = 1 := by
+  by_cases hn : nF 16 σ = 0
+  · right
+    have e1 := E1_16 σ h
+    rw [hn] at e1
+    have hz : zF 16 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_16 σ h
+    have hb : 1 - zF 16 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_17 (σ : ℕ → F) (h : Sat circuit σ) : bF 17 σ = 0 ∨ bF 17 σ = 1 := by
+  by_cases hn : nF 17 σ = 0
+  · right
+    have e1 := E1_17 σ h
+    rw [hn] at e1
+    have hz : zF 17 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_17 σ h
+    have hb : 1 - zF 17 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_18 (σ : ℕ → F) (h : Sat circuit σ) : bF 18 σ = 0 ∨ bF 18 σ = 1 := by
+  by_cases hn : nF 18 σ = 0
+  · right
+    have e1 := E1_18 σ h
+    rw [hn] at e1
+    have hz : zF 18 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_18 σ h
+    have hb : 1 - zF 18 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_19 (σ : ℕ → F) (h : Sat circuit σ) : bF 19 σ = 0 ∨ bF 19 σ = 1 := by
+  by_cases hn : nF 19 σ = 0
+  · right
+    have e1 := E1_19 σ h
+    rw [hn] at e1
+    have hz : zF 19 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_19 σ h
+    have hb : 1 - zF 19 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_20 (σ : ℕ → F) (h : Sat circuit σ) : bF 20 σ = 0 ∨ bF 20 σ = 1 := by
+  by_cases hn : nF 20 σ = 0
+  · right
+    have e1 := E1_20 σ h
+    rw [hn] at e1
+    have hz : zF 20 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_20 σ h
+    have hb : 1 - zF 20 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_21 (σ : ℕ → F) (h : Sat circuit σ) : bF 21 σ = 0 ∨ bF 21 σ = 1 := by
+  by_cases hn : nF 21 σ = 0
+  · right
+    have e1 := E1_21 σ h
+    rw [hn] at e1
+    have hz : zF 21 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_21 σ h
+    have hb : 1 - zF 21 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_22 (σ : ℕ → F) (h : Sat circuit σ) : bF 22 σ = 0 ∨ bF 22 σ = 1 := by
+  by_cases hn : nF 22 σ = 0
+  · right
+    have e1 := E1_22 σ h
+    rw [hn] at e1
+    have hz : zF 22 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_22 σ h
+    have hb : 1 - zF 22 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_23 (σ : ℕ → F) (h : Sat circuit σ) : bF 23 σ = 0 ∨ bF 23 σ = 1 := by
+  by_cases hn : nF 23 σ = 0
+  · right
+    have e1 := E1_23 σ h
+    rw [hn] at e1
+    have hz : zF 23 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_23 σ h
+    have hb : 1 - zF 23 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem bBit_24 (σ : ℕ → F) (h : Sat circuit σ) : bF 24 σ = 0 ∨ bF 24 σ = 1 := by
+  by_cases hn : nF 24 σ = 0
+  · right
+    have e1 := E1_24 σ h
+    rw [hn] at e1
+    have hz : zF 24 σ = 0 := by simpa using e1.symm
+    simp [bF, hz]
+  · left
+    have e2 := E2_24 σ h
+    have hb : 1 - zF 24 σ = 0 := by
+      rcases mul_eq_zero.mp e2 with h' | h'
+      · exact absurd h' hn
+      · exact h'
+    simpa [bF] using hb
+
+theorem borrowBit_0 (σ : ℕ → F) : borrowF 0 σ = 0 ∨ borrowF 0 σ = 1 := by
+  right
+  simp [borrowF, borrow, ZLC.toF, Xark.R1cs.LC.eval]
+
+theorem borrowBit_1 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 1 σ = 0 ∨ borrowF 1 σ = 1 := by
+  have hb : borrowF 1 σ = bF 0 σ := by
+    simp [borrowF, borrow, bLC, bF, zF, zvar, ZLC.toF, Xark.R1cs.LC.eval, sub_eq_add_neg]
+  rw [hb]
+  exact bBit_0 σ h
+
+theorem borrowBit_2 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 2 σ = 0 ∨ borrowF 2 σ = 1 := by
+  have hp := P_0 σ h
+  have hrec : borrowF 2 σ = borrowF 1 σ * bF 1 σ := by
+    rw [show borrowF 2 σ = (ZLC.toF (borrow 2)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_1 σ h with h1 | h1 <;> rcases bBit_1 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_3 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 3 σ = 0 ∨ borrowF 3 σ = 1 := by
+  have hp := P_1 σ h
+  have hrec : borrowF 3 σ = borrowF 2 σ * bF 2 σ := by
+    rw [show borrowF 3 σ = (ZLC.toF (borrow 3)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_2 σ h with h1 | h1 <;> rcases bBit_2 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_4 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 4 σ = 0 ∨ borrowF 4 σ = 1 := by
+  have hp := P_2 σ h
+  have hrec : borrowF 4 σ = borrowF 3 σ * bF 3 σ := by
+    rw [show borrowF 4 σ = (ZLC.toF (borrow 4)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_3 σ h with h1 | h1 <;> rcases bBit_3 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_5 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 5 σ = 0 ∨ borrowF 5 σ = 1 := by
+  have hp := P_3 σ h
+  have hrec : borrowF 5 σ = borrowF 4 σ * bF 4 σ := by
+    rw [show borrowF 5 σ = (ZLC.toF (borrow 5)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_4 σ h with h1 | h1 <;> rcases bBit_4 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_6 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 6 σ = 0 ∨ borrowF 6 σ = 1 := by
+  have hp := P_4 σ h
+  have hrec : borrowF 6 σ = borrowF 5 σ * bF 5 σ := by
+    rw [show borrowF 6 σ = (ZLC.toF (borrow 6)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_5 σ h with h1 | h1 <;> rcases bBit_5 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_7 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 7 σ = 0 ∨ borrowF 7 σ = 1 := by
+  have hp := P_5 σ h
+  have hrec : borrowF 7 σ = borrowF 6 σ * bF 6 σ := by
+    rw [show borrowF 7 σ = (ZLC.toF (borrow 7)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_6 σ h with h1 | h1 <;> rcases bBit_6 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_8 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 8 σ = 0 ∨ borrowF 8 σ = 1 := by
+  have hp := P_6 σ h
+  have hrec : borrowF 8 σ = borrowF 7 σ * bF 7 σ := by
+    rw [show borrowF 8 σ = (ZLC.toF (borrow 8)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_7 σ h with h1 | h1 <;> rcases bBit_7 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_9 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 9 σ = 0 ∨ borrowF 9 σ = 1 := by
+  have hp := P_7 σ h
+  have hrec : borrowF 9 σ = borrowF 8 σ * bF 8 σ := by
+    rw [show borrowF 9 σ = (ZLC.toF (borrow 9)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_8 σ h with h1 | h1 <;> rcases bBit_8 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_10 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 10 σ = 0 ∨ borrowF 10 σ = 1 := by
+  have hp := P_8 σ h
+  have hrec : borrowF 10 σ = borrowF 9 σ * bF 9 σ := by
+    rw [show borrowF 10 σ = (ZLC.toF (borrow 10)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_9 σ h with h1 | h1 <;> rcases bBit_9 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_11 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 11 σ = 0 ∨ borrowF 11 σ = 1 := by
+  have hp := P_9 σ h
+  have hrec : borrowF 11 σ = borrowF 10 σ * bF 10 σ := by
+    rw [show borrowF 11 σ = (ZLC.toF (borrow 11)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_10 σ h with h1 | h1 <;> rcases bBit_10 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_12 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 12 σ = 0 ∨ borrowF 12 σ = 1 := by
+  have hp := P_10 σ h
+  have hrec : borrowF 12 σ = borrowF 11 σ * bF 11 σ := by
+    rw [show borrowF 12 σ = (ZLC.toF (borrow 12)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_11 σ h with h1 | h1 <;> rcases bBit_11 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_13 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 13 σ = 0 ∨ borrowF 13 σ = 1 := by
+  have hp := P_11 σ h
+  have hrec : borrowF 13 σ = borrowF 12 σ * bF 12 σ := by
+    rw [show borrowF 13 σ = (ZLC.toF (borrow 13)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_12 σ h with h1 | h1 <;> rcases bBit_12 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_14 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 14 σ = 0 ∨ borrowF 14 σ = 1 := by
+  have hp := P_12 σ h
+  have hrec : borrowF 14 σ = borrowF 13 σ * bF 13 σ := by
+    rw [show borrowF 14 σ = (ZLC.toF (borrow 14)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_13 σ h with h1 | h1 <;> rcases bBit_13 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_15 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 15 σ = 0 ∨ borrowF 15 σ = 1 := by
+  have hp := P_13 σ h
+  have hrec : borrowF 15 σ = borrowF 14 σ * bF 14 σ := by
+    rw [show borrowF 15 σ = (ZLC.toF (borrow 15)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_14 σ h with h1 | h1 <;> rcases bBit_14 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_16 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 16 σ = 0 ∨ borrowF 16 σ = 1 := by
+  have hp := P_14 σ h
+  have hrec : borrowF 16 σ = borrowF 15 σ * bF 15 σ := by
+    rw [show borrowF 16 σ = (ZLC.toF (borrow 16)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_15 σ h with h1 | h1 <;> rcases bBit_15 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_17 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 17 σ = 0 ∨ borrowF 17 σ = 1 := by
+  have hp := P_15 σ h
+  have hrec : borrowF 17 σ = borrowF 16 σ * bF 16 σ := by
+    rw [show borrowF 17 σ = (ZLC.toF (borrow 17)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_16 σ h with h1 | h1 <;> rcases bBit_16 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_18 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 18 σ = 0 ∨ borrowF 18 σ = 1 := by
+  have hp := P_16 σ h
+  have hrec : borrowF 18 σ = borrowF 17 σ * bF 17 σ := by
+    rw [show borrowF 18 σ = (ZLC.toF (borrow 18)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_17 σ h with h1 | h1 <;> rcases bBit_17 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_19 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 19 σ = 0 ∨ borrowF 19 σ = 1 := by
+  have hp := P_17 σ h
+  have hrec : borrowF 19 σ = borrowF 18 σ * bF 18 σ := by
+    rw [show borrowF 19 σ = (ZLC.toF (borrow 19)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_18 σ h with h1 | h1 <;> rcases bBit_18 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_20 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 20 σ = 0 ∨ borrowF 20 σ = 1 := by
+  have hp := P_18 σ h
+  have hrec : borrowF 20 σ = borrowF 19 σ * bF 19 σ := by
+    rw [show borrowF 20 σ = (ZLC.toF (borrow 20)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_19 σ h with h1 | h1 <;> rcases bBit_19 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_21 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 21 σ = 0 ∨ borrowF 21 σ = 1 := by
+  have hp := P_19 σ h
+  have hrec : borrowF 21 σ = borrowF 20 σ * bF 20 σ := by
+    rw [show borrowF 21 σ = (ZLC.toF (borrow 21)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_20 σ h with h1 | h1 <;> rcases bBit_20 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_22 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 22 σ = 0 ∨ borrowF 22 σ = 1 := by
+  have hp := P_20 σ h
+  have hrec : borrowF 22 σ = borrowF 21 σ * bF 21 σ := by
+    rw [show borrowF 22 σ = (ZLC.toF (borrow 22)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_21 σ h with h1 | h1 <;> rcases bBit_21 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_23 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 23 σ = 0 ∨ borrowF 23 σ = 1 := by
+  have hp := P_21 σ h
+  have hrec : borrowF 23 σ = borrowF 22 σ * bF 22 σ := by
+    rw [show borrowF 23 σ = (ZLC.toF (borrow 23)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_22 σ h with h1 | h1 <;> rcases bBit_22 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_24 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 24 σ = 0 ∨ borrowF 24 σ = 1 := by
+  have hp := P_22 σ h
+  have hrec : borrowF 24 σ = borrowF 23 σ * bF 23 σ := by
+    rw [show borrowF 24 σ = (ZLC.toF (borrow 24)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_23 σ h with h1 | h1 <;> rcases bBit_23 σ h with h2 | h2 <;> simp [h1, h2]
+
+theorem borrowBit_25 (σ : ℕ → F) (h : Sat circuit σ) : borrowF 25 σ = 0 ∨ borrowF 25 σ = 1 := by
+  have hp := P_23 σ h
+  have hrec : borrowF 25 σ = borrowF 24 σ * bF 24 σ := by
+    rw [show borrowF 25 σ = (ZLC.toF (borrow 25)).eval σ from rfl]
+    rw [← hp]
+    simp [borrowF, bF]
+  rw [hrec]
+  rcases borrowBit_24 σ h with h1 | h1 <;> rcases bBit_24 σ h with h2 | h2 <;> simp [h1, h2]
+
 end Xark.Circuits.Rsa2048
