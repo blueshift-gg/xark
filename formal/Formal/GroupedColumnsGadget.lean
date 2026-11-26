@@ -139,17 +139,21 @@ outputs. -/
 /-- The integer value of the call's `i`-th input limb. -/
 def inLimb (ins : List F) (i : ℕ) : ℤ := ((ins.getD i 0).val : ℤ)
 
-/-- The gadget's contract: the product identity over the integers. -/
-def Spec (ins _outs : List F) : Prop :=
-  Xark.Rsa.GroupedColumns.val (fun i => inLimb ins i)
-    * Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (25 + i))
-  = Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (75 + i))
-    * Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (50 + i))
-    + Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (100 + i))
-
 /-- The 125 input limbs are below `2^82`. -/
 def Assumptions (ins : List F) : Prop :=
   ∀ i < 125, (ins.getD i 0).val < 2 ^ 82
+
+/-- The gadget's contract: under the limb bound, the product identity over the integers.
+The bound is a premise rather than an `Assumptions` hypothesis so that the theorem
+assumes nothing of its inputs — a caller supplies it from the `range_check_q`/`range_check_r`
+contracts, and `lean-export --coverage` then needs no obligation for the LC plugs. -/
+def Spec (ins _outs : List F) : Prop :=
+  Assumptions ins →
+    Xark.Rsa.GroupedColumns.val (fun i => inLimb ins i)
+      * Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (25 + i))
+    = Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (75 + i))
+      * Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (50 + i))
+      + Xark.Rsa.GroupedColumns.val (fun i => inLimb ins (100 + i))
 
 /-- The template's inputs are its 125 plugs, in order. -/
 theorem inputs_eq :
@@ -317,5 +321,262 @@ theorem prodRowQ_val (σ : TVar → F) (h : template.Sat σ)
     have h4 : (2 ^ 82 - 1) * (2 ^ 82 - 1) < 2 ^ 164 := by norm_num
     exact lt_of_le_of_lt h3 (lt_trans h4 two_pow_164_lt_r)
   rw [hcast, ZMod.val_natCast_of_lt hprod]
+
+/-! ### Convolution bounds
+
+The limbs are below `2^82`, so a column's convolution is below `25 · 2^164 < 2^169` and
+non-negative. The difference column `cols` (left product, minus quotient product, minus
+the right-hand side) is therefore in `(−(2^169 + 2^82), 2^169)`. -/
+
+/-- The a-limbs of an assignment. -/
+def plugA (σ : TVar → F) : ℕ → ℤ := fun i => ((σ (.plug i)).val : ℤ)
+/-- The b-limbs of an assignment. -/
+def plugB (σ : TVar → F) : ℕ → ℤ := fun i => ((σ (.plug (25 + i))).val : ℤ)
+/-- The m-limbs of an assignment. -/
+def plugM (σ : TVar → F) : ℕ → ℤ := fun i => ((σ (.plug (50 + i))).val : ℤ)
+/-- The q-limbs of an assignment. -/
+def plugQ (σ : TVar → F) : ℕ → ℤ := fun i => ((σ (.plug (75 + i))).val : ℤ)
+/-- The right-hand side limbs of an assignment. -/
+def plugR (σ : TVar → F) : ℕ → ℤ := fun i => ((σ (.plug (100 + i))).val : ℤ)
+
+theorem conv_nonneg (a b : ℕ → ℤ) (ha : ∀ i < 25, 0 ≤ a i) (hb : ∀ i < 25, 0 ≤ b i)
+    (c : ℕ) : 0 ≤ Xark.Rsa.GroupedColumns.conv a b c := by
+  rw [Xark.Rsa.GroupedColumns.conv]
+  refine Finset.sum_nonneg fun i hi => Finset.sum_nonneg fun k hk => ?_
+  by_cases h : i + k = c
+  · rw [if_pos h]
+    exact mul_nonneg (ha i (Finset.mem_range.mp hi)) (hb k (Finset.mem_range.mp hk))
+  · rw [if_neg h]
+
+/-- For a fixed `i` the inner convolution sum has at most one non-zero term. -/
+theorem inner_conv (a b : ℕ → ℤ) (c i : ℕ) :
+    (∑ k ∈ Finset.range 25, (if i + k = c then a i * b k else 0))
+      = if i ≤ c ∧ c - i < 25 then a i * b (c - i) else 0 := by
+  by_cases h : i ≤ c ∧ c - i < 25
+  · rw [if_pos h]
+    have hk : c - i ∈ Finset.range 25 := Finset.mem_range.mpr h.2
+    rw [Finset.sum_eq_single (c - i)]
+    · rw [if_pos (by omega : i + (c - i) = c)]
+    · intro k _ hne
+      rw [if_neg (by intro hik; exact hne (by omega))]
+    · intro hnot
+      exact absurd hk hnot
+  · rw [if_neg h]
+    refine Finset.sum_eq_zero fun k hk => ?_
+    have hk' := Finset.mem_range.mp hk
+    rw [if_neg (by intro hik; exact h ⟨by omega, by omega⟩)]
+
+theorem conv_lt (a b : ℕ → ℤ) (ha : ∀ i < 25, 0 ≤ a i ∧ a i < 2 ^ 82)
+    (hb : ∀ i < 25, 0 ≤ b i ∧ b i < 2 ^ 82) (c : ℕ) :
+    Xark.Rsa.GroupedColumns.conv a b c < 2 ^ 169 := by
+  rw [Xark.Rsa.GroupedColumns.conv]
+  have hterm : ∀ i ∈ Finset.range 25,
+      (∑ k ∈ Finset.range 25, (if i + k = c then a i * b k else 0))
+        ≤ (2 ^ 82 - 1) * (2 ^ 82 - 1) := by
+    intro i hi
+    have hi' := Finset.mem_range.mp hi
+    rw [inner_conv]
+    by_cases h : i ≤ c ∧ c - i < 25
+    · rw [if_pos h]
+      have h1 : a i ≤ 2 ^ 82 - 1 := by have := (ha i hi').2; omega
+      have h2 : b (c - i) ≤ 2 ^ 82 - 1 := by have := (hb (c - i) h.2).2; omega
+      exact mul_le_mul h1 h2 (by have := (hb (c - i) h.2).1; omega) (by positivity)
+    · rw [if_neg h]; positivity
+  have hle : (∑ i ∈ Finset.range 25, ∑ k ∈ Finset.range 25,
+      (if i + k = c then a i * b k else 0))
+      ≤ ∑ i ∈ Finset.range 25, ((2 ^ 82 - 1) * (2 ^ 82 - 1) : ℤ) :=
+    Finset.sum_le_sum fun i hi => hterm i hi
+  have hconst : (∑ _i ∈ Finset.range 25, ((2 ^ 82 - 1) * (2 ^ 82 - 1) : ℤ))
+      = 25 * ((2 ^ 82 - 1) * (2 ^ 82 - 1) : ℤ) := by
+    simp only [Finset.sum_const, Finset.card_range, nsmul_eq_mul]
+    norm_num
+  have hnum : 25 * ((2 ^ 82 - 1) * (2 ^ 82 - 1) : ℤ) < 2 ^ 169 := by norm_num
+  linarith
+
+/-- The column difference `conv a b c − conv q m c − rhs c` is in `(−(2^169+2^82), 2^169)`. -/
+theorem cols_bounds (a b m q r : ℕ → ℤ)
+    (ha : ∀ i < 25, 0 ≤ a i ∧ a i < 2 ^ 82)
+    (hb : ∀ i < 25, 0 ≤ b i ∧ b i < 2 ^ 82)
+    (hm : ∀ i < 25, 0 ≤ m i ∧ m i < 2 ^ 82)
+    (hq : ∀ i < 25, 0 ≤ q i ∧ q i < 2 ^ 82)
+    (hr : ∀ i < 25, 0 ≤ r i ∧ r i < 2 ^ 82) (c : ℕ) :
+    -(2 ^ 169 + 2 ^ 82) < Xark.Rsa.GroupedColumns.cols a b q m r c
+      ∧ Xark.Rsa.GroupedColumns.cols a b q m r c < 2 ^ 169 := by
+  have h1 := conv_lt a b ha hb c
+  have h1' : 0 ≤ Xark.Rsa.GroupedColumns.conv a b c :=
+    conv_nonneg a b (fun i hi => (ha i hi).1) (fun i hi => (hb i hi).1) c
+  have h2 := conv_lt q m hq hm c
+  have h2' : 0 ≤ Xark.Rsa.GroupedColumns.conv q m c :=
+    conv_nonneg q m (fun i hi => (hq i hi).1) (fun i hi => (hm i hi).1) c
+  have hr0 : 0 ≤ (if c < 25 then r c else 0) := by
+    by_cases h : c < 25
+    · rw [if_pos h]; exact (hr c (by omega)).1
+    · rw [if_neg h]
+  have hrc : (if c < 25 then r c else 0) < 2 ^ 82 := by
+    by_cases h : c < 25
+    · rw [if_pos h]; exact (hr c (by omega)).2
+    · rw [if_neg h]; norm_num
+  constructor <;> rw [Xark.Rsa.GroupedColumns.cols] <;> linarith
+
+/-! ### From witnesses to convolutions -/
+
+theorem two_pow_169_lt_r : (2 ^ 169 : ℕ) < r :=
+  Xark.Templates.ToBits.two_pow_lt_r' (by norm_num)
+
+theorem shadow_terms (σ : TVar → F) (ts : List (ℤ × TVar)) :
+    Xark.Circuit.shadow σ ⟨0, ts⟩ = (ts.map fun t => t.1 * ((σ t.2).val : ℤ)).sum := by
+  simp [Xark.Circuit.shadow]
+
+theorem lhsTerms_coeff {c : ℕ} {t : ℤ × TVar} (ht : t ∈ lhsTerms c) : t.1 = 1 := by
+  rw [lhsTerms] at ht
+  obtain ⟨i, _, hti⟩ := List.mem_flatMap.mp ht
+  obtain ⟨k, _, rfl⟩ := List.mem_map.mp hti
+  rfl
+
+theorem rhsTerms_coeff {c : ℕ} {t : ℤ × TVar} (ht : t ∈ rhsTerms c) : t.1 = 1 := by
+  rw [rhsTerms] at ht
+  rcases List.mem_append.mp ht with h | h
+  · obtain ⟨i, _, hti⟩ := List.mem_flatMap.mp h
+    obtain ⟨k, _, rfl⟩ := List.mem_map.mp hti
+    rfl
+  · by_cases hc : c < 25
+    · rw [if_pos hc] at h
+      obtain rfl := List.mem_singleton.mp h
+      rfl
+    · rw [if_neg hc] at h
+      exact absurd h (by simp)
+
+theorem shadow_lhs (σ : TVar → F) (c : ℕ) :
+    Xark.Circuit.shadow σ (lhsZ c) = ((lhsTerms c).map fun t => ((σ t.2).val : ℤ)).sum := by
+  rw [lhsZ, shadow_terms]
+  have hmap : (lhsTerms c).map (fun t => t.1 * ((σ t.2).val : ℤ))
+      = (lhsTerms c).map fun t => ((σ t.2).val : ℤ) := by
+    refine List.map_congr_left fun t ht => ?_
+    rw [lhsTerms_coeff ht, one_mul]
+  rw [hmap]
+
+theorem shadow_rhs (σ : TVar → F) (c : ℕ) :
+    Xark.Circuit.shadow σ (rhsZ c) = ((rhsTerms c).map fun t => ((σ t.2).val : ℤ)).sum := by
+  rw [rhsZ, shadow_terms]
+  have hmap : (rhsTerms c).map (fun t => t.1 * ((σ t.2).val : ℤ))
+      = (rhsTerms c).map fun t => ((σ t.2).val : ℤ) := by
+    refine List.map_congr_left fun t ht => ?_
+    rw [rhsTerms_coeff ht, one_mul]
+  rw [hmap]
+
+theorem shadow_lhs_conv (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (c : ℕ) :
+    Xark.Circuit.shadow σ (lhsZ c) = Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c := by
+  rw [shadow_lhs, sum_lhsTerms c (fun v => ((σ v).val : ℤ))]
+  rw [Xark.Rsa.GroupedColumns.conv]
+  refine Finset.sum_congr rfl fun i hi => Finset.sum_congr rfl fun k hk => ?_
+  have hi' := Finset.mem_range.mp hi
+  have hk' := Finset.mem_range.mp hk
+  by_cases hc : i + k = c
+  · rw [if_pos hc, if_pos hc]
+    rw [prodRowA_val σ h hb hi' hk', Nat.cast_mul]
+    rfl
+  · rw [if_neg hc, if_neg hc]
+
+theorem shadow_rhs_conv (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (c : ℕ) :
+    Xark.Circuit.shadow σ (rhsZ c)
+      = Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+        + (if c < 25 then plugR σ c else 0) := by
+  rw [shadow_rhs, sum_rhsTerms c (fun v => ((σ v).val : ℤ))]
+  rw [Xark.Rsa.GroupedColumns.conv]
+  congr 1
+  · refine Finset.sum_congr rfl fun i hi => Finset.sum_congr rfl fun k hk => ?_
+    have hi' := Finset.mem_range.mp hi
+    have hk' := Finset.mem_range.mp hk
+    by_cases hc : i + k = c
+    · rw [if_pos hc, if_pos hc]
+      rw [prodRowQ_val σ h hb hi' hk', Nat.cast_mul]
+      rfl
+    · rw [if_neg hc, if_neg hc]
+
+theorem eval_lhs_eq (σ : TVar → F) (c : ℕ) :
+    (lhs c).eval σ = ((Xark.Circuit.shadow σ (lhsZ c) : ℤ) : F) :=
+  Xark.Circuit.shadow_toF σ (lhsZ c)
+
+theorem eval_rhs_eq (σ : TVar → F) (c : ℕ) :
+    (rhs c).eval σ = ((Xark.Circuit.shadow σ (rhsZ c) : ℤ) : F) :=
+  Xark.Circuit.shadow_toF σ (rhsZ c)
+
+/-- The left column's field value is the cast of its convolution. -/
+theorem eval_lhs_val (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (c : ℕ) :
+    (((lhs c).eval σ).val : ℤ) = Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c := by
+  have h169 : (2 : ℤ) ^ 169 < (r : ℤ) := by exact_mod_cast two_pow_169_lt_r
+  have h0 : 0 ≤ Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c :=
+    conv_nonneg _ _ (fun i _ => by change (0 : ℤ) ≤ ((σ (.plug i)).val : ℤ); exact Int.natCast_nonneg _)
+      (fun i _ => by change (0 : ℤ) ≤ ((σ (.plug (25 + i))).val : ℤ); exact Int.natCast_nonneg _) c
+  have hlt : Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c < 2 ^ 169 :=
+    conv_lt _ _
+      (fun i _ => ⟨by change (0 : ℤ) ≤ ((σ (.plug i)).val : ℤ); exact Int.natCast_nonneg _,
+        by change ((σ (.plug i)).val : ℤ) < (2 ^ 82 : ℤ); exact_mod_cast hb i (by omega)⟩)
+      (fun i _ => ⟨by change (0 : ℤ) ≤ ((σ (.plug (25 + i))).val : ℤ); exact Int.natCast_nonneg _,
+        by change ((σ (.plug (25 + i))).val : ℤ) < (2 ^ 82 : ℤ); exact_mod_cast hb (25 + i) (by omega)⟩) c
+  have hltN : (Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c).toNat < r := by
+    have hz : ((Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c).toNat : ℤ)
+        = Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c := Int.toNat_of_nonneg h0
+    have : ((Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c).toNat : ℤ) < (r : ℤ) := by
+      rw [hz]; exact lt_trans hlt h169
+    exact_mod_cast this
+  have hcast : ((Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c : ℤ) : F)
+      = ((Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) c).toNat : ℕ) := by
+    rw [← Int.cast_natCast, Int.toNat_of_nonneg h0]
+  rw [eval_lhs_eq, shadow_lhs_conv σ h hb c, hcast, ZMod.val_natCast_of_lt hltN]
+  exact Int.toNat_of_nonneg h0
+
+/-- The right column's field value is the cast of its convolution plus the right-hand
+side's limb when the column has one. -/
+theorem eval_rhs_val (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (c : ℕ) :
+    (((rhs c).eval σ).val : ℤ)
+      = Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+        + (if c < 25 then plugR σ c else 0) := by
+  have h170 : (2 : ℤ) ^ 170 < (r : ℤ) := by
+    exact_mod_cast Xark.Templates.ToBits.two_pow_lt_r' (by norm_num : 170 ≤ 253)
+  have h1 : 0 ≤ Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c :=
+    conv_nonneg _ _ (fun i _ => by change (0 : ℤ) ≤ ((σ (.plug (75 + i))).val : ℤ); exact Int.natCast_nonneg _)
+      (fun i _ => by change (0 : ℤ) ≤ ((σ (.plug (50 + i))).val : ℤ); exact Int.natCast_nonneg _) c
+  have hlt1 : Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c < 2 ^ 169 :=
+    conv_lt _ _
+      (fun i _ => ⟨by change (0 : ℤ) ≤ ((σ (.plug (75 + i))).val : ℤ); exact Int.natCast_nonneg _,
+        by change ((σ (.plug (75 + i))).val : ℤ) < (2 ^ 82 : ℤ); exact_mod_cast hb (75 + i) (by omega)⟩)
+      (fun i _ => ⟨by change (0 : ℤ) ≤ ((σ (.plug (50 + i))).val : ℤ); exact Int.natCast_nonneg _,
+        by change ((σ (.plug (50 + i))).val : ℤ) < (2 ^ 82 : ℤ); exact_mod_cast hb (50 + i) (by omega)⟩) c
+  have h2 : 0 ≤ (if c < 25 then plugR σ c else 0) := by
+    by_cases hc : c < 25
+    · rw [if_pos hc]; change (0 : ℤ) ≤ ((σ (.plug (100 + c))).val : ℤ); exact Int.natCast_nonneg _
+    · rw [if_neg hc]
+  have hr : (if c < 25 then plugR σ c else 0) < 2 ^ 82 := by
+    by_cases hc : c < 25
+    · rw [if_pos hc]
+      change ((σ (.plug (100 + c))).val : ℤ) < (2 ^ 82 : ℤ)
+      exact_mod_cast hb (100 + c) (by omega)
+    · rw [if_neg hc]; norm_num
+  have h0 : 0 ≤ Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+      + (if c < 25 then plugR σ c else 0) := by linarith
+  have hlt : Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+      + (if c < 25 then plugR σ c else 0) < 2 ^ 170 := by linarith
+  have hltN : (Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+      + (if c < 25 then plugR σ c else 0)).toNat < r := by
+    have hz : ((Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+        + (if c < 25 then plugR σ c else 0)).toNat : ℤ)
+        = Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+          + (if c < 25 then plugR σ c else 0) := Int.toNat_of_nonneg h0
+    have : ((Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+        + (if c < 25 then plugR σ c else 0)).toNat : ℤ) < (r : ℤ) := by
+      rw [hz]; exact lt_trans hlt h170
+    exact_mod_cast this
+  have hcast : ((Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+        + (if c < 25 then plugR σ c else 0) : ℤ) : F)
+      = ((Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) c
+        + (if c < 25 then plugR σ c else 0)).toNat : ℕ) := by
+    rw [← Int.cast_natCast, Int.toNat_of_nonneg h0]
+  rw [eval_rhs_eq, shadow_rhs_conv σ h hb c, hcast, ZMod.val_natCast_of_lt hltN]
+  exact Int.toNat_of_nonneg h0
 
 end Xark.Templates.GroupedColumns
