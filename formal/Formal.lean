@@ -32,6 +32,8 @@ import Formal.Template
 import Formal.Circuit
 import Formal.Circuits.Secp256k1Ecdsa
 import Formal.Circuits.Rsa2048
+import Formal.Circuits.Rsa2048Verify
+import Formal.Circuits.Rsa2048Chain
 import Formal.Shadow
 import Formal.RsaCalls
 import Formal.Rsa2048Calls
