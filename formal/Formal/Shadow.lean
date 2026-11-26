@@ -111,4 +111,22 @@ theorem val_of_mul {σ : V → F} {a b : ℤ} {t : V}
   rw [← h2]
   exact ZMod.val_natCast_of_lt hlt
 
+/-- **A plug's shadow is its products' sum.** Every variable of the combination is a
+product row's output whose factors' values are the integers `fa`, `fb`; then the shadow is
+the combination's constant plus the coefficients times the integer products. This is the
+step from the circuit's product rows to a column's integer value. -/
+theorem shadow_of_products {σ : ℕ → F} {l : ZLC} (fa fb : ℕ → ℤ)
+    (hterm : ∀ t ∈ l.terms, σ t.2 = (fa t.2 : F) * (fb t.2 : F))
+    (ha : ∀ t ∈ l.terms, 0 ≤ fa t.2) (hb : ∀ t ∈ l.terms, 0 ≤ fb t.2)
+    (hab : ∀ t ∈ l.terms, fa t.2 * fb t.2 < (r : ℤ)) :
+    shadow σ l = l.const + (l.terms.map fun t => t.1 * (fa t.2 * fb t.2)).sum := by
+  simp only [shadow]
+  have hmap : l.terms.map (fun t : ℤ × ℕ => t.1 * (((σ t.2).val : ℕ) : ℤ))
+      = l.terms.map fun t => t.1 * (fa t.2 * fb t.2) := by
+    refine List.map_congr_left fun t ht => ?_
+    show t.1 * (((σ t.2).val : ℕ) : ℤ) = t.1 * (fa t.2 * fb t.2)
+    rw [val_of_mul (hterm t ht) (ha t ht) (hb t ht) (hab t ht),
+      Int.toNat_of_nonneg (by have := ha t ht; have := hb t ht; positivity)]
+  rw [hmap]
+
 end Xark.Circuit
