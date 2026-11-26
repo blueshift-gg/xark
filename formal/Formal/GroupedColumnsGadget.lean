@@ -972,4 +972,66 @@ theorem top_row (σ : TVar → F) (h : template.Sat σ)
   rw [hd48, show BI = ((2 ^ 88 : ℕ) : ℤ) by norm_num [BI]]
   exact hz0
 
+/-! ### The contract -/
+
+theorem carry_spec (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    Xark.Rsa.GroupedColumns.CarrySpec (dcol σ) (carry σ) :=
+  Xark.Rsa.GroupedColumns.carry_spec_of_steps (dcol σ) (carry σ)
+    (fun j hj => step_row σ h hb j hj) (top_row σ h hb)
+
+theorem val_a_eq (σ : TVar → F) :
+    Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) i)
+      = Xark.Rsa.GroupedColumns.val (plugA σ) := by
+  rw [Xark.Rsa.GroupedColumns.val, Xark.Rsa.GroupedColumns.val]
+  refine Finset.sum_congr rfl fun i hi => ?_
+  have hi25 := Finset.mem_range.mp hi
+  rw [inLimb, ins_getD σ (by omega)]
+  rfl
+
+theorem val_limb_eq (σ : TVar → F) (off : ℕ) (hoff : off + 25 ≤ 125) :
+    Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (off + i))
+      = Xark.Rsa.GroupedColumns.val (fun i => ((σ (.plug (off + i))).val : ℤ)) := by
+  rw [Xark.Rsa.GroupedColumns.val, Xark.Rsa.GroupedColumns.val]
+  refine Finset.sum_congr rfl fun i hi => ?_
+  have hi25 := Finset.mem_range.mp hi
+  rw [inLimb, ins_getD σ (by omega)]
+
+/-- **Soundness.** Under a satisfying assignment, the 125 input limbs (when below
+`2^82`) satisfy `val a · val b = val q · val m + val rhs` over the integers. -/
+theorem soundness (σ : TVar → F) (h : template.Sat σ) :
+    Spec (template.ins σ) (template.outs σ) := by
+  intro hbins
+  have hbσ : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82 := by
+    intro i hi
+    have := hbins i hi
+    rwa [ins_getD σ hi] at this
+  have hcarry := carry_spec σ h hbσ
+  have hspec := Xark.Rsa.GroupedColumns.soundness (dcol σ) (carry σ) hcarry
+  have hmul := Xark.Rsa.GroupedColumns.mul_eq (plugA σ) (plugB σ) (plugM σ) (plugQ σ)
+    (plugR σ) hspec
+  have hB : Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (25 + i))
+      = Xark.Rsa.GroupedColumns.val (plugB σ) := by
+    rw [val_limb_eq σ 25 (by norm_num)]
+    rfl
+  have hM : Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (50 + i))
+      = Xark.Rsa.GroupedColumns.val (plugM σ) := by
+    rw [val_limb_eq σ 50 (by norm_num)]
+    rfl
+  have hQ : Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (75 + i))
+      = Xark.Rsa.GroupedColumns.val (plugQ σ) := by
+    rw [val_limb_eq σ 75 (by norm_num)]
+    rfl
+  have hR : Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (100 + i))
+      = Xark.Rsa.GroupedColumns.val (plugR σ) := by
+    rw [val_limb_eq σ 100 (by norm_num)]
+    rfl
+  show Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) i)
+      * Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (25 + i))
+    = Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (75 + i))
+      * Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (50 + i))
+      + Xark.Rsa.GroupedColumns.val (fun i => inLimb (template.ins σ) (100 + i))
+  rw [val_a_eq σ, hB, hM, hQ, hR]
+  exact hmul
+
 end Xark.Templates.GroupedColumns
