@@ -434,7 +434,17 @@ with `borrow_0 = 1`, `borrow_{i+1} = borrow_i − u_i`, which reproduces plug 25
 `Σ out_i W^i = Σ N_i W^i − borrow_0 + W^25·borrow_25 = chainN − 1`. So the proof is:
 write the borrow LCs recursively (`b_0 = 1 − z_0`, `b_{i+1} = b_i − u_i`), prove each
 `out_i` identity and the final row's `b_25 = 0`, telescope, and convert to
-`val (limb (callAt 545) σ 25) = chainN − 1` (both sides `< r`). The Rust's
+`val (limb (callAt 545) σ 25) = chainN − 1` (both sides `< r`).
+
+Row layout (101 rows): row 0 = n_top; then, in order, 3 `is_zero` rows for limb 0,
+3 for limb 1, product row `borrow_2 = b_0·b_1` (row 7), 3 for limb 2, product
+`borrow_3`, …, 3 for limb 24, and the final top-borrow row (100, `a = var 4475`,
+`b = c = 0`, i.e. `borrow_25 = 0`). The rows are `ZRow`s; `s544.rows` is the
+`ZRow.toF` image, so to get the integer rows pattern-match
+`match s544 with | .glue rs => rs`. The is_zero rows for a limb are
+`N_i·w_i = z_i`, `N_i·(1−z_i) = 0`, `w_i·(1−z_i) = 0` (row `a` = the 17–20-term
+limb LC), and the product row is `b_i·b_{i+1} = u` (or `borrow_i·(1−z_i) = u` for
+the later borrows). The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
