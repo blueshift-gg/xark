@@ -84,8 +84,8 @@ private; the digest can be private too.
   `formal/templates/` (`require_lt__17x121`, `range_check_limbs__17x121`). The
   internal 25×82 conversion, range checks and paired-column carry rows are
   hand-written plain functions in `src/lib.rs` (their bound argument is in the
-  doc comments); a `cargo xtask lean-export --coverage` pass in a normal
-  checkout should cover their production call sites, and the R1CS digest needs
-  the usual `cargo xtask digests --update` / CHANGELOG follow-up.
+  doc comments). `cargo xtask lean-export --coverage` and `cargo xtask digests`
+  pass in the normal checkout; the optimized digest is pinned in
+  `tests/stable-digests.txt`.
 
 Part of [xark](https://github.com/blueshift-gg/xark): zero-knowledge circuits in plain Rust, verified on Solana.
