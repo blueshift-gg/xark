@@ -194,3 +194,29 @@ Until one lands, the row→step-identity bridge stays prose in `docs/security.md
 - No `native_decide`; no statement changes; no new axioms.
 - No deleting q/r or carry checks without a sound replacement.
 - No 24×86/23×90 paired widths (they violate `S_j < Fr`).
+
+## Where the rsa2048 composition stands (end of session)
+
+Every ingredient exists and is proven:
+
+| ingredient | lemma |
+|---|---|
+| a call's rows give its template's `Sat` | `Call.sat_rows` |
+| a step's rows give its integer row (`num = 2^164·k`) | `GroupedCarry.carry_of_sat_shadow` |
+| a plug's shadow is its products' sum | `Shadow.shadow_of_products` |
+| 24 step rows → `CarrySpec` | `GroupedColumns.carry_spec_of_steps` |
+| `CarrySpec` → the column identity → `a·b = q·m + r` | `GroupedColumns.soundness`, `mul_eq` |
+| 16 squarings + the final multiply | `RsaChain.chain` |
+| the encoded message | `RsaEm.em` |
+| the production circuit's call contracts | `Rsa2048Calls` (408 / 17 / 16, `decide +kernel`) |
+
+What is left is the **row-level model of the `grouped_columns` template** (704 KB, 3,435
+rows = 1,250 products + 24 × 91 step rows + 1 top row): its `rows_eq` by `decide +kernel`
+with products at `base + 2(i·25+k)`, then the assembly above. Marking the function as a
+`#[gadget]` and exporting the harness is already measured to work; the marker cannot land
+until the proof imports `Formal.Templates.GroupedColumns` (the exporter enforces it). After
+that, re-export the circuit: 17 top-level calls, and the composition is 17 `sat_call`s
+with the q/r `Spec`s supplying the limb bounds.
+
+The work is a single large proof plus mechanical instantiation, not an open design
+question; every number it needs is in this file.
