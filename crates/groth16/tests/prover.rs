@@ -23,6 +23,7 @@ use ark_serialize::{CanonicalSerialize, Compress};
 use ark_snark::SNARK;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use xark_groth16::pk::{G1Query, MAX_HEADER_LEN, PkError, PkSource};
 use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{Accelerated, Prover};
 use xark_groth16::{
@@ -1385,6 +1386,34 @@ fn transcoding_and_tee_produce_the_uncompressed_key() {
     prove(&src, &z, &mut spk, &mut ChaCha20Rng::seed_from_u64(2), &cfg).unwrap();
     assert!(spk.finish_tee().unwrap());
     assert_eq!(*buf.0.lock().unwrap(), want);
+
+    // Corrupt the first point of the next chunk. The previous chunk still
+    // reaches the prover in order and the partial cache cannot be finalized.
+    let mut corrupt = compressed.clone();
+    let point_size = pk.a_query[0].compressed_size();
+    let a_offset =
+        MAX_HEADER_LEN + pk.vk.compressed_size() + 2 * point_size + std::mem::size_of::<u64>();
+    let second_chunk = a_offset + cfg.msm_chunk * point_size;
+    corrupt[second_chunk..second_chunk + point_size].fill(0xff);
+    let mut spk = SerializedPk::from_bytes(&corrupt).unwrap();
+    spk.tee_uncompressed(Box::new(SharedBuf::default()))
+        .unwrap();
+    let mut offset = 0;
+    let failure = spk.stream_g1(G1Query::A, cfg.msm_chunk, &mut |start, points| {
+        assert_eq!(start, offset);
+        assert_eq!(points, &pk.a_query[start..start + points.len()]);
+        offset += points.len();
+    });
+    assert!(matches!(failure, Err(PkError::Deserialize(_))));
+    assert_eq!(offset, cfg.msm_chunk);
+    spk.stream_g1(G1Query::BG1, cfg.msm_chunk, &mut |_, _| {})
+        .unwrap();
+    spk.stream_g2(cfg.msm_chunk, &mut |_, _| {}).unwrap();
+    spk.stream_g1(G1Query::H, cfg.msm_chunk, &mut |_, _| {})
+        .unwrap();
+    spk.stream_g1(G1Query::L, cfg.msm_chunk, &mut |_, _| {})
+        .unwrap();
+    assert!(!spk.finish_tee().unwrap());
 }
 
 // ---- smooth (3·2^k / 9·2^k) domains -----------------------------------------------
