@@ -3,9 +3,9 @@
 //! This is the 2048-bit instance: `n` and the signature are 17 little-endian
 //! 121-bit limbs (2057 bits, enough for a 2048-bit modulus whose top limb is
 //! 112 bits), the public exponent is fixed at 65537, and the hash is SHA-256.
-//! The layout follows the zkGolf RSA reference: left-to-right
-//! square-and-multiply, `sig < n`, and a full comparison with the
-//! EMSA-PKCS1-v1_5 encoded message.
+//! The layout starts from the zkGolf RSA reference: left-to-right
+//! square-and-multiply, `sig < n`, and a comparison with the
+//! EMSA-PKCS1-v1_5 encoded message (fused into the terminal multiply here).
 //!
 //! Host-side decoding does the JSON, Base64, and DER work. The circuit takes the
 //! modulus, the signature, and the 32-byte digest only.
@@ -118,6 +118,318 @@ pub fn sha256_em(digest: [Field; 32]) -> [Field; LIMBS] {
     sha256_em_bits(digest_bits(digest))
 }
 
+// ---------------------------------------------------------------------------
+// The proving path: 25 x 82-bit limbs, lazy reduction, paired-column carries.
+//
+// `LIMBS x BITS` (17 x 121) is the input and public API layout; the modular
+// chain runs in a *wider* limb count (25 x 82) because a group of two 82-bit
+// columns has a 164-bit weight, so two columns' products still fit in one
+// `Fr` element and can share one carry. A 121-bit limb's product with a
+// 121-bit limb is already 242 bits, so no two 121-bit columns can share a
+// carry.
+//
+// Three other things happen here:
+//
+//   * lazy reduction: an intermediate residue is only proved `< 2^2048`, not
+//     `< n`. The chain stays congruent to `sig^(2^i) (mod n)`, and the final
+//     fused step pins the canonical target, so canonicality of the
+//     intermediates is never needed (see `verify_checked_bits`).
+//   * the final multiply's remainder *is* the encoded message: no remainder
+//     limbs are witnessed or certified, and the 17-limb equality disappears.
+//   * the convolution's columns are paired: a group of two 82-bit columns has
+//     a 164-bit weight, so its weighted sum still fits in `Fr` and the pair
+//     shares one carry. The carry certificate drops from 32 x 128 bits to
+//     24 x 89 bits; the schoolbook products are unchanged.
+//
+// Soundness bounds are documented on each function; `WIDE_*` are chosen from
+// them. The arithmetic below is over `Fr`, so every `const` bound is checked
+// against `Fr ~ 2^253.6`.
+// ---------------------------------------------------------------------------
+
+/// Limbs of the internal 82-bit representation: 25 * 82 = 2050 bits.
+const WIDE_LIMBS: usize = 25;
+/// Internal limb width; two columns of it still fit one `Fr` element.
+const WIDE_BITS: usize = 82;
+/// A pair of internal columns spans `2^(2*82)`.
+const GROUP_BITS: usize = 2 * WIDE_BITS;
+/// A group carry is below `2^(82 + log2(50)) < 2^87.7`; biased by `2^88`, the
+/// witnessed value is below `2^89`.
+const GROUP_CARRY_BITS: usize = 89;
+/// The group-carry bias, so the witness is non-negative.
+const GROUP_BIAS_BITS: usize = 88;
+/// Added to a group sum so it is non-negative; `2^252 = 2^88 * 2^164`.
+const GROUP_OFF_BITS: usize = 252;
+/// A 121-bit input limb shifted by at most 78 bits is below `2^199`, so the
+/// conversion carry is below `2^117.1`: 118 bits cover it.
+const CONVERT_CARRY_BITS: usize = 118;
+
+/// `2^e` as a compile-time-folded field constant.
+fn pow2(e: usize) -> Field {
+    let mut p = Field::from(1u8);
+    let mut i = 0usize;
+    while i < e {
+        p = p + p;
+        i += 1;
+    }
+    p
+}
+
+/// Prove `v < 2^W` with `W - 1` witnessed bits and the top bit derived
+/// affinely: `top = v - Σ_{i<W-1} 2^i b_i` and `top * (top - 2^(W-1)) = 0`
+/// forces `top ∈ {0, 2^(W-1)}`, so `v` is the low part or the low part plus
+/// `2^(W-1)`, both below `2^W`.
+///
+/// The measured cost is `W + 1` rows, the same as `bignum::range_check_limbs`
+/// and `to_bits`: the frontend turns the affine `top`'s booleanity into two
+/// rows. It is kept because it returns the top bit the 2048-bit `n` check needs,
+/// not as a row-count saving.
+fn range_derived<const W: usize>(v: Field) {
+    let _ = range_derived_top::<W>(v);
+}
+
+/// [`range_derived`], returning the top bit `top` (an affine expression).
+fn range_derived_top<const W: usize>(v: Field) -> Field {
+    const { assert!(W >= 1 && W <= 128, "range_derived: W out of range") };
+    let mut acc = Field::from(0u8);
+    let mut pow = Field::from(1u8);
+    let mut i = 0usize;
+    while i + 1 < W {
+        let bit = Field::hint_bit(v, i);
+        bit.require_bool();
+        acc = acc + bit * pow;
+        pow = pow + pow;
+        i += 1;
+    }
+    let top = v - acc;
+    require_eq(
+        top * (top - Field::from(1u128 << (W - 1))),
+        Field::from(0u8),
+    );
+    top
+}
+
+/// The internal 82-bit limbs of `n` (digest zero), from `EM_CONST`'s integer.
+const EM82_CONST: [Field; WIDE_LIMBS] = [
+    Field::constant("0"),
+    Field::constant("0"),
+    Field::constant("0"),
+    Field::constant("1908058575186009548423168"),
+    Field::constant("227580944067680599951361"),
+    Field::constant("4835703278458516698824640"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("4835703278458516698824703"),
+    Field::constant("36893488147419103231"),
+];
+
+/// [`sha256_em_bits`] in the internal 82-bit representation.
+///
+/// The digest's 256 bits live in bits `0..256`: the low 246 fill limbs 0..2,
+/// the top 10 are bits `0..10` of limb 3. The rest of limb 3 starts at bit 256
+/// (the DigestInfo), so the addition is carry-free.
+fn sha256_em_bits_82(bits: [Field; 256]) -> [Field; WIDE_LIMBS] {
+    let mut out = EM82_CONST;
+    let mut k = 0usize;
+    while k < 3usize {
+        let mut t = 0usize;
+        while t < WIDE_BITS {
+            let j = WIDE_BITS * k + t;
+            out[k] = out[k] + bits[j] * Field::from(1u128 << t);
+            t += 1;
+        }
+        k += 1;
+    }
+    let mut t = 0usize;
+    while t < 256usize - 3 * WIDE_BITS {
+        out[3] = out[3] + bits[3 * WIDE_BITS + t] * Field::from(1u128 << t);
+        t += 1;
+    }
+    out
+}
+
+/// Re-limb `x: [Field; 17]` (each limb `< 2^121`) into 25 little-endian 82-bit
+/// limbs, proving the value is unchanged. Returns the top bit of limb 24.
+///
+/// Column `q_i = floor(121 i / 82)` receives `x_i * 2^(121 i - 82 q_i)`. The
+/// shifts are at most 78, so a column term is below `2^199` and the carry
+/// below `2^118`; every column equation is below `Fr`, hence lifts from `Fr`
+/// to the integers. The carry chain telescopes to
+/// `Σ y_j 2^(82 j) = Σ x_i 2^(121 i)`; with `y` digits below `2^82` that is
+/// the unique base-`2^82` representation of the value.
+///
+/// Precondition: every `x[i] < 2^121` (the `Bignum` input reader, or
+/// `range_check_limbs`, proves it) and the value is below `2^2048` (both
+/// callers pass `n`, and `sig < n`). The 80-bit top-limb check is also what
+/// makes the output representation exactly 2048 bits.
+fn convert_wide(x: [Field; LIMBS]) -> ([Field; WIDE_LIMBS], Field) {
+    let mut cols = [Field::from(0u8); WIDE_LIMBS];
+    let mut i = 0usize;
+    while i < LIMBS {
+        let e = BITS * i;
+        let q = e / WIDE_BITS;
+        let r = e % WIDE_BITS;
+        cols[q] = cols[q] + x[i] * Field::from(1u128 << r);
+        i += 1;
+    }
+    let two_b = pow2(WIDE_BITS);
+    let mut y = [Field::from(0u8); WIDE_LIMBS];
+    let mut carry = Field::from(0u8);
+    let mut j = 0usize;
+    while j + 1 < WIDE_LIMBS {
+        let num = cols[j] + carry;
+        let dr = Field::hint_div_rem(num, two_b);
+        let (c, limb) = (dr[0], dr[1]);
+        require_eq(num, two_b * c + limb);
+        range_derived::<WIDE_BITS>(limb);
+        range_derived::<CONVERT_CARRY_BITS>(c);
+        y[j] = limb;
+        carry = c;
+        j += 1;
+    }
+    let num = cols[WIDE_LIMBS - 1] + carry;
+    let dr = Field::hint_div_rem(num, two_b);
+    require_eq(num, two_b * dr[0] + dr[1]);
+    require_eq(dr[0], Field::from(0u8));
+    let top = range_derived_top::<80>(dr[1]);
+    y[WIDE_LIMBS - 1] = dr[1];
+    (y, top)
+}
+
+/// Range-check an internal quotient: 24 limbs below `2^82`, the top below
+/// `2^81` (a lazy residue is below `2^2048`; `a*b - r < 2^4096`, and
+/// `n >= 2^2047`, so `q < 2^2049`).
+fn range_check_q(q: [Field; WIDE_LIMBS]) {
+    let mut i = 0usize;
+    while i + 1 < WIDE_LIMBS {
+        range_derived::<WIDE_BITS>(q[i]);
+        i += 1;
+    }
+    range_derived::<81>(q[WIDE_LIMBS - 1]);
+}
+
+/// Range-check a lazy remainder: 24 limbs below `2^82`, the top below `2^80`
+/// (it is only proved `< 2^2048`, not `< n`).
+fn range_check_r(r: [Field; WIDE_LIMBS]) {
+    let mut i = 0usize;
+    while i + 1 < WIDE_LIMBS {
+        range_derived::<WIDE_BITS>(r[i]);
+        i += 1;
+    }
+    range_derived::<80>(r[WIDE_LIMBS - 1]);
+}
+
+/// The integer identity `a·b == q·m + r` (or `+ em`), one row per pair of
+/// columns.
+///
+/// For columns `c = 2j, 2j+1`, `S_j = d_{2j} + 2^82 d_{2j+1}` with
+/// `d_c = Σ_{i+k=c} a_i b_k - Σ_{i+k=c} q_i m_k - rhs_c`. The rows impose
+/// `S_j + k_{j-1} = k_j 2^164`, `k_{-1} = k_23 = 0`, so multiplying by
+/// `2^(164 j)` and summing telescopes to `Σ_c d_c 2^(82 c) = 0`: the integer
+/// identity. The top column closes the chain.
+///
+/// Bounds (`L = 25`, `B = 82`): `|d_c| <= 2·25·(2^82-1)^2 < 2^169.7`, so
+/// `|S_j| < 2^251.7`; the fixed point `|k| < 2^251.7/(2^164-1) < 2^87.7`.
+/// With `OFF = 2^252`, a group numerator is `S_j + k_{j-1} + 2^252`, in
+/// `(0, 2^253) < Fr`; `cb = k + 2^88` is in `(0, 2^89)`. Both sides of every
+/// row are below `Fr`, so the row is an integer equality. A malicious prover
+/// cannot make the numerator negative: its `Fr` representative would exceed
+/// `cb·2^164 < 2^253`.
+fn grouped_columns(
+    a: [Field; WIDE_LIMBS],
+    b: [Field; WIDE_LIMBS],
+    m: [Field; WIDE_LIMBS],
+    q: [Field; WIDE_LIMBS],
+    rhs_extra: [Field; WIDE_LIMBS],
+) {
+    let cols = 2 * WIDE_LIMBS - 1;
+    let mut lhs = [Field::from(0u8); 2 * WIDE_LIMBS - 1];
+    let mut rhs = [Field::from(0u8); 2 * WIDE_LIMBS - 1];
+    let mut i = 0usize;
+    while i < WIDE_LIMBS {
+        let mut k = 0usize;
+        while k < WIDE_LIMBS {
+            lhs[i + k] = lhs[i + k] + a[i] * b[k];
+            rhs[i + k] = rhs[i + k] + q[i] * m[k];
+            k += 1;
+        }
+        i += 1;
+    }
+    let mut c = 0usize;
+    while c < WIDE_LIMBS {
+        rhs[c] = rhs[c] + rhs_extra[c];
+        c += 1;
+    }
+    let two_b = pow2(WIDE_BITS);
+    let group_mod = pow2(GROUP_BITS);
+    let bias = pow2(GROUP_BIAS_BITS);
+    let off = pow2(GROUP_OFF_BITS);
+    let mut cb_prev = bias;
+    let mut j = 0usize;
+    while j + 1 < WIDE_LIMBS {
+        let c0 = 2 * j;
+        let c1 = 2 * j + 1;
+        let s = (lhs[c0] - rhs[c0]) + two_b * (lhs[c1] - rhs[c1]);
+        let num = s + cb_prev - bias + off;
+        let dr = Field::hint_div_rem(num, group_mod);
+        require_eq(num, group_mod * dr[0] + dr[1]);
+        require_eq(dr[1], Field::from(0u8));
+        range_derived::<GROUP_CARRY_BITS>(dr[0]);
+        cb_prev = dr[0];
+        j += 1;
+    }
+    // Top column: the last carry must be exactly zero.
+    let top = lhs[cols - 1] - rhs[cols - 1];
+    require_eq(top + cb_prev - bias, Field::from(0u8));
+}
+
+/// `a² mod m` with a lazy remainder: proves `a² = q m + r` and
+/// `r < 2^2048`, not `r < m`. Congruent to `a² mod m`, which is all the chain
+/// needs.
+fn square_lazy(a: [Field; WIDE_LIMBS], m: [Field; WIDE_LIMBS]) -> [Field; WIDE_LIMBS] {
+    let (q, r) = Field::hint_mulmod_divmod::<WIDE_LIMBS>(a, a, m, WIDE_BITS);
+    range_check_q(q);
+    range_check_r(r);
+    grouped_columns(a, a, m, q, r);
+    r
+}
+
+/// The terminal step: `a·b = q n + em`, with `em` a public affine vector (the
+/// encoded message). The hint's remainder is only pinned to `em` (25 rows);
+/// it is never range-checked, and there is no separate limb-by-limb equality
+/// against a computed value.
+fn fused_final(
+    a: [Field; WIDE_LIMBS],
+    b: [Field; WIDE_LIMBS],
+    m: [Field; WIDE_LIMBS],
+    em: [Field; WIDE_LIMBS],
+) {
+    let (q, r) = Field::hint_mulmod_divmod::<WIDE_LIMBS>(a, b, m, WIDE_BITS);
+    range_check_q(q);
+    // Pin the hint's remainder to the public target; the fused identity below
+    // then proves the same equation without a remainder range check.
+    let mut i = 0usize;
+    while i < WIDE_LIMBS {
+        require_eq(r[i], em[i]);
+        i += 1;
+    }
+    grouped_columns(a, b, m, q, em);
+}
+
 /// `base^65537 mod m`, left-to-right square-and-multiply.
 ///
 /// `m_minus_1` must be exactly `m - 1` (from [`minus_one`]); `base` and `m` must
@@ -161,20 +473,34 @@ pub fn verify_sha256(n: U2048, sig: U2048, digest: [Field; 32]) {
 }
 
 fn verify_checked_bits(n: U2048, sig: U2048, bits: [Field; 256]) {
-    // n is exactly 2048 bits: the top limb is below 2^112 and its bit 111 is 1.
-    let top = n.limbs[16].to_bits::<112>();
-    require_eq(top[111], Field::from(1u8));
+    // The re-limb proves n < 2^2048 (its top limb is below 2^80); requiring
+    // that limb's top bit makes it exactly 2048 bits (2^2047 <= n < 2^2048),
+    // the bound every product and `q` estimate below uses.
+    let (n82, n_top) = convert_wide(n.limbs);
+    require_eq(n_top, pow2(79));
 
+    // `sig < n` is the RFC 8017 validity condition. It is checked in the
+    // 17 x 121 input view, before the lazy chain: the chain only needs
+    // congruence, but a verifier must reject s >= n.
     let m_minus_1 = minus_one::<LIMBS, BITS>(n.limbs);
     require_lt::<LIMBS, BITS>(sig.limbs, m_minus_1);
 
-    let recovered = mod_exp_65537(sig.limbs, n.limbs, m_minus_1);
-    let expected = sha256_em_bits(bits);
+    let (sig82, _) = convert_wide(sig.limbs);
+
+    // 16 lazy squarings: acc = sig^(2^16) mod n (a representative in
+    // [0, 2^2048), not necessarily canonical).
+    let mut acc = sig82;
     let mut i = 0usize;
-    while i < LIMBS {
-        require_eq(recovered[i], expected[i]);
+    while i < 16usize {
+        acc = square_lazy(acc, n82);
         i += 1;
     }
+
+    // Terminal fusion: acc * sig = q n + EM, with EM the public affine target.
+    // Since acc = sig^(2^16) (mod n), this pins EM = sig^65537 (mod n); EM is
+    // the PKCS#1 encoding, below 2^2033 < n, so it is the canonical residue.
+    let em = sha256_em_bits_82(bits);
+    fused_final(acc, sig82, n82, em);
 }
 
 fn verify_checked(n: U2048, sig: U2048, digest: [Field; 32]) {
@@ -193,10 +519,17 @@ fn verify_checked(n: U2048, sig: U2048, digest: [Field; 32]) {
 pub fn verify_sha256_words(n: U2048, sig: U2048, digest: [[Field; 32]; 8]) {
     // The digest integer's bit `j` is bit `j % 32` of word `7 - j / 32`: the
     // SHA-256 words are big-endian, each word's bits are little-endian.
+    //
+    // The words are constrained boolean here. `xark-sha256` already returns
+    // bits, but this is a public entry point: without the check a caller could
+    // pass non-boolean fields, and the encoded message would no longer be the
+    // bounded affine vector the modular identity's soundness proof assumes.
     let mut bits = [Field::from(0u8); 256];
     let mut j = 0usize;
     while j < 256usize {
-        bits[j] = digest[7 - j / 32][j % 32];
+        let b = digest[7 - j / 32][j % 32];
+        b.require_bool();
+        bits[j] = b;
         j += 1;
     }
     verify_checked_bits(n, sig, bits);
