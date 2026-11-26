@@ -508,6 +508,41 @@ fn key_shape_mismatch_is_reported() {
 // ---- real circuit: the zkyc bytecode -------------------------------------------
 
 const KYC_XBC: &[u8] = include_bytes!("fixtures/zkyc.xbc");
+
+#[test]
+fn on_disk_key_open_rejects_a_truncated_final_vector() {
+    use std::{fs, time::SystemTime};
+
+    let reduced = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let (key, _) = ArkG16::circuit_specific_setup(
+        XarkCircuit::for_setup_preminimized(reduced),
+        &mut ChaCha20Rng::seed_from_u64(102),
+    )
+    .unwrap();
+    assert!(!key.l_query.is_empty());
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("xark-short-pk-{}-{stamp}", std::process::id()));
+    for (encoding, compress) in [
+        ("compressed", Compress::Yes),
+        ("uncompressed", Compress::No),
+    ] {
+        let bytes = pk_bytes(&key, compress, true);
+        fs::write(&path, &bytes).unwrap();
+        let complete = SerializedPk::open(&path);
+        drop(complete.unwrap());
+
+        fs::write(&path, &bytes[..bytes.len() - 1]).unwrap();
+        let detected = matches!(SerializedPk::open(&path), Err(error)
+            if error.to_string().contains("proving key ends before the last vector"));
+        fs::remove_file(&path).unwrap();
+        assert!(detected, "{encoding}");
+    }
+}
 const KYC_INPUTS: &[(&str, &str)] = &[
     ("user.id", "3762531230650282305"),
     ("user.dob", "19900101"),
