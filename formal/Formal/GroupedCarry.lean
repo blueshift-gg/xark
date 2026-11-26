@@ -5,6 +5,7 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.GroupedColumnStep
 import Formal.GroupedColumns
+import Formal.Shadow
 import Formal.ToBits
 
 set_option linter.style.header false
@@ -98,5 +99,34 @@ theorem step_row_of_sat (σ : TVar → F) (h : template.Sat σ) (S cb : ℤ)
     (hnum : numLC.eval σ = (((S + cb - BI + OFF : ℤ)) : F)) :
     S + cb - BI + OFF = Q * ((vLC.eval σ).val : ℤ) :=
   carry_of_sat σ h (S + cb - BI + OFF) h0 hlt hnum
+
+/-- The numerator with integer coefficients, so its shadow is the integer it denotes. -/
+def numZ : Xark.R1cs.LC ℤ TVar :=
+  ⟨(2 ^ 252 - 2 ^ 88 : ℤ),
+    [(1, .plug 0), ((2 ^ 82 : ℤ), .plug 1), (-1, .plug 2), (-(2 ^ 82 : ℤ), .plug 3),
+     (1, .plug 4)]⟩
+
+/-- Read in the field, `numZ` is the template's `numLC`. -/
+theorem numZ_toField : Xark.Circuit.toField numZ = numLC := by decide +kernel
+
+/-- The shadow written out: the numerator as an integer expression in the call's plugs. -/
+theorem shadow_numZ (σ : TVar → F) :
+    Xark.Circuit.shadow σ numZ
+      = (2 ^ 252 - 2 ^ 88 : ℤ) + ((σ (.plug 0)).val : ℤ) - ((σ (.plug 2)).val : ℤ)
+        + 2 ^ 82 * (((σ (.plug 1)).val : ℤ) - ((σ (.plug 3)).val : ℤ))
+        + ((σ (.plug 4)).val : ℤ) := by
+  simp [Xark.Circuit.shadow, numZ, List.map_cons, List.sum_cons, List.map_nil, List.sum_nil]
+  ring
+
+/-- **The step's rows give its `CarrySpec` row, from a bound on the plugs alone.** With the
+step template satisfied and the numerator's integer shadow in `[0, r)`, the carry is the
+integer quotient: `num = 2^164 · k`. The field hypothesis of `carry_of_sat` is discharged by
+`shadow_toF`. -/
+theorem carry_of_sat_shadow (σ : TVar → F) (h : template.Sat σ)
+    (h0 : 0 ≤ Xark.Circuit.shadow σ numZ) (hlt : Xark.Circuit.shadow σ numZ < (r : ℤ)) :
+    Xark.Circuit.shadow σ numZ = Q * ((vLC.eval σ).val : ℤ) := by
+  have hnum : numLC.eval σ = (((Xark.Circuit.shadow σ numZ : ℤ)) : F) := by
+    rw [← numZ_toField, Xark.Circuit.shadow_toF]
+  exact carry_of_sat σ h (Xark.Circuit.shadow σ numZ) h0 hlt hnum
 
 end Xark.Rsa.GroupedCarry

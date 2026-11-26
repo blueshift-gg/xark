@@ -38,7 +38,9 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   constant is the RFC 8017 prefix, checked by `decide +kernel`), and its calls'
   contracts at the circuit level (`Formal/Rsa2048Calls.lean`: 408 carries
   pinned below `2^89`, 17 + 16 range-checked limb vectors, counts by
-  `decide +kernel`). The rows
+  `decide +kernel`), and the integer shadow that turns a call's plugs into
+  integers (`Formal/Shadow.lean`), so each step needs only the arithmetic bound on
+  its numerator (`carry_of_sat_shadow`). The rows
   that instantiate those identities are still hand-proved
   (`docs/security.md` §2.18). The
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key

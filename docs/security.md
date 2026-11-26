@@ -411,7 +411,11 @@ row 0 pins `num = 2^164·k` in the field (`pin_eval`, `decide +kernel` against
 the export), and when the numerator is canonical (`0 ≤ num < r`) and the carry
 below `2^89`, `num = 2^164 · k` holds over the integers, not only mod `r`
 (`carry_row`; both sides are then below `2^253 < r`), straight from the rows
-(`carry_of_sat`).
+(`carry_of_sat`). `Formal/Shadow.lean`'s integer shadow discharges the field half of
+that: `carry_of_sat_shadow` needs only `0 ≤ shadow σ numZ < r` — an arithmetic
+bound on the numerator written over the call's plugs (`shadow_numZ`) — because a
+field value that is the cast of an integer, with both in `[0, r)`, *is* that
+integer (`shadow_eq_of_eval`).
 That is the whole no-wrap argument, given the column bounds. `Formal/RsaChain.lean`
 then states the chain's top level: `n_bits` (the modulus is 2048 bits from the
 `n_top` pin), `squarings` (16 squarings keep `acc ≡ sig^(2^k)`), and `chain`
