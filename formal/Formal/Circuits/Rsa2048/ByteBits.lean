@@ -22586,4 +22586,14 @@ theorem chainSig_eq_bytes (σ : ℕ → F) (h : Sat circuit σ) :
   exact (Xark.Rsa.Bytes.bytes_of_bits (sigBits σ) (fun i => ((σ (256 + i)).val : ℤ))
     (sigBits_eq σ h)).symm
 
+/-- **The chain congruence over the public byte inputs.** `n` is the modulus's
+big-endian 256-byte integer, `sig` the signature's, and the target is the RFC 8017
+encoded message (prefix plus the digest's bits). -/
+theorem chain_congruence_bytes (σ : ℕ → F) (h : Sat circuit σ) :
+    Xark.Rsa.Em.EM_PREFIX + ∑ j ∈ Finset.range 256, digestBits σ j * 2 ^ j
+      ≡ (∑ i ∈ Finset.range 256, ((σ (256 + i)).val : ℤ) * 256 ^ (255 - i)) ^ (2 ^ 16 + 1)
+        [ZMOD ∑ i ∈ Finset.range 256, ((σ i).val : ℤ) * 256 ^ (255 - i)] := by
+  rw [← chainN_eq_bytes σ h, ← chainSig_eq_bytes σ h]
+  exact chain_congruence_em σ h
+
 end Xark.Circuits.Rsa2048
