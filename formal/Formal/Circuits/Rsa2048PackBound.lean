@@ -89,14 +89,12 @@ theorem val_weighted (f : ℕ → F) (hf : ∀ t < 82, (f t).val ≤ 1) :
     have hft : f t = ((f t).val : F) := (ZMod.natCast_zmod_val (f t)).symm
     conv_lhs => rw [hft]
     exact (Nat.cast_mul (m := 2 ^ t) (n := (f t).val)).symm
-  rw [hcast, ZMod.val_natCast_of_lt]
-  have hlt : (∑ t ∈ Finset.range 82, 2 ^ t * (f t).val) < r := by
-    have h : (0 : ℕ) < 2 ^ 82 := by positivity
-    exact lt_of_lt_of_le (by omega) (le_of_lt (weighted_lt f hf))
-  exact hlt
+  have hlt : (∑ t ∈ Finset.range 82, 2 ^ t * (f t).val) < r :=
+    lt_trans (weighted_lt f hf) (Xark.Templates.ToBits.two_pow_lt_r' (by norm_num))
+  rw [hcast, ZMod.val_natCast_of_lt hlt]
 
-theorem pack_bound (off q : ℕ) (σ : ℕ → F)
-    (hbit : ∀ b tb, ((bitGLC b tb).eval σ).val ≤ 1) :
+theorem pack_bound (off q : ℕ) (hoff : off ≤ 288) (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
     ((packGLCAt off q).eval σ).val < 2 ^ 82 := by
   rw [eval_packTerms]
   let f : ℕ → F := fun t =>
@@ -111,23 +109,477 @@ theorem pack_bound (off q : ℕ) (σ : ℕ → F)
     refine Finset.sum_congr rfl fun t ht => ?_
     dsimp [f]
     by_cases h : 82 * q + t < 2048
-    · simp only [h, if_pos]
-      congr 1
-      simp [bitGLC, LC.eval]
-    · simp only [h, if_false]
+    · simp only [h, if_pos, bitGLC, LC.eval, zero_add, Nat.cast_pow, Nat.cast_ofNat]
+    · simp only [h, if_false, mul_zero]
   rw [hsum]
   have hf : ∀ t < 82, (f t).val ≤ 1 := by
     intro t ht
     dsimp [f]
     by_cases h : 82 * q + t < 2048
-    · rw [if_pos h]; exact hbit _ _
+    · rw [if_pos h]
+      exact hbit _ _ (by omega) (by omega)
     · rw [if_neg h]; simp
   rw [val_weighted f hf]
   exact weighted_lt f hf
 
-/-- `bitOf` is a bit. -/
-theorem bitOf_val_le (x : F) (t : ℕ) : (Xark.Template.bitOf x t).val ≤ 1 := by
-  unfold Xark.Template.bitOf
-  split <;> simp
+/-- The packed limb in canonical form, so the exported plug is compared by `decide`
+rather than by normalizing the huge plug term inside a rewrite. -/
+def packCanon (off q : ℕ) : GLC := ⟨0, Xark.R1cs.normTerms leNat (packTermsAt off q)⟩
+
+theorem packCanon_eval (off q : ℕ) (σ : ℕ → F) :
+    (packCanon off q).eval σ = (packGLCAt off q).eval σ := by
+  simp only [packCanon, packGLCAt, LC.eval]
+  congr 1
+  exact (Xark.R1cs.eval_normTerms leNat (packTermsAt off q) σ)
+
+theorem nBound0 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 0) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 0 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 0) (LC.cst 0))) = packCanon 0 0 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound1 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 1) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 1 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 1) (LC.cst 0))) = packCanon 0 1 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound2 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 2) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 2 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 2) (LC.cst 0))) = packCanon 0 2 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound3 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 3) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 3 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 3) (LC.cst 0))) = packCanon 0 3 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound4 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 4) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 4 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 4) (LC.cst 0))) = packCanon 0 4 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound5 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 5) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 5 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 5) (LC.cst 0))) = packCanon 0 5 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound6 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 6) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 6 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 6) (LC.cst 0))) = packCanon 0 6 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound7 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 7) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 7 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 7) (LC.cst 0))) = packCanon 0 7 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound8 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 8) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 8 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 8) (LC.cst 0))) = packCanon 0 8 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound9 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 9) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 9 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 9) (LC.cst 0))) = packCanon 0 9 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound10 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 10) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 10 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 10) (LC.cst 0))) = packCanon 0 10 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound11 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 11) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 11 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 11) (LC.cst 0))) = packCanon 0 11 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound12 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 12) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 12 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 12) (LC.cst 0))) = packCanon 0 12 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound13 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 13) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 13 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 13) (LC.cst 0))) = packCanon 0 13 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound14 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 14) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 14 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 14) (LC.cst 0))) = packCanon 0 14 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound15 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 15) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 15 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 15) (LC.cst 0))) = packCanon 0 15 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound16 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 16) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 16 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 16) (LC.cst 0))) = packCanon 0 16 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound17 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 17) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 17 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 17) (LC.cst 0))) = packCanon 0 17 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound18 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 18) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 18 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 18) (LC.cst 0))) = packCanon 0 18 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound19 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 19) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 19 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 19) (LC.cst 0))) = packCanon 0 19 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound20 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 20) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 20 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 20) (LC.cst 0))) = packCanon 0 20 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound21 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 21) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 21 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 21) (LC.cst 0))) = packCanon 0 21 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound22 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 22) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 22 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 22) (LC.cst 0))) = packCanon 0 22 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound23 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 23) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 23 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 23) (LC.cst 0))) = packCanon 0 23 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem nBound24 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD (25 + 24) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 0 24 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD (25 + 24) (LC.cst 0))) = packCanon 0 24 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound0 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 0 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 0 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 0 (LC.cst 0))) = packCanon 256 0 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound1 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 1 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 1 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 1 (LC.cst 0))) = packCanon 256 1 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound2 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 2 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 2 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 2 (LC.cst 0))) = packCanon 256 2 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound3 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 3 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 3 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 3 (LC.cst 0))) = packCanon 256 3 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound4 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 4 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 4 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 4 (LC.cst 0))) = packCanon 256 4 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound5 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 5 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 5 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 5 (LC.cst 0))) = packCanon 256 5 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound6 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 6 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 6 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 6 (LC.cst 0))) = packCanon 256 6 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound7 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 7 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 7 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 7 (LC.cst 0))) = packCanon 256 7 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound8 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 8 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 8 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 8 (LC.cst 0))) = packCanon 256 8 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound9 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 9 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 9 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 9 (LC.cst 0))) = packCanon 256 9 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound10 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 10 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 10 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 10 (LC.cst 0))) = packCanon 256 10 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound11 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 11 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 11 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 11 (LC.cst 0))) = packCanon 256 11 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound12 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 12 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 12 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 12 (LC.cst 0))) = packCanon 256 12 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound13 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 13 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 13 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 13 (LC.cst 0))) = packCanon 256 13 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound14 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 14 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 14 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 14 (LC.cst 0))) = packCanon 256 14 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound15 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 15 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 15 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 15 (LC.cst 0))) = packCanon 256 15 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound16 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 16 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 16 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 16 (LC.cst 0))) = packCanon 256 16 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound17 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 17 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 17 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 17 (LC.cst 0))) = packCanon 256 17 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound18 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 18 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 18 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 18 (LC.cst 0))) = packCanon 256 18 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound19 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 19 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 19 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 19 (LC.cst 0))) = packCanon 256 19 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound20 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 20 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 20 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 20 (LC.cst 0))) = packCanon 256 20 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound21 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 21 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 21 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 21 (LC.cst 0))) = packCanon 256 21 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound22 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 22 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 22 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 22 (LC.cst 0))) = packCanon 256 22 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound23 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 23 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 23 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 23 (LC.cst 0))) = packCanon 256 23 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem sigBound24 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 548).plugs.getD 24 (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 256 24 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 548).plugs.getD 24 (LC.cst 0))) = packCanon 256 24 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
 
 end Xark.Circuits.Rsa2048
