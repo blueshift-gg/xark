@@ -3,7 +3,7 @@ Copyright (c) 2026 Blueshift Labs Limited. All rights reserved.
 Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
-import Formal.Circuits.Rsa2048PackBoundW
+import Formal.Circuits.Rsa2048.PackBoundW
 
 set_option linter.style.header false
 set_option maxRecDepth 100000
