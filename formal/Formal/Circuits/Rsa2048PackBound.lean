@@ -582,4 +582,220 @@ theorem sigBound24 (σ : ℕ → F)
   rw [hc, packCanon_eval]
   exact hp
 
+theorem emBound0 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 0) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 288 0 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 0) (LC.cst 0))) = packCanon 288 0 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem emBound1 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 1) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 288 1 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 1) (LC.cst 0))) = packCanon 288 1 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem emBound2 (σ : ℕ → F)
+    (hbit : ∀ b tb, b < 544 → tb < 8 → ((bitGLC b tb).eval σ).val ≤ 1) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 2) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hp := pack_bound 288 2 (by norm_num) σ hbit
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 2) (LC.cst 0))) = packCanon 288 2 := by
+    decide +kernel
+  rw [hc, packCanon_eval]
+  exact hp
+
+theorem emBound4 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 4) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 4) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 4 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound5 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 5) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 5) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 5 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound6 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 6) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 6) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 6 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound7 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 7) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 7) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 7 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound8 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 8) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 8) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 8 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound9 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 9) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 9) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 9 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound10 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 10) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 10) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 10 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound11 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 11) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 11) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 11 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound12 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 12) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 12) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 12 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound13 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 13) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 13) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 13 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound14 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 14) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 14) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 14 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound15 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 15) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 15) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 15 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound16 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 16) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 16) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 16 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound17 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 17) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 17) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 17 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound18 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 18) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 18) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 18 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound19 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 19) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 19) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 19 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound20 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 20) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 20) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 20 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound21 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 21) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 21) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 21 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound22 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 22) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 22) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 22 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound23 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 23) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 23) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 23 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
+theorem emBound24 (σ : ℕ → F) :
+    ((ZLC.toF ((callAt 596).plugs.getD (100 + 24) (LC.cst 0))).eval σ).val < 2 ^ 82 := by
+  have hc : (ZLC.toF ((callAt 596).plugs.getD (100 + 24) (LC.cst 0)))
+      = (⟨((Xark.Rsa.Em.em82 24 : ℤ) : F), []⟩ : GLC) := by
+    decide +kernel
+  rw [hc]
+  simp only [LC.eval, List.map_nil, List.sum_nil, add_zero]
+  decide
+
 end Xark.Circuits.Rsa2048
