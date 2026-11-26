@@ -403,13 +403,13 @@ fn prove_streaming(
             anyhow::bail!("streaming prove: {e}")
         }
     };
-    if let Some(tmp) = tee_tmp {
-        if pk.finish_tee()? {
-            tmp.persist(&decoded)
-                .map_err(|e| e.error)
-                .with_context(|| format!("writing {}", decoded.display()))?;
-            println!("Wrote {} (decoded key cache)", decoded.display());
-        }
+    if let Some(tmp) = tee_tmp
+        && pk.finish_tee()?
+    {
+        tmp.persist(&decoded)
+            .map_err(|e| e.error)
+            .with_context(|| format!("writing {}", decoded.display()))?;
+        println!("Wrote {} (decoded key cache)", decoded.display());
     }
     let times = ProveTimes {
         solve: t_solve,
