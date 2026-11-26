@@ -26,7 +26,7 @@ use crate::msm::{Scalar, StreamingMsm, SwCurve};
 use crate::pk::{G1Query, KeyVector, PkError, PkSource};
 use crate::qap;
 use crate::r1cs::ConstraintSource;
-use crate::types::Prepared;
+use crate::types::{Prepared, VerifyingKey};
 
 /// Prover tuning.
 #[derive(Clone, Debug)]
@@ -162,11 +162,23 @@ fn check_shape<S: ConstraintSource + ?Sized, P: PkSource + ?Sized>(
             h.h_len
         )));
     }
-    if h.vk.gamma_abc_g1.len() != l.num_instance() {
+    check_verifying_key_inputs(&h.vk, l.num_instance())
+}
+
+/// Check the key has the constant coefficient and one coefficient per public input.
+pub(crate) fn check_verifying_key_inputs(
+    vk: &VerifyingKey<Bn254>,
+    num_instance: usize,
+) -> Result<(), ProveError> {
+    let Some(actual) = vk.gamma_abc_g1.len().checked_sub(1) else {
+        return Err(ProveError::KeyMismatch(
+            "verifying key is missing its constant coefficient".into(),
+        ));
+    };
+    let expected = num_instance - 1;
+    if actual != expected {
         return Err(ProveError::KeyMismatch(format!(
-            "vk has {} public inputs, circuit has {}",
-            h.vk.gamma_abc_g1.len() - 1,
-            l.num_instance() - 1
+            "vk has {actual} public inputs, circuit has {expected}"
         )));
     }
     Ok(())

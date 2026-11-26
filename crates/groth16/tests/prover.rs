@@ -27,7 +27,7 @@ use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{Accelerated, Prover};
 use xark_groth16::{
     BytecodeSource, ConstraintSource, DomainKind, FftConfig, InMemoryPk, ProgramSource, ProveError,
-    ProverConfig, SerializedPk, prove, qap,
+    ProverConfig, SerializedPk, prove, prove_with_randomness, qap,
 };
 use xark_groth16::{Proof, ProvingKey, VerifyingKey};
 use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
@@ -635,6 +635,75 @@ fn every_prover_makes_the_same_proof() {
         .unwrap();
         assert_eq!(got, want, "{}", prover.name());
     }
+}
+
+#[test]
+fn proving_key_requires_the_constant_even_without_public_inputs() {
+    let mut prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    // Exercise the genuine KYC relation with all its inputs kept private.
+    for var in &mut prog.variables {
+        if var.visibility == Visibility::Public {
+            var.visibility = Visibility::Private;
+        }
+    }
+    let assign = kyc_witness();
+    let src = ProgramSource::new(&prog);
+    let z = src.layout().assignment_from_map(&assign);
+    assert_eq!(src.layout().num_instance(), 1);
+    let (mut pk, vk) = ArkG16::circuit_specific_setup(
+        XarkCircuit::for_setup_preminimized(prog.clone()),
+        &mut ChaCha20Rng::seed_from_u64(9),
+    )
+    .unwrap();
+    assert_eq!(vk.gamma_abc_g1.len(), 1);
+    let mut rng = ChaCha20Rng::seed_from_u64(10);
+    let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+    let cfg = ProverConfig::default();
+    let push_key = |bytes: &[u8]| {
+        let mut accel = xark_groth16::Local;
+        let mut pp = xark_groth16::PushProver::new(&src, z.clone(), r, s, cfg.clone(), &mut accel)?;
+        pp.push(bytes, &mut accel)?;
+        pp.finish()
+    };
+    let proof =
+        prove_with_randomness(&src, &z, &mut InMemoryPk::new(&pk), r, s, &cfg, &mut ()).unwrap();
+    assert!(xark_groth16::verify(&vk, &[], &proof).unwrap());
+    assert!(ArkG16::verify(&vk, &[], &proof).unwrap());
+    assert_eq!(
+        push_key(&pk_bytes(&pk, Compress::Yes, true)).unwrap(),
+        proof
+    );
+
+    pk.vk.gamma_abc_g1.clear();
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let assert_missing = |result| {
+        assert!(matches!(
+            result,
+            Err(ProveError::KeyMismatch(message))
+                if message == "verifying key is missing its constant coefficient"
+        ));
+    };
+    assert_missing(prove_with_randomness(
+        &src,
+        &z,
+        &mut InMemoryPk::new(&pk),
+        r,
+        s,
+        &cfg,
+        &mut (),
+    ));
+    assert_missing(prove_with_randomness(
+        &src,
+        &z,
+        &mut SerializedPk::from_bytes(&bytes).unwrap(),
+        r,
+        s,
+        &cfg,
+        &mut (),
+    ));
+    assert_missing(push_key(&bytes));
 }
 
 // ---- the worker decomposition, natively -------------------------------------------
