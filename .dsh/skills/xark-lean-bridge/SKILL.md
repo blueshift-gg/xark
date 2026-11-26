@@ -233,9 +233,15 @@ right — `decide` over `template.rows[0..1250]` against the model finds no mism
 step instances do **not** match `Row.bind` alone: the exported template holds the
 frontend's *normalized* linear combinations (terms sorted by variable, duplicate
 coefficients merged, zeros dropped), while `LC.bind` is a raw `flatMap` that preserves the
-step template's term order and repeats variables. So the model needs a `norm : LC → LC`
-(sort by var, merge coefficients, drop zeros — the frontend's invariant) applied to each
-bound row before comparing, and only then does `rows_eq` reduce to `decide`. (`CircuitHash`
+step template's term order and repeats variables. So the model needs a `norm : LC → LC` applied to each bound row before comparing, and only
+then does `rows_eq` reduce to `decide`. The invariant to reproduce (`xtask/src/lean.rs`'s
+`var`, `lean.rs:553`): a term's variable code is `v < plugs ? .plug v : .wit (v - plugs)`,
+and the exported list merges each variable into its **first occurrence** (summing its
+coefficients, dropping zeros) — *not* sorted by code (a sampled row ran `wit 3, wit 51,
+plug 101, wit 1250`). `normTerms` should therefore `partition` on the head's variable,
+merge, and recurse on the remainder (recursion needs `termination_by l.length`; the
+`List.length_filter_le` bound is immediate), with `eval_norm : (norm l).eval σ = l.eval σ`
+as the soundness fact. (`CircuitHash`
 is unaffected because its hash canonicalizes before hashing; `Call.rows` vs the compiler's
 rows differ only in representation.) Marking the function as a
 `#[gadget]` and exporting the harness is already measured to work; the marker cannot land
