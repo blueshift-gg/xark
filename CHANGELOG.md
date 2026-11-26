@@ -14,8 +14,9 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   and a generated RSA-2048 KAT that also hashes the test message on the host.
   The typed `verify_sha256`/`verify_sha256_words` entry points range-check their
   limbs, so a `Bignum::new` caller is safe.
-- `examples/rsa2048`: the byte-input example and generated KAT; 125,040 constraints
-  (157,451 before the golf).
+- `examples/rsa2048`: the byte-input example and generated KAT; 125,856 constraints
+  (157,451 before the golf; the group carry is a witnessed `num / 2^164` pinned by
+  two rows, which the export below needs).
 - Lean templates and proofs for `require_lt::<17, 121>`,
   `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`, plus the 25×82
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and
@@ -31,7 +32,9 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   `convert_wide`'s carry chain (`Formal/RsaConvert.lean`: the 25 rows telescope
   to the same 2048-bit number in the other limb width), and `bytes_to_wide`'s
   packing (`Formal/RsaBytes.lean`: the 25 limbs recombine to the bit string and
-  the big-endian byte string is that same value). The rows
+  the big-endian byte string is that same value), and the whole circuit as
+  segments (`Formal/Circuits/Rsa2048.lean`: 125,856 rows in 1,021 segments,
+  hash-gated by `CircuitHash.lean`). The rows
   that instantiate those identities are still hand-proved
   (`docs/security.md` §2.18). The
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key

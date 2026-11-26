@@ -10,89 +10,33 @@ import Formal.ToBits
 set_option linter.style.header false
 
 /-!
-# From a group carry's field element to its integer
+# From a group carry's witness to its integer
 
-`grouped_column_step` returns `k = num * 2^-164` as a field element, where
-`num = S + cb - 2^88 + 2^252`; `Formal/GroupedColumnStep.lean` proves `k < 2^89`.
-This file closes the arithmetic between those two statements:
+`grouped_column_step` witnesses the carry `k` and pins it with `num = 2^164·k`
+(row 0), where `num = S + cb - 2^88 + 2^252`; `Formal/GroupedColumnStep.lean`
+proves `k < 2^89` and exposes the pin as `pin_eval`. This file closes the
+arithmetic between them:
 
-* `outputs_eq`: the exported template's output **is** `num * 2^-164` — its five plug
-  coefficients are `2^-164` times `1, 2^82, -1, -2^82, 1` and its constant is
-  `2^-164` times `2^252 - 2^88`, checked against the template by `decide +kernel`.
-* `carry_row`: when `num` does not wrap (`0 ≤ num < r`), `k`'s representative below
-  `2^89` makes `2^164 * k = num` hold **over the integers**, not only mod `r`:
-  `2^164 * k.val < 2^253 < r`, so both sides of the field identity are canonical.
+* `carry_of_step`: `2^164 · k` is below `2^253 < r` when `k < 2^89`, so a
+  canonical numerator (`num < r`) makes the field identity an equality of
+  naturals — `num = 2^164 · k` over the integers, not only mod `r`.
+* `carry_of_sat`: the same straight from the step's rows: a satisfying assignment
+  whose `numLC` is the cast of a canonical integer has
+  `num = 2^164 · (vLC.eval σ)`, i.e. the `CarrySpec` row
+  `Formal/GroupedColumns.lean`'s telescope consumes.
 
-That integer equality is the `CarrySpec` row `Formal/GroupedColumns.lean`'s
-telescope consumes. The bounds on `num` (the column sum's `< 2^251.7` and the
-carry's `< 2^89`) come from the limb range checks; this file takes them as the
-`0 ≤ num` and `num < r` hypotheses.
+The remaining hypothesis is that `numLC.eval σ` *is* the cast of the integer
+numerator: the column bound `< 2^251.7` that the limb range checks give. That is
+the row bridge, still hand-proved.
 -/
 
 namespace Xark.Rsa.GroupedCarry
 
 open Xark.Template Xark.R1cs
-open Xark.Templates.GroupedColumnStep
-open Xark.Rsa.GroupedColumns (Q W BI OFF)
+open Xark.Templates.GroupedColumnStep (numLC vLC template Spec pin_eval soundness)
+open Xark.Rsa.GroupedColumns (Q BI OFF)
 
 instance : Fact (Nat.Prime r) := bn254_r_prime
-
-/-- `2^-164 mod r`, the constant multiply `xark_rsa::grouped_columns` uses to read a
-group carry from its numerator (`gadgets/xark-rsa/src/lib.rs`, `INV_GROUP`). -/
-def INV_GROUP : F :=
-  11761852403780205603504176608903144981443942272354872058493689129916111935102
-
-/-- `2^82` in the field. -/
-def wF : F := ((2 ^ 82 : ℕ) : F)
-
-/-- Multiply every coefficient of a combination by `c`. -/
-def _root_.Xark.R1cs.LC.mulConst (l : LC) (c : F) : LC :=
-  ⟨c * l.const, l.terms.map fun t => (c * t.1, t.2)⟩
-
-/-- Scaling a term list scales its evaluation. -/
-theorem sum_map_mul (ts : List (F × TVar)) (c : F) (σ : TVar → F) :
-    ((ts.map fun t => (c * t.1, t.2)).map fun t => t.1 * σ t.2).sum =
-      c * (ts.map fun t => t.1 * σ t.2).sum := by
-  induction ts with
-  | nil => simp
-  | cons t ts ih =>
-    simp only [List.map_cons, List.sum_cons] at ih ⊢
-    rw [ih]
-    ring
-
-/-- `mulConst` evaluates to `c` times the combination. -/
-theorem eval_mulConst (l : LC) (c : F) (σ : TVar → F) :
-    (l.mulConst c).eval σ = c * l.eval σ := by
-  obtain ⟨k, ts⟩ := l
-  simp only [Xark.R1cs.LC.mulConst, LC.eval, sum_map_mul]
-  ring
-
-/-- The numerator `grouped_column_step` builds:
-`(lhs0 - rhs0) + 2^82·(lhs1 - rhs1) + cb_prev - 2^88 + 2^252`. -/
-def numLC : LC :=
-  ⟨((2 ^ 252 - 2 ^ 88 : ℕ) : F),
-    [(1, .plug 0), (wF, .plug 1), (-1, .plug 2), (-wF, .plug 3), (1, .plug 4)]⟩
-
-/-- **The exported output is the carry.** The template's output combination is the
-numerator scaled by `2^-164`: the constants `1, 2^82, -1, -2^82, 1` on the plugs and
-`2^252 - 2^88` are the Rust expression's. -/
-theorem outputs_eq : template.outputs = [numLC.mulConst INV_GROUP] := by
-  decide +kernel
-
-/-- `2^164 · 2^-164 = 1` in the field. -/
-theorem Q_mul_inv : ((2 ^ 164 : ℕ) : F) * INV_GROUP = 1 := by decide
-
-/-- The step's output value is `2^-164` times its numerator. -/
-theorem vLC_eq (σ : TVar → F) :
-    (template.outputs.getD 0 ⟨0, []⟩).eval σ = INV_GROUP * numLC.eval σ := by
-  rw [outputs_eq]
-  simp only [List.getD_cons_zero, eval_mulConst]
-
-/-- **The carry's field identity.** `2^164 · k` is the numerator in the field, so
-`carry_row` only needs the numerator to be canonical, not the division row. -/
-theorem Q_mul_vLC (σ : TVar → F) :
-    ((2 ^ 164 : ℕ) : F) * (template.outputs.getD 0 ⟨0, []⟩).eval σ = numLC.eval σ := by
-  rw [vLC_eq, ← mul_assoc, Q_mul_inv, one_mul]
 
 /-- **The carry is the integer quotient.** If the numerator is a canonical field
 element (`num < r`) and the carry's representative is below `2^89`, then
@@ -132,12 +76,27 @@ theorem carry_row (num : ℤ) (k : F) (h0 : 0 ≤ num) (hlt : num < (r : ℤ))
   rw [Int.toNat_of_nonneg h0] at h2
   rwa [show ((2 ^ 164 : ℕ) : ℤ) = Q by norm_num [Q]] at h2
 
+/-- **The step's rows give its `CarrySpec` row.** A satisfying assignment of
+`grouped_column_step`, with `numLC` the cast of a canonical integer `num`, has
+`num = 2^164 · k` over the integers. -/
+theorem carry_of_sat (σ : TVar → F) (h : template.Sat σ) (num : ℤ)
+    (h0 : 0 ≤ num) (hlt : num < (r : ℤ)) (hnum : numLC.eval σ = (num : F)) :
+    num = Q * ((vLC.eval σ).val : ℤ) := by
+  have hout : template.outputs = [vLC] := by decide +kernel
+  have hk : (vLC.eval σ).val < 2 ^ 89 := by
+    have hspec := soundness σ h
+    simpa [Spec, Template.outs, hout] using hspec
+  have hcast : (num : F) = ((2 ^ 164 : ℕ) : F) * (vLC.eval σ) := by
+    rw [← hnum]
+    exact pin_eval σ h
+  exact carry_row num (vLC.eval σ) h0 hlt hcast hk
+
 /-- The same row written as `grouped_columns` computes it:
-`S + cb - 2^88 + 2^252 = 2^164 · k`. -/
-theorem step_row (S cb : ℤ) (k : F) (hk : k.val < 2 ^ 89)
+`S + cb - 2^88 + 2^252 = 2^164 · k`, straight from the step's rows. -/
+theorem step_row_of_sat (σ : TVar → F) (h : template.Sat σ) (S cb : ℤ)
     (h0 : 0 ≤ S + cb - BI + OFF) (hlt : S + cb - BI + OFF < (r : ℤ))
-    (hcast : (((S + cb - BI + OFF : ℤ)) : F) = ((2 ^ 164 : ℕ) : F) * k) :
-    S + cb - BI + OFF = Q * (k.val : ℤ) :=
-  carry_row (S + cb - BI + OFF) k h0 hlt hcast hk
+    (hnum : numLC.eval σ = (((S + cb - BI + OFF : ℤ)) : F)) :
+    S + cb - BI + OFF = Q * ((vLC.eval σ).val : ℤ) :=
+  carry_of_sat σ h (S + cb - BI + OFF) h0 hlt hnum
 
 end Xark.Rsa.GroupedCarry

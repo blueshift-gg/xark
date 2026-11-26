@@ -395,20 +395,23 @@ The 25×82 chain's range checks and per-step carries are Lean templates.
 `range_check_q`/`range_check_r` are 25 `range_derived` blocks
 (`Formal/RangeDerived.lean`; `Formal/RangeCheckQ.lean`, `RangeCheckR.lean`), and
 `grouped_column_step` is a `#[gadget]` whose 89-bit carry check is proven
-(`Formal/GroupedColumnStep.lean`). A group's carry is the affine field quotient
-`num·2^-164`; its 89-bit range check is what proves the division exact over the
-integers (a non-divisible numerator's quotient is at least `Fr/2^164 > 2^89`), so
-divisibility needs no row of its own. `Formal/GroupedColumns.lean` proves the
+(`Formal/GroupedColumnStep.lean`). A group's carry is a witnessed
+`num / 2^164`, pinned by `num = 2^164·k` and by the hint's remainder being
+zero; its 89-bit range check is what proves the division exact over the integers
+(a non-divisible numerator's quotient is at least `Fr/2^164 > 2^89`). The carry is
+a witness rather than an affine `num·2^-164` at a cost of two rows per step
+(`rsa2048`: 125,856 rows, 816 more): the next call then reads a variable, which is
+what makes the whole circuit exportable. `Formal/GroupedColumns.lean` proves the
 telescope: 24 carry rows plus the top row `d 48 + k 23 − BI = 0` imply the column
 identity `Σ_{c<49} d c · 2^(82c) = 0`, over the integers, with no dependence on
 the Rust row order, and reads the columns out of the limbs (`val a · val b =
 val q · val m + val r`, `mul_eq`; `square_eq`/`fused_final` are its square and
 encoded-message cases). `Formal/GroupedCarry.lean` closes the field→integer step:
-the template's output combination is the numerator times `2^-164` (`outputs_eq`,
-`decide +kernel` against the export; `Q_mul_vLC` then makes `2^164 · k` the
-numerator in the field), and when the numerator is canonical
-(`0 ≤ num < r`) and the carry below `2^89`, `num = 2^164 · k` holds over the
-integers, not only mod `r` (`carry_row`; both sides are then below `2^253 < r`).
+row 0 pins `num = 2^164·k` in the field (`pin_eval`, `decide +kernel` against
+the export), and when the numerator is canonical (`0 ≤ num < r`) and the carry
+below `2^89`, `num = 2^164 · k` holds over the integers, not only mod `r`
+(`carry_row`; both sides are then below `2^253 < r`), straight from the rows
+(`carry_of_sat`).
 That is the whole no-wrap argument, given the column bounds. `Formal/RsaChain.lean`
 then states the chain's top level: `n_bits` (the modulus is 2048 bits from the
 `n_top` pin), `squarings` (16 squarings keep `acc ≡ sig^(2^k)`), and `chain`
@@ -432,9 +435,12 @@ Still hand-proved, and therefore audit residuals:
 * **`minus_one` and `sig < n`.** The borrow chain that makes `n − 1`'s canonical
   digits, and so the `require_lt::<25,82>` composition to `sig < n`, are the
   bignum gadget's (its LC plugs are the allowlisted entry).
-* **The whole-circuit composition** (`Xark.Circuit`). An `rsa2048` export is
-  30 MB because the chain passes each carry as a linear combination rather than a
-  variable; it is deferred until the chain allocates carries.
+* **The whole-circuit composition** (`Xark.Circuit`). The production circuit is
+  exported and hash-gated (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 1,021
+  segments, `fnv1a64:860142cc226105b8`), so `Sat circuit σ` is the production rows;
+  what is not proven is that its calls' plugs meet the templates' `Assumptions`
+  (for the chain, the `CarrySpec` instance) and the top-level statement. That is
+  the same status as `secp256k1_ecdsa`'s export.
 
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s

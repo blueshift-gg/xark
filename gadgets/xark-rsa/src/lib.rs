@@ -163,12 +163,6 @@ const GROUP_CARRY_BITS: usize = 89;
 const GROUP_BIAS_BITS: usize = 88;
 /// Added to a group sum so it is non-negative; `2^252 = 2^88 * 2^164`.
 const GROUP_OFF_BITS: usize = 252;
-/// `2^-164 mod Fr` (the BN254 scalar field). Dividing a group numerator by the
-/// group weight is a constant multiply, hence free; the carry's range check is
-/// what turns that field quotient into the integer one.
-const INV_GROUP: Field = Field::constant(
-    "11761852403780205603504176608903144981443942272354872058493689129916111935102",
-);
 /// A 121-bit input limb shifted by at most 78 bits is below `2^199`, so the
 /// conversion carry is below `2^117.1`: 118 bits cover it.
 const CONVERT_CARRY_BITS: usize = 118;
@@ -382,9 +376,15 @@ pub fn range_check_r(r: [Field; WIDE_LIMBS]) {
 /// One two-column carry step of [`grouped_columns`].
 ///
 /// `lhs`/`rhs` are the product columns for one pair; `cb_prev` is the previous
-/// carry. The returned carry is `(S_j + cb_prev - 2^88 + 2^252) * 2^-164`,
-/// range-checked below `2^89`. See [`grouped_columns`] for why that range check
-/// is the whole certificate.
+/// carry. The carry is a *witness* `k`, pinned by `num = 2^164 · k` and
+/// range-checked below `2^89`; `num = S_j + cb_prev - 2^88 + 2^252` is
+/// `2^164 · k` over the integers, not only in the field, because `num` is
+/// canonical (`< 2^253`) and so is `2^164 · k`. See [`grouped_columns`].
+///
+/// Writing the carry as a variable rather than an affine `num · 2^-164` costs
+/// one row per step, but the next call then reads a variable instead of a linear
+/// combination that nests the previous one, which is what lets the chain export
+/// to Lean as a circuit rather than a 30 MB expansion (zkGolf's `EqViaCarries`).
 #[xark::gadget]
 pub fn grouped_column_step(
     lhs0: Field,
@@ -399,7 +399,14 @@ pub fn grouped_column_step(
     let off = pow2(GROUP_OFF_BITS);
     let s = (lhs0 - rhs0) + two_b * (lhs1 - rhs1);
     let num = s + cb_prev - bias + off;
-    let k = num * INV_GROUP;
+    let dr = Field::hint_div_rem(num, pow2(GROUP_BITS));
+    let k = dr[0];
+    // Pin the quotient, and the remainder to zero: `num = 2^164·k` exactly is
+    // what the chain needs, and `dr[1]` must be constrained like every hint
+    // output (it is 0 whenever the division is exact, which `num = 2^164·k`
+    // then forces over the integers).
+    require_eq(num, pow2(GROUP_BITS) * k);
+    require_eq(dr[1], Field::from(0u8));
     range_derived::<GROUP_CARRY_BITS>(k);
     k
 }
@@ -409,11 +416,12 @@ pub fn grouped_column_step(
 ///
 /// For columns `c = 2j, 2j+1`, `S_j = d_{2j} + 2^82 d_{2j+1}` with
 /// `d_c = Σ_{i+k=c} a_i b_k - Σ_{i+k=c} q_i m_k - rhs_c`. Group `j` forms
-/// `num_j = S_j + c_{j-1} + 2^252`, reads its carry `c_j = num_j / 2^164` *as a
-/// field element* (a constant multiply by [`INV_GROUP`], so no witness and no
-/// division row), and range-checks `c_j < 2^89`. Multiplying `num_j = c_j·2^164`
-/// by `2^(164 j)` and summing telescopes to `Σ_c d_c 2^(82 c) = 0`: the integer
-/// identity. The top column closes the chain, `d_48 + c_23 = 0`.
+/// `num_j = S_j + c_{j-1} + 2^252`, reads its carry `c_j = num_j / 2^164` as a
+/// witnessed field element ([`grouped_column_step`]: a `hint_div_rem`, one row
+/// pinning `num_j = c_j·2^164`, one pinning the remainder to zero), and
+/// range-checks `c_j < 2^89`. Multiplying `num_j = c_j·2^164` by `2^(164 j)` and
+/// summing telescopes to `Σ_c d_c 2^(82 c) = 0`: the integer identity. The top
+/// column closes the chain, `d_48 + c_23 = 0`.
 ///
 /// Bounds (`L = 25`, `B = 82`): `|d_c| <= 2·25·(2^82-1)^2 < 2^169.7`, so
 /// `|S_j| < 2^251.7`; the fixed point is `|c| < 2^251.7/(2^164-1) < 2^87.7`.
@@ -423,11 +431,11 @@ pub fn grouped_column_step(
 /// `c_j·2^164 < 2^253`.
 ///
 /// The range check is also what makes the division exact over the integers
-/// rather than only modulo `Fr`. Were `num_j` not divisible by `2^164`, the
-/// field quotient `num_j·2^-164` would be `(num_j + t·Fr)/2^164` for some
-/// `t ∈ [1, 2^164)`, and that is at least `Fr/2^164 > 2^89`, so the check would
-/// reject it. Divisibility therefore needs no row of its own, and each group's
-/// certificate is its 89-bit range check alone.
+/// rather than only modulo `Fr`. Were `num_j` not divisible by `2^164`, then
+/// `2^164·c_j = num_j` would force `c_j = (num_j + t·Fr)/2^164` for some
+/// `t ∈ [0, 2^164)`, at least `Fr/2^164 > 2^89`, so the check would reject it.
+/// A group's certificate is thus its 89-bit range check plus the two pinning
+/// rows of the step.
 fn grouped_columns(
     a: [Field; WIDE_LIMBS],
     b: [Field; WIDE_LIMBS],

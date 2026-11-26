@@ -14,8 +14,12 @@ set_option linter.style.header false
 
 The step's `range_derived::<89>` emits 88 boolean low bits and one derived top
 bit `top = k − Σ 2ⁱ bᵢ`, pinned by `top · (top − 2⁸⁸) = 0`. The rows therefore
-prove `k < 2⁸⁹` with no input assumption; the affine identity
-`k = (S + cb − 2⁸⁸ + 2²⁵²) · 2⁻¹⁶⁴` is the output expression itself.
+prove `k < 2⁸⁹` with no input assumption.
+
+Since the carry is a witness, the step also pins it: row 0 is
+`num − 2¹⁶⁴·k = 0` with `num = (lhs0−rhs0) + 2⁸²(lhs1−rhs1) + cb − 2⁸⁸ + 2²⁵²`,
+and row 1 pins the hint's remainder to zero. `Formal/GroupedCarry.lean` turns row 0
+into the integer identity `num = 2¹⁶⁴·k` the chain needs.
 -/
 
 namespace Xark.Templates.GroupedColumnStep
@@ -25,15 +29,28 @@ open Xark.Templates.Add32 (IsBit isBit_val word_lt sum_map_range isBit_of_mul_se
 
 instance : Fact (Nat.Prime r) := bn254_r_prime
 
-/-- The output `k`, as the exported linear combination. -/
+/-- The output `k`, as the exported linear combination: the hinted witness. -/
 def vLC : LC := template.outputs.getD 0 ⟨0, []⟩
 
-/-- The 88 low bits of `k`, at weights `2⁰ … 2⁸⁷`. -/
-def accLC : LC :=
-  ⟨0, (List.range 88).map fun i => (((2 ^ i : ℕ) : F), .wit (2 * i))⟩
+/-- The numerator `num = (lhs0 − rhs0) + 2^82·(lhs1 − rhs1) + cb_prev − 2^88 + 2^252`. -/
+def numLC : LC :=
+  ⟨((2 ^ 252 - 2 ^ 88 : ℕ) : F),
+    [(1, .plug 0), (((2 ^ 82 : ℕ) : F), .plug 1), (-1, .plug 2),
+     (-(((2 ^ 82 : ℕ) : F)), .plug 3), (1, .plug 4)]⟩
 
-def negTerms (l : List (F × TVar)) : List (F × TVar) :=
-  l.map fun t => (-t.1, t.2)
+/-- Row 0's left side: `num − 2^164·k`. -/
+def pinLC : LC := ⟨numLC.const, numLC.terms ++ [(-(((2 ^ 164 : ℕ) : F)), .wit 0)]⟩
+
+def pinRow : Row := ⟨pinLC, ⟨1, []⟩, ⟨0, []⟩⟩
+
+/-- Row 1: the hint's remainder is zero. -/
+def zeroRow : Row := ⟨LC.var (.wit 1), ⟨1, []⟩, ⟨0, []⟩⟩
+
+/-- The 88 low bits of `k`, at weights `2⁰ … 2⁸⁷`, after the hint's two variables. -/
+def accLC : LC :=
+  ⟨0, (List.range 88).map fun i => (((2 ^ i : ℕ) : F), .wit (2 + 2 * i))⟩
+
+def negTerms (l : List (F × TVar)) : List (F × TVar) := l.map fun t => (-t.1, t.2)
 
 /-- `top = k − Σ 2ⁱ bᵢ`. -/
 def topA : LC := ⟨vLC.const, vLC.terms ++ negTerms accLC.terms⟩
@@ -43,16 +60,23 @@ def topB : LC := ⟨topA.const - ((2 ^ 88 : ℕ) : F), topA.terms⟩
 
 /-- `bᵢ · bᵢ = bᵢ`. -/
 def bitRow (i : ℕ) : Row :=
-  ⟨LC.var (.wit (2 * i)), LC.var (.wit (2 * i)), LC.var (.wit (2 * i))⟩
+  ⟨LC.var (.wit (2 + 2 * i)), LC.var (.wit (2 + 2 * i)), LC.var (.wit (2 + 2 * i))⟩
 
 /-- `top · (top − 2⁸⁸) = 0`. -/
 def topRow : Row := ⟨topA, topB, ⟨0, []⟩⟩
 
-def modelRows : List Row := (List.range 88).map bitRow ++ [topRow]
+/-- The rows in order: the quotient pin, the remainder pin, the 88 booleanity rows,
+then the derived top bit. -/
+def modelRows : List Row :=
+  [pinRow, zeroRow] ++ (List.range 88).map bitRow ++ [topRow]
 
 set_option maxHeartbeats 0 in
 set_option maxRecDepth 100000 in
 theorem rows_eq : template.rows = modelRows := by
+  decide +kernel
+
+/-- The exported output is the hint's first variable. -/
+theorem vLC_eq : vLC = LC.var (.wit 0) := by
   decide +kernel
 
 /-- The step's contract: the output is below `2⁸⁹`. -/
@@ -62,29 +86,48 @@ def Spec (_ins outs : List F) : Prop :=
 /-- No input assumption: the range check is unconditional. -/
 def Assumptions (_ins : List F) : Prop := True
 
+/-- **The pin.** Row 0 says `num = 2^164·k` in the field. -/
+theorem pin_eval (σ : TVar → F) (h : template.Sat σ) :
+    numLC.eval σ = ((2 ^ 164 : ℕ) : F) * (vLC.eval σ) := by
+  rw [Template.Sat, rows_eq] at h
+  have hrow := h pinRow (by simp [modelRows])
+  have hv : vLC.eval σ = σ (.wit 0) := by
+    rw [vLC_eq]
+    simp [LC.var, LC.eval]
+  have hrow' : pinLC.eval σ = 0 := by
+    simpa only [Row.Sat, pinRow, LC.eval, List.map_nil, List.sum_nil, add_zero, mul_one]
+      using hrow
+  have hpin : pinLC.eval σ = numLC.eval σ - ((2 ^ 164 : ℕ) : F) * σ (.wit 0) := by
+    simp only [pinLC, numLC, LC.eval, List.map_append, List.sum_append, List.map_cons,
+      List.sum_cons, List.map_nil, List.sum_nil, add_zero]
+    ring
+  rw [hpin] at hrow'
+  rw [hv]
+  linear_combination hrow'
+
 /-- **Soundness.** Every satisfying assignment has its output below `2⁸⁹`. -/
 theorem soundness (σ : TVar → F) (h : template.Sat σ) :
     Spec (template.ins σ) (template.outs σ) := by
   rw [Template.Sat, rows_eq] at h
-  have hbits : ∀ i < 88, IsBit (σ (.wit (2 * i))) := by
+  have hbits : ∀ i < 88, IsBit (σ (.wit (2 + 2 * i))) := by
     intro i hi
     have hmem : bitRow i ∈ modelRows := by
-      simp only [modelRows, List.mem_append, List.mem_map, List.mem_range]
-      exact Or.inl ⟨i, hi, rfl⟩
+      refine List.mem_append_left _ (List.mem_append_right _ ?_)
+      exact List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩
     have hrow := h (bitRow i) hmem
     exact isBit_of_mul_self (by simpa [Row.Sat, bitRow] using hrow)
   have hrow : topA.eval σ * topB.eval σ = 0 := by
     have := h topRow (by simp [modelRows])
-    simpa [Row.Sat, topRow, LC.eval] using this
+    simpa only [Row.Sat, topRow, LC.eval, List.map_nil, List.sum_nil, add_zero] using this
   have hB : topB.eval σ = topA.eval σ - ((2 ^ 88 : ℕ) : F) := by
     simp only [topB, LC.eval]
     ring
   rw [hB] at hrow
   have htop : topA.eval σ = 0 ∨ topA.eval σ = ((2 ^ 88 : ℕ) : F) := by
-    rcases mul_eq_zero.mp hrow with h | h
-    · exact Or.inl h
-    · exact Or.inr (by linear_combination h)
-  let v : ℕ → ℕ := fun i => (σ (.wit (2 * i))).val
+    rcases mul_eq_zero.mp hrow with h' | h'
+    · exact Or.inl h'
+    · exact Or.inr (by linear_combination h')
+  let v : ℕ → ℕ := fun i => (σ (.wit (2 + 2 * i))).val
   have hv : ∀ i < 88, v i ≤ 1 := fun i hi => isBit_val (hbits i hi)
   have hW := word_lt v 88 hv
   have hcast : ((∑ i ∈ Finset.range 88, 2 ^ i * v i : ℕ) : F) = accLC.eval σ := by

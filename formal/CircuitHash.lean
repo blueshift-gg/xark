@@ -4,6 +4,7 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Circuits.Secp256k1Ecdsa
+import Formal.Circuits.Rsa2048
 
 /-!
 Run by CI (`lean.yml`, after the build) as `lake env lean CircuitHash.lean`: for each
@@ -15,3 +16,6 @@ hashed side by side. Fails, naming the circuit and the first differing segment, 
 
 #eval Xark.Circuit.check "Secp256k1Ecdsa" Xark.Circuits.Secp256k1Ecdsa.circuit
   Xark.Circuits.Secp256k1Ecdsa.expected Xark.Circuits.Secp256k1Ecdsa.expectedSegs
+
+#eval Xark.Circuit.check "Rsa2048" Xark.Circuits.Rsa2048.circuit
+  Xark.Circuits.Rsa2048.expected Xark.Circuits.Rsa2048.expectedSegs

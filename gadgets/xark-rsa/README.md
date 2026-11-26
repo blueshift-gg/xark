@@ -89,16 +89,18 @@ digest can be private too.
 ## Cost
 
 * The byte-input example (`examples/rsa2048`, the zkGolf-style public input)
-  verifies in **125,040 constraints** in the `xark build`; the harness counts
-  **126,273 primitive constraints** and **124,995 multiplication gates**. The
-  baseline before the golf was 157,451 / 155,153 (a 20.6% reduction).
-* The raw-limb `verify_sha256_limbs` is **136,235 primitive constraints**; the
-  typed `verify_sha256` adds its own limb range checks, so a `Bignum::new`
-  caller is safe, and its harness is **140,383**.
+  verifies in **125,856 constraints** (`CircuitHash`'s row count for its
+  `Formal/Circuits` export); the harness counts **127,089 primitive constraints**
+  and **124,995 multiplication gates**. The baseline before the golf was
+  157,451 / 155,153 (a 20.6% reduction); the witnessed carry below costs 816.
+* The raw-limb `verify_sha256_limbs` is **137,051 primitive constraints** (the
+  byte path's +816 is the same carry change); the typed `verify_sha256` adds its
+  own limb range checks, so a `Bignum::new` caller is safe.
 * The internal chain is 25 x 82-bit limbs with lazy reduction (an intermediate
   is proved `< 2^2048`, not `< n`; the final fused step pins the canonical
-  target), paired-column carries read affinely from their numerator (`num *
-  2^-164`, so each carry costs only its 89-bit range check), and a terminal
+  target), paired-column carries as *witnessed* `num / 2^164` (two pinning rows
+  plus the 89-bit range check; a witness rather than an affine `num * 2^-164` so
+  the next step reads a variable and the circuit exports to Lean), and a terminal
   multiply whose remainder is the encoded message. The octet public input is
   packed to those limbs with `to_bits::<8>`.
 * With the generic KAT inputs, `xark prove --verify` solves in 0.04 s and proves
@@ -126,10 +128,13 @@ digest can be private too.
   the byte packing. Each carries a `#[gadget]` marker, so the coverage check sees
   its production calls; the carry telescope is proven separately as the
   row-independent model `Xark.Rsa.GroupedColumns.soundness`
-  (`Formal/GroupedColumns.lean`). Still hand-proved: the chain composition around
-  those pieces (`square_lazy`, `fused_final`, `convert_wide`, `bytes_to_wide`,
-  `minus_one`, the `n_top`/EM pin, `verify_wide`) and the bridge from
-  `grouped_columns`' rows to the model — see `docs/security.md` §2.18.
+  (`Formal/GroupedColumns.lean`), the step's rows give its `CarrySpec` row
+  (`GroupedCarry.carry_of_sat`), and the chain's top level is `RsaChain.chain`
+  (`em ≡ sig^65537`). The production circuit is exported and hash-gated
+  (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 1,021 segments). Still
+  hand-proved: that the exported calls' plugs meet the templates' `Assumptions`
+  (for the chain, the `CarrySpec` instance), the EM vector, `minus_one`/`sig < n`,
+  and the top-level statement — see `docs/security.md` §2.18.
   `cargo xtask lean-export --check` passes all 69 templates, `--coverage` passes
   for `examples/rsa2048` (408/408 `grouped_column_step`, 17/17 `range_check_q`,
   16/16 `range_check_r` calls), and `cargo xtask digests` passes; the optimized
