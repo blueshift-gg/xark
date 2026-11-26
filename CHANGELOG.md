@@ -14,7 +14,7 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   and a generated RSA-2048 KAT that also hashes the test message on the host.
   The typed `verify_sha256`/`verify_sha256_words` entry points range-check their
   limbs, so a `Bignum::new` caller is safe.
-- `examples/rsa2048`: the byte-input example and generated KAT; 125,856 constraints
+- `examples/rsa2048`: the byte-input example and generated KAT; 125,040 constraints
   (157,451 before the golf).
 - Lean templates and proofs for `require_lt::<17, 121>`,
   `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`.

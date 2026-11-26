@@ -89,17 +89,18 @@ digest can be private too.
 ## Cost
 
 * The byte-input example (`examples/rsa2048`, the zkGolf-style public input)
-  verifies in **125,856 constraints** in the `xark build`; the harness counts
-  **127,089 primitive constraints** and **124,995 multiplication gates**. The
-  baseline before the golf was 157,451 / 155,153 (a 20.1% reduction).
-* The raw-limb `verify_sha256_limbs` is **137,051 primitive constraints**; the
+  verifies in **125,040 constraints** in the `xark build`; the harness counts
+  **126,273 primitive constraints** and **124,995 multiplication gates**. The
+  baseline before the golf was 157,451 / 155,153 (a 20.6% reduction).
+* The raw-limb `verify_sha256_limbs` is **136,235 primitive constraints**; the
   typed `verify_sha256` adds its own limb range checks, so a `Bignum::new`
-  caller is safe, and its harness is **141,199**.
+  caller is safe, and its harness is **140,383**.
 * The internal chain is 25 x 82-bit limbs with lazy reduction (an intermediate
   is proved `< 2^2048`, not `< n`; the final fused step pins the canonical
-  target), paired-column carries, and a terminal multiply whose remainder is
-  the encoded message. The octet public input is packed to those limbs with
-  `to_bits::<8>`.
+  target), paired-column carries read affinely from their numerator (`num *
+  2^-164`, so each carry costs only its 89-bit range check), and a terminal
+  multiply whose remainder is the encoded message. The octet public input is
+  packed to those limbs with `to_bits::<8>`.
 * With the generic KAT inputs, `xark prove --verify` solves in 0.04 s and proves
   in 0.70 s (release binary, `PROVE_TIME=1`, one machine), with 288 public
   inputs; the proof verifies.

@@ -141,7 +141,9 @@ pub fn sha256_em(digest: [Field; 32]) -> [Field; LIMBS] {
 //   * the convolution's columns are paired: a group of two 82-bit columns has
 //     a 164-bit weight, so its weighted sum still fits in `Fr` and the pair
 //     shares one carry. The carry certificate drops from 32 x 128 bits to
-//     24 x 89 bits; the schoolbook products are unchanged.
+//     24 x 89 bits; the schoolbook products are unchanged. The carry is read
+//     out of its group numerator affinely (`num * 2^-164`), so each group costs
+//     its 89-bit range check and nothing else.
 //
 // Soundness bounds are documented on each function; `WIDE_*` are chosen from
 // them. The arithmetic below is over `Fr`, so every `const` bound is checked
@@ -155,12 +157,18 @@ const WIDE_BITS: usize = 82;
 /// A pair of internal columns spans `2^(2*82)`.
 const GROUP_BITS: usize = 2 * WIDE_BITS;
 /// A group carry is below `2^(82 + log2(50)) < 2^87.7`; biased by `2^88`, the
-/// witnessed value is below `2^89`.
+/// range-checked value is below `2^89`.
 const GROUP_CARRY_BITS: usize = 89;
-/// The group-carry bias, so the witness is non-negative.
+/// The group-carry bias, so a group numerator is positive.
 const GROUP_BIAS_BITS: usize = 88;
 /// Added to a group sum so it is non-negative; `2^252 = 2^88 * 2^164`.
 const GROUP_OFF_BITS: usize = 252;
+/// `2^-164 mod Fr` (the BN254 scalar field). Dividing a group numerator by the
+/// group weight is a constant multiply, hence free; the carry's range check is
+/// what turns that field quotient into the integer one.
+const INV_GROUP: Field = Field::constant(
+    "11761852403780205603504176608903144981443942272354872058493689129916111935102",
+);
 /// A 121-bit input limb shifted by at most 78 bits is below `2^199`, so the
 /// conversion carry is below `2^117.1`: 118 bits cover it.
 const CONVERT_CARRY_BITS: usize = 118;
@@ -373,18 +381,26 @@ fn range_check_r(r: [Field; WIDE_LIMBS]) {
 /// columns.
 ///
 /// For columns `c = 2j, 2j+1`, `S_j = d_{2j} + 2^82 d_{2j+1}` with
-/// `d_c = Σ_{i+k=c} a_i b_k - Σ_{i+k=c} q_i m_k - rhs_c`. The rows impose
-/// `S_j + k_{j-1} = k_j 2^164`, `k_{-1} = k_23 = 0`, so multiplying by
-/// `2^(164 j)` and summing telescopes to `Σ_c d_c 2^(82 c) = 0`: the integer
-/// identity. The top column closes the chain.
+/// `d_c = Σ_{i+k=c} a_i b_k - Σ_{i+k=c} q_i m_k - rhs_c`. Group `j` forms
+/// `num_j = S_j + c_{j-1} + 2^252`, reads its carry `c_j = num_j / 2^164` *as a
+/// field element* (a constant multiply by [`INV_GROUP`], so no witness and no
+/// division row), and range-checks `c_j < 2^89`. Multiplying `num_j = c_j·2^164`
+/// by `2^(164 j)` and summing telescopes to `Σ_c d_c 2^(82 c) = 0`: the integer
+/// identity. The top column closes the chain, `d_48 + c_23 = 0`.
 ///
 /// Bounds (`L = 25`, `B = 82`): `|d_c| <= 2·25·(2^82-1)^2 < 2^169.7`, so
-/// `|S_j| < 2^251.7`; the fixed point `|k| < 2^251.7/(2^164-1) < 2^87.7`.
-/// With `OFF = 2^252`, a group numerator is `S_j + k_{j-1} + 2^252`, in
-/// `(0, 2^253) < Fr`; `cb = k + 2^88` is in `(0, 2^89)`. Both sides of every
-/// row are below `Fr`, so the row is an integer equality. A malicious prover
-/// cannot make the numerator negative: its `Fr` representative would exceed
-/// `cb·2^164 < 2^253`.
+/// `|S_j| < 2^251.7`; the fixed point is `|c| < 2^251.7/(2^164-1) < 2^87.7`.
+/// With `2^252` added, a group numerator is `S_j + c_{j-1} + 2^252`, in
+/// `(0, 2^253) < Fr`, so its `Fr` representative *is* that integer. A malicious
+/// prover cannot make it negative: the representative would then exceed
+/// `c_j·2^164 < 2^253`.
+///
+/// The range check is also what makes the division exact over the integers
+/// rather than only modulo `Fr`. Were `num_j` not divisible by `2^164`, the
+/// field quotient `num_j·2^-164` would be `(num_j + t·Fr)/2^164` for some
+/// `t ∈ [1, 2^164)`, and that is at least `Fr/2^164 > 2^89`, so the check would
+/// reject it. Divisibility therefore needs no row of its own, and each group's
+/// certificate is its 89-bit range check alone.
 fn grouped_columns(
     a: [Field; WIDE_LIMBS],
     b: [Field; WIDE_LIMBS],
@@ -411,7 +427,9 @@ fn grouped_columns(
         c += 1;
     }
     let two_b = pow2(WIDE_BITS);
-    let group_mod = pow2(GROUP_BITS);
+    // The offsets cancel in the telescoping sum only when `OFF = BIAS * 2^164`;
+    // get that wrong and the chain silently proves a different identity.
+    const { assert!(GROUP_OFF_BITS == GROUP_BIAS_BITS + GROUP_BITS) };
     let bias = pow2(GROUP_BIAS_BITS);
     let off = pow2(GROUP_OFF_BITS);
     let mut cb_prev = bias;
@@ -421,11 +439,17 @@ fn grouped_columns(
         let c1 = 2 * j + 1;
         let s = (lhs[c0] - rhs[c0]) + two_b * (lhs[c1] - rhs[c1]);
         let num = s + cb_prev - bias + off;
-        let dr = Field::hint_div_rem(num, group_mod);
-        require_eq(num, group_mod * dr[0] + dr[1]);
-        require_eq(dr[1], Field::from(0u8));
-        range_derived::<GROUP_CARRY_BITS>(dr[0]);
-        cb_prev = dr[0];
+        // The carry is `num / 2^164` read as a field element: a constant
+        // multiply, so no witness and no division row. The range check below is
+        // the whole certificate. It bounds the carry's representative `< 2^89`,
+        // and `num`'s is below `2^253`, so `2^164 * k` and `num` are both
+        // canonical representatives below `Fr` and `num = 2^164 * k` holds over
+        // the integers -- exactly the divisibility the chain needs -- rather
+        // than only modulo `Fr`. (Were `num` not divisible, `k` would be
+        // `(num + t*Fr)/2^164` with `t >= 1`, i.e. above `2^89.6`.)
+        let k = num * INV_GROUP;
+        range_derived::<GROUP_CARRY_BITS>(k);
+        cb_prev = k;
         j += 1;
     }
     // Top column: the last carry must be exactly zero.

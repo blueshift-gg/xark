@@ -392,8 +392,11 @@ limbs with `to_bits::<8>`; the whole-number entry point converts 17×121 limbs;
 the typed `verify_sha256`/`verify_sha256_words` range-check their limbs.
 
 The 25×82 lazy chain's quotient/remainder ranges, grouped-column carries, and
-terminal EM pin are hand-proved in `gadgets/xark-rsa/src/lib.rs`. The
-`require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
+terminal EM pin are hand-proved in `gadgets/xark-rsa/src/lib.rs`. A group's
+carry is the affine field quotient `num·2^-164`; its 89-bit range check is what
+proves the division exact over the integers (a non-divisible numerator's
+quotient is at least `Fr/2^164 > 2^89`), so divisibility needs no row of its
+own. The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. The
 `grouped_columns`/`square_lazy`/`fused_final` no-wrap argument is not yet a Lean
 theorem (audit residual), and `n`'s oddness/semiprimality is deliberately not
