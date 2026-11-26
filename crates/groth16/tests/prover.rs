@@ -10,6 +10,7 @@
 //!   fail — the contract has teeth.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 
 use ark_bn254::{Bn254, Fr};
 use ark_ff::{UniformRand, Zero};
@@ -1414,6 +1415,163 @@ fn transcoding_and_tee_produce_the_uncompressed_key() {
     spk.stream_g1(G1Query::L, cfg.msm_chunk, &mut |_, _| {})
         .unwrap();
     assert!(!spk.finish_tee().unwrap());
+}
+
+enum KeyReadFault {
+    SeekAt(u64),
+    ReadAt(u64),
+    None,
+}
+
+struct FaultingKeyReader<'a> {
+    cursor: Cursor<&'a [u8]>,
+    fault: KeyReadFault,
+}
+
+impl Read for FaultingKeyReader<'_> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if matches!(self.fault, KeyReadFault::ReadAt(at) if self.cursor.position() == at) {
+            return Err(io::Error::other("injected key read failure"));
+        }
+        self.cursor.read(out)
+    }
+}
+
+impl Seek for FaultingKeyReader<'_> {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        if matches!(self.fault, KeyReadFault::SeekAt(at) if to == SeekFrom::Start(at)) {
+            return Err(io::Error::other("injected key seek failure"));
+        }
+        self.cursor.seek(to)
+    }
+}
+
+struct FaultingTeeWriter {
+    written: SharedBuf,
+    remaining: usize,
+    fail_flush: bool,
+}
+
+impl Write for FaultingTeeWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.remaining == 0 && !bytes.is_empty() {
+            return Err(io::Error::other("injected tee write failure"));
+        }
+        let n = self.remaining.min(bytes.len());
+        let n = self.written.write(&bytes[..n])?;
+        self.remaining -= n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if self.fail_flush {
+            return Err(io::Error::other("injected tee flush failure"));
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn tee_rejects_g2_stream_and_writer_failures_after_continued_reads() {
+    let prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let circ = XarkCircuit::for_setup_preminimized(prog);
+    let (pk, _) = ArkG16::circuit_specific_setup(circ, &mut ChaCha20Rng::seed_from_u64(6)).unwrap();
+    let compressed = pk_bytes(&pk, Compress::Yes, true);
+    let uncompressed = pk_bytes(&pk, Compress::No, true);
+    let g2_start = |mode| {
+        MAX_HEADER_LEN
+            + pk.vk.serialized_size(mode)
+            + pk.beta_g1.serialized_size(mode)
+            + pk.delta_g1.serialized_size(mode)
+            + pk.a_query.serialized_size(mode)
+            + pk.b_g1_query.serialized_size(mode)
+            + std::mem::size_of::<u64>()
+    };
+    let chunk = 50;
+    let g2_start_compressed = g2_start(Compress::Yes);
+    let g2_point_size = pk.b_g2_query[0].compressed_size();
+    let second_chunk = g2_start_compressed + chunk * g2_point_size;
+    let mut malformed = compressed.clone();
+    malformed[second_chunk..second_chunk + g2_point_size].fill(0xff);
+    for (label, bytes, fault, expected_prefix) in [
+        (
+            "seek",
+            compressed.as_slice(),
+            KeyReadFault::SeekAt(g2_start_compressed as u64),
+            0,
+        ),
+        (
+            "read",
+            compressed.as_slice(),
+            KeyReadFault::ReadAt(second_chunk as u64),
+            chunk,
+        ),
+        ("decode", malformed.as_slice(), KeyReadFault::None, chunk),
+    ] {
+        let mut spk = SerializedPk::new(FaultingKeyReader {
+            cursor: Cursor::new(bytes),
+            fault,
+        })
+        .unwrap();
+        spk.tee_uncompressed(Box::new(SharedBuf::default()))
+            .unwrap();
+        spk.stream_g1(G1Query::A, chunk, &mut |_, _| {}).unwrap();
+        spk.stream_g1(G1Query::BG1, chunk, &mut |_, _| {}).unwrap();
+
+        let mut seen = 0;
+        let failure = spk.stream_g2(chunk, &mut |offset, points| {
+            assert_eq!(offset, seen, "{label}");
+            assert_eq!(points, &pk.b_g2_query[offset..offset + points.len()]);
+            seen += points.len();
+        });
+        match (label, failure) {
+            ("seek" | "read", Err(PkError::Io(e))) => {
+                assert_eq!(e.to_string(), format!("injected key {label} failure"));
+            }
+            ("decode", Err(PkError::Deserialize(_))) => {}
+            (_, other) => panic!("{label}: expected an injected G2 failure, got {other:?}"),
+        }
+        assert_eq!(seen, expected_prefix, "{label}");
+        spk.stream_g1(G1Query::H, chunk, &mut |_, _| {}).unwrap();
+        spk.stream_g1(G1Query::L, chunk, &mut |_, _| {}).unwrap();
+        assert!(!spk.finish_tee().unwrap(), "{label}");
+    }
+
+    let g2_start_uncompressed = g2_start(Compress::No);
+    for (limit, fail_flush) in [
+        (g2_start_uncompressed - std::mem::size_of::<u64>(), false),
+        (g2_start_uncompressed + 1, false),
+        (uncompressed.len(), true),
+    ] {
+        let mut spk = SerializedPk::from_bytes(&compressed).unwrap();
+        let written = SharedBuf::default();
+        spk.tee_uncompressed(Box::new(FaultingTeeWriter {
+            written: written.clone(),
+            remaining: limit,
+            fail_flush,
+        }))
+        .unwrap();
+        spk.stream_g1(G1Query::A, chunk, &mut |_, _| {}).unwrap();
+        spk.stream_g1(G1Query::BG1, chunk, &mut |_, _| {}).unwrap();
+        let mut seen = 0;
+        spk.stream_g2(chunk, &mut |offset, points| {
+            assert_eq!(offset, seen);
+            assert_eq!(points, &pk.b_g2_query[offset..offset + points.len()]);
+            seen += points.len();
+        })
+        .unwrap();
+        assert_eq!(seen, pk.b_g2_query.len());
+        spk.stream_g1(G1Query::H, chunk, &mut |_, _| {}).unwrap();
+        spk.stream_g1(G1Query::L, chunk, &mut |_, _| {}).unwrap();
+        assert_eq!(&*written.0.lock().unwrap(), &uncompressed[..limit]);
+        match spk.finish_tee() {
+            Err(e) if fail_flush => assert_eq!(e.to_string(), "injected tee flush failure"),
+            Ok(false) if !fail_flush => {}
+            other => panic!("expected a writer failure, got {other:?}"),
+        }
+    }
 }
 
 // ---- smooth (3·2^k / 9·2^k) domains -----------------------------------------------
