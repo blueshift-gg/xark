@@ -32,6 +32,22 @@ fn profile_from_exe(exe: &std::path::Path) -> Option<String> {
         })
 }
 
+#[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+fn publish_xark_copy(built: &std::path::Path, copy: &std::path::Path) -> std::io::Result<()> {
+    use std::{fs, io::ErrorKind};
+
+    let tmp = copy.with_extension(format!("{}.tmp", std::process::id()));
+    let published = fs::copy(built, &tmp).and_then(|_| match fs::hard_link(&tmp, copy) {
+        // Another test process placed its complete copy first. Leave that inode
+        // in place because a running CLI can look itself up by path.
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
+        result => result,
+    });
+    let removed = fs::remove_file(&tmp);
+    published?;
+    removed
+}
+
 /// Path to the built `xark` CLI binary, for the CLI integration tests.
 /// Returns the `xark` CLI binary path.
 #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
@@ -87,13 +103,147 @@ pub fn xark_bin() -> std::path::PathBuf {
         let copy = dir.join(exe);
         if !copy.exists() {
             std::fs::create_dir_all(&dir).expect("create target/xark-test-bin");
-            let tmp = dir.join(format!("{exe}.{}.tmp", std::process::id()));
-            std::fs::copy(&built, &tmp).expect("copy the built `xark`");
-            std::fs::rename(&tmp, &copy).expect("place the copy of `xark`");
+            publish_xark_copy(&built, &copy).expect("place the copy of `xark`");
         }
         copy
     })
     .clone()
+}
+
+#[cfg(all(test, not(any(target_os = "solana", target_arch = "bpf"))))]
+mod cli_copy_tests {
+    use super::publish_xark_copy;
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("xark-copy-{label}-{}-{stamp}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn second_cli_publication_leaves_first_copy_in_place() {
+        let dir = temp_dir("sequential");
+        let built = dir.join("built");
+        let copy = dir.join("xark");
+
+        fs::write(&built, b"first").unwrap();
+        publish_xark_copy(&built, &copy).unwrap();
+        fs::write(&built, b"second").unwrap();
+        publish_xark_copy(&built, &copy).unwrap();
+
+        assert_eq!(fs::read(&copy).unwrap(), b"first");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_cli_copy_removes_an_incomplete_stage_without_publishing() {
+        let dir = temp_dir("incomplete");
+        let copy = dir.join("xark");
+        let stale_stage = copy.with_extension(format!("{}.tmp", std::process::id()));
+        fs::write(&stale_stage, b"incomplete").unwrap();
+
+        let error = publish_xark_copy(&dir.join("missing"), &copy).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(!copy.exists());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_publishers_stage_distinct_executables() {
+        use std::{
+            os::unix::fs::PermissionsExt,
+            path::Path,
+            process::{Command, Stdio},
+            thread,
+            time::{Duration, Instant},
+        };
+
+        const CHILD_COPY: &str = "XARK_TEST_CONCURRENT_CLI_COPY";
+        const TEST: &str = "cli_copy_tests::concurrent_publishers_stage_distinct_executables";
+
+        fn wait_for(path: &Path) {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !path.exists() {
+                assert!(Instant::now() < deadline, "timed out waiting for {path:?}");
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        if let Some(source) = std::env::var_os(CHILD_COPY) {
+            let built = PathBuf::from(source);
+            let dir = built.parent().unwrap();
+            let gate = dir.join("gate");
+            fs::write(gate.join(built.file_name().unwrap()), []).unwrap();
+            wait_for(&gate.join("start"));
+            publish_xark_copy(&built, &dir.join("xark")).unwrap();
+            return;
+        }
+
+        let exe = std::env::current_exe().unwrap();
+        for count in [2, 4, 8] {
+            let dir = temp_dir("concurrent");
+            let copy = dir.join("xark");
+            let gate = dir.join("gate");
+            fs::create_dir(&gate).unwrap();
+            let mut publishers = Vec::new();
+            for index in 0..count {
+                let label = format!("publisher-{index}");
+                let built = dir.join(&label);
+                fs::write(&built, format!("#!/bin/sh\nprintf '%s\\n' {label}\n")).unwrap();
+                fs::set_permissions(&built, fs::Permissions::from_mode(0o755)).unwrap();
+                let child = Command::new(&exe)
+                    .args(["--exact", TEST])
+                    .env(CHILD_COPY, &built)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let stage = copy.with_extension(format!("{}.tmp", child.id()));
+                fs::write(stage, "incomplete staging file from an earlier run").unwrap();
+                publishers.push((child, label));
+            }
+            // Every process has reached the publication gate before a single release.
+            for (_, label) in &publishers {
+                wait_for(&gate.join(label));
+            }
+            assert!(!copy.exists());
+            fs::write(gate.join("start"), []).unwrap();
+
+            for (child, label) in publishers {
+                let output = child.wait_with_output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{count} processes, {label}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            let output = Command::new(&copy).output().unwrap();
+            assert!(output.status.success());
+            let winner = std::str::from_utf8(&output.stdout)
+                .unwrap()
+                .strip_suffix('\n')
+                .unwrap();
+            assert!((0..count).any(|index| winner == format!("publisher-{index}")));
+            assert_eq!(
+                fs::read(&copy).unwrap(),
+                fs::read(dir.join(winner)).unwrap()
+            );
+            assert_eq!(fs::read_dir(&dir).unwrap().count(), count + 2);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
 }
 
 /// Committed test fixtures, embedded as `const`s reachable from every
