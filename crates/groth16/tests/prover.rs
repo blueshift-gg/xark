@@ -706,6 +706,93 @@ fn proving_key_requires_the_constant_even_without_public_inputs() {
     assert_missing(push_key(&bytes));
 }
 
+#[test]
+fn verifying_key_layout_checks_all_proving_paths() {
+    let src = BytecodeSource::new(KYC_XBC).unwrap();
+    let prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let assign = kyc_witness();
+    let z = src.layout().assignment_from_map(&assign);
+    let circ = XarkCircuit::for_proving_preminimized(prog, assign);
+    let public = circ.public_inputs();
+    let (pk, vk) =
+        ArkG16::circuit_specific_setup(circ, &mut ChaCha20Rng::seed_from_u64(97)).unwrap();
+    assert!(!public.is_empty());
+    assert_eq!(vk.gamma_abc_g1.len(), public.len() + 1);
+
+    let cfg = ProverConfig {
+        self_check: true,
+        ..ProverConfig::default()
+    };
+    let mut rng = ChaCha20Rng::seed_from_u64(98);
+    let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+    let push = |bytes: &[u8]| {
+        let mut accel = xark_groth16::Local;
+        let mut prover =
+            xark_groth16::PushProver::new(&src, z.clone(), r, s, cfg.clone(), &mut accel)?;
+        // Split before the v2 header ends, then vary the vector chunk seams.
+        let (prefix, rest) = bytes.split_at(13);
+        prover.push(prefix, &mut accel)?;
+        for chunk in rest.chunks(8191) {
+            prover.push(chunk, &mut accel)?;
+        }
+        prover.finish()
+    };
+    let check_paths = |key: &ProvingKey<Bn254>, bytes: &[u8]| {
+        [
+            prove_with_randomness(&src, &z, &mut InMemoryPk::new(key), r, s, &cfg, &mut ()),
+            SerializedPk::from_bytes(bytes)
+                .map_err(ProveError::from)
+                .and_then(|mut stream| {
+                    prove_with_randomness(&src, &z, &mut stream, r, s, &cfg, &mut ())
+                }),
+            push(bytes),
+        ]
+    };
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let mut valid = check_paths(&pk, &bytes).into_iter().map(Result::unwrap);
+    let reference = valid.next().unwrap();
+    assert!(valid.all(|proof| proof == reference));
+    assert!(ArkG16::verify(&vk, &public, &reference).unwrap());
+    let mut changed = public;
+    changed[0] += Fr::from(1u64);
+    assert!(!ArkG16::verify(&vk, &changed, &reference).unwrap());
+
+    for (name, key) in [
+        ("short arity", {
+            let mut key = pk.clone();
+            key.vk.gamma_abc_g1.pop();
+            key
+        }),
+        ("long arity", {
+            let mut key = pk.clone();
+            key.vk.gamma_abc_g1.push(key.vk.gamma_abc_g1[0]);
+            key
+        }),
+    ] {
+        let encoded = pk_bytes(&key, Compress::No, true);
+        for result in check_paths(&key, &encoded) {
+            assert!(
+                matches!(result, Err(ProveError::KeyMismatch(message)) if message.starts_with("vk has ")),
+                "{name}"
+            );
+        }
+    }
+    let mut mismatched = pk;
+    mismatched.vk.gamma_abc_g1[0] = -mismatched.vk.gamma_abc_g1[0];
+    let encoded = pk_bytes(&mismatched, Compress::Yes, true);
+    for result in check_paths(&mismatched, &encoded) {
+        assert!(matches!(result, Err(ProveError::SelfCheckFailed)));
+    }
+
+    let mut noncanonical = bytes;
+    // Header v2 has 14 bytes. The first field limb is in alpha_g1.
+    noncanonical[14..46].fill(0xff);
+    assert!(SerializedPk::from_bytes(&noncanonical).is_err());
+    assert!(push(&noncanonical).is_err());
+}
+
 // ---- the worker decomposition, natively -------------------------------------------
 
 /// Mimics the JS worker pool step-for-step: column passes as gathered row-major
