@@ -53,6 +53,22 @@ its buffers from call to call and fills them in place: on unified memory
 (Apple silicon) the GPU reads the host's own pages, so after the first touch
 an input costs one write, not an allocation and a copy.
 
+## CPU-specific release builds
+
+For an x86-64 deployment where every host supports ADX and BMI2, build the
+prover with those target features enabled. Check the worker CPU features on
+each deployment host before distributing this binary. Use the portable
+release build across hosts with mixed instruction support.
+
+```sh
+RUSTFLAGS="-C target-feature=+adx,+bmi2" \
+  cargo build --locked --release -p xark-groth16 --example bench_prove
+```
+
+When measuring the CPU-specific build, use separate Cargo target directories
+for that build and the portable build. Keep the workload, key, thread budget,
+and proof verification settings fixed.
+
 ## GPU MSM security boundary
 
 GPU MSM execution is not verified constant-time. The OpenCL kernels branch on
