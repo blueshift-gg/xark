@@ -7,11 +7,10 @@
 //! circuit receives only the modulus, the signature, and the digest.
 
 use xark::prelude::*;
-use xark_rsa::prelude::*;
 
 #[circuit]
-pub fn rsa2048(n: Public<U2048>, sig: Private<U2048>, digest: Public<[u8; 32]>) {
-    xark_rsa::verify_sha256(n, sig, digest);
+pub fn rsa2048(n: Public<[u8; 256]>, sig: Private<[u8; 256]>, digest: Public<[u8; 32]>) {
+    xark_rsa::verify_sha256_bytes(n, sig, digest);
 }
 
 #[cfg(test)]
@@ -26,12 +25,18 @@ mod tests {
     /// SHA-256 of the leaf certificate's TBSCertificate TLV.
     const DIGEST_HEX: &str = "c37a1c1585bccadb102bba2ee173596132d6a355e9dbf4921096564937f690be";
 
-    fn n() -> U2048 {
-        N_HEX.into()
+    fn n() -> [u8; 256] {
+        hex::decode(N_HEX.trim_start_matches("0x"))
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
 
-    fn sig() -> U2048 {
-        SIG_HEX.into()
+    fn sig() -> [u8; 256] {
+        hex::decode(SIG_HEX.trim_start_matches("0x"))
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
 
     fn digest() -> [u8; 32] {

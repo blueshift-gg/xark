@@ -34,6 +34,54 @@ fn load() -> primitive::PrimitiveProgram {
     p
 }
 
+fn load_bytes() -> primitive::PrimitiveProgram {
+    let src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rsa2048_bytes.rs");
+    let c = xark_test_harness::compile_file(&src, "rsa2048_bytes", "bn254");
+    assert!(
+        c.status_success,
+        "compiling rsa2048_bytes fixture failed: {}",
+        c.stderr
+    );
+    let gates = c.mul_gate_count();
+    let p = c.program();
+    println!(
+        "rsa2048_bytes: {} primitive constraints, {} multiplication gates",
+        p.constraints.len(),
+        gates
+    );
+    p
+}
+
+fn n_bytes() -> [u8; 256] {
+    hex::decode(N_HEX).unwrap().try_into().unwrap()
+}
+
+fn sig_bytes() -> [u8; 256] {
+    hex::decode(SIG_HEX).unwrap().try_into().unwrap()
+}
+
+fn inputs_bytes(p: &primitive::PrimitiveProgram, digest: [u8; 32]) -> BTreeMap<u32, String> {
+    let id = |n: &str| {
+        p.vars
+            .iter()
+            .find(|v| v.name == n)
+            .unwrap_or_else(|| panic!("missing `{n}`"))
+            .id
+    };
+    let mut out = BTreeMap::new();
+    for (i, b) in n_bytes().iter().enumerate() {
+        out.insert(id(&format!("n[{i}]")), b.to_string());
+    }
+    for (i, b) in sig_bytes().iter().enumerate() {
+        out.insert(id(&format!("sig[{i}]")), b.to_string());
+    }
+    for (i, b) in digest.iter().enumerate() {
+        out.insert(id(&format!("digest[{i}]")), b.to_string());
+    }
+    out
+}
+
 fn limbs_121(x: &BigUint) -> Vec<String> {
     let mask = (BigUint::from(1u8) << 121u32) - 1u8;
     (0..17)
@@ -90,4 +138,20 @@ fn rejects_a_tampered_digest() {
     let mut d = digest();
     d[0] ^= 1;
     assert!(solver::solve_and_check(&p, &inputs(&p, d)).is_err());
+}
+
+#[test]
+fn accepts_the_real_leaf_certificate_signature_bytes() {
+    let p = load_bytes();
+    let assign = solver::solve_and_check(&p, &inputs_bytes(&p, digest()))
+        .unwrap_or_else(|e| panic!("honest byte-input RSA signature must solve: {e:?}"));
+    assert!(solver::analyze_underconstrained(&p, &assign).is_empty());
+}
+
+#[test]
+fn rejects_a_tampered_digest_bytes() {
+    let p = load_bytes();
+    let mut d = digest();
+    d[0] ^= 1;
+    assert!(solver::solve_and_check(&p, &inputs_bytes(&p, d)).is_err());
 }

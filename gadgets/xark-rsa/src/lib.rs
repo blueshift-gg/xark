@@ -310,6 +310,40 @@ fn convert_wide(x: [Field; LIMBS]) -> ([Field; WIDE_LIMBS], Field) {
     (y, top)
 }
 
+/// Pack the big-endian octet strings used by the zkGolf RSA interface into the
+/// 25 x 82-bit internal limbs. Each byte is decomposed with `to_bits::<8>`
+/// (which also pins it to a byte); bit `8*(255-i)+t` of the integer is bit `t`
+/// of byte `i`. The returned field is the modulus/signature top bit (bit 2047),
+/// which is `1` exactly when the integer is 2048 bits.
+fn bytes_to_wide(bytes: [Field; 256]) -> ([Field; WIDE_LIMBS], Field) {
+    let mut bits = [Field::from(0u8); 2048];
+    let mut i = 0usize;
+    while i < 256usize {
+        let b = bytes[i].to_bits::<8>();
+        let mut t = 0usize;
+        while t < 8usize {
+            // Byte 0 is the most significant octet of the big-endian encoding.
+            bits[8 * (255 - i) + t] = b[t];
+            t += 1;
+        }
+        i += 1;
+    }
+    let mut out = [Field::from(0u8); WIDE_LIMBS];
+    let mut q = 0usize;
+    while q < WIDE_LIMBS {
+        let mut t = 0usize;
+        while t < WIDE_BITS {
+            let j = WIDE_BITS * q + t;
+            if j < 2048 {
+                out[q] = out[q] + bits[j] * Field::from(1u128 << t);
+            }
+            t += 1;
+        }
+        q += 1;
+    }
+    (out, bits[2047])
+}
+
 /// Range-check an internal quotient: 24 limbs below `2^82`, the top below
 /// `2^81` (a lazy residue is below `2^2048`; `a*b - r < 2^4096`, and
 /// `n >= 2^2047`, so `q < 2^2049`).
@@ -474,27 +508,38 @@ pub fn verify_sha256(n: U2048, sig: U2048, digest: [Field; 32]) {
     verify_checked(n, sig, digest)
 }
 
-fn verify_checked_bits(n: U2048, sig: U2048, bits: [Field; 256]) {
-    // The re-limb proves n < 2^2048 (its top limb is below 2^80); requiring
-    // that limb's top bit makes it exactly 2048 bits (2^2047 <= n < 2^2048),
-    // the bound every product and `q` estimate below uses.
-    let (n82, n_top) = convert_wide(n.limbs);
+/// Verify an RSASSA-PKCS1-v1_5 / SHA-256 signature from the big-endian octet
+/// strings used by the zkGolf RSA interface: 256-byte modulus, 256-byte
+/// signature, 32-byte digest.
+///
+/// The bytes are pinned to bytes with `to_bits::<8>` and packed to the 25 x 82
+/// internal limbs in the circuit, so the public input is the octet string
+/// rather than a limb vector. The host passes the raw certificate integers and
+/// the signature bytes; `sig` may be private.
+pub fn verify_sha256_bytes(n: [Field; 256], sig: [Field; 256], digest: [Field; 32]) {
+    let (n82, n_top_bit) = bytes_to_wide(n);
+    let (sig82, _) = bytes_to_wide(sig);
+    verify_wide(n82, sig82, n_top_bit * pow2(79), digest_bits(digest));
+}
+
+/// The shared 25 x 82-bit verifier. `n_top` is the modulus's top bit at weight
+/// `2^79` (so a 2048-bit `n` makes it `2^79`).
+fn verify_wide(n: [Field; WIDE_LIMBS], sig: [Field; WIDE_LIMBS], n_top: Field, bits: [Field; 256]) {
+    // The top bit at weight 2^79 makes n exactly 2048 bits
+    // (2^2047 <= n < 2^2048), the bound every product and `q` estimate uses.
     require_eq(n_top, pow2(79));
 
-    // `sig < n` is the RFC 8017 validity condition. It is checked in the
-    // 17 x 121 input view, before the lazy chain: the chain only needs
+    // `sig < n` is the RFC 8017 validity condition. The lazy chain only needs
     // congruence, but a verifier must reject s >= n.
-    let m_minus_1 = minus_one::<LIMBS, BITS>(n.limbs);
-    require_lt::<LIMBS, BITS>(sig.limbs, m_minus_1);
-
-    let (sig82, _) = convert_wide(sig.limbs);
+    let m_minus_1 = minus_one::<WIDE_LIMBS, WIDE_BITS>(n);
+    require_lt::<WIDE_LIMBS, WIDE_BITS>(sig, m_minus_1);
 
     // 16 lazy squarings: acc = sig^(2^16) mod n (a representative in
     // [0, 2^2048), not necessarily canonical).
-    let mut acc = sig82;
+    let mut acc = sig;
     let mut i = 0usize;
     while i < 16usize {
-        acc = square_lazy(acc, n82);
+        acc = square_lazy(acc, n);
         i += 1;
     }
 
@@ -502,7 +547,13 @@ fn verify_checked_bits(n: U2048, sig: U2048, bits: [Field; 256]) {
     // Since acc = sig^(2^16) (mod n), this pins EM = sig^65537 (mod n); EM is
     // the PKCS#1 encoding, below 2^2033 < n, so it is the canonical residue.
     let em = sha256_em_bits_82(bits);
-    fused_final(acc, sig82, n82, em);
+    fused_final(acc, sig, n, em);
+}
+
+fn verify_checked_bits(n: U2048, sig: U2048, bits: [Field; 256]) {
+    let (n82, n_top) = convert_wide(n.limbs);
+    let (sig82, _) = convert_wide(sig.limbs);
+    verify_wide(n82, sig82, n_top, bits);
 }
 
 fn verify_checked(n: U2048, sig: U2048, digest: [Field; 32]) {

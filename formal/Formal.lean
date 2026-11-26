@@ -84,6 +84,8 @@ import Formal.Templates.RequireLt24x86
 import Formal.RequireLt24x86
 import Formal.Templates.RequireLt17x121
 import Formal.RequireLt17x121
+import Formal.Templates.RequireLt25x82
+import Formal.RequireLt25x82
 import Formal.Templates.RequireLt3x85
 import Formal.RequireLt3x85
 import Formal.Templates.RequireLt4x64

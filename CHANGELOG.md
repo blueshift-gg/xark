@@ -8,14 +8,15 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 
 ### Added
 
-- `xark-rsa`: RSA-2048 PKCS#1 v1.5 SHA-256 verification, a 17×121-bit public
-  input view, a 25×82-bit internal chain with lazy reduction and a fused terminal
-  multiply, and a real iAM Smart leaf-certificate KAT that also hashes the leaf
+- `xark-rsa`: RSA-2048 PKCS#1 v1.5 SHA-256 verification with a zkGolf-style
+  256-byte/32-byte octet public input packed in-circuit to a 25×82-bit internal
+  chain, a 17×121 whole-number API, lazy reduction, a fused terminal multiply,
+  and a real iAM Smart leaf-certificate KAT that also hashes the leaf
   TBSCertificate on the host.
-- `examples/rsa2048`: the gadget's example and KAT; 135,695 constraints
+- `examples/rsa2048`: the byte-input example and KAT; 125,856 constraints
   (157,451 before the golf).
 - Lean templates and proofs for `require_lt::<17, 121>`,
-  `range_check_limbs::<17, 121>`.
+  `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`.
 
 ## 0.5.0
 
