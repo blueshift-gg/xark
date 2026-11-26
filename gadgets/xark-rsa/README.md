@@ -73,13 +73,14 @@ the raw arrays); `Bignum::new` is the unchecked constructor.
 
 ## Host-side decoding
 
-The host does the JSON, Base64, DER, and date work. The circuit needs only:
+The host decodes the certificate or message, extracts the modulus, signature,
+and SHA-256 digest, and passes those three values. The circuit needs only:
 
 * the 2048-bit modulus,
 * the 2048-bit signature,
 * the SHA-256 digest (or the message, if the circuit hashes it).
 
-With `verify_sha256_bytes` the host passes the certificate's raw big-endian
+With `verify_sha256_bytes` the host passes the raw big-endian
 modulus and signature octets (and the digest bytes), so the byte-to-integer
 packing is inside the proof. With `verify_sha256` it passes whole numbers and
 the typed input reader does the limb split. The signature can be private; the
@@ -98,23 +99,22 @@ digest can be private too.
   target), paired-column carries, and a terminal multiply whose remainder is
   the encoded message. The octet public input is packed to those limbs with
   `to_bits::<8>`.
-* With the KAT inputs, `xark prove --verify` solves in 0.03 s and proves in
-  0.49 s (release binary, `PROVE_TIME=1`, one machine), with 288 public inputs;
-  the proof verifies.
+* With the generic KAT inputs, `xark prove --verify` solves in 0.04 s and proves
+  in 0.70 s (release binary, `PROVE_TIME=1`, one machine), with 288 public
+  inputs; the proof verifies.
 * The zkGolf public input is bytes, not a limb vector. A 25 x 82 *public* input
   would not match that contract; the byte path is the zkGolf-compatible one.
 
 ## Tests
 
-* `tests/real_certificate.rs` verifies a real signature from the iAM Smart PKI:
-  the leaf certificate `CN=IAM SMART` signed by `ID-CERT SIGNING CA CERT 3`
-  (RSA-2048, SHA-256), through both the byte and whole-number paths. It also
-  checks on the host that the digest is SHA-256 of the 832-byte leaf
-  TBSCertificate fixture (`leaf_tbs.der`); the circuit receives only `n`, `sig`,
-  and `digest`.
+* `tests/known_answer.rs` verifies a generated RSA-2048 key and a PKCS#1 v1.5
+  SHA-256 signature over a test message, through both the byte and whole-number
+  paths. It also checks on the host that the digest is SHA-256 of the test
+  message; the circuit receives only `n`, `sig`, and `digest`.
 * `tests/optimized.rs` covers generated keys, edge signatures, 2047-bit `n`,
   the RFC 8017 EM, the host `pow` differential, and the underconstrained check.
-* The example test rejects a tampered digest and repeats the TBS hash check.
+* The example test rejects a tampered digest and repeats the test-message hash
+  check.
 * The 25×82 `require_lt` rows and the 17×121 `range_check_limbs` rows have Lean
   templates (`require_lt__25x82`, `range_check_limbs__17x121`); the byte packing
   uses the base `to_bits` (8-bit) template. `cargo xtask lean-export --check`

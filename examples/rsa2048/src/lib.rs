@@ -1,10 +1,9 @@
 //! RSA-2048 PKCS#1 v1.5 SHA-256 verification, with the host doing the decoding.
 //!
-//! The test vector is a real signature from the iAM Smart PKI: the leaf
-//! certificate `CN=IAM SMART` signed by `ID-CERT SIGNING CA CERT 3`. The host
-//! extracts the TBSCertificate bytes, hashes them with SHA-256, and decodes the
-//! issuer's 2048-bit modulus and the certificate's 2048-bit signature. The
-//! circuit receives only the modulus, the signature, and the digest.
+//! The test vector is a generated RSA-2048 key and a PKCS#1 v1.5 SHA-256
+//! signature over a test message. The host hashes the message, decodes the
+//! big-endian modulus and signature, and the circuit receives only the modulus,
+//! the signature, and the digest.
 
 use xark::prelude::*;
 
@@ -18,12 +17,13 @@ mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
 
-    /// Issuer (`ID-CERT SIGNING CA CERT 3`) RSA-2048 modulus.
-    const N_HEX: &str = "0xB74D4050E5CF00D346155882720815975CEBDB78AF0DAB899CF329416ADE0AD119BA89DE657F1DF84C75182356405CB6A7BB75455F54353D839555AE608774694D7C832BBE12CAE6EE22CA1BFC27DC25F38DF8CC9FE318D128C0973F069CBB54466E0D95F0ADEBC67F52FE69F076792AFE87BC4FF45083C378F2DB6B63D0D4AF25F309654219C71F42C69F1673850D193786E5011524AC8B4CC4E7EB496A57331831A5C3646D9B7EAB1F70816C72077E057C273F3CA12FC468E1921AC856892AEA47F674F18347A687DE8CA29A9C81DFCFBAEAEE72272F37B552306770FCF3B2756726782291708A0616CEDC36A09E7E428157D8FCB29A748568A0A089F5B031";
-    /// Signature of the leaf certificate's TBS under that modulus.
-    const SIG_HEX: &str = "0xaef25a19594b31a5ba05d24938db1f19fd6576f7369b413f5a8a38c7a12b33d09e09b2f0907e2ad409a73c55d15991040f55357c1e6f2b1fe773cea79e6d45b69ad4af84e039ca1dfcb69f6238ef67bc19990eb532cfce1cc6138891a3924ad13b8c480a930f1c6293b9a470937dcf91ab0cc41ba1a3f23cc63598d2c2a41dbbbf1105bab494e714a79dc33b210ca47464610d47b203cf9f86f8d696dbcbbaa78c88adb0e0224be8bc55af725ec0f7227e0e94b9b3242a9bc46ad3789f4d268cd8906270fa27a9e5c2d071703b02c891a06a001fe39c1c7eb2ea9424fa51ee46770901a2c041007994119a095c58b74304e51fa68ce2ab6a449e2e91305769c2";
-    /// SHA-256 of the leaf certificate's TBSCertificate TLV.
-    const DIGEST_HEX: &str = "c37a1c1585bccadb102bba2ee173596132d6a355e9dbf4921096564937f690be";
+    /// Generated test-key RSA-2048 modulus.
+    const N_HEX: &str = "0xB4AFCE0C2B5961134236B5BA13AD4F12588F46BA02BA0724B9FBDC14800ECEE5FD90FA573EBBE10613B48A6784FBB85FF2DD527B765BB9041168DF35E45BCD8244E689C32F2829D0EB323761A3F1BC6F71DBDC96D08D8CBDF12264941219178B2A93A8963DABB80679D8613DC346E0D29420E97F889216C9555AC533904B4364E8C06FA81C44C7DC70ECE28372D543FE7CD14B2A9D5516D6A299FBEC68CA553305EBD79C5F113812A785C1CE679513AC234F7786A1E871833FED75A8778CF741452915F4A979792C9FA22AF82F60785CFB9CA0A3437A9F90C657E8590340958A6A8C2CEDD7E7714135C030844542A9EC88137346A97EDDE441630B7D2B6AD3AF";
+    /// Signature of the test message under that modulus.
+    const SIG_HEX: &str = "0x7cde0ace8e6e4f3e4b55c6902d73d092a3581f04ec44f9cccd0bf5e1838b66e46a0927bd52ad223547c0e757175641c07ae543319f69644c27a6151cc228a900f29f23c2178ac0b319de2a1887815592805d0f52298fd7d0bad7a71e803aeff3e628b397355e66ecf4cddfa730f5e25e5ab93438611e68bf147a18e0cbe051346f5450c91e554d99eea8d3f6055f380a2ab9f969f20d971391f6a578f6e139c6ecff44884d46891cde5bfc61a2cf438f20f9a82f76e6bdd0c206498598197005e96bddbb80a65733ccb9111206b4e6a7658499900c285fd0f304128e5f1143ebb013762acda4c3681b4c03859dd336a3b0abe959a6e02cb24147f8d06d127b0a";
+    /// SHA-256 of the test message.
+    const DIGEST_HEX: &str = "715976a685083f4be3a60e926f9e31a5b671a4a389b4cf709afb4c0c41c96baa";
+    const MESSAGE: &[u8] = b"xark RSA-2048 PKCS#1 v1.5 SHA-256 generic test vector";
 
     fn n() -> [u8; 256] {
         hex::decode(N_HEX.trim_start_matches("0x"))
@@ -44,14 +44,13 @@ mod tests {
     }
 
     #[test]
-    fn kat_digest_is_sha256_of_the_leaf_tbs() {
-        let tbs = include_bytes!("../../../gadgets/xark-rsa/tests/fixtures/leaf_tbs.der");
-        let d: [u8; 32] = Sha256::digest(tbs).into();
+    fn digest_is_sha256_of_the_test_message() {
+        let d: [u8; 32] = Sha256::digest(MESSAGE).into();
         assert_eq!(d, digest());
     }
 
     #[test]
-    fn accepts_the_real_leaf_certificate_signature() {
+    fn accepts_the_generated_rsa_signature() {
         rsa2048(n(), sig(), digest()).unwrap();
     }
 
