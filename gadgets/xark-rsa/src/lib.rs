@@ -436,8 +436,7 @@ pub fn grouped_column_step(
 /// `t ∈ [0, 2^164)`, at least `Fr/2^164 > 2^89`, so the check would reject it.
 /// A group's certificate is thus its 89-bit range check plus the two pinning
 /// rows of the step.
-#[xark::gadget]
-pub fn grouped_columns(
+fn grouped_columns_impl(
     a: [Field; WIDE_LIMBS],
     b: [Field; WIDE_LIMBS],
     m: [Field; WIDE_LIMBS],
@@ -476,6 +475,31 @@ pub fn grouped_columns(
     require_eq(top + cb_prev - bias, Field::from(0u8));
 }
 
+/// The integer identity `a·b == q·m + rhs_extra` (see [`grouped_columns_impl`]).
+#[xark::gadget]
+pub fn grouped_columns(
+    a: [Field; WIDE_LIMBS],
+    b: [Field; WIDE_LIMBS],
+    m: [Field; WIDE_LIMBS],
+    q: [Field; WIDE_LIMBS],
+    rhs_extra: [Field; WIDE_LIMBS],
+) {
+    grouped_columns_impl(a, b, m, q, rhs_extra);
+}
+
+/// The square case: both products read `a`, so the frontend's CSE merges `a i · a k`
+/// with `a k · a i`. A separate gadget because the merged template has 300 fewer
+/// product rows than the general one, and `lean-export --coverage` matches exact rows.
+#[xark::gadget]
+pub fn grouped_columns_square(
+    a: [Field; WIDE_LIMBS],
+    m: [Field; WIDE_LIMBS],
+    q: [Field; WIDE_LIMBS],
+    rhs_extra: [Field; WIDE_LIMBS],
+) {
+    grouped_columns_impl(a, a, m, q, rhs_extra);
+}
+
 /// `a² mod m` with a lazy remainder: proves `a² = q m + r` and
 /// `r < 2^2048`, not `r < m`. Congruent to `a² mod m`, which is all the chain
 /// needs.
@@ -483,7 +507,7 @@ fn square_lazy(a: [Field; WIDE_LIMBS], m: [Field; WIDE_LIMBS]) -> [Field; WIDE_L
     let (q, r) = Field::hint_mulmod_divmod::<WIDE_LIMBS>(a, a, m, WIDE_BITS);
     range_check_q(q);
     range_check_r(r);
-    grouped_columns(a, a, m, q, r);
+    grouped_columns_square(a, m, q, r);
     r
 }
 
