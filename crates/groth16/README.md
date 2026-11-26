@@ -55,12 +55,12 @@ an input costs one write, not an allocation and a copy.
 
 ## GPU MSM security boundary
 
-GPU MSM execution is not verified constant-time. The OpenCL kernels branch on
+GPU MSM execution is not verified constant-time. The OpenCL and CUDA kernels branch on
 scalar bits and on intermediate curve values, so their execution time can depend
 on the prover's scalars. GPU execution also relies on the device runtime and
 driver, which this crate does not audit. Scalar staging and intermediate device
 buffers are released without a guaranteed secure wipe. `xark prove --prover
-opencl` therefore requires `--acknowledge-gpu-side-channel-risk`. That flag
+opencl` (or `cuda`) therefore requires `--acknowledge-gpu-side-channel-risk`. That flag
 records acceptance of this risk; it does not make the backend constant-time.
 
 Do not prove on a GPU on shared or untrusted devices, or when the threat model

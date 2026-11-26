@@ -21,9 +21,12 @@ path = "src/main.rs"
 debug = ["xark-ir/debug", "xark-prover/debug"]
 # `xark prove --prover opencl`: needs an OpenCL runtime (and links its library).
 opencl = ["dep:xark-groth16-opencl"]
+# `xark prove --prover cuda`: needs nvcc to build and an NVIDIA GPU to run.
+cuda = ["dep:xark-groth16-cuda", "xark-groth16-cuda/cuda"]
 
 [dependencies]
 xark-groth16-opencl = { workspace = true, optional = true }
+xark-groth16-cuda = { workspace = true, optional = true }
 num-bigint = "0.4"
 xark-ir.workspace = true
 xark-prover.workspace = true

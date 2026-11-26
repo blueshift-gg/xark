@@ -4871,6 +4871,7 @@ dependencies = [
  "xark-backend",
  "xark-frontend",
  "xark-groth16",
+ "xark-groth16-cuda",
  "xark-groth16-opencl",
  "xark-ir",
  "xark-prover",
@@ -4929,6 +4930,21 @@ dependencies = [
  "xark-backend",
  "xark-ir",
  "xark-prover",
+]
+
+[[package]]
+name = "xark-groth16-cuda"
+version = "0.5.0"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-serialize 0.6.0",
+ "cc",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "xark-groth16",
 ]
 
 [[package]]

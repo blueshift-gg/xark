@@ -80,8 +80,8 @@ pub struct ProveArgs {
     #[arg(long, default_value_t = false)]
     pub verify: bool,
 
-    /// The prover: `cpu`, or `opencl` (experimental) to put the quotient and the
-    /// H MSM on a GPU beside the CPU. A GPU proves a circuit from a 2^18-point
+    /// The prover: `cpu`, or `opencl` or `cuda` (experimental) to put the
+    /// quotient and the H MSM on a GPU beside the CPU. A GPU proves a circuit from a 2^18-point
     /// domain on (a smaller one proves on the CPU), and its proof is always
     /// verified: one that fails is proved again on the CPU.
     #[arg(long, value_enum, default_value_t)]
