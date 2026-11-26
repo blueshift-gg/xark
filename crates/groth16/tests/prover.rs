@@ -671,10 +671,15 @@ fn proving_key_requires_the_constant_even_without_public_inputs() {
         prove_with_randomness(&src, &z, &mut InMemoryPk::new(&pk), r, s, &cfg, &mut ()).unwrap();
     assert!(xark_groth16::verify(&vk, &[], &proof).unwrap());
     assert!(ArkG16::verify(&vk, &[], &proof).unwrap());
-    assert_eq!(
-        push_key(&pk_bytes(&pk, Compress::Yes, true)).unwrap(),
-        proof
-    );
+    for compress in [Compress::Yes, Compress::No] {
+        let bytes = pk_bytes(&pk, compress, true);
+        let mut pull = SerializedPk::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            prove_with_randomness(&src, &z, &mut pull, r, s, &cfg, &mut ()).unwrap(),
+            proof
+        );
+        assert_eq!(push_key(&bytes).unwrap(), proof);
+    }
 
     pk.vk.gamma_abc_g1.clear();
     let bytes = pk_bytes(&pk, Compress::Yes, true);
@@ -779,6 +784,13 @@ fn verifying_key_layout_checks_all_proving_paths() {
             );
         }
     }
+    let header_end = xark_groth16::pk::MAX_HEADER_LEN;
+    let vk_end = header_end + pk.vk.serialized_size(Compress::Yes);
+    for end in [header_end - 1, vk_end - 1] {
+        assert!(SerializedPk::from_bytes(&bytes[..end]).is_err());
+        assert!(push(&bytes[..end]).is_err());
+    }
+
     let mut mismatched = pk;
     mismatched.vk.gamma_abc_g1[0] = -mismatched.vk.gamma_abc_g1[0];
     let encoded = pk_bytes(&mismatched, Compress::Yes, true);
@@ -787,8 +799,8 @@ fn verifying_key_layout_checks_all_proving_paths() {
     }
 
     let mut noncanonical = bytes;
-    // Header v2 has 14 bytes. The first field limb is in alpha_g1.
-    noncanonical[14..46].fill(0xff);
+    // Header v2 is followed by the first field element of alpha_g1.
+    noncanonical[header_end..header_end + 32].fill(0xff);
     assert!(SerializedPk::from_bytes(&noncanonical).is_err());
     assert!(push(&noncanonical).is_err());
 }
