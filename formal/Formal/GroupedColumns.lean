@@ -169,17 +169,18 @@ theorem val_mul (a b : ℕ → ℤ) :
       have := Finset.mem_range.mp hk
       omega)
 
-/-- **`square_lazy`'s identity.** With the columns `cols a a q m r` satisfying the
-carry telescope, the limbs satisfy `a² = q·m + r` over the integers. -/
-theorem square_eq (a m q r : ℕ → ℤ) (h : Spec (cols a a q m r)) :
-    val a * val a = val q * val m + val r := by
-  have hexp : ∀ c, cols a a q m r c * W ^ c =
-      conv a a c * W ^ c - conv q m c * W ^ c
+/-- **The product identity.** With the columns `cols a b q m r` (a product `a·b`, a
+quotient, a modulus and a right-hand side) satisfying the carry telescope, the limbs
+satisfy `a·b = q·m + r` over the integers. -/
+theorem mul_eq (a b m q r : ℕ → ℤ) (h : Spec (cols a b q m r)) :
+    val a * val b = val q * val m + val r := by
+  have hexp : ∀ c, cols a b q m r c * W ^ c =
+      conv a b c * W ^ c - conv q m c * W ^ c
         - (if c < 25 then r c else 0) * W ^ c := by
     intro c
     unfold cols
     ring
-  have h' : (∑ c ∈ Finset.range 49, (conv a a c * W ^ c - conv q m c * W ^ c
+  have h' : (∑ c ∈ Finset.range 49, (conv a b c * W ^ c - conv q m c * W ^ c
       - (if c < 25 then r c else 0) * W ^ c)) = 0 :=
     (Finset.sum_congr rfl fun c _ => (hexp c).symm).trans h
   rw [Finset.sum_sub_distrib, Finset.sum_sub_distrib] at h'
@@ -197,7 +198,7 @@ theorem square_eq (a m q r : ℕ → ℤ) (h : Spec (cols a a q m r)) :
         intro hlt
         exact hx (Finset.mem_range.mpr hlt)
       rw [if_neg hx', zero_mul]
-  rw [hsum49, ← val_mul a a, ← val_mul q m, ← val] at h'
+  rw [hsum49, ← val_mul a b, ← val_mul q m, ← val] at h'
   linarith
 
 /-- **`square_lazy`, at the model level.** The 24 carry rows and the top row of
@@ -205,6 +206,15 @@ theorem square_eq (a m q r : ℕ → ℤ) (h : Spec (cols a a q m r)) :
 `r` separately (`GroupedColumns.soundness` is the telescope). -/
 theorem square_lazy (a m q r : ℕ → ℤ) (k : ℕ → ℤ) (h : CarrySpec (cols a a q m r) k) :
     val a * val a = val q * val m + val r :=
-  square_eq a m q r (soundness _ _ h)
+  mul_eq a a m q r (soundness _ _ h)
+
+/-- **`fused_final`, at the model level.** The terminal multiply: the same rows with the
+right-hand side the public encoded message `em` rather than a hinted remainder, so the
+claim is `a·b = q·m + em` over the integers (the remainder pins are what make `em` the
+right-hand side). -/
+theorem fused_final (a b m em q : ℕ → ℤ) (k : ℕ → ℤ)
+    (h : CarrySpec (cols a b q m em) k) :
+    val a * val b = val q * val m + val em :=
+  mul_eq a b m q em (soundness _ _ h)
 
 end Xark.Rsa.GroupedColumns

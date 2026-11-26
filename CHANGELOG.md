@@ -21,7 +21,8 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and
   `grouped_column_step` (the 89-bit carry certificate), and the carry telescope
   `Xark.Rsa.GroupedColumns.soundness` (`Formal/GroupedColumns.lean`), its
-  limb reading (`val_mul`, `square_eq`: `a² = q·m + r` over the integers), and
+  limb reading (`val_mul`, `mul_eq`: `a·b = q·m + r` over the integers, with
+  `square_lazy` and `fused_final` as the `b = a` and `r = em` cases), and
   the field→integer carry step (`Formal/GroupedCarry.lean`: the template's output
   is the numerator times `2^-164`, and a canonical numerator below `2^253` gives
   `num = 2^164 · k` over the integers). The chain composition around them is
