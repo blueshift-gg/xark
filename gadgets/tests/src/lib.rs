@@ -111,7 +111,7 @@ pub fn xark_bin() -> std::path::PathBuf {
 }
 
 #[cfg(all(test, not(any(target_os = "solana", target_arch = "bpf"))))]
-mod tests {
+mod cli_copy_tests {
     use super::publish_xark_copy;
     use std::{fs, time::SystemTime};
 
