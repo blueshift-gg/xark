@@ -333,3 +333,13 @@ comparison, so `sig ≤ n − 1`), the `n_top` row, and the integer identities
 (`chainN`/`sig`/`chainEm` versus the big-endian byte values and
 `EM_PREFIX + SHA-256 digest`). The limb-level chain statement is the composition
 the objective names; the byte identities are the encoding layer around it.
+
+Proven-proof layout: the hand-written files live in `formal/Formal/Circuits/Rsa2048/`
+(`Verify`, `Chain`, `Packing`, `PackBound`, `PackBoundW`, `Bits`, `Statement`) because
+`cargo xtask lean-export --check` scans every `Formal/Circuits/*.lean` for a
+`--example` header and would fail on them in the parent directory. `s545` is the
+`RequireLt25x82` call: its first 50 plugs are the packed 25×82 limbs of `sig` and of
+`n − 1` (the last m plug carries a `-1` on a wire), so its `Spec` (`RequireLt.Spec`,
+a `limbs` comparison) gives `sig ≤ n − 1`, i.e. `sig < n` once the plug LCs are
+matched to `sq0`'s by window equality. The `n_top` row is the `bytes_to_wide` glue
+pinning `n`'s top bit.
