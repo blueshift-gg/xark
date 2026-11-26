@@ -58,7 +58,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   limb bounds, the 544 `to_bits` calls' bits and the byte packing's limbs, and
   `chain_congruence_em`: for every satisfying assignment the RFC 8017 encoded
   message (prefix plus the digest's bits) is `sig^65537` modulo the modulus, all
-  over the limb vectors the chain calls carry. No circuit changed.
+  over the limb vectors the chain calls carry. `ChainBits.lean`/`ByteBits.lean`
+  identify those limbs with the big-endian 256-byte integers of the public
+  modulus and signature inputs, prove `2^2047 ≤ n < 2^2048` from the top-bit glue
+  row, and `EmBytes.lean`'s `chain_congruence_public` states the congruence over
+  the public bytes with the digest as the 32 public digest bytes. No circuit
+  changed.
 
 ## 0.5.0
 
