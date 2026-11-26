@@ -416,6 +416,15 @@ gives `sig ≤ chainN − 1`. Remaining: model the `==0`/borrow glue rows and th
 identification `val (limb (callAt 545) σ 25) = chainN − 1`, plus the first-25-plug
 window (`(callAt 545).plugs[j] = (sq0).plugs[j]` for j<25, `decide`).
 
+`s544` has 101 rows (`#eval s544.rows.length`); per limb `i` (top to bottom) it has
+three rows plus a borrow-product row. Row 0 is `(-1 + var 550) * 1 = 0` (n_top).
+For limb `i`, with `x_i` its packing LC and `w`/`z` two hint vars (e.g. 4352/4353):
+`x_i·w = z`, `x_i·(1 + z) = 0`, `w·(1 + z) = 0`, which force `z = −1` when `x_i ≠ 0`
+and `z = 0` when `x_i = 0`, so `1 + z` is the `is_zero(x_i)` bit; the fourth row is a
+`z_i·z_{i+1} = product` (the frontend's `borrow·(1+z)` mul hint). Decode the exact
+per-limb rows (`(s544.rows.drop (1+4*k)).take 4`) and telescope
+`Σ (x_i − (1+z_i)·borrow?)·W^i = chainN − 1` next.
+
 Digest bytes (drafted in `/tmp/gen_embytes.py`): a generic
 `bytes_of_bits_n (n) (_hn) (bits bytes) (hbyte) : Σ_{i<n} bytes_i·256^(n-1-i) = Σ_{j<8n} bits_j·2^j`
 (compiles, 2.4 s), 32 per-byte `dbyte_k` (`((σ (512+k)).val : ℤ) = Σ_{t<8} digestBits (8*(31-k)+t)·2^t`,
