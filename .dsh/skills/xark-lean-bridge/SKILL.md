@@ -457,7 +457,18 @@ the later borrows).
 `w·b = 0`), the product rows keep the borrows 0/1, then
 `(out_i.eval).val = n_i.val − b_i.val + W·b_{i+1}.val` (each out_i in `[0,W)`), so
 `val (limb (callAt 545) σ 25) = chainN − 1`; the `RequireLt25x82` Spec (first 25
-plugs = sig, `Assumptions` from the sig bounds) then gives `sig < n`. The Rust's
+plugs = sig, `Assumptions` from the sig bounds) then gives `sig < n`.
+
+`SigLt.lean` now also has, all by `decide +kernel` (committed `78f7a2f7`): for each
+limb `i`, `hNa_i` (`(rowAt s_i).a = (callAt 548).plugs[25+i]`), `hNb_i`
+(`.b = var w_i`, `w_0 = 4352`, `w_i = z_i − 1`), `hNc_i` (`.c = var z_i`),
+`hNb2_i` (`(rowAt s_i+1).b = 1 − z_i`), `hNd_i`/`hNe_i` (third row `a = w_i`,
+`b = 1 − z_i`), where the is_zero rows for limb `i` are at `s_i = 1` (i=0) or `4i`.
+Together with `hout`/`hprod`/`htop` this is every algebraic fact the integer
+induction needs; the next step is to turn `Sat` into the field equations
+(`(ZLC.toF row.a).eval σ = shadow σ row.a` via `Xark.R1cs.shadow_toF`) and run the
+0/1 case split, then finish the RequireLt Spec application (first-25 window for
+`(callAt 545).plugs[j] = (callAt 548).plugs[j]`, `Assumptions` from the sig bounds). The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
