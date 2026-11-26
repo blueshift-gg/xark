@@ -327,6 +327,9 @@ the rows the frontend really emits, and CI fails when the code drifts from them.
 | `Xark.Rsa.Bytes.{packing, bytes_of_bits, bytes_to_wide}` | — (`Formal/RsaBytes.lean`): `xark_rsa::bytes_to_wide`'s big-endian packing, over ℤ | `packing`: the 25 limbs recombine to the bit string (`Σ_q out_q·2^(82q) = Σ_{j<2048} bits j·2^j`, bijection `(q,t) ↦ 82q+t`); `bytes_of_bits`: a byte string whose bytes are their eight placed bits read big-endian is the same value (`Σ_i bytes_i·256^(255−i) = Σ_j bits j·2^j`, bijection `(i,t) ↦ 8·(255−i)+t`); `bytes_to_wide` composes them, so the octet input and the limbs denote one number |
 | `Xark.Rsa.Convert.{cols_sum, partial_sum, telescoping}` | — (`Formal/RsaConvert.lean`): `xark_rsa::convert_wide`'s 17×121 → 25×82 re-limbing, over ℤ | `cols_sum`: the scattered columns are the input (`Σ_j cols_j·W^j = Σ_i x_i·2^(121 i)`); `partial_sum`: after `k` limbs the outputs' value is the columns' value minus the running carry at `W^k`; `telescoping`: the 25 rows `cols_j + c_{j-1} = W·c_j + y_j` with `c_24 = 0` give `Σ_j y_j·2^(82 j) = Σ_i x_i·2^(121 i)` — the re-limbing proves the value unchanged |
 | `Xark.Rsa.Em.{em82_eq, em}` | — (`Formal/RsaEm.lean`): `xark_rsa::sha256_em_bits_82`, the PKCS#1 v1.5 encoded message | `em82_eq`: `EM82_CONST`'s integer is the RFC 8017 prefix `00 01 ‖ FF^202 ‖ 00 ‖ 30 31 30 0d … 04 20`, checked by `decide +kernel` against the limb literals quoted from the Rust; `em`: adding the digest's 256 bits gives `prefix + Σ_{j<256} bits j · 2^j` (82 bits per limb, the DigestInfo body starting at bit 256) |
+| `Xark.Circuits.{step_call_spec, q_call_spec, r_call_spec}` | any `.call` segment of a circuit whose template is the rsa gadget (`Formal/Circuits/Calls.lean`) | `sat_call` gives the call's template a satisfying assignment, so the gadget's `spec` applies at the call site; `mul_row_value` reads a frontend product row as `σ t = A·B` |
+| `Xark.Circuits.{step_calls_bounded, q_calls_bounded, r_calls_bounded}` and `rsa2048_{step,q,r}_calls` | the production circuit (`Formal/Circuits/Rsa2048Calls.lean`), over `callsOf template C` | under **any** satisfying assignment of `Rsa2048.circuit`, each of its 408 `grouped_column_step` calls has its carry below `2^89` and pinned, its 17 `range_check_q` calls have 24 limbs `< 2^82` and a top `< 2^81`, its 16 `range_check_r` calls a top `< 2^80`; the three counts are `decide +kernel`. Not yet: grouping the 24 step calls of one `grouped_columns` into `carry_spec_of_steps` and the columns' convolution, then the chain |
+| `Xark.Rsa.GroupedColumns.carry_spec_of_steps` | — (`Formal/GroupedColumns.lean`): the Rust loop's `if j = 0 then 2^88 else k (j-1)` shape | one integer equation per step plus the top row give `CarrySpec`, which `soundness` then turns into the column identity |
 | `Xark.Rsa.Chain.{n_bits, squarings, chain}` | — (`Formal/RsaChain.lean`): `verify_wide`'s top level, over ℤ | `n_bits`: low limbs below `2^82` and a top limb `2^79 + t` (`t < 2^79`, what `n_top = 2^79` pins) make the modulus 2048 bits (`2^2047 ≤ n < 2^2048`); `squarings`: a step congruent to `a ↦ a·a` iterates to `a^(2^k)`; `chain`: 16 squarings plus `acc·sig = q·n + em` give `em ≡ sig^65537 (mod n)` — RSA verification with `e = 65537`, from the step identities `square_lazy`/`fused_final` prove |
 
 | `Xark.Templates.{Unpack,Unpack4}.soundness` | `xark_secp256k1::unpack`, `xark_secp256r1::unpack4` (the public 128-bit halves as 4 × 64-bit limbs: `divRem` hints, the limbs' range checks, one packing row per half) | with no input assumption, every limb is below `2⁶⁴` and each half is exactly its two limbs' value |
@@ -360,9 +363,10 @@ call's plugs meet its `Assumptions` (the allowlist's prose), and the top-level s
 rsa2048: 125,856 rows in 1,021 segments over 36 files (`fnv1a64:860142cc226105b8`),
 9.2 MB committed. It exports at all because the carry is a witness: with the old affine
 carry the same export was 30 MB, since each step's plug nested the previous output's
-linear combination. Not yet proven: the same two things — that the plugs meet
-`Assumptions` (for this circuit, the carry chain's `CarrySpec` instance, which is what
-the 24 step calls plus the top row would give) and the top-level statement.
+linear combination. Its calls' counts (408 / 17 / 16) and their per-call contracts are
+theorems (`Formal/Circuits/Rsa2048Calls.lean`), and every call's `Assumptions` are
+vacuous for these three gadgets. Not yet proven: the 24-step assembly into
+`CarrySpec` together with the columns' convolution, and the top-level statement.
 
 
 ### Adding a proven gadget

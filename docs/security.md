@@ -438,10 +438,13 @@ Still hand-proved, and therefore audit residuals:
   bignum gadget's (its LC plugs are the allowlisted entry).
 * **The whole-circuit composition** (`Xark.Circuit`). The production circuit is
   exported and hash-gated (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 1,021
-  segments, `fnv1a64:860142cc226105b8`), so `Sat circuit σ` is the production rows;
-  what is not proven is that its calls' plugs meet the templates' `Assumptions`
-  (for the chain, the `CarrySpec` instance) and the top-level statement. That is
-  the same status as `secp256k1_ecdsa`'s export.
+  segments, `fnv1a64:860142cc226105b8`), so `Sat circuit σ` is the production rows,
+  and its calls' contracts are theorems: 408 step calls each with a pinned carry
+  below `2^89`, 17 `range_check_q` and 16 `range_check_r` calls with every limb in
+  range (`Formal/Circuits/Rsa2048Calls.lean`, counts by `decide +kernel`). What is
+  not proven is the 24-step assembly — grouping each `grouped_columns`' calls into
+  `CarrySpec` with the columns computed from the product rows — and the top-level
+  statement.
 
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s

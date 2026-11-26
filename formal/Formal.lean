@@ -32,6 +32,7 @@ import Formal.Template
 import Formal.Circuit
 import Formal.Circuits.Secp256k1Ecdsa
 import Formal.Circuits.Rsa2048
+import Formal.Circuits.Rsa2048Calls
 import Formal.Templates.Add32
 import Formal.Add32
 import Formal.Templates.Xor

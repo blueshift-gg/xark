@@ -221,4 +221,7 @@ theorem soundness_foldAt {A : List F → Prop} {S : List F → List F → Prop} 
 
 end Template
 
+
+-- `Template`'s fields are all decidable; `Xark.Circuits.callsOf` filters by template.
+deriving instance DecidableEq for Template
 end Xark.Template

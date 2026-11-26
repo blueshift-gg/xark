@@ -217,4 +217,17 @@ theorem fused_final (a b m em q : ℕ → ℤ) (k : ℕ → ℤ)
     val a * val b = val q * val m + val em :=
   mul_eq a b m q em (soundness _ _ h)
 
+/-- **`CarrySpec` from the step equations.** The Rust loop starts the carry at `2^88` and
+then feeds each step's output into the next; this is that shape — one equation per step
+with `BI` for the first and `k (j-1)` otherwise — turned into the model's `CarrySpec`. -/
+theorem carry_spec_of_steps (d k : ℕ → ℤ)
+    (hstep : ∀ j < 24,
+      d (2 * j) + W * d (2 * j + 1) + (if j = 0 then BI else k (j - 1)) - BI + OFF
+        = Q * k j)
+    (htop : d 48 + k 23 - BI = 0) : CarrySpec d k := by
+  refine ⟨?_, ?_, htop⟩
+  · simpa using hstep 0 (by norm_num)
+  · intro j hj0 hj24
+    simpa [if_neg (by omega : ¬ j = 0)] using hstep j hj24
+
 end Xark.Rsa.GroupedColumns
