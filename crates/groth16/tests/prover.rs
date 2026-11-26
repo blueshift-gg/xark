@@ -10,6 +10,7 @@
 //!   fail — the contract has teeth.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 
 use ark_bn254::{Bn254, Fr};
 use ark_ff::{UniformRand, Zero};
@@ -23,6 +24,7 @@ use ark_serialize::{CanonicalSerialize, Compress};
 use ark_snark::SNARK;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use xark_groth16::pk::{G1Query, KeyVector, MAX_HEADER_LEN, PkError, PkSource};
 use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{Accelerated, Prover};
 use xark_groth16::{
@@ -1385,6 +1387,262 @@ fn transcoding_and_tee_produce_the_uncompressed_key() {
     prove(&src, &z, &mut spk, &mut ChaCha20Rng::seed_from_u64(2), &cfg).unwrap();
     assert!(spk.finish_tee().unwrap());
     assert_eq!(*buf.0.lock().unwrap(), want);
+
+    // Corrupt the first point of the next chunk. The previous chunk still
+    // reaches the prover in order and the partial cache cannot be finalized.
+    let mut corrupt = compressed.clone();
+    let point_size = pk.a_query[0].compressed_size();
+    let a_offset =
+        MAX_HEADER_LEN + pk.vk.compressed_size() + 2 * point_size + std::mem::size_of::<u64>();
+    let second_chunk = a_offset + cfg.msm_chunk * point_size;
+    corrupt[second_chunk..second_chunk + point_size].fill(0xff);
+    let mut spk = SerializedPk::from_bytes(&corrupt).unwrap();
+    spk.tee_uncompressed(Box::new(SharedBuf::default()))
+        .unwrap();
+    let mut offset = 0;
+    let failure = spk.stream_g1(G1Query::A, cfg.msm_chunk, &mut |start, points| {
+        assert_eq!(start, offset);
+        assert_eq!(points, &pk.a_query[start..start + points.len()]);
+        offset += points.len();
+    });
+    assert!(matches!(failure, Err(PkError::Deserialize(_))));
+    assert_eq!(offset, cfg.msm_chunk);
+    spk.stream_g1(G1Query::BG1, cfg.msm_chunk, &mut |_, _| {})
+        .unwrap();
+    spk.stream_g2(cfg.msm_chunk, &mut |_, _| {}).unwrap();
+    spk.stream_g1(G1Query::H, cfg.msm_chunk, &mut |_, _| {})
+        .unwrap();
+    spk.stream_g1(G1Query::L, cfg.msm_chunk, &mut |_, _| {})
+        .unwrap();
+    assert!(!spk.finish_tee().unwrap());
+}
+
+enum KeyReadFault {
+    SeekAt(u64),
+    ReadAt(u64),
+    None,
+}
+
+struct FaultingKeyReader<'a> {
+    cursor: Cursor<&'a [u8]>,
+    fault: KeyReadFault,
+}
+
+impl Read for FaultingKeyReader<'_> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if matches!(self.fault, KeyReadFault::ReadAt(at) if self.cursor.position() == at) {
+            return Err(io::Error::other("injected key read failure"));
+        }
+        self.cursor.read(out)
+    }
+}
+
+impl Seek for FaultingKeyReader<'_> {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        if matches!(self.fault, KeyReadFault::SeekAt(at) if to == SeekFrom::Start(at)) {
+            return Err(io::Error::other("injected key seek failure"));
+        }
+        self.cursor.seek(to)
+    }
+}
+
+struct FaultingTeeWriter {
+    written: SharedBuf,
+    remaining: usize,
+    fail_flush: bool,
+}
+
+impl Write for FaultingTeeWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.remaining == 0 && !bytes.is_empty() {
+            return Err(io::Error::other("injected tee write failure"));
+        }
+        let n = self.remaining.min(bytes.len());
+        let n = self.written.write(&bytes[..n])?;
+        self.remaining -= n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if self.fail_flush {
+            return Err(io::Error::other("injected tee flush failure"));
+        }
+        Ok(())
+    }
+}
+
+fn key_vector_offsets(pk: &ProvingKey<Bn254>, mode: Compress) -> [usize; 5] {
+    let mut offset = MAX_HEADER_LEN
+        + pk.vk.serialized_size(mode)
+        + pk.beta_g1.serialized_size(mode)
+        + pk.delta_g1.serialized_size(mode);
+    [
+        pk.a_query.serialized_size(mode),
+        pk.b_g1_query.serialized_size(mode),
+        pk.b_g2_query.serialized_size(mode),
+        pk.h_query.serialized_size(mode),
+        pk.l_query.serialized_size(mode),
+    ]
+    .map(|vector_size| {
+        let start = offset + std::mem::size_of::<u64>();
+        offset += vector_size;
+        start
+    })
+}
+
+fn stream_checked_vector(
+    src: &mut impl PkSource,
+    key: &ProvingKey<Bn254>,
+    vector: KeyVector,
+    chunk: usize,
+) -> (usize, Result<(), PkError>) {
+    fn check_points<'a, P: std::fmt::Debug + PartialEq>(
+        expected: &'a [P],
+        seen: &'a mut usize,
+    ) -> impl FnMut(usize, &[P]) + 'a {
+        move |offset, points| {
+            assert_eq!(offset, *seen);
+            assert_eq!(points, &expected[offset..offset + points.len()]);
+            *seen += points.len();
+        }
+    }
+
+    let mut seen = 0;
+    let result = match vector {
+        KeyVector::A => src.stream_g1(
+            G1Query::A,
+            chunk,
+            &mut check_points(&key.a_query, &mut seen),
+        ),
+        KeyVector::BG1 => src.stream_g1(
+            G1Query::BG1,
+            chunk,
+            &mut check_points(&key.b_g1_query, &mut seen),
+        ),
+        KeyVector::BG2 => src.stream_g2(chunk, &mut check_points(&key.b_g2_query, &mut seen)),
+        KeyVector::H => src.stream_g1(
+            G1Query::H,
+            chunk,
+            &mut check_points(&key.h_query, &mut seen),
+        ),
+        KeyVector::L => src.stream_g1(
+            G1Query::L,
+            chunk,
+            &mut check_points(&key.l_query, &mut seen),
+        ),
+    };
+    (seen, result)
+}
+
+#[test]
+fn tee_rejects_every_vector_fault_after_continued_reads() {
+    let prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let circ = XarkCircuit::for_setup_preminimized(prog);
+    let (pk, _) = ArkG16::circuit_specific_setup(circ, &mut ChaCha20Rng::seed_from_u64(6)).unwrap();
+    let compressed = pk_bytes(&pk, Compress::Yes, true);
+    let uncompressed = pk_bytes(&pk, Compress::No, true);
+    let vectors = [
+        (KeyVector::A, pk.a_query.len()),
+        (KeyVector::BG1, pk.b_g1_query.len()),
+        (KeyVector::BG2, pk.b_g2_query.len()),
+        (KeyVector::H, pk.h_query.len()),
+        (KeyVector::L, pk.l_query.len()),
+    ];
+
+    for ((failed, len), start) in vectors
+        .into_iter()
+        .zip(key_vector_offsets(&pk, Compress::Yes))
+    {
+        let chunk = 50.min(len.saturating_sub(1));
+        assert!(chunk > 0, "need at least two points in {failed:?}");
+        let point_size = if failed == KeyVector::BG2 {
+            pk.b_g2_query[0].compressed_size()
+        } else {
+            pk.beta_g1.compressed_size()
+        };
+        let second_chunk = start + chunk * point_size;
+        let mut malformed = compressed.clone();
+        malformed[second_chunk..second_chunk + point_size].fill(0xff);
+
+        for (label, bytes, fault, expected_prefix) in [
+            (
+                "seek",
+                compressed.as_slice(),
+                KeyReadFault::SeekAt(start as u64),
+                0,
+            ),
+            (
+                "read",
+                compressed.as_slice(),
+                KeyReadFault::ReadAt(second_chunk as u64),
+                chunk,
+            ),
+            ("decode", malformed.as_slice(), KeyReadFault::None, chunk),
+        ] {
+            let mut spk = SerializedPk::new(FaultingKeyReader {
+                cursor: Cursor::new(bytes),
+                fault,
+            })
+            .unwrap();
+            spk.tee_uncompressed(Box::new(SharedBuf::default()))
+                .unwrap();
+
+            for (vector, len) in vectors {
+                let (seen, result) = stream_checked_vector(&mut spk, &pk, vector, chunk);
+                if vector != failed {
+                    result.unwrap();
+                    assert_eq!(seen, len, "{failed:?} {label}, then {vector:?}");
+                    continue;
+                }
+                match (label, result) {
+                    ("seek" | "read", Err(PkError::Io(e))) => {
+                        assert_eq!(e.to_string(), format!("injected key {label} failure"));
+                    }
+                    ("decode", Err(PkError::Deserialize(_))) => {}
+                    (_, other) => {
+                        panic!("{failed:?} {label}: expected an injected failure, got {other:?}")
+                    }
+                }
+                assert_eq!(seen, expected_prefix, "{failed:?} {label}");
+            }
+            assert!(!spk.finish_tee().unwrap(), "{failed:?} {label}");
+        }
+    }
+
+    // Fail in each vector's length write or after the first byte of its first
+    // point. A complete write followed by a failed flush is also ineligible.
+    let writer_faults = key_vector_offsets(&pk, Compress::No)
+        .into_iter()
+        .flat_map(|start| {
+            [
+                (start - std::mem::size_of::<u64>(), false),
+                (start + 1, false),
+            ]
+        })
+        .chain([(uncompressed.len(), true)]);
+    for (limit, fail_flush) in writer_faults {
+        let mut spk = SerializedPk::from_bytes(&compressed).unwrap();
+        let written = SharedBuf::default();
+        spk.tee_uncompressed(Box::new(FaultingTeeWriter {
+            written: written.clone(),
+            remaining: limit,
+            fail_flush,
+        }))
+        .unwrap();
+        for (vector, len) in vectors {
+            let (seen, result) = stream_checked_vector(&mut spk, &pk, vector, 50);
+            result.unwrap();
+            assert_eq!(seen, len, "{vector:?} after writer fault at {limit}");
+        }
+        assert_eq!(&*written.0.lock().unwrap(), &uncompressed[..limit]);
+        match spk.finish_tee() {
+            Err(e) if fail_flush => assert_eq!(e.to_string(), "injected tee flush failure"),
+            Ok(false) if !fail_flush => {}
+            other => panic!("expected a writer failure at {limit}, got {other:?}"),
+        }
+    }
 }
 
 // ---- smooth (3·2^k / 9·2^k) domains -----------------------------------------------

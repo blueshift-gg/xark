@@ -519,6 +519,7 @@ impl<R: Read + Seek> SerializedPk<R> {
             Ok(())
         });
         if let Some(t) = tee.as_mut() {
+            t.ok &= res.is_ok();
             t.next += 1;
         }
         self.tee = tee;
