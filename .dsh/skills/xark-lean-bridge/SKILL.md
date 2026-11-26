@@ -444,7 +444,20 @@ Row layout (101 rows): row 0 = n_top; then, in order, 3 `is_zero` rows for limb 
 `match s544 with | .glue rs => rs`. The is_zero rows for a limb are
 `N_i·w_i = z_i`, `N_i·(1−z_i) = 0`, `w_i·(1−z_i) = 0` (row `a` = the 17–20-term
 limb LC), and the product row is `b_i·b_{i+1} = u` (or `borrow_i·(1−z_i) = u` for
-the later borrows). The Rust's
+the later borrows).
+
+`Formal/Circuits/Rsa2048/SigLt.lean` (committed, builds in ~4 s) now has the tables
+`zvar j = if j=0 then 4353 else 4357 + 5(j−1)`, `nxt i = 4360 + 5i`, the borrow LCs
+`borrow 0 = 1`, `borrow 1 = 1 − z_0`, `borrow (i+2) = var (nxt i)`, and **proves by
+`decide +kernel`**: `hout_0..24` (`(callAt 545).plugs[25+i] = (callAt 548).plugs[25+i]
+− borrow i + W·borrow (i+1)`) and `hprod_0..23` (the product row `4i+7` has
+`a = borrow (i+1)`, `b = 1 − z_{i+1}`, `c = borrow (i+2)`) and `htop` (row 100's
+`a = borrow 25`). Remaining: the integer-level induction — the is_zero rows make
+`b_i = 1 − z_i` a 0/1 bit (case split `x_i = 0` vs not: `x·w = z`, `x·b = 0`,
+`w·b = 0`), the product rows keep the borrows 0/1, then
+`(out_i.eval).val = n_i.val − b_i.val + W·b_{i+1}.val` (each out_i in `[0,W)`), so
+`val (limb (callAt 545) σ 25) = chainN − 1`; the `RequireLt25x82` Spec (first 25
+plugs = sig, `Assumptions` from the sig bounds) then gives `sig < n`. The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
