@@ -501,7 +501,22 @@ attempt hit the `↑(-t.1)` vs `-(↑t.1)` and composed-map forms (`Int.cast_neg
 `Int.cast_mul`, `List.sum_map_mul_left`). A simpler route: state `hout` at the *value*
 level by `decide`-checking the coefficient lists (`ZLC.eval` needs a `ℤ`-assignment;
 use `Xark.R1cs.shadow`/`shadow_toF` instead), or prove
-`(ZLC.toF (addLC l m)).eval σ = …` via `Xark.R1cs.eval_add`-style lemmas if present. The Rust's
+`(ZLC.toF (addLC l m)).eval σ = …` via `Xark.R1cs.eval_add`-style lemmas if present.
+
+Solved (committed `a81fec94`, `SigLt3.lean`): work at the `GLC` level instead — define
+`addG`/`negG`/`smulG` (F coefficients, no casts), prove
+`eval_addG` (`List.map_append`/`sum_append`, `ring`),
+`eval_negG`/`eval_smulG` via the list lemmas
+`sum_neg : (ts.map fun t => (-t.1) * σ t.2).sum = -(…)` and
+`sum_mul : (ts.map fun t => (c * t.1) * σ t.2).sum = c * (…)` (induction with
+`rw [List.map_cons, List.sum_cons, List.map_cons, List.sum_cons, ih]; ring` — the two
+`map_cons/sum_cons` pairs rewrite **both** sides), and `houtE_0..24`:
+`outF i σ = nF i σ − (ZLC.toF (borrow i)).eval σ + (W:F) * (ZLC.toF (borrow (i+1))).eval σ`
+via `congrArg ZLC.toF (hout_i)` and
+`simpa [addLC, negLC, smulLC, addG, negG, smulG, ZLC.toF, Int.cast_add, Int.cast_neg,
+List.map_append, List.map_map, Function.comp_def]`. Remaining: the `.val` formula (the
+integer `I = n_i.val − borrow_i.val + 2^82·borrow_{i+1}.val ∈ [0,W)` by cases), the
+telescoping, and `RequireLt25x82.soundness`. The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
