@@ -120,6 +120,7 @@ import Formal.GroupedCarry
 import Formal.RsaChain
 import Formal.RsaConvert
 import Formal.RsaBytes
+import Formal.RsaEm
 import Formal.RangeDerived
 import Formal.RangeCheckQ
 import Formal.RangeCheckR

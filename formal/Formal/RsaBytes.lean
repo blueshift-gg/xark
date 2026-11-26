@@ -33,62 +33,67 @@ obligation; this file is the arithmetic they carry.
 
 namespace Xark.Rsa.Bytes
 
-/-- Limb `q` of the packing: the bits of the 82-bit window starting at `82q`, the last
-window truncated at bit 2048. -/
-def limb (bits : ℕ → ℤ) (q : ℕ) : ℤ :=
-  ∑ t ∈ Finset.range 82, if 82 * q + t < 2048 then bits (82 * q + t) * 2 ^ t else 0
+/-- Limb `q` of a packing of width `a` covering `N` bits: the bits of the window
+starting at `aq`, the last window truncated at `N`. -/
+def limbOf (bits : ℕ → ℤ) (a N q : ℕ) : ℤ :=
+  ∑ t ∈ Finset.range a, if a * q + t < N then bits (a * q + t) * 2 ^ t else 0
 
-/-- A position below 2048 written in the limb grid: `(q, t) = (j/82, j%82)`. -/
-theorem div_mod_lt {j : ℕ} (hj : j < 2048) : j / 82 < 25 ∧ j % 82 < 82 := by
-  constructor
-  · rw [Nat.div_lt_iff_lt_mul (by norm_num)]
-    omega
-  · exact Nat.mod_lt _ (by norm_num)
+/-- Limb `q` of `bytes_to_wide`'s 25×82 packing. -/
+def limb (bits : ℕ → ℤ) (q : ℕ) : ℤ := limbOf bits 82 2048 q
 
-/-- The low digit of `82·q + t` is `t`, for `t < 82`. -/
-theorem add_mod (t q : ℕ) (ht : t < 82) : (82 * q + t) % 82 = t := by
-  rw [Nat.add_comm (82 * q) t, Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt ht]
+/-- A position below `N` in a width-`a` grid of `m` limbs. -/
+theorem div_mod_lt {j m a N : ℕ} (ha : 0 < a) (hN : N ≤ m * a) (hj : j < N) :
+    j / a < m ∧ j % a < a :=
+  ⟨(Nat.div_lt_iff_lt_mul ha).mpr (lt_of_lt_of_le hj hN), Nat.mod_lt _ ha⟩
 
-/-- `82·q + t` as a pair is injective on the limb grid. -/
-theorem add_mul_inj {q q' t t' : ℕ} (ht : t < 82) (ht' : t' < 82)
-    (h : 82 * q + t = 82 * q' + t') : q = q' ∧ t = t' := by
-  have hmod : t % 82 = t' % 82 := by
-    rw [← add_mod t q ht, ← add_mod t' q' ht', h]
+/-- The low digit of `a·q + t` is `t`, for `t < a`. -/
+theorem add_mod (a t q : ℕ) (ht : t < a) : (a * q + t) % a = t := by
+  rw [Nat.add_comm (a * q) t, Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt ht]
+
+/-- `a·q + t` as a pair is injective on the limb grid. -/
+theorem add_mul_inj {a q q' t t' : ℕ} (ha : 0 < a) (ht : t < a) (ht' : t' < a)
+    (h : a * q + t = a * q' + t') : q = q' ∧ t = t' := by
+  have hmod : t % a = t' % a := by
+    rw [← add_mod a t q ht, ← add_mod a t' q' ht', h]
   rw [Nat.mod_eq_of_lt ht, Nat.mod_eq_of_lt ht'] at hmod
-  constructor <;> omega
+  have hq : a * q = a * q' := by omega
+  constructor
+  · exact Nat.mul_left_cancel ha hq
+  · exact hmod
 
 /-- **The packing recombines to the bit string.** Rebuilding each limb at its weight
-gives the whole 2048-bit number: `Σ_q limb_q · 2^(82q) = Σ_{j<2048} bits j · 2^j`. -/
-theorem packing (bits : ℕ → ℤ) :
-    ∑ q ∈ Finset.range 25, limb bits q * 2 ^ (82 * q)
-      = ∑ j ∈ Finset.range 2048, bits j * 2 ^ j := by
-  have hlimb : ∀ q, limb bits q * 2 ^ (82 * q) =
-      ∑ t ∈ Finset.range 82,
-        if 82 * q + t < 2048 then bits (82 * q + t) * 2 ^ (82 * q + t) else 0 := by
+gives the whole `N`-bit number: `Σ_q limb_q · 2^(aq) = Σ_{j<N} bits j · 2^j`. The
+bijection is `(q, t) ↦ aq + t` between the limb grid and `[0, N)`. -/
+theorem packing_of (bits : ℕ → ℤ) (m a N : ℕ) (ha : 0 < a) (hN : N ≤ m * a) :
+    ∑ q ∈ Finset.range m, limbOf bits a N q * 2 ^ (a * q)
+      = ∑ j ∈ Finset.range N, bits j * 2 ^ j := by
+  have hlimb : ∀ q, limbOf bits a N q * 2 ^ (a * q) =
+      ∑ t ∈ Finset.range a,
+        if a * q + t < N then bits (a * q + t) * 2 ^ (a * q + t) else 0 := by
     intro q
-    rw [limb, Finset.sum_mul]
+    rw [limbOf, Finset.sum_mul]
     refine Finset.sum_congr rfl fun t _ => ?_
-    by_cases h : 82 * q + t < 2048
+    by_cases h : a * q + t < N
     · rw [if_pos h, if_pos h, mul_assoc, ← pow_add, Nat.add_comm]
     · rw [if_neg h, if_neg h, zero_mul]
-  have hflat : (∑ q ∈ Finset.range 25, ∑ t ∈ Finset.range 82,
-        if 82 * q + t < 2048 then bits (82 * q + t) * 2 ^ (82 * q + t) else 0)
-      = ∑ p ∈ Finset.range 25 ×ˢ Finset.range 82,
-        (if 82 * p.1 + p.2 < 2048 then bits (82 * p.1 + p.2) * 2 ^ (82 * p.1 + p.2) else 0) := by
+  have hflat : (∑ q ∈ Finset.range m, ∑ t ∈ Finset.range a,
+        if a * q + t < N then bits (a * q + t) * 2 ^ (a * q + t) else 0)
+      = ∑ p ∈ Finset.range m ×ˢ Finset.range a,
+        (if a * p.1 + p.2 < N then bits (a * p.1 + p.2) * 2 ^ (a * p.1 + p.2) else 0) := by
     rw [Finset.sum_product]
   simp only [hlimb, hflat]
   rw [← Finset.sum_filter]
-  refine Finset.sum_bij (fun p _ => 82 * p.1 + p.2) ?_ ?_ ?_ ?_
+  refine Finset.sum_bij (fun p _ => a * p.1 + p.2) ?_ ?_ ?_ ?_
   · intro p hp
     exact Finset.mem_range.mpr (Finset.mem_filter.mp hp).2
   · intro p hp p' hp' h
     obtain ⟨_, hpt⟩ := Finset.mem_product.mp (Finset.mem_filter.mp hp).1
     obtain ⟨_, hpt'⟩ := Finset.mem_product.mp (Finset.mem_filter.mp hp').1
-    have h1 := add_mul_inj (Finset.mem_range.mp hpt) (Finset.mem_range.mp hpt') h
+    have h1 := add_mul_inj ha (Finset.mem_range.mp hpt) (Finset.mem_range.mp hpt') h
     exact Prod.ext h1.1 h1.2
   · intro j hj
-    obtain ⟨hjq, hjt⟩ := div_mod_lt (Finset.mem_range.mp hj)
-    refine ⟨(j / 82, j % 82), ?_, ?_⟩
+    obtain ⟨hjq, hjt⟩ := div_mod_lt ha hN (Finset.mem_range.mp hj)
+    refine ⟨(j / a, j % a), ?_, ?_⟩
     · refine Finset.mem_filter.mpr ⟨Finset.mem_product.mpr ⟨?_, ?_⟩, ?_⟩
       · exact Finset.mem_range.mpr hjq
       · exact Finset.mem_range.mpr hjt
@@ -97,6 +102,12 @@ theorem packing (bits : ℕ → ℤ) :
     · rw [Nat.div_add_mod]
   · intro p _
     rfl
+
+/-- **The 25×82 packing recombines to the 2048-bit string.** -/
+theorem packing (bits : ℕ → ℤ) :
+    ∑ q ∈ Finset.range 25, limb bits q * 2 ^ (82 * q)
+      = ∑ j ∈ Finset.range 2048, bits j * 2 ^ j :=
+  packing_of bits 25 82 2048 (by norm_num) (by norm_num)
 
 /-- The low digit of `8·(255 − i) + t` is `t`, for `t < 8`. -/
 theorem byte_add_mod (t i : ℕ) (ht : t < 8) : (8 * (255 - i) + t) % 8 = t := by

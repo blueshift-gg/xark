@@ -34,7 +34,8 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   packing (`Formal/RsaBytes.lean`: the 25 limbs recombine to the bit string and
   the big-endian byte string is that same value), and the whole circuit as
   segments (`Formal/Circuits/Rsa2048.lean`: 125,856 rows in 1,021 segments,
-  hash-gated by `CircuitHash.lean`). The rows
+  hash-gated by `CircuitHash.lean`), and the EM vector (`Formal/RsaEm.lean`: the
+  constant is the RFC 8017 prefix, checked by `decide +kernel`). The rows
   that instantiate those identities are still hand-proved
   (`docs/security.md` §2.18). The
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key
