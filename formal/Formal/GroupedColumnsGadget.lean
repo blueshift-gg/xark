@@ -45,6 +45,7 @@ the 24 equations plus the top row into `CarrySpec`, and `GroupedColumns.soundnes
 namespace Xark.Templates.GroupedColumns
 
 open Xark.Template Xark.R1cs
+open Xark.Rsa.GroupedColumns (Q W BI OFF)
 
 instance : Fact (Nat.Prime r) := bn254_r_prime
 
@@ -668,5 +669,182 @@ theorem stepLift_sat (σ : TVar → F) (h : template.Sat σ) (j : ℕ) (hj : j <
   have h' := hrow
   simp only [bindNorm, Xark.R1cs.Row.Sat, eval_norm, Xark.R1cs.LC.eval_bind] at h'
   exact h'
+
+/-! ### The carries
+
+The column difference `dcol` is `conv a b − conv q m − rhs`; `carry` is instance `j`'s
+output. The step's pin row gives `OFF − BI + dcol (2j) + W·dcol (2j+1) + cb = Q·carry`,
+which is `GroupedColumns.CarrySpec`'s per-step equation with `cb` the previous carry. -/
+
+/-- The column difference of the call's limbs. -/
+def dcol (σ : TVar → F) (c : ℕ) : ℤ :=
+  Xark.Rsa.GroupedColumns.cols (plugA σ) (plugB σ) (plugQ σ) (plugM σ) (plugR σ) c
+
+/-- Instance `j`'s carry, as the integer its witness denotes. -/
+def carry (σ : TVar → F) (j : ℕ) : ℤ := ((stepLift j σ (.wit 0)).val : ℤ)
+
+/-- The carry instance `j` reads: the bias for the first, else `k_{j−1}`. -/
+def cb (σ : TVar → F) (j : ℕ) : ℤ := ((stepLift j σ (.plug 4)).val : ℤ)
+
+theorem plugA_bounds (σ : TVar → F) (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    ∀ i < 25, 0 ≤ plugA σ i ∧ plugA σ i < 2 ^ 82 := by
+  intro i hi
+  refine ⟨?_, ?_⟩
+  · change (0 : ℤ) ≤ ((σ (.plug i)).val : ℤ)
+    exact Int.natCast_nonneg _
+  · change ((σ (.plug i)).val : ℤ) < (2 ^ 82 : ℤ)
+    exact_mod_cast hb i (by omega)
+
+theorem plugB_bounds (σ : TVar → F) (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    ∀ i < 25, 0 ≤ plugB σ i ∧ plugB σ i < 2 ^ 82 := by
+  intro i hi
+  refine ⟨?_, ?_⟩
+  · change (0 : ℤ) ≤ ((σ (.plug (25 + i))).val : ℤ)
+    exact Int.natCast_nonneg _
+  · change ((σ (.plug (25 + i))).val : ℤ) < (2 ^ 82 : ℤ)
+    exact_mod_cast hb (25 + i) (by omega)
+
+theorem plugM_bounds (σ : TVar → F) (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    ∀ i < 25, 0 ≤ plugM σ i ∧ plugM σ i < 2 ^ 82 := by
+  intro i hi
+  refine ⟨?_, ?_⟩
+  · change (0 : ℤ) ≤ ((σ (.plug (50 + i))).val : ℤ)
+    exact Int.natCast_nonneg _
+  · change ((σ (.plug (50 + i))).val : ℤ) < (2 ^ 82 : ℤ)
+    exact_mod_cast hb (50 + i) (by omega)
+
+theorem plugQ_bounds (σ : TVar → F) (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    ∀ i < 25, 0 ≤ plugQ σ i ∧ plugQ σ i < 2 ^ 82 := by
+  intro i hi
+  refine ⟨?_, ?_⟩
+  · change (0 : ℤ) ≤ ((σ (.plug (75 + i))).val : ℤ)
+    exact Int.natCast_nonneg _
+  · change ((σ (.plug (75 + i))).val : ℤ) < (2 ^ 82 : ℤ)
+    exact_mod_cast hb (75 + i) (by omega)
+
+theorem plugR_bounds (σ : TVar → F) (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    ∀ i < 25, 0 ≤ plugR σ i ∧ plugR σ i < 2 ^ 82 := by
+  intro i hi
+  refine ⟨?_, ?_⟩
+  · change (0 : ℤ) ≤ ((σ (.plug (100 + i))).val : ℤ)
+    exact Int.natCast_nonneg _
+  · change ((σ (.plug (100 + i))).val : ℤ) < (2 ^ 82 : ℤ)
+    exact_mod_cast hb (100 + i) (by omega)
+
+theorem dcol_bounds (σ : TVar → F)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (c : ℕ) :
+    -(2 ^ 169 + 2 ^ 82) < dcol σ c ∧ dcol σ c < 2 ^ 169 :=
+  cols_bounds _ _ _ _ _ (plugA_bounds σ hb) (plugB_bounds σ hb) (plugM_bounds σ hb)
+    (plugQ_bounds σ hb) (plugR_bounds σ hb) c
+
+theorem shadow_numZ_eq (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (j : ℕ) :
+    Xark.Circuit.shadow (stepLift j σ) Xark.Rsa.GroupedCarry.numZ
+      = (OFF - BI) + dcol σ (2 * j) + W * dcol σ (2 * j + 1) + cb σ j := by
+  rw [Xark.Rsa.GroupedCarry.shadow_numZ]
+  have h0 : ((stepLift j σ (.plug 0)).val : ℤ)
+      = Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) (2 * j) := by
+    rw [stepLift_plug0]; exact eval_lhs_val σ h hb (2 * j)
+  have h1 : ((stepLift j σ (.plug 1)).val : ℤ)
+      = Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) (2 * j + 1) := by
+    rw [stepLift_plug1]; exact eval_lhs_val σ h hb (2 * j + 1)
+  have h2 : ((stepLift j σ (.plug 2)).val : ℤ)
+      = Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) (2 * j)
+        + (if 2 * j < 25 then plugR σ (2 * j) else 0) := by
+    rw [stepLift_plug2]; exact eval_rhs_val σ h hb (2 * j)
+  have h3 : ((stepLift j σ (.plug 3)).val : ℤ)
+      = Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) (2 * j + 1)
+        + (if 2 * j + 1 < 25 then plugR σ (2 * j + 1) else 0) := by
+    rw [stepLift_plug3]; exact eval_rhs_val σ h hb (2 * j + 1)
+  rw [h0, h1, h2, h3]
+  simp only [dcol, cb, Xark.Rsa.GroupedColumns.cols, W, BI, OFF]
+  ring
+
+/-- Instance `j`'s carry is the step template's output, so the step's range check bounds
+it by `2^89`. -/
+theorem carry_bounds (σ : TVar → F) (h : template.Sat σ) (j : ℕ) (hj : j < 24) :
+    0 ≤ carry σ j ∧ carry σ j < 2 ^ 89 := by
+  have hsat := stepLift_sat σ h j hj
+  have hspec := Xark.Templates.GroupedColumnStep.soundness (stepLift j σ) hsat
+  have hout : Xark.Templates.GroupedColumnStep.template.outputs
+      = [Xark.Templates.GroupedColumnStep.vLC] := by decide +kernel
+  have := hspec
+  simp only [Xark.Templates.GroupedColumnStep.Spec, Template.outs, hout, List.map_cons,
+    List.map_nil, List.getD_cons_zero, Xark.Templates.GroupedColumnStep.vLC_eq,
+    Xark.R1cs.LC.eval_var] at this
+  refine ⟨?_, ?_⟩
+  · show (0 : ℤ) ≤ carry σ j
+    unfold carry
+    exact Int.natCast_nonneg _
+  · show carry σ j < (2 ^ 89 : ℤ)
+    unfold carry
+    exact_mod_cast this
+
+theorem cb_eq (σ : TVar → F) (j : ℕ) :
+    cb σ j = if j = 0 then BI else carry σ (j - 1) := by
+  rw [cb, stepLift_plug4]
+  by_cases hj : j = 0
+  · rw [if_pos hj, if_pos hj]
+    have h : (((2 ^ 88 : ℕ) : F)).val = 2 ^ 88 :=
+      ZMod.val_natCast_of_lt (Xark.Templates.ToBits.two_pow_lt_r' (by norm_num))
+    rw [h]
+    show ((2 ^ 88 : ℕ) : ℤ) = BI
+    norm_num [BI]
+  · rw [if_neg hj, if_neg hj]
+    rw [carry, stepLift_wit]
+    simp [stepBase]
+
+theorem cb_bounds (σ : TVar → F) (h : template.Sat σ) (j : ℕ) (hj : j < 24) :
+    0 ≤ cb σ j ∧ cb σ j < 2 ^ 89 := by
+  rw [cb_eq]
+  by_cases hj0 : j = 0
+  · rw [if_pos hj0]
+    refine ⟨?_, ?_⟩
+    · show (0 : ℤ) ≤ BI; norm_num [BI]
+    · show BI < (2 ^ 89 : ℤ); norm_num [BI]
+  · rw [if_neg hj0]
+    exact carry_bounds σ h (j - 1) (by omega)
+
+theorem shadow_numZ_bounds (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (j : ℕ) (hj : j < 24) :
+    0 ≤ Xark.Circuit.shadow (stepLift j σ) Xark.Rsa.GroupedCarry.numZ
+      ∧ Xark.Circuit.shadow (stepLift j σ) Xark.Rsa.GroupedCarry.numZ < (r : ℤ) := by
+  rw [shadow_numZ_eq σ h hb j]
+  have hd0 := dcol_bounds σ hb (2 * j)
+  have hd1 := dcol_bounds σ hb (2 * j + 1)
+  have hcb := cb_bounds σ h j hj
+  have hW : (0 : ℤ) < W := by norm_num [W]
+  have hlowS : -(2 ^ 251 + 2 ^ 170) < dcol σ (2 * j) + W * dcol σ (2 * j + 1) := by
+    have hm : W * (-(2 ^ 169 + 2 ^ 82)) < W * dcol σ (2 * j + 1) :=
+      mul_lt_mul_of_pos_left hd1.1 hW
+    have hbound : (2 ^ 169 + 2 ^ 82) * (1 + W) < 2 ^ 251 + 2 ^ 170 := by
+      rw [W]; norm_num
+    nlinarith [hd0.1, hm, hbound]
+  have hupS : dcol σ (2 * j) + W * dcol σ (2 * j + 1) < 2 ^ 169 + W * 2 ^ 169 := by
+    have hm : W * dcol σ (2 * j + 1) < W * 2 ^ 169 := mul_lt_mul_of_pos_left hd1.2 hW
+    linarith [hd0.2]
+  constructor
+  · have hpos : 0 < OFF - BI - (2 ^ 251 + 2 ^ 170) := by norm_num [OFF, BI]
+    linarith [hcb.1]
+  · have hlt : OFF - BI + (2 ^ 169 + W * 2 ^ 169) + 2 ^ 89 < (r : ℤ) := by
+      norm_num [OFF, BI, W, r]
+    linarith [hcb.2]
+
+/-- The per-step equation `GroupedColumns.CarrySpec` consumes. -/
+theorem step_row (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) (j : ℕ) (hj : j < 24) :
+    dcol σ (2 * j) + W * dcol σ (2 * j + 1) + (if j = 0 then BI else carry σ (j - 1))
+        - BI + OFF = Q * carry σ j := by
+  have hbnds := shadow_numZ_bounds σ h hb j hj
+  have hc := Xark.Rsa.GroupedCarry.carry_of_sat_shadow (stepLift j σ) (stepLift_sat σ h j hj)
+    hbnds.1 hbnds.2
+  rw [shadow_numZ_eq σ h hb j] at hc
+  rw [show Xark.Templates.GroupedColumnStep.vLC.eval (stepLift j σ)
+      = stepLift j σ (.wit 0) from by
+    rw [Xark.Templates.GroupedColumnStep.vLC_eq]; exact Xark.R1cs.LC.eval_var _ _] at hc
+  change (OFF - BI) + dcol σ (2 * j) + W * dcol σ (2 * j + 1) + cb σ j
+      = Q * carry σ j at hc
+  rw [cb_eq σ j] at hc
+  linarith
 
 end Xark.Templates.GroupedColumns
