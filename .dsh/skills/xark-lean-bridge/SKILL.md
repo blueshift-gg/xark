@@ -414,7 +414,19 @@ Summing gives `Σ out_i·W^i = Σ m_i·W^i − 1` (telescoping), so s545's m lim
 `chainN − 1` once the `==0` hint bits satisfy their rows (s544's glue); the Spec then
 gives `sig ≤ chainN − 1`. Remaining: model the `==0`/borrow glue rows and the LC
 identification `val (limb (callAt 545) σ 25) = chainN − 1`, plus the first-25-plug
-window (`(callAt 545).plugs[j] = (sq0).plugs[j]` for j<25, `decide`). Gotchas:
+window (`(callAt 545).plugs[j] = (sq0).plugs[j]` for j<25, `decide`).
+
+Digest bytes (drafted in `/tmp/gen_embytes.py`): a generic
+`bytes_of_bits_n (n) (_hn) (bits bytes) (hbyte) : Σ_{i<n} bytes_i·256^(n-1-i) = Σ_{j<8n} bits_j·2^j`
+(compiles, 2.4 s), 32 per-byte `dbyte_k` (`((σ (512+k)).val : ℤ) = Σ_{t<8} digestBits (8*(31-k)+t)·2^t`,
+same proof as `sbyte`), `digestBits_eq` by `interval_cases`, and then
+`chainEm_bytes … = EM_PREFIX + Σ_{k<32} (σ (512+k)).val·256^(31-k)`. The first three
+compile in ~5 s; `chainEm_bytes`'s `exact (bytes_of_bits_n 32 …).symm` (also with
+`add_left_inj.mpr`, and with `rw`/`congr`) stalls for many minutes — likely the
+big-sum/`8*32` unification at the instantiation. Next: specialize
+`bytes_of_bits_n` to `n = 32` (a concrete copy) or prove the 32-byte identity with an
+inline `calc`/`sum_bij`, avoiding the instantiation. `n_top`/`n_bits` are committed
+in `ByteBits.lean` (`9acb7842`). Gotchas:
 `pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
 and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
 unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).
