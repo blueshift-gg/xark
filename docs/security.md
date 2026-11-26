@@ -441,7 +441,7 @@ Still hand-proved, and therefore audit residuals:
   segments, `fnv1a64:860142cc226105b8`), so `Sat circuit σ` is the production rows,
   and its calls' contracts are theorems: 408 step calls each with a pinned carry
   below `2^89`, 17 `range_check_q` and 16 `range_check_r` calls with every limb in
-  range (`Formal/Circuits/Rsa2048Calls.lean`, counts by `decide +kernel`). What is
+  range (`Formal/Rsa2048Calls.lean`, counts by `decide +kernel`). What is
   not proven is the 24-step assembly — grouping each `grouped_columns`' calls into
   `CarrySpec` with the columns computed from the product rows — and the top-level
   statement.

@@ -7,7 +7,7 @@ import Formal.Circuit
 import Formal.GroupedColumnStep
 import Formal.RangeCheckQ
 import Formal.RangeCheckR
-import Formal.Circuits.Calls
+import Formal.RsaCalls
 import Formal.Circuits.Rsa2048
 
 set_option linter.style.header false
@@ -16,7 +16,7 @@ set_option linter.style.header false
 # The rsa2048 circuit's gadget calls, from `Circuit.Sat`
 
 `Formal/Circuit.lean`'s `sat_call` hands a call's template its satisfying assignment,
-and `Formal/Circuits/Calls.lean` applies the rsa gadget proofs to one call. This file
+and `Formal/RsaCalls.lean` applies the rsa gadget proofs to one call. This file
 lifts that to **all** calls of a template in a circuit: `callsOf t C` collects the
 `.call` segments whose template is `t`, and `step_calls_bounded` etc. quantify over it.
 
