@@ -271,6 +271,10 @@ pub trait ConstraintSource: Sync {
     fn windows(&self, rows_hint: usize) -> Vec<Window>;
     /// Expand one window into `out` (cleared first).
     fn expand(&self, w: &Window, out: &mut RowChunk);
+    /// Report the first unsatisfied row in source order.
+    fn first_unsatisfied(&self, z: &[Fr]) -> Option<usize> {
+        first_unsatisfied_expanded(self, z)
+    }
     /// Optionally evaluate a window's rows directly (`outs[m][i] = ⟨M_i, z⟩` for
     /// the window's `i`-th row) without expanding it; `false` = not supported, use
     /// [`expand`](Self::expand).
@@ -323,6 +327,9 @@ impl<T: ConstraintSource + ?Sized> ConstraintSource for &T {
     fn expand(&self, w: &Window, out: &mut RowChunk) {
         (**self).expand(w, out)
     }
+    fn first_unsatisfied(&self, z: &[Fr]) -> Option<usize> {
+        (**self).first_unsatisfied(z)
+    }
 }
 
 impl<T: ConstraintSource + ?Sized> ConstraintSource for Box<T> {
@@ -344,6 +351,9 @@ impl<T: ConstraintSource + ?Sized> ConstraintSource for Box<T> {
     fn expand(&self, w: &Window, out: &mut RowChunk) {
         (**self).expand(w, out)
     }
+    fn first_unsatisfied(&self, z: &[Fr]) -> Option<usize> {
+        (**self).first_unsatisfied(z)
+    }
 }
 
 /// The first row `i` with `⟨A_i, z⟩·⟨B_i, z⟩ ≠ ⟨C_i, z⟩`, or `None` when `z`
@@ -351,6 +361,10 @@ impl<T: ConstraintSource + ?Sized> ConstraintSource for Box<T> {
 /// proof failed its self-check (a bad witness, or a key for another circuit),
 /// not for the proving path.
 pub fn first_unsatisfied<S: ConstraintSource + ?Sized>(src: &S, z: &[Fr]) -> Option<usize> {
+    src.first_unsatisfied(z)
+}
+
+fn first_unsatisfied_expanded<S: ConstraintSource + ?Sized>(src: &S, z: &[Fr]) -> Option<usize> {
     let mut chunk = RowChunk::default();
     for w in src.windows(1 << 14) {
         src.expand(&w, &mut chunk);
@@ -558,6 +572,35 @@ impl ConstraintSource for BytecodeSource {
             });
         debug_assert_eq!(i, w.rows.len());
         true
+    }
+    fn first_unsatisfied(&self, z: &[Fr]) -> Option<usize> {
+        // Compiled templates assume a full assignment with the constant wire set to one.
+        if !self.compiled || z.len() != self.layout.num_vars() || z[0] != Fr::from(1u64) {
+            return first_unsatisfied_expanded(self, z);
+        }
+
+        let value = |id| {
+            z[self
+                .layout
+                .position(id)
+                .expect("row references an unallocated var")]
+        };
+        for window in self.windows(1 << 14) {
+            let mut row = window.rows.start;
+            let mut first = None;
+            self.stream
+                .eval_items(window.handle, &value, [true; 3], &mut |[a, b, c]| {
+                    if first.is_none() && a * b != c {
+                        first = Some(row);
+                    }
+                    row += 1;
+                });
+            debug_assert_eq!(row, window.rows.end);
+            if first.is_some() {
+                return first;
+            }
+        }
+        None
     }
     fn expand(&self, w: &Window, out: &mut RowChunk) {
         out.clear(w.rows.start);

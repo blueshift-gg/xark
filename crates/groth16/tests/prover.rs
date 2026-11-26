@@ -524,15 +524,87 @@ const KYC_INPUTS: &[(&str, &str)] = &[
 ];
 
 fn kyc_witness() -> BTreeMap<VarId, Fr> {
-    let cp = xark_ir::function_decode::expand_function_blob(KYC_XBC).unwrap();
+    fixture_witness(KYC_XBC, KYC_INPUTS)
+}
+
+fn fixture_witness(xbc: &[u8], inputs: &[(&str, &str)]) -> BTreeMap<VarId, Fr> {
+    let cp = xark_ir::function_decode::expand_function_blob(xbc).unwrap();
     let prim = cp.to_primitive();
-    let names: BTreeMap<String, String> = KYC_INPUTS
+    let names: BTreeMap<String, String> = inputs
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
     let ids = xark_prover::resolve_input_ids(&prim.vars, &names).unwrap();
     let fp = xark_ir::solver::solve_and_check(&prim, &ids).unwrap();
     xark_prover::lower_witness(&fp)
+}
+
+#[test]
+fn compiled_checks_match_expansion_across_fixtures_and_windows() {
+    const SPONGE: &[u8] = include_bytes!("../../ir/tests/fixtures/poseidon2_sponge.xbc");
+    const SPONGE_INPUTS: &[(&str, &str)] = &[
+        ("a", "1"),
+        ("b", "2"),
+        ("c", "3"),
+        ("d", "4"),
+        ("e", "5"),
+        (
+            "out",
+            "8828141863764826539393608139805007447022200187560478202710690249571019683634",
+        ),
+    ];
+    for (name, xbc, inputs) in [
+        ("ZK-KYC", KYC_XBC, KYC_INPUTS),
+        ("Poseidon2 sponge", SPONGE, SPONGE_INPUTS),
+    ] {
+        let compiled = BytecodeSource::new(xbc).unwrap();
+        let mut expanded = BytecodeSource::new(xbc).unwrap();
+        expanded.set_compiled(false);
+        let assignment = compiled
+            .layout()
+            .assignment_from_map(&fixture_witness(xbc, inputs));
+        assert_eq!(first_unsatisfied(&expanded, &assignment), None, "{name}");
+        for (case, altered_index) in [
+            ("valid", None),
+            ("noncanonical constant", Some(0)),
+            ("changed public input", Some(1)),
+            ("changed final wire", Some(assignment.len() - 1)),
+        ] {
+            let mut z = assignment.clone();
+            if let Some(index) = altered_index {
+                z[index] += Fr::from(1u64);
+            }
+            let first = first_unsatisfied(&expanded, &z);
+            if case == "changed public input" {
+                assert!(first.is_some(), "{name}: {case}");
+            }
+            assert_eq!(first_unsatisfied(&compiled, &z), first, "{name}: {case}");
+
+            // The lower-level QAP evaluator assumes the constant is one.
+            // The diagnostic check above must use its expanded fallback here.
+            if altered_index == Some(0) {
+                continue;
+            }
+            let evaluate = |source: &BytecodeSource, window| {
+                let [mut a, mut b, mut c] =
+                    std::array::from_fn(|_| vec![Fr::zero(); source.num_constraints()]);
+                eval_rows(
+                    source,
+                    &z,
+                    window,
+                    [Some(&mut a), Some(&mut b), Some(&mut c)],
+                );
+                [a, b, c]
+            };
+            let reference = evaluate(&expanded, 37);
+            for hint in [1, 37, 1 << 14] {
+                assert!(
+                    evaluate(&compiled, hint) == reference,
+                    "{name}: {case}, window {hint}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1195,6 +1267,32 @@ fn compiled_template_evaluation_equals_expansion() {
     let mut c_only = vec![Fr::zero(); m];
     eval_rows(&src, &z, 1 << 14, [None, None, Some(&mut c_only)]);
     assert_eq!(c_only, expanded.2);
+}
+
+#[test]
+fn compiled_row_check_reports_the_same_first_failure_as_expansion() {
+    let src = BytecodeSource::new(KYC_XBC).unwrap();
+    let mut expanded = BytecodeSource::new(KYC_XBC).unwrap();
+    expanded.set_compiled(false);
+
+    let z = src.layout().assignment_from_map(&kyc_witness());
+    assert_eq!(first_unsatisfied(&src, &z), None);
+    assert_eq!(first_unsatisfied(&expanded, &z), None);
+
+    let mut wrong_public = z.clone();
+    wrong_public[1] += Fr::from(1u64);
+    let expected = first_unsatisfied(&expanded, &wrong_public).expect("wrong public input");
+    assert_eq!(
+        first_unsatisfied(&Box::new(&src), &wrong_public),
+        Some(expected)
+    );
+
+    let mut wrong_constant = z;
+    wrong_constant[0] = Fr::zero();
+    assert_eq!(
+        first_unsatisfied(&src, &wrong_constant),
+        first_unsatisfied(&expanded, &wrong_constant)
+    );
 }
 
 // ---- streaming setup ---------------------------------------------------------------
