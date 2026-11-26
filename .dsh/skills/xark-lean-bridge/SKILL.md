@@ -364,7 +364,23 @@ satisfying assignment). Its `limbOf_small` helper (`82q + w = 256` ⇒ the range
 `pn_emOut_k` takes `(σ) (h)` only for `k ≤ 3` (the higher limbs are constants, no
 `hbit`). Gates: `lake build`, AxiomCheck (2,820 theorems, standard axioms),
 `lean-export --check` (71/71), `lean-export --coverage`, `CircuitHash` (Rsa2048
-`860142cc226105b8`) all green. Gotchas:
+`860142cc226105b8`) all green.
+
+Byte layer (in progress, `Formal/Circuits/Rsa2048/ChainBits.lean`, committed): `nBits σ j`
+= the modulus's big-endian bit (`bitGLC (255 - j/8) (j%8)`), `sigBits` = bytes
+`256 + 255 - j/8`; `pn_n_0..24`/`pn_sig_0..24` prove each chain limb is
+`RsaBytes.limbOf … 82 2048 q` (q ≤ 23 with `limbOf_full`, q = 24 with
+`limbOf_last` at width 80 and an `hL` sum-subset step before `Nat.cast_sum`), and
+`chainN_limb`/`chainSig_limb` put the 25 limbs back into a `val`. Remaining:
+(1) `chainN_packing` (`RsaBytes.packing`), (2) 512 per-byte decomposition theorems
+`((σ i).val : ℤ) = Σ_{t<8} nBits (8*(255-i)+t) * 2^t` — they must be *concrete* in
+`i` because `callAt i`/`seg i` don't reduce symbolically; per byte: `call_sat_of` +
+`ToBits.SpecAt` gives `outs = bitOf (σ i)`, `Add32.word_testBit` decomposes
+`(σ i).val < 2^8`, and `bitGLC_eq_bitOut`/`bitOut_eval` link `nBits` to `outs` (gotcha:
+`bitGLC_eq_bitOut`'s explicit arguments and `hins`'s `simp` over `Template.ins`), then
+(3) `RsaBytes.bytes_of_bits` gives `chainN = ↑(Σ_i (σ i).val · 256^(255-i))`, same
+for `sigBits` with bytes 256..511. `sig < n` still needs the s545 subtraction/glue
+layer (its m plugs are not `sq0`'s modulus limbs — `decide` confirms). Gotchas:
 `pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
 and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
 unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).
