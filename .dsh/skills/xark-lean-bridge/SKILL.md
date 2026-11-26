@@ -255,3 +255,20 @@ with the q/r `Spec`s supplying the limb bounds.
 
 The work is a single large proof plus mechanical instantiation, not an open design
 question; every number it needs is in this file.
+
+## The composition, from here
+
+The circuit now exports its chain as 17 top-level calls, at segments
+`s548, s551, …, s593` (16 `GroupedColumnsSquare`) and `s596` (`GroupedColumns`),
+interleaved with `range_check_q`/`range_check_r` at `s546+3k`/`s547+3k`. Their plug
+LCs are in `Formal/Circuits/Rsa2048/Part1.lean`; most limbs are single variables
+(the hint outputs and the packed bytes' bits), so adjacent calls can be matched by
+proving LC equalities with `decide +kernel`. The per-call contract is
+`GroupedColumnsSquareGadget.soundness` / `GroupedColumnsGadget.soundness`
+(`Assumptions → val a · val b = val q · val m + val rhs`); the limb bounds come
+from the q/r calls (`RangeCheckQ.Spec`/`RangeCheckR.Spec` through `sat_call`),
+except the packed `n`/`sig`/`em` limbs, whose bound is the byte packing
+(`RsaBytes`, `bytes_to_wide`'s rows are glue plus `to_bits` calls). Then
+`RsaChain.chain` (`step` = the square's `r` limbs) and `RsaEm.em` give
+`em ≡ sig^65537 (mod n)`; `minus_one`/`require_lt` (the `RequireLt` call at
+`s?`) give `sig < n`, and `n_top` the 2048-bit bound.
