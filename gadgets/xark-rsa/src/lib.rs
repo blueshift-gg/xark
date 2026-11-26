@@ -465,9 +465,11 @@ pub fn verify_sha256_limbs(n: [Field; LIMBS], sig: [Field; LIMBS], digest: [Fiel
 /// Verify an RSASSA-PKCS1-v1_5 / SHA-256 signature for a 2048-bit modulus.
 ///
 /// `n` and `sig` must come from a range-checked `Bignum` (the `Public<U2048>` /
-/// `Private<U2048>` input reader range-checks every limb). The circuit also
-/// enforces that `n` has exactly 2048 bits, that `sig < n`, and that
-/// `sig^65537 mod n` equals the PKCS#1 v1.5 encoding of `digest`.
+/// `Private<U2048>` input reader range-checks every limb; [`Bignum::new_checked`]
+/// does too). The circuit also enforces that `n` has exactly 2048 bits, that
+/// `sig < n`, and that `sig^65537 mod n` equals the PKCS#1 v1.5 encoding of
+/// `digest`. It does not validate the RSA key structure (oddness/semiprimality);
+/// that is the caller's key allowlist.
 pub fn verify_sha256(n: U2048, sig: U2048, digest: [Field; 32]) {
     verify_checked(n, sig, digest)
 }

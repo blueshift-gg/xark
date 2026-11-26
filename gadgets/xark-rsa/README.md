@@ -48,8 +48,11 @@ xark_rsa::verify_sha256_words(n, sig, digest);
 
 `verify_sha256` enforces that `n` is exactly 2048 bits (`2^2047 <= n < 2^2048`),
 that `sig < n`, and that the recovered value equals the PKCS#1 v1.5 encoding of
-the digest. It does not check that the modulus belongs to a trusted certificate;
-that is the caller's or program's allowlist.
+the digest. It does not check that the modulus belongs to a trusted certificate,
+nor that it is odd or semiprime: the caller's key allowlist is the trust
+boundary. A caller that builds limbs itself should use `Bignum::new_checked`
+(or `verify_sha256_limbs`, which range-checks the raw arrays); `Bignum::new`
+is the unchecked constructor.
 
 ## Host-side decoding
 
@@ -73,13 +76,22 @@ private; the digest can be private too.
   is proved `< 2^2048`, not `< n`; the final fused step pins the canonical
   target), paired-column carries, and a terminal multiply whose remainder is
   the encoded message. Only the 17 x 121 input view is public API.
+* With the KAT inputs, `xark setup` takes 0.48 s and `xark prove --verify`
+  solves in 0.03 s and proves in 0.54 s (release binary, `PROVE_TIME=1`, one
+  machine; the proof verifies).
+* A 25 x 82 public input would remove the two conversion passes (about 9,910
+  rows, 7.2%) but changes the host API and needs `RequireLt25x82` /
+  `RangeCheckLimbs25x82` Lean widths; it is a follow-up, not part of this
+  crate version.
 
 ## Tests
 
 * `tests/real_certificate.rs` verifies a real signature from the iAM Smart PKI:
   the leaf certificate `CN=IAM SMART` signed by `ID-CERT SIGNING CA CERT 3`
-  (RSA-2048, SHA-256).
-* The example test rejects a tampered digest.
+  (RSA-2048, SHA-256). It also checks on the host that the digest is SHA-256 of
+  the 832-byte leaf TBSCertificate fixture (`leaf_tbs.der`); the circuit receives
+  only `n`, `sig`, and `digest`.
+* The example test rejects a tampered digest and repeats the TBS hash check.
 * The 17×121 `require_lt` and `range_check_limbs` rows have Lean templates under
   `formal/templates/` (`require_lt__17x121`, `range_check_limbs__17x121`). The
   internal 25×82 conversion, range checks and paired-column carry rows are

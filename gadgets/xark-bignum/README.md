@@ -47,6 +47,7 @@ for a 24-limb modulus.
 |---|---|
 | `fp!(Name, "modulus")` | Define a field type with operators and `.inverse()`, `.sub2()`, `.triple()`, `.reduce()`. Defaults to 3 × 86-bit limbs; `fp!(Name, "0x…", 4, 64)` picks another layout. |
 | `Bignum<LIMBS, BITS>` | Generic limbed number with `mul`, `add`, `sub`, `neg`, `inverse`, `sub2`, `triple`, `reduce`, `range_check`; the modulus `m` is passed in, and `mul` and `sub2` derive their bound `m − 1` from it. |
+| `Bignum::new_checked` | `new` plus `range_check_limbs`, for limbs a circuit builds itself. |
 | `mod_mul`, `mod_add`, `mod_sub`, `mod_neg`, `mod_inverse` | The free functions behind them, on `[Field; LIMBS]`. |
 | `mul_divmod` | `(⌊a·b / m⌋, a·b mod m)`, both constrained. |
 | `sub2`, `triple_mod`, `reduce_once` | Fused `a − b − c`, `3·v`, and one conditional subtraction. |
@@ -60,7 +61,8 @@ for a 24-limb modulus.
 - Every operation assumes its operands' limbs are below `2^BITS`: its rows prove
   the relation it documents only then. Typed inputs (`Bignum`, `fp!` types) and
   every operation's result already are; limbs a circuit builds itself (a
-  `[Field; LIMBS]` parameter, `Bignum::new`) need `range_check_limbs` first.
+  `[Field; LIMBS]` parameter, `Bignum::new`) need `range_check_limbs` first;
+  `Bignum::new_checked` does that for you.
 - Most operations also assume canonical operands (`a, b < m`); each function's
   docs give its precondition.
 - In range isn't canonical: only `mod_mul`'s and `sub2`'s results are below `m`. An

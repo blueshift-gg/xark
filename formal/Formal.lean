@@ -52,8 +52,6 @@ import Formal.ToBits
 import Formal.Templates.Consts.ToBits
 import Formal.Templates.ToBits17
 import Formal.ToBits17
-import Formal.Templates.ToBits112
-import Formal.ToBits112
 import Formal.Templates.Consts.ToBits17
 import Formal.Templates.ToBits32
 import Formal.ToBits32

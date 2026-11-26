@@ -20,6 +20,7 @@ xark-bignum.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+sha2.workspace = true
 num-bigint.workspace = true
 xark-ir.workspace = true
 xark-test-harness = { path = "../../crates/test-harness" }

@@ -158,6 +158,14 @@ impl<const LIMBS: usize, const BITS: usize> Bignum<LIMBS, BITS> {
         Bignum { limbs }
     }
 
+    /// [`Bignum::new`] followed by [`range_check_limbs`]: every limb is
+    /// range-checked to `[0, 2^BITS)`. Use this for limbs a circuit builds
+    /// itself; a typed [`Bignum`] input is already checked by its reader.
+    pub fn new_checked(limbs: [Field; LIMBS]) -> Self {
+        range_check_limbs::<LIMBS, BITS>(limbs);
+        Bignum { limbs }
+    }
+
     /// Range-check every limb to `[0, 2^BITS)`.
     pub fn range_check(self) {
         range_check_limbs::<LIMBS, BITS>(self.limbs)
