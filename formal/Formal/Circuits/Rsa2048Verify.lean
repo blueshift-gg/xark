@@ -97,6 +97,16 @@ theorem pv_eq_pn (c : Call) (σ : ℕ → F) (i : ℕ) : pv c σ i = (pn c σ i 
 /-- A column of a call: the 25 plug values starting at `off`. -/
 def limb (c : Call) (σ : ℕ → F) (off : ℕ) : ℕ → ℤ := fun i => pv c σ (off + i)
 
+theorem getD_of_window0 {l l' : List Xark.Circuit.ZLC} {off' i : ℕ} (hi : i < 25)
+    (h : l.take 25 = (l'.drop off').take 25) (d : Xark.Circuit.ZLC) :
+    l.getD i d = l'.getD (off' + i) d := by
+  rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD]
+  have h1 : (l.take 25)[i]? = l[i]? := by
+    rw [List.getElem?_take, if_pos hi]
+  have h2 : ((l'.drop off').take 25)[i]? = l'[off' + i]? := by
+    rw [List.getElem?_take, if_pos hi, List.getElem?_drop]
+  rw [← h1, h, h2]
+
 theorem pn_congr {c c' : Call} (σ : ℕ → F) {i i' : ℕ}
     (h : c.plugs.getD i (Xark.R1cs.LC.cst 0) = c'.plugs.getD i' (Xark.R1cs.LC.cst 0)) :
     pn c σ i = pn c' σ i' := by
