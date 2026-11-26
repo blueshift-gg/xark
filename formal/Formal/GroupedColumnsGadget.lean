@@ -847,4 +847,129 @@ theorem step_row (σ : TVar → F) (h : template.Sat σ)
   rw [cb_eq σ j] at hc
   linarith
 
+/-! ### The top row and the contract -/
+
+theorem conv48 (a b : ℕ → ℤ) :
+    Xark.Rsa.GroupedColumns.conv a b 48 = a 24 * b 24 := by
+  rw [Xark.Rsa.GroupedColumns.conv]
+  have hinner : ∀ i ∈ Finset.range 25, i ≠ 24 →
+      (∑ k ∈ Finset.range 25, if i + k = 48 then a i * b k else 0) = 0 := by
+    intro i hi hne
+    have hi' := Finset.mem_range.mp hi
+    refine Finset.sum_eq_zero fun k hk => ?_
+    have hk' := Finset.mem_range.mp hk
+    rw [if_neg (by omega)]
+  have h24 : (∑ k ∈ Finset.range 25, if 24 + k = 48 then a 24 * b k else 0)
+      = a 24 * b 24 := by
+    refine (Finset.sum_eq_single 24 ?_ ?_).trans ?_
+    · intro k hk hne
+      have hk' := Finset.mem_range.mp hk
+      rw [if_neg (by omega)]
+    · intro hnot
+      exact absurd (Finset.mem_range.mpr (by norm_num)) hnot
+    · rw [if_pos (by norm_num : 24 + 24 = 48)]
+  exact (Finset.sum_eq_single 24 hinner
+    (fun hnot => absurd (Finset.mem_range.mpr (by norm_num)) hnot)).trans h24
+
+theorem topRow_eval (σ : TVar → F) :
+    topRow.a.eval σ
+      = σ (.wit 1248) - σ (.wit 1249) + σ (.wit 5367) - ((2 ^ 88 : ℕ) : F) := by
+  unfold topRow
+  rw [Xark.Template.eval_norm]
+  simp only [Xark.R1cs.LC.eval, List.map_cons, List.sum_cons, List.map_nil, List.sum_nil,
+    add_zero]
+  ring
+
+/-- The top row's integer equation: `d 48 + k 23 = 2^88`. -/
+theorem top_row (σ : TVar → F) (h : template.Sat σ)
+    (hb : ∀ i < 125, (σ (.plug i)).val < 2 ^ 82) :
+    dcol σ 48 + carry σ 23 - BI = 0 := by
+  have hsat : Xark.R1cs.Sat modelRows σ := by
+    simpa only [Template.Sat, rows_eq] using h
+  have hrow := hsat topRow (by simp [modelRows])
+  have hz : (σ (.wit 1248) - σ (.wit 1249) + σ (.wit 5367) - ((2 ^ 88 : ℕ) : F)) = 0 := by
+    have hrow' : topRow.a.eval σ = 0 := by
+      have hb1 : topRow.b.eval σ = 1 := by
+        unfold topRow
+        simp [Xark.R1cs.LC.eval]
+      have hc0 : topRow.c.eval σ = 0 := by
+        unfold topRow
+        simp [Xark.R1cs.LC.eval]
+      have := hrow
+      rw [Xark.R1cs.Row.Sat, hb1, hc0, mul_one] at this
+      exact this
+    rwa [topRow_eval] at hrow'
+  have hcomp : σ (.wit 5367) = ((carry σ 23 : ℤ) : F) := by
+    have hw : stepLift 23 σ (.wit 0) = σ (.wit 5367) := by
+      rw [stepLift_wit]
+      norm_num [stepBase]
+    rw [← hw]
+    show stepLift 23 σ (.wit 0) = ((carry σ 23 : ℤ) : F)
+    unfold carry
+    rw [Int.cast_natCast, ZMod.natCast_zmod_val]
+  have hp : σ (.wit 1248) = (((σ (.plug 24)).val * (σ (.plug 49)).val : ℕ) : F) := by
+    have hv := prodRowA_val σ h hb (i := 24) (k := 24) (by norm_num) (by norm_num)
+    have hw : prodVar 24 24 = 1248 := by norm_num [prodVar]
+    rw [hw] at hv
+    rw [← ZMod.natCast_zmod_val (σ (.wit 1248)), hv]
+  have hq : σ (.wit 1249) = (((σ (.plug 99)).val * (σ (.plug 74)).val : ℕ) : F) := by
+    have hv := prodRowQ_val σ h hb (i := 24) (k := 24) (by norm_num) (by norm_num)
+    have hw : prodVar 24 24 + 1 = 1249 := by norm_num [prodVar]
+    rw [hw] at hv
+    rw [← ZMod.natCast_zmod_val (σ (.wit 1249)), hv]
+  rw [hp, hq, hcomp] at hz
+  have hz' : ((Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+      - ((2 ^ 88 : ℕ) : ℤ) : ℤ) : F) = 0 := by
+    push_cast at hz
+    rw [conv48 (plugA σ) (plugB σ), conv48 (plugQ σ) (plugM σ)]
+    push_cast
+    exact hz
+  have hdvd : ((r : ℤ)) ∣ (Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+      - ((2 ^ 88 : ℕ) : ℤ)) :=
+    (ZMod.intCast_zmod_eq_zero_iff_dvd _ r).mp hz'
+  have hc48 := dcol_bounds σ hb 48
+  have hcarry := carry_bounds σ h 23 (by norm_num)
+  have hd48 : dcol σ 48 = Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 := by
+    rw [dcol, Xark.Rsa.GroupedColumns.cols]
+    have h : (if 48 < 25 then plugR σ 48 else 0) = 0 := by norm_num
+    rw [h]
+    ring
+  have hlo : -(2 ^ 170 : ℤ) < Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+      - ((2 ^ 88 : ℕ) : ℤ) := by
+    rw [← hd48]
+    rw [show ((2 ^ 88 : ℕ) : ℤ) = (2 ^ 88 : ℤ) by norm_num]
+    have hnum : -(2 ^ 170 : ℤ) < -(2 ^ 169 + 2 ^ 82) - 2 ^ 88 := by norm_num
+    linarith [hc48.1, hcarry.1, hnum]
+  have hhi : Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+      - ((2 ^ 88 : ℕ) : ℤ) < 2 ^ 170 := by
+    rw [← hd48]
+    rw [show ((2 ^ 88 : ℕ) : ℤ) = (2 ^ 88 : ℤ) by norm_num]
+    have hnum : (2 ^ 169 : ℤ) + 2 ^ 89 - 2 ^ 88 < 2 ^ 170 := by norm_num
+    linarith [hc48.2, hcarry.2, hnum]
+  have h170r : (2 ^ 170 : ℤ) < (r : ℤ) := by
+    exact_mod_cast Xark.Templates.ToBits.two_pow_lt_r' (by norm_num : 170 ≤ 253)
+  have hz0 : Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+      - ((2 ^ 88 : ℕ) : ℤ) = 0 := by
+    rcases lt_trichotomy (Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+      - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+      - ((2 ^ 88 : ℕ) : ℤ)) 0 with hneg | hzero | hpos
+    · have hdvd' : ((r : ℤ)) ∣ -((Xark.Rsa.GroupedColumns.conv (plugA σ) (plugB σ) 48
+          - Xark.Rsa.GroupedColumns.conv (plugQ σ) (plugM σ) 48 + carry σ 23
+          - ((2 ^ 88 : ℕ) : ℤ))) := dvd_neg.mpr hdvd
+      have h := Int.eq_zero_of_dvd_of_nonneg_of_lt (by linarith)
+        (by linarith [hlo, h170r]) hdvd'
+      linarith
+    · exact hzero
+    · have h := Int.eq_zero_of_dvd_of_nonneg_of_lt (by linarith)
+        (by linarith [hhi, h170r]) hdvd
+      linarith
+  rw [hd48, show BI = ((2 ^ 88 : ℕ) : ℤ) by norm_num [BI]]
+  exact hz0
+
 end Xark.Templates.GroupedColumns
