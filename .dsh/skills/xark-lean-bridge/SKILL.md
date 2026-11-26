@@ -62,8 +62,15 @@ a `#[gadget]`:
 
 * markers do not change rows (the digests stayed identical when the step/q/r were marked),
   so this costs no circuit change and no re-key;
-* its template is one 24-step chain (~1,400 rows: 1,250 product rows, 24 step instances,
-  the top row), which is well inside what `decide +kernel` handles (`RangeCheckQ` is 394 KB);
+* its template is one 24-step chain: **measured 704 KB, 3,435 rows** = 1,250 product rows
+  (`a[i]·b[k]` and `q[i]·m[k]` interleaved by the CSE order) + 24 inlined step instances
+  (91 rows each, the step's rows flat) + 1 top row — well inside what `decide +kernel`
+  handles (`RangeCheckQ` is 394 KB / 4,073 rows). The tooling enforces the invariant:
+  `lean-export --example` refuses to run unless `Formal.Templates.GroupedColumns` is
+  imported by exactly one proof under `formal/Formal/`, so the marker cannot land
+  without the proof;
+* the limb bounds: `Assumptions` (`∀ i, ins i < 2^82` on the 125 plugs) come from the
+  q/r `Spec`s at the call site;
 * its `Assumptions` are the limb bounds (`∀ i, ins i < 2^82`, plus the rhs limbs' bits) and
   its `Spec` is `val a · val b = val q · val m + val r` — the `GroupedColumns` model, proven
   once, transferred by `rows_eq`;
