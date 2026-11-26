@@ -272,7 +272,17 @@ impl Schema {
                 i = end;
             } else if rest[i..].starts_with('[') {
                 let end = rest[i..].find(']')? + i;
-                ty = ty["array"]["of"].clone();
+                // An array's elements are named by index (`msg[3]`), as `leaf_names`
+                // names them. Any other bracket key (past the length, `msg[03]`, or on
+                // a value that isn't an array) would be a leaf no input has, which
+                // `leaves` returns and `public_inputs` ignores.
+                let f = &rest[i + 1..end];
+                let n = f.parse::<u64>().ok().filter(|n| n.to_string() == f)?;
+                let a = ty.get("array")?;
+                if n >= a["len"].as_u64()? {
+                    return None;
+                }
+                ty = a["of"].clone();
                 i = end + 1;
             } else {
                 return None;
@@ -1492,6 +1502,39 @@ mod tests {
         // Past the tuple, or not a position: no such input.
         for key in ["pair.2", "pair.x", "pair.0.0", "pair.00", "pair.+0"] {
             let e = s.public_inputs(&json!({ key: 1 })).unwrap_err();
+            assert!(e.message.contains("unknown input"), "{key}: {e}");
+        }
+    }
+
+    /// An array's elements given flat (`msg[0]`) are the array's own leaves, so a
+    /// key in brackets has to name one of them, as `leaf_names` writes it.
+    #[test]
+    fn array_elements_are_given_by_index() {
+        let s = schema();
+        let mut flat = inputs();
+        let o = flat.as_object_mut().unwrap();
+        o.remove("msg");
+        o.insert("msg[0]".into(), json!(97));
+        o.insert("msg[1]".into(), json!("98"));
+        assert_eq!(s.leaves(&flat).unwrap(), s.leaves(&inputs()).unwrap());
+        // Past the array, not an index as written, or not on an array: no such input.
+        for key in [
+            "msg[2]",
+            "msg[x]",
+            "msg[]",
+            "msg[00]",
+            "msg[+1]",
+            "msg[-1]",
+            "msg[0][0]",
+            "ok[0]",
+            "id[0]",
+            "k.limbs[3]",
+        ] {
+            let mut v = inputs();
+            v[key] = json!(1);
+            let e = s.leaves(&v).unwrap_err();
+            assert!(e.message.contains("unknown input"), "{key}: {e}");
+            let e = s.public_inputs(&v).unwrap_err();
             assert!(e.message.contains("unknown input"), "{key}: {e}");
         }
     }
