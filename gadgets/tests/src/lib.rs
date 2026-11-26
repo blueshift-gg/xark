@@ -160,66 +160,89 @@ mod cli_copy_tests {
     #[test]
     fn concurrent_publishers_stage_distinct_executables() {
         use std::{
-            io::{Read, Write},
             os::unix::fs::PermissionsExt,
+            path::Path,
             process::{Command, Stdio},
+            thread,
+            time::{Duration, Instant},
         };
 
         const CHILD_COPY: &str = "XARK_TEST_CONCURRENT_CLI_COPY";
         const TEST: &str = "cli_copy_tests::concurrent_publishers_stage_distinct_executables";
+
+        fn wait_for(path: &Path) {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !path.exists() {
+                assert!(Instant::now() < deadline, "timed out waiting for {path:?}");
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
         if let Some(source) = std::env::var_os(CHILD_COPY) {
             let built = PathBuf::from(source);
-            let copy = built.with_file_name("xark");
-            std::io::stdin().read_exact(&mut [0]).unwrap();
-            publish_xark_copy(&built, &copy).unwrap();
+            let dir = built.parent().unwrap();
+            let gate = dir.join("gate");
+            fs::write(gate.join(built.file_name().unwrap()), []).unwrap();
+            wait_for(&gate.join("start"));
+            publish_xark_copy(&built, &dir.join("xark")).unwrap();
             return;
         }
 
-        let dir = temp_dir("concurrent");
-        let copy = dir.join("xark");
         let exe = std::env::current_exe().unwrap();
-        let mut publishers = Vec::new();
-        for label in ["first", "second"] {
-            let built = dir.join(label);
-            fs::write(&built, format!("#!/bin/sh\nprintf '%s\\n' {label}\n")).unwrap();
-            fs::set_permissions(&built, fs::Permissions::from_mode(0o755)).unwrap();
-            let child = Command::new(&exe)
-                .args(["--exact", TEST])
-                .env(CHILD_COPY, &built)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
-            let stage = copy.with_extension(format!("{}.tmp", child.id()));
-            fs::write(stage, "incomplete staging file from an earlier run").unwrap();
-            publishers.push(child);
-        }
-        // Both processes are live and cannot publish until released here.
-        for child in &mut publishers {
-            child.stdin.take().unwrap().write_all(&[1]).unwrap();
-        }
-        for child in publishers {
-            let output = child.wait_with_output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(stdout.contains("1 passed"), "{stdout}");
-        }
+        for count in [2, 4, 8] {
+            let dir = temp_dir("concurrent");
+            let copy = dir.join("xark");
+            let gate = dir.join("gate");
+            fs::create_dir(&gate).unwrap();
+            let mut publishers = Vec::new();
+            for index in 0..count {
+                let label = format!("publisher-{index}");
+                let built = dir.join(&label);
+                fs::write(&built, format!("#!/bin/sh\nprintf '%s\\n' {label}\n")).unwrap();
+                fs::set_permissions(&built, fs::Permissions::from_mode(0o755)).unwrap();
+                let child = Command::new(&exe)
+                    .args(["--exact", TEST])
+                    .env(CHILD_COPY, &built)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let stage = copy.with_extension(format!("{}.tmp", child.id()));
+                fs::write(stage, "incomplete staging file from an earlier run").unwrap();
+                publishers.push((child, label));
+            }
+            // Every process has reached the publication gate before a single release.
+            for (_, label) in &publishers {
+                wait_for(&gate.join(label));
+            }
+            assert!(!copy.exists());
+            fs::write(gate.join("start"), []).unwrap();
 
-        let output = Command::new(&copy).output().unwrap();
-        assert!(output.status.success());
-        assert!(matches!(output.stdout.as_slice(), b"first\n" | b"second\n"));
-        assert_eq!(
-            fs::read(&copy).unwrap(),
-            fs::read(dir.join(String::from_utf8_lossy(&output.stdout).trim())).unwrap()
-        );
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 3);
-        fs::remove_dir_all(dir).unwrap();
+            for (child, label) in publishers {
+                let output = child.wait_with_output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{count} processes, {label}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            let output = Command::new(&copy).output().unwrap();
+            assert!(output.status.success());
+            let winner = std::str::from_utf8(&output.stdout)
+                .unwrap()
+                .strip_suffix('\n')
+                .unwrap();
+            assert!((0..count).any(|index| winner == format!("publisher-{index}")));
+            assert_eq!(
+                fs::read(&copy).unwrap(),
+                fs::read(dir.join(winner)).unwrap()
+            );
+            assert_eq!(fs::read_dir(&dir).unwrap().count(), count + 2);
+            fs::remove_dir_all(dir).unwrap();
+        }
     }
 }
 
