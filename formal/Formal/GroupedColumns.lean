@@ -11,9 +11,13 @@ set_option linter.style.header false
 # `grouped_columns`: the 25×82 carry/telescope model
 
 This is the row-independent arithmetic model of `xark_rsa::grouped_columns`.
-It does not depend on the generated R1CS template. The bridge from the xark
-rows to this model is a separate obligation; the 130 MB raw `#[gadget]` export
-is not used.
+It does not depend on the generated R1CS template. The carry rows are the
+exported `grouped_column_step` calls (their 89-bit range check is
+`Formal/GroupedColumnStep.lean`), but this file takes them as integers: the
+bridge from the step's field elements to `CarrySpec`'s `k : ℕ → ℤ` is a separate
+obligation. The 130 MB raw `#[gadget]` export of `grouped_columns` is not used
+(the nested calls' outputs are used as plugs, so substituting them every time
+blows the rows up quadratically).
 
 `d c` is the xark column `lhs c − rhs c`; `s j` groups the pair
 `d (2j), d (2j+1)` with `W = 2^82`, so `Q = W^2 = 2^164`. The carry chain is
