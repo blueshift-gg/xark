@@ -21,7 +21,10 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and
   `grouped_column_step` (the 89-bit carry certificate), and the carry telescope
   `Xark.Rsa.GroupedColumns.soundness` (`Formal/GroupedColumns.lean`). The chain
-  composition around them is still hand-proved (`docs/security.md` §2.18).
+  composition around them is still hand-proved (`docs/security.md` §2.18). The
+  markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key
+  made for the example before this change must be made again; no released key
+  used it.
 
 ## 0.5.0
 
