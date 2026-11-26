@@ -27,7 +27,9 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   is the numerator times `2^-164`, and a canonical numerator below `2^253` gives
   `num = 2^164 · k` over the integers), and the chain's top level
   (`Formal/RsaChain.lean`: the 2048-bit modulus bound, the 16-squaring
-  congruence, and `em ≡ sig^65537 (mod n)` from the step identities). The rows
+  congruence, and `em ≡ sig^65537 (mod n)` from the step identities), and
+  `convert_wide`'s carry chain (`Formal/RsaConvert.lean`: the 25 rows telescope
+  to the same 2048-bit number in the other limb width). The rows
   that instantiate those identities are still hand-proved
   (`docs/security.md` §2.18). The
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key

@@ -413,8 +413,12 @@ That is the whole no-wrap argument, given the column bounds. `Formal/RsaChain.le
 then states the chain's top level: `n_bits` (the modulus is 2048 bits from the
 `n_top` pin), `squarings` (16 squarings keep `acc ≡ sig^(2^k)`), and `chain`
 (16 squarings plus the terminal `acc·sig = q·n + em` give
-`em ≡ sig^65537 (mod n)`). Each step's identity is the model theorem above; what
-is hand-proved is that the rows instantiate those step identities.
+`em ≡ sig^65537 (mod n)`). `Formal/RsaConvert.lean` does the same for
+`convert_wide`: the 25 carry rows (with the top quotient zero) telescope to
+`Σ y_j·2^(82 j) = Σ x_i·2^(121 i)`, so the 17×121 and 25×82 paths denote one
+number. Each step's identity is a model theorem; what is hand-proved is that the
+rows instantiate those step identities. `bytes_to_wide`'s big-endian packing and
+the EM vector are not yet model theorems either.
 
 Still hand-proved, and therefore audit residuals: the bridge from
 `grouped_columns`' actual rows to the `GroupedColumns` model — that the column
