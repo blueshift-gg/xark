@@ -111,4 +111,100 @@ theorem soundness (d : ℕ → ℤ) (k : ℕ → ℤ)
   rw [Spec, hpair, htel, htop']
   ring
 
+/-! ### The limbs behind the columns
+
+The telescope above takes the columns `d c` as integers. This section reads them out of
+the limb vectors the Rust builds: `d c` of a product `a·b` is the convolution of the two
+limbs at column `c`, and `val` is the number the limbs denote. Then the column identity is
+the integer identity `a² = q·m + r` that `square_lazy` exists to prove. -/
+
+/-- The number a 25×82 limb vector denotes, `Σ xᵢ·W^i`. -/
+def val (x : ℕ → ℤ) : ℤ := ∑ i ∈ Finset.range 25, x i * W ^ i
+
+/-- Column `c` of the product `a·b`: the convolution of the limbs whose indices add to `c`. -/
+def conv (a b : ℕ → ℤ) (c : ℕ) : ℤ :=
+  ∑ i ∈ Finset.range 25, ∑ k ∈ Finset.range 25, if i + k = c then a i * b k else 0
+
+/-- `grouped_columns`' column: `a·b`'s convolution minus `q·m`'s, minus the right-hand
+side's limb `c` (the remainder, or the encoded message). -/
+def cols (a b q m rhs : ℕ → ℤ) (c : ℕ) : ℤ :=
+  conv a b c - conv q m c - (if c < 25 then rhs c else 0)
+
+/-- **The product's columns.** Multiplying two limb vectors multiplies their columns'
+polynomials: `val a · val b = Σ_c conv a b c · W^c`. -/
+theorem val_mul (a b : ℕ → ℤ) :
+    val a * val b = ∑ c ∈ Finset.range 49, conv a b c * W ^ c := by
+  rw [val, val, Finset.sum_mul_sum]
+  have hstep : ∀ i ∈ Finset.range 25, ∀ k ∈ Finset.range 25,
+      (a i * W ^ i) * (b k * W ^ k) = a i * b k * W ^ (i + k) := by
+    intro i _ k _
+    rw [pow_add]
+    ring
+  have hstep' : (∑ i ∈ Finset.range 25, ∑ k ∈ Finset.range 25,
+        (a i * W ^ i) * (b k * W ^ k))
+      = ∑ i ∈ Finset.range 25, ∑ k ∈ Finset.range 25, a i * b k * W ^ (i + k) := by
+    refine Finset.sum_congr rfl fun i hi => Finset.sum_congr rfl fun k hk => hstep i hi k hk
+  rw [hstep']
+  have hprod : (∑ i ∈ Finset.range 25, ∑ k ∈ Finset.range 25, a i * b k * W ^ (i + k))
+      = ∑ p ∈ Finset.range 25 ×ˢ Finset.range 25,
+          a p.1 * b p.2 * W ^ (p.1 + p.2) := by
+    rw [Finset.sum_product]
+  rw [hprod]
+  rw [← Finset.sum_fiberwise_of_maps_to (s := Finset.range 25 ×ˢ Finset.range 25)
+    (t := Finset.range 49) (g := fun p : ℕ × ℕ => p.1 + p.2)
+    (f := fun p : ℕ × ℕ => a p.1 * b p.2 * W ^ (p.1 + p.2)) ?_]
+  · refine Finset.sum_congr rfl fun c _ => ?_
+    rw [conv]
+    simp only [Finset.sum_mul]
+    rw [Finset.sum_filter, Finset.sum_product]
+    dsimp only
+    refine Finset.sum_congr rfl fun i _ => Finset.sum_congr rfl fun k _ => ?_
+    by_cases h : i + k = c
+    · rw [if_pos h, if_pos h, h]
+    · rw [if_neg h, if_neg h, zero_mul]
+  · intro p hp
+    obtain ⟨hi, hk⟩ := Finset.mem_product.mp hp
+    exact Finset.mem_range.mpr (by
+      have := Finset.mem_range.mp hi
+      have := Finset.mem_range.mp hk
+      omega)
+
+/-- **`square_lazy`'s identity.** With the columns `cols a a q m r` satisfying the
+carry telescope, the limbs satisfy `a² = q·m + r` over the integers. -/
+theorem square_eq (a m q r : ℕ → ℤ) (h : Spec (cols a a q m r)) :
+    val a * val a = val q * val m + val r := by
+  have hexp : ∀ c, cols a a q m r c * W ^ c =
+      conv a a c * W ^ c - conv q m c * W ^ c
+        - (if c < 25 then r c else 0) * W ^ c := by
+    intro c
+    unfold cols
+    ring
+  have h' : (∑ c ∈ Finset.range 49, (conv a a c * W ^ c - conv q m c * W ^ c
+      - (if c < 25 then r c else 0) * W ^ c)) = 0 :=
+    (Finset.sum_congr rfl fun c _ => (hexp c).symm).trans h
+  rw [Finset.sum_sub_distrib, Finset.sum_sub_distrib] at h'
+  have hsum49 : (∑ c ∈ Finset.range 49, (if c < 25 then r c else 0) * W ^ c)
+      = ∑ c ∈ Finset.range 25, r c * W ^ c := by
+    have hf : (∑ c ∈ Finset.range 25, (if c < 25 then r c else 0) * W ^ c)
+        = ∑ c ∈ Finset.range 25, r c * W ^ c :=
+      Finset.sum_congr rfl fun c hc => by rw [if_pos (Finset.mem_range.mp hc)]
+    rw [← hf]
+    refine (Finset.sum_subset (s₁ := Finset.range 25) (s₂ := Finset.range 49) ?_ ?_).symm
+    · intro x hx
+      exact Finset.mem_range.mpr (lt_trans (Finset.mem_range.mp hx) (by norm_num))
+    · intro x _ hx
+      have hx' : ¬ x < 25 := by
+        intro hlt
+        exact hx (Finset.mem_range.mpr hlt)
+      rw [if_neg hx', zero_mul]
+  rw [hsum49, ← val_mul a a, ← val_mul q m, ← val] at h'
+  linarith
+
+/-- **`square_lazy`, at the model level.** The 24 carry rows and the top row of
+`grouped_columns` prove `a² = q·m + r` over the integers; the range checks bound `q` and
+`r` separately (`GroupedColumns.soundness` is the telescope). -/
+theorem square_lazy (a m q r : ℕ → ℤ) (k : ℕ → ℤ) (h : CarrySpec (cols a a q m r) k) :
+    val a * val a = val q * val m + val r :=
+  square_eq a m q r (soundness _ _ h)
+
 end Xark.Rsa.GroupedColumns

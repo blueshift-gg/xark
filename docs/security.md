@@ -401,12 +401,19 @@ integers (a non-divisible numerator's quotient is at least `Fr/2^164 > 2^89`), s
 divisibility needs no row of its own. `Formal/GroupedColumns.lean` proves the
 telescope: 24 carry rows plus the top row `d 48 + k 23 − BI = 0` imply the column
 identity `Σ_{c<49} d c · 2^(82c) = 0`, over the integers, with no dependence on
-the Rust row order.
+the Rust row order, and reads the columns out of the limbs (`val a² = val q·val m
++ val r`, `square_eq`). `Formal/GroupedCarry.lean` closes the field→integer step:
+the template's output combination is the numerator times `2^-164` (`outputs_eq`,
+`decide +kernel` against the export), and when the numerator is canonical
+(`0 ≤ num < r`) and the carry below `2^89`, `num = 2^164 · k` holds over the
+integers, not only mod `r` (`carry_row`; both sides are then below `2^253 < r`).
+That is the whole no-wrap argument, given the column bounds.
 
 Still hand-proved, and therefore audit residuals: the bridge from
-`grouped_columns`' actual rows to the `GroupedColumns` model (the per-row
-`CarrySpec` instance, which the `GroupedColumnStep` template supplies row by row),
-the chain composition (`square_lazy`, `fused_final`, `convert_wide`,
+`grouped_columns`' actual rows to the `GroupedColumns` model — that the column
+sums are the limbs' convolutions, that the 24 step calls' carries are the model's
+`k`, and that each numerator is canonical (the `< 2^251.7` column bound) — the
+chain composition (`square_lazy`, `fused_final`, `convert_wide`,
 `bytes_to_wide`, `minus_one`, the `n_top`/EM pin and `verify_wide`), and the
 terminal EM vector's derivation from the digest. The `require_lt::<25,82>` and
 `range_check_limbs::<17,121>` rows have Lean templates; the byte packing uses the

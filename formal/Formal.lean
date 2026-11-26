@@ -115,6 +115,7 @@ import Formal.Templates.RangeCheckLimbs17x121
 import Formal.Templates.Consts.GroupedColumnStep
 import Formal.GroupedColumnStep
 import Formal.GroupedColumns
+import Formal.GroupedCarry
 import Formal.RangeDerived
 import Formal.RangeCheckQ
 import Formal.RangeCheckR

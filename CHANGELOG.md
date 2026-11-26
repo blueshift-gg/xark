@@ -20,8 +20,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`, plus the 25×82
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and
   `grouped_column_step` (the 89-bit carry certificate), and the carry telescope
-  `Xark.Rsa.GroupedColumns.soundness` (`Formal/GroupedColumns.lean`). The chain
-  composition around them is still hand-proved (`docs/security.md` §2.18). The
+  `Xark.Rsa.GroupedColumns.soundness` (`Formal/GroupedColumns.lean`), its
+  limb reading (`val_mul`, `square_eq`: `a² = q·m + r` over the integers), and
+  the field→integer carry step (`Formal/GroupedCarry.lean`: the template's output
+  is the numerator times `2^-164`, and a canonical numerator below `2^253` gives
+  `num = 2^164 · k` over the integers). The chain composition around them is
+  still hand-proved (`docs/security.md` §2.18). The
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key
   made for the example before this change must be made again; no released key
   used it.
