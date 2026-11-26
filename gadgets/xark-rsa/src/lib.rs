@@ -436,7 +436,8 @@ pub fn grouped_column_step(
 /// `t ∈ [0, 2^164)`, at least `Fr/2^164 > 2^89`, so the check would reject it.
 /// A group's certificate is thus its 89-bit range check plus the two pinning
 /// rows of the step.
-fn grouped_columns(
+#[xark::gadget]
+pub fn grouped_columns(
     a: [Field; WIDE_LIMBS],
     b: [Field; WIDE_LIMBS],
     m: [Field; WIDE_LIMBS],
