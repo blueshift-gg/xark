@@ -405,7 +405,8 @@ the Rust row order, and reads the columns out of the limbs (`val a · val b =
 val q · val m + val r`, `mul_eq`; `square_eq`/`fused_final` are its square and
 encoded-message cases). `Formal/GroupedCarry.lean` closes the field→integer step:
 the template's output combination is the numerator times `2^-164` (`outputs_eq`,
-`decide +kernel` against the export), and when the numerator is canonical
+`decide +kernel` against the export; `Q_mul_vLC` then makes `2^164 · k` the
+numerator in the field), and when the numerator is canonical
 (`0 ≤ num < r`) and the carry below `2^89`, `num = 2^164 · k` holds over the
 integers, not only mod `r` (`carry_row`; both sides are then below `2^253 < r`).
 That is the whole no-wrap argument, given the column bounds.

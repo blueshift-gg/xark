@@ -49,6 +49,7 @@ def wF : F := ((2 ^ 82 : ℕ) : F)
 def _root_.Xark.R1cs.LC.mulConst (l : LC) (c : F) : LC :=
   ⟨c * l.const, l.terms.map fun t => (c * t.1, t.2)⟩
 
+/-- Scaling a term list scales its evaluation. -/
 theorem sum_map_mul (ts : List (F × TVar)) (c : F) (σ : TVar → F) :
     ((ts.map fun t => (c * t.1, t.2)).map fun t => t.1 * σ t.2).sum =
       c * (ts.map fun t => t.1 * σ t.2).sum := by
@@ -59,6 +60,7 @@ theorem sum_map_mul (ts : List (F × TVar)) (c : F) (σ : TVar → F) :
     rw [ih]
     ring
 
+/-- `mulConst` evaluates to `c` times the combination. -/
 theorem eval_mulConst (l : LC) (c : F) (σ : TVar → F) :
     (l.mulConst c).eval σ = c * l.eval σ := by
   obtain ⟨k, ts⟩ := l
@@ -79,6 +81,18 @@ theorem outputs_eq : template.outputs = [numLC.mulConst INV_GROUP] := by
 
 /-- `2^164 · 2^-164 = 1` in the field. -/
 theorem Q_mul_inv : ((2 ^ 164 : ℕ) : F) * INV_GROUP = 1 := by decide
+
+/-- The step's output value is `2^-164` times its numerator. -/
+theorem vLC_eq (σ : TVar → F) :
+    (template.outputs.getD 0 ⟨0, []⟩).eval σ = INV_GROUP * numLC.eval σ := by
+  rw [outputs_eq]
+  simp only [List.getD_cons_zero, eval_mulConst]
+
+/-- **The carry's field identity.** `2^164 · k` is the numerator in the field, so
+`carry_row` only needs the numerator to be canonical, not the division row. -/
+theorem Q_mul_vLC (σ : TVar → F) :
+    ((2 ^ 164 : ℕ) : F) * (template.outputs.getD 0 ⟨0, []⟩).eval σ = numLC.eval σ := by
+  rw [vLC_eq, ← mul_assoc, Q_mul_inv, one_mul]
 
 /-- **The carry is the integer quotient.** If the numerator is a canonical field
 element (`num < r`) and the carry's representative is below `2^89`, then
