@@ -210,9 +210,23 @@ Every ingredient exists and is proven:
 | the encoded message | `RsaEm.em` |
 | the production circuit's call contracts | `Rsa2048Calls` (408 / 17 / 16, `decide +kernel`) |
 
-What is left is the **row-level model of the `grouped_columns` template** (704 KB, 3,435
-rows = 1,250 products + 24 × 91 step rows + 1 top row): its `rows_eq` by `decide +kernel`
-with products at `base + 2(i·25+k)`, then the assembly above. Marking the function as a
+What is left is the **row-level model of the `grouped_columns` template**: 704 KB,
+`plugs := 125`, `wits := 5546`, 3,435 rows = 1,250 products + 24 × 91 step rows + 1 top row.
+Its exact shape (verified against the exported rows):
+
+* plugs: `a` = 0..24, `b` = 25..49, `m` = 50..74, `q` = 75..99, `rhs` = 100..124;
+* products: `wit (2(i·25+k))` = `a i · b k`, `wit (2(i·25+k)+1)` = `q i · m k`, i,k < 25
+  (the `hints` list is exactly these `.product` entries, in that order);
+* columns: `lhs c = Σ_{i+k=c} wit (2(i·25+k))`,
+  `rhs c = Σ_{i+k=c} wit (2(i·25+k)+1) + (if c < 25 then plug (100+c) else 0)`;
+* step instance j < 24 starts at `1250 + 179j`: `q_j` = that, `r_j` = +1, bits at
+  `+2+2t` (t < 88), the derived top at `+178`; its rows are the step template's 91 rows
+  with plugs `lhs (2j), lhs (2j+1), rhs (2j), rhs (2j+1), cb` (`cb` = `2^88` at j = 0,
+  else `wit (1250+179(j−1))`);
+* the top row is `lhs 48 − rhs 48 + wit 5367 − 2^88 = 0` (5367 = `1250 + 179·23`),
+  matching `wit 1248 = lhs 48`, `wit 1249 = rhs 48`.
+
+Then `rows_eq` by `decide +kernel`, the assembly above, and (only then) the marker. Marking the function as a
 `#[gadget]` and exporting the harness is already measured to work; the marker cannot land
 until the proof imports `Formal.Templates.GroupedColumns` (the exporter enforces it). After
 that, re-export the circuit: 17 top-level calls, and the composition is 17 `sat_call`s
