@@ -283,3 +283,20 @@ bound and integer identity follow from the `to_bits` `Spec`s by evaluating the
 LC. `RequireLt25x82` (s545) gives `sig < n` at the limb level; `n_top` is the
 `bytes_to_wide` glue row. Anything after that (e.g. the host-level byte
 statement) is the same identities rearranged.
+
+Packing progress: `Formal/Circuits/Rsa2048Packing.lean` has the bit model —
+`to_bits::<8>` returns `[bit 0, …, bit 7]` with **bit 0 affine**
+(`byte − Σ_{s<7} 2^{s+1}·wit_s`) and bits 1..7 the witnesses `base = 544 + 7b`;
+`bytes_to_wide`'s bit `j` is byte `off + 255 − j/8`, bit `j % 8`, weight
+`2^{j % 82}` (off 0 for `n`, 256 for `sig`; `j < 2048` only), and the `em` limbs
+add `EM82_CONST` (digest bits `j < 256`, byte `512 + 31 − j/8`). All 75 packed-limb
+LCs are proved equal to that model after `normTerms` (`nTerms*`, `sigTerms*`,
+`emTerms*`, `emConst*`, `decide +kernel`). `Formal/Circuits/Rsa2048PackBound.lean`
+proves the generic bound: `pack_bound` (a 25×82 limb is `< 2^82` once each bit is)
+via `eval_normTerms` and a weighted-sum/`ZMod.val` argument. Remaining: the 75
+concrete specializations (`eval_eq_of_norm_eq rfl (nTerms q)`), the bit-is-a-bit
+fact from the 544 `to_bits` specs (`ToBits.SpecAt`: `ins < 2^8`,
+`outs = bits of ins`; `bitOf` is 0/1), the integer identities
+(`val (n limbs) = big-endian n`, same for `sig`, `val em = EM_PREFIX + digest`), and
+`RequireLt25x82`/`n_top` for `sig < n` and the 2048-bit bound. The machine's swap is
+full and builds run minutes; budget for that.
