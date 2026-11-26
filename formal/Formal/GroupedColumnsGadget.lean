@@ -579,4 +579,94 @@ theorem eval_rhs_val (σ : TVar → F) (h : template.Sat σ)
   rw [eval_rhs_eq, shadow_rhs_conv σ h hb c, hcast, ZMod.val_natCast_of_lt hltN]
   exact Int.toNat_of_nonneg h0
 
+/-! ### The step instances
+
+Instance `j` starts at row `1250 + 91j` and witness `1250 + 179j`; its five plugs are the
+two columns of each product and the previous carry (`2^88` for the first). These lemmas
+read the instance's plugs and hand its rows the step template's assignment. -/
+
+/-- Step instance `j`'s assignment: its plugs' and witnesses' values in the parent. -/
+def stepLift (j : ℕ) (σ : TVar → F) : TVar → F := fun v => (stepEnv j v).eval σ
+
+theorem stepPlug_getD0 (j : ℕ) : (stepPlug j).getD 0 (LC.cst 0) = lhs (2 * j) := by
+  simp [stepPlug]
+
+theorem stepPlug_getD1 (j : ℕ) : (stepPlug j).getD 1 (LC.cst 0) = lhs (2 * j + 1) := by
+  simp [stepPlug]
+
+theorem stepPlug_getD2 (j : ℕ) : (stepPlug j).getD 2 (LC.cst 0) = rhs (2 * j) := by
+  simp [stepPlug]
+
+theorem stepPlug_getD3 (j : ℕ) : (stepPlug j).getD 3 (LC.cst 0) = rhs (2 * j + 1) := by
+  simp [stepPlug]
+
+theorem stepPlug_getD4 (j : ℕ) :
+    (stepPlug j).getD 4 (LC.cst 0)
+      = (if j = 0 then LC.cst ((2 ^ 88 : ℕ) : F) else LC.var (.wit (1250 + 179 * (j - 1)))) := by
+  simp [stepPlug]
+
+theorem stepEnv_plug0 (j : ℕ) : stepEnv j (.plug 0) = lhs (2 * j) := by
+  simp [stepEnv, stepPlug]
+
+theorem stepEnv_plug1 (j : ℕ) : stepEnv j (.plug 1) = lhs (2 * j + 1) := by
+  simp [stepEnv, stepPlug]
+
+theorem stepEnv_plug2 (j : ℕ) : stepEnv j (.plug 2) = rhs (2 * j) := by
+  simp [stepEnv, stepPlug]
+
+theorem stepEnv_plug3 (j : ℕ) : stepEnv j (.plug 3) = rhs (2 * j + 1) := by
+  simp [stepEnv, stepPlug]
+
+theorem stepEnv_plug4 (j : ℕ) :
+    stepEnv j (.plug 4)
+      = (if j = 0 then LC.cst ((2 ^ 88 : ℕ) : F) else LC.var (.wit (1250 + 179 * (j - 1)))) := by
+  simp [stepEnv, stepPlug]
+
+theorem stepLift_plug0 (j : ℕ) (σ : TVar → F) :
+    stepLift j σ (.plug 0) = (lhs (2 * j)).eval σ := by
+  rw [stepLift, stepEnv_plug0]
+
+theorem stepLift_plug1 (j : ℕ) (σ : TVar → F) :
+    stepLift j σ (.plug 1) = (lhs (2 * j + 1)).eval σ := by
+  rw [stepLift, stepEnv_plug1]
+
+theorem stepLift_plug2 (j : ℕ) (σ : TVar → F) :
+    stepLift j σ (.plug 2) = (rhs (2 * j)).eval σ := by
+  rw [stepLift, stepEnv_plug2]
+
+theorem stepLift_plug3 (j : ℕ) (σ : TVar → F) :
+    stepLift j σ (.plug 3) = (rhs (2 * j + 1)).eval σ := by
+  rw [stepLift, stepEnv_plug3]
+
+theorem stepLift_plug4 (j : ℕ) (σ : TVar → F) :
+    stepLift j σ (.plug 4)
+      = (if j = 0 then ((2 ^ 88 : ℕ) : F) else σ (.wit (1250 + 179 * (j - 1)))) := by
+  rw [stepLift, stepEnv_plug4]
+  by_cases h : j = 0
+  · rw [if_pos h, if_pos h]
+    simp [Xark.R1cs.LC.cst, Xark.R1cs.LC.eval]
+  · rw [if_neg h, if_neg h]
+    simp [Xark.R1cs.LC.var, Xark.R1cs.LC.eval]
+
+theorem stepLift_wit (j : ℕ) (σ : TVar → F) (t : ℕ) :
+    stepLift j σ (.wit t) = σ (.wit (stepBase j + t)) := by
+  simp [stepLift, stepEnv, LC.eval_var]
+
+/-- A step instance's rows satisfy the step template's assignment. -/
+theorem stepLift_sat (σ : TVar → F) (h : template.Sat σ) (j : ℕ) (hj : j < 24) :
+    Xark.Templates.GroupedColumnStep.template.Sat (stepLift j σ) := by
+  have hsat : Xark.R1cs.Sat modelRows σ := by
+    simpa only [Template.Sat, rows_eq] using h
+  intro r hr
+  have hmem0 : bindNorm (stepEnv j) r ∈ (List.range 24).flatMap stepRows := by
+    rw [List.mem_flatMap]
+    exact ⟨j, List.mem_range.mpr hj, List.mem_map.mpr ⟨r, hr, rfl⟩⟩
+  have hmem : bindNorm (stepEnv j) r ∈ modelRows := by
+    simp only [modelRows]
+    simp [hmem0]
+  have hrow := hsat _ hmem
+  have h' := hrow
+  simp only [bindNorm, Xark.R1cs.Row.Sat, eval_norm, Xark.R1cs.LC.eval_bind] at h'
+  exact h'
+
 end Xark.Templates.GroupedColumns
