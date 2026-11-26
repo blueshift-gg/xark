@@ -51,6 +51,14 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   markers regroup `rsa2048`'s keyed rows (its flat rows are unchanged), so a key
   made for the example before this change must be made again; no released key
   used it.
+- Lean composition of that circuit (`Formal/Circuits/Rsa2048/Verify.lean`,
+  `Chain.lean`, `Packing.lean`, `PackBound.lean`, `PackBoundW.lean`, `Bits.lean`,
+  `Statement.lean`, `EmBits.lean`): the 17 chain calls reached by segment index
+  and their `grouped_columns(_square)` contracts, the adjacent range checks'
+  limb bounds, the 544 `to_bits` calls' bits and the byte packing's limbs, and
+  `chain_congruence_em`: for every satisfying assignment the RFC 8017 encoded
+  message (prefix plus the digest's bits) is `sig^65537` modulo the modulus, all
+  over the limb vectors the chain calls carry. No circuit changed.
 
 ## 0.5.0
 

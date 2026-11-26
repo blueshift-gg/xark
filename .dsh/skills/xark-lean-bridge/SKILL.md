@@ -353,7 +353,18 @@ Next piece (in progress, no repo file yet): connect `chainEm` to `RsaEm.em`. Def
 q ≥ 4: the plug is the constant, `em82 q`). Then
 `val (limb fin σ 100) = Σ q pn·W^q = Σ q emOut q·W^q = val (emOut (digestBits σ))`,
 and `RsaEm.em` gives `chainEm = EM_PREFIX + Σ digestBit_j·2^j`, so the final theorem
-is `Em.em (digestBits σ) ≡ (val (limb sq0 σ 0))^(2^16+1) [ZMOD chainN σ]`. Gotchas:
+is `Em.em (digestBits σ) ≡ (val (limb sq0 σ 0))^(2^16+1) [ZMOD chainN σ]`.
+
+Done: `Formal/Circuits/Rsa2048/EmBits.lean` proves `pn_emOut_0..24`,
+`val_em_limb` (`val (limb fin σ 100) = val (emOut (digestBits σ))`), `chainEm_eq`
+(`chainEm σ = EM_PREFIX + Σ_{j<256} digestBits σ j · 2^j`) and
+`chain_congruence_em` (`EM_PREFIX + Σ digest bits ≡ sig^(2^16+1) [ZMOD n]` for every
+satisfying assignment). Its `limbOf_small` helper (`82q + w = 256` ⇒ the range-82
+`limbOf` sum is the first `w` terms) is what limb 3 needs. The run-time gotcha:
+`pn_emOut_k` takes `(σ) (h)` only for `k ≤ 3` (the higher limbs are constants, no
+`hbit`). Gates: `lake build`, AxiomCheck (2,820 theorems, standard axioms),
+`lean-export --check` (71/71), `lean-export --coverage`, `CircuitHash` (Rsa2048
+`860142cc226105b8`) all green. Gotchas:
 `pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
 and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
 unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).

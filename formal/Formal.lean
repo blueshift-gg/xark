@@ -39,6 +39,7 @@ import Formal.Circuits.Rsa2048.PackBound
 import Formal.Circuits.Rsa2048.PackBoundW
 import Formal.Circuits.Rsa2048.Bits
 import Formal.Circuits.Rsa2048.Statement
+import Formal.Circuits.Rsa2048.EmBits
 import Formal.Shadow
 import Formal.RsaCalls
 import Formal.Rsa2048Calls
