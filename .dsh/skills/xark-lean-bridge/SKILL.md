@@ -54,7 +54,31 @@ Model-level theorems now cover every named step except the EM vector
    `sha256_em_bits_82` (constant, `EM82_CONST`), `verify_wide` (`n` exactly 2048
    bits, `sig < n`, 16 squarings + terminal multiply, the EM comparison).
 
-## What the rsa2048 instantiation still needs (finding, round 42)
+## The instantiation shortcut: make the chain a gadget (finding, round 43)
+
+Composing the circuit call-by-call is blocked on variable identity (below), and the bounds
+would have to be traced through the packing. Both disappear if `grouped_columns` itself is
+a `#[gadget]`:
+
+* markers do not change rows (the digests stayed identical when the step/q/r were marked),
+  so this costs no circuit change and no re-key;
+* its template is one 24-step chain (~1,400 rows: 1,250 product rows, 24 step instances,
+  the top row), which is well inside what `decide +kernel` handles (`RangeCheckQ` is 394 KB);
+* its `Assumptions` are the limb bounds (`∀ i, ins i < 2^82`, plus the rhs limbs' bits) and
+  its `Spec` is `val a · val b = val q · val m + val r` — the `GroupedColumns` model, proven
+  once, transferred by `rows_eq`;
+* the export then has **17 top-level calls** instead of 408 step calls plus 1,250 glue rows
+  each, so the circuit composition is 17 `sat_call` applications plus the plug-obligation
+  (each plug is a limb, whose bound is the q/r `Spec` — already theorems);
+* `bytes_to_wide`/`convert_wide` get the same treatment (bytes < 256 → limbs < 2^82 and the
+  packing identity), which supplies the remaining bounds.
+
+The nested step/q/r calls become children (`coverage::Call.parent`) and vanish from the
+top-level export. Proof work: one `rows_eq` + `soundness` per new gadget, the models being
+`GroupedColumns`, `RsaBytes`, `RsaConvert` (all already proven, but over values rather than
+LC sums — the `Row`-level version of `GroupedColumns` is the real work).
+
+## What the rsa2048 instantiation needed without that (finding, round 42)
 
 The composition's mathematics is complete: step contract (`carry_of_sat_shadow`), the
 integer shadow (`Shadow.lean`: `shadow_toF`, `shadow_eq_of_eval`, `val_of_mul`,
