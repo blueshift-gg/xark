@@ -117,10 +117,22 @@ digest can be private too.
   the RFC 8017 EM, the host `pow` differential, and the underconstrained check.
 * The example test rejects a tampered digest and repeats the test-message hash
   check.
-* The 25×82 `require_lt` rows and the 17×121 `range_check_limbs` rows have Lean
-  templates (`require_lt__25x82`, `range_check_limbs__17x121`); the byte packing
-  uses the base `to_bits` (8-bit) template. `cargo xtask lean-export --check`
-  passes all 66 templates, `--coverage` passes, and `cargo xtask digests` passes;
-  the optimized digest is pinned in `tests/stable-digests.txt`.
+* Lean-proven pieces of the chain: `range_check_q`/`range_check_r` (25
+  `range_derived` blocks each, `Formal/RangeCheckQ.lean`/`RangeCheckR.lean`,
+  `Formal/RangeDerived.lean`), `grouped_column_step` (the 89-bit carry
+  certificate, `Formal/GroupedColumnStep.lean`), the 25×82 `require_lt`
+  (`require_lt__25x82`), the 17×121 `range_check_limbs`
+  (`range_check_limbs__17x121`), and the base `to_bits` (8-bit) template used by
+  the byte packing. Each carries a `#[gadget]` marker, so the coverage check sees
+  its production calls; the carry telescope is proven separately as the
+  row-independent model `Xark.Rsa.GroupedColumns.soundness`
+  (`Formal/GroupedColumns.lean`). Still hand-proved: the chain composition around
+  those pieces (`square_lazy`, `fused_final`, `convert_wide`, `bytes_to_wide`,
+  `minus_one`, the `n_top`/EM pin, `verify_wide`) and the bridge from
+  `grouped_columns`' rows to the model — see `docs/security.md` §2.18.
+  `cargo xtask lean-export --check` passes all 69 templates, `--coverage` passes
+  for `examples/rsa2048` (408/408 `grouped_column_step`, 17/17 `range_check_q`,
+  16/16 `range_check_r` calls), and `cargo xtask digests` passes; the optimized
+  digest is pinned in `tests/stable-digests.txt`.
 
 Part of [xark](https://github.com/blueshift-gg/xark): zero-knowledge circuits in plain Rust, verified on Solana.

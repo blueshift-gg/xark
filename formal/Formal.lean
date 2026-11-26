@@ -112,6 +112,12 @@ import Formal.RequireLt8x32
 import Formal.RangeCheckLimbs
 import Formal.RangeCheckLimbs8x32
 import Formal.Templates.RangeCheckLimbs17x121
+import Formal.Templates.Consts.GroupedColumnStep
+import Formal.GroupedColumnStep
+import Formal.GroupedColumns
+import Formal.RangeDerived
+import Formal.RangeCheckQ
+import Formal.RangeCheckR
 import Formal.RangeCheckLimbs17x121
 import Formal.RangeCheckLimbs4x64
 import Formal.RangeCheckLimbs3x86

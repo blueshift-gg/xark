@@ -391,15 +391,26 @@ strings (256-byte modulus/signature, 32-byte digest) and packs them to 25×82
 limbs with `to_bits::<8>`; the whole-number entry point converts 17×121 limbs;
 the typed `verify_sha256`/`verify_sha256_words` range-check their limbs.
 
-The 25×82 lazy chain's quotient/remainder ranges, grouped-column carries, and
-terminal EM pin are hand-proved in `gadgets/xark-rsa/src/lib.rs`. A group's
-carry is the affine field quotient `num·2^-164`; its 89-bit range check is what
-proves the division exact over the integers (a non-divisible numerator's
-quotient is at least `Fr/2^164 > 2^89`), so divisibility needs no row of its
-own. The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
-templates; the byte packing uses the base `to_bits` (8-bit) template. The
-`grouped_columns`/`square_lazy`/`fused_final` no-wrap argument is not yet a Lean
-theorem (audit residual), and `n`'s oddness/semiprimality is deliberately not
+The 25×82 chain's range checks and per-step carries are Lean templates.
+`range_check_q`/`range_check_r` are 25 `range_derived` blocks
+(`Formal/RangeDerived.lean`; `Formal/RangeCheckQ.lean`, `RangeCheckR.lean`), and
+`grouped_column_step` is a `#[gadget]` whose 89-bit carry check is proven
+(`Formal/GroupedColumnStep.lean`). A group's carry is the affine field quotient
+`num·2^-164`; its 89-bit range check is what proves the division exact over the
+integers (a non-divisible numerator's quotient is at least `Fr/2^164 > 2^89`), so
+divisibility needs no row of its own. `Formal/GroupedColumns.lean` proves the
+telescope: 24 carry rows plus the top row `d 48 + k 23 − BI = 0` imply the column
+identity `Σ_{c<49} d c · 2^(82c) = 0`, over the integers, with no dependence on
+the Rust row order.
+
+Still hand-proved, and therefore audit residuals: the bridge from
+`grouped_columns`' actual rows to the `GroupedColumns` model (the per-row
+`CarrySpec` instance, which the `GroupedColumnStep` template supplies row by row),
+the chain composition (`square_lazy`, `fused_final`, `convert_wide`,
+`bytes_to_wide`, `minus_one`, the `n_top`/EM pin and `verify_wide`), and the
+terminal EM vector's derivation from the digest. The `require_lt::<25,82>` and
+`range_check_limbs::<17,121>` rows have Lean templates; the byte packing uses the
+base `to_bits` (8-bit) template. `n`'s oddness/semiprimality is deliberately not
 proven: the verifier's key allowlist or certificate chain is the trust anchor.
 
 ## 3. Trusted setup
@@ -448,10 +459,14 @@ such a key. See
 [`docs/trusted-setup.md`](trusted-setup.md).
 
 ## 4. Known unaudited paths
-- `xark-rsa`: the 25×82 `grouped_columns`/`square_lazy`/`fused_final` no-wrap
-  argument is hand-proved, not a Lean theorem; key validity (oddness/
-  semiprimality) is a caller/allowlist precondition. The `require_lt`,
-  `range_check_limbs`, and `to_bits` rows are Lean-exported.
+- `xark-rsa`: the 25×82 chain's `range_check_q`/`range_check_r` and
+  `grouped_column_step` are Lean-exported and proven, and
+  `Formal/GroupedColumns.lean` proves the carry telescope as a model; the
+  composition (`square_lazy`, `fused_final`, `convert_wide`, `bytes_to_wide`,
+  `minus_one`, the `n_top`/EM pin, `verify_wide`) and the bridge from
+  `grouped_columns`' rows to the model are hand-proved, not Lean theorems; key
+  validity (oddness/semiprimality) is a caller/allowlist precondition. The
+  `require_lt`, `range_check_limbs`, and `to_bits` rows are Lean-exported.
 
 * **`xark build`/`test` execute the circuit crate's code.** Compiling runs `build.rs`,
   proc-macros, and (for `xark test`) the test harness with the host toolchain — arbitrary

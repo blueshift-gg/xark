@@ -17,7 +17,11 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 - `examples/rsa2048`: the byte-input example and generated KAT; 125,040 constraints
   (157,451 before the golf).
 - Lean templates and proofs for `require_lt::<17, 121>`,
-  `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`.
+  `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`, plus the 25×82
+  chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and
+  `grouped_column_step` (the 89-bit carry certificate), and the carry telescope
+  `Xark.Rsa.GroupedColumns.soundness` (`Formal/GroupedColumns.lean`). The chain
+  composition around them is still hand-proved (`docs/security.md` §2.18).
 
 ## 0.5.0
 

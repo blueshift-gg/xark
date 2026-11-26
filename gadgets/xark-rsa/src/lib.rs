@@ -357,7 +357,8 @@ fn bytes_to_wide(bytes: [Field; 256]) -> ([Field; WIDE_LIMBS], Field) {
 /// Range-check an internal quotient: 24 limbs below `2^82`, the top below
 /// `2^81` (a lazy residue is below `2^2048`; `a*b - r < 2^4096`, and
 /// `n >= 2^2047`, so `q < 2^2049`).
-fn range_check_q(q: [Field; WIDE_LIMBS]) {
+#[xark::gadget]
+pub fn range_check_q(q: [Field; WIDE_LIMBS]) {
     let mut i = 0usize;
     while i + 1 < WIDE_LIMBS {
         range_derived::<WIDE_BITS>(q[i]);
@@ -368,13 +369,39 @@ fn range_check_q(q: [Field; WIDE_LIMBS]) {
 
 /// Range-check a lazy remainder: 24 limbs below `2^82`, the top below `2^80`
 /// (it is only proved `< 2^2048`, not `< n`).
-fn range_check_r(r: [Field; WIDE_LIMBS]) {
+#[xark::gadget]
+pub fn range_check_r(r: [Field; WIDE_LIMBS]) {
     let mut i = 0usize;
     while i + 1 < WIDE_LIMBS {
         range_derived::<WIDE_BITS>(r[i]);
         i += 1;
     }
     range_derived::<80>(r[WIDE_LIMBS - 1]);
+}
+
+/// One two-column carry step of [`grouped_columns`].
+///
+/// `lhs`/`rhs` are the product columns for one pair; `cb_prev` is the previous
+/// carry. The returned carry is `(S_j + cb_prev - 2^88 + 2^252) * 2^-164`,
+/// range-checked below `2^89`. See [`grouped_columns`] for why that range check
+/// is the whole certificate.
+#[xark::gadget]
+pub fn grouped_column_step(
+    lhs0: Field,
+    lhs1: Field,
+    rhs0: Field,
+    rhs1: Field,
+    cb_prev: Field,
+) -> Field {
+    const { assert!(GROUP_OFF_BITS == GROUP_BIAS_BITS + GROUP_BITS) };
+    let two_b = pow2(WIDE_BITS);
+    let bias = pow2(GROUP_BIAS_BITS);
+    let off = pow2(GROUP_OFF_BITS);
+    let s = (lhs0 - rhs0) + two_b * (lhs1 - rhs1);
+    let num = s + cb_prev - bias + off;
+    let k = num * INV_GROUP;
+    range_derived::<GROUP_CARRY_BITS>(k);
+    k
 }
 
 /// The integer identity `a·b == q·m + r` (or `+ em`), one row per pair of
@@ -426,30 +453,13 @@ fn grouped_columns(
         rhs[c] = rhs[c] + rhs_extra[c];
         c += 1;
     }
-    let two_b = pow2(WIDE_BITS);
-    // The offsets cancel in the telescoping sum only when `OFF = BIAS * 2^164`;
-    // get that wrong and the chain silently proves a different identity.
-    const { assert!(GROUP_OFF_BITS == GROUP_BIAS_BITS + GROUP_BITS) };
     let bias = pow2(GROUP_BIAS_BITS);
-    let off = pow2(GROUP_OFF_BITS);
     let mut cb_prev = bias;
     let mut j = 0usize;
     while j + 1 < WIDE_LIMBS {
         let c0 = 2 * j;
         let c1 = 2 * j + 1;
-        let s = (lhs[c0] - rhs[c0]) + two_b * (lhs[c1] - rhs[c1]);
-        let num = s + cb_prev - bias + off;
-        // The carry is `num / 2^164` read as a field element: a constant
-        // multiply, so no witness and no division row. The range check below is
-        // the whole certificate. It bounds the carry's representative `< 2^89`,
-        // and `num`'s is below `2^253`, so `2^164 * k` and `num` are both
-        // canonical representatives below `Fr` and `num = 2^164 * k` holds over
-        // the integers -- exactly the divisibility the chain needs -- rather
-        // than only modulo `Fr`. (Were `num` not divisible, `k` would be
-        // `(num + t*Fr)/2^164` with `t >= 1`, i.e. above `2^89.6`.)
-        let k = num * INV_GROUP;
-        range_derived::<GROUP_CARRY_BITS>(k);
-        cb_prev = k;
+        cb_prev = grouped_column_step(lhs[c0], lhs[c1], rhs[c0], rhs[c1], cb_prev);
         j += 1;
     }
     // Top column: the last carry must be exactly zero.
