@@ -299,4 +299,18 @@ fact from the 544 `to_bits` specs (`ToBits.SpecAt`: `ins < 2^8`,
 `outs = bits of ins`; `bitOf` is 0/1), the integer identities
 (`val (n limbs) = big-endian n`, same for `sig`, `val em = EM_PREFIX + digest`), and
 `RequireLt25x82`/`n_top` for `sig < n` and the 2048-bit bound. The machine's swap is
-full and builds run minutes; budget for that.
+full, but the earlier multi-minute hangs were `maxHeartbeats 0` hiding a bad
+`omega` metavariable in `val_weighted`; with that fixed the module compiles in
+seconds (plus ~1s per `decide`).
+
+Progress: `Formal/Circuits/Rsa2048PackBound.lean` now proves
+`nBound0..24`, `sigBound0..24` (via `packCanon`/`decide +kernel` and
+`pack_bound`) and `emBound` for every limb except **q = 3** (q ≤ 2 use
+`pack_bound 288 q`, since `emTerms q = packTermsAt 288 q`; q ≥ 4 are
+constant-only and `decide`). Left: em q=3 (constant `em82 3` plus the 10 digest
+bits `j = 246..255`; bound `em82 3 + 2^10 - 1 < 2^82`), the 544 `to_bits` bit
+facts (`hbit`: per call `call_sat_of`, `ToBits.SpecAt` gives
+`outs = bits of ins`; note `(callAt b).t = ToBits.template` is `rfl`, and
+`(bitGLC b tb).eval σ = outs.getD tb 0` needs the output LCs unfolded — bit 0 is
+the affine combination, bits 1..7 are `var (544+7b9+s)`), then the integer
+identities, `RequireLt25x82`'s limb order and `n_top`, and the final statement.
