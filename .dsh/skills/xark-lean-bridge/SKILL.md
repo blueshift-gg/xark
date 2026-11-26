@@ -226,7 +226,18 @@ Its exact shape (verified against the exported rows):
 * the top row is `lhs 48 − rhs 48 + wit 5367 − 2^88 = 0` (5367 = `1250 + 179·23`),
   matching `wit 1248 = lhs 48`, `wit 1249 = rhs 48`.
 
-Then `rows_eq` by `decide +kernel`, the assembly above, and (only then) the marker. Marking the function as a
+Then `rows_eq` by `decide +kernel`, the assembly above, and (only then) the marker.
+
+**Measured against the real template (round 48):** the 1,250 product rows above are exactly
+right — `decide` over `template.rows[0..1250]` against the model finds no mismatch. The 24
+step instances do **not** match `Row.bind` alone: the exported template holds the
+frontend's *normalized* linear combinations (terms sorted by variable, duplicate
+coefficients merged, zeros dropped), while `LC.bind` is a raw `flatMap` that preserves the
+step template's term order and repeats variables. So the model needs a `norm : LC → LC`
+(sort by var, merge coefficients, drop zeros — the frontend's invariant) applied to each
+bound row before comparing, and only then does `rows_eq` reduce to `decide`. (`CircuitHash`
+is unaffected because its hash canonicalizes before hashing; `Call.rows` vs the compiler's
+rows differ only in representation.) Marking the function as a
 `#[gadget]` and exporting the harness is already measured to work; the marker cannot land
 until the proof imports `Formal.Templates.GroupedColumns` (the exporter enforces it). After
 that, re-export the circuit: 17 top-level calls, and the composition is 17 `sat_call`s
