@@ -5,6 +5,8 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Circuit
 import Formal.GroupedColumnStep
+import Formal.GroupedColumnsGadget
+import Formal.GroupedColumnsSquareGadget
 import Formal.RangeCheckQ
 import Formal.RangeCheckR
 import Formal.RsaCalls
@@ -85,21 +87,30 @@ theorem r_calls_bounded (h : Sat C σ) :
 
 /-! ### The production circuit's counts -/
 
-/-- `examples/rsa2048`'s circuit: 408 `grouped_column_step` calls (24 per
-`grouped_columns`, 17 of those). -/
-theorem rsa2048_step_calls :
-    (callsOf Xark.Templates.GroupedColumnStep.template
-      Xark.Circuits.Rsa2048.circuit).length = 408 := by
+/-- `examples/rsa2048`'s chain: 16 `grouped_columns_square` calls (the squarings) and
+1 general `grouped_columns` call (the terminal fused multiply). The 408
+`grouped_column_step` calls are children of those, so they are no longer top-level
+segments; `callsOf` counts only the segments. -/
+theorem rsa2048_square_calls :
+    (callsOf Xark.Templates.GroupedColumnsSquare.template
+      Xark.Circuits.Rsa2048.circuit).length = 16 := by
+  decide +kernel
+
+theorem rsa2048_columns_calls :
+    (callsOf Xark.Templates.GroupedColumns.template
+      Xark.Circuits.Rsa2048.circuit).length = 1 := by
   decide +kernel
 
 /-- And 17 `range_check_q` calls (one per `square_lazy`/`fused_final`). -/
 theorem rsa2048_q_calls :
-    (callsOf Xark.Templates.RangeCheckQ.template Xark.Circuits.Rsa2048.circuit).length = 17 := by
+    (callsOf Xark.Templates.RangeCheckQ.template
+      Xark.Circuits.Rsa2048.circuit).length = 17 := by
   decide +kernel
 
 /-- And 16 `range_check_r` calls (the squarings; the final fused step pins `em`). -/
 theorem rsa2048_r_calls :
-    (callsOf Xark.Templates.RangeCheckR.template Xark.Circuits.Rsa2048.circuit).length = 16 := by
+    (callsOf Xark.Templates.RangeCheckR.template
+      Xark.Circuits.Rsa2048.circuit).length = 16 := by
   decide +kernel
 
 end Xark.Circuits

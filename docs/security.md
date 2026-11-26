@@ -416,7 +416,14 @@ that: `carry_of_sat_shadow` needs only `0 ≤ shadow σ numZ < r` — an arithme
 bound on the numerator written over the call's plugs (`shadow_numZ`) — because a
 field value that is the cast of an integer, with both in `[0, r)`, *is* that
 integer (`shadow_eq_of_eval`).
-That is the whole no-wrap argument, given the column bounds. `Formal/RsaChain.lean`
+That is the whole no-wrap argument, given the column bounds. `Formal/Norm.lean`
+reproduces the frontend's term normalization (sorted by variable, merged, zeros
+dropped) so a model built with `LC.bind` can be compared with the exported rows, and
+`Formal/GroupedColumnsGadget.lean` / `GroupedColumnsSquareGadget.lean` model the two
+chain templates (`a·b` and the CSE'd `a·a`) row by row, `rows_eq` by `decide +kernel`,
+and prove their contracts: under the limb bounds the product rows, the 24 step
+instances and the top row give `val a · val b = val q · val m + val rhs` (with `b = a`
+for the square). The template is the gadget's, so its rows are the production call's. `Formal/RsaChain.lean`
 then states the chain's top level: `n_bits` (the modulus is 2048 bits from the
 `n_top` pin), `squarings` (16 squarings keep `acc ≡ sig^(2^k)`), and `chain`
 (16 squarings plus the terminal `acc·sig = q·n + em` give
@@ -427,28 +434,30 @@ number. `Formal/RsaBytes.lean` gives `bytes_to_wide`'s two packing identities, s
 the octet input and the 25×82 limbs also denote one number, and
 `Formal/RsaEm.lean` proves `sha256_em_bits_82`'s constant is the RFC 8017 prefix
 (`decide +kernel` against the limb literals) and that the digest's bits add the
-digest's integer. Each step's identity is a model theorem; what is hand-proved is that the
-rows instantiate those step identities. `bytes_to_wide`'s big-endian packing and
-the EM vector are not yet model theorems either.
+digest's integer. Each step's identity is a model theorem, and the two chain gadgets' templates now
+instantiate them. `bytes_to_wide`'s big-endian packing and the EM vector's rows are
+not yet model theorems.
 
 Still hand-proved, and therefore audit residuals:
 
-* **Rows → step identities.** That `grouped_columns`' column sums are the limbs'
-  convolutions, that the 24 step calls' carries are the model's `k`, and that each
-  numerator is canonical (the `< 2^251.7` column bound). This is the one bridge
-  between the emitted rows and every theorem above.
+* **The 17-call assembly.** Identifying the chain's limb vectors across the 17
+  `grouped_columns`/`grouped_columns_square` calls and supplying each call's limb
+  bounds from the adjacent `range_check_q`/`range_check_r` `Spec`s; then
+  `RsaChain.chain` and `RsaEm.em`. The per-call rows → `val a · val b = val q · val m
+  + val rhs` step (the previous residual) is proven in the two gadget files.
 * **`minus_one` and `sig < n`.** The borrow chain that makes `n − 1`'s canonical
   digits, and so the `require_lt::<25,82>` composition to `sig < n`, are the
   bignum gadget's (its LC plugs are the allowlisted entry).
 * **The whole-circuit composition** (`Xark.Circuit`). The production circuit is
-  exported and hash-gated (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 1,021
+  exported and hash-gated (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 597
   segments, `fnv1a64:860142cc226105b8`), so `Sat circuit σ` is the production rows,
-  and its calls' contracts are theorems: 408 step calls each with a pinned carry
-  below `2^89`, 17 `range_check_q` and 16 `range_check_r` calls with every limb in
+  and its calls' contracts are theorems: 16 `grouped_columns_square` and 1
+  `grouped_columns` call, each giving the integer product identity under the limb
+  bounds, 17 `range_check_q` and 16 `range_check_r` calls with every limb in
   range (`Formal/Rsa2048Calls.lean`, counts by `decide +kernel`). What is
-  not proven is the 24-step assembly — grouping each `grouped_columns`' calls into
-  `CarrySpec` with the columns computed from the product rows — and the top-level
-  statement.
+  not proven is the 17-call assembly — matching each call's limb vectors to the
+  next one's, supplying the q/r bounds, and `RsaChain.chain`/`RsaEm.em` to the
+  top-level statement — plus the byte-packing rows' model.
 
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s

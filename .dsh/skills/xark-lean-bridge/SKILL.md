@@ -16,7 +16,7 @@ Keep the gadget generic: no pinned key. The existing
 
 ## Status (2026-11)
 
-Proven and exported (`lean-export --check` is green on 69 templates):
+Proven and exported (`lean-export --check` is green on 71 templates):
 
 | piece | template | proof |
 |---|---|---|
@@ -28,23 +28,26 @@ Proven and exported (`lean-export --check` is green on 69 templates):
 | chain top level | — (model) | `RsaChain.{n_bits, squarings, chain}`: 2048-bit modulus, `em ≡ sig^65537` |
 | re-limbing | — (model) | `RsaConvert.{cols_sum, partial_sum, telescoping}`: 17×121 → 25×82 proves one number |
 | byte packing | — (model) | `RsaBytes.{packing, bytes_of_bits, bytes_to_wide}`: octets and limbs denote one number |
-| `Consts` obligation for LC plugs | `Templates/Consts/GroupedColumnStep.lean` (`soundness_free`) | needed because `grouped_columns` calls the step with LC plugs |
+| `grouped_columns` (general) | `Templates/GroupedColumns.lean` (704 KB, 3,435 rows) | `Formal/GroupedColumnsGadget.lean`: `modelRows`, `rows_eq`, `soundness` (`Assumptions → val a·val b = val q·val m + val rhs`) |
+| `grouped_columns_square` (CSE'd) | `Templates/GroupedColumnsSquare.lean` (639 KB, 3,135 rows, 100 plugs) | `Formal/GroupedColumnsSquareGadget.lean`: same, with `a` on both sides |
+| term normalization | — | `Formal/Norm.lean`: `normTerms`/`eval_norm` (sort by `varLe`, merge, drop zeros; structural so `decide +kernel` works) |
+| `Consts` obligation for LC plugs | `Templates/Consts/GroupedColumnStep.lean`, `GroupedColumns.lean`, `GroupedColumnsSquare.lean` (`soundness_free`) | needed because the chain gadgets call the step with LC plugs |
 
-Coverage on `examples/rsa2048`: 408/408 `grouped_column_step`, 17/17
-`range_check_q`, 16/16 `range_check_r` calls, no allowlist entries. Digests
+Coverage on `examples/rsa2048`: 17/17 chain calls (16
+`grouped_columns_square`, 1 `grouped_columns`), 17/17 `range_check_q`, 16/16
+`range_check_r` calls, no allowlist entries. The 408 `grouped_column_step` calls are
+children of the chain gadgets and are no longer top-level segments. Digests
 pinned (`rsa2048 68ef4df3… 98b4c751…` under the keyed rustc; run
 `rustup toolchain install 1.99.1` then `rustup run 1.99.1 cargo xtask digests
 --check` — the workspace rustc also passes, with a different *keyed* digest).
 
-Model-level theorems now cover every named step except the EM vector
-(`sha256_em_bits_82`'s constant prefix plus the digest's bits). Still hand-proved
+The chain gadgets' row-level models and contracts are now proved; what remains
+is the composition (17 `sat_call`s plus the chain/EM lemmas). Still hand-proved
 (the remaining gap, in order):
 
-1. The bridge from `grouped_columns`' actual rows to the `GroupedColumns` model:
-   the per-row `CarrySpec` instance. `GroupedColumnStep.Spec` is only the
-   range bound; the affine `k = num·2^-164` is the template's output expression.
-   `Formal/GroupedColumns.lean` gives the telescope; composing the 24 step calls
-   plus the top row into `CarrySpec` is the missing glue theorem.
+1. The composition: 17 `sat_call` applications (`GroupedColumns.soundness` and
+   `GroupedColumnsSquare.soundness` with the limb bounds from the q/r `Spec`s),
+   then `RsaChain.chain` and `RsaEm.em` to the top-level statement.
 2. `square_lazy`: `hint_mulmod_divmod` (the `divRem` hint's integer `a² = q·m + r`
    and its per-limb semantics), q/r ranges (done), the columns (done).
 3. `fused_final` (q range + 25 EM pins + columns with `rhs_extra = em`),
@@ -111,8 +114,9 @@ unfolds `shadow σ plug` over the concrete terms and closes each with `val_of_mu
 The chain now witnesses each carry: `grouped_column_step` does
 `hint_div_rem(num, 2^164)`, pins `num = 2^164·k` and the remainder to zero, and
 range-checks `k` — 91 rows, +816 per circuit. That made
-`lean-export --example rsa2048` viable: **9.2 MB, 36 parts, 125,856 rows, 1,021
-segments**, hash-gated in `CircuitHash.lean`. The affine-carry design would have
+`lean-export --example rsa2048` viable: with the chain gadgets marked, the export
+is **597 segments, 125,856 rows, 3 parts** (the flat row hash is unchanged:
+`fnv1a64:860142cc226105b8`), hash-gated in `CircuitHash.lean`. The affine-carry design would have
 been 30 MB. The frontend refuses a hint output that no row pins, which is why the
 remainder needs its own row.
 
@@ -159,7 +163,7 @@ Until one lands, the row→step-identity bridge stays prose in `docs/security.md
   examples/rsa2048` is the fast loop; `--update` (all examples) only rewrites
   `Consts/`.
 - `lake`: `source $HOME/.elan/env`; `lake build` is the kernel gate;
-  `AxiomCheck.lean` must print "standard axioms only" (69 harnesses).
+  `AxiomCheck.lean` must print "standard axioms only" (71 harnesses).
 
 ## Mapping xark → zkGolf/Clean
 

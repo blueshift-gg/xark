@@ -361,13 +361,16 @@ inside the circuit. secp256k1_ecdsa: 619 template calls of 12 templates, 4 folde
 `xor` and `d·(2y − 2p)` products of the digit selectors). Not yet proven: that each
 call's plugs meet its `Assumptions` (the allowlist's prose), and the top-level statement.
 
-rsa2048: 125,856 rows in 1,021 segments over 36 files (`fnv1a64:860142cc226105b8`),
-9.2 MB committed. It exports at all because the carry is a witness: with the old affine
+rsa2048: 125,856 rows in 597 segments over 3 files (`fnv1a64:860142cc226105b8`),
+a few MB committed. It exports at all because the carry is a witness: with the old affine
 carry the same export was 30 MB, since each step's plug nested the previous output's
-linear combination. Its calls' counts (408 / 17 / 16) and their per-call contracts are
-theorems (`Formal/Rsa2048Calls.lean`), and every call's `Assumptions` are
-vacuous for these three gadgets. Not yet proven: the 24-step assembly into
-`CarrySpec` together with the columns' convolution, and the top-level statement.
+linear combination. Its calls' counts (16 `grouped_columns_square` + 1 `grouped_columns`, 17
+`range_check_q`, 16 `range_check_r`) and their per-call contracts are theorems
+(`Formal/Rsa2048Calls.lean`), the two chain gadgets' contracts are proven row by row
+(`Formal/GroupedColumnsGadget.lean`, `Formal/GroupedColumnsSquareGadget.lean`), and
+every call's `Assumptions` are vacuous for these gadgets. Not yet proven: the
+17-call assembly (the chain's limb vectors across calls, the q/r bounds) and the
+top-level statement.
 
 
 ### Adding a proven gadget

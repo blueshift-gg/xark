@@ -116,11 +116,12 @@ import Formal.RequireLt8x32
 import Formal.RangeCheckLimbs
 import Formal.RangeCheckLimbs8x32
 import Formal.Templates.RangeCheckLimbs17x121
-import Formal.Templates.Consts.GroupedColumnStep
 import Formal.Templates.Consts.GroupedColumns
+import Formal.Templates.Consts.GroupedColumnsSquare
 import Formal.GroupedColumnStep
 import Formal.GroupedColumns
 import Formal.GroupedColumnsGadget
+import Formal.GroupedColumnsSquareGadget
 import Formal.Norm
 import Formal.GroupedCarry
 import Formal.RsaChain

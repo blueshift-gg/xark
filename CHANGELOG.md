@@ -33,12 +33,17 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   to the same 2048-bit number in the other limb width), and `bytes_to_wide`'s
   packing (`Formal/RsaBytes.lean`: the 25 limbs recombine to the bit string and
   the big-endian byte string is that same value), and the whole circuit as
-  segments (`Formal/Circuits/Rsa2048.lean`: 125,856 rows in 1,021 segments,
+  segments (`Formal/Circuits/Rsa2048.lean`: 125,856 rows in 597 segments,
   hash-gated by `CircuitHash.lean`), and the EM vector (`Formal/RsaEm.lean`: the
   constant is the RFC 8017 prefix, checked by `decide +kernel`), and its calls'
-  contracts at the circuit level (`Formal/Rsa2048Calls.lean`: 408 carries
-  pinned below `2^89`, 17 + 16 range-checked limb vectors, counts by
-  `decide +kernel`), and the integer shadow that turns a call's plugs into
+  contracts at the circuit level (`Formal/Rsa2048Calls.lean`: 17 chain calls
+  (16 `grouped_columns_square`, 1 general `grouped_columns`) whose product rows
+  give the integer identity, 17 + 16 range-checked limb vectors, counts by
+  `decide +kernel`), the two chain gadgets themselves
+  (`Formal/GroupedColumnsGadget.lean` and `Formal/GroupedColumnsSquareGadget.lean`:
+  the exported 3,435- and 3,135-row templates modelled, `rows_eq` by
+  `decide +kernel`, and soundness on the limb bounds), the frontend's term
+  normalization (`Formal/Norm.lean`), and the integer shadow that turns a call's plugs into
   integers (`Formal/Shadow.lean`), so each step needs only the arithmetic bound on
   its numerator (`carry_of_sat_shadow`). The rows
   that instantiate those identities are still hand-proved

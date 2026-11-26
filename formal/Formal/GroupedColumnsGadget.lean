@@ -4,7 +4,6 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Templates.GroupedColumns
-import Formal.Templates.GroupedColumnStep
 import Formal.GroupedColumns
 import Formal.GroupedCarry
 import Formal.Shadow

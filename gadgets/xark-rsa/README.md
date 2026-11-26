@@ -131,13 +131,16 @@ digest can be private too.
   (`Formal/GroupedColumns.lean`), the step's rows give its `CarrySpec` row
   (`GroupedCarry.carry_of_sat`), and the chain's top level is `RsaChain.chain`
   (`em ≡ sig^65537`). The production circuit is exported and hash-gated
-  (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 1,021 segments). Still
-  hand-proved: that the exported calls' plugs meet the templates' `Assumptions`
-  (for the chain, the `CarrySpec` instance), the EM vector, `minus_one`/`sig < n`,
-  and the top-level statement — see `docs/security.md` §2.18.
-  `cargo xtask lean-export --check` passes all 69 templates, `--coverage` passes
-  for `examples/rsa2048` (408/408 `grouped_column_step`, 17/17 `range_check_q`,
-  16/16 `range_check_r` calls), and `cargo xtask digests` passes; the optimized
-  digest is pinned in `tests/stable-digests.txt`.
+  (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 597 segments). The two chain
+  gadgets' templates are modelled and proved row by row
+  (`Formal/GroupedColumnsGadget.lean`, `Formal/GroupedColumnsSquareGadget.lean`),
+  so each call gives `val a · val b = val q · val m + val rhs` from the limb
+  bounds. Still hand-proved: the 17-call assembly (the chain's limb vectors and
+  the q/r bounds), `minus_one`/`sig < n`, and the top-level statement — see
+  `docs/security.md` §2.18.
+  `cargo xtask lean-export --check` passes all 71 templates, `--coverage` passes
+  for `examples/rsa2048` (16 + 1 chain calls, 17/17 `range_check_q`, 16/16
+  `range_check_r` calls), and `cargo xtask digests` passes; the optimized digest
+  is pinned in `tests/stable-digests.txt`.
 
 Part of [xark](https://github.com/blueshift-gg/xark): zero-knowledge circuits in plain Rust, verified on Solana.
