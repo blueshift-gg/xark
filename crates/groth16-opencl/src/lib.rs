@@ -1544,6 +1544,16 @@ mod tests {
 
     #[test]
     fn msm_kernels_compile_as_opencl_12_when_clang_is_available() {
+        // Honor an explicit Makefile compiler override, including wrappers.
+        if std::env::var_os("CLANG").is_none()
+            && std::process::Command::new("clang")
+                .arg("--version")
+                .output()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            eprintln!("skipping the offline syntax check because clang is unavailable");
+            return;
+        }
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernels");
         let output = std::process::Command::new("make")
             .arg("-C")
