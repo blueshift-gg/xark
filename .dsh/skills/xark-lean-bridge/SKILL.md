@@ -380,7 +380,25 @@ Byte layer (in progress, `Formal/Circuits/Rsa2048/ChainBits.lean`, committed): `
 `bitGLC_eq_bitOut`'s explicit arguments and `hins`'s `simp` over `Template.ins`), then
 (3) `RsaBytes.bytes_of_bits` gives `chainN = ↑(Σ_i (σ i).val · 256^(255-i))`, same
 for `sigBits` with bytes 256..511. `sig < n` still needs the s545 subtraction/glue
-layer (its m plugs are not `sq0`'s modulus limbs — `decide` confirms). Gotchas:
+layer (its m plugs are not `sq0`'s modulus limbs — `decide` confirms).
+
+Done since: `Formal/Circuits/Rsa2048/ByteBits.lean` generates all 512 per-byte
+decompositions (`nbyte_0..255`, `sbyte_0..255`; each concrete byte uses `call_sat_of`
++ `ToBits.SpecAt`, `Add32.word_testBit`, `bitGLC_eq_bitOut`/`bitOut_eval`, with
+`hins`/`hlt`/`hbitval` exactly as in `nbyte_0`), lifts them to `nBits_eq`/`sigBits_eq`
+by `interval_cases`, and proves `chainN_packing`/`chainSig_packing` (`RsaBytes.packing`)
+and `chainN_eq_bytes`/`chainSig_eq_bytes` (`RsaBytes.bytes_of_bits`):
+`chainN = Σ_i (σ i).val·256^(255-i)` and `val (limb sq0 σ 0) = Σ_i (σ (256+i)).val·256^(255-i)`.
+`chain_congruence_bytes` then states the chain congruence over the public bytes with
+the RFC EM prefix+digest bits. The digest bytes (512..543) still enter as bits; a
+32-byte `bytes_of_bits` variant (or the shift-into-256-bytes trick) would make
+`chainEm` byte-level.
+
+`n_top`: s544's first glue row is `-2^79 + 2^79·var 550 = 0` (const `Int.negSucc
+604462909807314587353087`, term `2^79` at 550), i.e. `σ 550 = 1`. Var 550 is byte 0's
+bit 7 (`bitBase 0 + 6`), and byte 0 is the modulus's most significant byte, so
+`nBits σ 2047 = 1` and `n ≥ 2^2047`; the upper bound is each byte `< 256`. Extracting
+that row needs the `Sat`-to-row helper (`segSat` in `Verify.lean`). Gotchas:
 `pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
 and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
 unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).
