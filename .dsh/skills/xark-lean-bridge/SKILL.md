@@ -398,7 +398,23 @@ the RFC EM prefix+digest bits. The digest bytes (512..543) still enter as bits; 
 604462909807314587353087`, term `2^79` at 550), i.e. `σ 550 = 1`. Var 550 is byte 0's
 bit 7 (`bitBase 0 + 6`), and byte 0 is the modulus's most significant byte, so
 `nBits σ 2047 = 1` and `n ≥ 2^2047`; the upper bound is each byte `< 256`. Extracting
-that row needs the `Sat`-to-row helper (`segSat` in `Verify.lean`). Gotchas:
+that row needs the `Sat`-to-row helper (`segSat` in `Verify.lean`).
+
+`n_top`/`n_bits` are now proven in `ByteBits.lean`: `n_top` extracts s544's first glue
+row (`Sat (seg 544).rows σ` via `segSat`, then `List.getElem_mem` and unfolding
+`ZRow.toF`/`LC.eval`), `nByte0_ge`/`chainN_ge` (the `128·256^255` term), `nByte_lt`
+(each byte `< 256` from `nBits_eq` + `hbit`), `chainN_lt` (geometric
+`(255)·Σ256^k = 256^256−1` via `Finset.sum_range_reflect` + induction), and
+`n_bits : 2^2047 ≤ chainN ∧ chainN < 2^2048`.
+
+`sig < n`: the Rust is `minus_one` then `require_lt` (gadgets/xark-rsa/src/lib.rs:610).
+`minus_one` (xark-bignum) computes `out[i] = m[i] − borrow_i + borrow_{i+1}·2^82`,
+`borrow_0 = 1`, `borrow_{i+1} = borrow_i · (m[i] == 0)`, and `require_eq(borrow_25, 0)`.
+Summing gives `Σ out_i·W^i = Σ m_i·W^i − 1` (telescoping), so s545's m limbs are
+`chainN − 1` once the `==0` hint bits satisfy their rows (s544's glue); the Spec then
+gives `sig ≤ chainN − 1`. Remaining: model the `==0`/borrow glue rows and the LC
+identification `val (limb (callAt 545) σ 25) = chainN − 1`, plus the first-25-plug
+window (`(callAt 545).plugs[j] = (sq0).plugs[j]` for j<25, `decide`). Gotchas:
 `pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
 and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
 unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).
