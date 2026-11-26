@@ -468,7 +468,21 @@ Together with `hout`/`hprod`/`htop` this is every algebraic fact the integer
 induction needs; the next step is to turn `Sat` into the field equations
 (`(ZLC.toF row.a).eval σ = shadow σ row.a` via `Xark.R1cs.shadow_toF`) and run the
 0/1 case split, then finish the RequireLt Spec application (first-25 window for
-`(callAt 545).plugs[j] = (callAt 548).plugs[j]`, `Assumptions` from the sig bounds). The Rust's
+`(callAt 545).plugs[j] = (callAt 548).plugs[j]`, `Assumptions` from the sig bounds).
+
+Done (committed `871ea58e`): `s544_sat`/`rowSat`, `nF/wF/zF`, and the field equations
+`E1_i : nF i * wF i = zF i`, `E2_i : nF i * (1 − zF i) = 0`,
+`E3_i : wF i * (1 − zF i) = 0` for every limb, `P_i :
+(ZLC.toF (borrow (i+1))).eval σ * (1 − zF (i+1) σ) = (ZLC.toF (borrow (i+2))).eval σ`
+for i<24, and `T : (ZLC.toF (borrow 25)).eval σ = 0`. Each row is reached with
+`rowSat` and the bridging `show (s544.rows[k]).a/b/c = ZLC.toF … from by decide +kernel`,
+then `simpa [ZLC.toF, LC.eval, …, zvar, sub_eq_add_neg]`. Note: `borrow` is a `ZLC`,
+so its field value is `(ZLC.toF (borrow i)).eval σ`, not `(borrow i).eval σ`.
+Remaining: the 0/1 induction (`b_i = 1 − z_i` is `is_zero(n_i)`: `n_i = 0` ⇒ `z_i = 0`;
+`n_i ≠ 0` ⇒ `b_i = 0`), the value formula
+`(outF i).val = (nF i).val − (borrow_i).val + 2^82·(borrow_{i+1}).val` (each `out_i` in
+`[0,W)`), the integer telescoping to `val (limb (callAt 545) σ 25) = chainN − 1`,
+and the RequireLt Spec application. The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
