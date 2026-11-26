@@ -343,3 +343,17 @@ Proven-proof layout: the hand-written files live in `formal/Formal/Circuits/Rsa2
 a `limbs` comparison) gives `sig ≤ n − 1`, i.e. `sig < n` once the plug LCs are
 matched to `sq0`'s by window equality. The `n_top` row is the `bytes_to_wide` glue
 pinning `n`'s top bit.
+
+Next piece (in progress, no repo file yet): connect `chainEm` to `RsaEm.em`. Define
+`digestBits σ j = (((bitGLC (543 - j/8) (j%8)).eval σ).val : ℤ)` (digest byte
+`512 + 31 - j/8`, bit `j%8`), `emCanon q = ⟨em82 q, normTerms (emTerms q)⟩`, and prove
+`emOut (digestBits σ) q = (pn fin σ (100+q) : ℤ)` for each `q < 25` (q ≤ 2: use
+`packCanon 288 q` since `emTerms q = packTermsAt 288 q`, then `eval_packTerms` +
+`val_weighted`; q = 3: `emCanon3_eval` + `eval_packTermsW` + `val_weightedW 10`;
+q ≥ 4: the plug is the constant, `em82 q`). Then
+`val (limb fin σ 100) = Σ q pn·W^q = Σ q emOut q·W^q = val (emOut (digestBits σ))`,
+and `RsaEm.em` gives `chainEm = EM_PREFIX + Σ digestBit_j·2^j`, so the final theorem
+is `Em.em (digestBits σ) ≡ (val (limb sq0 σ 0))^(2^16+1) [ZMOD chainN σ]`. Gotchas:
+`pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
+and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
+unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).
