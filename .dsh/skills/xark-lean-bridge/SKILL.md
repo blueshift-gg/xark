@@ -425,6 +425,19 @@ and `z = 0` when `x_i = 0`, so `1 + z` is the `is_zero(x_i)` bit; the fourth row
 per-limb rows (`(s544.rows.drop (1+4*k)).take 4`) and telescope
 `Σ (x_i − (1+z_i)·borrow?)·W^i = chainN − 1` next.
 
+Concrete forms (`#eval`): s545 m plug 25 (limb 0) is
+`N0 + (W−1) − W·s_0` and plug 26 is
+`N1 − 1 + (Σ_t 2^t·var(2260+t)) + s_0 + W·(s_0·s_1)`, where `N_i` is the n limb LC,
+`s = var 4353` satisfies the s544 rows `x·w = s`, `x·(1+s) = 0`, `w·(1+s) = 0`
+(so `s = −1` when `x ≠ 0`, `s = 0` when `x = 0`, i.e. `is_zero = 1 + s`), and
+`s_0·s_1` is the product hint (row `s_0·s_1 = 4360`). The Rust's
+`out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
+`next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
+sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
+now imported by `Formal.lean` and the gates are green (`lake build` 3355 jobs,
+AxiomCheck 3440 theorems, `lean-export --check` 71/71, coverage, digests,
+CircuitHash `860142cc226105b8`).
+
 Digest bytes (drafted in `/tmp/gen_embytes.py`): a generic
 `bytes_of_bits_n (n) (_hn) (bits bytes) (hbyte) : Σ_{i<n} bytes_i·256^(n-1-i) = Σ_{j<8n} bits_j·2^j`
 (compiles, 2.4 s), 32 per-byte `dbyte_k` (`((σ (512+k)).val : ℤ) = Σ_{t<8} digestBits (8*(31-k)+t)·2^t`,
