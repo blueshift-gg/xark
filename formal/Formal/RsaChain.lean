@@ -139,4 +139,71 @@ theorem chain (n sig em q : ℤ) (step : ℤ → ℤ) (k : ℕ)
     _ ≡ sig ^ (2 ^ k) * sig [ZMOD n] := hmul
     _ = sig ^ (2 ^ k + 1) := by rw [pow_succ]
 
+/-- The same congruence for a *sequence* of squarings: the production loop carries the
+limbs from one call to the next rather than iterating a function. -/
+theorem squarings_seq (n : ℤ) (a : ℕ → ℤ)
+    (hstep : ∀ k, a (k + 1) ≡ a k * a k [ZMOD n]) :
+    ∀ k, a k ≡ a 0 ^ (2 ^ k) [ZMOD n]
+  | 0 => by simp
+  | k + 1 => by
+    have ih := squarings_seq n a hstep k
+    have h1 := hstep k
+    have h2 : a k * a k ≡ a 0 ^ (2 ^ k) * a 0 ^ (2 ^ k) [ZMOD n] := ih.mul ih
+    have h3 : a 0 ^ (2 ^ k) * a 0 ^ (2 ^ k) = a 0 ^ (2 ^ (k + 1)) := by
+      rw [← pow_add]
+      congr 1
+      rw [pow_succ]
+      ring
+    calc a (k + 1) ≡ a k * a k [ZMOD n] := h1
+      _ ≡ a 0 ^ (2 ^ k) * a 0 ^ (2 ^ k) [ZMOD n] := h2
+      _ = a 0 ^ (2 ^ (k + 1)) := h3
+
+/-- **The chain's congruence, sequentially.** `k` squarings followed by the terminal
+multiply `a k * a 0 = q * n + em` give `em ≡ a 0 ^ (2^k + 1) (mod n)`. -/
+theorem chain_seq (n em q : ℤ) (a : ℕ → ℤ) (k : ℕ)
+    (hstep : ∀ j, a (j + 1) ≡ a j * a j [ZMOD n])
+    (hfinal : a k * a 0 = q * n + em) :
+    em ≡ a 0 ^ (2 ^ k + 1) [ZMOD n] := by
+  have hsq := squarings_seq n a hstep k
+  have hmul : a k * a 0 ≡ a 0 ^ (2 ^ k) * a 0 [ZMOD n] := hsq.mul_right (a 0)
+  have hright : q * n + em ≡ em [ZMOD n] := by
+    rw [Int.modEq_iff_dvd]
+    exact ⟨-q, by ring⟩
+  calc em ≡ q * n + em [ZMOD n] := hright.symm
+    _ = a k * a 0 := hfinal.symm
+    _ ≡ a 0 ^ (2 ^ k) * a 0 [ZMOD n] := hmul
+    _ = a 0 ^ (2 ^ k + 1) := by rw [pow_succ]
+
+theorem squarings_seq_range (n : ℤ) (a : ℕ → ℤ) :
+    ∀ k, (∀ j < k, a (j + 1) ≡ a j * a j [ZMOD n]) → a k ≡ a 0 ^ (2 ^ k) [ZMOD n]
+  | 0 => fun _ => by simp
+  | k + 1 => fun hstep => by
+    have ih := squarings_seq_range n a k (fun j hj => hstep j (by omega))
+    have h1 := hstep k (by omega)
+    have h2 : a k * a k ≡ a 0 ^ (2 ^ k) * a 0 ^ (2 ^ k) [ZMOD n] := ih.mul ih
+    have h3 : a 0 ^ (2 ^ k) * a 0 ^ (2 ^ k) = a 0 ^ (2 ^ (k + 1)) := by
+      rw [← pow_add]
+      congr 1
+      rw [pow_succ]
+      ring
+    calc a (k + 1) ≡ a k * a k [ZMOD n] := h1
+      _ ≡ a 0 ^ (2 ^ k) * a 0 ^ (2 ^ k) [ZMOD n] := h2
+      _ = a 0 ^ (2 ^ (k + 1)) := h3
+
+/-- **The chain's congruence, sequentially and bounded.** The step congruence is needed
+only for `j < k` (the production loop runs `k` times). -/
+theorem chain_seq_range (n em q : ℤ) (a : ℕ → ℤ) (k : ℕ)
+    (hstep : ∀ j < k, a (j + 1) ≡ a j * a j [ZMOD n])
+    (hfinal : a k * a 0 = q * n + em) :
+    em ≡ a 0 ^ (2 ^ k + 1) [ZMOD n] := by
+  have hsq := squarings_seq_range n a k hstep
+  have hmul : a k * a 0 ≡ a 0 ^ (2 ^ k) * a 0 [ZMOD n] := hsq.mul_right (a 0)
+  have hright : q * n + em ≡ em [ZMOD n] := by
+    rw [Int.modEq_iff_dvd]
+    exact ⟨-q, by ring⟩
+  calc em ≡ q * n + em [ZMOD n] := hright.symm
+    _ = a k * a 0 := hfinal.symm
+    _ ≡ a 0 ^ (2 ^ k) * a 0 [ZMOD n] := hmul
+    _ = a 0 ^ (2 ^ k + 1) := by rw [pow_succ]
+
 end Xark.Rsa.Chain
