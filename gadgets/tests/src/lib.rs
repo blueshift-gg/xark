@@ -32,6 +32,22 @@ fn profile_from_exe(exe: &std::path::Path) -> Option<String> {
         })
 }
 
+#[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+fn publish_xark_copy(built: &std::path::Path, copy: &std::path::Path) -> std::io::Result<()> {
+    use std::{fs, io::ErrorKind};
+
+    let tmp = copy.with_extension(format!("{}.tmp", std::process::id()));
+    let published = fs::copy(built, &tmp).and_then(|_| match fs::hard_link(&tmp, copy) {
+        // Another test process placed its complete copy first. Leave that inode
+        // in place because a running CLI can look itself up by path.
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
+        result => result,
+    });
+    let removed = fs::remove_file(&tmp);
+    published?;
+    removed
+}
+
 /// Path to the built `xark` CLI binary, for the CLI integration tests.
 /// Returns the `xark` CLI binary path.
 #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
@@ -87,13 +103,38 @@ pub fn xark_bin() -> std::path::PathBuf {
         let copy = dir.join(exe);
         if !copy.exists() {
             std::fs::create_dir_all(&dir).expect("create target/xark-test-bin");
-            let tmp = dir.join(format!("{exe}.{}.tmp", std::process::id()));
-            std::fs::copy(&built, &tmp).expect("copy the built `xark`");
-            std::fs::rename(&tmp, &copy).expect("place the copy of `xark`");
+            publish_xark_copy(&built, &copy).expect("place the copy of `xark`");
         }
         copy
     })
     .clone()
+}
+
+#[cfg(all(test, not(any(target_os = "solana", target_arch = "bpf"))))]
+mod tests {
+    use super::publish_xark_copy;
+    use std::{fs, time::SystemTime};
+
+    #[test]
+    fn second_cli_publication_leaves_first_copy_in_place() {
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("xark-copy-{}-{stamp}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let built = dir.join("built");
+        let copy = dir.join("xark");
+
+        fs::write(&built, b"first").unwrap();
+        publish_xark_copy(&built, &copy).unwrap();
+        fs::write(&built, b"second").unwrap();
+        publish_xark_copy(&built, &copy).unwrap();
+
+        assert_eq!(fs::read(&copy).unwrap(), b"first");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 /// Committed test fixtures, embedded as `const`s reachable from every
