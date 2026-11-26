@@ -314,3 +314,22 @@ facts (`hbit`: per call `call_sat_of`, `ToBits.SpecAt` gives
 `(bitGLC b tb).eval σ = outs.getD tb 0` needs the output LCs unfolded — bit 0 is
 the affine combination, bits 1..7 are `var (544+7b9+s)`), then the integer
 identities, `RequireLt25x82`'s limb order and `n_top`, and the final statement.
+
+Status: all of the above now holds. `Formal/Circuits/Rsa2048PackBoundW.lean` (width-`w`
+bound, `emBound3`, `bitOut`/`bitGLC_eq_bitOut`/`bitOf_val_le`),
+`Formal/Circuits/Rsa2048Bits.lean` (`bits0..543`, `hbit`; the `callAt b` facts are
+`rfl`, not `decide`, or the 544 proofs blow up), and
+`Formal/Circuits/Rsa2048Statement.lean`:
+
+```
+theorem chain_congruence_sat (σ : ℕ → F) (h : Sat circuit σ) :
+    chainEm σ ≡ (val (limb sq0 σ 0)) ^ (2 ^ 16 + 1) [ZMOD chainN σ]
+```
+
+are all checked (`lake build` green, AxiomCheck 2,789 theorems standard axioms).
+`Formal.lean` imports the packing modules. Left for the byte-level statement:
+`RequireLt25x82` at `s545` (its 50 plugs are `sq0`'s 0..49; `Spec` is a `limbs`
+comparison, so `sig ≤ n − 1`), the `n_top` row, and the integer identities
+(`chainN`/`sig`/`chainEm` versus the big-endian byte values and
+`EM_PREFIX + SHA-256 digest`). The limb-level chain statement is the composition
+the objective names; the byte identities are the encoding layer around it.
