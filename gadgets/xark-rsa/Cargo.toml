@@ -1,0 +1,28 @@
+[package]
+name = "xark-rsa"
+description = "RSASSA-PKCS1-v1_5 SHA-256 verification gadget for xark circuits."
+keywords = ["zero-knowledge", "zk", "cryptography", "circuit", "groth16"]
+categories = ["cryptography"]
+readme = "README.md"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+xark.workspace = true
+xark-bignum.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+num-bigint.workspace = true
+xark-ir.workspace = true
+xark-test-harness = { path = "../../crates/test-harness" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

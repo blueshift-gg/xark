@@ -5064,6 +5064,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "xark-rsa"
+version = "0.5.0"
+dependencies = [
+ "hex",
+ "num-bigint 0.4.8",
+ "xark",
+ "xark-bignum",
+ "xark-ir",
+ "xark-test-harness",
+]
+
+[[package]]
 name = "xark-schema"
 version = "0.5.0"
 dependencies = [

@@ -52,6 +52,8 @@ import Formal.ToBits
 import Formal.Templates.Consts.ToBits
 import Formal.Templates.ToBits17
 import Formal.ToBits17
+import Formal.Templates.ToBits112
+import Formal.ToBits112
 import Formal.Templates.Consts.ToBits17
 import Formal.Templates.ToBits32
 import Formal.ToBits32
@@ -82,6 +84,8 @@ import Formal.Templates.RequireLt3x86
 import Formal.RequireLt3x86
 import Formal.Templates.RequireLt24x86
 import Formal.RequireLt24x86
+import Formal.Templates.RequireLt17x121
+import Formal.RequireLt17x121
 import Formal.Templates.RequireLt3x85
 import Formal.RequireLt3x85
 import Formal.Templates.RequireLt4x64
@@ -107,6 +111,8 @@ import Formal.Templates.RequireLt8x32
 import Formal.RequireLt8x32
 import Formal.RangeCheckLimbs
 import Formal.RangeCheckLimbs8x32
+import Formal.Templates.RangeCheckLimbs17x121
+import Formal.RangeCheckLimbs17x121
 import Formal.RangeCheckLimbs4x64
 import Formal.RangeCheckLimbs3x86
 import Formal.Templates.Mux

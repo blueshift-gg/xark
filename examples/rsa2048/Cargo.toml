@@ -1,0 +1,17 @@
+[package]
+name = "rsa2048"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+xark = { path = "../../crates/lang", version = "0.5.0" }
+xark-rsa = { path = "../../gadgets/xark-rsa", version = "0.5.0" }
+
+[dev-dependencies]
+hex = "0.4"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

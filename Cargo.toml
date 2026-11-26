@@ -28,6 +28,7 @@ members = [
     "gadgets/xark-pedersen",
     "gadgets/xark-poseidon",
     "gadgets/xark-poseidon2",
+    "gadgets/xark-rsa",
     "gadgets/xark-secp256k1",
     "gadgets/xark-secp256r1",
     "gadgets/xark-sha256",
@@ -99,6 +100,7 @@ xark-macros = { path = "crates/macros", version = "0.5.0" }
 xark-poseidon = { path = "gadgets/xark-poseidon", version = "0.5.0" }
 xark-poseidon2 = { path = "gadgets/xark-poseidon2", version = "0.5.0" }
 xark-prover = { path = "crates/prover", version = "0.5.0" }
+xark-rsa = { path = "gadgets/xark-rsa", version = "0.5.0" }
 xark-schema = { path = "crates/schema", version = "0.5.0" }
 xark-verifier = { path = "crates/verifier", version = "0.5.0" }
 

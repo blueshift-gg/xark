@@ -4,6 +4,16 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
+## Unreleased
+
+### Added
+
+- `xark-rsa`: RSA-2048 PKCS#1 v1.5 SHA-256 verification, 17×121-bit limbs, with a
+  real iAM Smart leaf-certificate KAT.
+- `examples/rsa2048`: the gadget's example and KAT; 157,451 constraints.
+- Lean templates and proofs for `require_lt::<17, 121>`,
+  `range_check_limbs::<17, 121>`, and `to_bits::<112>`.
+
 ## 0.5.0
 
 The generated client crate is named `<name>-client` and carries the circuit's proof
