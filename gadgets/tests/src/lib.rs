@@ -113,16 +113,22 @@ pub fn xark_bin() -> std::path::PathBuf {
 #[cfg(all(test, not(any(target_os = "solana", target_arch = "bpf"))))]
 mod cli_copy_tests {
     use super::publish_xark_copy;
-    use std::{fs, time::SystemTime};
+    use std::{fs, path::PathBuf, time::SystemTime};
 
-    #[test]
-    fn second_cli_publication_leaves_first_copy_in_place() {
+    fn temp_dir(label: &str) -> PathBuf {
         let stamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("xark-copy-{}-{stamp}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("xark-copy-{label}-{}-{stamp}", std::process::id()));
         fs::create_dir(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn second_cli_publication_leaves_first_copy_in_place() {
+        let dir = temp_dir("sequential");
         let built = dir.join("built");
         let copy = dir.join("xark");
 
@@ -133,6 +139,86 @@ mod cli_copy_tests {
 
         assert_eq!(fs::read(&copy).unwrap(), b"first");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_cli_copy_removes_an_incomplete_stage_without_publishing() {
+        let dir = temp_dir("incomplete");
+        let copy = dir.join("xark");
+        let stale_stage = copy.with_extension(format!("{}.tmp", std::process::id()));
+        fs::write(&stale_stage, b"incomplete").unwrap();
+
+        let error = publish_xark_copy(&dir.join("missing"), &copy).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(!copy.exists());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_publishers_stage_distinct_executables() {
+        use std::{
+            io::{Read, Write},
+            os::unix::fs::PermissionsExt,
+            process::{Command, Stdio},
+        };
+
+        const CHILD_COPY: &str = "XARK_TEST_CONCURRENT_CLI_COPY";
+        const TEST: &str = "cli_copy_tests::concurrent_publishers_stage_distinct_executables";
+        if let Some(source) = std::env::var_os(CHILD_COPY) {
+            let built = PathBuf::from(source);
+            let copy = built.with_file_name("xark");
+            std::io::stdin().read_exact(&mut [0]).unwrap();
+            publish_xark_copy(&built, &copy).unwrap();
+            return;
+        }
+
+        let dir = temp_dir("concurrent");
+        let copy = dir.join("xark");
+        let exe = std::env::current_exe().unwrap();
+        let mut publishers = Vec::new();
+        for label in ["first", "second"] {
+            let built = dir.join(label);
+            fs::write(&built, format!("#!/bin/sh\nprintf '%s\\n' {label}\n")).unwrap();
+            fs::set_permissions(&built, fs::Permissions::from_mode(0o755)).unwrap();
+            let child = Command::new(&exe)
+                .args(["--exact", TEST])
+                .env(CHILD_COPY, &built)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let stage = copy.with_extension(format!("{}.tmp", child.id()));
+            fs::write(stage, "incomplete staging file from an earlier run").unwrap();
+            publishers.push(child);
+        }
+        // Both processes are live and cannot publish until released here.
+        for child in &mut publishers {
+            child.stdin.take().unwrap().write_all(&[1]).unwrap();
+        }
+        for child in publishers {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.contains("1 passed"), "{stdout}");
+        }
+
+        let output = Command::new(&copy).output().unwrap();
+        assert!(output.status.success());
+        assert!(matches!(output.stdout.as_slice(), b"first\n" | b"second\n"));
+        assert_eq!(
+            fs::read(&copy).unwrap(),
+            fs::read(dir.join(String::from_utf8_lossy(&output.stdout).trim())).unwrap()
+        );
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 3);
         fs::remove_dir_all(dir).unwrap();
     }
 }
