@@ -256,19 +256,30 @@ with the q/r `Spec`s supplying the limb bounds.
 The work is a single large proof plus mechanical instantiation, not an open design
 question; every number it needs is in this file.
 
-## The composition, from here
+## The composition (done, at the limb level)
 
-The circuit now exports its chain as 17 top-level calls, at segments
-`s548, s551, …, s593` (16 `GroupedColumnsSquare`) and `s596` (`GroupedColumns`),
-interleaved with `range_check_q`/`range_check_r` at `s546+3k`/`s547+3k`. Their plug
-LCs are in `Formal/Circuits/Rsa2048/Part1.lean`; most limbs are single variables
-(the hint outputs and the packed bytes' bits), so adjacent calls can be matched by
-proving LC equalities with `decide +kernel`. The per-call contract is
-`GroupedColumnsSquareGadget.soundness` / `GroupedColumnsGadget.soundness`
-(`Assumptions → val a · val b = val q · val m + val rhs`); the limb bounds come
-from the q/r calls (`RangeCheckQ.Spec`/`RangeCheckR.Spec` through `sat_call`),
-except the packed `n`/`sig`/`em` limbs, whose bound is the byte packing
-(`RsaBytes`, `bytes_to_wide`'s rows are glue plus `to_bits` calls). Then
-`RsaChain.chain` (`step` = the square's `r` limbs) and `RsaEm.em` give
-`em ≡ sig^65537 (mod n)`; `minus_one`/`require_lt` (the `RequireLt` call at
-`s?`) give `sig < n`, and `n_top` the 2048-bit bound.
+`Formal/Circuits/Rsa2048Verify.lean` reaches the 17 chain calls by index
+(`seg`/`callAt`/`segSat`, no `callsOf` template comparisons), applies
+`GroupedColumnsSquareGadget.soundness` / `GroupedColumnsGadget.soundness` to each
+(`square_contract`/`general_contract`), builds each call's `Assumptions` from the
+adjacent `range_check_q`/`range_check_r` `Spec`s (`q_call_bound`/`r_call_bound`
+plus the LC window equalities), and matches the chain's limb vectors by LC
+equality (`val_limb_eq`). `Formal/Circuits/Rsa2048Chain.lean` then proves
+`chain_congruence`:
+
+```
+chainEm σ ≡ (val (limb sq0 σ 0)) ^ (2^16 + 1) [ZMOD chainN σ]
+```
+
+with only three hypotheses left, the packed limbs' bounds:
+`hSig`/`hN` (the first call's `a` and `m` plugs, i.e. the signature and modulus
+limbs) and `hEm` (the terminal call's right-hand-side plugs). Those, and the
+integer identities `chainN = n`'s big-endian integer, `chainA 0 = sig`'s, and
+`chainEm = RsaEm.em digestBits`, are the byte packing's: 544 `to_bits` calls
+`s0..s543` (byte `b` at base `544+7b`, outputs `[bit7, bit0..bit6]`), whose
+`Spec` is `ins < 2^8 ∧ outs = bits of ins`. `bytes_to_wide`'s limb LCs are
+literal sums of those bits (`(2^t, bitvar)` and the affine bit7), so a limb's
+bound and integer identity follow from the `to_bits` `Spec`s by evaluating the
+LC. `RequireLt25x82` (s545) gives `sig < n` at the limb level; `n_top` is the
+`bytes_to_wide` glue row. Anything after that (e.g. the host-level byte
+statement) is the same identities rearranged.
