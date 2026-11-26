@@ -795,4 +795,918 @@ theorem hNd_24 : (rowAt 98).a = (⟨0, [(1, 4471)]⟩ : ZLC) := by
 theorem hNe_24 : (rowAt 98).b = bLC 24 := by
   decide +kernel
 
+theorem s544_sat (σ : ℕ → F) (h : Sat circuit σ) : Sat s544.rows σ := by
+  have hs := segSat (σ := σ) h (n := 544) (by decide)
+  rwa [show seg 544 = s544 from rfl] at hs
+
+theorem rowSat (σ : ℕ → F) (h : Sat circuit σ) (i : ℕ) (hi : i < s544.rows.length) :
+    (s544.rows[i]).Sat σ := s544_sat σ h _ (List.getElem_mem hi)
+
+/-- The modulus limb `i`'s field value (the same LC the chain calls read). -/
+def nF (i : ℕ) (σ : ℕ → F) : F :=
+  (ZLC.toF ((callAt 548).plugs.getD (25 + i) (LC.cst 0))).eval σ
+
+def wF (i : ℕ) (σ : ℕ → F) : F := σ (if i = 0 then 4352 else 4357 + 5 * (i - 1) - 1)
+
+def zF (i : ℕ) (σ : ℕ → F) : F := σ (if i = 0 then 4353 else 4357 + 5 * (i - 1))
+
+theorem E1_0 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 0 σ * wF 0 σ = zF 0 σ := by
+  have hrow := rowSat σ h 1 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[1]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 0) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[1]).b = ZLC.toF (⟨0, [(1, 4352)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[1]).c = ZLC.toF (⟨0, [(1, 4353)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_0 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 0 σ * (1 - zF 0 σ) = 0 := by
+  have hrow := rowSat σ h 2 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[2]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 0) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[2]).b = ZLC.toF (bLC 0) from by decide +kernel,
+      show (s544.rows[2]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_0 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 0 σ * (1 - zF 0 σ) = 0 := by
+  have hrow := rowSat σ h 3 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[3]).a = ZLC.toF (⟨0, [(1, 4352)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[3]).b = ZLC.toF (bLC 0) from by decide +kernel,
+      show (s544.rows[3]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_1 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 1 σ * wF 1 σ = zF 1 σ := by
+  have hrow := rowSat σ h 4 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[4]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 1) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[4]).b = ZLC.toF (⟨0, [(1, 4356)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[4]).c = ZLC.toF (⟨0, [(1, 4357)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_1 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 1 σ * (1 - zF 1 σ) = 0 := by
+  have hrow := rowSat σ h 5 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[5]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 1) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[5]).b = ZLC.toF (bLC 1) from by decide +kernel,
+      show (s544.rows[5]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_1 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 1 σ * (1 - zF 1 σ) = 0 := by
+  have hrow := rowSat σ h 6 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[6]).a = ZLC.toF (⟨0, [(1, 4356)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[6]).b = ZLC.toF (bLC 1) from by decide +kernel,
+      show (s544.rows[6]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_2 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 2 σ * wF 2 σ = zF 2 σ := by
+  have hrow := rowSat σ h 8 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[8]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 2) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[8]).b = ZLC.toF (⟨0, [(1, 4361)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[8]).c = ZLC.toF (⟨0, [(1, 4362)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_2 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 2 σ * (1 - zF 2 σ) = 0 := by
+  have hrow := rowSat σ h 9 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[9]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 2) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[9]).b = ZLC.toF (bLC 2) from by decide +kernel,
+      show (s544.rows[9]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_2 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 2 σ * (1 - zF 2 σ) = 0 := by
+  have hrow := rowSat σ h 10 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[10]).a = ZLC.toF (⟨0, [(1, 4361)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[10]).b = ZLC.toF (bLC 2) from by decide +kernel,
+      show (s544.rows[10]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_3 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 3 σ * wF 3 σ = zF 3 σ := by
+  have hrow := rowSat σ h 12 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[12]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 3) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[12]).b = ZLC.toF (⟨0, [(1, 4366)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[12]).c = ZLC.toF (⟨0, [(1, 4367)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_3 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 3 σ * (1 - zF 3 σ) = 0 := by
+  have hrow := rowSat σ h 13 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[13]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 3) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[13]).b = ZLC.toF (bLC 3) from by decide +kernel,
+      show (s544.rows[13]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_3 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 3 σ * (1 - zF 3 σ) = 0 := by
+  have hrow := rowSat σ h 14 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[14]).a = ZLC.toF (⟨0, [(1, 4366)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[14]).b = ZLC.toF (bLC 3) from by decide +kernel,
+      show (s544.rows[14]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_4 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 4 σ * wF 4 σ = zF 4 σ := by
+  have hrow := rowSat σ h 16 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[16]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 4) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[16]).b = ZLC.toF (⟨0, [(1, 4371)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[16]).c = ZLC.toF (⟨0, [(1, 4372)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_4 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 4 σ * (1 - zF 4 σ) = 0 := by
+  have hrow := rowSat σ h 17 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[17]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 4) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[17]).b = ZLC.toF (bLC 4) from by decide +kernel,
+      show (s544.rows[17]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_4 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 4 σ * (1 - zF 4 σ) = 0 := by
+  have hrow := rowSat σ h 18 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[18]).a = ZLC.toF (⟨0, [(1, 4371)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[18]).b = ZLC.toF (bLC 4) from by decide +kernel,
+      show (s544.rows[18]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_5 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 5 σ * wF 5 σ = zF 5 σ := by
+  have hrow := rowSat σ h 20 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[20]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 5) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[20]).b = ZLC.toF (⟨0, [(1, 4376)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[20]).c = ZLC.toF (⟨0, [(1, 4377)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_5 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 5 σ * (1 - zF 5 σ) = 0 := by
+  have hrow := rowSat σ h 21 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[21]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 5) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[21]).b = ZLC.toF (bLC 5) from by decide +kernel,
+      show (s544.rows[21]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_5 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 5 σ * (1 - zF 5 σ) = 0 := by
+  have hrow := rowSat σ h 22 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[22]).a = ZLC.toF (⟨0, [(1, 4376)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[22]).b = ZLC.toF (bLC 5) from by decide +kernel,
+      show (s544.rows[22]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_6 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 6 σ * wF 6 σ = zF 6 σ := by
+  have hrow := rowSat σ h 24 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[24]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 6) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[24]).b = ZLC.toF (⟨0, [(1, 4381)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[24]).c = ZLC.toF (⟨0, [(1, 4382)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_6 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 6 σ * (1 - zF 6 σ) = 0 := by
+  have hrow := rowSat σ h 25 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[25]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 6) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[25]).b = ZLC.toF (bLC 6) from by decide +kernel,
+      show (s544.rows[25]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_6 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 6 σ * (1 - zF 6 σ) = 0 := by
+  have hrow := rowSat σ h 26 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[26]).a = ZLC.toF (⟨0, [(1, 4381)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[26]).b = ZLC.toF (bLC 6) from by decide +kernel,
+      show (s544.rows[26]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_7 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 7 σ * wF 7 σ = zF 7 σ := by
+  have hrow := rowSat σ h 28 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[28]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 7) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[28]).b = ZLC.toF (⟨0, [(1, 4386)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[28]).c = ZLC.toF (⟨0, [(1, 4387)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_7 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 7 σ * (1 - zF 7 σ) = 0 := by
+  have hrow := rowSat σ h 29 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[29]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 7) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[29]).b = ZLC.toF (bLC 7) from by decide +kernel,
+      show (s544.rows[29]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_7 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 7 σ * (1 - zF 7 σ) = 0 := by
+  have hrow := rowSat σ h 30 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[30]).a = ZLC.toF (⟨0, [(1, 4386)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[30]).b = ZLC.toF (bLC 7) from by decide +kernel,
+      show (s544.rows[30]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_8 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 8 σ * wF 8 σ = zF 8 σ := by
+  have hrow := rowSat σ h 32 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[32]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 8) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[32]).b = ZLC.toF (⟨0, [(1, 4391)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[32]).c = ZLC.toF (⟨0, [(1, 4392)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_8 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 8 σ * (1 - zF 8 σ) = 0 := by
+  have hrow := rowSat σ h 33 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[33]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 8) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[33]).b = ZLC.toF (bLC 8) from by decide +kernel,
+      show (s544.rows[33]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_8 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 8 σ * (1 - zF 8 σ) = 0 := by
+  have hrow := rowSat σ h 34 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[34]).a = ZLC.toF (⟨0, [(1, 4391)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[34]).b = ZLC.toF (bLC 8) from by decide +kernel,
+      show (s544.rows[34]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_9 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 9 σ * wF 9 σ = zF 9 σ := by
+  have hrow := rowSat σ h 36 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[36]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 9) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[36]).b = ZLC.toF (⟨0, [(1, 4396)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[36]).c = ZLC.toF (⟨0, [(1, 4397)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_9 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 9 σ * (1 - zF 9 σ) = 0 := by
+  have hrow := rowSat σ h 37 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[37]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 9) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[37]).b = ZLC.toF (bLC 9) from by decide +kernel,
+      show (s544.rows[37]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_9 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 9 σ * (1 - zF 9 σ) = 0 := by
+  have hrow := rowSat σ h 38 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[38]).a = ZLC.toF (⟨0, [(1, 4396)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[38]).b = ZLC.toF (bLC 9) from by decide +kernel,
+      show (s544.rows[38]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_10 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 10 σ * wF 10 σ = zF 10 σ := by
+  have hrow := rowSat σ h 40 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[40]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 10) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[40]).b = ZLC.toF (⟨0, [(1, 4401)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[40]).c = ZLC.toF (⟨0, [(1, 4402)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_10 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 10 σ * (1 - zF 10 σ) = 0 := by
+  have hrow := rowSat σ h 41 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[41]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 10) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[41]).b = ZLC.toF (bLC 10) from by decide +kernel,
+      show (s544.rows[41]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_10 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 10 σ * (1 - zF 10 σ) = 0 := by
+  have hrow := rowSat σ h 42 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[42]).a = ZLC.toF (⟨0, [(1, 4401)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[42]).b = ZLC.toF (bLC 10) from by decide +kernel,
+      show (s544.rows[42]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_11 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 11 σ * wF 11 σ = zF 11 σ := by
+  have hrow := rowSat σ h 44 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[44]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 11) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[44]).b = ZLC.toF (⟨0, [(1, 4406)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[44]).c = ZLC.toF (⟨0, [(1, 4407)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_11 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 11 σ * (1 - zF 11 σ) = 0 := by
+  have hrow := rowSat σ h 45 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[45]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 11) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[45]).b = ZLC.toF (bLC 11) from by decide +kernel,
+      show (s544.rows[45]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_11 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 11 σ * (1 - zF 11 σ) = 0 := by
+  have hrow := rowSat σ h 46 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[46]).a = ZLC.toF (⟨0, [(1, 4406)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[46]).b = ZLC.toF (bLC 11) from by decide +kernel,
+      show (s544.rows[46]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_12 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 12 σ * wF 12 σ = zF 12 σ := by
+  have hrow := rowSat σ h 48 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[48]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 12) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[48]).b = ZLC.toF (⟨0, [(1, 4411)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[48]).c = ZLC.toF (⟨0, [(1, 4412)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_12 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 12 σ * (1 - zF 12 σ) = 0 := by
+  have hrow := rowSat σ h 49 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[49]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 12) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[49]).b = ZLC.toF (bLC 12) from by decide +kernel,
+      show (s544.rows[49]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_12 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 12 σ * (1 - zF 12 σ) = 0 := by
+  have hrow := rowSat σ h 50 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[50]).a = ZLC.toF (⟨0, [(1, 4411)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[50]).b = ZLC.toF (bLC 12) from by decide +kernel,
+      show (s544.rows[50]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_13 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 13 σ * wF 13 σ = zF 13 σ := by
+  have hrow := rowSat σ h 52 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[52]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 13) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[52]).b = ZLC.toF (⟨0, [(1, 4416)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[52]).c = ZLC.toF (⟨0, [(1, 4417)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_13 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 13 σ * (1 - zF 13 σ) = 0 := by
+  have hrow := rowSat σ h 53 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[53]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 13) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[53]).b = ZLC.toF (bLC 13) from by decide +kernel,
+      show (s544.rows[53]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_13 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 13 σ * (1 - zF 13 σ) = 0 := by
+  have hrow := rowSat σ h 54 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[54]).a = ZLC.toF (⟨0, [(1, 4416)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[54]).b = ZLC.toF (bLC 13) from by decide +kernel,
+      show (s544.rows[54]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_14 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 14 σ * wF 14 σ = zF 14 σ := by
+  have hrow := rowSat σ h 56 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[56]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 14) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[56]).b = ZLC.toF (⟨0, [(1, 4421)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[56]).c = ZLC.toF (⟨0, [(1, 4422)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_14 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 14 σ * (1 - zF 14 σ) = 0 := by
+  have hrow := rowSat σ h 57 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[57]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 14) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[57]).b = ZLC.toF (bLC 14) from by decide +kernel,
+      show (s544.rows[57]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_14 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 14 σ * (1 - zF 14 σ) = 0 := by
+  have hrow := rowSat σ h 58 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[58]).a = ZLC.toF (⟨0, [(1, 4421)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[58]).b = ZLC.toF (bLC 14) from by decide +kernel,
+      show (s544.rows[58]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_15 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 15 σ * wF 15 σ = zF 15 σ := by
+  have hrow := rowSat σ h 60 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[60]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 15) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[60]).b = ZLC.toF (⟨0, [(1, 4426)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[60]).c = ZLC.toF (⟨0, [(1, 4427)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_15 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 15 σ * (1 - zF 15 σ) = 0 := by
+  have hrow := rowSat σ h 61 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[61]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 15) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[61]).b = ZLC.toF (bLC 15) from by decide +kernel,
+      show (s544.rows[61]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_15 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 15 σ * (1 - zF 15 σ) = 0 := by
+  have hrow := rowSat σ h 62 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[62]).a = ZLC.toF (⟨0, [(1, 4426)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[62]).b = ZLC.toF (bLC 15) from by decide +kernel,
+      show (s544.rows[62]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_16 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 16 σ * wF 16 σ = zF 16 σ := by
+  have hrow := rowSat σ h 64 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[64]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 16) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[64]).b = ZLC.toF (⟨0, [(1, 4431)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[64]).c = ZLC.toF (⟨0, [(1, 4432)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_16 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 16 σ * (1 - zF 16 σ) = 0 := by
+  have hrow := rowSat σ h 65 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[65]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 16) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[65]).b = ZLC.toF (bLC 16) from by decide +kernel,
+      show (s544.rows[65]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_16 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 16 σ * (1 - zF 16 σ) = 0 := by
+  have hrow := rowSat σ h 66 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[66]).a = ZLC.toF (⟨0, [(1, 4431)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[66]).b = ZLC.toF (bLC 16) from by decide +kernel,
+      show (s544.rows[66]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_17 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 17 σ * wF 17 σ = zF 17 σ := by
+  have hrow := rowSat σ h 68 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[68]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 17) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[68]).b = ZLC.toF (⟨0, [(1, 4436)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[68]).c = ZLC.toF (⟨0, [(1, 4437)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_17 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 17 σ * (1 - zF 17 σ) = 0 := by
+  have hrow := rowSat σ h 69 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[69]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 17) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[69]).b = ZLC.toF (bLC 17) from by decide +kernel,
+      show (s544.rows[69]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_17 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 17 σ * (1 - zF 17 σ) = 0 := by
+  have hrow := rowSat σ h 70 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[70]).a = ZLC.toF (⟨0, [(1, 4436)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[70]).b = ZLC.toF (bLC 17) from by decide +kernel,
+      show (s544.rows[70]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_18 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 18 σ * wF 18 σ = zF 18 σ := by
+  have hrow := rowSat σ h 72 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[72]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 18) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[72]).b = ZLC.toF (⟨0, [(1, 4441)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[72]).c = ZLC.toF (⟨0, [(1, 4442)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_18 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 18 σ * (1 - zF 18 σ) = 0 := by
+  have hrow := rowSat σ h 73 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[73]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 18) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[73]).b = ZLC.toF (bLC 18) from by decide +kernel,
+      show (s544.rows[73]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_18 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 18 σ * (1 - zF 18 σ) = 0 := by
+  have hrow := rowSat σ h 74 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[74]).a = ZLC.toF (⟨0, [(1, 4441)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[74]).b = ZLC.toF (bLC 18) from by decide +kernel,
+      show (s544.rows[74]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_19 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 19 σ * wF 19 σ = zF 19 σ := by
+  have hrow := rowSat σ h 76 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[76]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 19) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[76]).b = ZLC.toF (⟨0, [(1, 4446)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[76]).c = ZLC.toF (⟨0, [(1, 4447)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_19 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 19 σ * (1 - zF 19 σ) = 0 := by
+  have hrow := rowSat σ h 77 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[77]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 19) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[77]).b = ZLC.toF (bLC 19) from by decide +kernel,
+      show (s544.rows[77]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_19 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 19 σ * (1 - zF 19 σ) = 0 := by
+  have hrow := rowSat σ h 78 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[78]).a = ZLC.toF (⟨0, [(1, 4446)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[78]).b = ZLC.toF (bLC 19) from by decide +kernel,
+      show (s544.rows[78]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_20 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 20 σ * wF 20 σ = zF 20 σ := by
+  have hrow := rowSat σ h 80 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[80]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 20) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[80]).b = ZLC.toF (⟨0, [(1, 4451)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[80]).c = ZLC.toF (⟨0, [(1, 4452)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_20 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 20 σ * (1 - zF 20 σ) = 0 := by
+  have hrow := rowSat σ h 81 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[81]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 20) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[81]).b = ZLC.toF (bLC 20) from by decide +kernel,
+      show (s544.rows[81]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_20 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 20 σ * (1 - zF 20 σ) = 0 := by
+  have hrow := rowSat σ h 82 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[82]).a = ZLC.toF (⟨0, [(1, 4451)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[82]).b = ZLC.toF (bLC 20) from by decide +kernel,
+      show (s544.rows[82]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_21 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 21 σ * wF 21 σ = zF 21 σ := by
+  have hrow := rowSat σ h 84 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[84]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 21) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[84]).b = ZLC.toF (⟨0, [(1, 4456)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[84]).c = ZLC.toF (⟨0, [(1, 4457)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_21 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 21 σ * (1 - zF 21 σ) = 0 := by
+  have hrow := rowSat σ h 85 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[85]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 21) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[85]).b = ZLC.toF (bLC 21) from by decide +kernel,
+      show (s544.rows[85]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_21 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 21 σ * (1 - zF 21 σ) = 0 := by
+  have hrow := rowSat σ h 86 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[86]).a = ZLC.toF (⟨0, [(1, 4456)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[86]).b = ZLC.toF (bLC 21) from by decide +kernel,
+      show (s544.rows[86]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_22 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 22 σ * wF 22 σ = zF 22 σ := by
+  have hrow := rowSat σ h 88 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[88]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 22) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[88]).b = ZLC.toF (⟨0, [(1, 4461)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[88]).c = ZLC.toF (⟨0, [(1, 4462)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_22 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 22 σ * (1 - zF 22 σ) = 0 := by
+  have hrow := rowSat σ h 89 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[89]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 22) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[89]).b = ZLC.toF (bLC 22) from by decide +kernel,
+      show (s544.rows[89]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_22 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 22 σ * (1 - zF 22 σ) = 0 := by
+  have hrow := rowSat σ h 90 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[90]).a = ZLC.toF (⟨0, [(1, 4461)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[90]).b = ZLC.toF (bLC 22) from by decide +kernel,
+      show (s544.rows[90]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_23 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 23 σ * wF 23 σ = zF 23 σ := by
+  have hrow := rowSat σ h 92 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[92]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 23) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[92]).b = ZLC.toF (⟨0, [(1, 4466)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[92]).c = ZLC.toF (⟨0, [(1, 4467)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_23 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 23 σ * (1 - zF 23 σ) = 0 := by
+  have hrow := rowSat σ h 93 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[93]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 23) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[93]).b = ZLC.toF (bLC 23) from by decide +kernel,
+      show (s544.rows[93]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_23 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 23 σ * (1 - zF 23 σ) = 0 := by
+  have hrow := rowSat σ h 94 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[94]).a = ZLC.toF (⟨0, [(1, 4466)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[94]).b = ZLC.toF (bLC 23) from by decide +kernel,
+      show (s544.rows[94]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E1_24 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 24 σ * wF 24 σ = zF 24 σ := by
+  have hrow := rowSat σ h 96 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[96]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 24) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[96]).b = ZLC.toF (⟨0, [(1, 4471)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[96]).c = ZLC.toF (⟨0, [(1, 4472)]⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, wF, zF, zvar] using hrow
+
+theorem E2_24 (σ : ℕ → F) (h : Sat circuit σ) :
+    nF 24 σ * (1 - zF 24 σ) = 0 := by
+  have hrow := rowSat σ h 97 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[97]).a = ZLC.toF ((callAt 548).plugs.getD (25 + 24) (LC.cst 0)) from by decide +kernel,
+      show (s544.rows[97]).b = ZLC.toF (bLC 24) from by decide +kernel,
+      show (s544.rows[97]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, nF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem E3_24 (σ : ℕ → F) (h : Sat circuit σ) :
+    wF 24 σ * (1 - zF 24 σ) = 0 := by
+  have hrow := rowSat σ h 98 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[98]).a = ZLC.toF (⟨0, [(1, 4471)]⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[98]).b = ZLC.toF (bLC 24) from by decide +kernel,
+      show (s544.rows[98]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, wF, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_0 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 1)).eval σ * (1 - zF 1 σ) = (ZLC.toF (borrow 2)).eval σ := by
+  have hrow := rowSat σ h 7 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[7]).a = ZLC.toF (borrow 1) from by decide +kernel,
+      show (s544.rows[7]).b = ZLC.toF (bLC 1) from by decide +kernel,
+      show (s544.rows[7]).c = ZLC.toF (borrow 2) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_1 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 2)).eval σ * (1 - zF 2 σ) = (ZLC.toF (borrow 3)).eval σ := by
+  have hrow := rowSat σ h 11 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[11]).a = ZLC.toF (borrow 2) from by decide +kernel,
+      show (s544.rows[11]).b = ZLC.toF (bLC 2) from by decide +kernel,
+      show (s544.rows[11]).c = ZLC.toF (borrow 3) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_2 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 3)).eval σ * (1 - zF 3 σ) = (ZLC.toF (borrow 4)).eval σ := by
+  have hrow := rowSat σ h 15 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[15]).a = ZLC.toF (borrow 3) from by decide +kernel,
+      show (s544.rows[15]).b = ZLC.toF (bLC 3) from by decide +kernel,
+      show (s544.rows[15]).c = ZLC.toF (borrow 4) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_3 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 4)).eval σ * (1 - zF 4 σ) = (ZLC.toF (borrow 5)).eval σ := by
+  have hrow := rowSat σ h 19 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[19]).a = ZLC.toF (borrow 4) from by decide +kernel,
+      show (s544.rows[19]).b = ZLC.toF (bLC 4) from by decide +kernel,
+      show (s544.rows[19]).c = ZLC.toF (borrow 5) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_4 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 5)).eval σ * (1 - zF 5 σ) = (ZLC.toF (borrow 6)).eval σ := by
+  have hrow := rowSat σ h 23 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[23]).a = ZLC.toF (borrow 5) from by decide +kernel,
+      show (s544.rows[23]).b = ZLC.toF (bLC 5) from by decide +kernel,
+      show (s544.rows[23]).c = ZLC.toF (borrow 6) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_5 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 6)).eval σ * (1 - zF 6 σ) = (ZLC.toF (borrow 7)).eval σ := by
+  have hrow := rowSat σ h 27 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[27]).a = ZLC.toF (borrow 6) from by decide +kernel,
+      show (s544.rows[27]).b = ZLC.toF (bLC 6) from by decide +kernel,
+      show (s544.rows[27]).c = ZLC.toF (borrow 7) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_6 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 7)).eval σ * (1 - zF 7 σ) = (ZLC.toF (borrow 8)).eval σ := by
+  have hrow := rowSat σ h 31 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[31]).a = ZLC.toF (borrow 7) from by decide +kernel,
+      show (s544.rows[31]).b = ZLC.toF (bLC 7) from by decide +kernel,
+      show (s544.rows[31]).c = ZLC.toF (borrow 8) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_7 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 8)).eval σ * (1 - zF 8 σ) = (ZLC.toF (borrow 9)).eval σ := by
+  have hrow := rowSat σ h 35 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[35]).a = ZLC.toF (borrow 8) from by decide +kernel,
+      show (s544.rows[35]).b = ZLC.toF (bLC 8) from by decide +kernel,
+      show (s544.rows[35]).c = ZLC.toF (borrow 9) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_8 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 9)).eval σ * (1 - zF 9 σ) = (ZLC.toF (borrow 10)).eval σ := by
+  have hrow := rowSat σ h 39 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[39]).a = ZLC.toF (borrow 9) from by decide +kernel,
+      show (s544.rows[39]).b = ZLC.toF (bLC 9) from by decide +kernel,
+      show (s544.rows[39]).c = ZLC.toF (borrow 10) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_9 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 10)).eval σ * (1 - zF 10 σ) = (ZLC.toF (borrow 11)).eval σ := by
+  have hrow := rowSat σ h 43 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[43]).a = ZLC.toF (borrow 10) from by decide +kernel,
+      show (s544.rows[43]).b = ZLC.toF (bLC 10) from by decide +kernel,
+      show (s544.rows[43]).c = ZLC.toF (borrow 11) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_10 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 11)).eval σ * (1 - zF 11 σ) = (ZLC.toF (borrow 12)).eval σ := by
+  have hrow := rowSat σ h 47 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[47]).a = ZLC.toF (borrow 11) from by decide +kernel,
+      show (s544.rows[47]).b = ZLC.toF (bLC 11) from by decide +kernel,
+      show (s544.rows[47]).c = ZLC.toF (borrow 12) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_11 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 12)).eval σ * (1 - zF 12 σ) = (ZLC.toF (borrow 13)).eval σ := by
+  have hrow := rowSat σ h 51 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[51]).a = ZLC.toF (borrow 12) from by decide +kernel,
+      show (s544.rows[51]).b = ZLC.toF (bLC 12) from by decide +kernel,
+      show (s544.rows[51]).c = ZLC.toF (borrow 13) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_12 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 13)).eval σ * (1 - zF 13 σ) = (ZLC.toF (borrow 14)).eval σ := by
+  have hrow := rowSat σ h 55 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[55]).a = ZLC.toF (borrow 13) from by decide +kernel,
+      show (s544.rows[55]).b = ZLC.toF (bLC 13) from by decide +kernel,
+      show (s544.rows[55]).c = ZLC.toF (borrow 14) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_13 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 14)).eval σ * (1 - zF 14 σ) = (ZLC.toF (borrow 15)).eval σ := by
+  have hrow := rowSat σ h 59 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[59]).a = ZLC.toF (borrow 14) from by decide +kernel,
+      show (s544.rows[59]).b = ZLC.toF (bLC 14) from by decide +kernel,
+      show (s544.rows[59]).c = ZLC.toF (borrow 15) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_14 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 15)).eval σ * (1 - zF 15 σ) = (ZLC.toF (borrow 16)).eval σ := by
+  have hrow := rowSat σ h 63 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[63]).a = ZLC.toF (borrow 15) from by decide +kernel,
+      show (s544.rows[63]).b = ZLC.toF (bLC 15) from by decide +kernel,
+      show (s544.rows[63]).c = ZLC.toF (borrow 16) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_15 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 16)).eval σ * (1 - zF 16 σ) = (ZLC.toF (borrow 17)).eval σ := by
+  have hrow := rowSat σ h 67 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[67]).a = ZLC.toF (borrow 16) from by decide +kernel,
+      show (s544.rows[67]).b = ZLC.toF (bLC 16) from by decide +kernel,
+      show (s544.rows[67]).c = ZLC.toF (borrow 17) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_16 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 17)).eval σ * (1 - zF 17 σ) = (ZLC.toF (borrow 18)).eval σ := by
+  have hrow := rowSat σ h 71 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[71]).a = ZLC.toF (borrow 17) from by decide +kernel,
+      show (s544.rows[71]).b = ZLC.toF (bLC 17) from by decide +kernel,
+      show (s544.rows[71]).c = ZLC.toF (borrow 18) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_17 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 18)).eval σ * (1 - zF 18 σ) = (ZLC.toF (borrow 19)).eval σ := by
+  have hrow := rowSat σ h 75 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[75]).a = ZLC.toF (borrow 18) from by decide +kernel,
+      show (s544.rows[75]).b = ZLC.toF (bLC 18) from by decide +kernel,
+      show (s544.rows[75]).c = ZLC.toF (borrow 19) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_18 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 19)).eval σ * (1 - zF 19 σ) = (ZLC.toF (borrow 20)).eval σ := by
+  have hrow := rowSat σ h 79 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[79]).a = ZLC.toF (borrow 19) from by decide +kernel,
+      show (s544.rows[79]).b = ZLC.toF (bLC 19) from by decide +kernel,
+      show (s544.rows[79]).c = ZLC.toF (borrow 20) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_19 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 20)).eval σ * (1 - zF 20 σ) = (ZLC.toF (borrow 21)).eval σ := by
+  have hrow := rowSat σ h 83 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[83]).a = ZLC.toF (borrow 20) from by decide +kernel,
+      show (s544.rows[83]).b = ZLC.toF (bLC 20) from by decide +kernel,
+      show (s544.rows[83]).c = ZLC.toF (borrow 21) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_20 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 21)).eval σ * (1 - zF 21 σ) = (ZLC.toF (borrow 22)).eval σ := by
+  have hrow := rowSat σ h 87 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[87]).a = ZLC.toF (borrow 21) from by decide +kernel,
+      show (s544.rows[87]).b = ZLC.toF (bLC 21) from by decide +kernel,
+      show (s544.rows[87]).c = ZLC.toF (borrow 22) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_21 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 22)).eval σ * (1 - zF 22 σ) = (ZLC.toF (borrow 23)).eval σ := by
+  have hrow := rowSat σ h 91 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[91]).a = ZLC.toF (borrow 22) from by decide +kernel,
+      show (s544.rows[91]).b = ZLC.toF (bLC 22) from by decide +kernel,
+      show (s544.rows[91]).c = ZLC.toF (borrow 23) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_22 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 23)).eval σ * (1 - zF 23 σ) = (ZLC.toF (borrow 24)).eval σ := by
+  have hrow := rowSat σ h 95 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[95]).a = ZLC.toF (borrow 23) from by decide +kernel,
+      show (s544.rows[95]).b = ZLC.toF (bLC 23) from by decide +kernel,
+      show (s544.rows[95]).c = ZLC.toF (borrow 24) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem P_23 (σ : ℕ → F) (h : Sat circuit σ) :
+    (ZLC.toF (borrow 24)).eval σ * (1 - zF 24 σ) = (ZLC.toF (borrow 25)).eval σ := by
+  have hrow := rowSat σ h 99 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[99]).a = ZLC.toF (borrow 24) from by decide +kernel,
+      show (s544.rows[99]).b = ZLC.toF (bLC 24) from by decide +kernel,
+      show (s544.rows[99]).c = ZLC.toF (borrow 25) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval, zF, bLC, zvar, sub_eq_add_neg] using hrow
+
+theorem T (σ : ℕ → F) (h : Sat circuit σ) : (ZLC.toF (borrow 25)).eval σ = 0 := by
+  have hrow := rowSat σ h 100 (by decide)
+  rw [Xark.R1cs.Row.Sat] at hrow
+  rw [show (s544.rows[100]).a = ZLC.toF (borrow 25) from by decide +kernel,
+      show (s544.rows[100]).b = ZLC.toF (⟨1, []⟩ : ZLC) from by decide +kernel,
+      show (s544.rows[100]).c = ZLC.toF (⟨0, []⟩ : ZLC) from by decide +kernel] at hrow
+  simpa [ZLC.toF, Xark.R1cs.LC.eval] using hrow
+
 end Xark.Circuits.Rsa2048
