@@ -482,7 +482,18 @@ Remaining: the 0/1 induction (`b_i = 1 − z_i` is `is_zero(n_i)`: `n_i = 0` ⇒
 `n_i ≠ 0` ⇒ `b_i = 0`), the value formula
 `(outF i).val = (nF i).val − (borrow_i).val + 2^82·(borrow_{i+1}).val` (each `out_i` in
 `[0,W)`), the integer telescoping to `val (limb (callAt 545) σ 25) = chainN − 1`,
-and the RequireLt Spec application. The Rust's
+and the RequireLt Spec application.
+
+0/1 induction done (committed `74704698`): `bF i σ = 1 − zF i σ`, `borrowF i σ =
+(ZLC.toF (borrow i)).eval σ`, `bBit_0..24` (`bF i = 0 ∨ = 1`; `n_i = 0` ⇒ z=0 ⇒ b=1;
+`n_i ≠ 0` ⇒ `mul_eq_zero` from `E2` ⇒ b=0), `borrowBit_0..25` (`borrow 0 = 1`,
+`borrow 1 = b_0`, `borrow_{i+2} = borrow_{i+1}·b_{i+1}` from `P_i`, product of bits).
+Remaining: `outVal_i` (from `hout_i`'s eval: `outF i = nF i − borrowF i + (W:F)·borrowF
+(i+1)`; the integer `I = n_i.val − borrow_i.val + 2^82·borrow_{i+1}.val` is in `[0,W)`
+by cases on `n_i = 0`/`borrow_i` with the recurrence, so `(outF i).val = I`), then the
+telescoping `Σ outF_i·W^i = Σ nF_i·W^i − borrow_0 + W^25·borrow_25 = chainN − 1`, then
+`RequireLt25x82.soundness` (first-25 window, `Assumptions` from `sigBound`) for
+`sig ≤ chainN − 1`. The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
