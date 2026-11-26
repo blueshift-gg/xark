@@ -401,8 +401,9 @@ integers (a non-divisible numerator's quotient is at least `Fr/2^164 > 2^89`), s
 divisibility needs no row of its own. `Formal/GroupedColumns.lean` proves the
 telescope: 24 carry rows plus the top row `d 48 + k 23 − BI = 0` imply the column
 identity `Σ_{c<49} d c · 2^(82c) = 0`, over the integers, with no dependence on
-the Rust row order, and reads the columns out of the limbs (`val a² = val q·val m
-+ val r`, `square_eq`). `Formal/GroupedCarry.lean` closes the field→integer step:
+the Rust row order, and reads the columns out of the limbs (`val a · val b =
+val q · val m + val r`, `mul_eq`; `square_eq`/`fused_final` are its square and
+encoded-message cases). `Formal/GroupedCarry.lean` closes the field→integer step:
 the template's output combination is the numerator times `2^-164` (`outputs_eq`,
 `decide +kernel` against the export), and when the numerator is canonical
 (`0 ≤ num < r`) and the carry below `2^89`, `num = 2^164 · k` holds over the
