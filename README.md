@@ -37,8 +37,8 @@ fn only_a_square_root_proves() {
 - **Typed clients.** `xark client` turns your circuit's inputs into a typed
   TypeScript client that proves and verifies in Node or the browser.
 - **The hard gadgets are done.** Poseidon, Poseidon2, SHA-256, Keccak, BLAKE2s,
-  BLAKE3, Merkle proofs, AES, and ECDSA (secp256k1, P-256) and Ed25519 signature
-  verification.
+  BLAKE3, Merkle proofs, AES, ECDSA (secp256k1, P-256), Ed25519, and RSA-2048
+  (PKCS#1 v1.5 / SHA-256) signature verification.
 
 ## Quickstart
 
@@ -187,6 +187,7 @@ xark-poseidon2 = "0.5"
 | `xark-aes` | AES-128/256 block cipher, CTR and GCM |
 | `xark-secp256k1`, `xark-secp256r1` | ECDSA signature verification on secp256k1 and P-256 |
 | `xark-ed25519` | Ed25519 (EdDSA) signature verification |
+| `xark-rsa` | RSA-2048 PKCS#1 v1.5 / SHA-256 signature verification (byte and whole-number inputs) |
 | `xark-grumpkin` | The Grumpkin curve, for recursion and folding, and Schnorr signatures over it |
 | `xark-bits`, `xark-bignum`, `xark-curve`, `xark-hash` | Building blocks for writing your own gadgets |
 

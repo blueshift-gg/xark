@@ -32,6 +32,25 @@ fn load() -> primitive::PrimitiveProgram {
     p
 }
 
+fn load_typed() -> primitive::PrimitiveProgram {
+    let src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rsa2048_typed.rs");
+    let c = xark_test_harness::compile_file(&src, "rsa2048_typed", "bn254");
+    assert!(
+        c.status_success,
+        "compiling rsa2048_typed fixture failed: {}",
+        c.stderr
+    );
+    let gates = c.mul_gate_count();
+    let p = c.program();
+    println!(
+        "rsa2048_typed: {} primitive constraints, {} multiplication gates",
+        p.constraints.len(),
+        gates
+    );
+    p
+}
+
 fn load_bytes() -> primitive::PrimitiveProgram {
     let src =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rsa2048_bytes.rs");
@@ -59,7 +78,35 @@ fn sig_bytes() -> [u8; 256] {
     hex::decode(SIG_HEX).unwrap().try_into().unwrap()
 }
 
+fn inputs_typed(p: &primitive::PrimitiveProgram, digest: [u8; 32]) -> BTreeMap<u32, String> {
+    // The typed `U2048` inputs are lowered to 17 fresh limb variables each;
+    // the frontend gives them numeric names. The fixture's input order is
+    // n[0..17], sig[0..17], digest[0..32].
+    let ids: Vec<u32> = p.vars.iter().take(66).map(|v| v.id).collect();
+    let n = BigUint::parse_bytes(N_HEX.as_bytes(), 16).unwrap();
+    let s = BigUint::parse_bytes(SIG_HEX.as_bytes(), 16).unwrap();
+    let mut out = BTreeMap::new();
+    for (i, l) in limbs_121(&n).into_iter().enumerate() {
+        out.insert(ids[i], l);
+    }
+    for (i, l) in limbs_121(&s).into_iter().enumerate() {
+        out.insert(ids[17 + i], l);
+    }
+    for (i, b) in digest.iter().enumerate() {
+        out.insert(ids[34 + i], b.to_string());
+    }
+    out
+}
+
 fn inputs_bytes(p: &primitive::PrimitiveProgram, digest: [u8; 32]) -> BTreeMap<u32, String> {
+    inputs_bytes_with_n(p, n_bytes(), digest)
+}
+
+fn inputs_bytes_with_n(
+    p: &primitive::PrimitiveProgram,
+    n: [u8; 256],
+    digest: [u8; 32],
+) -> BTreeMap<u32, String> {
     let id = |n: &str| {
         p.vars
             .iter()
@@ -68,7 +115,7 @@ fn inputs_bytes(p: &primitive::PrimitiveProgram, digest: [u8; 32]) -> BTreeMap<u
             .id
     };
     let mut out = BTreeMap::new();
-    for (i, b) in n_bytes().iter().enumerate() {
+    for (i, b) in n.iter().enumerate() {
         out.insert(id(&format!("n[{i}]")), b.to_string());
     }
     for (i, b) in sig_bytes().iter().enumerate() {
@@ -146,9 +193,38 @@ fn accepts_the_generated_rsa_signature_bytes() {
 }
 
 #[test]
+fn accepts_the_generated_rsa_signature_typed() {
+    let p = load_typed();
+    let assign = solver::solve_and_check(&p, &inputs_typed(&p, digest()))
+        .unwrap_or_else(|e| panic!("honest typed RSA signature must solve: {e:?}"));
+    assert!(solver::analyze_underconstrained(&p, &assign).is_empty());
+}
+
+#[test]
+fn rejects_a_tampered_digest_typed() {
+    let p = load_typed();
+    let mut d = digest();
+    d[0] ^= 1;
+    assert!(solver::solve_and_check(&p, &inputs_typed(&p, d)).is_err());
+}
+
+#[test]
 fn rejects_a_tampered_digest_bytes() {
     let p = load_bytes();
     let mut d = digest();
     d[0] ^= 1;
     assert!(solver::solve_and_check(&p, &inputs_bytes(&p, d)).is_err());
+}
+
+#[test]
+fn byte_path_n_top_bit_is_rejected_at_the_top_check() {
+    let p = load_bytes();
+    let mut n = n_bytes();
+    // Clear the 2048-bit modulus's top bit; the byte path must fail at its
+    // `n_top` equality, not later at the EM pin.
+    n[0] &= 0x7f;
+    let e = solver::solve_and_check(&p, &inputs_bytes_with_n(&p, n, digest()))
+        .expect_err("a 2047-bit byte modulus must be rejected");
+    let msg = format!("{e:?}");
+    assert!(msg.contains("4352"), "expected n_top row 4352 in {msg}");
 }

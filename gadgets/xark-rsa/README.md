@@ -55,13 +55,13 @@ xark_rsa::verify_sha256_words(n, sig, digest);
 | Item | What it does |
 |---|---|
 | `verify_sha256_bytes(n, sig, digest)` | Verify from 256-byte big-endian `n` and `sig` and a 32-byte digest; packs the octets to the 25 x 82 internal limbs. This is the zkGolf-compatible public input. |
-| `verify_sha256(n, sig, digest)` | Verify from typed 17 x 121 `U2048` inputs, range-checked by their input reader. |
-| `verify_sha256_words(n, sig, words)` | The same, from the eight `[[Field; 32]; 8]` SHA-256 output words; each word is boolean-checked. |
+| `verify_sha256(n, sig, digest)` | Verify from typed 17 x 121 `U2048` inputs; the entry point range-checks the limbs (the reader’s bits are reused). |
+| `verify_sha256_words(n, sig, words)` | The same, from the eight `[[Field; 32]; 8]` SHA-256 output words; each word is boolean-checked and the limbs are range-checked. |
 | `verify_sha256_limbs(n, sig, digest)` | The same from raw `[Field; 17]` arrays; it range-checks them first. |
 | `sha256_em(digest)` | The expected EMSA-PKCS1-v1_5 encoded message as 17 limbs. |
 | `sha256_em_bits(bits)` | The same from 256 digest bits. |
 | `digest_bits(digest)` | The 256 bits of a 32-byte big-endian digest. |
-| `mod_exp_65537(base, m, m_minus_1)` | `base^65537 mod m` by left-to-right square-and-multiply. |
+| `mod_exp_65537(base, m, m_minus_1)` | Standalone 17×121 `base^65537 mod m` helper; the verifier uses the 25×82 chain, not this path. |
 | `U2048` | `Bignum<17, 121>`, the whole-number input view. |
 
 All paths enforce that `n` is exactly 2048 bits (`2^2047 <= n < 2^2048`), that
@@ -92,8 +92,9 @@ digest can be private too.
   verifies in **125,856 constraints** in the `xark build`; the harness counts
   **127,089 primitive constraints** and **124,995 multiplication gates**. The
   baseline before the golf was 157,451 / 155,153 (a 20.1% reduction).
-* The 17 x 121 whole-number API still works and shares the 25 x 82 arithmetic;
-  its harness is **137,051 primitive constraints**.
+* The raw-limb `verify_sha256_limbs` is **137,051 primitive constraints**; the
+  typed `verify_sha256` adds its own limb range checks, so a `Bignum::new`
+  caller is safe, and its harness is **141,199**.
 * The internal chain is 25 x 82-bit limbs with lazy reduction (an intermediate
   is proved `< 2^2048`, not `< n`; the final fused step pins the canonical
   target), paired-column carries, and a terminal multiply whose remainder is

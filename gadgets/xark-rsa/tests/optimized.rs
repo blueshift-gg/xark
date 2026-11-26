@@ -1,6 +1,6 @@
 //! Differential and edge-case tests for the optimized RSA-2048 proving path.
 //!
-//! The KAT in `real_certificate.rs` proves one real certificate. These tests
+//! The KAT in `known_answer.rs` proves one generated RSA vector. These tests
 //! exercise the relation itself: generated keys and digests, the edge
 //! signatures, an even modulus (the relation is mathematical; key validity is
 //! the caller's), the SHA-256-word entry point, and a host `pow` differential
@@ -141,6 +141,18 @@ fn rejects(p: &primitive::PrimitiveProgram, inputs: &BTreeMap<u32, String>) {
     );
 }
 
+/// Reject at a specific constraint row. This keeps the top-bit and `sig < n`
+/// checks regression-protected: without the check the input usually still
+/// fails later at the EM equality, so a bare `is_err` would pass.
+fn rejects_at(p: &primitive::PrimitiveProgram, inputs: &BTreeMap<u32, String>, row: u32) {
+    let e = solver::solve_and_check(p, inputs).expect_err("input must be rejected");
+    let msg = format!("{e:?}");
+    assert!(
+        msg.contains(&row.to_string()),
+        "expected row {row} in {msg}"
+    );
+}
+
 #[test]
 fn accepts_generated_signatures() {
     let p = load("rsa2048");
@@ -197,9 +209,22 @@ fn even_modulus_relation_is_accepted() {
 fn n_must_have_exactly_2048_bits() {
     let p = load("rsa2048");
     let dg = [0u8; 32];
-    // 2047-bit modulus: the top-bit check must reject it.
+    // 2047-bit modulus: the top-bit check, not the later EM check, must reject it.
     let n = (BigUint::from(1u8) << 2046u32) + 1u8;
-    rejects(&p, &rsa_inputs(&p, &n, &BigUint::from(0u8), &dg));
+    rejects_at(&p, &rsa_inputs(&p, &n, &BigUint::from(0u8), &dg), 14216);
+    // 2049-bit modulus: `convert_wide` rejects the non-zero top carry.
+    let n = (BigUint::from(1u8) << 2048u32) + (BigUint::from(1u8) << 2047u32) + 1u8;
+    rejects_at(&p, &rsa_inputs(&p, &n, &BigUint::from(0u8), &dg), 9309);
+}
+
+#[test]
+fn sig_equal_or_above_n_is_rejected_at_require_lt() {
+    let p = load("rsa2048");
+    let (n, _) = key(KEY1_N, KEY1_D);
+    let dg = [0u8; 32];
+    // Without `require_lt`, `sig = n` still fails at the EM pin; assert the
+    // rejection is the comparison, not the EM.
+    rejects_at(&p, &rsa_inputs(&p, &n, &n, &dg), 14366);
 }
 
 #[test]

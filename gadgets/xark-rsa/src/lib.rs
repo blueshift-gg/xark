@@ -1,14 +1,15 @@
 //! RSASSA-PKCS1-v1_5 signature verification for xark circuits.
 //!
-//! This is the 2048-bit instance: `n` and the signature are 17 little-endian
-//! 121-bit limbs (2057 bits, enough for a 2048-bit modulus whose top limb is
-//! 112 bits), the public exponent is fixed at 65537, and the hash is SHA-256.
-//! The layout starts from the zkGolf RSA reference: left-to-right
-//! square-and-multiply, `sig < n`, and a comparison with the
-//! EMSA-PKCS1-v1_5 encoded message (fused into the terminal multiply here).
+//! This is the 2048-bit instance, with public exponent 65537 and SHA-256.
+//! The primary public input is the zkGolf-style big-endian octet string:
+//! a 256-byte modulus, a 256-byte signature, and a 32-byte digest. The circuit
+//! packs the octets to 25 x 82-bit internal limbs, then does left-to-right
+//! square-and-multiply, `sig < n`, and the terminal compare with the
+//! EMSA-PKCS1-v1_5 encoded message. A 17 x 121 whole-number input view remains
+//! for hosts that have already decoded the integers.
 //!
-//! Host-side decoding does the JSON, Base64, and DER work. The circuit takes the
-//! modulus, the signature, and the 32-byte digest only.
+//! The host decodes the certificate or message and passes the modulus, the
+//! signature, and the 32-byte digest only.
 //!
 //! ```ignore
 //! use xark_rsa::prelude::*;
@@ -34,7 +35,8 @@ pub const BITS: usize = 121;
 /// A 2048-bit RSA integer in the circuit.
 pub type U2048 = Bignum<LIMBS, BITS>;
 
-/// EMSA-PKCS1-v1_5 encoded message for SHA-256, with the digest set to zero.
+/// EMSA-PKCS1-v1_5 encoded message for SHA-256 (RFC 8017 §9.2), with the digest
+/// set to zero.
 ///
 /// The encoded message is 256 bytes:
 /// `00 01 FF…FF 00 || SHA-256 DigestInfo || digest`, with 202 `FF` bytes.
@@ -466,8 +468,9 @@ fn fused_final(
 
 /// `base^65537 mod m`, left-to-right square-and-multiply.
 ///
-/// `m_minus_1` must be exactly `m - 1` (from [`minus_one`]); `base` and `m` must
-/// have limbs below `2^BITS`.
+/// Standalone 17 x 121 helper: the verifier uses the 25 x 82 chain
+/// ([`verify_wide`]) instead. `m_minus_1` must be exactly `m - 1` (from
+/// [`minus_one`]); `base` and `m` must have limbs below `2^BITS`.
 pub fn mod_exp_65537(
     base: [Field; LIMBS],
     m: [Field; LIMBS],
@@ -505,6 +508,12 @@ pub fn verify_sha256_limbs(n: [Field; LIMBS], sig: [Field; LIMBS], digest: [Fiel
 /// `digest`. It does not validate the RSA key structure (oddness/semiprimality);
 /// that is the caller's key allowlist.
 pub fn verify_sha256(n: U2048, sig: U2048, digest: [Field; 32]) {
+    // `Bignum::new` is the unchecked constructor, so a typed `U2048` is not
+    // enough on its own: enforce the limb ranges here as well. The input
+    // reader's `range_check_limbs` bits are reused by the frontend when this
+    // is called on `Public<U2048>` / `Private<U2048>`.
+    n.range_check();
+    sig.range_check();
     verify_checked(n, sig, digest)
 }
 
@@ -570,6 +579,9 @@ fn verify_checked(n: U2048, sig: U2048, digest: [Field; 32]) {
 /// xark_rsa::verify_sha256_words(n, sig, digest);
 /// ```
 pub fn verify_sha256_words(n: U2048, sig: U2048, digest: [[Field; 32]; 8]) {
+    // Same typed-constructor caveat as `verify_sha256`.
+    n.range_check();
+    sig.range_check();
     // The digest integer's bit `j` is bit `j % 32` of word `7 - j / 32`: the
     // SHA-256 words are big-endian, each word's bits are little-endian.
     //

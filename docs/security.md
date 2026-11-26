@@ -382,6 +382,23 @@ it, and a region that would straddle a branch is refused
 (`witness_regions_end_with_a_diverging_arm`, `witness_regions_dont_straddle_branches`).
 Review each region's outputs for a pin.
 
+### 2.18 `xark-rsa` RSA-2048 PKCS#1 v1.5 SHA-256
+
+The relation is `sig < n`, `2^2047 <= n < 2^2048`, and
+`sig^65537 ≡ EM(n, digest) (mod n)`, with `n` and the digest public and the
+signature private. The byte entry point takes the zkGolf big-endian octet
+strings (256-byte modulus/signature, 32-byte digest) and packs them to 25×82
+limbs with `to_bits::<8>`; the whole-number entry point converts 17×121 limbs;
+the typed `verify_sha256`/`verify_sha256_words` range-check their limbs.
+
+The 25×82 lazy chain's quotient/remainder ranges, grouped-column carries, and
+terminal EM pin are hand-proved in `gadgets/xark-rsa/src/lib.rs`. The
+`require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
+templates; the byte packing uses the base `to_bits` (8-bit) template. The
+`grouped_columns`/`square_lazy`/`fused_final` no-wrap argument is not yet a Lean
+theorem (audit residual), and `n`'s oddness/semiprimality is deliberately not
+proven: the verifier's key allowlist or certificate chain is the trust anchor.
+
 ## 3. Trusted setup
 
 ### Assumption restated
@@ -428,6 +445,10 @@ such a key. See
 [`docs/trusted-setup.md`](trusted-setup.md).
 
 ## 4. Known unaudited paths
+- `xark-rsa`: the 25×82 `grouped_columns`/`square_lazy`/`fused_final` no-wrap
+  argument is hand-proved, not a Lean theorem; key validity (oddness/
+  semiprimality) is a caller/allowlist precondition. The `require_lt`,
+  `range_check_limbs`, and `to_bits` rows are Lean-exported.
 
 * **`xark build`/`test` execute the circuit crate's code.** Compiling runs `build.rs`,
   proc-macros, and (for `xark test`) the test harness with the host toolchain — arbitrary

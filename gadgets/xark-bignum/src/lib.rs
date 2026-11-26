@@ -837,9 +837,10 @@ pub fn reduce_once<const LIMBS: usize, const BITS: usize>(
 /// hint `n[j]` is `1` iff they differ at limb `j` or above; `f[k] = n[k] − n[k+1]`
 /// is the one-hot "first difference at `k`" (`n[0] = 0`: they are equal). Cost
 /// `4·LIMBS + BITS` rows. Proven sound and complete over its exact rows at the widths
-/// production uses, 3 × 86, 3 × 85 and 4 × 64 (`formal/Formal/RequireLt*.lean`); a
-/// constant `m − 1` is that template with constant plugs (`cargo xtask lean-export
-/// --coverage`). Other widths are not exported.
+/// production uses: 3 × 86, 3 × 85, 4 × 64, 8 × 32, 17 × 121, 24 × 86 and
+/// 25 × 82 (`formal/Formal/RequireLt*.lean`); a constant `m − 1` is that
+/// template with constant plugs (`cargo xtask lean-export --coverage`). Other
+/// widths are not exported.
 #[xark::gadget]
 pub fn require_lt<const LIMBS: usize, const BITS: usize>(
     x: [Field; LIMBS],

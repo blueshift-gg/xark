@@ -12,6 +12,8 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   256-byte/32-byte octet public input packed in-circuit to a 25×82-bit internal
   chain, a 17×121 whole-number API, lazy reduction, a fused terminal multiply,
   and a generated RSA-2048 KAT that also hashes the test message on the host.
+  The typed `verify_sha256`/`verify_sha256_words` entry points range-check their
+  limbs, so a `Bignum::new` caller is safe.
 - `examples/rsa2048`: the byte-input example and generated KAT; 125,856 constraints
   (157,451 before the golf).
 - Lean templates and proofs for `require_lt::<17, 121>`,

@@ -24,7 +24,7 @@ set_option linter.style.header false
 differing limb; the limbs above it equal; and `m₋₁[k] − 1 − x[k]` there a `B`-bit number.
 
 The model takes `m₋₁`'s limbs as linear combinations `mv`. The exported templates are the
-harness calls `require_lt::<3, 86>`, `<3, 85>`, `<4, 64>`, `<8, 32>` and `<24, 86>` on fresh
+harness calls `require_lt::<3, 86>`, `<3, 85>`, `<4, 64>`, `<8, 32>`, `<17, 121>`, `<24, 86>` and `<25, 82>` on fresh
 `x` and `m₋₁` (`mv = plugM L`); `Formal/RequireLt{3x86,3x85,4x64,8x32,24x86}.lean` show each
 equal to the model by `decide +kernel` and state its theorems. Production passes `m₋₁` as a constant, so its rows
 are those templates with constant plugs (`Template.soundness_inst`, checked by

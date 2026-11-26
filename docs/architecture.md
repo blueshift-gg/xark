@@ -76,7 +76,7 @@ Shared libraries the gadgets build on: `xark-bits` (bit/word blocks — `and32`,
 arithmetic, used by the EC gadgets), `xark-curve` (shared curve macros), `xark-hash`
 (the `Hash`/`Digest` types). The gadgets: `xark-poseidon`, `xark-poseidon2`,
 `xark-sha256`, `xark-keccak`, `xark-mimc`, `xark-blake3`, `xark-blake2s`, `xark-aes`,
-`xark-pedersen`, `xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`.
+`xark-pedersen`, `xark-grumpkin`, `xark-secp256k1`, `xark-secp256r1`, `xark-ed25519`, `xark-rsa`.
 
 ### `xark-prover` — `crates/prover`
 
