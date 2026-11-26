@@ -11,18 +11,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ark_bn254::{Bn254, Fr};
-use ark_ff::{UniformRand, Zero};
+use ark_bn254::{Bn254, Fq, Fr};
+use ark_ff::{BigInteger, PrimeField, UniformRand, Zero};
 use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP};
 use ark_poly::GeneralEvaluationDomain;
 use ark_relations::gr1cs::{
     ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, OptimizationGoal,
     R1CS_PREDICATE_LABEL, SynthesisMode,
 };
-use ark_serialize::{CanonicalSerialize, Compress};
+use ark_serialize::{CanonicalSerialize, Compress, SerializationError};
 use ark_snark::SNARK;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use xark_groth16::pk::{MAX_HEADER_LEN, PkError};
 use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{Accelerated, Prover};
 use xark_groth16::{
@@ -784,11 +785,22 @@ fn verifying_key_layout_checks_all_proving_paths() {
             );
         }
     }
-    let header_end = xark_groth16::pk::MAX_HEADER_LEN;
+    let header_end = MAX_HEADER_LEN;
     let vk_end = header_end + pk.vk.serialized_size(Compress::Yes);
+    assert!(matches!(
+        SerializedPk::from_bytes(&bytes[..header_end - 1]),
+        Err(PkError::Header(_))
+    ));
+    assert!(matches!(
+        SerializedPk::from_bytes(&bytes[..vk_end - 1]),
+        Err(PkError::Deserialize(SerializationError::IoError(error)))
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+    ));
     for end in [header_end - 1, vk_end - 1] {
-        assert!(SerializedPk::from_bytes(&bytes[..end]).is_err());
-        assert!(push(&bytes[..end]).is_err());
+        assert!(matches!(
+            push(&bytes[..end]),
+            Err(ProveError::KeyMismatch(message)) if message.starts_with("proving key ended early")
+        ));
     }
 
     let mut mismatched = pk;
@@ -799,10 +811,19 @@ fn verifying_key_layout_checks_all_proving_paths() {
     }
 
     let mut noncanonical = bytes;
-    // Header v2 is followed by the first field element of alpha_g1.
-    noncanonical[header_end..header_end + 32].fill(0xff);
-    assert!(SerializedPk::from_bytes(&noncanonical).is_err());
-    assert!(push(&noncanonical).is_err());
+    // Replace the x coordinate of alpha_g1 with p, preserving its valid point flags.
+    let mut modulus = Fq::MODULUS.to_bytes_le();
+    let coord = &mut noncanonical[header_end..header_end + modulus.len()];
+    *modulus.last_mut().unwrap() |= coord.last().unwrap() & 0b1100_0000;
+    coord.copy_from_slice(&modulus);
+    assert!(matches!(
+        SerializedPk::from_bytes(&noncanonical),
+        Err(PkError::Deserialize(SerializationError::InvalidData))
+    ));
+    assert!(matches!(
+        push(&noncanonical),
+        Err(ProveError::KeyMismatch(message)) if message.starts_with("proving key ended early")
+    ));
 }
 
 // ---- the worker decomposition, natively -------------------------------------------
