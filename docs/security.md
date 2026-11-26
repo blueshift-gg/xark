@@ -416,7 +416,8 @@ then states the chain's top level: `n_bits` (the modulus is 2048 bits from the
 `em ≡ sig^65537 (mod n)`). `Formal/RsaConvert.lean` does the same for
 `convert_wide`: the 25 carry rows (with the top quotient zero) telescope to
 `Σ y_j·2^(82 j) = Σ x_i·2^(121 i)`, so the 17×121 and 25×82 paths denote one
-number. Each step's identity is a model theorem; what is hand-proved is that the
+number. `Formal/RsaBytes.lean` gives `bytes_to_wide`'s two packing identities, so
+the octet input and the 25×82 limbs also denote one number. Each step's identity is a model theorem; what is hand-proved is that the
 rows instantiate those step identities. `bytes_to_wide`'s big-endian packing and
 the EM vector are not yet model theorems either.
 
@@ -426,9 +427,8 @@ Still hand-proved, and therefore audit residuals:
   convolutions, that the 24 step calls' carries are the model's `k`, and that each
   numerator is canonical (the `< 2^251.7` column bound). This is the one bridge
   between the emitted rows and every theorem above.
-* **`bytes_to_wide` and the EM.** The big-endian 2048-bit packing and
-  `sha256_em_bits_82`'s EM vector (constant prefix plus the digest bits) have no
-  model theorem yet.
+* **The EM vector.** `sha256_em_bits_82`'s constant prefix plus the digest bits
+  (`bytes_to_wide`'s packing now has one: `Formal/RsaBytes.lean`).
 * **`minus_one` and `sig < n`.** The borrow chain that makes `n − 1`'s canonical
   digits, and so the `require_lt::<25,82>` composition to `sig < n`, are the
   bignum gadget's (its LC plugs are the allowlisted entry).
