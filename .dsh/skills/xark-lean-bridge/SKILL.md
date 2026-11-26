@@ -493,7 +493,15 @@ Remaining: `outVal_i` (from `hout_i`'s eval: `outF i = nF i − borrowF i + (W:F
 by cases on `n_i = 0`/`borrow_i` with the recurrence, so `(outF i).val = I`), then the
 telescoping `Σ outF_i·W^i = Σ nF_i·W^i − borrow_0 + W^25·borrow_25 = chainN − 1`, then
 `RequireLt25x82.soundness` (first-25 window, `Assumptions` from `sigBound`) for
-`sig ≤ chainN − 1`. The Rust's
+`sig ≤ chainN − 1`.
+
+The step `outF i = nF i − borrowF i + (W:F)·borrowF (i+1)` needs the evaluations of the
+LC combinators `addLC`/`negLC`/`smulLC` under `ZLC.toF`; a direct `simp`/list-induction
+attempt hit the `↑(-t.1)` vs `-(↑t.1)` and composed-map forms (`Int.cast_neg`,
+`Int.cast_mul`, `List.sum_map_mul_left`). A simpler route: state `hout` at the *value*
+level by `decide`-checking the coefficient lists (`ZLC.eval` needs a `ℤ`-assignment;
+use `Xark.R1cs.shadow`/`shadow_toF` instead), or prove
+`(ZLC.toF (addLC l m)).eval σ = …` via `Xark.R1cs.eval_add`-style lemmas if present. The Rust's
 `out[i] = m[i] − borrow_i + next_{i+1}·W`, `borrow_0 = 1`,
 `next = borrow·is_zero`, expanded through these LCs, is the identity to prove; the
 sign/constant bookkeeping (`W−1`, `−W·s_0`) needs care. All byte-level modules are
