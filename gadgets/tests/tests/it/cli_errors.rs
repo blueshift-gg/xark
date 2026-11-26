@@ -606,7 +606,7 @@ fn clients_default_beside_the_crate() {
     );
     let manifest = std::fs::read_to_string(verifier.join("Cargo.toml")).unwrap();
     assert!(
-        manifest.contains("name = \"arithmetic-square-verifier\""),
+        manifest.contains("name = \"arithmetic-square-client\""),
         "{manifest}"
     );
     assert!(out.contains("clients/rust"), "{out}");

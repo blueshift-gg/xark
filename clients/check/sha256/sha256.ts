@@ -63,7 +63,7 @@ const schema = {
     }
   },
   "version": 2,
-  "xark": "0.4.0"
+  "xark": "0.5.0"
 };
 
 /** Every input of `sha256`. */

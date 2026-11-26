@@ -9,8 +9,8 @@ tests verify real signatures from the `p256` crate.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-secp256r1 = "0.4"
+xark = "0.5"
+xark-secp256r1 = "0.5"
 ```
 
 ## Use

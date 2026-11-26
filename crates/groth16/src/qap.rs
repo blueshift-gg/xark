@@ -9,7 +9,7 @@
 //! instance assignment at rows `m..m+ℓ` (libsnark's input-consistency rows).
 //!
 //! Peak memory is two domain-sized vectors (`A`+`B`, then `AB`+`C`), or one with
-//! a [`Spill`]; rows are re-streamed instead of being held. Domains up to 2^18
+//! a [`Spill`]; rows are re-streamed instead of being held. Domains up to 2^20
 //! points hold a third, `C = A∘B`, instead of re-streaming the rows for it.
 
 use ark_bn254::Fr;
@@ -186,8 +186,10 @@ pub fn quotient<S: ConstraintSource + ?Sized>(
             // second pass over the rows. One that doesn't gets an h no proof
             // verifies with: the self-check, if on, fails and reports the row, as
             // before. The price is a third vector, so only on domains up to
-            // 2^18 points (8 MiB a vector).
-            let c_early: Option<Vec<Fr>> = (dom.n <= 1 << 18).then(|| {
+            // 2^20 points (32 MiB a vector): keccak256 of 1024 bytes, 2^20
+            // points, proved 5% faster for 3% more peak memory (797 → 820 MB),
+            // and a device's quotient skips the row pass it waited on.
+            let c_early: Option<Vec<Fr>> = (dom.n <= 1 << 20).then(|| {
                 a.par_iter()
                     .with_min_len(MIN_LEN)
                     .zip(b.par_iter())
@@ -230,6 +232,26 @@ pub fn quotient<S: ConstraintSource + ?Sized>(
                     n2: dom.n2,
                 });
             }
+            if accel.ifft_to_t(dom, &mut c) {
+                // As above, with each transform on the device that takes it.
+                if !accel.from_coset_to_t(dom, &mut a) {
+                    dom.from_coset_to_t(&mut a, Fr::GENERATOR.inverse().unwrap());
+                }
+                a.par_iter_mut()
+                    .with_min_len(MIN_LEN)
+                    .zip(c.par_iter())
+                    .for_each(|(x, y)| {
+                        *x -= y;
+                        *x *= z_inv;
+                    });
+                return Ok(Quotient {
+                    t: a,
+                    n1: dom.n1,
+                    n2: dom.n2,
+                });
+            }
+            // A device with coset transforms but no inverse DFT: C goes to the
+            // coset and back on it, as A and B do.
             to_coset(dom, &mut c, accel);
             a.par_iter_mut()
                 .with_min_len(MIN_LEN)

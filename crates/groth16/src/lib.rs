@@ -12,6 +12,8 @@
 //! * [`fft`] — blocked four-step FFT with tiled gathers/transposes.
 //! * [`qap`] — the quotient polynomial `h`, bit-identical to arkworks'.
 //! * [`prover`] — assembles the proof.
+//! * [`provers`] — the [`Prover`] interface every prover (CPU, a device,
+//!   arkworks in the benchmarks) proves through.
 //! * [`accel`] — hooks + worker kernels to offload FFT sweeps and MSM chunks.
 
 pub mod accel;
@@ -23,6 +25,7 @@ pub mod limbs;
 pub mod msm;
 pub mod pk;
 pub mod prover;
+pub mod provers;
 pub mod push;
 pub mod qap;
 pub mod r1cs;
@@ -38,6 +41,7 @@ pub use pk::{InMemoryPk, PkSource, SerializedPk};
 pub use prover::{
     Probe, ProveError, ProverConfig, prove, prove_accelerated, prove_with_randomness,
 };
+pub use provers::{Accelerated, Cpu, Prover, prove_with_rng};
 pub use push::PushProver;
 pub use r1cs::{
     BytecodeSource, ConstraintSource, ProgramSource, RowFileSource, VarLayout, first_unsatisfied,

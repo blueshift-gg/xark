@@ -11,8 +11,8 @@ authors use it to give a new 256-bit hash the same public-input form.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-hash = "0.4"
+xark = "0.5"
+xark-hash = "0.5"
 ```
 
 ## Use

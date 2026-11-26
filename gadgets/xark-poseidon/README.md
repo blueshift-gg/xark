@@ -10,8 +10,8 @@ thousands. `xark-merkle` uses it.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-poseidon = "0.4"
+xark = "0.5"
+xark-poseidon = "0.5"
 ```
 
 ## Use

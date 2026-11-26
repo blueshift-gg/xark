@@ -35,6 +35,9 @@ pub struct Typed {
 /// The typed public inputs for `schema`, or `None` when one of them has no Rust form
 /// here (or the schema doesn't match the key's `n` public inputs).
 pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed> {
+    // The proof struct is named after the circuit, as the TypeScript client is
+    // (`zkyc_nationality` → `ZkycNationalityProof`), whatever the crate is called.
+    let marker = super::client::ts::pascal(schema["circuit"].as_str().unwrap_or("circuit"));
     let mut g = Gen {
         schema,
         defs: BTreeMap::new(),
@@ -42,6 +45,7 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
         uses: Uses::default(),
     };
     let mut fields = String::new();
+    let mut field_list: Vec<(String, String)> = Vec::new();
     let public: Vec<&Value> = schema["inputs"]
         .as_array()?
         .iter()
@@ -51,6 +55,7 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
         let name = input["name"].as_str()?;
         let ty = g.rust_ty(&input["type"])?;
         let _ = writeln!(fields, "    pub {}: {ty},", ident(name));
+        field_list.push((ident(name), ty));
         g.leaves(&input["type"], name, &format!("self.{}", ident(name)))?;
     }
     let order: Vec<&str> = schema["public_inputs"]
@@ -66,12 +71,20 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
         .map(|l| g.leaves.get(*l).map(Leaf::element))
         .collect::<Option<_>>()?;
 
+    // The `to_fields` array body, shared by `PublicInputs` and the `{marker}Proof` bundle.
+    let mut to_fields = String::from("[\n");
+    for e in &exprs {
+        let _ = writeln!(to_fields, "            {e},");
+    }
+    to_fields.push_str("        ]");
+
     let mut items = String::new();
     items.push_str(&g.uses.helpers());
     for def in g.defs.values() {
         items.push_str(def);
         items.push('\n');
     }
+    // `PublicInputs`: the circuit's public inputs by name, for building from state.
     let _ = write!(
         items,
         "/// This circuit's public inputs, by name: what a proof proves, and what your\n\
@@ -81,21 +94,74 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
          impl PublicInputs {{\n    \
          /// The field elements the proof is over, in proof order, each 32 bytes\n    \
          /// little-endian, packed as the circuit's `#[input]` packs them.\n    \
-         pub const fn to_fields(&self) -> Fields {{\n        \
-         [\n"
+         pub const fn to_fields(&self) -> Fields {{\n        {to_fields}\n    }}\n}}\n\n\
+         impl From<PublicInputs> for Fields {{\n    \
+         fn from(inputs: PublicInputs) -> Fields {{\n        inputs.to_fields()\n    }}\n}}\n\n\
+         impl From<&PublicInputs> for Fields {{\n    \
+         fn from(inputs: &PublicInputs) -> Fields {{\n        inputs.to_fields()\n    }}\n}}\n\n"
     );
-    for e in exprs {
-        let _ = writeln!(items, "            {e},");
+
+    // `{marker}Proof`: the proof and its named public inputs in one `no_std` struct — the
+    // single type a program holds. `verify` packs the inputs and checks the embedded VK.
+    // An input named `proof` would be a second field of that name: such a circuit gets
+    // `PublicInputs` and `verify` only.
+    let bundle = !field_list.iter().any(|(name, _)| name == "proof");
+    if bundle {
+        let _ = write!(
+            items,
+            "/// This circuit's proof together with the public inputs it's over — the one\n\
+         /// type a program holds. Fill it from your program's values (or parse it from\n\
+         /// instruction data with `TryFrom<&[u8]>`), then `verify()` (the\n\
+         /// `xark_verifier::Verifiable` trait).\n\
+         #[derive(Clone, Copy, Debug, PartialEq, Eq)]\n\
+         pub struct {marker}Proof {{\n    \
+         /// The 256-byte Groth16 proof.\n    \
+         pub proof: [u8; 256],\n{fields}}}\n\n\
+         impl {marker}Proof {{\n    \
+         /// The public inputs as field elements, packed as the circuit's `#[input]` does.\n    \
+         pub const fn to_fields(&self) -> Fields {{\n        {to_fields}\n    }}\n}}\n\n\
+         impl xark_verifier::Verifiable for {marker}Proof {{\n    \
+         fn verify(&self) -> ::core::result::Result<(), xark_verifier::XarkError> {{\n        \
+         if verify_fields(&Proof::from_le_bytes(&self.proof), &self.to_fields()) {{\n            \
+         ::core::result::Result::Ok(())\n        }} else {{\n            \
+         ::core::result::Result::Err(xark_verifier::XarkError::InvalidProof)\n        }}\n    }}\n}}\n"
+        );
     }
-    items.push_str(
-        "        ]\n    }\n}\n\n\
-         impl From<PublicInputs> for Fields {\n    \
-         fn from(inputs: PublicInputs) -> Fields {\n        \
-         inputs.to_fields()\n    }\n}\n\n\
-         impl From<&PublicInputs> for Fields {\n    \
-         fn from(inputs: &PublicInputs) -> Fields {\n        \
-         inputs.to_fields()\n    }\n}\n",
-    );
+
+    // `TryFrom<&[u8]>` for the bundle — only when every public input is a fixed byte array
+    // (`[u8; N]`: keys, hashes, nullifiers), the common on-chain case. Reads `proof (256) ||
+    // each input`, no `alloc`.
+    if bundle
+        && let Some(widths) = field_list
+            .iter()
+            .map(|(_, ty)| byte_array_len(ty))
+            .collect::<Option<Vec<usize>>>()
+    {
+        // `__rest`, not `rest`, so an input of that name doesn't bind it twice.
+        let mut parse = String::new();
+        for ((name, _), w) in field_list.iter().zip(&widths) {
+            let _ = writeln!(
+                parse,
+                "        let ({name}, __rest) = __rest.split_first_chunk::<{w}>().ok_or(xark_verifier::XarkError::Truncated)?;"
+            );
+        }
+        let inits: String = field_list
+            .iter()
+            .map(|(name, _)| format!("{name}: *{name}, "))
+            .collect();
+        let _ = write!(
+            items,
+            "\nimpl ::core::convert::TryFrom<&[u8]> for {marker}Proof {{\n    \
+             type Error = xark_verifier::XarkError;\n    \
+             /// Parse `proof (256 B) || public inputs` from instruction data. The inputs\n    \
+             /// come from the caller — bind them to your program's state before trusting.\n    \
+             fn try_from(data: &[u8]) -> ::core::result::Result<Self, xark_verifier::XarkError> {{\n        \
+             let (proof, __rest) = data.split_first_chunk::<256>().ok_or(xark_verifier::XarkError::Truncated)?;\n\
+             {parse}        if !__rest.is_empty() {{\n            \
+             return ::core::result::Result::Err(xark_verifier::XarkError::TrailingBytes);\n        }}\n        \
+             ::core::result::Result::Ok(Self {{ proof: *proof, {inits}}})\n    }}\n}}\n"
+        );
+    }
     // A sample that can't be written out typed only loses the self-test.
     let sample = sample.and_then(|values| {
         let decoded = xark_schema::Schema::parse(&schema.to_string())
@@ -112,6 +178,16 @@ pub fn generate(schema: &Value, n: usize, sample: Option<&[Fr]>) -> Option<Typed
         Some(lit)
     });
     Some(Typed { items, sample })
+}
+
+/// `[u8; N]` → `Some(N)`; any other type → `None`. Used to decide whether a
+/// `{marker}Proof` can get a byte-slice `TryFrom` (all inputs fixed byte arrays).
+fn byte_array_len(ty: &str) -> Option<usize> {
+    ty.strip_prefix("[u8; ")?
+        .strip_suffix(']')?
+        .trim()
+        .parse()
+        .ok()
 }
 
 struct Gen<'a> {

@@ -4,14 +4,90 @@ Before 1.0, a release that changes any circuit bumps the minor version, and each
 such circuit is listed under "Circuits that changed": its keys must be made
 again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolchain-policy).
 
-## Unreleased
+## 0.5.0
+
+The generated client crate is named `<name>-client` and carries the circuit's proof
+as one type, and with the `prover` feature it proves on a host too. A circuit crate
+can depend on another for its input types. No circuit changed: keys made with 0.4
+still verify (its digests are the same; `zkyc_nationality` is a new example).
 
 The prover is faster on every circuit of the gnark comparison (#84), with every
-core and on one thread, and no proof changed: for the same randomness each is
-byte-identical to arkworks', as the tests check. No circuit changed.
+core and on one thread: for the same randomness each proof is byte-identical to
+arkworks', as the tests check. It no longer verifies a proof before returning
+it unless asked to (`xark prove --verify`). On a GPU, `xark prove --prover
+opencl` (experimental) puts the quotient and the H MSM beside the CPU's MSMs (Ed25519: 215 ms
+instead of 370 on an Apple M3 Max), through `xark_groth16::Prover`, the one
+interface every prover now shares.
+
+### Moving from 0.4.0
+
+The steps, with before and after code: [docs/migrating-to-0.5.md](docs/migrating-to-0.5.md).
+
+- **Nothing to do for an existing crate.** `xark export` over an earlier export
+  keeps that crate's name, so a 0.4.0 project's `<name>-verifier` and the
+  programs depending on it build as before. A new export is named
+  `<name>-client`; `--crate-name` still picks the name.
+- A circuit's name can now end in `-verifier`, and can't end in `-client`.
+- **A proof isn't verified before it is returned unless you ask.** Inputs that
+  break a constraint used to fail `xark prove` (and the wasm and TypeScript
+  provers) with the constraint's source line; now they give a proof no verifier
+  accepts. Where you relied on that error, pass `--verify`, or `{ verify: true }`
+  to the wasm `prove` or a client's `prover.prove(inputs, …)`.
 
 ### Changes
 
+- A new client crate is `<name>-client` (it was `<name>-verifier`), and `xark add
+  program` depends on the client crate by the name it has.
+- The client crate has a `<Name>Proof` struct: the 256-byte proof and the public
+  inputs by name, `no_std`. It implements `xark_verifier::Verifiable`, whose
+  `verify()` returns `Result<(), XarkError>`. When every public input is a byte
+  array, `<Name>Proof::try_from(data)` parses `proof || public inputs` from
+  instruction data, and refuses data that is short (`Truncated`) or long
+  (`TrailingBytes`). A circuit with a public input named `proof` gets no
+  `<Name>Proof`.
+- `xark_verifier::XarkError`, `#[repr(u32)]` with `u32::from` for a program's
+  `ProgramError::Custom` code.
+- The client crate's `prover` feature adds `prover::Prover`, which proves from the
+  circuit's build directory on a host: `prove_fields` takes `(name, decimal)`
+  pairs and `prove_json` a JSON object of them (plain field values only, not yet
+  structs). The default build is the on-chain verifier and doesn't pull it in.
+- The client crate depends on `xark-verifier = "<version>"`, a semver-compatible
+  requirement, instead of an exact `"=<version>"`, so it takes the verifier's
+  patch releases.
+- `#[circuit]` emits its wasm entry on every build, with the wasm-only
+  attributes applied by `cfg_attr`, so rust-analyzer no longer greys out the
+  circuit function as inactive code. The circuit build is the same.
+- A circuit crate can depend on another circuit crate, to reuse its `#[input]`
+  types and their methods (an `Identity` and its `commitment()`): only the crate
+  `xark` builds exports its `#[circuit]`, and a dependency's is an ordinary
+  function. It failed to link before (`duplicate symbol: __xark_main`), so a
+  circuit crate meant as a library had to put its `#[circuit]` behind a feature.
+  `examples/zkyc_nationality` proves a nationality against `examples/zkyc`'s
+  identity commitment, and no circuit changed. See
+  [docs/inputs.md](docs/inputs.md#reusing-types-from-another-circuit). Two
+  `#[circuit]`s in one crate are still an error.
+- Provers share one interface, `xark_groth16::Prover`: a prover holds its key
+  and proves a witness with the caller's `(r, s)`, so any two give the same
+  proof bytes. `Cpu` is xark's prover (key streamed or resident), and the tests
+  and `bench_prove warm` run arkworks through it too; a test holds them all to
+  arkworks' proof.
+- `xark-groth16`'s public API grows, and nothing that compiled stops compiling:
+  - New: `Prover`, `Cpu`, `Accelerated` and `prove_with_rng` (above).
+  - `Accelerator` gains `prepare`, `wants_proof`, `wants_msm_for` and
+    `ifft_to_t`, and `PkSource` gains `fork`; each has a default, so an
+    existing implementation is unchanged.
+  - `prove`, `prove_with_randomness` and `prove_accelerated` are as they were.
+- `xark prove --prover opencl` (an `xark` built with `--features opencl`) puts
+  the quotient and the H MSM on an OpenCL GPU while the CPU takes A, B and L
+  (`xark_groth16::Accelerated`, with `xark-groth16-opencl` as its device; from
+  Aryan Putta's #47). On an Apple M3 Max, `xark prove` of Ed25519 takes 215 ms
+  instead of 370 and secp256r1 ECDSA 256 instead of 354, the device's set-up
+  included; a circuit under a 2^18-point domain stays on the CPU, where the
+  GPU's fixed cost would lose. A GPU MSM is variable-time, so it
+  needs `--acknowledge-gpu-side-channel-risk`.
+  Experimental: tested on Apple Silicon, and in CI on POCL (OpenCL on a CPU).
+  The device's proof is always verified, and one that fails although the
+  inputs satisfy the circuit is proved again on the CPU, with a warning.
 - A proof is no longer verified against its key before it is returned: its
   soundness doesn't depend on that, and a verifier checks it anyway. `xark prove
   --verify`, `{ verify: true }` in the wasm prover's options (`prove` takes
@@ -22,9 +98,12 @@ byte-identical to arkworks', as the tests check. No circuit changed.
   line says "Proof produced", with " and verified" when it was.
 - The quotient takes six transforms of the domain instead of seven: `C` takes
   an inverse FFT where it took a coset FFT and its inverse, since
-  `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. On domains up to 2^18 points `C` is
+  `h = (coset_iFFT(A·B) − iFFT(C)) / Z(g)`. On domains up to 2^20 points `C` is
   `A∘B` (the rows hold for a witness that proves), without a second pass over
-  the rows.
+  the rows; past 2^18 points that holds one more domain vector (16 MiB at 2^19,
+  32 MiB at 2^20: keccak256 of 1024 bytes peaked at 820 MB, was 797), unless
+  `ProverConfig::spill_dir` is set. A device that offers the inverse DFT (`Accelerator::ifft_to_t`,
+  which OpenCL does) gets the six transforms too.
 - The FFT's butterfly adds and subtracts on the Montgomery limbs: 12.0 ns where
   it was 17.6 (2^20 points on one thread: 161 ms, was 220). The row FFTs of a
   domain under 2^17 points ran as one task; they now spread over the pool. The

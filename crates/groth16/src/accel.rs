@@ -32,9 +32,31 @@ pub trait Accelerator {
     fn from_coset_to_t(&mut self, _dom: &Domain, _buf: &mut [Fr]) -> bool {
         false
     }
+    /// In place: evaluations on the domain → coefficients in T-layout (the
+    /// inverse DFT, `1/N` included). A device that takes this saves the
+    /// quotient a transform: `C` needs one inverse DFT instead of a coset DFT
+    /// and back.
+    fn ifft_to_t(&mut self, _dom: &Domain, _buf: &mut [Fr]) -> bool {
+        false
+    }
+    /// A proof over a domain of `domain_size` points is coming; called before the
+    /// witness is solved, so set-up that doesn't need it (tables, warming the
+    /// device) can overlap the solve. A hint: the default ignores it.
+    fn prepare(&mut self, _domain_size: usize) {}
+    /// Whether to take a proof over a domain of `domain_size` points at all. A
+    /// device with a fixed cost a proof declines the small ones, which then
+    /// prove on the CPU alone; asked before [`prepare`](Self::prepare).
+    fn wants_proof(&self, _domain_size: usize) -> bool {
+        true
+    }
     /// Whether [`msm`](Self::msm) should be offered raw key chunks.
     fn wants_msm(&self) -> bool {
         false
+    }
+    /// Whether to offer the vector whose first chunk has `scalars`, asked
+    /// before any of its points are read so a decline costs nothing.
+    fn wants_msm_for(&self, _g2: bool, _scalars: &[Scalar]) -> bool {
+        self.wants_msm()
     }
     /// `Σ sᵢ·Pᵢ` over serialized points (`g2` selects the group; `compressed` the
     /// point encoding). Returns the sum in uncompressed affine encoding.

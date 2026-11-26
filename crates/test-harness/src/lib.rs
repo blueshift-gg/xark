@@ -244,6 +244,18 @@ impl WasmLibs {
         let mut requested_targets = BTreeSet::from(["xark".to_owned()]);
         requested_targets.extend(packages.iter().map(|name| name.replace('-', "_")));
 
+        // Every test process builds the libraries, and every build, a fresh one
+        // too, removes and rewrites the uplifted `lib<name>.rlib`s the circuits
+        // link: a compile in one process could find one missing or half written
+        // while another's build ran (`cannot find crate xark`, `rust-lld`
+        // failures). So the build and a copy of those files, which the compiles
+        // then link instead, happen under this lock (see `snapshot`).
+        std::fs::create_dir_all(&target).expect("create target/xark-compile-wasm");
+        let lock = std::fs::File::create(target.join(".harness.lock"))
+            .expect("create target/xark-compile-wasm/.harness.lock");
+        lock.lock()
+            .expect("lock target/xark-compile-wasm/.harness.lock");
+
         let output = Command::new("cargo")
             .args([
                 "build",
@@ -309,6 +321,8 @@ impl WasmLibs {
             "cargo build reported no circuit rlibs:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        let (externs, library_dirs) = snapshot(&target, externs, library_dirs);
+        drop(lock);
 
         Self {
             root,
@@ -316,7 +330,55 @@ impl WasmLibs {
             library_dirs,
         }
     }
+}
 
+/// Copies of the uplifted rlibs in `externs`, in a directory no build writes,
+/// and the search path with that directory in place of the uplifted ones; called
+/// under the build's lock. Copies are keyed by the files' sizes and times, so
+/// test processes over one build share a single copy, and a rebuild makes a new
+/// one. Cargo's other artifacts (dependencies, proc macros) sit in hashed paths
+/// a fresh build leaves alone, wherever its layout puts them.
+fn snapshot(
+    target: &Path,
+    externs: BTreeMap<String, PathBuf>,
+    mut library_dirs: BTreeSet<PathBuf>,
+) -> (BTreeMap<String, PathBuf>, BTreeSet<PathBuf>) {
+    use std::hash::{Hash, Hasher};
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    for (name, path) in &externs {
+        let meta =
+            std::fs::metadata(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        (name, meta.len(), meta.modified().ok()).hash(&mut key);
+    }
+    let dir = target
+        .join("harness-libs")
+        .join(format!("{:016x}", key.finish()));
+    if !dir.exists() {
+        let tmp = dir.with_extension(format!("tmp{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).expect("create the harness's rlib copies");
+        for (name, path) in &externs {
+            std::fs::copy(path, tmp.join(format!("lib{name}.rlib")))
+                .unwrap_or_else(|e| panic!("copying {}: {e}", path.display()));
+        }
+        std::fs::rename(&tmp, &dir).expect("publish the harness's rlib copies");
+    }
+    for path in externs.values() {
+        if let Some(parent) = path.parent() {
+            library_dirs.remove(parent);
+        }
+    }
+    library_dirs.insert(dir.clone());
+    let externs = externs
+        .into_keys()
+        .map(|name| {
+            let copy = dir.join(format!("lib{name}.rlib"));
+            (name, copy)
+        })
+        .collect();
+    (externs, library_dirs)
+}
+
+impl WasmLibs {
     /// Add these libraries to a `rustc` command: each rlib as an `--extern`,
     /// and every artifact directory as a dependency search path.
     fn link(&self, cmd: &mut Command) {

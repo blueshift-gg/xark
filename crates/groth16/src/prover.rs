@@ -187,7 +187,20 @@ fn accel_msm<P: PkSource + ?Sized>(
     chunk: usize,
     sc: &dyn Fn(usize, usize) -> Vec<Scalar>,
 ) -> Result<Option<Vec<u8>>, PkError> {
+    let g2 = v == KeyVector::BG2;
     if !accel.wants_msm() {
+        return Ok(None);
+    }
+    let h = pk.header();
+    let len = match v {
+        KeyVector::A => h.a_len,
+        KeyVector::BG1 => h.b_g1_len,
+        KeyVector::BG2 => h.b_g2_len,
+        KeyVector::H => h.h_len,
+        KeyVector::L => h.l_len,
+    };
+    let mut first = sc(0, chunk.max(1).min(len));
+    if !accel.wants_msm_for(g2, &first) {
         return Ok(None);
     }
     let mut parts: Vec<u8> = Vec::new();
@@ -197,8 +210,12 @@ fn accel_msm<P: PkSource + ?Sized>(
             return;
         }
         let n = bytes.len() / point_bytes(v, compressed);
-        let g2 = v == KeyVector::BG2;
-        match accel.msm(g2, bytes, compressed, &sc(off, n)) {
+        let scalars = if off == 0 && first.len() == n {
+            std::mem::take(&mut first)
+        } else {
+            sc(off, n)
+        };
+        match accel.msm(g2, bytes, compressed, &scalars) {
             Some(p) if valid_msm_output(g2, &p) => parts.extend_from_slice(&p),
             Some(_) | None => declined = true,
         }
@@ -405,7 +422,7 @@ where
     S: ConstraintSource + ?Sized,
     P: PkSource + ?Sized,
 {
-    prove_impl(src, z, pk, r, s, cfg, probe, None)
+    prove_impl(src, z, pk, r, s, cfg, probe, Accel::None)
 }
 
 /// [`prove_with_randomness`], routing FFT sweeps and MSM chunks through `accel`.
@@ -424,7 +441,35 @@ where
     S: ConstraintSource + ?Sized,
     P: PkSource + ?Sized,
 {
-    prove_impl(src, z, pk, r, s, cfg, probe, Some(accel))
+    prove_impl(src, z, pk, r, s, cfg, probe, Accel::Serial(accel))
+}
+
+/// [`prove_accelerated`] for a device that runs beside the CPU: the quotient
+/// and the H MSM go to `accel` (H from a second reader of the key) while the CPU
+/// takes A, B₁, B₂ and L.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prove_overlapped<S, P>(
+    src: &S,
+    z: &[Fr],
+    pk: &mut P,
+    r: Fr,
+    s: Fr,
+    cfg: &ProverConfig,
+    probe: &mut dyn Probe,
+    accel: &mut (dyn Accelerator + Send),
+) -> Result<Proof<Bn254>, ProveError>
+where
+    S: ConstraintSource + ?Sized,
+    P: PkSource + ?Sized,
+{
+    prove_impl(src, z, pk, r, s, cfg, probe, Accel::Overlap(accel))
+}
+
+enum Accel<'a> {
+    None,
+    /// May own the CPU workers, so the steps run in turn.
+    Serial(&'a mut dyn Accelerator),
+    Overlap(&'a mut (dyn Accelerator + Send)),
 }
 
 /// With no accelerator and no `cfg.spill_dir`, `h` is computed on the thread pool
@@ -439,16 +484,26 @@ fn prove_impl<S, P>(
     s: Fr,
     cfg: &ProverConfig,
     probe: &mut dyn Probe,
-    accel: Option<&mut dyn Accelerator>,
+    accel: Accel<'_>,
 ) -> Result<Proof<Bn254>, ProveError>
 where
     S: ConstraintSource + ?Sized,
     P: PkSource + ?Sized,
 {
     let mut local = Local;
-    let (concurrent, accel) = match accel {
-        Some(a) => (false, a),
-        None => (cfg.spill_dir.is_none(), &mut local as &mut dyn Accelerator),
+    // An accelerator beside the CPU takes the quotient and then the H MSM, from
+    // a second reader of the key, while the CPU streams A, B and L.
+    let (concurrent, accel, mut beside) = match accel {
+        Accel::Serial(a) => (false, a, None),
+        Accel::Overlap(a) if cfg.spill_dir.is_none() => {
+            (true, &mut local as &mut dyn Accelerator, Some(a))
+        }
+        Accel::Overlap(a) => (false, a as &mut dyn Accelerator, None),
+        Accel::None => (
+            cfg.spill_dir.is_none(),
+            &mut local as &mut dyn Accelerator,
+            None,
+        ),
     };
     probe.mark("start");
     let dom = qap::key_domain(src, pk.header().h_len, cfg.fft).map_err(ProveError::KeyMismatch)?;
@@ -513,7 +568,31 @@ where
         probe.mark("msm+qap_h+self_check");
         return Ok(proof);
     }
-    let (a_acc, b1_acc, b2_acc, l_acc, h_acc) = if concurrent && pk.resident().is_some() {
+    let h_pk = if beside.is_some() { pk.fork() } else { None };
+    let (a_acc, b1_acc, b2_acc, l_acc, h_acc) = if let Some(mut h_pk) = h_pk {
+        let dev = beside.take().expect("a second reader only for a device");
+        // 2) The quotient and H on the device, A, B and L on the CPU.
+        let mut h = None;
+        let cpu = rayon::in_place_scope(|sc| {
+            sc.spawn(|_| {
+                h = Some((|| {
+                    let q = quotient_for(src, z, &dom, cfg, dev, &mut ())?;
+                    let h_sc = |off, len| q.chunk(off, len);
+                    Ok::<_, ProveError>(stream_msm_g1(&mut *h_pk, dev, G1Query::H, chunk, &h_sc)?)
+                })());
+            });
+            if cfg.self_check {
+                sc.spawn(|_| prep = Some(Prepared::new(&hdr.vk, &z[1..ninst])));
+            }
+            sc.spawn(|_| fixed_terms = Some(fixed()));
+            let abc = witness_msms(pk, &mut Local, &mut ())?;
+            let l = stream_msm_g1(pk, &mut Local, G1Query::L, chunk, &aux_sc)?;
+            Ok::<_, PkError>((abc, l))
+        });
+        probe.mark("msm_ab+l beside qap_h+msm_h");
+        let ((a, b1, b2), l) = cpu?;
+        (a, b1, b2, l, h.expect("the scope joined the H MSM")?)
+    } else if concurrent && pk.resident().is_some() {
         // 2) A resident key: each MSM is a task beside the quotient, so a small
         // circuit's MSMs, too short to fill the pool one at a time, fill it
         // together, and H starts as soon as h is ready.
@@ -551,10 +630,17 @@ where
     } else {
         // 2) h. Alone, 1) leaves cores idle (key reads, small digit classes, the
         // tail of each chunk), which the quotient's work fills.
+        // A device whose key can't be read twice still takes the quotient
+        // beside the CPU's A and B, then H and L.
+        let mut cpu = Local;
         let ((a, b1, b2), h) = if concurrent {
             let mut h = None;
+            let q_dev: &mut (dyn Accelerator + Send) = match beside.as_deref_mut() {
+                Some(d) => d,
+                None => &mut cpu,
+            };
             let abl = rayon::in_place_scope(|sc| {
-                sc.spawn(|_| h = Some(quotient_for(src, z, &dom, cfg, &mut Local, &mut ())));
+                sc.spawn(|_| h = Some(quotient_for(src, z, &dom, cfg, q_dev, &mut ())));
                 if cfg.self_check {
                     sc.spawn(|_| prep = Some(Prepared::new(&hdr.vk, &z[1..ninst])));
                 }
@@ -571,6 +657,10 @@ where
             (abl, h)
         };
         // 3) H, L, in the key's order (a tee re-writes the key as it is read).
+        let accel: &mut dyn Accelerator = match beside {
+            Some(d) => d,
+            None => accel,
+        };
         let hq = stream_msm_g1(pk, accel, G1Query::H, chunk, &|off, len| h.chunk(off, len))?;
         drop(h);
         probe.mark("msm_h");

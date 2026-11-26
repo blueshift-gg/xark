@@ -38,6 +38,7 @@ pub mod ceremony;
 pub mod check;
 pub mod client;
 pub mod completions;
+pub mod device;
 pub mod doctor;
 pub mod export;
 pub mod inspect;

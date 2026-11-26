@@ -13,8 +13,8 @@ accumulators, Nova instances) inside a BN254 proof, or a Schnorr signature for a
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-grumpkin = "0.4"
+xark = "0.5"
+xark-grumpkin = "0.5"
 ```
 
 ## Use

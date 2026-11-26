@@ -10,8 +10,8 @@ client that makes a proof computes the same roots and paths as the circuit.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-merkle = "0.4"
+xark = "0.5"
+xark-merkle = "0.5"
 ```
 
 ## Use

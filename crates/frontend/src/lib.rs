@@ -471,8 +471,14 @@ pub fn build_crate_with(
     } else {
         "--cfg xark"
     };
+    // Only this crate's `#[circuit]` is the entry: a circuit crate it depends on (for
+    // its `#[input]` types) exports nothing (`xark-macros`, `is_entry_crate`).
+    let entry_dir = crate_dir
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", crate_dir.display()))?;
     cmd.current_dir(crate_dir)
         .env("RUSTFLAGS", rustflags)
+        .env("XARK_ENTRY_MANIFEST_DIR", &entry_dir)
         .env("CARGO_TARGET_DIR", target_dir)
         .args([
             "rustc",

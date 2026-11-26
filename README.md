@@ -115,15 +115,15 @@ generated clients embed the verifying key, and the CI workflow `xark init` wrote
 checks they match the source (`xark build --check`).
 
 The program depends on `clients/my-circuit/rust/`, the verifier crate `xark build`
-generates (`my-circuit-verifier`). Its `PublicInputs` has the circuit's public
+generates (`my-circuit-client`). Its `PublicInputs` has the circuit's public
 inputs by name, packed for you, and `verify` takes it:
 
 ```rust
-let proof = my_circuit_verifier::Proof::from_le_bytes(proof_bytes);
-let inputs = my_circuit_verifier::PublicInputs {
+let proof = my_circuit_client::Proof::from_le_bytes(proof_bytes);
+let inputs = my_circuit_client::PublicInputs {
     result: /* from your program's state, 32 bytes little-endian */,
 };
-if !my_circuit_verifier::verify(&proof, inputs) {
+if !my_circuit_client::verify(&proof, inputs) {
     return Err(ProgramError::InvalidArgument);
 }
 ```
@@ -144,6 +144,8 @@ The verifier crate's `SETUP` constant says which kind of key it embeds.
 - [Editor diagnostics](docs/editor.md): circuit errors inline in rust-analyzer
 
 **Using proofs**
+- [Migrating from 0.4](docs/migrating-to-0.5.md): nothing to change; the client
+  crate's proof type, host prover and new name, to take up when you like
 - [Migrating from 0.3](docs/migrating-to-0.4.md): keep a circuit crate, or move it
   into a project, keeping your keys
 - [TypeScript clients](docs/typescript.md): typed provers and verifiers for Node
@@ -172,8 +174,8 @@ Each gadget is its own crate under [`gadgets/`](gadgets). Add the ones you use:
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-poseidon2 = "0.4"
+xark = "0.5"
+xark-poseidon2 = "0.5"
 ```
 
 | Crate | What it does |
@@ -190,7 +192,7 @@ xark-poseidon2 = "0.4"
 
 ## Examples
 
-[`examples/`](examples) has 74 runnable circuits, from `cube` to `zkyc` (a private
+[`examples/`](examples) has 75 runnable circuits, from `cube` to `zkyc` (a private
 credential check against a public policy), with the gadgets above at work. Test
 any of them with `xark test examples/<name>`.
 

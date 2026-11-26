@@ -10,8 +10,8 @@ built on it. If you only need a hash, use those crates instead.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-bits = "0.4"
+xark = "0.5"
+xark-bits = "0.5"
 ```
 
 ## Use

@@ -1,0 +1,15 @@
+[package]
+name = "zkyc_nationality"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+xark = { path = "../../crates/lang", version = "0.5.0" }
+# Another circuit crate, used as a library: its `Identity` and `commitment()`.
+zkyc = { path = "../zkyc" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(xark)'] }

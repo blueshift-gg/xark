@@ -11,8 +11,8 @@ against the `aes` and `aes-gcm` crates.
 
 ```toml
 [dependencies]
-xark = "0.4"
-xark-aes = "0.4"
+xark = "0.5"
+xark-aes = "0.5"
 ```
 
 ## Use

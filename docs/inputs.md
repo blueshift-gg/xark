@@ -103,3 +103,31 @@ A `TYPE` is built from the standard types (field, `uN`, bytes, number, date,
 text, choice, set, address, arrays, tuples, structs), and those are what client
 generators map: adding a language means mapping that fixed list, never a
 circuit's own types.
+
+## Reusing types from another circuit
+
+A circuit crate is also a library. To write a circuit over another circuit's
+inputs (a check of your own against an issuer's `Identity` commitment, say),
+depend on its crate and use its `#[input]` types and methods as they are:
+
+```toml
+[dependencies]
+xark = "0.5"
+zkyc = { path = "../zkyc" }
+```
+
+```rust
+use xark::prelude::*;
+use zkyc::Identity;
+
+#[circuit]
+pub fn zkyc_nationality(id: Private<Identity>, commitment: Public<Field>, allowed: Public<Bitfield<Country>>) {
+    require_eq(id.commitment(), commitment); // zkyc's own commitment, so its issuers' commitments work here
+    id.nationality.require_in(allowed);
+}
+```
+
+Only the crate `xark` builds exports its `#[circuit]`: the dependency's is an
+ordinary function there, so it needs no feature to leave it out, and building the
+dependency on its own still gives its own circuit, unchanged. A crate still holds
+one `#[circuit]`. `examples/zkyc_nationality` is this circuit in full.
