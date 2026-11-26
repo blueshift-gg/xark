@@ -420,16 +420,26 @@ number. Each step's identity is a model theorem; what is hand-proved is that the
 rows instantiate those step identities. `bytes_to_wide`'s big-endian packing and
 the EM vector are not yet model theorems either.
 
-Still hand-proved, and therefore audit residuals: the bridge from
-`grouped_columns`' actual rows to the `GroupedColumns` model — that the column
-sums are the limbs' convolutions, that the 24 step calls' carries are the model's
-`k`, and that each numerator is canonical (the `< 2^251.7` column bound) — the
-chain composition (`square_lazy`, `fused_final`, `convert_wide`,
-`bytes_to_wide`, `minus_one`, the `n_top`/EM pin and `verify_wide`), and the
-terminal EM vector's derivation from the digest. The `require_lt::<25,82>` and
-`range_check_limbs::<17,121>` rows have Lean templates; the byte packing uses the
-base `to_bits` (8-bit) template. `n`'s oddness/semiprimality is deliberately not
-proven: the verifier's key allowlist or certificate chain is the trust anchor.
+Still hand-proved, and therefore audit residuals:
+
+* **Rows → step identities.** That `grouped_columns`' column sums are the limbs'
+  convolutions, that the 24 step calls' carries are the model's `k`, and that each
+  numerator is canonical (the `< 2^251.7` column bound). This is the one bridge
+  between the emitted rows and every theorem above.
+* **`bytes_to_wide` and the EM.** The big-endian 2048-bit packing and
+  `sha256_em_bits_82`'s EM vector (constant prefix plus the digest bits) have no
+  model theorem yet.
+* **`minus_one` and `sig < n`.** The borrow chain that makes `n − 1`'s canonical
+  digits, and so the `require_lt::<25,82>` composition to `sig < n`, are the
+  bignum gadget's (its LC plugs are the allowlisted entry).
+* **The whole-circuit composition** (`Xark.Circuit`). An `rsa2048` export is
+  30 MB because the chain passes each carry as a linear combination rather than a
+  variable; it is deferred until the chain allocates carries.
+
+The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
+templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s
+oddness/semiprimality is deliberately not proven: the verifier's key allowlist or
+certificate chain is the trust anchor.
 
 ## 3. Trusted setup
 
