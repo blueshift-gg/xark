@@ -22596,4 +22596,120 @@ theorem chain_congruence_bytes (σ : ℕ → F) (h : Sat circuit σ) :
   rw [← chainN_eq_bytes σ h, ← chainSig_eq_bytes σ h]
   exact chain_congruence_em σ h
 
+theorem n_top (σ : ℕ → F) (h : Sat circuit σ) :
+    (nBits σ 2047 : ℤ) = 1 := by
+  have hs : Sat (seg 544).rows σ := segSat h (n := 544) (by decide)
+  have hs544 : Sat s544.rows σ := by
+    have := hs
+    rw [show seg 544 = s544 from rfl] at this
+    exact this
+  have h0 := hs544 _ (List.getElem_mem (by decide : 0 < s544.rows.length))
+  rw [Xark.R1cs.Row.Sat] at h0
+  simp only [s544, Seg.rows, ZRow.toF, ZLC.toF, LC.eval, List.map_cons, List.map_nil,
+    List.sum_cons, List.sum_nil] at h0
+  norm_num at h0
+  -- h0 : (row0.a.eval σ) * (row0.b.eval σ) = row0.c.eval σ
+  have hrow : ((604462909807314587353088 : F) * (σ 550 - 1)) = 0 := by
+    linear_combination h0
+  have h2 : (604462909807314587353088 : F) ≠ 0 := by decide
+  have hsub : σ 550 - 1 = 0 := by
+    rcases mul_eq_zero.mp hrow with hz | hz
+    · exact absurd hz h2
+    · exact hz
+  have h1 : σ 550 = 1 := sub_eq_zero.mp hsub
+  unfold nBits
+  rw [show 255 - 2047 / 8 = 0 by norm_num, show 2047 % 8 = 7 by norm_num]
+  have h750 : (bitGLC 0 7).eval σ = σ 550 := by
+    simp [bitGLC, bitTerms, bitBase, LC.eval]
+  rw [h750, h1]
+  simp [ZMod.val_one]
+
+
+theorem nByte0_ge (σ : ℕ → F) (h : Sat circuit σ) : (128 : ℤ) ≤ ((σ 0).val : ℤ) := by
+  rw [nBits_eq σ h 0 (by norm_num)]
+  rw [Finset.sum_range_succ]
+  have h7 : nBits σ (8 * (255 - 0) + 7) = 1 := by
+    rw [show 8 * (255 - 0) + 7 = 2047 by norm_num]
+    exact n_top σ h
+  have hlow : 0 ≤ ∑ t ∈ Finset.range 7, nBits σ (8 * (255 - 0) + t) * 2 ^ t := by
+    refine Finset.sum_nonneg fun t ht => ?_
+    have hb : (0 : ℤ) ≤ nBits σ (8 * (255 - 0) + t) := Int.natCast_nonneg _
+    exact mul_nonneg hb (by positivity)
+  rw [h7]
+  norm_num
+  linarith
+
+theorem chainN_ge (σ : ℕ → F) (h : Sat circuit σ) :
+    (128 : ℤ) * 256 ^ 255 ≤ chainN σ := by
+  rw [chainN_eq_bytes σ h]
+  rw [show 256 = 255 + 1 by norm_num, Finset.sum_range_succ']
+  simp only [Nat.zero_add, Nat.sub_zero]
+  have hterm : (128 : ℤ) * 256 ^ 255 ≤ ((σ 0).val : ℤ) * 256 ^ 255 :=
+    mul_le_mul_of_nonneg_right (nByte0_ge σ h) (by positivity)
+  have hrest : 0 ≤ ∑ i ∈ Finset.range 255, ((σ (i + 1)).val : ℤ) * 256 ^ (255 - (i + 1)) := by
+    refine Finset.sum_nonneg fun i hi => ?_
+    exact mul_nonneg (Int.natCast_nonneg _) (by positivity)
+  linarith
+
+theorem nByte_lt (σ : ℕ → F) (h : Sat circuit σ) (i : ℕ) (hi : i < 256) :
+    ((σ i).val : ℤ) ≤ 255 := by
+  rw [nBits_eq σ h i hi]
+  have hb : ∀ t < 8, nBits σ (8 * (255 - i) + t) ≤ 1 := by
+    intro t ht
+    unfold nBits
+    have h1 : (8 * (255 - i) + t) / 8 = 255 - i := by omega
+    have h2 : (8 * (255 - i) + t) % 8 = t := by omega
+    rw [h1, h2, show 255 - (255 - i) = i by omega]
+    have hz : (ZMod.val (Xark.R1cs.LC.eval (bitGLC i t) σ) : ℤ) ≤ 1 := by
+      exact_mod_cast hbit σ h i t (by omega) ht
+    exact hz
+  have hle : (∑ t ∈ Finset.range 8, nBits σ (8 * (255 - i) + t) * 2 ^ t)
+      ≤ ∑ t ∈ Finset.range 8, (1 : ℤ) * 2 ^ t := by
+    refine Finset.sum_le_sum fun t ht => ?_
+    exact mul_le_mul_of_nonneg_right (hb t (Finset.mem_range.mp ht)) (by positivity)
+  have h255 : (∑ t ∈ Finset.range 8, (1 : ℤ) * 2 ^ t) = 255 := by
+    norm_num [Finset.sum_range_succ]
+  rw [h255] at hle
+  exact hle
+
+theorem chainN_lt (σ : ℕ → F) (h : Sat circuit σ) : chainN σ < (2 : ℤ) ^ 2048 := by
+  rw [chainN_eq_bytes σ h]
+  have hle : (∑ i ∈ Finset.range 256, ((σ i).val : ℤ) * 256 ^ (255 - i))
+      ≤ ∑ i ∈ Finset.range 256, (255 : ℤ) * 256 ^ (255 - i) := by
+    refine Finset.sum_le_sum fun i hi => ?_
+    exact mul_le_mul_of_nonneg_right (nByte_lt σ h i (Finset.mem_range.mp hi)) (by positivity)
+  have hgeom : (∑ i ∈ Finset.range 256, (255 : ℤ) * 256 ^ (255 - i)) = (256 : ℤ) ^ 256 - 1 := by
+    rw [← Finset.mul_sum]
+    have h1 : (∑ i ∈ Finset.range 256, (256 : ℤ) ^ (255 - i))
+        = ∑ k ∈ Finset.range 256, (256 : ℤ) ^ k := by
+      rw [Finset.sum_range_reflect]
+    rw [h1]
+    have htel : ∀ n, ((255 : ℤ) * ∑ k ∈ Finset.range n, (256 : ℤ) ^ k) = (256 : ℤ) ^ n - 1 := by
+      intro n
+      induction n with
+      | zero => simp
+      | succ n ih => rw [Finset.sum_range_succ, mul_add, ih]; ring
+    exact htel 256
+  have hlt : (256 : ℤ) ^ 256 - 1 < (2 : ℤ) ^ 2048 := by
+    have hpow : (256 : ℤ) ^ 256 = (2 : ℤ) ^ 2048 := by
+      rw [show (256 : ℤ) = 2 ^ 8 by norm_num, ← pow_mul]
+    rw [hpow]
+    have hpos : (0 : ℤ) < (2 : ℤ) ^ 2048 := by positivity
+    omega
+  calc (∑ i ∈ Finset.range 256, ((σ i).val : ℤ) * 256 ^ (255 - i))
+      ≤ ∑ i ∈ Finset.range 256, (255 : ℤ) * 256 ^ (255 - i) := hle
+    _ = (256 : ℤ) ^ 256 - 1 := hgeom
+    _ < (2 : ℤ) ^ 2048 := hlt
+
+/-- **`n` has 2048 bits.** The top byte's top bit is pinned to `1` by s544's first
+glue row, and every byte is below `256`. -/
+theorem n_bits (σ : ℕ → F) (h : Sat circuit σ) :
+    (2 : ℤ) ^ 2047 ≤ chainN σ ∧ chainN σ < (2 : ℤ) ^ 2048 := by
+  constructor
+  · have hge := chainN_ge σ h
+    rwa [show (128 : ℤ) * 256 ^ 255 = (2 : ℤ) ^ 2047 by
+      rw [show (128 : ℤ) = 2 ^ 7 by norm_num, show (256 : ℤ) = 2 ^ 8 by norm_num,
+        ← pow_mul, ← pow_add]] at hge
+  · exact chainN_lt σ h
+
 end Xark.Circuits.Rsa2048
