@@ -1503,9 +1503,27 @@ fn stream_underconstrained(
     modulus: &num_bigint::BigUint,
     check_sat: bool,
 ) -> (bool, Vec<crate::solver::UnderConstrained>) {
-    // Over BN254 both passes run the compiled rows (`eval`); compiled once here.
     let compiled = crate::solver::is_bn254(modulus).then(|| eval::compile(defs, top_c));
-    let compiled = compiled.as_ref();
+    stream_underconstrained_with_program(
+        (defs, top_c),
+        vars,
+        keep_extra,
+        assign,
+        modulus,
+        check_sat,
+        compiled.as_ref(),
+    )
+}
+
+fn stream_underconstrained_with_program(
+    (defs, top_c): (&[GDef], &[CItem]),
+    vars: &[Var],
+    keep_extra: &std::collections::BTreeSet<u32>,
+    assign: &[Option<crate::solver::Fp>],
+    modulus: &num_bigint::BigUint,
+    check_sat: bool,
+    compiled: Option<&eval::Compiled>,
+) -> (bool, Vec<crate::solver::UnderConstrained>) {
     let (flags, sat_ok, quadratic) = classify_and_check(
         defs,
         top_c,
@@ -1654,6 +1672,86 @@ pub fn stream_solve_verify(
         return Err("a constraint is unsatisfied".to_string());
     }
     Ok((crate::solver::slots_into_map(assign), out))
+}
+
+/// Reuse the immutable BN254 witness and row programs for one circuit artifact.
+/// Every invocation solves and checks a new witness with request-local state.
+pub struct PreparedStreamSolver {
+    decoded: CompactDecoded,
+    modulus: num_bigint::BigUint,
+    witness: eval::WProgram,
+    rows: eval::Compiled,
+}
+
+impl PreparedStreamSolver {
+    /// Decode and compile a trusted circuit artifact before admitting requests.
+    pub fn new(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.get(..6) != Some(b"XBC\0\x02\x00") {
+            return Err("expected a version 2 XBC artifact".into());
+        }
+        let decoded = catch_quietly(|| decode_compact(bytes))
+            .map_err(|()| "malformed function artifact (XBC decode failed)".to_string())?;
+        let (field, _, defs, top_c, top_w, ..) = &decoded;
+        let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
+            .ok_or_else(|| "bad modulus".to_string())?;
+        if !crate::solver::is_bn254(&modulus) {
+            return Err("prepared streaming solver requires BN254".into());
+        }
+        let (witness, rows) = catch_quietly(|| {
+            (
+                eval::WProgram::compile(defs, top_w),
+                eval::compile(defs, top_c),
+            )
+        })
+        .map_err(|()| "malformed function artifact (XBC compile failed)".to_string())?;
+        Ok(Self {
+            decoded,
+            modulus,
+            witness,
+            rows,
+        })
+    }
+
+    pub fn input_vars(&self) -> &[Var] {
+        let (_, vars, .., num_inputs) = &self.decoded;
+        &vars[..*num_inputs]
+    }
+
+    /// Run the same full row and under-constraint analysis as [`stream_solve_verify`].
+    pub fn solve_verify(
+        &self,
+        inputs: &BTreeMap<u32, String>,
+    ) -> Result<
+        (
+            BTreeMap<u32, crate::solver::Fp>,
+            Vec<crate::solver::UnderConstrained>,
+        ),
+        String,
+    > {
+        let (_, vars, defs, top_c, top_w, keep_extra, _) = &self.decoded;
+        let assign = solve_streamed_with_program(
+            self.input_vars(),
+            vars.len(),
+            defs,
+            top_w,
+            &self.modulus,
+            inputs,
+            Some(&self.witness),
+        )?;
+        let (sat_ok, out) = stream_underconstrained_with_program(
+            (defs, top_c),
+            vars,
+            keep_extra,
+            &assign,
+            &self.modulus,
+            true,
+            Some(&self.rows),
+        );
+        if !sat_ok {
+            return Err("a constraint is unsatisfied".to_string());
+        }
+        Ok((crate::solver::slots_into_map(assign), out))
+    }
 }
 
 /// Count the R1CS constraints by **streaming** them out of the compact bytecode
@@ -1997,13 +2095,25 @@ fn solve_streamed(
     modulus: &num_bigint::BigUint,
     inputs: &BTreeMap<u32, String>,
 ) -> Result<Vec<Option<crate::solver::Fp>>, String> {
+    solve_streamed_with_program(vars, n, defs, top_w, modulus, inputs, None)
+}
+
+fn solve_streamed_with_program(
+    vars: &[Var],
+    n: usize,
+    defs: &[GDef],
+    top_w: &[WItem],
+    modulus: &num_bigint::BigUint,
+    inputs: &BTreeMap<u32, String>,
+    program: Option<&eval::WProgram>,
+) -> Result<Vec<Option<crate::solver::Fp>>, String> {
     if !crate::solver::is_bn254(modulus) {
         return crate::solver::solve_witness_streamed_dense(vars, n, modulus, inputs, |sink| {
             expand_w_visit(defs, top_w, &IDENTITY, &mut |op| sink(op));
         })
         .map_err(|e| format!("solve: {e:?}"));
     }
-    let w = eval::solve_witness(defs, top_w, vars, n, modulus, inputs)
+    let w = eval::solve_witness(defs, top_w, vars, n, modulus, inputs, program)
         .map_err(|e| format!("solve: {e:?}"))?;
     Ok(w.vals
         .into_iter()
@@ -3003,11 +3113,34 @@ mod eval {
         e
     }
 
-    struct WProgram {
+    pub(super) struct WProgram {
         defs: Vec<Vec<WItem>>,
         /// Per template: [`escapes`].
         escapes: Vec<bool>,
         top: Vec<WItem>,
+    }
+
+    impl WProgram {
+        pub(super) fn compile(defs: &[GDef], top: &[super::WItem]) -> Self {
+            // Chunk boundaries only forgo carrying a Bit input over.
+            use rayon::prelude::*;
+            let defs: Vec<Vec<WItem>> = defs
+                .par_iter()
+                .map(|d| w_items(&d.w_items, Some(d)))
+                .collect();
+            let top = top
+                .par_chunks(256)
+                .map(|c| w_items(c, None))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .flatten()
+                .collect();
+            let mut memo = vec![None; defs.len()];
+            let escapes = (0..defs.len())
+                .map(|d| escapes(&defs, d, &mut memo))
+                .collect();
+            Self { defs, escapes, top }
+        }
     }
 
     /// A BN254 witness: values by var id, and which ids an input or an op
@@ -3190,13 +3323,14 @@ mod eval {
     /// witness as `solve_witness_streamed_dense` over [`super::expand_w_visit`]:
     /// the ops run in the same order, and a plug's expression or a carried `Bit`
     /// input has the value the substituted op would read.
-    pub fn solve_witness(
+    pub(super) fn solve_witness(
         defs: &[GDef],
         top: &[super::WItem],
         vars: &[Var],
         n: usize,
         modulus: &BigUint,
         inputs: &BTreeMap<u32, String>,
+        program: Option<&WProgram>,
     ) -> Result<Witness, SolveError> {
         let mut w = Witness {
             vals: vec![Fr::zero(); n],
@@ -3211,31 +3345,26 @@ mod eval {
                 w.put(var.id, v.as_bn254_fr().expect("BN254 modulus"));
             }
         }
-        // Compiling is per template and per top-level item, so it runs in
-        // parallel; a chunk boundary only forgoes carrying a `Bit` input over.
-        use rayon::prelude::*;
-        let defs: Vec<Vec<WItem>> = defs
-            .par_iter()
-            .map(|d| w_items(&d.w_items, Some(d)))
-            .collect();
-        let top: Vec<WItem> = top
-            .par_chunks(256)
-            .map(|c| w_items(c, None))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .flatten()
-            .collect();
-        let mut memo = vec![None; defs.len()];
-        let escapes = (0..defs.len())
-            .map(|d| escapes(&defs, d, &mut memo))
-            .collect();
-        let p = WProgram { defs, escapes, top };
+        let owned;
+        let program = if let Some(program) = program {
+            program
+        } else {
+            owned = WProgram::compile(defs, top);
+            &owned
+        };
         let top = WFrame {
             base: 0,
             plugs: Vec::new(),
             vals: Some(Vec::new()),
         };
-        run(&p, &p.top, &top, &mut w, modulus, &mut Vec::new())?;
+        run(
+            program,
+            &program.top,
+            &top,
+            &mut w,
+            modulus,
+            &mut Vec::new(),
+        )?;
         Ok(w)
     }
 }

@@ -9,17 +9,19 @@
 
 use std::collections::BTreeMap;
 
-use xark_ir::function_decode::{expand_function_blob, expand_function_blob_reduced};
+use xark_ir::function_decode::{
+    PreparedStreamSolver, expand_function_blob, expand_function_blob_reduced, stream_solve_verify,
+};
 use xark_ir::solver::{check_cp, solve_cp};
 
 const XBC: &[u8] = include_bytes!("fixtures/poseidon2_sponge.xbc");
 /// `poseidon2_sponge(1, 2, 3, 4, 5)`.
 const HASH: &str = "8828141863764826539393608139805007447022200187560478202710690249571019683634";
 
-fn witness(h: &str) -> BTreeMap<u32, xark_ir::solver::Fp> {
+fn inputs(h: &str) -> BTreeMap<u32, String> {
     let full = expand_function_blob(XBC).unwrap();
     let id = |n: &str| full.vars.iter().find(|v| v.name == n).unwrap().id;
-    let inputs: BTreeMap<u32, String> = [
+    [
         ("a", "1"),
         ("b", "2"),
         ("c", "3"),
@@ -29,8 +31,37 @@ fn witness(h: &str) -> BTreeMap<u32, xark_ir::solver::Fp> {
     ]
     .into_iter()
     .map(|(n, v)| (id(n), v.to_string()))
-    .collect();
-    solve_cp(&full, &inputs).unwrap()
+    .collect()
+}
+
+fn witness(h: &str) -> BTreeMap<u32, xark_ir::solver::Fp> {
+    solve_cp(&expand_function_blob(XBC).unwrap(), &inputs(h)).unwrap()
+}
+
+#[test]
+fn prepared_solver_matches_full_stream_checks_after_a_rejected_request() {
+    let solver = PreparedStreamSolver::new(XBC).unwrap();
+    let valid = inputs(HASH);
+    let invalid = inputs("12345");
+    let expected = stream_solve_verify(XBC, &valid).unwrap();
+    let (actual, rejected) = rayon::join(
+        || solver.solve_verify(&valid),
+        || solver.solve_verify(&invalid),
+    );
+    let actual = actual.unwrap();
+    assert_eq!(
+        rejected.unwrap_err(),
+        stream_solve_verify(XBC, &invalid).unwrap_err()
+    );
+    assert_eq!(actual.0, expected.0);
+    let report = |rows: Vec<xark_ir::solver::UnderConstrained>| {
+        rows.into_iter()
+            .map(|row| (row.var, row.name, row.reason))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(report(actual.1), report(expected.1));
+    assert_eq!(solver.solve_verify(&valid).unwrap().0, expected.0);
+    assert!(PreparedStreamSolver::new(&XBC[..6]).is_err());
 }
 
 #[test]
