@@ -72,8 +72,11 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   `VerifyWide.lean` bundles the byte-level facts (`n` is 2048 bits, `sig < n`,
   the encoded message is below `n`, and it is `sig^65537` mod `n`) as one
   `verify_wide_spec`; the encoding's range makes the congruence the canonical
-  `sig^65537 mod n = EM` (`rsa_verify_equation`). `docs/security.md` §2.18 now
-  records these as proven rather than as audit residuals. No circuit changed.
+  `sig^65537 mod n = EM` (`rsa_verify_equation`). `Rfc8017.lean` writes RFC 8017's
+  verifier and proves it returns `true` on every satisfying assignment (the
+  statement zk.golf's RSA challenge specifies), with zk.golf's interface
+  assumptions. `docs/security.md` §2.18 now records these as proven rather than as
+  audit residuals. No circuit changed.
 
 ## 0.5.0
 

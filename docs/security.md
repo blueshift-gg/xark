@@ -466,6 +466,15 @@ facts the congruence is the canonical-residue equality `sig^65537 mod n = EM`
 input: the theorem is about the RSA relation for that digest, not that the digest is
 any message's SHA-256.
 
+`Rfc8017.lean` states the conformance target independently: it writes RFC 8017's
+`OS2IP`/`I2OSP`, the SHA-256 EMSA-PKCS1-v1_5 encoding and
+`RSASSA-PKCS1-v1_5-VERIFY`, and proves `verify_wide_spec` entails the verifier
+returning `true` for the 2048-bit / SHA-256 / `e = 65537` instance
+(`verifySignature_true`), plus zk.golf's interface assumptions
+(`rfc8017_assumptions`: the three octet strings and `HasBitSize n 2048`). That is the
+statement zk.golf's `RSASSAPKCS1v15` challenge takes as its `Spec`; the file is a
+transcription of RFC 8017, not of zk.golf's unlicensed source.
+
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s
 oddness/semiprimality is deliberately not proven: the verifier's key allowlist or
