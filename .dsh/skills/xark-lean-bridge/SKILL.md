@@ -1144,3 +1144,20 @@ explicit hypothesis. `lake build` is 3,384 jobs; AxiomCheck 4,819 theorems. The 
 piece of item (2) is `hEm`: the terminal `r` array is `< 2^82` because it is the
 `sha256_em_bits_82` output (`emOut` of the 256 digest bits), the analogue of the byte
 path's `EmBits`/`PackBound`.
+
+### What `hEm` needs (2026-11, round 37)
+
+`w_verify_wide` (in `WordsCong.lean`) is the words 17×121 statement with one
+hypothesis: `hEm : ∀ i < 25, pn (wcallAt 88) σ (100 + i) < 2^82`, the terminal
+`grouped_columns` call's `r` array. That array is the `sha256_em_bits_82` output (the
+gadget is zero-row, so it is inlined into s88's plugs 100..124). The byte path proves
+the analogous facts in `Formal/Circuits/Rsa2048/EmBits.lean`
+(`pn fin σ (100+i) = emOut (digestBits σ) i`, 25 per-limb lemmas over the
+`packCanon` LCs) and `PackBound.lean` (`weighted_lt`/`val_weighted`: a weighted sum of
+≤ 82 bits with weights `< 2^82` is `< 2^82`; `pack_bound` instantiates it for the
+byte's `bitGLC`). For the words: (a) the digest bits are the `to_bits` calls at
+s2..s33 (their outputs are the `wit` LCs; `Template.bitOf x i = if x.val.testBit i
+then 1 else 0`, so each bit value is `0`/`1`); (b) the final's `r` plugs are the
+`emOut` LCs with those bits; (c) `weighted_lt` gives the bound. The port is
+the plumbing in (a)/(b): the bit vars' `wit` indices and the `em82` LCs' term lists,
+per the byte `EmBits`/`PackBound` pattern (~250–300 lines).
