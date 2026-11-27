@@ -897,3 +897,14 @@ syntactically equal — `simp only [gbit, zero_add]` closes). Still to do: `h1`
 attempt with `linear_combination`/`nlinarith` over the expanded 79-term sum did not
 finish and was reverted — keep `S` opaque (`set`). `lake build` is 3,376 jobs;
 AxiomCheck 4,269 theorems.
+
+### `n_top_eq` and `n_top_ge` (2026-11, round 15)
+
+`ConvertTop.lean` now proves `n_top_eq` (`σ 26347 = 2^79 + Σ bits`, with `S` opaque
+via `set`, `topN_hcast` for the cast, `linear_combination ha` for the field step, and
+`ZMod.val_natCast_of_lt` since `2^79 + S < 2^80 < r`) and `n_top_ge` (`2^79 ≤ σ 26347`
+by `Nat.le_add_right` after `rw [n_top_eq]` — `omega` over the sum was the 10-minute
+bottleneck; avoid it). The file compiles in 2.7s. The lower value bound `n_val_ge`
+(needs `mul_le_mul_of_nonneg_right` and a `set` for the top term; a first version was
+slow and was reverted) and the `minus_one` tail + chain remain. `lake build` is 3,376
+jobs; AxiomCheck 4,271 theorems.

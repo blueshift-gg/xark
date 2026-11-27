@@ -66,4 +66,44 @@ theorem topN_hcast (σ : ℕ → F) :
   push_cast
   simp only [ZMod.natCast_zmod_val, gbit, zero_add]
 
+theorem n_top_eq (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    (σ 26347).val =
+      2 ^ 79 + ∑ i ∈ Finset.range 79, 2 ^ i * (σ (26348 + 2 * i)).val := by
+  have hr := growAt_sat (s36_sat h) 9812 (by decide)
+  rw [topN_row] at hr
+  have ha : topNLC.eval σ = 0 := by
+    simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+  rw [topN_eval] at ha
+  have hbits := topN_bits σ h
+  let w : ℕ → ℕ := fun i => (σ (26348 + 2 * i)).val
+  have hwb : ∀ i < 79, w i ≤ 1 := fun i hi => isBit_val (hbits i hi)
+  have hWlt := word_lt w 79 hwb
+  set S : ℕ := ∑ i ∈ Finset.range 79, 2 ^ i * w i
+  have hSlt : S < 2 ^ 79 := hWlt
+  have hcast' : (S : F) =
+      ∑ i ∈ Finset.range 79, ((2 ^ i : ℕ) : F) * σ (26348 + 2 * i) := by
+    rw [show S = ∑ i ∈ Finset.range 79, 2 ^ i * w i from rfl]
+    rw [topN_hcast σ]
+    simp only [gacc, Xark.R1cs.LC.eval, List.map_map, Function.comp_def, sum_map_range]
+    simp only [gbit, zero_add]
+  have h1 : (σ 26347 : F) = ((2 ^ 79 : ℕ) : F) + (S : F) := by
+    rw [hcast']
+    linear_combination ha
+  have h2 : (((2 ^ 79 + S : ℕ)) : F) = ((2 ^ 79 : ℕ) : F) + (S : F) := by
+    push_cast
+    ring
+  have h1' : (σ 26347 : F) = (((2 ^ 79 + S : ℕ)) : F) := by
+    rw [h2]
+    exact h1
+  have h80r : (2 ^ 80 : ℕ) < r := Xark.Templates.ToBits.two_pow_lt_r' (n := 80) (by norm_num)
+  have hval : (σ 26347).val = 2 ^ 79 + S := by
+    rw [h1', ZMod.val_natCast_of_lt (by omega : 2 ^ 79 + S < r)]
+  rw [hval]
+
+/-- The modulus's top limb is at least `2^79`, i.e. `n ≥ 2^2047`. -/
+theorem n_top_ge (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    2 ^ 79 ≤ (σ 26347).val := by
+  rw [n_top_eq σ h]
+  exact Nat.le_add_right _ _
+
 end Xark.Circuits.Rsa2048
