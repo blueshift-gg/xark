@@ -1173,3 +1173,14 @@ top-bit LC and the low-bit `wit`s; the byte path's `EmBits` maps `bitGLC` to exa
 these. The remaining port: (i) get `IsBit ((to_bits.outs σ').getD t 0)` from `houts`
 (the `getD` of the mapped list; `getElem?_map`/`getElem?_range` + `Option.getD_some`),
 (ii) transport to the `wit` vars, (iii) `weighted_lt` for `< 2^82`.
+
+### The digest bits are bits (2026-11, round 39)
+
+`WordsEm.lean`: `tobits_out_isBit` (generic: a `ToBits`-satisfying template's t-th
+output is `bitOf (ins.getD 0 0) t`, hence `0`/`1`; the `outs` rewrite is
+`houts` then `getD_eq_getElem?_getD`, `getElem?_map`, `getElem?_range ht`, `rfl`) and
+`w_tobits_out_isBit_0..31` (the 32 digest-byte `to_bits` calls at s2..s33). The
+per-call template/Sat facts need `b` *concrete* (`wcallAt (2+b)` for symbolic b does
+not reduce), hence the 32 wrappers. `lake build` is 3,385 jobs; AxiomCheck 4,852
+theorems. Remaining for `hEm`: transport these to the `em82` LCs' `wit`/top-bit terms
+and apply `weighted_lt` (`< 2^82`).
