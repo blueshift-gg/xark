@@ -1059,3 +1059,15 @@ circuit-independent and reused directly; only the `Sat`/`hseg` arguments change.
 the s38..s88 call indices (`q`/`r`/`square` triples, then the final `q`+general), the
 per-call plug bounds (the converted limbs, `yN`/`yS`), and the `RsaChain.chain`
 congruence (`EM ≡ sig^65537 (mod n)`).
+
+### The words chain's q/r bounds (2026-11, round 28)
+
+`WordsQR.lean` (generated): for each of the 16 squarings (square `i` at segment
+`40 + 3i`), `wq_i`/`wr_i` bound the call's `q` array (plugs 50..74) and `r` array
+(75..99) below `2^82`. The proof pattern: a 25-element **window** fact
+(`((wcallAt (40+3i)).plugs.drop 50).take 25 = ((wcallAt (38+3i)).plugs.drop 0).take 25`)
+by `decide +kernel`, then `getD_of_window hj hw (LC.cst 0)`, then
+`simp only [pn, Call.lift, Call.env, hp, Nat.zero_add]` (the `simp only` matters —
+`simp` with the full set normalizes `getD` to `getElem?` and `hp` stops matching),
+then `wq_call_bound`/`wr_call_bound` at the check call. Both `lake build` (3,380 jobs)
+and AxiomCheck (4,721 theorems) are green.
