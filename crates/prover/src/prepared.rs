@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use ark_bn254::{Bn254, Fr};
+use ark_bn254::Bn254;
 use ark_ff::PrimeField;
 use ark_serialize::{CanonicalSerialize, Valid};
 use xark_groth16::{ConstraintSource, InMemoryPk, ProverConfig, ProvingKey, VerifyingKey};
