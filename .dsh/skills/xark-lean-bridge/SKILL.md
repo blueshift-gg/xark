@@ -661,3 +661,30 @@ entry point (no example circuit), the signature's visibility (their public `Inpu
 a precedent, but changing ours re-keys), completeness (Clean-specific; it would need
 a Lean model of the Rust witness generator), Groth16 soundness/ZK, and
 `digest = H(M)` (both specs leave it as an assumption).
+
+### The three unmodelled gadgets: why the templates were not added (2026-11, round 2)
+
+Tried `sha256_em_bits_82` (the safest of the three). Facts established:
+
+* It exports as a **zero-row** template: `plugs := 256`, `wits := 0`, `rows := []`, and
+  the 25 `outputs` are exactly `em82 k + Σ (2^t, plug (82k+t))` — the EM limb LCs.
+  `cargo xtask lean-export sha256_em_bits_82` writes
+  `Formal/Templates/Sha256EmBits82.lean` (29 lines, hash `sha256:ba5286f…`).
+* The example exporter only emits a segment for a top-level call with `rows > 0`
+  (`calls.filter(|c| c.parent.is_none() && c.rows > 0)`), so a zero-row gadget does
+  **not** renumber the circuit. That is the one safe case.
+* It still refuses to export the example until exactly one *direct* file under
+  `formal/Formal/` imports the template (`coverage::proof_of` scans only that
+  directory), and `AxiomCheck` wants
+  `Xark.Templates.Sha256EmBits82.soundness` mentioning `template` and
+  `Template.Sat`.
+* The contract `output q = emOut digest q` is already proven at the circuit level
+  (`EmBits.lean`'s `pn_emOut_0..24`, `val_em_limb`, `chainEm_eq`), so the template
+  proof would duplicate the `limbOf`/weighted-sum work for no new fact. Reverted.
+
+The other two are worse: `bytes_to_wide` owns the 544 `to_bits` calls, and marking it
+turns them into children, collapsing them from the top-level export — every `callAt`
+index in `Bits.lean`, `ByteBits.lean`, `Verify.lean`, `SigLt.lean` and `Chain.lean`
+shifts. `minus_one` lives in `xark-bignum` and is called by `mul_divmod`/`sub2`, so
+marking it changes the curve examples' exports too. Both need a re-export and a
+re-prove of the compositions, not a mechanical template.
