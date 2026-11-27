@@ -747,3 +747,16 @@ s37 `RequireLt25x82`, s38..s85 the 16 (q, r, square) triples, s86 the fused q ch
 s87 glue, s88 the general `grouped_columns`. Next: the `convert_wide` row model (the
 glue's 25 column equations for n and sig, then `RsaConvert.telescoping`) and the chain
 assembly with the gadget contracts.
+
+### The `convert_wide` glue model (2026-11, round 5)
+
+s36 (9,913 rows) is the lowering of *two* `convert_wide` calls (n, sig). Per column:
+one `num = W·carry + limb` row (`a = num − W·carry − limb`, `b = 1`, `c = 0`), then
+`range_derived::<82>(limb)` and `range_derived::<118>(carry)` (W−1 booleanity rows and
+the top row `top·(top − 2^(W−1)) = 0`); the last column adds `require_eq(carry, 0)` and
+`range_derived_top::<80>`. `Formal/Circuits/Rsa2048/ConvertGlue.lean` models one block
+over *circuit* variables (`gbit base i = base + 2i`, `gacc`, `gtopA`/`gtopB`,
+`gblockRows`) and proves `gblock_sound` — the glue-level `RangeDerived.block_sound`.
+Next: check the ~50 blocks of s36 against it by `decide`, extract the 25 column
+equations per operand, and apply `Xark.Rsa.Convert.telescoping` (`cols_sum`,
+`partial_sum`).
