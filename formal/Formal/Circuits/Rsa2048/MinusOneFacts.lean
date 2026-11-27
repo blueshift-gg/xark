@@ -629,4 +629,467 @@ theorem mhout_24 : (wcallAt 37).plugs.getD (25 + 24) (LC.cst 0)
         (smulLC (W : ℤ) (mborrow 25)) := by
   decide +kernel
 
+theorem mE1q_0 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 16747 * σ 36268 = σ 36269 := by
+  have hr := growAt_sat (s36_sat h) 9813 (by decide)
+  rw [mE1_0] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_0 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 16747 * (1 - σ 36269) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9814 (by decide)
+  rw [mE2_0] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_1 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 17147 * σ 36272 = σ 36273 := by
+  have hr := growAt_sat (s36_sat h) 9816 (by decide)
+  rw [mE1_1] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_1 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 17147 * (1 - σ 36273) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9817 (by decide)
+  rw [mE2_1] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_2 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 17547 * σ 36277 = σ 36278 := by
+  have hr := growAt_sat (s36_sat h) 9820 (by decide)
+  rw [mE1_2] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_2 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 17547 * (1 - σ 36278) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9821 (by decide)
+  rw [mE2_2] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_3 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 17947 * σ 36282 = σ 36283 := by
+  have hr := growAt_sat (s36_sat h) 9824 (by decide)
+  rw [mE1_3] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_3 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 17947 * (1 - σ 36283) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9825 (by decide)
+  rw [mE2_3] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_4 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 18347 * σ 36287 = σ 36288 := by
+  have hr := growAt_sat (s36_sat h) 9828 (by decide)
+  rw [mE1_4] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_4 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 18347 * (1 - σ 36288) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9829 (by decide)
+  rw [mE2_4] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_5 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 18747 * σ 36292 = σ 36293 := by
+  have hr := growAt_sat (s36_sat h) 9832 (by decide)
+  rw [mE1_5] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_5 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 18747 * (1 - σ 36293) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9833 (by decide)
+  rw [mE2_5] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_6 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 19147 * σ 36297 = σ 36298 := by
+  have hr := growAt_sat (s36_sat h) 9836 (by decide)
+  rw [mE1_6] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_6 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 19147 * (1 - σ 36298) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9837 (by decide)
+  rw [mE2_6] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_7 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 19547 * σ 36302 = σ 36303 := by
+  have hr := growAt_sat (s36_sat h) 9840 (by decide)
+  rw [mE1_7] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_7 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 19547 * (1 - σ 36303) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9841 (by decide)
+  rw [mE2_7] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_8 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 19947 * σ 36307 = σ 36308 := by
+  have hr := growAt_sat (s36_sat h) 9844 (by decide)
+  rw [mE1_8] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_8 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 19947 * (1 - σ 36308) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9845 (by decide)
+  rw [mE2_8] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_9 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 20347 * σ 36312 = σ 36313 := by
+  have hr := growAt_sat (s36_sat h) 9848 (by decide)
+  rw [mE1_9] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_9 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 20347 * (1 - σ 36313) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9849 (by decide)
+  rw [mE2_9] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_10 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 20747 * σ 36317 = σ 36318 := by
+  have hr := growAt_sat (s36_sat h) 9852 (by decide)
+  rw [mE1_10] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_10 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 20747 * (1 - σ 36318) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9853 (by decide)
+  rw [mE2_10] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_11 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 21147 * σ 36322 = σ 36323 := by
+  have hr := growAt_sat (s36_sat h) 9856 (by decide)
+  rw [mE1_11] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_11 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 21147 * (1 - σ 36323) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9857 (by decide)
+  rw [mE2_11] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_12 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 21547 * σ 36327 = σ 36328 := by
+  have hr := growAt_sat (s36_sat h) 9860 (by decide)
+  rw [mE1_12] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_12 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 21547 * (1 - σ 36328) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9861 (by decide)
+  rw [mE2_12] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_13 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 21947 * σ 36332 = σ 36333 := by
+  have hr := growAt_sat (s36_sat h) 9864 (by decide)
+  rw [mE1_13] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_13 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 21947 * (1 - σ 36333) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9865 (by decide)
+  rw [mE2_13] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_14 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 22347 * σ 36337 = σ 36338 := by
+  have hr := growAt_sat (s36_sat h) 9868 (by decide)
+  rw [mE1_14] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_14 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 22347 * (1 - σ 36338) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9869 (by decide)
+  rw [mE2_14] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_15 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 22747 * σ 36342 = σ 36343 := by
+  have hr := growAt_sat (s36_sat h) 9872 (by decide)
+  rw [mE1_15] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_15 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 22747 * (1 - σ 36343) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9873 (by decide)
+  rw [mE2_15] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_16 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 23147 * σ 36347 = σ 36348 := by
+  have hr := growAt_sat (s36_sat h) 9876 (by decide)
+  rw [mE1_16] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_16 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 23147 * (1 - σ 36348) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9877 (by decide)
+  rw [mE2_16] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_17 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 23547 * σ 36352 = σ 36353 := by
+  have hr := growAt_sat (s36_sat h) 9880 (by decide)
+  rw [mE1_17] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_17 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 23547 * (1 - σ 36353) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9881 (by decide)
+  rw [mE2_17] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_18 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 23947 * σ 36357 = σ 36358 := by
+  have hr := growAt_sat (s36_sat h) 9884 (by decide)
+  rw [mE1_18] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_18 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 23947 * (1 - σ 36358) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9885 (by decide)
+  rw [mE2_18] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_19 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 24347 * σ 36362 = σ 36363 := by
+  have hr := growAt_sat (s36_sat h) 9888 (by decide)
+  rw [mE1_19] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_19 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 24347 * (1 - σ 36363) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9889 (by decide)
+  rw [mE2_19] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_20 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 24747 * σ 36367 = σ 36368 := by
+  have hr := growAt_sat (s36_sat h) 9892 (by decide)
+  rw [mE1_20] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_20 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 24747 * (1 - σ 36368) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9893 (by decide)
+  rw [mE2_20] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_21 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 25147 * σ 36372 = σ 36373 := by
+  have hr := growAt_sat (s36_sat h) 9896 (by decide)
+  rw [mE1_21] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_21 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 25147 * (1 - σ 36373) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9897 (by decide)
+  rw [mE2_21] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_22 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 25547 * σ 36377 = σ 36378 := by
+  have hr := growAt_sat (s36_sat h) 9900 (by decide)
+  rw [mE1_22] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_22 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 25547 * (1 - σ 36378) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9901 (by decide)
+  rw [mE2_22] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_23 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 25947 * σ 36382 = σ 36383 := by
+  have hr := growAt_sat (s36_sat h) 9904 (by decide)
+  rw [mE1_23] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_23 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 25947 * (1 - σ 36383) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9905 (by decide)
+  rw [mE2_23] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mE1q_24 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 26347 * σ 36387 = σ 36388 := by
+  have hr := growAt_sat (s36_sat h) 9908 (by decide)
+  rw [mE1_24] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+theorem mE2q_24 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 26347 * (1 - σ 36388) = 0 := by
+  have hr := growAt_sat (s36_sat h) 9909 (by decide)
+  rw [mE2_24] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_0 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    (1 - σ 36269) * (1 - σ 36273) = σ 36276 := by
+  have hr := growAt_sat (s36_sat h) 9819 (by decide)
+  rw [mP_0] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_1 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36276 * (1 - σ 36278) = σ 36281 := by
+  have hr := growAt_sat (s36_sat h) 9823 (by decide)
+  rw [mP_1] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_2 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36281 * (1 - σ 36283) = σ 36286 := by
+  have hr := growAt_sat (s36_sat h) 9827 (by decide)
+  rw [mP_2] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_3 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36286 * (1 - σ 36288) = σ 36291 := by
+  have hr := growAt_sat (s36_sat h) 9831 (by decide)
+  rw [mP_3] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_4 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36291 * (1 - σ 36293) = σ 36296 := by
+  have hr := growAt_sat (s36_sat h) 9835 (by decide)
+  rw [mP_4] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_5 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36296 * (1 - σ 36298) = σ 36301 := by
+  have hr := growAt_sat (s36_sat h) 9839 (by decide)
+  rw [mP_5] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_6 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36301 * (1 - σ 36303) = σ 36306 := by
+  have hr := growAt_sat (s36_sat h) 9843 (by decide)
+  rw [mP_6] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_7 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36306 * (1 - σ 36308) = σ 36311 := by
+  have hr := growAt_sat (s36_sat h) 9847 (by decide)
+  rw [mP_7] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_8 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36311 * (1 - σ 36313) = σ 36316 := by
+  have hr := growAt_sat (s36_sat h) 9851 (by decide)
+  rw [mP_8] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_9 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36316 * (1 - σ 36318) = σ 36321 := by
+  have hr := growAt_sat (s36_sat h) 9855 (by decide)
+  rw [mP_9] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_10 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36321 * (1 - σ 36323) = σ 36326 := by
+  have hr := growAt_sat (s36_sat h) 9859 (by decide)
+  rw [mP_10] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_11 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36326 * (1 - σ 36328) = σ 36331 := by
+  have hr := growAt_sat (s36_sat h) 9863 (by decide)
+  rw [mP_11] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_12 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36331 * (1 - σ 36333) = σ 36336 := by
+  have hr := growAt_sat (s36_sat h) 9867 (by decide)
+  rw [mP_12] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_13 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36336 * (1 - σ 36338) = σ 36341 := by
+  have hr := growAt_sat (s36_sat h) 9871 (by decide)
+  rw [mP_13] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_14 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36341 * (1 - σ 36343) = σ 36346 := by
+  have hr := growAt_sat (s36_sat h) 9875 (by decide)
+  rw [mP_14] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_15 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36346 * (1 - σ 36348) = σ 36351 := by
+  have hr := growAt_sat (s36_sat h) 9879 (by decide)
+  rw [mP_15] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_16 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36351 * (1 - σ 36353) = σ 36356 := by
+  have hr := growAt_sat (s36_sat h) 9883 (by decide)
+  rw [mP_16] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_17 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36356 * (1 - σ 36358) = σ 36361 := by
+  have hr := growAt_sat (s36_sat h) 9887 (by decide)
+  rw [mP_17] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_18 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36361 * (1 - σ 36363) = σ 36366 := by
+  have hr := growAt_sat (s36_sat h) 9891 (by decide)
+  rw [mP_18] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_19 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36366 * (1 - σ 36368) = σ 36371 := by
+  have hr := growAt_sat (s36_sat h) 9895 (by decide)
+  rw [mP_19] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_20 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36371 * (1 - σ 36373) = σ 36376 := by
+  have hr := growAt_sat (s36_sat h) 9899 (by decide)
+  rw [mP_20] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_21 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36376 * (1 - σ 36378) = σ 36381 := by
+  have hr := growAt_sat (s36_sat h) 9903 (by decide)
+  rw [mP_21] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_22 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36381 * (1 - σ 36383) = σ 36386 := by
+  have hr := growAt_sat (s36_sat h) 9907 (by decide)
+  rw [mP_22] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mPq_23 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    σ 36386 * (1 - σ 36388) = σ 36391 := by
+  have hr := growAt_sat (s36_sat h) 9911 (by decide)
+  rw [mP_23] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval, sub_eq_add_neg] using hr
+
+theorem mFq (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) : σ 36391 = 0 := by
+  have hr := growAt_sat (s36_sat h) 9912 (by decide)
+  rw [mF] at hr
+  simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+
+/-- `z` is a bit: `n·w = z` and `n·(1−z) = 0`. -/
+theorem zBit {n w z : F} (h1 : n * w = z) (h2 : n * (1 - z) = 0) : z = 0 ∨ z = 1 := by
+  rcases mul_eq_zero.mp h2 with hn | hz
+  · left
+    rw [hn, zero_mul] at h1
+    exact h1.symm
+  · right
+    linear_combination -hz
+
+/-- `b = 1 − z` is a bit when `z` is. -/
+theorem bBit_of {b z : F} (h : b = 1 - z) (hz : z = 0 ∨ z = 1) : b = 0 ∨ b = 1 := by
+  rcases hz with hz | hz
+  · right; rw [h, hz]; ring
+  · left; rw [h, hz]; ring
 end Xark.Circuits.Rsa2048

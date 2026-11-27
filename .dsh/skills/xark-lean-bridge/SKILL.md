@@ -949,3 +949,17 @@ The byte stack's per-limb algebra (`SigLt3`'s `E1/E2/E3`/`P`/`houtE`/`hnb`/`hrec
 the `mE*` row shapes (done), the `mE1q`/`mE2q`/`mPq` equations and `mhoutE_i`, then
 `val_formula`/`telescope` with `mborrow 0 = 1`, `mborrow 25 = 0`. `lake build` is
 3,377 jobs; AxiomCheck 4,398 theorems.
+
+### The words minus_one equations (2026-11, round 19)
+
+`MinusOneFacts.lean` now has the per-limb equations from the row shapes:
+`mE1q_j : σ m_j · σ w_j = σ z_j`, `mE2q_j : σ m_j · (1 − σ z_j) = 0` (via
+`growAt_sat` + the `mE*` shape + `simpa [Row.Sat, LC.eval, sub_eq_add_neg]`),
+`mPq_i : borrow_{i+1} · (1 − z_{i+1}) = borrow_{i+2}` (P_0's `a` is `1 − z_0`;
+for i≥1 it is the var `nxt_{i−1}`), and `mFq : σ 36391 = 0` (borrow_25). Generic
+bit lemmas: `zBit` (`n·w = z`, `n·(1−z) = 0` ⇒ z ∈ {0,1}, by `mul_eq_zero`) and
+`bBit_of` (`b = 1−z`, z bit ⇒ b bit; note z=0 ⇒ b=1, z=1 ⇒ b=0 — the branch order
+matters). The `decide +kernel` row facts cost ~73 s: each `getD` walks ~9,800 list
+cells. `lake build` is 3,377 jobs; AxiomCheck 4,475 theorems. Next: define
+`mzF/mwF/mbF/mborrowF/mOutF/mNF`, the `mhoutE_i` rewrite, `hrec/hnb/outVal` and
+`telescope` → `val (limb (wcallAt 37) σ 25) = n_val − 1`.
