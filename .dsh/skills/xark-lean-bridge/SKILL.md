@@ -919,3 +919,20 @@ The slow trap was `positivity` on `(W : ℤ)^j` with symbolic `j`: it loops; pro
 `0 ≤ W` once (`hW0`) and use `pow_nonneg hW0 j`. `n_limb_bnd24`/`n_limb_lt82` feed
 `yN 24`/`nLimb.getD 24 0 = 26347`. `lake build` is 3,376 jobs; AxiomCheck 4,272
 theorems. Remaining: the `minus_one` tail (9813..9912) and the chain.
+
+### The words `minus_one` tail model (2026-11, round 17)
+
+`MinusOneFacts.lean` (generated): the words circuit's `minus_one(n)` is s36's *tail*,
+s36 indices **9813..9912** (s36 has 9,913 rows: convert(n) 0..4905, convert(sig)
+4906..9811, the `n_top` check 9812, `minus_one` 9813..9912). It is the byte path's
+`s544` lowering at new variables: per limb `j` an `is_zero` gadget (`m_j·w_j = z_j`,
+`m_j·(1−z_j) = 0`, `w_j·(1−z_j) = 0`) and the borrow product
+`borrow_{i+1}·(1−z_{i+1}) = borrow_{i+2}`, ending `borrow_25 = 0`. Variables:
+`mzvar j = if j=0 then 36269 else 36273 + 5(j−1)`, `mwvar j = mzvar j − 1`,
+`mnxt i = 36276 + 5i`, `mbLC j = 1 − z_j`, `mborrow 0 = 1`, `mborrow 1 = mbLC 0`,
+`mborrow (i+2) = mnxt i`. The 100 row-shape facts (`mE1/mE2/mE3_j`, `mP_i`, `mF`)
+are `decide +kernel` on `growAt (9813 + i)`; the names are prefixed (`mzvar` not
+`zvar`) because `SigLt.lean` already has the byte-path names in the same namespace.
+`lake build` is 3,377 jobs; AxiomCheck 4,372 theorems. Next: the `hout_i` plugs, then
+`SigLt3`-style `hrec/hnb/outVal` + `SigLt4.telescope` for `val (limb s37 σ 25) =
+n_val − 1`.
