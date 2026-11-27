@@ -64,6 +64,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   row, and `EmBytes.lean`'s `chain_congruence_public` states the congruence over
   the public bytes with the digest as the 32 public digest bytes. No circuit
   changed.
+- Lean `sig < n` for that circuit (`Formal/Circuits/Rsa2048/SigLt.lean`,
+  `SigLt3.lean`, `SigLt4.lean`, `SigLt5.lean`): s544's `minus_one` glue rows
+  (the `is_zero` bits, the borrow recurrence and `borrow_25 = 0`) telescope to
+  `val (minus_one n) = chainN − 1`, and `require_lt::<25, 82>` at s545 — the
+  first 25 of its plugs are the signature's limb vector — then gives `sig < n`.
+  No circuit changed.
 
 ## 0.5.0
 
