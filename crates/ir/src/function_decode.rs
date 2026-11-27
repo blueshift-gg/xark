@@ -3252,6 +3252,50 @@ mod eval {
         vals: Option<Vec<Fr>>,
     }
 
+    #[cfg(test)]
+    thread_local! {
+        static FRAME_DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+    }
+
+    impl Drop for WFrame {
+        fn drop(&mut self) {
+            use zeroize::Zeroize;
+            #[cfg(test)]
+            let had_secret = self.plugs.iter().any(|plug| !plug.k.is_zero())
+                || self
+                    .vals
+                    .as_ref()
+                    .is_some_and(|vals| vals.iter().any(|value| !value.is_zero()));
+            for plug in &mut self.plugs {
+                plug.k.zeroize();
+                for (_, coefficient) in &mut plug.terms {
+                    coefficient.zeroize();
+                }
+            }
+            if let Some(vals) = &mut self.vals {
+                vals.zeroize();
+            }
+            #[cfg(test)]
+            FRAME_DROP_CHECK.with(|check| {
+                if check.get().is_some() {
+                    check.set(Some((
+                        had_secret,
+                        self.plugs.iter().all(|plug| {
+                            plug.k.is_zero()
+                                && plug
+                                    .terms
+                                    .iter()
+                                    .all(|(_, coefficient)| coefficient.is_zero())
+                        }) && self
+                            .vals
+                            .as_ref()
+                            .is_none_or(|vals| vals.iter().all(Zero::is_zero)),
+                    )));
+                }
+            });
+        }
+    }
+
     const ONE: Fr = ark_ff::MontFp!("1");
 
     impl WFrame {
@@ -3473,6 +3517,33 @@ mod eval {
         assert!(matches!(err, SolveError::MissingInput(1)));
         assert_eq!(
             DROP_CHECK.with(|check| check.replace(None)),
+            Some((true, true))
+        );
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn call_frame_wipes_witness_derived_plug_and_value() {
+        let w = Witness {
+            vals: vec![Fr::from(7_u64)],
+            set: vec![true],
+        };
+        let parent = WFrame {
+            base: 0,
+            plugs: Vec::new(),
+            vals: Some(vec![Fr::from(7_u64)]),
+        };
+        let plugs = [Lc {
+            k: Fr::zero(),
+            terms: vec![(VRef::Plug(0), ONE)],
+        }];
+        let frame = parent.call(VRef::Global(1), &plugs, false, &w);
+        assert_eq!(frame.plugs[0].k, Fr::from(7_u64));
+        assert_eq!(frame.vals.as_ref().unwrap()[0], Fr::from(7_u64));
+        FRAME_DROP_CHECK.with(|check| check.set(Some((false, false))));
+        drop(frame);
+        assert_eq!(
+            FRAME_DROP_CHECK.with(|check| check.replace(None)),
             Some((true, true))
         );
     }
