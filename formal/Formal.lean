@@ -49,6 +49,7 @@ import Formal.Circuits.Rsa2048.SigLt4
 import Formal.Circuits.Rsa2048.SigLt5
 import Formal.Circuits.Rsa2048.VerifyWide
 import Formal.Circuits.Rsa2048Words
+import Formal.Circuits.Rsa2048.Words
 import Formal.Circuits.Rsa2048.Rfc8017
 import Formal.Sha256EmBits82
 import Formal.Templates.Consts.Sha256EmBits82

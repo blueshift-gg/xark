@@ -734,3 +734,16 @@ now emits `set_option maxRecDepth 1000000 in` for a glue segment over 1,024 rows
 other circuit's text changes; `--check` confirms). `CircuitHash.lean` checks all three
 circuits. The Lean composition of this circuit (input-reader bounds + `convert_wide`
 identity + the 25×82 chain) is the remaining part of item (2).
+
+### The words circuit's segment map and input bounds (2026-11, round 4)
+
+`Formal/Circuits/Rsa2048/Words.lean` adds the words plumbing (`wseg`, `wcallAt`,
+`wsegSat`, `wcall_sat_of`, mirroring `Verify.lean`) and the input-reader bounds:
+`rcl_call_bound` with `n_limb_bound` on s0 and `sig_limb_bound` on s1 — every 17×121
+limb is below `2^121`. The `Rsa2048Words` segment map (89 segments): s0/s1 the
+input-reader `range_check_limbs`, s2..s33 the digest's 32 `to_bits`, s34/s35
+`verify_sha256`'s explicit `range_check`, s36 the `convert_wide` glue (9,913 rows),
+s37 `RequireLt25x82`, s38..s85 the 16 (q, r, square) triples, s86 the fused q check,
+s87 glue, s88 the general `grouped_columns`. Next: the `convert_wide` row model (the
+glue's 25 column equations for n and sig, then `RsaConvert.telescoping`) and the chain
+assembly with the gadget contracts.
