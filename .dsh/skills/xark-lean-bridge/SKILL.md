@@ -1161,3 +1161,15 @@ then 1 else 0`, so each bit value is `0`/`1`); (b) the final's `r` plugs are the
 `emOut` LCs with those bits; (c) `weighted_lt` gives the bound. The port is
 the plumbing in (a)/(b): the bit vars' `wit` indices and the `em82` LCs' term lists,
 per the byte `EmBits`/`PackBound` pattern (~250–300 lines).
+
+### The `to_bits` outputs, for `hEm` (2026-11, round 38)
+
+`Template.bitOf x i = if x.val.testBit i then 1 else 0`, so every `to_bits` output is
+`0`/`1` (an `IsBit`); `ToBits.SpecAt 8 ins outs := (ins.getD 0 0).val < 2^8 ∧
+outs = (List.range 8).map (bitOf (ins.getD 0 0))`. The template's `outputs` (8) are
+`[plug − 2·wit0 − … − 128·wit6, wit0, …, wit6]`: the first is the *top* bit's affine
+residual, the rest the 7 low bits. So an `em82` LC over those plugs references the
+top-bit LC and the low-bit `wit`s; the byte path's `EmBits` maps `bitGLC` to exactly
+these. The remaining port: (i) get `IsBit ((to_bits.outs σ').getD t 0)` from `houts`
+(the `getD` of the mapped list; `getElem?_map`/`getElem?_range` + `Option.getD_some`),
+(ii) transport to the `wit` vars, (iii) `weighted_lt` for `< 2^82`.
