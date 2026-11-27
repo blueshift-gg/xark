@@ -2161,10 +2161,10 @@ fn solve_streamed(
     .map_err(|e| format!("solve: {e:?}"))
 }
 
-fn bn254_witness_slots(w: eval::Witness) -> Vec<Option<crate::solver::Fp>> {
-    w.vals
+fn bn254_witness_slots(mut w: eval::Witness) -> Vec<Option<crate::solver::Fp>> {
+    std::mem::take(&mut w.vals)
         .into_iter()
-        .zip(w.set)
+        .zip(std::mem::take(&mut w.set))
         .map(|(v, set)| set.then_some(crate::solver::Fp::Bn254(v)))
         .collect()
 }
@@ -3202,6 +3202,30 @@ mod eval {
         pub set: Vec<bool>,
     }
 
+    #[cfg(test)]
+    thread_local! {
+        static DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+    }
+
+    impl Drop for Witness {
+        fn drop(&mut self) {
+            use zeroize::Zeroize;
+            #[cfg(test)]
+            let had_secret = self.vals.iter().any(|value| !value.is_zero());
+            self.vals.zeroize();
+            self.set.zeroize();
+            #[cfg(test)]
+            DROP_CHECK.with(|check| {
+                if check.get().is_some() {
+                    check.set(Some((
+                        had_secret,
+                        self.vals.iter().all(Zero::is_zero) && self.set.iter().all(|set| !set),
+                    )));
+                }
+            });
+        }
+    }
+
     impl Witness {
         fn get(&self, id: u32) -> Fr {
             self.vals.get(id as usize).copied().unwrap_or_default()
@@ -3417,6 +3441,40 @@ mod eval {
             &mut Vec::new(),
         )?;
         Ok(w)
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn missing_later_input_wipes_partial_dense_witness() {
+        let vars = [
+            Var {
+                id: 0,
+                name: "first".into(),
+                role: VarRole::PrivateInput,
+            },
+            Var {
+                id: 1,
+                name: "missing".into(),
+                role: VarRole::PrivateInput,
+            },
+        ];
+        let inputs = BTreeMap::from([(0, "123456789".into())]);
+        let modulus = BigUint::from_bytes_le(&Fr::MODULUS.to_bytes_le());
+        DROP_CHECK.with(|check| check.set(Some((false, false))));
+        let err = solve_witness(
+            WitnessProgram::Symbolic(&[], &[]),
+            &vars,
+            2,
+            &modulus,
+            &inputs,
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(err, SolveError::MissingInput(1)));
+        assert_eq!(
+            DROP_CHECK.with(|check| check.replace(None)),
+            Some((true, true))
+        );
     }
 }
 
