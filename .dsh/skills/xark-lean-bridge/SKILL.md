@@ -908,3 +908,14 @@ bottleneck; avoid it). The file compiles in 2.7s. The lower value bound `n_val_g
 (needs `mul_le_mul_of_nonneg_right` and a `set` for the top term; a first version was
 slow and was reverted) and the `minus_one` tail + chain remain. `lake build` is 3,376
 jobs; AxiomCheck 4,271 theorems.
+
+### `n_val_ge`: the modulus is at least `2^2047` (2026-11, round 16)
+
+`n_val_ge` in `ConvertTop.lean`: `2^2047 ≤ Σ_{j<25} yN j·W^j`. Use
+`Finset.single_le_sum` for the top term (`y24·W^24 ≤ Σ`), `mul_le_mul_of_nonneg_right`
+for `2^79·W^24 ≤ y24·W^24`, and a `calc` chain; the `2^2047 = 2^79·W^24` identity is
+`rw [show W = 2^82 from rfl]; ring_nf` (the `← pow_mul, ← pow_add` rewrites *loop*).
+The slow trap was `positivity` on `(W : ℤ)^j` with symbolic `j`: it loops; prove
+`0 ≤ W` once (`hW0`) and use `pow_nonneg hW0 j`. `n_limb_bnd24`/`n_limb_lt82` feed
+`yN 24`/`nLimb.getD 24 0 = 26347`. `lake build` is 3,376 jobs; AxiomCheck 4,272
+theorems. Remaining: the `minus_one` tail (9813..9912) and the chain.

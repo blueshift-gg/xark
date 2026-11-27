@@ -106,4 +106,33 @@ theorem n_top_ge (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
   rw [n_top_eq σ h]
   exact Nat.le_add_right _ _
 
+theorem n_val_ge (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    2 ^ 2047 ≤ ∑ j ∈ Finset.range 25, yN σ j * (W : ℤ) ^ j := by
+  have htop := n_top_ge σ h
+  have hy24 : (2 ^ 79 : ℤ) ≤ yN σ 24 := by
+    rw [show yN σ 24 = ((σ (nLimb.getD 24 0)).val : ℤ) from rfl]
+    have hget : nLimb.getD 24 0 = 26347 := by decide
+    rw [hget]
+    exact_mod_cast htop
+  have hW24 : (0 : ℤ) ≤ (W : ℤ) ^ 24 := by positivity
+  have hterm : (2 : ℤ) ^ 79 * (W : ℤ) ^ 24 ≤ yN σ 24 * (W : ℤ) ^ 24 :=
+    mul_le_mul_of_nonneg_right hy24 hW24
+  have h2047 : (2 : ℤ) ^ 2047 = 2 ^ 79 * (W : ℤ) ^ 24 := by
+    rw [show (W : ℤ) = 2 ^ 82 from rfl]
+    ring_nf
+  have hsplit : (∑ j ∈ Finset.range 25, yN σ j * (W : ℤ) ^ j)
+      = (∑ j ∈ Finset.range 24, yN σ j * (W : ℤ) ^ j) + yN σ 24 * (W : ℤ) ^ 24 :=
+    Finset.sum_range_succ (fun j => yN σ j * (W : ℤ) ^ j) 24
+  have hW0 : (0 : ℤ) ≤ W := by
+    rw [show (W : ℤ) = 2 ^ 82 from rfl]
+    positivity
+  have hsum0 : (0 : ℤ) ≤ ∑ j ∈ Finset.range 24, yN σ j * (W : ℤ) ^ j :=
+    Finset.sum_nonneg fun j _ => mul_nonneg (by unfold yN; exact Int.natCast_nonneg _) (pow_nonneg hW0 j)
+  calc (2 : ℤ) ^ 2047 = 2 ^ 79 * (W : ℤ) ^ 24 := h2047
+    _ ≤ yN σ 24 * (W : ℤ) ^ 24 := hterm
+    _ ≤ yN σ 24 * (W : ℤ) ^ 24 + (∑ j ∈ Finset.range 24, yN σ j * (W : ℤ) ^ j) :=
+        le_add_of_nonneg_right hsum0
+    _ = (∑ j ∈ Finset.range 24, yN σ j * (W : ℤ) ^ j) + yN σ 24 * (W : ℤ) ^ 24 := by ring
+    _ = ∑ j ∈ Finset.range 25, yN σ j * (W : ℤ) ^ j := hsplit.symm
+
 end Xark.Circuits.Rsa2048
