@@ -802,3 +802,19 @@ about an arbitrary `W`. Next: the same for the remaining 24 columns of each oper
 (the row facts and block slices are `decide +kernel`; the variable numbers come from
 the generated rows), then `RsaConvert.partial_sum`/`cols_sum`, `n_top`, and the
 `minus_one` tail.
+
+### The generic convert column (2026-11, round 8)
+
+`convert_col_x` (in `ConvertGlue.lean`) proves a generic carry row with an input term
+and the previous carry: from the row shape
+`[(2^e, x), (1, prev), (-W, carry), (-1, limb)]`, the block bounds, and the input
+bound, it derives `2^e·x + prev = W·carry + limb` over `ℤ` (via `int_eq_zero_of_cast`
+with the integer `E` below `2^243 < r`). It works on real data: column 1 of
+`convert_wide(n)` (row 201, x = var 1, prev 16746, carry 17146, limb 17147) is proved
+by calling it with `hrow : ... := by decide +kernel` and the block slices
+(`gblock_sat (k := 83/284/202)`). Traps: `mul_le_mul_of_nonneg_left` needs
+`le_of_lt hb4` (and `positivity` on `2^e` works via `pow_nonneg`, not `positivity` on
+`W`); `gblock_sat`'s `k` must be passed explicitly or the expected type has a
+metavariable; and `2^243 < r` via `Nat.cast_lt` + `Nat.cast_pow` (plain `exact_mod_cast`
+on the huge numeral hits the recursion limit). Next: the `prev`-only and input-only
+shapes, then the generated 25 callers per operand.

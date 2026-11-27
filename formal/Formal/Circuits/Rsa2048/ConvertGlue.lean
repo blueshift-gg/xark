@@ -223,4 +223,74 @@ theorem col0_eq (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
   rw [show (W : ℤ) = 2 ^ 82 by simp [W]]
   linarith
 
+/-- `Sat` of s36's rows from the whole circuit. -/
+theorem s36_sat {σ : ℕ → F} (h : Sat Rsa2048Words.circuit σ) :
+    Sat Rsa2048Words.s36.rows σ := by
+  have h' := wsegSat h (n := 36) (by decide)
+  rwa [show wseg 36 = Rsa2048Words.s36 from rfl] at h'
+
+/-- A carry row with an input term and the previous carry. -/
+theorem convert_col_x (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
+    (k : ℕ) (hk : k < Rsa2048Words.s36.rows.length) (e : ℕ) (he : e ≤ 121)
+    (x prev carry limb : ℕ)
+    (hrow : growAt k =
+      ⟨⟨0, [(((2 ^ e : ℤ) : F), x), ((1 : F), prev), ((-W : F), carry), ((-1 : F), limb)]⟩,
+        ⟨1, []⟩, ⟨0, []⟩⟩)
+    (hx : (σ x).val < 2 ^ 121) (hp : (σ prev).val < 2 ^ 118)
+    (hc : (σ carry).val < 2 ^ 118) (hl : (σ limb).val < 2 ^ 82) :
+    (2 ^ e : ℤ) * ((σ x).val : ℤ) + ((σ prev).val : ℤ) =
+      (W : ℤ) * ((σ carry).val : ℤ) + ((σ limb).val : ℤ) := by
+  have hr := growAt_sat (s36_sat h) k hk
+  rw [hrow] at hr
+  have ha := by
+    simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+  let E : ℤ := (2 ^ e : ℤ) * ((σ x).val : ℤ) + ((σ prev).val : ℤ)
+      - (W : ℤ) * ((σ carry).val : ℤ) - ((σ limb).val : ℤ)
+  have hE : (E : F) = 0 := by
+    dsimp [E]
+    push_cast
+    simp only [ZMod.natCast_zmod_val]
+    linear_combination ha
+  have hb1 : ((σ prev).val : ℤ) < 2 ^ 118 := by exact_mod_cast hp
+  have hb2 : ((σ carry).val : ℤ) < 2 ^ 118 := by exact_mod_cast hc
+  have hb3 : ((σ limb).val : ℤ) < 2 ^ 82 := by exact_mod_cast hl
+  have hb4 : ((σ x).val : ℤ) < 2 ^ 121 := by exact_mod_cast hx
+  have hpow : ((2 : ℤ) ^ e) ≤ 2 ^ 121 :=
+    pow_le_pow_right₀ (by norm_num) he
+  have hpow0 : (0 : ℤ) ≤ (2 : ℤ) ^ e := pow_nonneg (by norm_num) e
+  have hstep : ((2 : ℤ) ^ e) * ((σ x).val : ℤ) ≤ ((2 : ℤ) ^ e) * 2 ^ 121 :=
+    mul_le_mul_of_nonneg_left (le_of_lt hb4) hpow0
+  have hmul : ((2 : ℤ) ^ e) * ((σ x).val : ℤ) ≤ 2 ^ 242 := by
+    refine le_trans hstep ?_
+    rw [← pow_add]
+    exact pow_le_pow_right₀ (by norm_num) (by omega)
+  have hWcarry : (W : ℤ) * ((σ carry).val : ℤ) < 2 ^ 200 := by
+    have hW' : (W : ℤ) = 2 ^ 82 := by simp [W]
+    rw [hW']
+    have h := mul_lt_mul_of_pos_left hb2 (by norm_num : (0 : ℤ) < 2 ^ 82)
+    have h2 : ((2 : ℤ) ^ 82 * 2 ^ 118) = 2 ^ 200 := by rw [← pow_add]
+    rwa [h2] at h
+  have hp0 : (0 : ℤ) ≤ ((σ prev).val : ℤ) := by positivity
+  have h200 : (2 : ℤ) ^ 200 < (r : ℤ) := by
+    have h := Xark.Templates.ToBits.two_pow_lt_r' (n := 200) (by norm_num)
+    have h' := Nat.cast_lt (α := ℤ).mpr h
+    simpa [Nat.cast_pow] using h'
+  have h243 : (2 : ℤ) ^ 243 < (r : ℤ) := by
+    have h := Xark.Templates.ToBits.two_pow_lt_r' (n := 243) (by norm_num)
+    have h' := Nat.cast_lt (α := ℤ).mpr h
+    simpa [Nat.cast_pow] using h'
+  have hlo : -((r : ℤ)) < E := by
+    dsimp [E]
+    nlinarith [hWcarry, hb3, hp0, h200]
+  have hW0 : (0 : ℤ) ≤ (W : ℤ) := by
+    rw [show (W : ℤ) = 2 ^ 82 by simp [W]]
+    positivity
+  have hc0 : (0 : ℤ) ≤ (W : ℤ) * ((σ carry).val : ℤ) := mul_nonneg hW0 (by positivity)
+  have hl0 : (0 : ℤ) ≤ ((σ limb).val : ℤ) := by positivity
+  have hhi : E < (r : ℤ) := by
+    dsimp [E]
+    nlinarith [hmul, hb1, hc0, hl0, h243]
+  have hzero := int_eq_zero_of_cast _ hE hlo hhi
+  linarith
+
 end Xark.Circuits.Rsa2048
