@@ -12,7 +12,7 @@ set_option linter.unusedSimpArgs false
 namespace Xark.Templates.GroupedColumns.Consts
 open Xark.Template
 
-/-- LC plugs of calls in rsa2048, rsa2048_words. -/
+/-- LC plugs of calls in rsa2048, rsa2048_sha256, rsa2048_words. -/
 theorem soundness_free (σ : TVar → F) (h : template.Sat σ) :
     Spec (template.ins σ) (template.outs σ) :=
   soundness σ h

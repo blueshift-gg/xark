@@ -1226,3 +1226,30 @@ The traps that cost hours (each was a 10-minute hang, none an error):
 * The imports: `WordsEm` imports `Formal.Circuits.Rsa2048.PackBoundW` (for
   `val_weightedW`/`weighted_ltW`/`bitOf_val_le3`/`getD_map_eq`) and opens
   `Xark.Rsa.GroupedColumns (val W)` for the final statement.
+
+### Next: the digest = H(M) composition (round 40, started)
+
+`examples/rsa2048_sha256` (new, 157,438 constraints, digest `cfc0560f…`, verified
+`a3f6f8c9…`) is committed: private 53-byte message → `xark_sha256::sha256` (one padded
+block) → `xark_rsa::verify_sha256_words`. The KAT shares `rsa2048`'s key, so no re-key.
+The coverage allowlist has one new line (`require_lt` LC plugs, same justification as
+`rsa2048_words`) and `lean-export --coverage --update` only touched the `Consts`
+docstrings, because the sha256 call shapes are `sha256`'s.
+
+The Lean side is the remaining work, and the key design decision comes first:
+
+* the words composition (`Words*.lean`) is keyed to `Rsa2048Words.circuit`'s segment
+  indices, so it does *not* apply to the new circuit as written. Either (a) export
+  `rsa2048_sha256` (`cargo xtask lean-export --example rsa2048_sha256`) and port the
+  `Words*` files to its segment map (mechanical but long: every `wcallAt n` changes),
+  or (b) restructure the composition into a lemma over an abstract segment map
+  (the gadget contracts already are), so both circuits share it.
+* the SHA-256 half needs a row-level model per FIPS 180-4: the 16 big-endian message
+  words from the padded bytes (`to_bits::<8>` per byte, proven), the 48 schedule
+  extensions (`σ₀`/`σ₁` = the proven `xor3`/`reduce` templates), the 64 rounds
+  (`Ch`/`Maj3`/`Σ₀`/`Σ₁` plus `reduce::<33..36>`; `Formal/Sha256.lean` gives the
+  *structural* spec, `Formal/HashOps.lean`/`Reduce.lean` the per-bit pieces), the
+  chaining `h = compress(h, block)`, and finally that the eight output words are the
+  digest bytes the EM gadget reads. `Formal/Sha256.lean` says explicitly it proves no
+  end-to-end theorem, so the composition is new work; expect it to be the largest
+  single piece in this project.

@@ -492,6 +492,16 @@ same rows, so `weighted_ltW` puts every limb below `2^82` — the words analogue
 byte path's `EmBits`/`PackBound`. `w_verify_wide` bundles the facts as
 `2^2047 ≤ n < 2^2048 ∧ sig < n ∧ EM ≡ sig^65537 (mod n)`, with no hypothesis left.
 
+`examples/rsa2048_sha256` closes the remaining gap in the *circuit*: the message is
+private, `xark_sha256::sha256` hashes it in-circuit (53 bytes, one padded block), and
+its eight 32-bit words feed `verify_sha256_words`, so the relation the example proves is
+RFC 8017's with `digest = H(M)`, sharing `rsa2048`'s key (157,438 constraints,
+`cfc0560f…`/`a3f6f8c9…`). Its Lean composition is the open proof work: the digest words
+are the SHA-256 block's output wires, and connecting them to FIPS 180-4's `H(M)`
+needs a row-level model of the compression rounds, block chaining and padding. Until
+that lands, the machine-checked statements above are the RSA relation for a digest the
+circuit receives, not that the digest is any message's SHA-256.
+
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s
 oddness/semiprimality is deliberately not proven: the verifier's key allowlist or

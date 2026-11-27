@@ -17,12 +17,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 - `examples/rsa2048`: the byte-input example and generated KAT; 125,856 constraints
   (157,451 before the golf; the group carry is a witnessed `num / 2^164` pinned by
   two rows, which the export below needs).
-- The words (17×121) circuit's Lean composition is nearly complete, as
+- The words (17×121) circuit's Lean composition is complete, as
   `Formal/Circuits/Rsa2048/Words*.lean`: the input-reader bounds, the `convert_wide`
   value identity and the 2048-bit modulus, `minus_one(n) = n − 1` and `sig < n`, the
-  16 square identities and the chain congruence `EM ≡ sig^65537 (mod n)` (conditional
-  on the EM array bound). The end-to-end 17×121 statement and the digest = H(M)
-  composition remain.
+  16 square identities, the chain congruence `EM ≡ sig^65537 (mod n)`, and the
+  terminal call's EM array bound. The end-to-end 17×121 statement is proved with no
+  hypothesis (`w_verify_wide`); the digest = H(M) composition remains.
 - `examples/rsa2048_words`: the whole-number 17×121 entry point (`verify_sha256`),
   sharing `rsa2048`'s generated RSA vector. The modulus and signature are
   input-reader-range-checked `Bignum<17, 121>` limbs that `convert_wide` re-limbs to
@@ -30,6 +30,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   the one coverage allowlist entry the example adds (the caller's limb bounds are
   `convert_wide`'s range rows). The circuit is exported and hash-gated
   (`fnv1a64:1758a6b6ad3aeb24`, 139,868 rows in 89 segments).
+- `examples/rsa2048_sha256`: the digest is computed in-circuit. A private 53-byte
+  message goes through `xark_sha256::sha256` (one padded block), and its eight
+  32-bit words feed `xark_rsa::verify_sha256_words`, so the statement is RFC 8017's
+  RSA relation with `digest = H(M)`; 157,438 constraints, sharing `rsa2048`'s key.
+  Its Lean composition (a row-level model of the SHA-256 rounds, chaining and
+  padding, then the RSA relation) is not yet exported or proved.
 - Lean templates and proofs for `require_lt::<17, 121>`,
   `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`, plus the 25×82
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and

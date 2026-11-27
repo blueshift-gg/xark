@@ -12,7 +12,7 @@ set_option linter.unusedSimpArgs false
 namespace Xark.Templates.Reduce36.Consts
 open Xark.Template
 
-/-- LC plugs of calls in sha256, sha256_consume. -/
+/-- LC plugs of calls in rsa2048_sha256, sha256, sha256_consume. -/
 theorem soundness_free (σ : TVar → F) (h : template.Sat σ) :
     Spec (template.ins σ) (template.outs σ) :=
   soundness σ h
