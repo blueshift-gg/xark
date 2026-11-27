@@ -24,6 +24,7 @@ the block rows and then telescopes the carry equations with `Xark.Rsa.Convert`.
 namespace Xark.Circuits.Rsa2048
 
 open Xark.Circuit Xark.R1cs Xark.Template
+open Xark.Rsa.GroupedColumns (val W)
 open Xark.Templates.Add32 (IsBit isBit_val isBit_of_mul_self word_lt sum_map_range cast_sum)
 
 /-- Bit `i`'s variable in a glue block whose first bit is `base`. -/
@@ -115,5 +116,111 @@ theorem gblock_sound (v base W : ℕ) (hW : W ≤ 253) (hW1 : 1 ≤ W) (σ : ℕ
       omega
   rw [Nat.mod_eq_of_lt (lt_trans h2 (Xark.Templates.ToBits.two_pow_lt_r' hW))]
   exact h2
+
+/-- The glue row `k` of s36 (`convert_wide`'s rows). -/
+def growAt (k : ℕ) : GRow :=
+  (Rsa2048Words.s36.rows).getD k ⟨⟨0, []⟩, ⟨0, []⟩, ⟨0, []⟩⟩
+
+/-- `Sat` transfers to a slice of a satisfied list. -/
+theorem sat_slice {σ : ℕ → F} {l : List GRow} (h : Sat l σ) {a b : ℕ} {m : List GRow}
+    (hm : m = (l.drop a).take b) : Sat m σ := by
+  subst hm
+  intro r hr
+  exact h r (List.mem_of_mem_drop (List.mem_of_mem_take hr))
+
+/-- **A field zero that is an integer below `r` in absolute value is zero.** The convert
+rows are cast integer combinations of an input limb (`< 2^121`), a previous carry
+(`< 2^118`), a carry (`< 2^118`) and an output limb (`< 2^82`); the combination is
+below `2^200 < r`. -/
+theorem int_eq_zero_of_cast (E : ℤ) (h : (E : F) = 0) (hlo : -((r : ℤ)) < E)
+    (hhi : E < (r : ℤ)) : E = 0 := by
+  have hr0 : ((r : ℕ) : F) = 0 := ZMod.natCast_self r
+  by_cases h0 : (0 : ℤ) ≤ E
+  · have hval : ((E.toNat : ℕ) : ℤ) = E := Int.toNat_of_nonneg h0
+    have hcast : ((E.toNat : ℕ) : F) = 0 := by
+      rw [← hval] at h
+      simpa only [Int.cast_natCast] using h
+    have hv := ZMod.val_natCast_of_lt (n := r) (a := E.toNat) (by omega : E.toNat < r)
+    rw [hcast, ZMod.val_zero] at hv
+    omega
+  · have h0' : E < 0 := by omega
+    have h1 : (0 : ℤ) ≤ E + (r : ℤ) := by omega
+    have h2 : E + (r : ℤ) < (r : ℤ) := by omega
+    have hcast : ((E + (r : ℤ) : ℤ) : F) = 0 := by
+      push_cast
+      rw [h, hr0]
+      ring
+    have hval : ((E + (r : ℤ)).toNat : ℤ) = E + (r : ℤ) := Int.toNat_of_nonneg h1
+    have hcast' : (((E + (r : ℤ)).toNat : ℕ) : F) = 0 := by
+      rw [← hval] at hcast
+      simpa only [Int.cast_natCast] using hcast
+    have hv := ZMod.val_natCast_of_lt (n := r) (a := (E + (r : ℤ)).toNat) (by omega)
+    rw [hcast', ZMod.val_zero] at hv
+    omega
+
+/-- A `gblockRows` slice of s36 is satisfied. -/
+theorem gblock_sat {σ : ℕ → F} (h : Sat Rsa2048Words.s36.rows σ) {v base W k : ℕ}
+    (hm : gblockRows v base W = (Rsa2048Words.s36.rows.drop k).take W) :
+    Sat (gblockRows v base W) σ :=
+  sat_slice h hm
+
+/-- Row `k` of s36 is satisfied. -/
+theorem growAt_sat {σ : ℕ → F} (h : Sat Rsa2048Words.s36.rows σ) (k : ℕ)
+    (hk : k < Rsa2048Words.s36.rows.length) : (growAt k).Sat σ := by
+  rw [growAt, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hk, Option.getD_some]
+  exact h _ (List.getElem_mem hk)
+
+/-- The input reader's plug 0 is variable 0. -/
+theorem n_plug0 : (wcallAt 0).env (.plug 0) = (LC.var 0 : GLC) := rfl
+
+theorem pn_n0 (σ : ℕ → F) : pn (wcallAt 0) σ 0 = (σ 0).val := by
+  simp [pn, Call.lift, n_plug0, LC.var, LC.eval]
+
+theorem s36_block0_limb : gblockRows 16747 16748 82 = (Rsa2048Words.s36.rows.drop 1).take 82 := by
+  decide +kernel
+
+theorem s36_block0_carry :
+    gblockRows 16746 16911 118 = (Rsa2048Words.s36.rows.drop 83).take 118 := by
+  decide +kernel
+
+/-- **Column 0 of `convert_wide(n)`**: `x_0 = W·carry_0 + limb_0` over the integers. -/
+theorem col0_eq (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((σ 0).val : ℤ) = (W : ℤ) * ((σ 16746).val : ℤ) + ((σ 16747).val : ℤ) := by
+  have hs : Sat Rsa2048Words.s36.rows σ := by
+    have h' := wsegSat h (n := 36) (by decide)
+    rwa [show wseg 36 = Rsa2048Words.s36 from rfl] at h'
+  have hr := growAt_sat hs 0 (by decide)
+  have hrow : growAt 0 =
+      ⟨⟨0, [((1 : F), 0), (((-(2 ^ 82 : ℤ)) : F), 16746), ((-1 : F), 16747)]⟩,
+        ⟨1, []⟩, ⟨0, []⟩⟩ := by decide +kernel
+  rw [hrow] at hr
+  have ha := by
+    simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+  have hlimb := gblock_sound 16747 16748 82 (by norm_num) (by norm_num) σ
+    (gblock_sat hs s36_block0_limb)
+  have hcarry := gblock_sound 16746 16911 118 (by norm_num) (by norm_num) σ
+    (gblock_sat hs s36_block0_carry)
+  have hx := n_limb_bound σ h (j := 0) (by norm_num)
+  rw [pn_n0] at hx
+  have hE : ((((σ 0).val : ℤ) - ((2 ^ 82 : ℤ)) * ((σ 16746).val : ℤ)
+      - ((σ 16747).val : ℤ) : ℤ) : F) = 0 := by
+    push_cast
+    simp only [ZMod.natCast_zmod_val]
+    linear_combination ha
+  have hb1 : ((σ 16746).val : ℤ) < 2 ^ 118 := by exact_mod_cast hcarry
+  have hb2 : ((σ 16747).val : ℤ) < 2 ^ 82 := by exact_mod_cast hlimb
+  have hb3 : ((σ 0).val : ℤ) < 2 ^ 121 := by exact_mod_cast hx
+  have hb0 : (0 : ℤ) ≤ ((σ 16746).val : ℤ) := by positivity
+  have hr' : (2 : ℤ) ^ 200 < (r : ℤ) := by
+    have := Xark.Templates.ToBits.two_pow_lt_r' (n := 200) (by norm_num)
+    exact_mod_cast this
+  have hlo : -((r : ℤ)) < ((σ 0).val : ℤ) - ((2 ^ 82 : ℤ)) * ((σ 16746).val : ℤ)
+      - ((σ 16747).val : ℤ) := by nlinarith
+  have hhi : ((σ 0).val : ℤ) - ((2 ^ 82 : ℤ)) * ((σ 16746).val : ℤ)
+      - ((σ 16747).val : ℤ) < (r : ℤ) := by nlinarith
+  have hzero := int_eq_zero_of_cast _ hE hlo hhi
+  show ((σ 0).val : ℤ) = (W : ℤ) * ((σ 16746).val : ℤ) + ((σ 16747).val : ℤ)
+  rw [show (W : ℤ) = 2 ^ 82 by simp [W]]
+  linarith
 
 end Xark.Circuits.Rsa2048

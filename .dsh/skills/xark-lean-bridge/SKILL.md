@@ -787,3 +787,18 @@ give `limb_j < 2^82`, `carry_j < 2^118` (the last `limb_24 < 2^80` via
 then gives `Σ limb_j·W^j = Σ x_i·2^(121i)`. The words minus_one rows are the byte
 path's `SigLt` analysis with the variables shifted (s544's rows in that circuit), so
 that part can be re-instantiated from `SigLt.lean`'s pattern.
+
+### The first convert column, proven end to end (2026-11, round 7)
+
+`ConvertGlue.lean` now has the whole pipeline for one column: `growAt`/`growAt_sat`
+(row facts from `Sat s36.rows`), `sat_slice`/`gblock_sat` (a `gblockRows` slice of
+s36 inherits `Sat`), `int_eq_zero_of_cast` (a field zero whose integer form is
+`-r < E < r` is zero — via `ZMod.val_natCast_of_lt`), and `col0_eq`:
+`(σ 0).val = W·(σ 16746).val + (σ 16747).val`. Two traps: the input limb bound needs
+`pn (wcallAt 0) σ 0 = (σ 0).val` (the plug is `LC.var 0`; `rfl` for the `env` fact,
+then `simp [pn, Call.lift, ...]`), and `open Xark.Rsa.GroupedColumns (val W)` must be
+in scope or `W` is silently auto-bound (Lean's `autoImplicit`), making the statement
+about an arbitrary `W`. Next: the same for the remaining 24 columns of each operand
+(the row facts and block slices are `decide +kernel`; the variable numbers come from
+the generated rows), then `RsaConvert.partial_sum`/`cols_sum`, `n_top`, and the
+`minus_one` tail.
