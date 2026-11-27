@@ -565,6 +565,7 @@ fn prepared_cpu_prover_checks_and_isolates_typed_requests() {
     let reduced = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
         .unwrap()
         .into_r1cs();
+    let minimized = XarkCircuit::for_setup(reduced.clone()).prog().clone();
     let circuit = XarkCircuit::for_proving_preminimized(reduced, kyc_witness());
     let (pk, vk) =
         ArkG16::circuit_specific_setup(circuit, &mut ChaCha20Rng::seed_from_u64(9)).unwrap();
@@ -613,6 +614,15 @@ fn prepared_cpu_prover_checks_and_isolates_typed_requests() {
     let (fresh, _) = decode(prepared.prove(input("20200101", None)).unwrap());
     assert_ne!(fresh, a_proof);
     assert!(ArkG16::verify(&vk, &a_public, &fresh).unwrap());
+
+    let circuit = XarkCircuit::for_proving_preminimized(minimized, kyc_witness());
+    let (minimized_key, minimized_vk) =
+        ArkG16::circuit_specific_setup(circuit, &mut ChaCha20Rng::seed_from_u64(11)).unwrap();
+    let minimized = PreparedCpuProver::new(KYC_XBC, minimized_key).unwrap();
+    let (proof, public) = decode(minimized.prove(input("20200101", None)).unwrap());
+    assert_eq!(public, a_public);
+    assert!(ArkG16::verify(&minimized_vk, &public, &proof).unwrap());
+    assert!(xark_groth16::verify(&minimized_vk, &public, &proof).unwrap());
 }
 
 #[test]
