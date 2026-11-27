@@ -69,10 +69,11 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   (the `is_zero` bits, the borrow recurrence and `borrow_25 = 0`) telescope to
   `val (minus_one n) = chainN − 1`, and `require_lt::<25, 82>` at s545 — the
   first 25 of its plugs are the signature's limb vector — then gives `sig < n`.
-  `VerifyWide.lean` bundles the three byte-level facts (`n` is 2048 bits,
-  `sig < n`, and the encoded message is `sig^65537` mod `n`) as one
-  `verify_wide_spec`, and `docs/security.md` §2.18 now records them as proven
-  rather than as audit residuals. No circuit changed.
+  `VerifyWide.lean` bundles the byte-level facts (`n` is 2048 bits, `sig < n`,
+  the encoded message is below `n`, and it is `sig^65537` mod `n`) as one
+  `verify_wide_spec`; the encoding's range makes the congruence the canonical
+  `sig^65537 mod n = EM` (`rsa_verify_equation`). `docs/security.md` §2.18 now
+  records these as proven rather than as audit residuals. No circuit changed.
 
 ## 0.5.0
 

@@ -458,8 +458,11 @@ through `SigLt5.lean` read s544's `is_zero` bits and borrow rows, prove every bo
 `out_i = n_i − borrow_i + 2^82·borrow_{i+1}` by cases on the borrow bits (no subtraction
 crosses a cast), telescope it to `val (minus_one n) = chainN − 1`, and apply
 `require_lt::<25,82>`'s `Spec` at s545 for `sig ≤ chainN − 1`, hence `sig < n`.
-`VerifyWide.lean` names the three byte operands and bundles the three facts as
-`verify_wide_spec`, so the gadget's contract is one theorem. The digest is a public
+`VerifyWide.lean` names the three byte operands and bundles the facts as
+`verify_wide_spec`: `n`'s 2048 bits, `sig < n`, `EM < n` (the prefix's leading `0x00`
+keeps `EM < 2^2040`, and `n ≥ 2^2047`), and `EM ≡ sig^65537 (mod n)`. With both range
+facts the congruence is the canonical-residue equality `sig^65537 mod n = EM`
+(`rsa_verify_equation`), the check a PKCS#1 verifier runs. The digest is a public
 input: the theorem is about the RSA relation for that digest, not that the digest is
 any message's SHA-256.
 
