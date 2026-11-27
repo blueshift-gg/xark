@@ -17,6 +17,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 - `examples/rsa2048`: the byte-input example and generated KAT; 125,856 constraints
   (157,451 before the golf; the group carry is a witnessed `num / 2^164` pinned by
   two rows, which the export below needs).
+- `examples/rsa2048_words`: the whole-number 17×121 entry point (`verify_sha256`),
+  sharing `rsa2048`'s generated RSA vector. The modulus and signature are
+  input-reader-range-checked `Bignum<17, 121>` limbs that `convert_wide` re-limbs to
+  the 25×82 chain; the digest is the 32 public bytes. Its `require_lt` LC plugs are
+  the one coverage allowlist entry the example adds (the caller's limb bounds are
+  `convert_wide`'s range rows).
 - Lean templates and proofs for `require_lt::<17, 121>`,
   `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`, plus the 25×82
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and
