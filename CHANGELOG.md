@@ -77,6 +77,11 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   statement zk.golf's RSA challenge specifies), with zk.golf's interface
   assumptions. `docs/security.md` §2.18 now records these as proven rather than as
   audit residuals. No circuit changed.
+- `sha256_em_bits_82` is a proven gadget: it emits no rows, so its template pins the
+  encoded message's 25 82-bit limb linear combinations, and `Sha256EmBits82.soundness`
+  proves each output limb is `emOut` of the digest bits. `lean-export --check` is 72
+  templates, and its `rsa2048` call is covered with no assumptions (the empty-vector
+  `Consts` obligation, no allowlist entry). No circuit changed.
 
 ## 0.5.0
 

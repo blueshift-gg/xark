@@ -435,11 +435,15 @@ the octet input and the 25×82 limbs also denote one number, and
 `Formal/RsaEm.lean` proves `sha256_em_bits_82`'s constant is the RFC 8017 prefix
 (`decide +kernel` against the limb literals) and that the digest's bits add the
 digest's integer. Each step's identity is a model theorem, and the two chain
-gadgets' templates instantiate them. The byte packing's and the EM vector's rows have
-no separate template model; their identities are proved from the exported rows
-instead (`chainN_eq_bytes`, `chainSig_eq_bytes`, and `chainEm_bytes_32`, which turns
-the EM's 256 digest bits into the 32 public digest bytes), so the byte statements do
-not rest on those rows being modelled.
+gadgets' templates instantiate them. The EM vector is a proven gadget too:
+`sha256_em_bits_82` emits no rows, its template pins the encoded message's 25 82-bit
+limb linear combinations, and `Sha256EmBits82.soundness` proves each output limb is
+`emOut` of the digest bits (coverage: its `rsa2048` call is covered with no
+assumptions). The byte packing's rows still have no separate template model; their
+identities are proved from the exported rows instead (`chainN_eq_bytes`,
+`chainSig_eq_bytes`, and `chainEm_bytes_32`, which turns the EM's 256 digest bits
+into the 32 public digest bytes), so the byte statements do not rest on those rows
+being modelled.
 
 The composition is a theorem over the exported circuit. `Sat circuit σ` is the
 production rows (125,856 in 597 segments, `fnv1a64:860142cc226105b8`); the composition

@@ -662,9 +662,34 @@ a precedent, but changing ours re-keys), completeness (Clean-specific; it would 
 a Lean model of the Rust witness generator), Groth16 soundness/ZK, and
 `digest = H(M)` (both specs leave it as an assumption).
 
-### The three unmodelled gadgets: why the templates were not added (2026-11, round 2)
+### `sha256_em_bits_82` is a proven gadget (2026-11, round 2)
 
-Tried `sha256_em_bits_82` (the safest of the three). Facts established:
+Landed: `#[xark::gadget]` + `#[doc(hidden)] pub` on `sha256_em_bits_82`, a harness at
+`formal/templates/sha256_em_bits_82/`, the generated zero-row template
+(`Formal/Templates/Sha256EmBits82.lean`: 256 plugs, 0 wits, 25 output LCs) and
+`Formal/Sha256EmBits82.lean`. The proof uses the conventional gadget shape:
+`Assumptions (_) := True`, `Spec ins outs := ∀ q < 25, outs.getD q 0 = emOut ins q`, and
+`soundness : Spec (template.ins σ) (template.outs σ)`. The key lemmas: `outputs_eq`
+(`interval_cases q <;> rfl`: the generated output LC is *definitionally*
+`⟨em82 q, (range w).map (2^t, plug (82q+t))⟩`), `eval_model` (a `List.sum` over `range`
+is a `Finset.sum`), and `limbOf_full`/`limbOf_small`/the zero case. Coverage now says
+`1 of 1 calls covered; 1 covered with LC plugs (no assumptions)`; `--update` wrote the
+empty-vector `Consts/Sha256EmBits82.lean` (`soundness_free`), which `Formal.lean`
+imports. `lean-export --check` is 72 templates; `CircuitHash` is unchanged.
+
+Two traps:
+* The coverage tool decides `trivial` by the *exact line*
+  `theorem soundness (σ : TVar → F) (h : template.Sat σ) :`. A `_h` binder makes it
+  think the gadget assumes something, and the call falls to "LC plugs: the caller must
+  enforce Assumptions" (an allowlist entry). Keep the binder named `h`; reference it
+  (`have _ := h`) to silence the unused-variable linter.
+* A zero-row call is filtered from the example export
+  (`c.parent.is_none() && c.rows > 0`), so the circuit is not renumbered; the export
+  diff is empty and `CircuitHash` is unchanged.
+
+### The other two unmodelled gadgets (2026-11, round 2)
+
+The previous round tried `sha256_em_bits_82` and established these facts:
 
 * It exports as a **zero-row** template: `plugs := 256`, `wits := 0`, `rows := []`, and
   the 25 `outputs` are exactly `em82 k + Σ (2^t, plug (82k+t))` — the EM limb LCs.

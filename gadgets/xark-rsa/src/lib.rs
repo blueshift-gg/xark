@@ -246,7 +246,9 @@ const EM82_CONST: [Field; WIDE_LIMBS] = [
 /// The digest's 256 bits live in bits `0..256`: the low 246 fill limbs 0..2,
 /// the top 10 are bits `0..10` of limb 3. The rest of limb 3 starts at bit 256
 /// (the DigestInfo), so the addition is carry-free.
-fn sha256_em_bits_82(bits: [Field; 256]) -> [Field; WIDE_LIMBS] {
+#[doc(hidden)]
+#[xark::gadget]
+pub fn sha256_em_bits_82(bits: [Field; 256]) -> [Field; WIDE_LIMBS] {
     let mut out = EM82_CONST;
     let mut k = 0usize;
     while k < 3usize {
