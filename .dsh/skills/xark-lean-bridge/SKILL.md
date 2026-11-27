@@ -936,3 +936,16 @@ are `decide +kernel` on `growAt (9813 + i)`; the names are prefixed (`mzvar` not
 `lake build` is 3,377 jobs; AxiomCheck 4,372 theorems. Next: the `hout_i` plugs, then
 `SigLt3`-style `hrec/hnb/outVal` + `SigLt4.telescope` for `val (limb s37 σ 25) =
 n_val − 1`.
+
+### The words minus_one plugs and the generic is_zero (2026-11, round 18)
+
+`MinusOneFacts.lean` now imports `SigLt` (for `addLC`/`negLC`/`smulLC`/`ZLC.toF`) and
+adds the 25 `mhout_i` facts: the `require_lt` call (s37) reads its `m` argument
+(`plugs[25+i]`) as the first square's `m` plugs (`wcallAt 40`, `plugs[25+i]`, the
+converted n limbs) minus `mborrow i` plus `W·mborrow (i+1)` — all `decide +kernel`.
+Also `isZero_iff` (generic): from `n·w = z` and `n·(1−z) = 0`, `n = 0 ↔ 1−z = 1`.
+The byte stack's per-limb algebra (`SigLt3`'s `E1/E2/E3`/`P`/`houtE`/`hnb`/`hrec`/
+`outVal`, `SigLt4.telescope`) is generic in the row equations, so the words version is:
+the `mE*` row shapes (done), the `mE1q`/`mE2q`/`mPq` equations and `mhoutE_i`, then
+`val_formula`/`telescope` with `mborrow 0 = 1`, `mborrow 25 = 0`. `lake build` is
+3,377 jobs; AxiomCheck 4,398 theorems.

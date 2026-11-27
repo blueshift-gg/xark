@@ -4,6 +4,7 @@ Released under the MIT license as described in the repository LICENSE.
 Authors: Blueshift Labs Limited
 -/
 import Formal.Circuits.Rsa2048.ConvertTop
+import Formal.Circuits.Rsa2048.SigLt
 
 set_option linter.style.header false
 set_option maxRecDepth 100000
@@ -489,6 +490,143 @@ theorem mP_23 : growAt 9911 =
 
 
 theorem mF : growAt 9912 = ⟨⟨0, [((1 : F), 36391)]⟩, ⟨1, []⟩, ⟨0, []⟩⟩ := by
+  decide +kernel
+
+
+/-- The `is_zero` gadget: `n ≠ 0` makes `z = 1`, so `n = 0 ↔ 1 − z = 1`. -/
+theorem isZero_iff {n w z : F} (h1 : n * w = z) (h2 : n * (1 - z) = 0) :
+    n = 0 ↔ 1 - z = 1 := by
+  constructor
+  · intro hn
+    rw [hn, zero_mul] at h1
+    rw [← h1]
+    ring
+  · intro hb
+    rw [hb, mul_one] at h2
+    exact h2
+theorem mhout_0 : (wcallAt 37).plugs.getD (25 + 0) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 0) (LC.cst 0)) (negLC (mborrow 0)))
+        (smulLC (W : ℤ) (mborrow 1)) := by
+  decide +kernel
+
+theorem mhout_1 : (wcallAt 37).plugs.getD (25 + 1) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 1) (LC.cst 0)) (negLC (mborrow 1)))
+        (smulLC (W : ℤ) (mborrow 2)) := by
+  decide +kernel
+
+theorem mhout_2 : (wcallAt 37).plugs.getD (25 + 2) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 2) (LC.cst 0)) (negLC (mborrow 2)))
+        (smulLC (W : ℤ) (mborrow 3)) := by
+  decide +kernel
+
+theorem mhout_3 : (wcallAt 37).plugs.getD (25 + 3) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 3) (LC.cst 0)) (negLC (mborrow 3)))
+        (smulLC (W : ℤ) (mborrow 4)) := by
+  decide +kernel
+
+theorem mhout_4 : (wcallAt 37).plugs.getD (25 + 4) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 4) (LC.cst 0)) (negLC (mborrow 4)))
+        (smulLC (W : ℤ) (mborrow 5)) := by
+  decide +kernel
+
+theorem mhout_5 : (wcallAt 37).plugs.getD (25 + 5) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 5) (LC.cst 0)) (negLC (mborrow 5)))
+        (smulLC (W : ℤ) (mborrow 6)) := by
+  decide +kernel
+
+theorem mhout_6 : (wcallAt 37).plugs.getD (25 + 6) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 6) (LC.cst 0)) (negLC (mborrow 6)))
+        (smulLC (W : ℤ) (mborrow 7)) := by
+  decide +kernel
+
+theorem mhout_7 : (wcallAt 37).plugs.getD (25 + 7) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 7) (LC.cst 0)) (negLC (mborrow 7)))
+        (smulLC (W : ℤ) (mborrow 8)) := by
+  decide +kernel
+
+theorem mhout_8 : (wcallAt 37).plugs.getD (25 + 8) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 8) (LC.cst 0)) (negLC (mborrow 8)))
+        (smulLC (W : ℤ) (mborrow 9)) := by
+  decide +kernel
+
+theorem mhout_9 : (wcallAt 37).plugs.getD (25 + 9) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 9) (LC.cst 0)) (negLC (mborrow 9)))
+        (smulLC (W : ℤ) (mborrow 10)) := by
+  decide +kernel
+
+theorem mhout_10 : (wcallAt 37).plugs.getD (25 + 10) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 10) (LC.cst 0)) (negLC (mborrow 10)))
+        (smulLC (W : ℤ) (mborrow 11)) := by
+  decide +kernel
+
+theorem mhout_11 : (wcallAt 37).plugs.getD (25 + 11) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 11) (LC.cst 0)) (negLC (mborrow 11)))
+        (smulLC (W : ℤ) (mborrow 12)) := by
+  decide +kernel
+
+theorem mhout_12 : (wcallAt 37).plugs.getD (25 + 12) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 12) (LC.cst 0)) (negLC (mborrow 12)))
+        (smulLC (W : ℤ) (mborrow 13)) := by
+  decide +kernel
+
+theorem mhout_13 : (wcallAt 37).plugs.getD (25 + 13) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 13) (LC.cst 0)) (negLC (mborrow 13)))
+        (smulLC (W : ℤ) (mborrow 14)) := by
+  decide +kernel
+
+theorem mhout_14 : (wcallAt 37).plugs.getD (25 + 14) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 14) (LC.cst 0)) (negLC (mborrow 14)))
+        (smulLC (W : ℤ) (mborrow 15)) := by
+  decide +kernel
+
+theorem mhout_15 : (wcallAt 37).plugs.getD (25 + 15) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 15) (LC.cst 0)) (negLC (mborrow 15)))
+        (smulLC (W : ℤ) (mborrow 16)) := by
+  decide +kernel
+
+theorem mhout_16 : (wcallAt 37).plugs.getD (25 + 16) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 16) (LC.cst 0)) (negLC (mborrow 16)))
+        (smulLC (W : ℤ) (mborrow 17)) := by
+  decide +kernel
+
+theorem mhout_17 : (wcallAt 37).plugs.getD (25 + 17) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 17) (LC.cst 0)) (negLC (mborrow 17)))
+        (smulLC (W : ℤ) (mborrow 18)) := by
+  decide +kernel
+
+theorem mhout_18 : (wcallAt 37).plugs.getD (25 + 18) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 18) (LC.cst 0)) (negLC (mborrow 18)))
+        (smulLC (W : ℤ) (mborrow 19)) := by
+  decide +kernel
+
+theorem mhout_19 : (wcallAt 37).plugs.getD (25 + 19) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 19) (LC.cst 0)) (negLC (mborrow 19)))
+        (smulLC (W : ℤ) (mborrow 20)) := by
+  decide +kernel
+
+theorem mhout_20 : (wcallAt 37).plugs.getD (25 + 20) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 20) (LC.cst 0)) (negLC (mborrow 20)))
+        (smulLC (W : ℤ) (mborrow 21)) := by
+  decide +kernel
+
+theorem mhout_21 : (wcallAt 37).plugs.getD (25 + 21) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 21) (LC.cst 0)) (negLC (mborrow 21)))
+        (smulLC (W : ℤ) (mborrow 22)) := by
+  decide +kernel
+
+theorem mhout_22 : (wcallAt 37).plugs.getD (25 + 22) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 22) (LC.cst 0)) (negLC (mborrow 22)))
+        (smulLC (W : ℤ) (mborrow 23)) := by
+  decide +kernel
+
+theorem mhout_23 : (wcallAt 37).plugs.getD (25 + 23) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 23) (LC.cst 0)) (negLC (mborrow 23)))
+        (smulLC (W : ℤ) (mborrow 24)) := by
+  decide +kernel
+
+theorem mhout_24 : (wcallAt 37).plugs.getD (25 + 24) (LC.cst 0)
+    = addLC (addLC ((wcallAt 40).plugs.getD (25 + 24) (LC.cst 0)) (negLC (mborrow 24)))
+        (smulLC (W : ℤ) (mborrow 25)) := by
   decide +kernel
 
 end Xark.Circuits.Rsa2048
