@@ -1716,6 +1716,55 @@ impl PreparedStreamSolver {
         &self.inputs
     }
 
+    /// Solve a request and check every compiled row. Circuit under-constraint
+    /// analysis remains available through `solve_verify` for circuit audits;
+    /// proof generation requires satisfaction of the fixed circuit relation.
+    pub fn solve_satisfied(
+        &self,
+        inputs: &BTreeMap<u32, String>,
+    ) -> Result<BTreeMap<u32, crate::solver::Fp>, String> {
+        use rayon::prelude::*;
+        use zeroize::Zeroize;
+
+        let mut assign = eval::solve_witness(
+            eval::WitnessProgram::Compiled(&self.witness),
+            self.input_vars(),
+            self.num_vars,
+            &self.modulus,
+            inputs,
+        )
+        .map(bn254_witness_slots)
+        .map_err(|e| format!("solve: {e:?}"))?;
+        let sat_ok = {
+            let z = bn254_values(&assign);
+            self.rows
+                .top
+                .par_iter()
+                .map(|item| {
+                    let mut ok = true;
+                    eval::eval(
+                        &self.rows,
+                        item,
+                        &eval::TOP,
+                        &z,
+                        [true; 3],
+                        &mut |[a, b, c]| ok &= a * b == c,
+                    );
+                    ok
+                })
+                .reduce(|| true, |a, b| a && b)
+        };
+        if !sat_ok {
+            for value in assign.iter_mut().flatten() {
+                if let crate::solver::Fp::Bn254(scalar) = value {
+                    scalar.zeroize();
+                }
+            }
+            return Err("a constraint is unsatisfied".to_string());
+        }
+        Ok(crate::solver::slots_into_map(assign))
+    }
+
     /// Run the same full row and under-constraint analysis as [`stream_solve_verify`].
     pub fn solve_verify(
         &self,

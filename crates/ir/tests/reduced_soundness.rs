@@ -65,6 +65,24 @@ fn prepared_solver_matches_full_stream_checks_after_a_rejected_request() {
 }
 
 #[test]
+fn prepared_satisfaction_only_matches_witness_and_rejects_invalid_statement() {
+    let solver = PreparedStreamSolver::new(XBC).unwrap();
+    let valid = inputs(HASH);
+    let invalid = inputs("12345");
+    let expected = solver.solve_verify(&valid).unwrap().0;
+    let (actual, rejected) = rayon::join(
+        || solver.solve_satisfied(&valid),
+        || solver.solve_satisfied(&invalid),
+    );
+    assert_eq!(actual.unwrap(), expected);
+    assert_eq!(
+        rejected.unwrap_err(),
+        solver.solve_verify(&invalid).unwrap_err()
+    );
+    assert_eq!(solver.solve_satisfied(&valid).unwrap(), expected);
+}
+
+#[test]
 fn fixture_is_templated() {
     // Otherwise the tests below check a flat circuit and prove nothing about the
     // per-template minimizer.
