@@ -1104,3 +1104,16 @@ call's four bounds (`whaFin` from `wA_15`+`wr_15`; `whbFin`/`whmFin` via `wa_0`/
 windows; `whqFin` from the s86 check; `hEm` from the digest bits), then
 `w_general_contract`, the 16 `hstep`s and `chain_seq_range` for
 `EM ≡ sig^65537 (mod n)`.
+
+### The words final call's bounds (2026-11, round 32)
+
+`WordsCong.lean`: `whaFin` (a = the previous square's r), `whbFin` (b = sig),
+`whmFin` (m = n), `whqFin` (q = the s86 check) — the final `grouped_columns` call's
+four `< 2^82` array bounds — and `wn_i` (the squares' `m` = `wChainN`; `wn_0` is `rfl`,
+the rest `val_limb_eq` + a window). All via the window/`pn` pattern. The `w_step`
+(`wChainA (j+1) ≡ wChainA j^2 [ZMOD wChainN]` from `wsq_j`) still needs its
+`Int.modEq_iff_dvd` witness oriented correctly — the first attempt's goal came out as
+`val (limb .. 50) * wChainN = ...` with the wrong square's q, so write the witness as a
+`refine ⟨q, ?_⟩` and rewrite `wsq_j`, `wn_j` *inside* it. `lake build` is 3,384 jobs;
+AxiomCheck 4,809 theorems. Next: `w_step`/`w_final`/`w_chain_congruence`, then the
+`hEm` bound from the digest bits and the final 17×121 statement.
