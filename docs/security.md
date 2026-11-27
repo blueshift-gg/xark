@@ -479,6 +479,16 @@ returning `true` for the 2048-bit / SHA-256 / `e = 65537` instance
 statement zk.golf's `RSASSAPKCS1v15` challenge takes as its `Spec`; the file is a
 transcription of RFC 8017, not of zk.golf's unlicensed source.
 
+The 17×121 (whole-number) example gets the same treatment in
+`Formal/Circuits/Rsa2048/Words*.lean`, over the exported `Rsa2048Words` circuit
+(139,868 rows in 89 segments, `fnv1a64:1758a6b6ad3aeb24`): the input-reader bounds,
+`convert_wide`'s value identity and the 2048-bit modulus, `minus_one(n) = n − 1`,
+`sig < n`, the 16 square identities, and the chain congruence
+`EM ≡ sig^65537 (mod n)`. `w_verify_wide` bundles them as
+`2^2047 ≤ n < 2^2048 ∧ sig < n ∧ EM ≡ sig^65537 (mod n)`, with the terminal call's
+EM array bound as the one explicit hypothesis still to prove (the analogue of the byte
+path's `EmBits`/`PackBound`).
+
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s
 oddness/semiprimality is deliberately not proven: the verifier's key allowlist or
