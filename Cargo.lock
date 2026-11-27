@@ -5061,6 +5061,7 @@ dependencies = [
  "sha2 0.11.0",
  "xark-groth16",
  "xark-ir",
+ "zeroize",
 ]
 
 [[package]]

@@ -536,6 +536,86 @@ fn kyc_witness() -> BTreeMap<VarId, Fr> {
 }
 
 #[test]
+fn prepared_cpu_prover_checks_and_isolates_typed_requests() {
+    use ark_serialize::CanonicalDeserialize;
+    use xark_prover::{PreparedCpuProver, ProveInputs};
+
+    struct Inputs(Vec<(String, Fr)>);
+    impl ProveInputs for Inputs {
+        fn into_inputs(self) -> Vec<(String, Fr)> {
+            self.0
+        }
+    }
+
+    let input = |max_dob: &str, commitment: Option<&str>| {
+        Inputs(
+            KYC_INPUTS
+                .iter()
+                .map(|&(name, value)| {
+                    let value = match name {
+                        "max_dob" => max_dob,
+                        "commitment" => commitment.unwrap_or(value),
+                        _ => value,
+                    };
+                    (name.to_owned(), value.parse().unwrap())
+                })
+                .collect(),
+        )
+    };
+    let reduced = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let circuit = XarkCircuit::for_proving_preminimized(reduced, kyc_witness());
+    let (pk, vk) =
+        ArkG16::circuit_specific_setup(circuit, &mut ChaCha20Rng::seed_from_u64(9)).unwrap();
+    let mut malformed = pk.clone();
+    malformed.vk.gamma_abc_g1.clear();
+    assert!(PreparedCpuProver::new(KYC_XBC, malformed).is_err());
+    let mut malformed = pk.clone();
+    use ark_ff::Field;
+    malformed.b_g2_query[0] =
+        ark_bn254::G2Affine::new_unchecked(ark_bn254::Fq2::zero(), ark_bn254::Fq2::ONE);
+    assert!(PreparedCpuProver::new(KYC_XBC, malformed).is_err());
+    let mut mismatched = pk.clone();
+    mismatched.vk.alpha_g1 = -mismatched.vk.alpha_g1;
+    assert!(
+        PreparedCpuProver::new(KYC_XBC, mismatched)
+            .unwrap()
+            .prove(input("20200101", None))
+            .is_err()
+    );
+
+    let prepared = PreparedCpuProver::new(KYC_XBC, pk).unwrap();
+    assert_eq!(prepared.verifying_key(), &vk);
+    assert!(prepared.prove(input("20200101", Some("0"))).is_err());
+    let (a, b) = std::thread::scope(|scope| {
+        let a = scope.spawn(|| prepared.prove(input("20200101", None)).unwrap());
+        let b = scope.spawn(|| prepared.prove(input("20210101", None)).unwrap());
+        (a.join().unwrap(), b.join().unwrap())
+    });
+    let decode = |out: xark_prover::CircuitProof| {
+        (
+            Proof::<Bn254>::deserialize_compressed(out.proof.as_slice()).unwrap(),
+            Vec::<Fr>::deserialize_compressed(out.public_inputs.as_slice()).unwrap(),
+        )
+    };
+    let ((a_proof, a_public), (b_proof, b_public)) = (decode(a), decode(b));
+    assert_ne!(a_public, b_public);
+    for (proof, public, other) in [
+        (&a_proof, &a_public, &b_public),
+        (&b_proof, &b_public, &a_public),
+    ] {
+        assert!(ArkG16::verify(&vk, public, proof).unwrap());
+        assert!(xark_groth16::verify(&vk, public, proof).unwrap());
+        assert!(!ArkG16::verify(&vk, other, proof).unwrap());
+        assert!(!xark_groth16::verify(&vk, other, proof).unwrap());
+    }
+    let (fresh, _) = decode(prepared.prove(input("20200101", None)).unwrap());
+    assert_ne!(fresh, a_proof);
+    assert!(ArkG16::verify(&vk, &a_public, &fresh).unwrap());
+}
+
+#[test]
 fn bytecode_rows_equal_the_reduced_expansion() {
     let reduced = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
         .unwrap()
