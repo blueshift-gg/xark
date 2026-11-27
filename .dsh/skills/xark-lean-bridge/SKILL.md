@@ -1011,3 +1011,15 @@ bullets; the `hc0`/`hc25` args are `(mborrowF 0).val = 1` / `(mborrowF 25).val =
 via `ZMod.val_one`/`ZMod.val_zero` + `norm_num`). `lake build` is 3,378 jobs;
 AxiomCheck 4,656 theorems. Next: rewrite `mNF` to `yN`, bridge to
 `val (limb (wcallAt 37) σ 25)`, `RequireLt25x82` → `sig < n`; then the chain.
+
+### The words minus_one value bridge (2026-11, round 24)
+
+`mval_limb : val (limb (wcallAt 37) σ 25) = Σ (mOutF i σ).val·W^i` by `rfl` (the
+`val`/`limb`/`pv` definitions line up). A first `mNF → yN` bridge (25 `mNF_yN_i` plus
+`mval_yN` by `Finset.sum_congr` + `interval_cases` + `rw`) hung in elaboration; the
+leaner route is to keep the m-side sums in `mNF` form and rewrite only where needed,
+or to `simp` the 25 pointwise lemmas in one `Finset.sum_congr`. Note: **do not use
+`pkill -f 'lean.*<file>'`** — the pattern matches the tool's own bash command line and
+kills the shell (it masqueraded as a timeout twice). `lake build` is 3,378 jobs;
+AxiomCheck 4,657 theorems. Next: the `yN` bridge, `RequireLt25x82` at s37 → `sig < n`,
+then the chain.

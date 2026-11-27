@@ -1427,4 +1427,10 @@ theorem mval_minus_one (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
       · simpa [W] using moutVal_24 σ h
       )
 
+/-- `val` of the `minus_one` output limbs is the sum of their values. -/
+theorem mval_limb (σ : ℕ → F) :
+    val (limb (wcallAt 37) σ 25)
+      = ∑ i ∈ Finset.range 25, (mOutF i σ).val * (W : ℤ) ^ i := by
+  rfl
+
 end Xark.Circuits.Rsa2048
