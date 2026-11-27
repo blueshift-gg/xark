@@ -1091,3 +1091,16 @@ squaring: `val a·val a = val q·val m + val r` at segment `40 + 3i`, with
 as metavariables otherwise) and the four bounds from `WordsQR`/`WordsAM`. `lake build`
 is 3,382 jobs; AxiomCheck 4,771 theorems. Next: the final `q`+`w_general_contract`
 (the `EM` array bound from the digest bits), then the `RsaChain` congruence.
+
+### The words chain's accumulator and final windows (2026-11, round 31)
+
+`WordsFinal.lean` (generated): `wChainN` (`val (limb (wcallAt 40) σ 25)`),
+`wChainEm` (`val (limb (wcallAt 88) σ 100)`), `wAccList` (the 16 squares' `a` + the
+final's `a`), `wChainA`, and the 17 `wA_i` window lemmas (`val (limb next) σ 0 =
+val (limb prev) σ 75`) plus `wFinB` (`val (limb 88) σ 25 = val (limb 40) σ 0`) and
+`wFinM` (`val (limb 88) σ 50 = wChainN`). `val_limb_eq` + a `decide +kernel` window is
+the whole proof. `lake build` is 3,383 jobs; AxiomCheck 4,789 theorems. Next: the final
+call's four bounds (`whaFin` from `wA_15`+`wr_15`; `whbFin`/`whmFin` via `wa_0`/`wm`-style
+windows; `whqFin` from the s86 check; `hEm` from the digest bits), then
+`w_general_contract`, the 16 `hstep`s and `chain_seq_range` for
+`EM ≡ sig^65537 (mod n)`.
