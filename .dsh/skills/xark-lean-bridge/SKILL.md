@@ -868,3 +868,16 @@ every converted limb below `2^82` (the top one is proved `< 2^80` and relaxed wi
 call. `lake build` is 3,374 jobs; AxiomCheck 4,262 theorems. Next: the `n_top` row
 (9812) pins `σ 26347 = 2^79 + Σ bits`, so the top limb is `≥ 2^79`; then the
 mixed-radix bound `Σ y_j·W^j < 2^2048` (top limb `< 2^80`) and the chain.
+
+### The mixed-radix bound (2026-11, round 13)
+
+`ConvertValue.lean`: `geom_lt` (`Σ_{j<k} y j·W^j < W^k` when every `y j < W`, by
+induction, fast) and `n_val_lt`/`s_val_lt`: the converted values are below `2^2048`
+(split `range 25 = range 24 + {24}`; the top limb `< 2^80`, the others `< W`;
+`2^80·W^24 = 2^2048` by `← pow_mul, ← pow_add`). The *lower* bound `n ≥ 2^2047` still
+needs the `n_top` row: a first attempt (`n_top_eq` with `linear_combination ha` and
+`nlinarith` over the 79-term bit sum) did not finish in 10 minutes and was reverted —
+prove it in the `gblock_sound` style instead (`hcast` for the bit sum via
+`sum_map_range`/`ZMod.natCast_zmod_val`, `word_lt` for `Σ < 2^79`, then
+`int_eq_zero_of_cast`), keeping the `Finset.sum` opaque. `lake build` is 3,375 jobs;
+AxiomCheck 4,265 theorems.

@@ -55,6 +55,7 @@ import Formal.Circuits.Rsa2048.ConvertCols
 import Formal.Circuits.Rsa2048.ConvertColsSig
 import Formal.Circuits.Rsa2048.ConvertWide
 import Formal.Circuits.Rsa2048.ConvertBounds
+import Formal.Circuits.Rsa2048.ConvertValue
 import Formal.Circuits.Rsa2048.Rfc8017
 import Formal.Sha256EmBits82
 import Formal.Templates.Consts.Sha256EmBits82
