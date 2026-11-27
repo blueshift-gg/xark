@@ -17,6 +17,12 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
 - `examples/rsa2048`: the byte-input example and generated KAT; 125,856 constraints
   (157,451 before the golf; the group carry is a witnessed `num / 2^164` pinned by
   two rows, which the export below needs).
+- The words (17×121) circuit's Lean composition is nearly complete, as
+  `Formal/Circuits/Rsa2048/Words*.lean`: the input-reader bounds, the `convert_wide`
+  value identity and the 2048-bit modulus, `minus_one(n) = n − 1` and `sig < n`, the
+  16 square identities and the chain congruence `EM ≡ sig^65537 (mod n)` (conditional
+  on the EM array bound). The end-to-end 17×121 statement and the digest = H(M)
+  composition remain.
 - `examples/rsa2048_words`: the whole-number 17×121 entry point (`verify_sha256`),
   sharing `rsa2048`'s generated RSA vector. The modulus and signature are
   input-reader-range-checked `Bignum<17, 121>` limbs that `convert_wide` re-limbs to
