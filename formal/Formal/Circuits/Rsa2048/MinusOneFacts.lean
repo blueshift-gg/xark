@@ -1092,4 +1092,23 @@ theorem bBit_of {b z : F} (h : b = 1 - z) (hz : z = 0 ∨ z = 1) : b = 0 ∨ b =
   rcases hz with hz | hz
   · right; rw [h, hz]; ring
   · left; rw [h, hz]; ring
+
+/-- The `z` value of limb `j`. -/
+def mzF (j : ℕ) (σ : ℕ → F) : F := σ (mzvar j)
+/-- The `w` value of limb `j`. -/
+def mwF (j : ℕ) (σ : ℕ → F) : F := σ (mwvar j)
+/-- The borrow bit `b_j = 1 − z_j`. -/
+def mbF (j : ℕ) (σ : ℕ → F) : F := (ZLC.toF (mbLC j)).eval σ
+/-- `borrow_i`. -/
+def mborrowF (i : ℕ) (σ : ℕ → F) : F := (ZLC.toF (mborrow i)).eval σ
+/-- The `minus_one` output limb `i` (the `require_lt` m plugs). -/
+def mOutF (i : ℕ) (σ : ℕ → F) : F :=
+  (ZLC.toF ((wcallAt 37).plugs.getD (25 + i) (LC.cst 0))).eval σ
+/-- The input limb `i` (the square's m plugs). -/
+def mNF (i : ℕ) (σ : ℕ → F) : F :=
+  (ZLC.toF ((wcallAt 40).plugs.getD (25 + i) (LC.cst 0))).eval σ
+
+theorem mbF_eq (j : ℕ) (σ : ℕ → F) : mbF j σ = 1 - mzF j σ := by
+  simp [mbF, mbLC, mzF, ZLC.toF, Xark.R1cs.LC.eval]
+  ring
 end Xark.Circuits.Rsa2048

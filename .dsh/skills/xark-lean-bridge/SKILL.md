@@ -963,3 +963,14 @@ matters). The `decide +kernel` row facts cost ~73 s: each `getD` walks ~9,800 li
 cells. `lake build` is 3,377 jobs; AxiomCheck 4,475 theorems. Next: define
 `mzF/mwF/mbF/mborrowF/mOutF/mNF`, the `mhoutE_i` rewrite, `hrec/hnb/outVal` and
 `telescope` → `val (limb (wcallAt 37) σ 25) = n_val − 1`.
+
+### The words minus_one eval layer (2026-11, round 20)
+
+`MinusOneFacts.lean` defines `mzF`/`mwF`/`mbF`/`mborrowF`/`mOutF`/`mNF` (the limb,
+borrow and output values as field elements) and `mbF_eq : mbF j σ = 1 − mzF j σ`.
+The per-limb `mNF i σ = σ (nLimb.getD i 0)` needs the plug fact as a `decide` lemma
+(`(wcallAt 40).plugs.getD (25+i) = ⟨0, [(1, limb)]⟩`), because `simp` cannot reduce
+`nLimb.getD i 0` for symbolic `i` — plan: a `decide +kernel` plug fact per limb, then
+`mNF_eq_i`. The file is ~74s to elaborate (the `getD` row facts). `lake build` is
+3,377 jobs; AxiomCheck 4,476 theorems. Next: the plug facts, `mhoutE_i`, the
+`hrec/hnb/outVal` instantiations, `telescope`, then `sig < n`.
