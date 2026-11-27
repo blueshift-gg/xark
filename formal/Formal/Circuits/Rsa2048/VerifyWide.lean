@@ -188,4 +188,11 @@ theorem verify_wide (σ : ℕ → F) (h : Sat circuit σ) :
     (verify_wide_spec σ h).sig_lt, (verify_wide_spec σ h).em_lt,
     (verify_wide_spec σ h).em⟩
 
+/-- **What the verifier sees.** The circuit's public inputs are the modulus's 256 bytes
+followed by the digest's 32, in order. The signature's bytes (`256..511`) are private
+witnesses, so `verify_wide_spec` is existential in `sig`: it proves knowledge of a valid
+signature. -/
+theorem publics_eq : publics = List.range 256 ++ (List.range 32).map (· + 512) := by
+  decide +kernel
+
 end Xark.Circuits.Rsa2048
