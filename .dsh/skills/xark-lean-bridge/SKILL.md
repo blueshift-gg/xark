@@ -580,3 +580,31 @@ Gates after importing `SigLt`/`SigLt3`/`SigLt4`/`SigLt5` into `Formal.lean` (com
 `1c6150e0`): `lake build` 3,359 jobs; AxiomCheck 3,915 theorems standard axioms;
 `lean-export --check` 71/71; `lean-export --coverage` green (136 s); `digests --check`
 all 76 circuits (1.99.1); `CircuitHash` Rsa2048 `fnv1a64:860142cc226105b8`.
+
+## End to end (2026-11)
+
+`Formal/Circuits/Rsa2048/VerifyWide.lean` (committed `d014479f`) names the three byte
+operands (`nBytes`, `sigBytes`, `digestBytes`) and bundles the three facts as
+`verify_wide_spec` (a `Prop` structure) and `verify_wide` (the same as a conjunction):
+
+* `2^2047 ≤ n < 2^2048` (`nBytes_bits`, from `n_bits` + `chainN_eq_bytes`);
+* `sig < n` (`sigBytes_lt_nBytes`, from `chainSig_bytes_lt_bytes`);
+* `EM_PREFIX + Σ_{k<32} digest_k·256^(31−k) ≡ sig^65537 (mod n)` (`emBytes_congruence`,
+  from `chain_congruence_public`).
+
+Gotcha: `simp [chainN]` unfolds `chainN = val (limb sq0 σ 25)` and keeps going into
+`callAt 548`'s plug list and the 597-element `circuit` — it hangs. Rewrite with
+`chainN_eq_bytes` instead, never unfold `chainN` under `simp`.
+
+`docs/security.md` §2.18 (committed `a558b4b3`) no longer lists the composition,
+`minus_one`/`sig < n`, or the whole-circuit assembly as audit residuals; it records
+them as theorems and keeps the two deliberate exclusions (the digest is a public
+input, `n`'s oddness/semiprimality is unproven). `bytes_to_wide` and
+`sha256_em_bits_82` are plain functions with no exported template, so there is no
+row-level model for them; their values are proved from the exported rows
+(`chainN_eq_bytes`, `chainSig_eq_bytes`, `chainEm_bytes_32`). Giving them a template
+would mean marking them `#[gadget]`, i.e. touching the gadget source.
+
+Gates after the bundle: `lake build` 3,360 jobs; AxiomCheck 3,923 theorems standard
+axioms; `lean-export --check` 71/71; coverage 152 s; `digests --check` 76/76 (1.99.1);
+`CircuitHash` Rsa2048 `fnv1a64:860142cc226105b8`.
