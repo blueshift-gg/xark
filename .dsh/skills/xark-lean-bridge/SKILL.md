@@ -844,3 +844,16 @@ assembly: define `xN/yN/cN` (and `xS/yS/cS`) from the var lists, prove
 (`Finset.sum_eq_single` with the uniqueness over `Fin 17`, so `decide` closes it),
 then `hrow` per column and `telescoping`. `lake build` is 3,372 jobs; AxiomCheck
 4,104 theorems.
+
+### The convert telescope, both operands (2026-11, round 11)
+
+`ConvertWide.lean` (generated) defines `nIn/nLimb/nCarry` and `sIn/sLimb/sCarry` (the
+concrete variable lists from the s36 parse), `xN/yN/cN`/`xS/yS/cS`, and the two `cols`
+lemmas: `cols_single` (one input limb; uniqueness over `Fin 17` so `decide` closes it)
+and `cols_none`. Per column it turns the `n_col<j>`/`s_col<j>` fact into
+`cols x j + (if j=0 then 0 else c (j-1)) = W·c j + y j`, then `n_hrow`/`s_hrow` (by
+`interval_cases`), `n_c24`/`s_c24` (the final carry is 0), and
+`n_convert_eq`/`s_convert_eq` via `Xark.Rsa.Convert.telescoping`:
+`Σ_{j<25} y j·W^j = Σ_{i<17} x i·2^(121i)` for both n and sig. Note `Convert.W` and
+`GroupedColumns.W` are two defs of `2^82`; `simpa [Xark.Rsa.Convert.W, W]` reconciles
+them. `lake build` is 3,373 jobs; AxiomCheck 4,162 theorems.
