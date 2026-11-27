@@ -537,6 +537,9 @@ fn kyc_witness() -> BTreeMap<VarId, Fr> {
 
 #[test]
 fn prepared_cpu_prover_checks_and_isolates_typed_requests() {
+    use ark_bn254::{Fq, Fq2, G2Affine};
+    use ark_ec::AffineRepr;
+    use ark_ff::{Field, PrimeField};
     use ark_serialize::CanonicalDeserialize;
     use xark_prover::{PreparedCpuProver, ProveInputs};
 
@@ -573,10 +576,21 @@ fn prepared_cpu_prover_checks_and_isolates_typed_requests() {
     malformed.vk.gamma_abc_g1.clear();
     assert!(PreparedCpuProver::new(KYC_XBC, malformed).is_err());
     let mut malformed = pk.clone();
-    use ark_ff::Field;
-    malformed.b_g2_query[0] =
-        ark_bn254::G2Affine::new_unchecked(ark_bn254::Fq2::zero(), ark_bn254::Fq2::ONE);
+    malformed.b_g2_query[0] = G2Affine::new_unchecked(Fq2::zero(), Fq2::ONE);
     assert!(PreparedCpuProver::new(KYC_XBC, malformed).is_err());
+    // Use full-order multiplication to select an on-curve point that the
+    // constructor must reject even though it passes the curve equation.
+    let outsider = (0..64u64)
+        .filter_map(|x| G2Affine::get_point_from_x_unchecked(Fq2::new(Fq::from(x), Fq::ONE), false))
+        .find(|point| !point.mul_bigint(Fr::MODULUS).is_zero())
+        .unwrap();
+    assert!(outsider.is_on_curve());
+    let mut malformed = pk.clone();
+    malformed.b_g2_query[0] = outsider;
+    match PreparedCpuProver::new(KYC_XBC, malformed) {
+        Err(error) => assert!(error.0.starts_with("invalid proving key:")),
+        Ok(_) => panic!("prepared an on-curve point outside the G2 subgroup"),
+    }
     let mut mismatched = pk.clone();
     mismatched.vk.alpha_g1 = -mismatched.vk.alpha_g1;
     assert!(
@@ -588,6 +602,18 @@ fn prepared_cpu_prover_checks_and_isolates_typed_requests() {
 
     let prepared = PreparedCpuProver::new(KYC_XBC, pk).unwrap();
     assert_eq!(prepared.verifying_key(), &vk);
+    let mut invalid = input("20200101", None);
+    invalid.0.push(("unknown_input".to_owned(), Fr::ONE));
+    match prepared.prove(invalid) {
+        Err(error) => assert_eq!(error.0, "unknown circuit input"),
+        Ok(_) => panic!("accepted an unknown typed input"),
+    }
+    let mut invalid = input("20200101", None);
+    invalid.0.push(invalid.0[0].clone());
+    match prepared.prove(invalid) {
+        Err(error) => assert_eq!(error.0, "duplicate circuit input"),
+        Ok(_) => panic!("accepted a duplicate typed input"),
+    }
     assert!(prepared.prove(input("20200101", Some("0"))).is_err());
     let (a, b) = std::thread::scope(|scope| {
         let a = scope.spawn(|| prepared.prove(input("20200101", None)).unwrap());

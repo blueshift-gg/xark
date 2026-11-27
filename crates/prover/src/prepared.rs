@@ -85,17 +85,18 @@ impl PreparedCpuProver {
     pub fn prove(&self, inputs: impl ProveInputs) -> Result<CircuitProof, ProveError> {
         let mut decimal = BTreeMap::new();
         let solved = (|| {
-            for (name, mut value) in inputs.into_inputs() {
+            let values = Zeroizing::new(inputs.into_inputs());
+            for (name, value) in values.iter() {
                 let id = self
                     .inputs
-                    .get(&name)
+                    .get(name)
                     .ok_or_else(|| ProveError("unknown circuit input".into()))?;
                 let std::collections::btree_map::Entry::Vacant(entry) = decimal.entry(*id) else {
                     return Err(ProveError("duplicate circuit input".into()));
                 };
                 entry.insert(value.into_bigint().to_string());
-                value.zeroize();
             }
+            drop(values);
             if decimal.len() != self.inputs.len() {
                 return Err(ProveError("missing circuit input".into()));
             }
