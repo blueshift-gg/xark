@@ -760,3 +760,30 @@ over *circuit* variables (`gbit base i = base + 2i`, `gacc`, `gtopA`/`gtopB`,
 Next: check the ~50 blocks of s36 against it by `decide`, extract the 25 column
 equations per operand, and apply `Xark.Rsa.Convert.telescoping` (`cols_sum`,
 `partial_sum`).
+
+### s36's exact decomposition (2026-11, round 5 continued)
+
+Parsing the 9,913 rows of s36 (Part1.lean) against the Rust: **two `convert_wide`
+calls, the `n_top` check, then `minus_one`**.
+
+* rows 0..4905 — `convert_wide(n)`: 25 carry rows at 0, 201, …, 4824 (each followed
+  by the 82-row `limb` block and the 118-row `carry` block) and the `require_eq(carry,0)`
+  at 4825 (the final column's `range_derived_top::<80>` is rows 4826..4905).
+* rows 4906..9811 — `convert_wide(sig)`, the same shift by 4906 (num rows at
+  4906..9730, require at 9731, top block 9732..9811).
+* row 9812 — `require_eq(n_top, 2^79)` (`a = n_top − 2^79`, `b = 1`, `c = 0`), the
+  2048-bit check.
+* rows 9813..9912 — `minus_one(n)`: 25 limbs × 4 rows (is_zero and product/out rows),
+  ending with `borrow_24 = 0` at 9912.
+
+The first carry row is
+`a = x_0 − W·carry_0 − limb_0`, `b = 1`, `c = 0` (vars 16746/16747); column j's is
+`a = 2^(121j%82)·x_j + carry_{j-1} − W·carry_j − limb_j` (one input term, since
+121/82 < 2 so each column gets at most one input limb). So:
+`cols x j + carry_{j-1} = W·carry_j + limb_j`, exactly `RsaConvert.partial_sum`'s
+hypothesis, with `carry_{-1} = 0` and the final `carry_24 = 0`; the 82/118-bit blocks
+give `limb_j < 2^82`, `carry_j < 2^118` (the last `limb_24 < 2^80` via
+`range_derived_top::<80>`). That is the whole convert ingredient; `RsaConvert.telescoping`
+then gives `Σ limb_j·W^j = Σ x_i·2^(121i)`. The words minus_one rows are the byte
+path's `SigLt` analysis with the variables shifted (s544's rows in that circuit), so
+that part can be re-instantiated from `SigLt.lean`'s pattern.
