@@ -1023,3 +1023,14 @@ or to `simp` the 25 pointwise lemmas in one `Finset.sum_congr`. Note: **do not u
 kills the shell (it masqueraded as a timeout twice). `lake build` is 3,378 jobs;
 AxiomCheck 4,657 theorems. Next: the `yN` bridge, `RequireLt25x82` at s37 → `sig < n`,
 then the chain.
+
+### The words minus_one value against `yN` (2026-11, round 25)
+
+`mNF_yN_i` (25) and `mval_yN`: `Σ (mOutF i σ).val·W^i = (Σ yN σ i·W^i) − 1`, proved by
+`telescope` with `b i = yN σ i` and 25 `interval_cases` bullets
+(`simpa [W, mNF_yN_i] using moutVal_i σ h`). Trap: `moutVal_i`'s n term is
+`ZMod.cast (mNF i σ)`, not `((mNF i σ).val : ℤ)` — the pointwise lemma must be stated
+with `ZMod.cast` (and then `rw [mNF_eq_i]; rfl` works). `lake build` is 3,378 jobs;
+AxiomCheck 4,683 theorems. Next: the RequireLt application at s37 (the words
+`req_ins_take`/`Assumptions`/`spec_iff` chain with the 25 sig-limb plug facts) →
+`sig < n`; then the chain at s38..s88.

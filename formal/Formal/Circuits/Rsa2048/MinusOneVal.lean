@@ -1433,4 +1433,140 @@ theorem mval_limb (σ : ℕ → F) :
       = ∑ i ∈ Finset.range 25, (mOutF i σ).val * (W : ℤ) ^ i := by
   rfl
 
+theorem mNF_yN_0 (σ : ℕ → F) : ZMod.cast (mNF 0 σ) = yN σ 0 := by
+  rw [mNF_eq_0]
+  rfl
+
+theorem mNF_yN_1 (σ : ℕ → F) : ZMod.cast (mNF 1 σ) = yN σ 1 := by
+  rw [mNF_eq_1]
+  rfl
+
+theorem mNF_yN_2 (σ : ℕ → F) : ZMod.cast (mNF 2 σ) = yN σ 2 := by
+  rw [mNF_eq_2]
+  rfl
+
+theorem mNF_yN_3 (σ : ℕ → F) : ZMod.cast (mNF 3 σ) = yN σ 3 := by
+  rw [mNF_eq_3]
+  rfl
+
+theorem mNF_yN_4 (σ : ℕ → F) : ZMod.cast (mNF 4 σ) = yN σ 4 := by
+  rw [mNF_eq_4]
+  rfl
+
+theorem mNF_yN_5 (σ : ℕ → F) : ZMod.cast (mNF 5 σ) = yN σ 5 := by
+  rw [mNF_eq_5]
+  rfl
+
+theorem mNF_yN_6 (σ : ℕ → F) : ZMod.cast (mNF 6 σ) = yN σ 6 := by
+  rw [mNF_eq_6]
+  rfl
+
+theorem mNF_yN_7 (σ : ℕ → F) : ZMod.cast (mNF 7 σ) = yN σ 7 := by
+  rw [mNF_eq_7]
+  rfl
+
+theorem mNF_yN_8 (σ : ℕ → F) : ZMod.cast (mNF 8 σ) = yN σ 8 := by
+  rw [mNF_eq_8]
+  rfl
+
+theorem mNF_yN_9 (σ : ℕ → F) : ZMod.cast (mNF 9 σ) = yN σ 9 := by
+  rw [mNF_eq_9]
+  rfl
+
+theorem mNF_yN_10 (σ : ℕ → F) : ZMod.cast (mNF 10 σ) = yN σ 10 := by
+  rw [mNF_eq_10]
+  rfl
+
+theorem mNF_yN_11 (σ : ℕ → F) : ZMod.cast (mNF 11 σ) = yN σ 11 := by
+  rw [mNF_eq_11]
+  rfl
+
+theorem mNF_yN_12 (σ : ℕ → F) : ZMod.cast (mNF 12 σ) = yN σ 12 := by
+  rw [mNF_eq_12]
+  rfl
+
+theorem mNF_yN_13 (σ : ℕ → F) : ZMod.cast (mNF 13 σ) = yN σ 13 := by
+  rw [mNF_eq_13]
+  rfl
+
+theorem mNF_yN_14 (σ : ℕ → F) : ZMod.cast (mNF 14 σ) = yN σ 14 := by
+  rw [mNF_eq_14]
+  rfl
+
+theorem mNF_yN_15 (σ : ℕ → F) : ZMod.cast (mNF 15 σ) = yN σ 15 := by
+  rw [mNF_eq_15]
+  rfl
+
+theorem mNF_yN_16 (σ : ℕ → F) : ZMod.cast (mNF 16 σ) = yN σ 16 := by
+  rw [mNF_eq_16]
+  rfl
+
+theorem mNF_yN_17 (σ : ℕ → F) : ZMod.cast (mNF 17 σ) = yN σ 17 := by
+  rw [mNF_eq_17]
+  rfl
+
+theorem mNF_yN_18 (σ : ℕ → F) : ZMod.cast (mNF 18 σ) = yN σ 18 := by
+  rw [mNF_eq_18]
+  rfl
+
+theorem mNF_yN_19 (σ : ℕ → F) : ZMod.cast (mNF 19 σ) = yN σ 19 := by
+  rw [mNF_eq_19]
+  rfl
+
+theorem mNF_yN_20 (σ : ℕ → F) : ZMod.cast (mNF 20 σ) = yN σ 20 := by
+  rw [mNF_eq_20]
+  rfl
+
+theorem mNF_yN_21 (σ : ℕ → F) : ZMod.cast (mNF 21 σ) = yN σ 21 := by
+  rw [mNF_eq_21]
+  rfl
+
+theorem mNF_yN_22 (σ : ℕ → F) : ZMod.cast (mNF 22 σ) = yN σ 22 := by
+  rw [mNF_eq_22]
+  rfl
+
+theorem mNF_yN_23 (σ : ℕ → F) : ZMod.cast (mNF 23 σ) = yN σ 23 := by
+  rw [mNF_eq_23]
+  rfl
+
+theorem mNF_yN_24 (σ : ℕ → F) : ZMod.cast (mNF 24 σ) = yN σ 24 := by
+  rw [mNF_eq_24]
+  rfl
+
+/-- The words `minus_one` value against the converted modulus. -/
+theorem mval_yN (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    (∑ i ∈ Finset.range 25, (mOutF i σ).val * (W : ℤ) ^ i)
+      = (∑ i ∈ Finset.range 25, yN σ i * (W : ℤ) ^ i) - 1 :=
+  telescope (fun i => ((mOutF i σ).val : ℤ)) (fun i => yN σ i)
+    (fun i => ((mborrowF i σ).val : ℤ))
+    (by rw [mborrowF0, ZMod.val_one]; norm_num) (by rw [mborrowF25 σ h, ZMod.val_zero]; norm_num)
+    (fun i hi => by
+      interval_cases i
+      · simpa [W, mNF_yN_0] using moutVal_0 σ h
+      · simpa [W, mNF_yN_1] using moutVal_1 σ h
+      · simpa [W, mNF_yN_2] using moutVal_2 σ h
+      · simpa [W, mNF_yN_3] using moutVal_3 σ h
+      · simpa [W, mNF_yN_4] using moutVal_4 σ h
+      · simpa [W, mNF_yN_5] using moutVal_5 σ h
+      · simpa [W, mNF_yN_6] using moutVal_6 σ h
+      · simpa [W, mNF_yN_7] using moutVal_7 σ h
+      · simpa [W, mNF_yN_8] using moutVal_8 σ h
+      · simpa [W, mNF_yN_9] using moutVal_9 σ h
+      · simpa [W, mNF_yN_10] using moutVal_10 σ h
+      · simpa [W, mNF_yN_11] using moutVal_11 σ h
+      · simpa [W, mNF_yN_12] using moutVal_12 σ h
+      · simpa [W, mNF_yN_13] using moutVal_13 σ h
+      · simpa [W, mNF_yN_14] using moutVal_14 σ h
+      · simpa [W, mNF_yN_15] using moutVal_15 σ h
+      · simpa [W, mNF_yN_16] using moutVal_16 σ h
+      · simpa [W, mNF_yN_17] using moutVal_17 σ h
+      · simpa [W, mNF_yN_18] using moutVal_18 σ h
+      · simpa [W, mNF_yN_19] using moutVal_19 σ h
+      · simpa [W, mNF_yN_20] using moutVal_20 σ h
+      · simpa [W, mNF_yN_21] using moutVal_21 σ h
+      · simpa [W, mNF_yN_22] using moutVal_22 σ h
+      · simpa [W, mNF_yN_23] using moutVal_23 σ h
+      · simpa [W, mNF_yN_24] using moutVal_24 σ h
+      )
+
 end Xark.Circuits.Rsa2048
