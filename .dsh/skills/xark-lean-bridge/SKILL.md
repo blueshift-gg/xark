@@ -857,3 +857,14 @@ and `cols_none`. Per column it turns the `n_col<j>`/`s_col<j>` fact into
 `Σ_{j<25} y j·W^j = Σ_{i<17} x i·2^(121i)` for both n and sig. Note `Convert.W` and
 `GroupedColumns.W` are two defs of `2^82`; `simpa [Xark.Rsa.Convert.W, W]` reconciles
 them. `lake build` is 3,373 jobs; AxiomCheck 4,162 theorems.
+
+### Converted-limb bounds (2026-11, round 12)
+
+`ConvertBounds.lean` (generated) gives `n_limb_bnd<j>`/`n_carry_bnd<j>` (and the `s_`
+counterparts) from the same block slices, plus `n_limb_lt82`/`s_limb_lt82`:
+every converted limb below `2^82` (the top one is proved `< 2^80` and relaxed with
+`Nat.lt_of_lt_of_le`). These are what `square_contract`/`general_contract` take as
+`ha`/`hm`/`hq`/`hr` — `pn c σ i < 2^82` for the four 25-limb arrays of each chain
+call. `lake build` is 3,374 jobs; AxiomCheck 4,262 theorems. Next: the `n_top` row
+(9812) pins `σ 26347 = 2^79 + Σ bits`, so the top limb is `≥ 2^79`; then the
+mixed-radix bound `Σ y_j·W^j < 2^2048` (top limb `< 2^80`) and the chain.
