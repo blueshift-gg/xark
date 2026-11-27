@@ -1082,3 +1082,12 @@ is `sLimb` for square 0 (same map lemma, `s_limb_lt82`) and the previous square'
 (window vs `drop 75`, then `wr_{i-1}`). `lake build` is 3,381 jobs; AxiomCheck 4,755
 theorems. Next: the 16 `w_square_contract` applications (chaining `acc` = previous `r`),
 the final `q`+`w_general_contract`, and the `RsaChain` congruence.
+
+### The words chain's square identities (2026-11, round 30)
+
+`WordsSq.lean` (generated): `wsq_0..15`, one `w_square_contract` application per
+squaring: `val a·val a = val q·val m + val r` at segment `40 + 3i`, with
+`(n := ...)`/`(c := wcallAt ...)` passed explicitly (the `rfl` `hseg` leaves `n`/`c`
+as metavariables otherwise) and the four bounds from `WordsQR`/`WordsAM`. `lake build`
+is 3,382 jobs; AxiomCheck 4,771 theorems. Next: the final `q`+`w_general_contract`
+(the `EM` array bound from the digest bits), then the `RsaChain` congruence.
