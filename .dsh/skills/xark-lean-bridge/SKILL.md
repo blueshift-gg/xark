@@ -974,3 +974,15 @@ The per-limb `mNF i σ = σ (nLimb.getD i 0)` needs the plug fact as a `decide` 
 `mNF_eq_i`. The file is ~74s to elaborate (the `getD` row facts). `lake build` is
 3,377 jobs; AxiomCheck 4,476 theorems. Next: the plug facts, `mhoutE_i`, the
 `hrec/hnb/outVal` instantiations, `telescope`, then `sig < n`.
+
+### The words minus_one chain (2026-11, round 21)
+
+`MinusOneVal.lean` (fast to elaborate, ~2 s): `mNF_eq_i` (25, via a `decide` plug fact
++ `show`/`rw`/`simp` — plain `simp [mNF, …]` leaves a goal because it does not unfold
+`wcallAt`'s `plugs.getD`), `mhrec_i` (25: `mhrec_0` by `simp`; `mhrec_i` from
+`mPq_{i-1}` with `mzvar` in the simp set — otherwise `σ (mzvar j)` stays symbolic),
+`mborrowF0` (`= 1`) and `mborrowF25` (`= 0`, from `mFq`). Next: `mhoutE_i` (the
+`addG`/`eval_addG` rewrite; needs `mborrow`/`mNF`/`mborrowF` unfolded carefully),
+`mhnb_i`/`mbBit_i`/`mborrowBit_i`/`moutVal_i`, then `telescope` for
+`val (limb (wcallAt 37) σ 25) = n_val - 1` and `sig < n`. `lake build` is 3,378 jobs;
+AxiomCheck 4,528 theorems.
