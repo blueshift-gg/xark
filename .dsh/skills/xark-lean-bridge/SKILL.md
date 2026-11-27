@@ -629,3 +629,35 @@ Gotchas on that proof (`Exponentiation` and `positivity`):
   `Finset.sum_nonneg` and `mul_nonneg (Int.natCast_nonneg _) (pow_nonneg (by norm_num) _)`.
 * `chainEm = EM_PREFIX + digestBytes` is `chainEm_eq` composed with
   `chainEm_bytes_32`, then `rfl` (the sums are the same expression).
+
+### zk.golf and the RFC 8017 bridge (2026-11)
+
+zk.golf's challenge repo (`zksecurity/zk-golf-challenges`,
+`Challenge/Specs/RSASSAPKCS1v15.lean`) states the RSA instance as
+`verifySignature alg e n h sig = true` over RFC 8017's `OS2IP`/`I2OSP` and
+EMSA-PKCS1-v1_5, with `Assumptions` = octet strings + `HasBitSize (os2ip n) (8·len)`;
+its `Interface.lean` puts the signature in `Input` (public), and its `Challenge.lean`
+also demands `Completeness` and `ComputableWitnesses`. Two cautions: the repo has
+**no license** (`license: null`), so do not vendor or `require` it, and its interface
+uses `axiom hCircomPrime`, which our AxiomCheck rejects.
+
+`Formal/Circuits/Rsa2048/Rfc8017.lean` is our independent transcription of the RFC:
+`os2ip`, `i2osp` (an `Option`, as theirs), `Octets`, `HasBitSize`,
+`sha256DigestInfoPrefix`, `emsaPkcs1v15Encode` (2 + 202×0xff + 1 + 19 + 32 octets),
+`rsavp1`, `verifySignature`; then `verify_wide_spec`'s facts give
+`verifySignature_true` and `rfc8017_assumptions`. The load-bearing lemmas:
+`os2ip_range_map` (`os2ip (range n |>.map f) = Σ f i·256^(n-1-i)`); `i2osp_cons`
+(the digit split at the head) and `i2osp_os2ip` (the OS2IP/I2OSP round trip on octet
+strings); `os2ip_emsa_prefix` (`decide +kernel`: the 224-octet prefix shifted by 32
+octets is `EM_PREFIX`); `os2ip_append`.
+Gotchas: `List.range (n+1) = 0 :: (range n).map (·+1)` needs `List.range_add` +
+`List.range_one` + `List.map_congr_left`; the digit arithmetic is
+`Nat.add_mul_div_right` and `Nat.add_mul_mod_self_left`; `Int.natCast_emod` and
+`Int.natCast_inj` move the ℤ congruence to ℕ; `Octets` is a `∀`, so `decide` does
+not fire on it — go through `List.all_eq_true` and `of_decide_eq_true`.
+
+Not closeable from zk.golf: xark's template models (different framework), the 17×121
+entry point (no example circuit), the signature's visibility (their public `Input` is
+a precedent, but changing ours re-keys), completeness (Clean-specific; it would need
+a Lean model of the Rust witness generator), Groth16 soundness/ZK, and
+`digest = H(M)` (both specs leave it as an assumption).
