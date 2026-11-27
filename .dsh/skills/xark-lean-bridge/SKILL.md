@@ -1071,3 +1071,14 @@ by `decide +kernel`, then `getD_of_window hj hw (LC.cst 0)`, then
 `simp` with the full set normalizes `getD` to `getElem?` and `hp` stops matching),
 then `wq_call_bound`/`wr_call_bound` at the check call. Both `lake build` (3,380 jobs)
 and AxiomCheck (4,721 theorems) are green.
+
+### The words chain's a/m bounds (2026-11, round 29)
+
+`WordsAM.lean` (generated): `wa_i`/`wm_i` for the 16 squarings. Every `m` array is the
+converted modulus: the window `((wcallAt sq).plugs.drop 25).take 25 =
+(nLimbMapLC.drop 0).take 25` (`nLimbMapLC := nLimb.map (fun v => ⟨0, [(1, v)]⟩)`) plus
+`nLimbMapLC_getD` (25 `interval_cases` + `rfl`), then `pn`/`n_limb_lt82`. The `a` array
+is `sLimb` for square 0 (same map lemma, `s_limb_lt82`) and the previous square's `r`
+(window vs `drop 75`, then `wr_{i-1}`). `lake build` is 3,381 jobs; AxiomCheck 4,755
+theorems. Next: the 16 `w_square_contract` applications (chaining `acc` = previous `r`),
+the final `q`+`w_general_contract`, and the `RsaChain` congruence.
