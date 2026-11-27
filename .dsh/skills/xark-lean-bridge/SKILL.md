@@ -986,3 +986,14 @@ The per-limb `mNF i σ = σ (nLimb.getD i 0)` needs the plug fact as a `decide` 
 `mhnb_i`/`mbBit_i`/`mborrowBit_i`/`moutVal_i`, then `telescope` for
 `val (limb (wcallAt 37) σ 25) = n_val - 1` and `sig < n`. `lake build` is 3,378 jobs;
 AxiomCheck 4,528 theorems.
+
+### The words minus_one bits and borrows (2026-11, round 22)
+
+`MinusOneVal.lean` adds `mhnb_i` (25: `mNF i = 0 ↔ mbF i = 1`, via `isZero_iff` with
+`mNF_eq_i`/`mwF`/`mzF` unfolded), `mbBit_i` (25: `mbF i ∈ {0,1}` via `zBit` +
+`bBit_of`), and `mborrowBit_i` (0..25: induction with `mhrec_i`; for i≥1 `rw [mhrec_k σ h]`
+must pass `σ h` explicitly, else `h` becomes a goal). `mhoutE_i` is still open: the
+`congrArg ZLC.toF (mhout_i)` + `simpa [addLC, …]` leaves a residual scalar identity
+because `simpa` will not finish with `ring`; the fix is to `simp` the `ZLC.toF`
+equality to `LC.eval` form and then `linear_combination`/`ring`, or to prove the
+plug's affine form directly. `lake build` is 3,378 jobs; AxiomCheck 4,604 theorems.
