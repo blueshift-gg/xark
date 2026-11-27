@@ -1034,3 +1034,16 @@ with `ZMod.cast` (and then `rw [mNF_eq_i]; rfl` works). `lake build` is 3,378 jo
 AxiomCheck 4,683 theorems. Next: the RequireLt application at s37 (the words
 `req_ins_take`/`Assumptions`/`spec_iff` chain with the 25 sig-limb plug facts) →
 `sig < n`; then the chain at s38..s88.
+
+### The words `sig < n` (2026-11, round 26)
+
+`m_sig_le : val (limb (wcallAt 37) σ 0) ≤ (Σ yN σ i·W^i) − 1`. The byte
+`sig_le_minus_one` recipe transfers: the call's Sat (`wcall_sat_of` 37 + `rfl`-template),
+`RequireLt25x82.Assumptions` (note it is the **take form** `∀ v ∈ ins.take 25,
+v.val < 2^82`, not `∀ j < 25` — `req_ins_take` must be passed its `σ'` explicitly), the
+25 per-limb plug/bound bullets (`interval_cases j` needs `have hj' := List.mem_range.mp hj;
+clear hj`), `soundness`/`spec_iff`/`plugM`/`limbs_cast`, and the final
+`rw [← hleft, ← hright, mval_limb, mval_yN] at hleZ`. The x plugs of s37 and the `a`
+plugs of s40 are the same vars (`sLimb`), so the `val_limb_eq` window is not needed.
+With this, the words circuit's `sig < n` is proved (`sig ≤ n − 1 < n`). `lake build` is
+3,379 jobs; AxiomCheck 4,685 theorems. Next: the chain at s38..s88.

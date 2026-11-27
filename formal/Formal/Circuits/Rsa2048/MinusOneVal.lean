@@ -1569,4 +1569,229 @@ theorem mval_yN (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
       · simpa [W, mNF_yN_24] using moutVal_24 σ h
       )
 
+theorem req_ins_getD (σ' : TVar → F) {j : ℕ} (hj : j < 25) :
+    (Xark.Templates.RequireLt25x82.template.ins σ').getD j 0 = σ' (.plug j) := by
+  have h1 : (Xark.Templates.RequireLt25x82.template.ins σ').getD j 0
+      = ((Xark.Templates.RequireLt25x82.template.ins σ').take 25).getD j 0 := by
+    rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD, List.getElem?_take, if_pos hj]
+  rw [h1, req_ins_take]
+  simp [List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hj]
+
+/-- The words `sig < n`. -/
+theorem m_sig_le (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    val (limb (wcallAt 37) σ 0) ≤ (∑ i ∈ Finset.range 25, yN σ i * (W : ℤ) ^ i) - 1 := by
+  have hsat : Xark.Templates.RequireLt25x82.template.Sat ((wcallAt 37).lift σ) := by
+    have hc := wcall_sat_of h 37 (wcallAt 37) rfl (by decide)
+    rwa [show (wcallAt 37).t = Xark.Templates.RequireLt25x82.template from by decide] at hc
+  have ha : Xark.Templates.RequireLt25x82.Assumptions
+      (Xark.Templates.RequireLt25x82.template.ins ((wcallAt 37).lift σ)) := by
+    intro v hv
+    rw [req_ins_take ((wcallAt 37).lift σ)] at hv
+    rcases List.mem_map.mp hv with ⟨j, hj, rfl⟩
+    have hj' : j < 25 := List.mem_range.mp hj
+    clear hj
+    interval_cases j
+    · have hp : (wcallAt 37).plugs.getD 0 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 0 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 0)).val = (σ (sLimb.getD 0 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 0 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 1 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 1 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 1)).val = (σ (sLimb.getD 1 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 1 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 2 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 2 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 2)).val = (σ (sLimb.getD 2 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 2 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 3 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 3 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 3)).val = (σ (sLimb.getD 3 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 3 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 4 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 4 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 4)).val = (σ (sLimb.getD 4 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 4 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 5 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 5 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 5)).val = (σ (sLimb.getD 5 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 5 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 6 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 6 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 6)).val = (σ (sLimb.getD 6 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 6 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 7 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 7 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 7)).val = (σ (sLimb.getD 7 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 7 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 8 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 8 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 8)).val = (σ (sLimb.getD 8 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 8 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 9 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 9 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 9)).val = (σ (sLimb.getD 9 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 9 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 10 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 10 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 10)).val = (σ (sLimb.getD 10 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 10 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 11 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 11 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 11)).val = (σ (sLimb.getD 11 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 11 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 12 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 12 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 12)).val = (σ (sLimb.getD 12 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 12 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 13 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 13 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 13)).val = (σ (sLimb.getD 13 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 13 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 14 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 14 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 14)).val = (σ (sLimb.getD 14 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 14 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 15 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 15 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 15)).val = (σ (sLimb.getD 15 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 15 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 16 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 16 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 16)).val = (σ (sLimb.getD 16 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 16 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 17 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 17 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 17)).val = (σ (sLimb.getD 17 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 17 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 18 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 18 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 18)).val = (σ (sLimb.getD 18 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 18 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 19 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 19 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 19)).val = (σ (sLimb.getD 19 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 19 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 20 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 20 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 20)).val = (σ (sLimb.getD 20 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 20 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 21 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 21 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 21)).val = (σ (sLimb.getD 21 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 21 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 22 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 22 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 22)).val = (σ (sLimb.getD 22 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 22 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 23 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 23 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 23)).val = (σ (sLimb.getD 23 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 23 (by norm_num)
+    · have hp : (wcallAt 37).plugs.getD 24 (LC.cst 0) = ⟨0, [((Int.ofNat 1), sLimb.getD 24 0)]⟩ := by
+        decide +kernel
+      have hb : ((wcallAt 37).lift σ (.plug 24)).val = (σ (sLimb.getD 24 0)).val := by
+        rw [Call.lift, Call.env, hp]
+        simp [ZLC.toF, Xark.R1cs.LC.eval]
+      rw [hb]
+      exact s_limb_lt82 σ h 24 (by norm_num)
+  have hspec := Xark.Templates.RequireLt25x82.soundness ((wcallAt 37).lift σ) ha hsat
+  have hle0 : Xark.Templates.RequireLt.limbs
+        (fun j => (((wcallAt 37).lift σ) (.plug j)).val) 82 25
+      ≤ Xark.Templates.RequireLt.limbs
+        (fun j => ((Xark.Templates.RequireLt.plugM 25 j).eval ((wcallAt 37).lift σ)).val)
+        82 25 := by
+    rw [← Xark.Templates.RequireLt.spec_iff Xark.Templates.RequireLt25x82.is_model]
+    exact hspec
+  have hle : Xark.Templates.RequireLt.limbs
+        (fun j => (((wcallAt 37).lift σ) (.plug j)).val) 82 25
+      ≤ Xark.Templates.RequireLt.limbs
+        (fun j => (((wcallAt 37).lift σ) (.plug (25 + j))).val) 82 25 := by
+    simpa [Xark.Templates.RequireLt.plugM, Xark.R1cs.LC.eval] using hle0
+  have hleZ : ((Xark.Templates.RequireLt.limbs
+        (fun j => (((wcallAt 37).lift σ) (.plug j)).val) 82 25 : ℕ) : ℤ)
+      ≤ ((Xark.Templates.RequireLt.limbs
+        (fun j => (((wcallAt 37).lift σ) (.plug (25 + j))).val) 82 25 : ℕ) : ℤ) := by
+    exact_mod_cast hle
+  rw [limbs_cast, limbs_cast] at hleZ
+  have hleft : val (limb (wcallAt 37) σ 0)
+      = ∑ j ∈ Finset.range 25, ((((wcallAt 37).lift σ) (.plug j)).val : ℤ) * W ^ j := by
+    simp [val, limb, pv]
+  have hright : val (limb (wcallAt 37) σ 25)
+      = ∑ j ∈ Finset.range 25, ((((wcallAt 37).lift σ) (.plug (25 + j))).val : ℤ) * W ^ j :=
+    rfl
+  rw [← hleft, ← hright, mval_limb (σ := σ), mval_yN σ h] at hleZ
+  exact hleZ
+
 end Xark.Circuits.Rsa2048
