@@ -818,3 +818,16 @@ by calling it with `hrow : ... := by decide +kernel` and the block slices
 metavariable; and `2^243 < r` via `Nat.cast_lt` + `Nat.cast_pow` (plain `exact_mod_cast`
 on the huge numeral hits the recursion limit). Next: the `prev`-only and input-only
 shapes, then the generated 25 callers per operand.
+
+### All 25 modulus columns, generated (2026-11, round 9)
+
+`Formal/Circuits/Rsa2048/ConvertCols.lean` is generated from the s36 parse (a Python
+script, not committed): `n_plug1..16`/`pn_n1..16` (plug i is var i), then one theorem
+per column `n_col0..n_col24`, each a call of `convert_col_x` (input+prev), `convert_col_prev`
+(no input: columns 3, 6, 9, 12, 15, 18, 21, 24) or `convert_col_x0` (column 0), with
+the `decide` row shape and the block-slice bounds. The final column 24 proves
+`n_col24_row : σ 26346 = 0` (the `require_eq(carry, 0)` row) and then
+`σ 25946 = W·0 + σ 26347` (`simpa`, since `W·0 + x = x`). The whole file elaborates in
+~31s; `lake build` is 3,371 jobs, AxiomCheck 4,044 theorems. Next: the same for the
+signature operand (base 4906, reader 1, input vars 4131..4147), then
+`RsaConvert.partial_sum`/`cols_sum` to get `Σ limb·W^j = Σ x_i·2^(121i)`.
