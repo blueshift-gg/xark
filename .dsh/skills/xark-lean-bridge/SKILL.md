@@ -713,3 +713,24 @@ index in `Bits.lean`, `ByteBits.lean`, `Verify.lean`, `SigLt.lean` and `Chain.le
 shifts. `minus_one` lives in `xark-bignum` and is called by `mul_divmod`/`sub2`, so
 marking it changes the curve examples' exports too. Both need a re-export and a
 re-prove of the compositions, not a mechanical template.
+
+### The 17×121 example and its circuit export (2026-11, round 3)
+
+`examples/rsa2048_words` (commit `ce7d9dbe`) is the whole-number entry point:
+`#[circuit] fn rsa2048_words(n: Public<U2048>, sig: Private<U2048>, digest: Public<[u8; 32]>)`
+calling `xark_rsa::verify_sha256`. `U2048 = Bignum<17, 121>` reads a whole number
+(the input reader range-checks every limb) and `convert_wide` re-limbs it to 25×82.
+The KAT reuses the byte path's vector; `cargo test --release` passes; `digests
+--update` under 1.99.1 gives keyed `b9ce25…`, flat `7970866a…` (77 circuits); coverage
+is green with one new allowlist entry for `require_lt`'s LC plugs (the `Consts` user
+lists of GroupedColumns and Sha256EmBits82 gained `rsa2048_words`).
+
+The exported circuit (`cargo xtask lean-export --example rsa2048_words`) is **89
+segments / 139,868 rows**, `fnv1a64:1758a6b6ad3aeb24`, with
+`publics = [0..16] ++ [8262..8293]` (n's 17 limbs, the digest's 32 bytes; the 17
+signature limbs are private). Its one 9,913-row glue segment (`convert_wide`'s plain
+`range_derived` block) nested deeper than the generator's limit, so `xtask/src/lean.rs`
+now emits `set_option maxRecDepth 1000000 in` for a glue segment over 1,024 rows (no
+other circuit's text changes; `--check` confirms). `CircuitHash.lean` checks all three
+circuits. The Lean composition of this circuit (input-reader bounds + `convert_wide`
+identity + the 25×82 chain) is the remaining part of item (2).

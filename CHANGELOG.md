@@ -22,7 +22,8 @@ again. See the toolchain policy in [docs/toolchain.md](docs/toolchain.md#toolcha
   input-reader-range-checked `Bignum<17, 121>` limbs that `convert_wide` re-limbs to
   the 25×82 chain; the digest is the 32 public bytes. Its `require_lt` LC plugs are
   the one coverage allowlist entry the example adds (the caller's limb bounds are
-  `convert_wide`'s range rows).
+  `convert_wide`'s range rows). The circuit is exported and hash-gated
+  (`fnv1a64:1758a6b6ad3aeb24`, 139,868 rows in 89 segments).
 - Lean templates and proofs for `require_lt::<17, 121>`,
   `require_lt::<25, 82>`, and `range_check_limbs::<17, 121>`, plus the 25×82
   chain's `range_check_q`, `range_check_r` (`Formal/RangeDerived.lean`) and

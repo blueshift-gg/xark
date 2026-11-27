@@ -5,6 +5,7 @@ Authors: Blueshift Labs Limited
 -/
 import Formal.Circuits.Secp256k1Ecdsa
 import Formal.Circuits.Rsa2048
+import Formal.Circuits.Rsa2048Words
 
 /-!
 Run by CI (`lean.yml`, after the build) as `lake env lean CircuitHash.lean`: for each
@@ -19,3 +20,6 @@ hashed side by side. Fails, naming the circuit and the first differing segment, 
 
 #eval Xark.Circuit.check "Rsa2048" Xark.Circuits.Rsa2048.circuit
   Xark.Circuits.Rsa2048.expected Xark.Circuits.Rsa2048.expectedSegs
+
+#eval Xark.Circuit.check "Rsa2048Words" Xark.Circuits.Rsa2048Words.circuit
+  Xark.Circuits.Rsa2048Words.expected Xark.Circuits.Rsa2048Words.expectedSegs

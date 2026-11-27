@@ -348,8 +348,15 @@ fn export_circuit(example: &str) -> Result<(String, Vec<(PathBuf, String)>)> {
             .iter()
             .map(|[a, b, c]| format!("    ⟨{}, {}, {}⟩", lc(a), lc(b), lc(c)))
             .collect();
+        // A glue segment can be thousands of rows (a plain `range_derived` block in
+        // `convert_wide`): its list literal nests that deep, past the recursion limit.
+        let depth = if to - from > 1024 {
+            "set_option maxRecDepth 1000000 in\n"
+        } else {
+            ""
+        };
         format!(
-            "-- rows {from}..{to}\nset_option maxHeartbeats 0 in\ndef s{} : Seg := .glue [\n{}]",
+            "-- rows {from}..{to}\nset_option maxHeartbeats 0 in\n{depth}def s{} : Seg := .glue [\n{}]",
             segs_len(),
             rows.join(",\n")
         )
