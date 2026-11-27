@@ -1266,6 +1266,7 @@ fn two_valued_suspects(
     suspects: &std::collections::BTreeSet<u32>,
 ) -> std::collections::BTreeSet<u32> {
     use crate::solver::Fp;
+
     use rayon::prelude::*;
     // Gather every suspect's referencing rows, in parallel over the shards (a
     // suspect's verdict doesn't depend on the order of its rows). On circuits
@@ -1518,7 +1519,7 @@ fn stream_underconstrained(
         .map_or(RowProgram::Symbolic(defs, top_c), RowProgram::Compiled);
     let (flags, sat_ok, quadratic) =
         classify_and_check(program, assign, modulus, vars.len(), check_sat);
-    let suspects = select_suspects(&flags, vars);
+    let suspects = select_suspects(&flags, named_derived_vars(vars).map(|(id, _)| id));
     let two_valued = if suspects.is_empty() {
         std::collections::BTreeSet::new()
     } else if check_sat && sat_ok {
@@ -1526,68 +1527,73 @@ fn stream_underconstrained(
     } else {
         two_valued_suspects(defs, top_c, assign, modulus, &suspects)
     };
-    let out = assemble_underconstrained(&flags, vars, keep_extra, &two_valued);
+    let out = assemble_underconstrained(&flags, named_derived_vars(vars), keep_extra, &two_valued);
     (sat_ok, out)
 }
 
 /// Vars that survived pass-1 classification restricted-but-never-pinned — the
 /// only ones that need the pass-2 two-valued test.
-fn select_suspects(
-    flags: &[std::sync::atomic::AtomicU8],
-    vars: &[Var],
-) -> std::collections::BTreeSet<u32> {
-    use crate::primitive::VarRole;
-    use std::sync::atomic::Ordering;
+fn named_derived_vars(vars: &[Var]) -> impl Iterator<Item = (u32, Option<&str>)> {
     vars.iter()
         .filter(|var| matches!(var.role, VarRole::Derived))
-        .filter(|var| {
-            let f = flags[var.id as usize].load(Ordering::Relaxed);
-            f & F_SEEN != 0 && f & F_RESTRICTED != 0 && f & F_PINNED == 0
-        })
-        .map(|var| var.id)
-        .collect()
+        .map(|var| (var.id, Some(var.name.as_str())))
+}
+
+fn derived_vars_with_implicit_suffix(
+    signature: &[Var],
+    num_vars: usize,
+) -> impl Iterator<Item = (u32, Option<&str>)> {
+    named_derived_vars(signature).chain((signature.len()..num_vars).map(|id| (id as u32, None)))
+}
+
+fn select_suspects(
+    flags: &[std::sync::atomic::AtomicU8],
+    vars: impl Iterator<Item = u32>,
+) -> std::collections::BTreeSet<u32> {
+    use std::sync::atomic::Ordering;
+    vars.filter(|&id| {
+        let f = flags[id as usize].load(Ordering::Relaxed);
+        f & F_SEEN != 0 && f & F_RESTRICTED != 0 && f & F_PINNED == 0
+    })
+    .collect()
 }
 
 /// Turn the classification flags (+ the resolved two-valued suspect set) into the
 /// under-constraint verdict list, in var-id order — byte-identical to
 /// `analyze_underconstrained_cp`'s output on the same circuit.
-fn assemble_underconstrained(
+fn assemble_underconstrained<'a>(
     flags: &[std::sync::atomic::AtomicU8],
-    vars: &[Var],
+    vars: impl Iterator<Item = (u32, Option<&'a str>)>,
     keep_extra: &std::collections::BTreeSet<u32>,
     two_valued: &std::collections::BTreeSet<u32>,
 ) -> Vec<crate::solver::UnderConstrained> {
-    use crate::primitive::VarRole;
     use std::sync::atomic::Ordering;
-    vars.iter()
-        .filter(|var| matches!(var.role, VarRole::Derived))
-        .filter_map(|var| {
-            let v = var.id;
-            let f = flags[v as usize].load(Ordering::Relaxed);
-            let reason = if f & F_SEEN == 0 {
-                // Unreferenced: the flat analyzer only sees vars that survive the
-                // expand-time prune (kept only for an explicit advice-keep).
-                if keep_extra.contains(&v) {
-                    "no constraint references this variable"
-                } else {
-                    return None;
-                }
-            } else if f & F_PINNED != 0 {
-                return None; // linearly pinned → uniquely determined
-            } else if f & F_RESTRICTED == 0 {
-                "variable's coefficient is zero in every referencing constraint (free)"
-            } else if two_valued.contains(&v) {
-                "a different value also satisfies all its constraints (two-valued)"
+    vars.filter_map(|(v, name)| {
+        let f = flags[v as usize].load(Ordering::Relaxed);
+        let reason = if f & F_SEEN == 0 {
+            // Unreferenced: the flat analyzer only sees vars that survive the
+            // expand-time prune (kept only for an explicit advice-keep).
+            if keep_extra.contains(&v) {
+                "no constraint references this variable"
             } else {
-                return None; // restricted, single-valued → fine
-            };
-            Some(crate::solver::UnderConstrained {
-                var: v,
-                name: var.name.clone(),
-                reason: reason.into(),
-            })
+                return None;
+            }
+        } else if f & F_PINNED != 0 {
+            return None; // linearly pinned → uniquely determined
+        } else if f & F_RESTRICTED == 0 {
+            "variable's coefficient is zero in every referencing constraint (free)"
+        } else if two_valued.contains(&v) {
+            "a different value also satisfies all its constraints (two-valued)"
+        } else {
+            return None; // restricted, single-valued → fine
+        };
+        Some(crate::solver::UnderConstrained {
+            var: v,
+            name: name.map_or_else(|| format!("v{v}"), str::to_owned),
+            reason: reason.into(),
         })
-        .collect()
+    })
+    .collect()
 }
 
 /// **Streaming under-constraint analyzer** — the soundness twin of
@@ -1660,9 +1666,9 @@ pub fn stream_solve_verify(
 /// Reuse the immutable BN254 witness and row programs for one circuit artifact.
 /// Every invocation solves and checks a new witness with request-local state.
 pub struct PreparedStreamSolver {
-    vars: Vec<Var>,
+    inputs: Vec<Var>,
     keep_extra: std::collections::BTreeSet<u32>,
-    num_inputs: usize,
+    num_vars: usize,
     modulus: num_bigint::BigUint,
     witness: eval::WProgram,
     rows: eval::Compiled,
@@ -1674,9 +1680,16 @@ impl PreparedStreamSolver {
         if bytes.get(..6) != Some(b"XBC\0\x02\x00") {
             return Err("expected a version 2 XBC artifact".into());
         }
-        let (field, vars, defs, top_c, top_w, keep_extra, num_inputs) =
-            catch_quietly(|| decode_compact(bytes))
-                .map_err(|()| "malformed function artifact (XBC decode failed)".to_string())?;
+        let CompactCore {
+            field,
+            inputs,
+            defs,
+            top_c,
+            top_w,
+            keep_extra,
+            num_vars,
+        } = catch_quietly(|| decode_core(bytes))
+            .map_err(|()| "malformed function artifact (XBC decode failed)".to_string())?;
         let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
             .ok_or_else(|| "bad modulus".to_string())?;
         if !crate::solver::is_bn254(&modulus) {
@@ -1690,9 +1703,9 @@ impl PreparedStreamSolver {
         })
         .map_err(|()| "malformed function artifact (XBC compile failed)".to_string())?;
         Ok(Self {
-            vars,
+            inputs,
             keep_extra,
-            num_inputs,
+            num_vars,
             modulus,
             witness,
             rows,
@@ -1700,7 +1713,7 @@ impl PreparedStreamSolver {
     }
 
     pub fn input_vars(&self) -> &[Var] {
-        &self.vars[..self.num_inputs]
+        &self.inputs
     }
 
     /// Run the same full row and under-constraint analysis as [`stream_solve_verify`].
@@ -1717,7 +1730,7 @@ impl PreparedStreamSolver {
         let assign = eval::solve_witness(
             eval::WitnessProgram::Compiled(&self.witness),
             self.input_vars(),
-            self.vars.len(),
+            self.num_vars,
             &self.modulus,
             inputs,
         )
@@ -1725,17 +1738,18 @@ impl PreparedStreamSolver {
         .map_err(|e| format!("solve: {e:?}"))?;
         let program = RowProgram::Compiled(&self.rows);
         let (flags, sat_ok, quadratic) =
-            classify_and_check(program, &assign, &self.modulus, self.vars.len(), true);
+            classify_and_check(program, &assign, &self.modulus, self.num_vars, true);
         if !sat_ok {
             return Err("a constraint is unsatisfied".to_string());
         }
-        let suspects = select_suspects(&flags, &self.vars);
+        let derived = || derived_vars_with_implicit_suffix(&self.inputs, self.num_vars);
+        let suspects = select_suspects(&flags, derived().map(|(id, _)| id));
         let two_valued = if suspects.is_empty() {
             std::collections::BTreeSet::new()
         } else {
             two_valued_satisfied(program, &assign, &self.modulus, &suspects, &quadratic)
         };
-        let out = assemble_underconstrained(&flags, &self.vars, &self.keep_extra, &two_valued);
+        let out = assemble_underconstrained(&flags, derived(), &self.keep_extra, &two_valued);
         Ok((crate::solver::slots_into_map(assign), out))
     }
 }
@@ -3497,6 +3511,38 @@ mod tests {
         assert_eq!(generic, compiled);
     }
 
+    #[test]
+    fn implicit_derived_suffix_preserves_names_and_diagnostic_order() {
+        use std::sync::atomic::AtomicU8;
+        let signature = vec![
+            Var {
+                id: 0,
+                name: "request".into(),
+                role: VarRole::PublicInput,
+            },
+            Var {
+                id: 1,
+                name: "named_hint".into(),
+                role: VarRole::Derived,
+            },
+        ];
+        let flags =
+            [F_SEEN, F_SEEN, F_SEEN | F_RESTRICTED, 0, F_SEEN | F_PINNED].map(AtomicU8::new);
+        let keep = [3].into_iter().collect();
+        let derived = || derived_vars_with_implicit_suffix(&signature, flags.len());
+        let suspects = select_suspects(&flags, derived().map(|(id, _)| id));
+        assert_eq!(suspects, [2].into_iter().collect());
+        let report = assemble_underconstrained(&flags, derived(), &keep, &suspects);
+        assert_eq!(
+            report
+                .iter()
+                .map(|row| (row.var, row.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "named_hint"), (2, "v2"), (3, "v3")],
+        );
+        assert_eq!(report[2].reason, "no constraint references this variable");
+    }
+
     // ---- streaming under-constraint analyzer equivalence ----
 
     use crate::solver::Fp;
@@ -3522,7 +3568,7 @@ mod tests {
         for r in rows {
             apply_row_flags(r, assign, modulus, &flags, &quadratic);
         }
-        let suspects = select_suspects(&flags, vars);
+        let suspects = select_suspects(&flags, named_derived_vars(vars).map(|(id, _)| id));
         let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
             suspects.iter().map(|&v| (v, Vec::new())).collect();
         for r in rows {
@@ -3548,7 +3594,7 @@ mod tests {
                 "one-candidate pass disagrees"
             );
         }
-        assemble_underconstrained(&flags, vars, keep_extra, &two_valued)
+        assemble_underconstrained(&flags, named_derived_vars(vars), keep_extra, &two_valued)
     }
 
     fn bn254_modulus() -> num_bigint::BigUint {
