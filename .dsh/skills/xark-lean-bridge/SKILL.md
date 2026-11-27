@@ -881,3 +881,19 @@ prove it in the `gblock_sound` style instead (`hcast` for the bit sum via
 `sum_map_range`/`ZMod.natCast_zmod_val`, `word_lt` for `Σ < 2^79`, then
 `int_eq_zero_of_cast`), keeping the `Finset.sum` opaque. `lake build` is 3,375 jobs;
 AxiomCheck 4,265 theorems.
+
+### The `n_top` row's verified pieces (2026-11, round 14)
+
+`ConvertTop.lean`: `topNLC`/`topN_row` (row 9812 = `(limb_24 − Σ bits) − 2^79`, by
+`decide +kernel`), `topN_eval` (the row as `−2^79 + σ 26347 − Σ_i 2^i·bit_i`; the
+`LC.eval` output is `(-a)·x`, so `simp only [neg_mul]` + `Finset.sum_neg_distrib`
+before `ring`), `topN_bits` (the top block's 79 bits are boolean), and `topN_hcast`
+(the ℕ bit sum casts to `(gacc 26348 80).eval σ` — **`gacc base W` is over `W−1`
+bits**, so the 79-bit top block needs `W = 80`, not 79; and `ring` fails on the two
+`∑ i, … σ (gbit …)` vs `σ (26348+2i)` sums because they are defeq but not
+syntactically equal — `simp only [gbit, zero_add]` closes). Still to do: `h1`
+(`σ 26347 = ↑(2^79 + S)` from `ha`/`topN_hcast`) and `hval`
+(`ZMod.val_natCast_of_lt`), then `n_top_ge` and the lower value bound. A first
+attempt with `linear_combination`/`nlinarith` over the expanded 79-term sum did not
+finish and was reverted — keep `S` opaque (`set`). `lake build` is 3,376 jobs;
+AxiomCheck 4,269 theorems.
