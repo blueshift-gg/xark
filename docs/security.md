@@ -483,11 +483,14 @@ The 17×121 (whole-number) example gets the same treatment in
 `Formal/Circuits/Rsa2048/Words*.lean`, over the exported `Rsa2048Words` circuit
 (139,868 rows in 89 segments, `fnv1a64:1758a6b6ad3aeb24`): the input-reader bounds,
 `convert_wide`'s value identity and the 2048-bit modulus, `minus_one(n) = n − 1`,
-`sig < n`, the 16 square identities, and the chain congruence
-`EM ≡ sig^65537 (mod n)`. `w_verify_wide` bundles them as
-`2^2047 ≤ n < 2^2048 ∧ sig < n ∧ EM ≡ sig^65537 (mod n)`, with the terminal call's
-EM array bound as the one explicit hypothesis still to prove (the analogue of the byte
-path's `EmBits`/`PackBound`).
+`sig < n`, the 16 square identities, the chain congruence
+`EM ≡ sig^65537 (mod n)`, and the terminal call's EM array bound. That bound is
+`Formal/Circuits/Rsa2048/WordsEm.lean`'s `w_hEm`: the final `grouped_columns` call's
+`r` array is the `sha256_em_bits_82` output, a `2^t`-weighted sum of the 32 `to_bits`
+calls' digest bits, and each of those bits is 0 or 1 by the gadget's contract over the
+same rows, so `weighted_ltW` puts every limb below `2^82` — the words analogue of the
+byte path's `EmBits`/`PackBound`. `w_verify_wide` bundles the facts as
+`2^2047 ≤ n < 2^2048 ∧ sig < n ∧ EM ≡ sig^65537 (mod n)`, with no hypothesis left.
 
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s

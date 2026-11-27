@@ -322,9 +322,9 @@ theorem wChainA0_eq (σ : ℕ → F) :
   exact Finset.sum_congr rfl fun i hi => by
     rw [Nat.zero_add, pv_s_eq σ i (Finset.mem_range.mp hi)]
 
-/-- The 17×121 circuit's verification statement (with the EM array bound as the one
-remaining hypothesis: the terminal call's `r` array is the encoded message). -/
-theorem w_verify_wide (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
+/-- The 17×121 circuit's verification statement, given the terminal call's `r` array
+bound (`WordsEm.w_hEm` discharges it). -/
+theorem w_verify_wide_of_em (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
     (hEm : ∀ i < 25, pn (wcallAt 88) σ (100 + i) < 2 ^ 82) :
     2 ^ 2047 ≤ wChainN σ ∧ wChainN σ < 2 ^ 2048 ∧
       val (limb (wcallAt 40) σ 0) < wChainN σ ∧

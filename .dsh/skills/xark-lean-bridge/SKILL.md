@@ -16,7 +16,7 @@ Keep the gadget generic: no pinned key. The existing
 
 ## Status (2026-11)
 
-Proven and exported (`lean-export --check` is green on 71 templates):
+Proven and exported (`lean-export --check` is green on 72 templates):
 
 | piece | template | proof |
 |---|---|---|
@@ -1184,3 +1184,45 @@ per-call template/Sat facts need `b` *concrete* (`wcallAt (2+b)` for symbolic b 
 not reduce), hence the 32 wrappers. `lake build` is 3,385 jobs; AxiomCheck 4,852
 theorems. Remaining for `hEm`: transport these to the `em82` LCs' `wit`/top-bit terms
 and apply `weighted_lt` (`< 2^82`).
+
+### The words EM bound, done (2026-11, round 40)
+
+`WordsEm.lean` closes `hEm`, and `w_verify_wide` is now unconditional (in `WordsEm.lean`,
+delegating to `WordsCong.w_verify_wide_of_em`, the renamed conditional statement). The
+port is the byte path's, with the words var layout: digest byte `b` is var `8262 + b`, its
+`to_bits` witnesses start at `wbitBase b = 8294 + 7b`, bit 0 is the affine residual and
+bits 1..7 the witnesses (`wbitTerms`). `wemTerms q` is the gadget's limb: `EM82_CONST`'s
+limb plus `2^t · bit(31 − j/8, j%8)` for `j = 82q + t < 256`, normalized into `wemCanon q`.
+
+Shape of the proof: `wem_plug` (`interval_cases q <;> decide +kernel`) matches the 25
+exported plugs to `wemCanon`; `wem_eval` writes the value as `const + Σ 2^t · bit` and
+`eval_wemTerms`/`eval_normTerms` get there (the byte `packCanon`/`eval_packTerms`
+pattern, with the `j < 256` guard instead of `j < 2048`); `wbitGLC_eq_wbitOut` +
+`wbitOut_eval` (generic `Call`, like `PackBoundW.bitGLC_eq_bitOut`) turn a
+`ToBits.soundness` output into the bit combination, so `wbit_le_one` (32 one-line
+branches, one per byte, `wcall_sat_of` then `wbit_le_one_at`) gives every bit's val ≤ 1;
+then `wem_bound_of` = `val_weightedW` + `weighted_ltW` + `ZMod.val_add` with the constant
+carried separately: limbs 0..2 are `k = 0` at width 82, limb 3 is
+`1908058575186009548423168` at width 10 (`sum_guard_shrink`), limbs 4..24 only the
+constant. `lake build` is 3,385 jobs; AxiomCheck 4,867 theorems.
+
+The traps that cost hours (each was a 10-minute hang, none an error):
+
+* `congr 1` on a goal where one side's summand is a *metavariable* (from `refine f … ?_`)
+  hangs; state the sum equality as its own `have hsum` with `Finset.sum_congr` and
+  `rw [hsum]` instead. Same for `rw [hsum]` after the fact, so keep the coefficient
+  spelled `((2 ^ t : ℕ) : F)` everywhere.
+* `↑(2 ^ t) : F` elaborates as `(2 : F) ^ t`, not `Nat.cast (2 ^ t)`; the two are only
+  propositionally equal, so a `∑ … ↑(2 ^ t) * f t` from one place will not `rw` against
+  the other. Write `((2 ^ t : ℕ) : F)`.
+* `Finset.sum_subset` applied where the LHS summand is the plain `f` (not the guarded
+  `if`) sends the unifier into a 10-minute search: prove the equation with the guard on
+  both sides. And `rw`s whose side goal needs `omega` must first
+  `have ht := Finset.mem_range.mp ht`, else omega has no `t < 82`.
+* Also: `lake env lean file.lean` does *not* pass the lakefile's `leanOptions`; a file that
+  compiles in 7 s by hand can hang under `lake build` (`maxSynthPendingDepth = 3`). Always
+  confirm a new proof with `lake build`, and bisect a hang by truncating the file at
+  declaration boundaries and rebuilding with the options.
+* The imports: `WordsEm` imports `Formal.Circuits.Rsa2048.PackBoundW` (for
+  `val_weightedW`/`weighted_ltW`/`bitOf_val_le3`/`getD_map_eq`) and opens
+  `Xark.Rsa.GroupedColumns (val W)` for the final statement.
