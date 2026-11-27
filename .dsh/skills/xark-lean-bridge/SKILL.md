@@ -1117,3 +1117,17 @@ the rest `val_limb_eq` + a window). All via the window/`pn` pattern. The `w_step
 `refine ⟨q, ?_⟩` and rewrite `wsq_j`, `wn_j` *inside* it. `lake build` is 3,384 jobs;
 AxiomCheck 4,809 theorems. Next: `w_step`/`w_final`/`w_chain_congruence`, then the
 `hEm` bound from the digest bits and the final 17×121 statement.
+
+### The words chain congruence (2026-11, round 33)
+
+`WordsCong.lean` now has `w_step` (16 bullets: `wChainA (j+1) ≡ wChainA j² [ZMOD wChainN]`
+from `wsq_j`; the `Int.modEq_iff_dvd` witness must rewrite `wsq_j`, `wn_j` **and**
+`show wChainN = val (limb (wcallAt 40) σ 25)` inside the witness, else the modulus and
+the `wsq`'s `m` term are syntactically different), `w_final` (the `w_general_contract`
+at s88 with `whaFin`/`whbFin`/`whmFin`/`whqFin` and `hEm`; the `← wFinB`/`← wFinM`
+rewrites must come before any `show wChainN = …`), and **`w_chain_congruence`**:
+`wChainEm σ ≡ (wChainA σ 0)^(2^16+1) [ZMOD wChainN σ]` via
+`Xark.Rsa.Chain.chain_seq_range` — i.e. `EM ≡ sig^65537 (mod n)` for the words
+circuit, with the EM bound (`hEm`) as a hypothesis exactly like the byte path.
+`lake build` is 3,384 jobs; AxiomCheck 4,812 theorems. Next: `hEm` from the 256 digest
+bits, then the 17×121 `verify_wide` statement.
