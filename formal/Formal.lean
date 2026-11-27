@@ -59,6 +59,7 @@ import Formal.Circuits.Rsa2048.ConvertValue
 import Formal.Circuits.Rsa2048.ConvertTop
 import Formal.Circuits.Rsa2048.MinusOneFacts
 import Formal.Circuits.Rsa2048.MinusOneVal
+import Formal.Circuits.Rsa2048.WordsChain
 import Formal.Circuits.Rsa2048.Rfc8017
 import Formal.Sha256EmBits82
 import Formal.Templates.Consts.Sha256EmBits82

@@ -1047,3 +1047,15 @@ clear hj`), `soundness`/`spec_iff`/`plugM`/`limbs_cast`, and the final
 plugs of s40 are the same vars (`sLimb`), so the `val_limb_eq` window is not needed.
 With this, the words circuit's `sig < n` is proved (`sig ≤ n − 1 < n`). `lake build` is
 3,379 jobs; AxiomCheck 4,685 theorems. Next: the chain at s38..s88.
+
+### The words chain contracts (2026-11, round 27)
+
+`WordsChain.lean`: the four `Verify.lean` contracts re-stated for
+`Rsa2048Words.circuit` through `wseg`/`wcall_sat_of` — `wq_call_bound`,
+`wr_call_bound`, `w_square_contract`, `w_general_contract`. The template-level
+`q_ins_getD`/`r_ins_getD` and `val_inLimb_sq0`/`sq`/`gen`/`gen0` are
+circuit-independent and reused directly; only the `Sat`/`hseg` arguments change.
+`lake build` is 3,379 jobs; AxiomCheck 4,689 theorems. Next: the chain assembly —
+the s38..s88 call indices (`q`/`r`/`square` triples, then the final `q`+general), the
+per-call plug bounds (the converted limbs, `yN`/`yS`), and the `RsaChain.chain`
+congruence (`EM ≡ sig^65537 (mod n)`).
