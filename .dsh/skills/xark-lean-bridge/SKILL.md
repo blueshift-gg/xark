@@ -831,3 +831,16 @@ the `decide` row shape and the block-slice bounds. The final column 24 proves
 ~31s; `lake build` is 3,371 jobs, AxiomCheck 4,044 theorems. Next: the same for the
 signature operand (base 4906, reader 1, input vars 4131..4147), then
 `RsaConvert.partial_sum`/`cols_sum` to get `Σ limb·W^j = Σ x_i·2^(121i)`.
+
+### Both operands' columns, and the next assembly (2026-11, round 10)
+
+`ConvertColsSig.lean` mirrors `ConvertCols.lean` for the signature: `s_plug0..16`/
+`pn_s0..16` (plug i is var 4131+i), `s_col0..s_col24`, and `s_col24_row`
+(`σ 36107 = 0`). `RsaConvert.telescoping` is exactly the consumer: it needs
+`hrow : ∀ j < 25, cols x j + (if j = 0 then 0 else c (j-1)) = W·c j + y j` and
+`c 24 = 0`, and returns `Σ_{j<25} y j·W^j = Σ_{i<17} x i·2^(121i)`. The remaining
+assembly: define `xN/yN/cN` (and `xS/yS/cS`) from the var lists, prove
+`cols x j = x i₀·2^(121i₀%82)` (one input term) or `= 0` (no input) per column
+(`Finset.sum_eq_single` with the uniqueness over `Fin 17`, so `decide` closes it),
+then `hrow` per column and `telescoping`. `lake build` is 3,372 jobs; AxiomCheck
+4,104 theorems.
