@@ -538,3 +538,45 @@ in `ByteBits.lean` (`9acb7842`). Gotchas:
 `pn` unfolds to `((ZLC.toF (c.plugs.getD i)).eval σ).val` (rewrite `hplug` directly),
 and `((bitTerms ...).map ...).sum = (bitGLC ...).eval σ` needs `LC.eval`'s `0 + …`
 unfolded (`simp only [bitGLC, LC.eval, zero_add]` on a standalone goal).
+
+## `sig < n` (done, 2026-11)
+
+`SigLt3.lean` (committed `39c5555c`): `val_formula` is the generic value formula,
+`(out.val : ℤ) = n.val - bo.val + W·bn.val` under `hout : out = n - bo + W·bn`,
+`hrec : bn = bo·b`, the 0/1 facts for `bo`/`b`, and `n = 0 ↔ b = 1`; the proof splits
+`bo = 0` (`bn = 0`), `bo = 1, b = 1` (`n = 0`, `bn = 1`, `out.val = W−1`), and
+`bo = 1, b = 0` (`n ≠ 0`, `bn = 0`, `out.val = n.val − 1`), all by `ZMod.val_sub`/
+`val_cast_of_lt` and `Nat.cast_sub`, so no subtraction crosses a cast. `hrec_0` needs no
+`h` (`borrow 1 = bLC 0`, `borrow 0 = 1`); `hrec_{i+1}` is `(P_i).symm` with `bF`
+unfolded. `hnb_i` is `E1` (`n = 0 ⇒ z = 0 ⇒ b = 1`) and `E2` (`b = 1 ⇒ n·1 = 0`).
+Then `outVal_0..24` instantiate it. **Gotcha:** state the formula in `ℤ` (`((outF i σ).val : ℤ)`);
+written without the coercion, Lean elaborates the goal in `ℕ` (nat subtraction), and the
+`exact`/`simpa` against the `ℤ` lemma hangs for minutes instead of failing.
+
+`SigLt4.lean` (committed `00301b3d`): `telescope` sums
+`a i = b i − c i + W·c(i+1)` over `range 25` and cancels the shifted sum
+(`Finset.sum_range_succ'` on the RHS via `conv_rhs`, `Finset.sum_range_succ` for
+`range 26`), giving `Σ a·W^i = Σ b·W^i − 1` from `c 0 = 1`, `c 25 = 0`.
+`val_minus_one : val (limb (callAt 545) σ 25) = chainN σ - 1`; `hleft`/`hright` are the
+`limb`/`pv` unfoldings (`rfl`/`simp [val, limb, pv]`, `Nat.zero_add` for offset 0).
+The `outVal` dispatch is `interval_cases i` with 25 bullets (a `<;>` chain of
+`exact outVal_k` type-checks too slowly).
+
+`SigLt5.lean` (committed `f78fc29e`): `req_ins`/`req_ins_take` read the range check's
+50 inputs from `RequireLt25x82.is_model.1` and `RequireLt.inputs` (the literal
+`template.inputs` would unfold the whole 1,700-row template; never `simp [template]`).
+`first25_window` is `(callAt 545).plugs.take 25 = (callAt 548).plugs.take 25`
+(`decide +kernel`), `first25_bound` combines it with `sigBound0..24` via
+`getD_of_window0`. The bound side uses `RequireLt.spec_iff is_model` (avoids the
+`getD` bookkeeping entirely), then `limbs_cast : ↑(limbs a 82 n) = Σ (a j : ℤ)·W^j`
+(`Nat.cast_sum/mul/pow`, `Nat.cast_ofNat`, `pow_mul`), and `val_limb_eq` for the
+first-25 window: `sig_le_minus_one : val (limb sq0 σ 0) ≤ chainN σ - 1`. Finally
+`chainSig_lt_chainN` (`n ≥ 2^2047`), and over the bytes `chainSig_bytes_lt_chainN` /
+`chainSig_bytes_lt_bytes` (the host-level `sig < n`). Together with
+`chain_congruence_bytes` the byte-level verification statement (2048-bit `n`,
+`sig < n`, `em ≡ sig^65537 mod n`) is complete.
+
+Gates after importing `SigLt`/`SigLt3`/`SigLt4`/`SigLt5` into `Formal.lean` (committed
+`1c6150e0`): `lake build` 3,359 jobs; AxiomCheck 3,915 theorems standard axioms;
+`lean-export --check` 71/71; `lean-export --coverage` green (136 s); `digests --check`
+all 76 circuits (1.99.1); `CircuitHash` Rsa2048 `fnv1a64:860142cc226105b8`.
