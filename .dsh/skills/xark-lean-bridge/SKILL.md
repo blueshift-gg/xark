@@ -608,3 +608,24 @@ would mean marking them `#[gadget]`, i.e. touching the gadget source.
 Gates after the bundle: `lake build` 3,360 jobs; AxiomCheck 3,923 theorems standard
 axioms; `lean-export --check` 71/71; coverage 152 s; `digests --check` 76/76 (1.99.1);
 `CircuitHash` Rsa2048 `fnv1a64:860142cc226105b8`.
+
+### The canonical-residue lemma (2026-11)
+
+`VerifyWide.lean` also proves `emBytes_lt_nBytes` / `chainEm_lt_chainN`: the encoded
+message is below the modulus. The prefix's leading byte is `0x00`, so
+`EM_PREFIX < 2^2040`, and `digestBytes < 2^256` (each digest byte is a sum of 8 bits,
+`digestByte_lt`); with `n ≥ 2^2047` that gives `EM < 2^2041 < n`. `rsa_verify_equation`
+then turns the congruence into the standard check `sig^65537 % n = EM`. Without `EM < n`
+the congruence alone does not say `RSAVP1 = EM` (a larger encoding could be hit at
+`sig^e mod n = EM − n`), so this is the fact that makes `verify_wide_spec` the PKCS#1
+verifier's contract. `VerifyWideSpec` has fields `n_bits`, `sig_lt`, `em_lt`, `em`.
+
+Gotchas on that proof (`Exponentiation` and `positivity`):
+* `norm_num` will not evaluate `2^2040` at its default cap — set
+  `set_option exponentiation.threshold 4096`, and `EM_PREFIX < 2^2040` itself is a
+  `decide +kernel` (the literal is 2040 bits).
+* **Do not call `positivity` on `digestBytes σ`** (a `Finset.sum` over 32 byte
+  products): it does not terminate in reasonable time. Prove `0 ≤ digestBytes` with
+  `Finset.sum_nonneg` and `mul_nonneg (Int.natCast_nonneg _) (pow_nonneg (by norm_num) _)`.
+* `chainEm = EM_PREFIX + digestBytes` is `chainEm_eq` composed with
+  `chainEm_bytes_32`, then `rfl` (the sums are the same expression).
