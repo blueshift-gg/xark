@@ -434,30 +434,34 @@ number. `Formal/RsaBytes.lean` gives `bytes_to_wide`'s two packing identities, s
 the octet input and the 25×82 limbs also denote one number, and
 `Formal/RsaEm.lean` proves `sha256_em_bits_82`'s constant is the RFC 8017 prefix
 (`decide +kernel` against the limb literals) and that the digest's bits add the
-digest's integer. Each step's identity is a model theorem, and the two chain gadgets' templates now
-instantiate them. `bytes_to_wide`'s big-endian packing and the EM vector's rows are
-not yet model theorems.
+digest's integer. Each step's identity is a model theorem, and the two chain
+gadgets' templates instantiate them. The byte packing's and the EM vector's rows have
+no separate template model; their identities are proved from the exported rows
+instead (`chainN_eq_bytes`, `chainSig_eq_bytes`, and `chainEm_bytes_32`, which turns
+the EM's 256 digest bits into the 32 public digest bytes), so the byte statements do
+not rest on those rows being modelled.
 
-Still hand-proved, and therefore audit residuals:
+The composition is a theorem over the exported circuit. `Sat circuit σ` is the
+production rows (125,856 in 597 segments, `fnv1a64:860142cc226105b8`); the composition
+reaches the 17 chain calls by segment index, applies the two gadget contracts under the
+adjacent `range_check_q`/`range_check_r` bounds, matches the chain's limb vectors by
+linear-combination equality, and composes `RsaChain.chain` with `RsaEm.em`
+(`chain_congruence_em`). The byte layer then proves the chain's modulus is the 256-byte
+big-endian `n` (`chainN_eq_bytes`), the first accumulator is the 256-byte `sig`
+(`chainSig_eq_bytes`), the modulus has 2048 bits (`n_bits`, from the `n_top` glue row),
+and `chain_congruence_public` states
+`EM_PREFIX + Σ_{k<32} digest_k·256^(31−k) ≡ sig^65537 (mod n)` over the public bytes.
 
-* **The 17-call assembly.** Identifying the chain's limb vectors across the 17
-  `grouped_columns`/`grouped_columns_square` calls and supplying each call's limb
-  bounds from the adjacent `range_check_q`/`range_check_r` `Spec`s; then
-  `RsaChain.chain` and `RsaEm.em`. The per-call rows → `val a · val b = val q · val m
-  + val rhs` step (the previous residual) is proven in the two gadget files.
-* **`minus_one` and `sig < n`.** The borrow chain that makes `n − 1`'s canonical
-  digits, and so the `require_lt::<25,82>` composition to `sig < n`, are the
-  bignum gadget's (its LC plugs are the allowlisted entry).
-* **The whole-circuit composition** (`Xark.Circuit`). The production circuit is
-  exported and hash-gated (`Formal/Circuits/Rsa2048.lean`, 125,856 rows in 597
-  segments, `fnv1a64:860142cc226105b8`), so `Sat circuit σ` is the production rows,
-  and its calls' contracts are theorems: 16 `grouped_columns_square` and 1
-  `grouped_columns` call, each giving the integer product identity under the limb
-  bounds, 17 `range_check_q` and 16 `range_check_r` calls with every limb in
-  range (`Formal/Rsa2048Calls.lean`, counts by `decide +kernel`). What is
-  not proven is the 17-call assembly — matching each call's limb vectors to the
-  next one's, supplying the q/r bounds, and `RsaChain.chain`/`RsaEm.em` to the
-  top-level statement — plus the byte-packing rows' model.
+`minus_one` and `sig < n` are the same treatment. `Formal/Circuits/Rsa2048/SigLt.lean`
+through `SigLt5.lean` read s544's `is_zero` bits and borrow rows, prove every borrow is
+0 or 1 (`bBit`, `borrowBit`), give the per-limb value formula
+`out_i = n_i − borrow_i + 2^82·borrow_{i+1}` by cases on the borrow bits (no subtraction
+crosses a cast), telescope it to `val (minus_one n) = chainN − 1`, and apply
+`require_lt::<25,82>`'s `Spec` at s545 for `sig ≤ chainN − 1`, hence `sig < n`.
+`VerifyWide.lean` names the three byte operands and bundles the three facts as
+`verify_wide_spec`, so the gadget's contract is one theorem. The digest is a public
+input: the theorem is about the RSA relation for that digest, not that the digest is
+any message's SHA-256.
 
 The `require_lt::<25,82>` and `range_check_limbs::<17,121>` rows have Lean
 templates; the byte packing uses the base `to_bits` (8-bit) template. `n`'s
