@@ -293,4 +293,109 @@ theorem convert_col_x (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
   have hzero := int_eq_zero_of_cast _ hE hlo hhi
   linarith
 
+/-- A carry row with the previous carry and no input term. -/
+theorem convert_col_prev (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
+    (k : ℕ) (hk : k < Rsa2048Words.s36.rows.length)
+    (prev carry limb : ℕ)
+    (hrow : growAt k =
+      ⟨⟨0, [((1 : F), prev), ((-W : F), carry), ((-1 : F), limb)]⟩, ⟨1, []⟩, ⟨0, []⟩⟩)
+    (hp : (σ prev).val < 2 ^ 118) (hc : (σ carry).val < 2 ^ 118)
+    (hl : (σ limb).val < 2 ^ 82) :
+    ((σ prev).val : ℤ) = (W : ℤ) * ((σ carry).val : ℤ) + ((σ limb).val : ℤ) := by
+  have hr := growAt_sat (s36_sat h) k hk
+  rw [hrow] at hr
+  have ha := by
+    simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+  let E : ℤ := ((σ prev).val : ℤ) - (W : ℤ) * ((σ carry).val : ℤ) - ((σ limb).val : ℤ)
+  have hE : (E : F) = 0 := by
+    dsimp [E]
+    push_cast
+    simp only [ZMod.natCast_zmod_val]
+    linear_combination ha
+  have hb1 : ((σ prev).val : ℤ) < 2 ^ 118 := by exact_mod_cast hp
+  have hb2 : ((σ carry).val : ℤ) < 2 ^ 118 := by exact_mod_cast hc
+  have hb3 : ((σ limb).val : ℤ) < 2 ^ 82 := by exact_mod_cast hl
+  have hWcarry : (W : ℤ) * ((σ carry).val : ℤ) < 2 ^ 200 := by
+    have hW' : (W : ℤ) = 2 ^ 82 := by simp [W]
+    rw [hW']
+    have h := mul_lt_mul_of_pos_left hb2 (by norm_num : (0 : ℤ) < 2 ^ 82)
+    have h2 : ((2 : ℤ) ^ 82 * 2 ^ 118) = 2 ^ 200 := by rw [← pow_add]
+    rwa [h2] at h
+  have hW0 : (0 : ℤ) ≤ (W : ℤ) := by
+    rw [show (W : ℤ) = 2 ^ 82 by simp [W]]
+    positivity
+  have hp0 : (0 : ℤ) ≤ ((σ prev).val : ℤ) := by positivity
+  have hc0 : (0 : ℤ) ≤ (W : ℤ) * ((σ carry).val : ℤ) := mul_nonneg hW0 (by positivity)
+  have hl0 : (0 : ℤ) ≤ ((σ limb).val : ℤ) := by positivity
+  have h200 : (2 : ℤ) ^ 200 < (r : ℤ) := by
+    have h := Xark.Templates.ToBits.two_pow_lt_r' (n := 200) (by norm_num)
+    have h' := Nat.cast_lt (α := ℤ).mpr h
+    simpa [Nat.cast_pow] using h'
+  have h201 : (2 : ℤ) ^ 201 < (r : ℤ) := by
+    have h := Xark.Templates.ToBits.two_pow_lt_r' (n := 201) (by norm_num)
+    have h' := Nat.cast_lt (α := ℤ).mpr h
+    simpa [Nat.cast_pow] using h'
+  have hsum : ((2 : ℤ) ^ 200 + 2 ^ 82) < 2 ^ 201 := by norm_num
+  have hlo : -((r : ℤ)) < E := by
+    dsimp [E]
+    nlinarith [hWcarry, hb3, hp0, hc0, hl0, h201, hsum]
+  have hhi : E < (r : ℤ) := by
+    dsimp [E]
+    nlinarith [hb1, hb2, hb3, h200]
+  have hzero := int_eq_zero_of_cast _ hE hlo hhi
+  linarith
+
+/-- A carry row with an input term and no previous carry (column 0). -/
+theorem convert_col_x0 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
+    (k : ℕ) (hk : k < Rsa2048Words.s36.rows.length)
+    (x carry limb : ℕ)
+    (hrow : growAt k =
+      ⟨⟨0, [((1 : F), x), ((-W : F), carry), ((-1 : F), limb)]⟩, ⟨1, []⟩, ⟨0, []⟩⟩)
+    (hx : (σ x).val < 2 ^ 121) (hc : (σ carry).val < 2 ^ 118)
+    (hl : (σ limb).val < 2 ^ 82) :
+    ((σ x).val : ℤ) = (W : ℤ) * ((σ carry).val : ℤ) + ((σ limb).val : ℤ) := by
+  have hr := growAt_sat (s36_sat h) k hk
+  rw [hrow] at hr
+  have ha := by
+    simpa [Xark.R1cs.Row.Sat, Xark.R1cs.LC.eval] using hr
+  let E : ℤ := ((σ x).val : ℤ) - (W : ℤ) * ((σ carry).val : ℤ) - ((σ limb).val : ℤ)
+  have hE : (E : F) = 0 := by
+    dsimp [E]
+    push_cast
+    simp only [ZMod.natCast_zmod_val]
+    linear_combination ha
+  have hb1 : ((σ x).val : ℤ) < 2 ^ 121 := by exact_mod_cast hx
+  have hb2 : ((σ carry).val : ℤ) < 2 ^ 118 := by exact_mod_cast hc
+  have hb3 : ((σ limb).val : ℤ) < 2 ^ 82 := by exact_mod_cast hl
+  have hWcarry : (W : ℤ) * ((σ carry).val : ℤ) < 2 ^ 200 := by
+    have hW' : (W : ℤ) = 2 ^ 82 := by simp [W]
+    rw [hW']
+    have h := mul_lt_mul_of_pos_left hb2 (by norm_num : (0 : ℤ) < 2 ^ 82)
+    have h2 : ((2 : ℤ) ^ 82 * 2 ^ 118) = 2 ^ 200 := by rw [← pow_add]
+    rwa [h2] at h
+  have hc0 : (0 : ℤ) ≤ (W : ℤ) * ((σ carry).val : ℤ) := by
+    have hW0 : (0 : ℤ) ≤ (W : ℤ) := by
+      rw [show (W : ℤ) = 2 ^ 82 by simp [W]]
+      positivity
+    exact mul_nonneg hW0 (by positivity)
+  have hl0 : (0 : ℤ) ≤ ((σ limb).val : ℤ) := by positivity
+  have h200 : (2 : ℤ) ^ 200 < (r : ℤ) := by
+    have h := Xark.Templates.ToBits.two_pow_lt_r' (n := 200) (by norm_num)
+    have h' := Nat.cast_lt (α := ℤ).mpr h
+    simpa [Nat.cast_pow] using h'
+  have h201 : (2 : ℤ) ^ 201 < (r : ℤ) := by
+    have h := Xark.Templates.ToBits.two_pow_lt_r' (n := 201) (by norm_num)
+    have h' := Nat.cast_lt (α := ℤ).mpr h
+    simpa [Nat.cast_pow] using h'
+  have hsum : ((2 : ℤ) ^ 200 + 2 ^ 82) < 2 ^ 201 := by norm_num
+  have hlo : -((r : ℤ)) < E := by
+    dsimp [E]
+    nlinarith [hWcarry, hb3, hc0, hl0, h201, hsum]
+  have h121200 : (2 : ℤ) ^ 121 < 2 ^ 200 := by norm_num
+  have hhi : E < (r : ℤ) := by
+    dsimp [E]
+    nlinarith [hb1, hb2, hb3, hc0, hl0, h200, h121200]
+  have hzero := int_eq_zero_of_cast _ hE hlo hhi
+  linarith
+
 end Xark.Circuits.Rsa2048
