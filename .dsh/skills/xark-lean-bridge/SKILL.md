@@ -997,3 +997,17 @@ must pass `σ h` explicitly, else `h` becomes a goal). `mhoutE_i` is still open:
 because `simpa` will not finish with `ring`; the fix is to `simp` the `ZLC.toF`
 equality to `LC.eval` form and then `linear_combination`/`ring`, or to prove the
 plug's affine form directly. `lake build` is 3,378 jobs; AxiomCheck 4,604 theorems.
+
+### The words minus_one value (2026-11, round 23)
+
+`MinusOneVal.lean` closes the algebra: `hdist` (`ZLC.toF` distributes over
+`addLC`/`negLC`/`smulLC` → `addG`/`negG`/`smulG`, by `Int.cast_add/neg/mul` +
+`List.map_append`), 25 `mhoutE_i` (from `mhout_i` + `hdist`, then
+`rw [mOutF, hh, eval_addG, …]` + `simp only [mNF, mborrowF, sub_eq_add_neg]` — no
+`ring` needed), 25 `moutVal_i` (`val_formula` with `mhoutE`/`mhrec`/`mborrowBit`/
+`mbBit`/`mhnb`), and `mval_minus_one`:
+`Σ (mOutF i).val·W^i = Σ (mNF i).val·W^i − 1` via `telescope` (25 `interval_cases`
+bullets; the `hc0`/`hc25` args are `(mborrowF 0).val = 1` / `(mborrowF 25).val = 0`,
+via `ZMod.val_one`/`ZMod.val_zero` + `norm_num`). `lake build` is 3,378 jobs;
+AxiomCheck 4,656 theorems. Next: rewrite `mNF` to `yN`, bridge to
+`val (limb (wcallAt 37) σ 25)`, `RequireLt25x82` → `sig < n`; then the chain.

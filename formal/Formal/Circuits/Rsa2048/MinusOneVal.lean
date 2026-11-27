@@ -958,4 +958,473 @@ theorem mborrowBit_25 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
   rw [mhrec_24 σ h]
   rcases mborrowBit_24 σ h with h0 | h0 <;> rcases mbBit_24 σ h with b0 | b0 <;> rw [h0, b0] <;> norm_num
 
+/-- `ZLC.toF` distributes over the affine combination `addLC`/`negLC`/`smulLC`. -/
+theorem hdist (i : ℕ) :
+    (addLC (addLC ((wcallAt 40).plugs.getD (25 + i) (LC.cst 0)) (negLC (mborrow i)))
+        (smulLC W (mborrow (i+1)))).toF
+      = addG (addG ((wcallAt 40).plugs.getD (25 + i) (LC.cst 0)).toF (negG ((mborrow i).toF)))
+          (smulG (W : F) ((mborrow (i+1)).toF)) := by
+  simp [addLC, negLC, smulLC, addG, negG, smulG, ZLC.toF, Int.cast_add, Int.cast_neg, Int.cast_mul,
+    List.map_append, List.map_map, Function.comp_def]
+
+theorem mhoutE_0 (σ : ℕ → F) :
+    mOutF 0 σ = mNF 0 σ - mborrowF 0 σ + (W : F) * mborrowF 1 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 0) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 0) (LC.cst 0)).toF) (negG ((mborrow 0).toF)))
+          (smulG (W : F) ((mborrow 1).toF)) := by
+    have h := congrArg ZLC.toF (mhout_0)
+    rwa [hdist 0] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_1 (σ : ℕ → F) :
+    mOutF 1 σ = mNF 1 σ - mborrowF 1 σ + (W : F) * mborrowF 2 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 1) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 1) (LC.cst 0)).toF) (negG ((mborrow 1).toF)))
+          (smulG (W : F) ((mborrow 2).toF)) := by
+    have h := congrArg ZLC.toF (mhout_1)
+    rwa [hdist 1] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_2 (σ : ℕ → F) :
+    mOutF 2 σ = mNF 2 σ - mborrowF 2 σ + (W : F) * mborrowF 3 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 2) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 2) (LC.cst 0)).toF) (negG ((mborrow 2).toF)))
+          (smulG (W : F) ((mborrow 3).toF)) := by
+    have h := congrArg ZLC.toF (mhout_2)
+    rwa [hdist 2] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_3 (σ : ℕ → F) :
+    mOutF 3 σ = mNF 3 σ - mborrowF 3 σ + (W : F) * mborrowF 4 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 3) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 3) (LC.cst 0)).toF) (negG ((mborrow 3).toF)))
+          (smulG (W : F) ((mborrow 4).toF)) := by
+    have h := congrArg ZLC.toF (mhout_3)
+    rwa [hdist 3] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_4 (σ : ℕ → F) :
+    mOutF 4 σ = mNF 4 σ - mborrowF 4 σ + (W : F) * mborrowF 5 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 4) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 4) (LC.cst 0)).toF) (negG ((mborrow 4).toF)))
+          (smulG (W : F) ((mborrow 5).toF)) := by
+    have h := congrArg ZLC.toF (mhout_4)
+    rwa [hdist 4] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_5 (σ : ℕ → F) :
+    mOutF 5 σ = mNF 5 σ - mborrowF 5 σ + (W : F) * mborrowF 6 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 5) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 5) (LC.cst 0)).toF) (negG ((mborrow 5).toF)))
+          (smulG (W : F) ((mborrow 6).toF)) := by
+    have h := congrArg ZLC.toF (mhout_5)
+    rwa [hdist 5] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_6 (σ : ℕ → F) :
+    mOutF 6 σ = mNF 6 σ - mborrowF 6 σ + (W : F) * mborrowF 7 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 6) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 6) (LC.cst 0)).toF) (negG ((mborrow 6).toF)))
+          (smulG (W : F) ((mborrow 7).toF)) := by
+    have h := congrArg ZLC.toF (mhout_6)
+    rwa [hdist 6] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_7 (σ : ℕ → F) :
+    mOutF 7 σ = mNF 7 σ - mborrowF 7 σ + (W : F) * mborrowF 8 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 7) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 7) (LC.cst 0)).toF) (negG ((mborrow 7).toF)))
+          (smulG (W : F) ((mborrow 8).toF)) := by
+    have h := congrArg ZLC.toF (mhout_7)
+    rwa [hdist 7] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_8 (σ : ℕ → F) :
+    mOutF 8 σ = mNF 8 σ - mborrowF 8 σ + (W : F) * mborrowF 9 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 8) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 8) (LC.cst 0)).toF) (negG ((mborrow 8).toF)))
+          (smulG (W : F) ((mborrow 9).toF)) := by
+    have h := congrArg ZLC.toF (mhout_8)
+    rwa [hdist 8] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_9 (σ : ℕ → F) :
+    mOutF 9 σ = mNF 9 σ - mborrowF 9 σ + (W : F) * mborrowF 10 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 9) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 9) (LC.cst 0)).toF) (negG ((mborrow 9).toF)))
+          (smulG (W : F) ((mborrow 10).toF)) := by
+    have h := congrArg ZLC.toF (mhout_9)
+    rwa [hdist 9] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_10 (σ : ℕ → F) :
+    mOutF 10 σ = mNF 10 σ - mborrowF 10 σ + (W : F) * mborrowF 11 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 10) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 10) (LC.cst 0)).toF) (negG ((mborrow 10).toF)))
+          (smulG (W : F) ((mborrow 11).toF)) := by
+    have h := congrArg ZLC.toF (mhout_10)
+    rwa [hdist 10] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_11 (σ : ℕ → F) :
+    mOutF 11 σ = mNF 11 σ - mborrowF 11 σ + (W : F) * mborrowF 12 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 11) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 11) (LC.cst 0)).toF) (negG ((mborrow 11).toF)))
+          (smulG (W : F) ((mborrow 12).toF)) := by
+    have h := congrArg ZLC.toF (mhout_11)
+    rwa [hdist 11] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_12 (σ : ℕ → F) :
+    mOutF 12 σ = mNF 12 σ - mborrowF 12 σ + (W : F) * mborrowF 13 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 12) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 12) (LC.cst 0)).toF) (negG ((mborrow 12).toF)))
+          (smulG (W : F) ((mborrow 13).toF)) := by
+    have h := congrArg ZLC.toF (mhout_12)
+    rwa [hdist 12] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_13 (σ : ℕ → F) :
+    mOutF 13 σ = mNF 13 σ - mborrowF 13 σ + (W : F) * mborrowF 14 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 13) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 13) (LC.cst 0)).toF) (negG ((mborrow 13).toF)))
+          (smulG (W : F) ((mborrow 14).toF)) := by
+    have h := congrArg ZLC.toF (mhout_13)
+    rwa [hdist 13] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_14 (σ : ℕ → F) :
+    mOutF 14 σ = mNF 14 σ - mborrowF 14 σ + (W : F) * mborrowF 15 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 14) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 14) (LC.cst 0)).toF) (negG ((mborrow 14).toF)))
+          (smulG (W : F) ((mborrow 15).toF)) := by
+    have h := congrArg ZLC.toF (mhout_14)
+    rwa [hdist 14] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_15 (σ : ℕ → F) :
+    mOutF 15 σ = mNF 15 σ - mborrowF 15 σ + (W : F) * mborrowF 16 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 15) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 15) (LC.cst 0)).toF) (negG ((mborrow 15).toF)))
+          (smulG (W : F) ((mborrow 16).toF)) := by
+    have h := congrArg ZLC.toF (mhout_15)
+    rwa [hdist 15] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_16 (σ : ℕ → F) :
+    mOutF 16 σ = mNF 16 σ - mborrowF 16 σ + (W : F) * mborrowF 17 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 16) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 16) (LC.cst 0)).toF) (negG ((mborrow 16).toF)))
+          (smulG (W : F) ((mborrow 17).toF)) := by
+    have h := congrArg ZLC.toF (mhout_16)
+    rwa [hdist 16] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_17 (σ : ℕ → F) :
+    mOutF 17 σ = mNF 17 σ - mborrowF 17 σ + (W : F) * mborrowF 18 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 17) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 17) (LC.cst 0)).toF) (negG ((mborrow 17).toF)))
+          (smulG (W : F) ((mborrow 18).toF)) := by
+    have h := congrArg ZLC.toF (mhout_17)
+    rwa [hdist 17] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_18 (σ : ℕ → F) :
+    mOutF 18 σ = mNF 18 σ - mborrowF 18 σ + (W : F) * mborrowF 19 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 18) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 18) (LC.cst 0)).toF) (negG ((mborrow 18).toF)))
+          (smulG (W : F) ((mborrow 19).toF)) := by
+    have h := congrArg ZLC.toF (mhout_18)
+    rwa [hdist 18] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_19 (σ : ℕ → F) :
+    mOutF 19 σ = mNF 19 σ - mborrowF 19 σ + (W : F) * mborrowF 20 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 19) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 19) (LC.cst 0)).toF) (negG ((mborrow 19).toF)))
+          (smulG (W : F) ((mborrow 20).toF)) := by
+    have h := congrArg ZLC.toF (mhout_19)
+    rwa [hdist 19] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_20 (σ : ℕ → F) :
+    mOutF 20 σ = mNF 20 σ - mborrowF 20 σ + (W : F) * mborrowF 21 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 20) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 20) (LC.cst 0)).toF) (negG ((mborrow 20).toF)))
+          (smulG (W : F) ((mborrow 21).toF)) := by
+    have h := congrArg ZLC.toF (mhout_20)
+    rwa [hdist 20] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_21 (σ : ℕ → F) :
+    mOutF 21 σ = mNF 21 σ - mborrowF 21 σ + (W : F) * mborrowF 22 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 21) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 21) (LC.cst 0)).toF) (negG ((mborrow 21).toF)))
+          (smulG (W : F) ((mborrow 22).toF)) := by
+    have h := congrArg ZLC.toF (mhout_21)
+    rwa [hdist 21] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_22 (σ : ℕ → F) :
+    mOutF 22 σ = mNF 22 σ - mborrowF 22 σ + (W : F) * mborrowF 23 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 22) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 22) (LC.cst 0)).toF) (negG ((mborrow 22).toF)))
+          (smulG (W : F) ((mborrow 23).toF)) := by
+    have h := congrArg ZLC.toF (mhout_22)
+    rwa [hdist 22] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_23 (σ : ℕ → F) :
+    mOutF 23 σ = mNF 23 σ - mborrowF 23 σ + (W : F) * mborrowF 24 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 23) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 23) (LC.cst 0)).toF) (negG ((mborrow 23).toF)))
+          (smulG (W : F) ((mborrow 24).toF)) := by
+    have h := congrArg ZLC.toF (mhout_23)
+    rwa [hdist 23] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem mhoutE_24 (σ : ℕ → F) :
+    mOutF 24 σ = mNF 24 σ - mborrowF 24 σ + (W : F) * mborrowF 25 σ := by
+  have hh : ((wcallAt 37).plugs.getD (25 + 24) (LC.cst 0)).toF
+      = addG (addG (((wcallAt 40).plugs.getD (25 + 24) (LC.cst 0)).toF) (negG ((mborrow 24).toF)))
+          (smulG (W : F) ((mborrow 25).toF)) := by
+    have h := congrArg ZLC.toF (mhout_24)
+    rwa [hdist 24] at h
+  rw [mOutF, hh, eval_addG, eval_addG, eval_negG, eval_smulG]
+  simp only [mNF, mborrowF, sub_eq_add_neg]
+
+theorem moutVal_0 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 0 σ).val : ℤ) = ((mNF 0 σ).val : ℤ) - ((mborrowF 0 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 1 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 0 σ) (mNF 0 σ) (mborrowF 0 σ) (mborrowF 1 σ) (mbF 0 σ)
+    (mhoutE_0 σ) (mhrec_0 σ) (mborrowBit_0 σ) (mbBit_0 σ h) (mhnb_0 σ h)
+
+theorem moutVal_1 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 1 σ).val : ℤ) = ((mNF 1 σ).val : ℤ) - ((mborrowF 1 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 2 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 1 σ) (mNF 1 σ) (mborrowF 1 σ) (mborrowF 2 σ) (mbF 1 σ)
+    (mhoutE_1 σ) (mhrec_1 σ h) (mborrowBit_1 σ h) (mbBit_1 σ h) (mhnb_1 σ h)
+
+theorem moutVal_2 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 2 σ).val : ℤ) = ((mNF 2 σ).val : ℤ) - ((mborrowF 2 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 3 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 2 σ) (mNF 2 σ) (mborrowF 2 σ) (mborrowF 3 σ) (mbF 2 σ)
+    (mhoutE_2 σ) (mhrec_2 σ h) (mborrowBit_2 σ h) (mbBit_2 σ h) (mhnb_2 σ h)
+
+theorem moutVal_3 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 3 σ).val : ℤ) = ((mNF 3 σ).val : ℤ) - ((mborrowF 3 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 4 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 3 σ) (mNF 3 σ) (mborrowF 3 σ) (mborrowF 4 σ) (mbF 3 σ)
+    (mhoutE_3 σ) (mhrec_3 σ h) (mborrowBit_3 σ h) (mbBit_3 σ h) (mhnb_3 σ h)
+
+theorem moutVal_4 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 4 σ).val : ℤ) = ((mNF 4 σ).val : ℤ) - ((mborrowF 4 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 5 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 4 σ) (mNF 4 σ) (mborrowF 4 σ) (mborrowF 5 σ) (mbF 4 σ)
+    (mhoutE_4 σ) (mhrec_4 σ h) (mborrowBit_4 σ h) (mbBit_4 σ h) (mhnb_4 σ h)
+
+theorem moutVal_5 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 5 σ).val : ℤ) = ((mNF 5 σ).val : ℤ) - ((mborrowF 5 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 6 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 5 σ) (mNF 5 σ) (mborrowF 5 σ) (mborrowF 6 σ) (mbF 5 σ)
+    (mhoutE_5 σ) (mhrec_5 σ h) (mborrowBit_5 σ h) (mbBit_5 σ h) (mhnb_5 σ h)
+
+theorem moutVal_6 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 6 σ).val : ℤ) = ((mNF 6 σ).val : ℤ) - ((mborrowF 6 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 7 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 6 σ) (mNF 6 σ) (mborrowF 6 σ) (mborrowF 7 σ) (mbF 6 σ)
+    (mhoutE_6 σ) (mhrec_6 σ h) (mborrowBit_6 σ h) (mbBit_6 σ h) (mhnb_6 σ h)
+
+theorem moutVal_7 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 7 σ).val : ℤ) = ((mNF 7 σ).val : ℤ) - ((mborrowF 7 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 8 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 7 σ) (mNF 7 σ) (mborrowF 7 σ) (mborrowF 8 σ) (mbF 7 σ)
+    (mhoutE_7 σ) (mhrec_7 σ h) (mborrowBit_7 σ h) (mbBit_7 σ h) (mhnb_7 σ h)
+
+theorem moutVal_8 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 8 σ).val : ℤ) = ((mNF 8 σ).val : ℤ) - ((mborrowF 8 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 9 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 8 σ) (mNF 8 σ) (mborrowF 8 σ) (mborrowF 9 σ) (mbF 8 σ)
+    (mhoutE_8 σ) (mhrec_8 σ h) (mborrowBit_8 σ h) (mbBit_8 σ h) (mhnb_8 σ h)
+
+theorem moutVal_9 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 9 σ).val : ℤ) = ((mNF 9 σ).val : ℤ) - ((mborrowF 9 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 10 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 9 σ) (mNF 9 σ) (mborrowF 9 σ) (mborrowF 10 σ) (mbF 9 σ)
+    (mhoutE_9 σ) (mhrec_9 σ h) (mborrowBit_9 σ h) (mbBit_9 σ h) (mhnb_9 σ h)
+
+theorem moutVal_10 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 10 σ).val : ℤ) = ((mNF 10 σ).val : ℤ) - ((mborrowF 10 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 11 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 10 σ) (mNF 10 σ) (mborrowF 10 σ) (mborrowF 11 σ) (mbF 10 σ)
+    (mhoutE_10 σ) (mhrec_10 σ h) (mborrowBit_10 σ h) (mbBit_10 σ h) (mhnb_10 σ h)
+
+theorem moutVal_11 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 11 σ).val : ℤ) = ((mNF 11 σ).val : ℤ) - ((mborrowF 11 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 12 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 11 σ) (mNF 11 σ) (mborrowF 11 σ) (mborrowF 12 σ) (mbF 11 σ)
+    (mhoutE_11 σ) (mhrec_11 σ h) (mborrowBit_11 σ h) (mbBit_11 σ h) (mhnb_11 σ h)
+
+theorem moutVal_12 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 12 σ).val : ℤ) = ((mNF 12 σ).val : ℤ) - ((mborrowF 12 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 13 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 12 σ) (mNF 12 σ) (mborrowF 12 σ) (mborrowF 13 σ) (mbF 12 σ)
+    (mhoutE_12 σ) (mhrec_12 σ h) (mborrowBit_12 σ h) (mbBit_12 σ h) (mhnb_12 σ h)
+
+theorem moutVal_13 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 13 σ).val : ℤ) = ((mNF 13 σ).val : ℤ) - ((mborrowF 13 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 14 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 13 σ) (mNF 13 σ) (mborrowF 13 σ) (mborrowF 14 σ) (mbF 13 σ)
+    (mhoutE_13 σ) (mhrec_13 σ h) (mborrowBit_13 σ h) (mbBit_13 σ h) (mhnb_13 σ h)
+
+theorem moutVal_14 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 14 σ).val : ℤ) = ((mNF 14 σ).val : ℤ) - ((mborrowF 14 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 15 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 14 σ) (mNF 14 σ) (mborrowF 14 σ) (mborrowF 15 σ) (mbF 14 σ)
+    (mhoutE_14 σ) (mhrec_14 σ h) (mborrowBit_14 σ h) (mbBit_14 σ h) (mhnb_14 σ h)
+
+theorem moutVal_15 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 15 σ).val : ℤ) = ((mNF 15 σ).val : ℤ) - ((mborrowF 15 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 16 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 15 σ) (mNF 15 σ) (mborrowF 15 σ) (mborrowF 16 σ) (mbF 15 σ)
+    (mhoutE_15 σ) (mhrec_15 σ h) (mborrowBit_15 σ h) (mbBit_15 σ h) (mhnb_15 σ h)
+
+theorem moutVal_16 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 16 σ).val : ℤ) = ((mNF 16 σ).val : ℤ) - ((mborrowF 16 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 17 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 16 σ) (mNF 16 σ) (mborrowF 16 σ) (mborrowF 17 σ) (mbF 16 σ)
+    (mhoutE_16 σ) (mhrec_16 σ h) (mborrowBit_16 σ h) (mbBit_16 σ h) (mhnb_16 σ h)
+
+theorem moutVal_17 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 17 σ).val : ℤ) = ((mNF 17 σ).val : ℤ) - ((mborrowF 17 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 18 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 17 σ) (mNF 17 σ) (mborrowF 17 σ) (mborrowF 18 σ) (mbF 17 σ)
+    (mhoutE_17 σ) (mhrec_17 σ h) (mborrowBit_17 σ h) (mbBit_17 σ h) (mhnb_17 σ h)
+
+theorem moutVal_18 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 18 σ).val : ℤ) = ((mNF 18 σ).val : ℤ) - ((mborrowF 18 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 19 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 18 σ) (mNF 18 σ) (mborrowF 18 σ) (mborrowF 19 σ) (mbF 18 σ)
+    (mhoutE_18 σ) (mhrec_18 σ h) (mborrowBit_18 σ h) (mbBit_18 σ h) (mhnb_18 σ h)
+
+theorem moutVal_19 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 19 σ).val : ℤ) = ((mNF 19 σ).val : ℤ) - ((mborrowF 19 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 20 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 19 σ) (mNF 19 σ) (mborrowF 19 σ) (mborrowF 20 σ) (mbF 19 σ)
+    (mhoutE_19 σ) (mhrec_19 σ h) (mborrowBit_19 σ h) (mbBit_19 σ h) (mhnb_19 σ h)
+
+theorem moutVal_20 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 20 σ).val : ℤ) = ((mNF 20 σ).val : ℤ) - ((mborrowF 20 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 21 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 20 σ) (mNF 20 σ) (mborrowF 20 σ) (mborrowF 21 σ) (mbF 20 σ)
+    (mhoutE_20 σ) (mhrec_20 σ h) (mborrowBit_20 σ h) (mbBit_20 σ h) (mhnb_20 σ h)
+
+theorem moutVal_21 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 21 σ).val : ℤ) = ((mNF 21 σ).val : ℤ) - ((mborrowF 21 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 22 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 21 σ) (mNF 21 σ) (mborrowF 21 σ) (mborrowF 22 σ) (mbF 21 σ)
+    (mhoutE_21 σ) (mhrec_21 σ h) (mborrowBit_21 σ h) (mbBit_21 σ h) (mhnb_21 σ h)
+
+theorem moutVal_22 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 22 σ).val : ℤ) = ((mNF 22 σ).val : ℤ) - ((mborrowF 22 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 23 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 22 σ) (mNF 22 σ) (mborrowF 22 σ) (mborrowF 23 σ) (mbF 22 σ)
+    (mhoutE_22 σ) (mhrec_22 σ h) (mborrowBit_22 σ h) (mbBit_22 σ h) (mhnb_22 σ h)
+
+theorem moutVal_23 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 23 σ).val : ℤ) = ((mNF 23 σ).val : ℤ) - ((mborrowF 23 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 24 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 23 σ) (mNF 23 σ) (mborrowF 23 σ) (mborrowF 24 σ) (mbF 23 σ)
+    (mhoutE_23 σ) (mhrec_23 σ h) (mborrowBit_23 σ h) (mbBit_23 σ h) (mhnb_23 σ h)
+
+theorem moutVal_24 (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    ((mOutF 24 σ).val : ℤ) = ((mNF 24 σ).val : ℤ) - ((mborrowF 24 σ).val : ℤ)
+      + (2 : ℤ) ^ 82 * ((mborrowF 25 σ).val : ℤ) :=
+  val_formula (W := 2 ^ 82) (by norm_num) two_pow_82_lt_r
+    (mOutF 24 σ) (mNF 24 σ) (mborrowF 24 σ) (mborrowF 25 σ) (mbF 24 σ)
+    (mhoutE_24 σ) (mhrec_24 σ h) (mborrowBit_24 σ h) (mbBit_24 σ h) (mhnb_24 σ h)
+
+/-- The `minus_one` value: the outputs telescope to `n − 1`. -/
+theorem mval_minus_one (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ) :
+    (∑ i ∈ Finset.range 25, (mOutF i σ).val * (W : ℤ) ^ i)
+      = (∑ i ∈ Finset.range 25, (mNF i σ).val * (W : ℤ) ^ i) - 1 :=
+  telescope (fun i => ((mOutF i σ).val : ℤ)) (fun i => ((mNF i σ).val : ℤ))
+    (fun i => ((mborrowF i σ).val : ℤ))
+    (by rw [mborrowF0, ZMod.val_one]; norm_num) (by rw [mborrowF25 σ h, ZMod.val_zero]; norm_num) (fun i hi => by
+      interval_cases i
+      · simpa [W] using moutVal_0 σ h
+      · simpa [W] using moutVal_1 σ h
+      · simpa [W] using moutVal_2 σ h
+      · simpa [W] using moutVal_3 σ h
+      · simpa [W] using moutVal_4 σ h
+      · simpa [W] using moutVal_5 σ h
+      · simpa [W] using moutVal_6 σ h
+      · simpa [W] using moutVal_7 σ h
+      · simpa [W] using moutVal_8 σ h
+      · simpa [W] using moutVal_9 σ h
+      · simpa [W] using moutVal_10 σ h
+      · simpa [W] using moutVal_11 σ h
+      · simpa [W] using moutVal_12 σ h
+      · simpa [W] using moutVal_13 σ h
+      · simpa [W] using moutVal_14 σ h
+      · simpa [W] using moutVal_15 σ h
+      · simpa [W] using moutVal_16 σ h
+      · simpa [W] using moutVal_17 σ h
+      · simpa [W] using moutVal_18 σ h
+      · simpa [W] using moutVal_19 σ h
+      · simpa [W] using moutVal_20 σ h
+      · simpa [W] using moutVal_21 σ h
+      · simpa [W] using moutVal_22 σ h
+      · simpa [W] using moutVal_23 σ h
+      · simpa [W] using moutVal_24 σ h
+      )
+
 end Xark.Circuits.Rsa2048
