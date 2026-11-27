@@ -1131,3 +1131,16 @@ rewrites must come before any `show wChainN = …`), and **`w_chain_congruence`*
 circuit, with the EM bound (`hEm`) as a hypothesis exactly like the byte path.
 `lake build` is 3,384 jobs; AxiomCheck 4,812 theorems. Next: `hEm` from the 256 digest
 bits, then the 17×121 `verify_wide` statement.
+
+### The words 17×121 statement (2026-11, round 35)
+
+`WordsCong.lean` adds `pn_m_eq`/`pn_s_eq` (the square's `m`/`a` plug values are the
+converted n/sig limbs), `pv_n_eq`/`pv_s_eq` (the `val` summands are `yN`/`yS`),
+`wChainN_eq`/`wChainA0_eq` (the `val` sums equal the `yN`/`yS` sums; `rw [val]; simp only
+[limb]` is needed so the `pv` summands appear), and **`w_verify_wide`**:
+`2^2047 ≤ wChainN ∧ wChainN < 2^2048 ∧ sig < wChainN ∧ wChainEm ≡ sig^65537 [ZMOD
+wChainN]` — the words 17×121 statement, with the EM array bound (`hEm`) as the one
+explicit hypothesis. `lake build` is 3,384 jobs; AxiomCheck 4,819 theorems. The last
+piece of item (2) is `hEm`: the terminal `r` array is `< 2^82` because it is the
+`sha256_em_bits_82` output (`emOut` of the 256 digest bits), the analogue of the byte
+path's `EmBits`/`PackBound`.

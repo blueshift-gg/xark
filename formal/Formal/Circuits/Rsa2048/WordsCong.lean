@@ -275,4 +275,71 @@ theorem w_chain_congruence (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
   Xark.Rsa.Chain.chain_seq_range (wChainN σ) (wChainEm σ) (val (limb (wcallAt 88) σ 75))
     (wChainA σ) 16 (w_step σ h) (w_final σ h hEm)
 
+/-- The square's `m` plug value is the converted modulus limb. -/
+theorem pn_m_eq (σ : ℕ → F) {j : ℕ} (hj : j < 25) :
+    pn (wcallAt 40) σ (25 + j) = (σ (nLimb.getD j 0)).val := by
+  have hw : ((wcallAt 40).plugs.drop 25).take 25 = (nLimbMapLC.drop 0).take 25 := by
+    decide +kernel
+  have hp := getD_of_window hj hw (LC.cst 0)
+  rw [Nat.zero_add] at hp
+  have hgd := nLimbMapLC_getD j hj
+  simp only [pn, Call.lift, Call.env, hp, hgd]
+  simp [ZLC.toF, Xark.R1cs.LC.eval]
+
+/-- The square's `a` plug value is the converted signature limb. -/
+theorem pn_s_eq (σ : ℕ → F) {j : ℕ} (hj : j < 25) :
+    pn (wcallAt 40) σ j = (σ (sLimb.getD j 0)).val := by
+  have hw : ((wcallAt 40).plugs.drop 0).take 25 = (sLimbMapLC.drop 0).take 25 := by
+    decide +kernel
+  have hp := getD_of_window hj hw (LC.cst 0)
+  rw [Nat.zero_add] at hp
+  have hgd := sLimbMapLC_getD j hj
+  simp only [pn, Call.lift, Call.env, hp, hgd]
+  simp [ZLC.toF, Xark.R1cs.LC.eval]
+
+theorem pv_n_eq (σ : ℕ → F) (i : ℕ) (hj : i < 25) :
+    pv (wcallAt 40) σ (25 + i) = yN σ i := by
+  rw [pv, show ((wcallAt 40).lift σ (.plug (25 + i))).val = (σ (nLimb.getD i 0)).val
+    from pn_m_eq σ hj]
+  rfl
+
+theorem pv_s_eq (σ : ℕ → F) (i : ℕ) (hj : i < 25) :
+    pv (wcallAt 40) σ i = yS σ i := by
+  rw [pv, show ((wcallAt 40).lift σ (.plug i)).val = (σ (sLimb.getD i 0)).val
+    from pn_s_eq σ hj]
+  rfl
+
+theorem wChainN_eq (σ : ℕ → F) :
+    wChainN σ = ∑ i ∈ Finset.range 25, yN σ i * (W : ℤ) ^ i := by
+  rw [wChainN, val]
+  simp only [limb]
+  exact Finset.sum_congr rfl fun i hi => by rw [pv_n_eq σ i (Finset.mem_range.mp hi)]
+
+theorem wChainA0_eq (σ : ℕ → F) :
+    wChainA σ 0 = ∑ i ∈ Finset.range 25, yS σ i * (W : ℤ) ^ i := by
+  rw [show wChainA σ 0 = val (limb (wcallAt 40) σ 0) from rfl, val]
+  simp only [limb]
+  exact Finset.sum_congr rfl fun i hi => by
+    rw [Nat.zero_add, pv_s_eq σ i (Finset.mem_range.mp hi)]
+
+/-- The 17×121 circuit's verification statement (with the EM array bound as the one
+remaining hypothesis: the terminal call's `r` array is the encoded message). -/
+theorem w_verify_wide (σ : ℕ → F) (h : Sat Rsa2048Words.circuit σ)
+    (hEm : ∀ i < 25, pn (wcallAt 88) σ (100 + i) < 2 ^ 82) :
+    2 ^ 2047 ≤ wChainN σ ∧ wChainN σ < 2 ^ 2048 ∧
+      val (limb (wcallAt 40) σ 0) < wChainN σ ∧
+      wChainEm σ ≡ (val (limb (wcallAt 40) σ 0)) ^ (2 ^ 16 + 1) [ZMOD wChainN σ] := by
+  have hn := wChainN_eq σ
+  have hs := wChainA0_eq σ
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · rw [hn]; exact n_val_ge σ h
+  · rw [hn]; exact n_val_lt σ h
+  · have hle := m_sig_le σ h
+    rw [show val (limb (wcallAt 37) σ 0) = val (limb (wcallAt 40) σ 0) from
+      val_limb_eq σ (off := 0) (off' := 0)
+        (by decide +kernel : ((wcallAt 37).plugs.drop 0).take 25 = ((wcallAt 40).plugs.drop 0).take 25),
+      ← hn] at hle
+    linarith
+  · exact w_chain_congruence σ h hEm
+
 end Xark.Circuits.Rsa2048
