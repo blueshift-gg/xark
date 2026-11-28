@@ -406,6 +406,23 @@ fn prove_streaming(
     if let Some(tmp) = tee_tmp
         && pk.finish_tee()?
     {
+        // Developer-only synchronization point for the concurrent cache writer
+        // regression. Both processes must finish staging before either publishes.
+        #[cfg(feature = "debug")]
+        if let Some(gate) = std::env::var_os("XARK_TEST_CACHE_PUBLISH_GATE") {
+            let gate = std::path::Path::new(&gate);
+            fs::write(
+                gate.join(format!("ready-{}", std::process::id())),
+                tmp.path().to_string_lossy().as_bytes(),
+            )?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while !gate.join("release").exists() {
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!("timed out waiting for cache publication test gate");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
         tmp.persist(&decoded)
             .map_err(|e| e.error)
             .with_context(|| format!("writing {}", decoded.display()))?;

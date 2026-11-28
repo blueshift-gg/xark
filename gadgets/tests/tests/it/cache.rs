@@ -8,6 +8,7 @@
 
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::common::{tempdir, xark_bin, xark_build};
 
@@ -85,8 +86,14 @@ fn concurrent_provers_publish_complete_decoded_key_cache() {
     // A leftover entry at the former shared path must not block cache warming.
     let stale = out.join("pk.decoded.bin.tmp");
     std::fs::create_dir(&stale).unwrap();
+    let gate = tmp.path().join("publication-gate");
+    std::fs::create_dir(&gate).unwrap();
     let prove_to = |name: &str, cache| {
-        prove_command(&out, cache)
+        let mut command = prove_command(&out, cache);
+        if cache {
+            command.env("XARK_TEST_CACHE_PUBLISH_GATE", &gate);
+        }
+        command
             .arg("--out")
             .arg(tmp.path().join(name))
             .arg("--verify")
@@ -97,6 +104,30 @@ fn concurrent_provers_publish_complete_decoded_key_cache() {
     };
     let first = prove_to("proof-one", true);
     let second = prove_to("proof-two", true);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let staged = loop {
+        let ready = gate.read_dir().unwrap().flatten().collect::<Vec<_>>();
+        if ready.len() == 2 || Instant::now() >= deadline {
+            break ready;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let staged_paths = staged
+        .iter()
+        .map(|marker| {
+            let staging_path = std::fs::read_to_string(marker.path()).unwrap();
+            (Path::new(&staging_path).is_file(), staging_path)
+        })
+        .collect::<Vec<_>>();
+    // Always release children before asserting, including on a timeout.
+    std::fs::write(gate.join("release"), []).unwrap();
+    assert_eq!(staged.len(), 2, "both writers must finish staging");
+    for (exists, staging_path) in staged_paths {
+        assert!(
+            exists,
+            "staged key absent before publication: {staging_path}"
+        );
+    }
     for child in [first, second] {
         let output = child.wait_with_output().unwrap();
         assert!(
