@@ -348,10 +348,26 @@ fn prove_streaming(
                 pk = c;
             }
             _ if args.cache => {
-                let tmp = decoded.with_extension("bin.tmp");
-                let f = fs::File::create(&tmp)
-                    .with_context(|| format!("creating {}", tmp.display()))?;
-                pk.tee_uncompressed(Box::new(std::io::BufWriter::with_capacity(1 << 20, f)))?;
+                // Each prover owns its staging file until the complete key is published.
+                let dir = decoded
+                    .parent()
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let mut staging = tempfile::Builder::new();
+                staging.prefix(".xark-decoded-");
+                // Preserve access to the shared proving key cache, subject to the umask.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    staging.permissions(fs::Permissions::from_mode(0o666));
+                }
+                let tmp = staging
+                    .tempfile_in(dir)
+                    .with_context(|| format!("staging {}", decoded.display()))?;
+                pk.tee_uncompressed(Box::new(std::io::BufWriter::with_capacity(
+                    1 << 20,
+                    tmp.as_file().try_clone()?,
+                )))?;
                 tee_tmp = Some(tmp);
             }
             _ => {}
@@ -387,13 +403,30 @@ fn prove_streaming(
             anyhow::bail!("streaming prove: {e}")
         }
     };
-    if let Some(tmp) = tee_tmp {
-        if pk.finish_tee()? {
-            fs::rename(&tmp, &decoded).with_context(|| format!("writing {}", decoded.display()))?;
-            println!("Wrote {} (decoded key cache)", decoded.display());
-        } else {
-            let _ = fs::remove_file(&tmp);
+    if let Some(tmp) = tee_tmp
+        && pk.finish_tee()?
+    {
+        // Developer-only synchronization point for the concurrent cache writer
+        // regression. Both processes must finish staging before either publishes.
+        #[cfg(feature = "debug")]
+        if let Some(gate) = std::env::var_os("XARK_TEST_CACHE_PUBLISH_GATE") {
+            let gate = std::path::Path::new(&gate);
+            fs::write(
+                gate.join(format!("ready-{}", std::process::id())),
+                tmp.path().to_string_lossy().as_bytes(),
+            )?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while !gate.join("release").exists() {
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!("timed out waiting for cache publication test gate");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
+        tmp.persist(&decoded)
+            .map_err(|e| e.error)
+            .with_context(|| format!("writing {}", decoded.display()))?;
+        println!("Wrote {} (decoded key cache)", decoded.display());
     }
     let times = ProveTimes {
         solve: t_solve,

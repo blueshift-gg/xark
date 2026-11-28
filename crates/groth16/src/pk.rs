@@ -329,6 +329,12 @@ impl SerializedPk<BufReader<File>> {
     /// Stream a proving key from disk.
     pub fn open(path: &Path) -> Result<Self, PkError> {
         let mut pk = Self::new(BufReader::with_capacity(1 << 20, File::open(path)?))?;
+        // A seek past EOF succeeds. Check the final vector's extent before a
+        // caller can select a cached key whose header still matches.
+        let metadata = pk.r.get_ref().metadata()?;
+        if metadata.is_file() && pk.r.stream_position()? > metadata.len() {
+            return Err(invalid_pk("proving key ends before the last vector"));
+        }
         pk.path = Some(path.to_path_buf());
         Ok(pk)
     }
