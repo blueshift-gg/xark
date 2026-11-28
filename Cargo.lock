@@ -4929,6 +4929,7 @@ dependencies = [
  "xark-backend",
  "xark-ir",
  "xark-prover",
+ "zeroize",
 ]
 
 [[package]]

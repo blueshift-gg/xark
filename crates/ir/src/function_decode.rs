@@ -1253,6 +1253,41 @@ fn bn254_values(assign: &[Option<crate::solver::Fp>]) -> impl Fn(u32) -> ark_bn2
     }
 }
 
+/// Keep the solved dense BN254 witness covered through row evaluation. A row
+/// evaluator can unwind before the ordinary unsatisfied-row return path.
+struct SatisfiedSlots(Vec<Option<crate::solver::Fp>>);
+
+#[cfg(test)]
+thread_local! {
+    static SATISFIED_SLOT_DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+}
+
+impl Drop for SatisfiedSlots {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        #[cfg(test)]
+        let had_secret = self.0.iter().flatten().any(|value| {
+            matches!(value, crate::solver::Fp::Bn254(scalar) if *scalar != ark_bn254::Fr::from(0u64))
+        });
+        for value in self.0.iter_mut().flatten() {
+            if let crate::solver::Fp::Bn254(scalar) = value {
+                scalar.zeroize();
+            }
+        }
+        #[cfg(test)]
+        SATISFIED_SLOT_DROP_CHECK.with(|check| {
+            if check.get().is_some() {
+                check.set(Some((
+                    had_secret,
+                    self.0.iter().flatten().all(|value| {
+                        matches!(value, crate::solver::Fp::Bn254(scalar) if *scalar == ark_bn254::Fr::from(0u64))
+                    }),
+                )));
+            }
+        });
+    }
+}
+
 /// Streaming pass 2 for a witness not known to satisfy every row: re-stream the
 /// constraints, gathering each *suspect* var's univariate `(a,b,c)` reductions,
 /// then run the exact flat two-valued test on them. Suspects are vars that
@@ -1724,7 +1759,6 @@ impl PreparedStreamSolver {
         inputs: &BTreeMap<u32, String>,
     ) -> Result<BTreeMap<u32, crate::solver::Fp>, String> {
         use rayon::prelude::*;
-        use zeroize::Zeroize;
 
         let mut assign = eval::solve_witness(
             eval::WitnessProgram::Compiled(&self.witness),
@@ -1734,9 +1768,10 @@ impl PreparedStreamSolver {
             inputs,
         )
         .map(bn254_witness_slots)
+        .map(SatisfiedSlots)
         .map_err(|e| format!("solve: {e:?}"))?;
         let sat_ok = {
-            let z = bn254_values(&assign);
+            let z = bn254_values(&assign.0);
             self.rows
                 .top
                 .par_iter()
@@ -1755,14 +1790,9 @@ impl PreparedStreamSolver {
                 .reduce(|| true, |a, b| a && b)
         };
         if !sat_ok {
-            for value in assign.iter_mut().flatten() {
-                if let crate::solver::Fp::Bn254(scalar) = value {
-                    scalar.zeroize();
-                }
-            }
             return Err("a constraint is unsatisfied".to_string());
         }
-        Ok(crate::solver::slots_into_map(assign))
+        Ok(crate::solver::slots_into_map(std::mem::take(&mut assign.0)))
     }
 
     /// Run the same full row and under-constraint analysis as [`stream_solve_verify`].
@@ -3552,6 +3582,21 @@ mod eval {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn satisfied_slots_wipe_when_row_evaluation_unwinds() {
+        SATISFIED_SLOT_DROP_CHECK.with(|check| check.set(Some((false, false))));
+        let unwind = std::panic::catch_unwind(|| {
+            let _slots = SatisfiedSlots(vec![Some(crate::solver::Fp::Bn254(ark_bn254::Fr::from(
+                7u64,
+            )))]);
+            panic!("row evaluator panic");
+        });
+        assert!(unwind.is_err());
+        SATISFIED_SLOT_DROP_CHECK.with(|check| {
+            assert_eq!(check.replace(None), Some((true, true)));
+        });
+    }
 
     fn row(a: u32, b: u32, c: u32) -> R1csRow {
         R1csRow {

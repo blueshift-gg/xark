@@ -11,6 +11,59 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::{CircuitProof, ProveError, ProveInputs, owned_rows_for_key};
 
+/// Temporary decimal encodings are witness-derived and must be cleared even if
+/// input validation or witness solving unwinds.
+struct DecimalInputs(BTreeMap<u32, String>);
+
+#[cfg(test)]
+thread_local! {
+    static DECIMAL_DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+    static ASSIGNMENT_DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+}
+
+impl Drop for DecimalInputs {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let had_secret = self.0.values().any(|value| !value.is_empty());
+        self.0.values_mut().for_each(Zeroize::zeroize);
+        #[cfg(test)]
+        DECIMAL_DROP_CHECK.with(|check| {
+            if check.get().is_some() {
+                check.set(Some((had_secret, self.0.values().all(String::is_empty))));
+            }
+        });
+    }
+}
+
+/// The solver returns field values by variable id. Keep ownership of them until
+/// the Groth16 witness is built, including if that conversion unwinds.
+struct SolvedAssignment(BTreeMap<u32, Fp>);
+
+impl Drop for SolvedAssignment {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let had_secret = self.0.values().any(
+            |value| matches!(value, Fp::Bn254(scalar) if *scalar != ark_bn254::Fr::from(0u64)),
+        );
+        for value in self.0.values_mut() {
+            if let Fp::Bn254(scalar) = value {
+                scalar.zeroize();
+            }
+        }
+        #[cfg(test)]
+        ASSIGNMENT_DROP_CHECK.with(|check| {
+            if check.get().is_some() {
+                check.set(Some((
+                    had_secret,
+                    self.0.values().all(|value| {
+                        matches!(value, Fp::Bn254(scalar) if *scalar == ark_bn254::Fr::from(0u64))
+                    }),
+                )));
+            }
+        });
+    }
+}
+
 /// Repeated BN254 proving for one immutable circuit and resident key.
 ///
 /// Construction validates the key's points and prepares the witness and row
@@ -83,7 +136,7 @@ impl PreparedCpuProver {
     /// Solve, prove and self-check a fresh request. The proof and public inputs
     /// use the same canonical encodings as [`crate::Circuit::prove`].
     pub fn prove(&self, inputs: impl ProveInputs) -> Result<CircuitProof, ProveError> {
-        let mut decimal = BTreeMap::new();
+        let mut decimal = DecimalInputs(BTreeMap::new());
         let solved = (|| {
             let values = Zeroizing::new(inputs.into_inputs());
             for (name, value) in values.iter() {
@@ -91,27 +144,23 @@ impl PreparedCpuProver {
                     .inputs
                     .get(name)
                     .ok_or_else(|| ProveError("unknown circuit input".into()))?;
-                let std::collections::btree_map::Entry::Vacant(entry) = decimal.entry(*id) else {
+                let std::collections::btree_map::Entry::Vacant(entry) = decimal.0.entry(*id) else {
                     return Err(ProveError("duplicate circuit input".into()));
                 };
                 entry.insert(value.into_bigint().to_string());
             }
             drop(values);
-            if decimal.len() != self.inputs.len() {
+            if decimal.0.len() != self.inputs.len() {
                 return Err(ProveError("missing circuit input".into()));
             }
-            self.solver.solve_satisfied(&decimal).map_err(ProveError)
+            self.solver.solve_satisfied(&decimal.0).map_err(ProveError)
         })();
-        decimal.values_mut().for_each(Zeroize::zeroize);
-        let mut assignment = solved?;
+        drop(decimal);
+        let assignment = SolvedAssignment(solved?);
         let layout = self.rows.layout();
         let witness =
-            Zeroizing::new(layout.assignment(|id| assignment.get(&id).and_then(Fp::as_bn254_fr)));
-        for value in assignment.values_mut() {
-            if let Fp::Bn254(scalar) = value {
-                scalar.zeroize();
-            }
-        }
+            Zeroizing::new(layout.assignment(|id| assignment.0.get(&id).and_then(Fp::as_bn254_fr)));
+        drop(assignment);
         let proof = xark_groth16::prove(
             &*self.rows,
             &witness,
@@ -131,5 +180,29 @@ impl PreparedCpuProver {
             .serialize_compressed(&mut result.public_inputs)
             .map_err(|err| ProveError(err.to_string()))?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_witness_values_wipe_on_unwind() {
+        DECIMAL_DROP_CHECK.with(|check| check.set(Some((false, false))));
+        ASSIGNMENT_DROP_CHECK.with(|check| check.set(Some((false, false))));
+        let unwind = std::panic::catch_unwind(|| {
+            let _decimal = DecimalInputs(BTreeMap::from([(1, "123456789".to_owned())]));
+            let _assignment =
+                SolvedAssignment(BTreeMap::from([(2, Fp::Bn254(ark_bn254::Fr::from(7u64)))]));
+            panic!("request unwind");
+        });
+        assert!(unwind.is_err());
+        DECIMAL_DROP_CHECK.with(|check| {
+            assert_eq!(check.replace(None), Some((true, true)));
+        });
+        ASSIGNMENT_DROP_CHECK.with(|check| {
+            assert_eq!(check.replace(None), Some((true, true)));
+        });
     }
 }
