@@ -20,7 +20,7 @@ use crate::accel::{Accelerator, sum_g1, sum_g2, valid_msm_output};
 use crate::keystream::{KeyEvent, KeyStream, KeyStreamError};
 use crate::msm::{Scalar, StreamingMsm};
 use crate::pk::KeyVector;
-use crate::prover::{ProveError, ProverConfig};
+use crate::prover::{ProveError, ProverConfig, check_verifying_key_inputs};
 use crate::qap;
 use crate::r1cs::ConstraintSource;
 
@@ -89,13 +89,7 @@ impl<S: ConstraintSource> Fold<'_, S> {
                 domain,
                 ..
             } => {
-                if vk.gamma_abc_g1.len() != layout.num_instance() {
-                    return Err(mismatch(format!(
-                        "vk has {} public inputs, circuit has {}",
-                        vk.gamma_abc_g1.len().saturating_sub(1),
-                        layout.num_instance() - 1
-                    )));
-                }
+                check_verifying_key_inputs(vk, layout.num_instance())?;
                 *self.header = Some((vk.clone(), beta_g1, delta_g1));
                 if self.h.is_none() {
                     // The header states the domain (v2); an older key implies

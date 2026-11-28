@@ -11,15 +11,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ark_bn254::{Bn254, Fr};
-use ark_ff::{UniformRand, Zero};
+use ark_bn254::{Bn254, Fq, Fr};
+use ark_ff::{BigInteger, PrimeField, UniformRand, Zero};
 use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP};
 use ark_poly::GeneralEvaluationDomain;
 use ark_relations::gr1cs::{
     ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, OptimizationGoal,
     R1CS_PREDICATE_LABEL, SynthesisMode,
 };
-use ark_serialize::{CanonicalSerialize, Compress};
+use ark_serialize::{CanonicalSerialize, Compress, SerializationError};
 use ark_snark::SNARK;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -27,7 +27,7 @@ use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{Accelerated, Prover};
 use xark_groth16::{
     BytecodeSource, ConstraintSource, DomainKind, FftConfig, InMemoryPk, ProgramSource, ProveError,
-    ProverConfig, SerializedPk, prove, qap,
+    ProverConfig, SerializedPk, prove, prove_with_randomness, qap,
 };
 use xark_groth16::{Proof, ProvingKey, VerifyingKey};
 use xark_ir::r1cs::{FieldSpec, R1csConstraint, R1csProgram, Variable, Visibility};
@@ -635,6 +635,195 @@ fn every_prover_makes_the_same_proof() {
         .unwrap();
         assert_eq!(got, want, "{}", prover.name());
     }
+}
+
+#[test]
+fn proving_key_requires_the_constant_even_without_public_inputs() {
+    let mut prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    // Exercise the genuine KYC relation with all its inputs kept private.
+    for var in &mut prog.variables {
+        if var.visibility == Visibility::Public {
+            var.visibility = Visibility::Private;
+        }
+    }
+    let assign = kyc_witness();
+    let src = ProgramSource::new(&prog);
+    let z = src.layout().assignment_from_map(&assign);
+    assert_eq!(src.layout().num_instance(), 1);
+    let (mut pk, vk) = ArkG16::circuit_specific_setup(
+        XarkCircuit::for_setup_preminimized(prog.clone()),
+        &mut ChaCha20Rng::seed_from_u64(9),
+    )
+    .unwrap();
+    assert_eq!(vk.gamma_abc_g1.len(), 1);
+    let mut rng = ChaCha20Rng::seed_from_u64(10);
+    let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+    let cfg = ProverConfig::default();
+    let push_key = |bytes: &[u8]| {
+        let mut accel = xark_groth16::Local;
+        let mut pp = xark_groth16::PushProver::new(&src, z.clone(), r, s, cfg.clone(), &mut accel)?;
+        pp.push(bytes, &mut accel)?;
+        pp.finish()
+    };
+    let proof =
+        prove_with_randomness(&src, &z, &mut InMemoryPk::new(&pk), r, s, &cfg, &mut ()).unwrap();
+    assert!(xark_groth16::verify(&vk, &[], &proof).unwrap());
+    assert!(ArkG16::verify(&vk, &[], &proof).unwrap());
+    for compress in [Compress::Yes, Compress::No] {
+        let bytes = pk_bytes(&pk, compress, true);
+        let mut pull = SerializedPk::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            prove_with_randomness(&src, &z, &mut pull, r, s, &cfg, &mut ()).unwrap(),
+            proof
+        );
+        assert_eq!(push_key(&bytes).unwrap(), proof);
+    }
+
+    pk.vk.gamma_abc_g1.clear();
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let assert_missing = |result| {
+        assert!(matches!(
+            result,
+            Err(ProveError::KeyMismatch(message))
+                if message == "verifying key is missing its constant coefficient"
+        ));
+    };
+    assert_missing(prove_with_randomness(
+        &src,
+        &z,
+        &mut InMemoryPk::new(&pk),
+        r,
+        s,
+        &cfg,
+        &mut (),
+    ));
+    assert_missing(prove_with_randomness(
+        &src,
+        &z,
+        &mut SerializedPk::from_bytes(&bytes).unwrap(),
+        r,
+        s,
+        &cfg,
+        &mut (),
+    ));
+    assert_missing(push_key(&bytes));
+}
+
+#[test]
+fn verifying_key_layout_checks_all_proving_paths() {
+    use xark_groth16::pk::{MAX_HEADER_LEN, PkError};
+    let src = BytecodeSource::new(KYC_XBC).unwrap();
+    let prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
+        .unwrap()
+        .into_r1cs();
+    let assign = kyc_witness();
+    let z = src.layout().assignment_from_map(&assign);
+    let circ = XarkCircuit::for_proving_preminimized(prog, assign);
+    let public = circ.public_inputs();
+    let (pk, vk) =
+        ArkG16::circuit_specific_setup(circ, &mut ChaCha20Rng::seed_from_u64(97)).unwrap();
+    assert!(!public.is_empty());
+    assert_eq!(vk.gamma_abc_g1.len(), public.len() + 1);
+
+    let cfg = ProverConfig {
+        self_check: true,
+        ..ProverConfig::default()
+    };
+    let mut rng = ChaCha20Rng::seed_from_u64(98);
+    let (r, s) = (Fr::rand(&mut rng), Fr::rand(&mut rng));
+    let push = |bytes: &[u8]| {
+        let mut accel = xark_groth16::Local;
+        let mut prover =
+            xark_groth16::PushProver::new(&src, z.clone(), r, s, cfg.clone(), &mut accel)?;
+        // Split before the v2 header ends, then vary the vector chunk seams.
+        let (prefix, rest) = bytes.split_at(13);
+        prover.push(prefix, &mut accel)?;
+        for chunk in rest.chunks(8191) {
+            prover.push(chunk, &mut accel)?;
+        }
+        prover.finish()
+    };
+    let check_paths = |key: &ProvingKey<Bn254>, bytes: &[u8]| {
+        [
+            prove_with_randomness(&src, &z, &mut InMemoryPk::new(key), r, s, &cfg, &mut ()),
+            SerializedPk::from_bytes(bytes)
+                .map_err(ProveError::from)
+                .and_then(|mut stream| {
+                    prove_with_randomness(&src, &z, &mut stream, r, s, &cfg, &mut ())
+                }),
+            push(bytes),
+        ]
+    };
+    let bytes = pk_bytes(&pk, Compress::Yes, true);
+    let mut valid = check_paths(&pk, &bytes).into_iter().map(Result::unwrap);
+    let reference = valid.next().unwrap();
+    assert!(valid.all(|proof| proof == reference));
+    assert!(ArkG16::verify(&vk, &public, &reference).unwrap());
+    let mut changed = public;
+    changed[0] += Fr::from(1u64);
+    assert!(!ArkG16::verify(&vk, &changed, &reference).unwrap());
+
+    for (name, key) in [
+        ("short arity", {
+            let mut key = pk.clone();
+            key.vk.gamma_abc_g1.pop();
+            key
+        }),
+        ("long arity", {
+            let mut key = pk.clone();
+            key.vk.gamma_abc_g1.push(key.vk.gamma_abc_g1[0]);
+            key
+        }),
+    ] {
+        let encoded = pk_bytes(&key, Compress::No, true);
+        for result in check_paths(&key, &encoded) {
+            assert!(
+                matches!(result, Err(ProveError::KeyMismatch(message)) if message.starts_with("vk has ")),
+                "{name}"
+            );
+        }
+    }
+    let header_end = MAX_HEADER_LEN;
+    let vk_end = header_end + pk.vk.serialized_size(Compress::Yes);
+    assert!(matches!(
+        SerializedPk::from_bytes(&bytes[..header_end - 1]),
+        Err(PkError::Header(_))
+    ));
+    assert!(matches!(
+        SerializedPk::from_bytes(&bytes[..vk_end - 1]),
+        Err(PkError::Deserialize(SerializationError::IoError(error)))
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+    ));
+    for end in [header_end - 1, vk_end - 1] {
+        assert!(matches!(
+            push(&bytes[..end]),
+            Err(ProveError::KeyMismatch(message)) if message.starts_with("proving key ended early")
+        ));
+    }
+
+    let mut mismatched = pk;
+    mismatched.vk.gamma_abc_g1[0] = -mismatched.vk.gamma_abc_g1[0];
+    let encoded = pk_bytes(&mismatched, Compress::Yes, true);
+    for result in check_paths(&mismatched, &encoded) {
+        assert!(matches!(result, Err(ProveError::SelfCheckFailed)));
+    }
+
+    let mut noncanonical = bytes;
+    // Replace the x coordinate of alpha_g1 with p, preserving its valid point flags.
+    let mut modulus = Fq::MODULUS.to_bytes_le();
+    let coord = &mut noncanonical[header_end..header_end + modulus.len()];
+    *modulus.last_mut().unwrap() |= coord.last().unwrap() & 0b1100_0000;
+    coord.copy_from_slice(&modulus);
+    assert!(matches!(
+        SerializedPk::from_bytes(&noncanonical),
+        Err(PkError::Deserialize(SerializationError::InvalidData))
+    ));
+    assert!(matches!(
+        push(&noncanonical),
+        Err(ProveError::KeyMismatch(message)) if message.starts_with("proving key ended early")
+    ));
 }
 
 // ---- the worker decomposition, natively -------------------------------------------
