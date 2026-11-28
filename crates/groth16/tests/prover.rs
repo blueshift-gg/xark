@@ -23,7 +23,6 @@ use ark_serialize::{CanonicalSerialize, Compress, SerializationError};
 use ark_snark::SNARK;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use xark_groth16::pk::{MAX_HEADER_LEN, PkError};
 use xark_groth16::r1cs::{RowChunk, eval_rows, first_unsatisfied};
 use xark_groth16::{Accelerated, Prover};
 use xark_groth16::{
@@ -714,6 +713,7 @@ fn proving_key_requires_the_constant_even_without_public_inputs() {
 
 #[test]
 fn verifying_key_layout_checks_all_proving_paths() {
+    use xark_groth16::pk::{MAX_HEADER_LEN, PkError};
     let src = BytecodeSource::new(KYC_XBC).unwrap();
     let prog = xark_ir::function_decode::expand_function_blob_reduced(KYC_XBC)
         .unwrap()
