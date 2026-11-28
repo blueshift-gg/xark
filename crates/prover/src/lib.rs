@@ -20,6 +20,8 @@ use xark_ir::{FieldConst, LinearCombination as IrLc, R1csProgram, VarId, Visibil
 
 pub mod inputs;
 pub use inputs::{InputValue, flatten_inputs, resolve_input_ids};
+mod prepared;
+pub use prepared::PreparedCpuProver;
 
 /// Developer-diagnostics env-flag probe. Only reads the environment under the
 /// `debug` feature; a normal release build compiles this to `false` so the
@@ -687,6 +689,15 @@ pub fn rows_for_key(
     a_len: usize,
     cached: Option<Vec<u8>>,
 ) -> Result<Box<dyn xark_groth16::ConstraintSource>, String> {
+    let rows = owned_rows_for_key(xbc, a_len, cached)?;
+    Ok(rows)
+}
+
+fn owned_rows_for_key(
+    xbc: &[u8],
+    a_len: usize,
+    cached: Option<Vec<u8>>,
+) -> Result<Box<dyn xark_groth16::ConstraintSource + Send>, String> {
     use sha2::Digest;
     use xark_groth16::ConstraintSource;
     let src =

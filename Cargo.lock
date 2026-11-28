@@ -4929,6 +4929,7 @@ dependencies = [
  "xark-backend",
  "xark-ir",
  "xark-prover",
+ "zeroize",
 ]
 
 [[package]]
@@ -4980,6 +4981,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -5061,6 +5063,7 @@ dependencies = [
  "sha2 0.11.0",
  "xark-groth16",
  "xark-ir",
+ "zeroize",
 ]
 
 [[package]]

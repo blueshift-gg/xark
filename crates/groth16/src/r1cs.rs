@@ -25,6 +25,30 @@ use rayon::prelude::*;
 use xark_ir::function_decode::ReducedRowStream;
 use xark_ir::r1cs_stream::RowFile;
 use xark_ir::{FieldConst, LinearCombination, R1csProgram, VarId, Visibility};
+use zeroize::Zeroize;
+
+/// Covers partially appended witness values if the parallel assignment callback
+/// unwinds. The returned vector is wrapped by the caller for its later lifetime.
+struct PartialAssignment(Vec<Fr>);
+
+#[cfg(test)]
+static PARTIAL_ASSIGNMENT_DROP_CHECK: std::sync::Mutex<Option<(bool, bool)>> =
+    std::sync::Mutex::new(None);
+
+impl Drop for PartialAssignment {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let had_value = self.0.iter().any(|value| !value.is_zero());
+        self.0.iter_mut().for_each(Zeroize::zeroize);
+        #[cfg(test)]
+        {
+            let mut check = PARTIAL_ASSIGNMENT_DROP_CHECK.lock().unwrap();
+            if check.is_some() {
+                *check = Some((had_value, self.0.iter().all(Zero::is_zero)));
+            }
+        }
+    }
+}
 
 /// IR variable id → assignment position, matching arkworks' allocation order.
 #[derive(Clone, Debug)]
@@ -125,14 +149,16 @@ impl VarLayout {
     /// The full assignment `z` (`z[0] = 1`), reading each variable's value by id.
     /// Unassigned variables are zero (as in `XarkCircuit`).
     pub fn assignment(&self, value: impl Fn(VarId) -> Option<Fr> + Sync) -> Vec<Fr> {
-        let mut z = Vec::with_capacity(self.num_vars());
-        z.push(Fr::from(1u64));
-        z.par_extend(
+        // A parallel callback can unwind after writing part of this witness.
+        // Guard the vector before any field value is appended.
+        let mut z = PartialAssignment(Vec::with_capacity(self.num_vars()));
+        z.0.push(Fr::from(1u64));
+        z.0.par_extend(
             self.ids
                 .par_iter()
                 .map(|&id| value(id).unwrap_or_else(Fr::zero)),
         );
-        z
+        std::mem::take(&mut z.0)
     }
 
     /// The full assignment from a solved `VarId → Fr` map.
@@ -661,7 +687,9 @@ impl ConstraintSource for RowFileSource {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::{PositionMap, VarLayout};
+    use super::{PARTIAL_ASSIGNMENT_DROP_CHECK, PositionMap, VarLayout};
+    use ark_bn254::Fr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn sparse_variable_ids_do_not_require_id_sized_storage() {
@@ -671,5 +699,27 @@ mod layout_tests {
         assert_eq!(layout.position(u32::MAX), Some(2));
         assert_eq!(layout.position(1), None);
         assert!(matches!(layout.positions, PositionMap::Sparse(_)));
+    }
+
+    #[test]
+    fn assignment_callback_unwind_drops_partial_witness() {
+        let layout = VarLayout::new((0..64).map(|id| (id, false)));
+        let visited = AtomicUsize::new(0);
+        *PARTIAL_ASSIGNMENT_DROP_CHECK.lock().unwrap() = Some((false, false));
+        let result = std::panic::catch_unwind(|| {
+            layout.assignment(|id| {
+                visited.fetch_add(1, Ordering::Relaxed);
+                if id == 31 {
+                    panic!("assignment callback failed");
+                }
+                Some(Fr::from(7u64))
+            })
+        });
+        assert!(result.is_err());
+        assert!(visited.load(Ordering::Relaxed) > 0);
+        assert_eq!(
+            PARTIAL_ASSIGNMENT_DROP_CHECK.lock().unwrap().take(),
+            Some((true, true))
+        );
     }
 }

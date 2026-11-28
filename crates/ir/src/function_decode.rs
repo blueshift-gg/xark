@@ -1164,6 +1164,12 @@ fn note(
 /// One row's `(a, b)` with `a ≠ 0` for a var — any of them (the first to land).
 type Quadratic = std::sync::OnceLock<(crate::solver::Fp, crate::solver::Fp)>;
 
+#[derive(Clone, Copy)]
+enum RowProgram<'a> {
+    Symbolic(&'a [GDef], &'a [CItem]),
+    Compiled(&'a eval::Compiled),
+}
+
 /// Streaming pass 1: classify every variable with a **dense flag byte** while
 /// (optionally) checking satisfiability, in a single parallel sweep of the
 /// compact constraint stream. Returns the flag array (indexed by var id),
@@ -1176,13 +1182,11 @@ type Quadratic = std::sync::OnceLock<(crate::solver::Fp, crate::solver::Fp)>;
 /// when a var is never pinned), so the parallel `fetch_or` merge across shards is
 /// sound — no need to preserve global row order.
 fn classify_and_check(
-    defs: &[GDef],
-    top_c: &[CItem],
+    program: RowProgram<'_>,
     assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     num_vars: usize,
     check_sat: bool,
-    compiled: Option<&eval::Compiled>,
 ) -> (Vec<std::sync::atomic::AtomicU8>, bool, Vec<Quadratic>) {
     use rayon::prelude::*;
     use std::sync::atomic::AtomicU8;
@@ -1193,24 +1197,28 @@ fn classify_and_check(
     } else {
         Vec::new()
     };
-    if let Some(c) = compiled {
-        // Over BN254: the rows as the prover's evaluator compiles them (`Fr`
-        // coefficients, resolved references), each costing its field operations and
-        // nothing else, where building a row allocated three LCs and a map.
-        use crate::solver::Fp;
-        let z = bn254_values(assign);
-        let sat_ok = c
-            .top
-            .par_iter()
-            .map(|item| {
-                let mut flag = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, _c: ark_bn254::Fr| {
-                    note(v, Fp::Bn254(a), Fp::Bn254(b), &flags, &quadratic);
-                };
-                eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut flag)
-            })
-            .reduce(|| true, |x, y| x && y);
-        return (flags, !check_sat || sat_ok, quadratic);
-    }
+    let (defs, top_c) = match program {
+        RowProgram::Symbolic(defs, top_c) => (defs, top_c),
+        RowProgram::Compiled(c) => {
+            // Over BN254: the rows as the prover's evaluator compiles them (`Fr`
+            // coefficients, resolved references), each costing its field operations and
+            // nothing else, where building a row allocated three LCs and a map.
+            use crate::solver::Fp;
+            let z = bn254_values(assign);
+            let sat_ok = c
+                .top
+                .par_iter()
+                .map(|item| {
+                    let mut flag =
+                        |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, _c: ark_bn254::Fr| {
+                            note(v, Fp::Bn254(a), Fp::Bn254(b), &flags, &quadratic);
+                        };
+                    eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut flag)
+                })
+                .reduce(|| true, |x, y| x && y);
+            return (flags, !check_sat || sat_ok, quadratic);
+        }
+    };
     let sat_ok = top_c
         .par_iter()
         .map(|item| {
@@ -1245,6 +1253,41 @@ fn bn254_values(assign: &[Option<crate::solver::Fp>]) -> impl Fn(u32) -> ark_bn2
     }
 }
 
+/// Keep the solved dense BN254 witness covered through row evaluation. A row
+/// evaluator can unwind before the ordinary unsatisfied-row return path.
+struct SatisfiedSlots(Vec<Option<crate::solver::Fp>>);
+
+#[cfg(test)]
+thread_local! {
+    static SATISFIED_SLOT_DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+}
+
+impl Drop for SatisfiedSlots {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        #[cfg(test)]
+        let had_secret = self.0.iter().flatten().any(|value| {
+            matches!(value, crate::solver::Fp::Bn254(scalar) if *scalar != ark_bn254::Fr::from(0u64))
+        });
+        for value in self.0.iter_mut().flatten() {
+            if let crate::solver::Fp::Bn254(scalar) = value {
+                scalar.zeroize();
+            }
+        }
+        #[cfg(test)]
+        SATISFIED_SLOT_DROP_CHECK.with(|check| {
+            if check.get().is_some() {
+                check.set(Some((
+                    had_secret,
+                    self.0.iter().flatten().all(|value| {
+                        matches!(value, crate::solver::Fp::Bn254(scalar) if *scalar == ark_bn254::Fr::from(0u64))
+                    }),
+                )));
+            }
+        });
+    }
+}
+
 /// Streaming pass 2 for a witness not known to satisfy every row: re-stream the
 /// constraints, gathering each *suspect* var's univariate `(a,b,c)` reductions,
 /// then run the exact flat two-valued test on them. Suspects are vars that
@@ -1258,6 +1301,7 @@ fn two_valued_suspects(
     suspects: &std::collections::BTreeSet<u32>,
 ) -> std::collections::BTreeSet<u32> {
     use crate::solver::Fp;
+
     use rayon::prelude::*;
     // Gather every suspect's referencing rows, in parallel over the shards (a
     // suspect's verdict doesn't depend on the order of its rows). On circuits
@@ -1311,27 +1355,28 @@ fn two_valued_suspects(
 /// the rows: on circuits built from multiplications nearly every derived var
 /// is a suspect. Over BN254 the sweep runs the compiled rows, as pass 1 did.
 fn two_valued_satisfied(
-    defs: &[GDef],
-    top_c: &[CItem],
+    program: RowProgram<'_>,
     assign: &[Option<crate::solver::Fp>],
     modulus: &num_bigint::BigUint,
     suspects: &std::collections::BTreeSet<u32>,
     quadratic: &[Quadratic],
-    compiled: Option<&eval::Compiled>,
 ) -> std::collections::BTreeSet<u32> {
     use rayon::prelude::*;
     let test = SecondRoots::new(assign, modulus, suspects, quadratic);
-    if let Some(c) = compiled {
-        use crate::solver::Fp;
-        let z = bn254_values(assign);
-        c.top.par_iter().for_each(|item| {
-            let mut check = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, cc: ark_bn254::Fr| {
-                test.check_poly(v, &Fp::Bn254(a), &Fp::Bn254(b), &Fp::Bn254(cc));
-            };
-            eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut check);
-        });
-        return test.survivors();
-    }
+    let (defs, top_c) = match program {
+        RowProgram::Symbolic(defs, top_c) => (defs, top_c),
+        RowProgram::Compiled(c) => {
+            use crate::solver::Fp;
+            let z = bn254_values(assign);
+            c.top.par_iter().for_each(|item| {
+                let mut check = |v: u32, a: ark_bn254::Fr, b: ark_bn254::Fr, cc: ark_bn254::Fr| {
+                    test.check_poly(v, &Fp::Bn254(a), &Fp::Bn254(b), &Fp::Bn254(cc));
+                };
+                eval::classify(c, item, &eval::TOP, &[], &z, &mut Vec::new(), &mut check);
+            });
+            return test.survivors();
+        }
+    };
     top_c.par_iter().for_each(|item| {
         expand_c_visit(
             defs,
@@ -1503,90 +1548,87 @@ fn stream_underconstrained(
     modulus: &num_bigint::BigUint,
     check_sat: bool,
 ) -> (bool, Vec<crate::solver::UnderConstrained>) {
-    // Over BN254 both passes run the compiled rows (`eval`); compiled once here.
     let compiled = crate::solver::is_bn254(modulus).then(|| eval::compile(defs, top_c));
-    let compiled = compiled.as_ref();
-    let (flags, sat_ok, quadratic) = classify_and_check(
-        defs,
-        top_c,
-        assign,
-        modulus,
-        vars.len(),
-        check_sat,
-        compiled,
-    );
-    let suspects = select_suspects(&flags, vars);
+    let program = compiled
+        .as_ref()
+        .map_or(RowProgram::Symbolic(defs, top_c), RowProgram::Compiled);
+    let (flags, sat_ok, quadratic) =
+        classify_and_check(program, assign, modulus, vars.len(), check_sat);
+    let suspects = select_suspects(&flags, named_derived_vars(vars).map(|(id, _)| id));
     let two_valued = if suspects.is_empty() {
         std::collections::BTreeSet::new()
     } else if check_sat && sat_ok {
-        two_valued_satisfied(
-            defs, top_c, assign, modulus, &suspects, &quadratic, compiled,
-        )
+        two_valued_satisfied(program, assign, modulus, &suspects, &quadratic)
     } else {
         two_valued_suspects(defs, top_c, assign, modulus, &suspects)
     };
-    let out = assemble_underconstrained(&flags, vars, keep_extra, &two_valued);
+    let out = assemble_underconstrained(&flags, named_derived_vars(vars), keep_extra, &two_valued);
     (sat_ok, out)
 }
 
 /// Vars that survived pass-1 classification restricted-but-never-pinned — the
 /// only ones that need the pass-2 two-valued test.
-fn select_suspects(
-    flags: &[std::sync::atomic::AtomicU8],
-    vars: &[Var],
-) -> std::collections::BTreeSet<u32> {
-    use crate::primitive::VarRole;
-    use std::sync::atomic::Ordering;
+fn named_derived_vars(vars: &[Var]) -> impl Iterator<Item = (u32, Option<&str>)> {
     vars.iter()
         .filter(|var| matches!(var.role, VarRole::Derived))
-        .filter(|var| {
-            let f = flags[var.id as usize].load(Ordering::Relaxed);
-            f & F_SEEN != 0 && f & F_RESTRICTED != 0 && f & F_PINNED == 0
-        })
-        .map(|var| var.id)
-        .collect()
+        .map(|var| (var.id, Some(var.name.as_str())))
+}
+
+fn derived_vars_with_implicit_suffix(
+    signature: &[Var],
+    num_vars: usize,
+) -> impl Iterator<Item = (u32, Option<&str>)> {
+    named_derived_vars(signature).chain((signature.len()..num_vars).map(|id| (id as u32, None)))
+}
+
+fn select_suspects(
+    flags: &[std::sync::atomic::AtomicU8],
+    vars: impl Iterator<Item = u32>,
+) -> std::collections::BTreeSet<u32> {
+    use std::sync::atomic::Ordering;
+    vars.filter(|&id| {
+        let f = flags[id as usize].load(Ordering::Relaxed);
+        f & F_SEEN != 0 && f & F_RESTRICTED != 0 && f & F_PINNED == 0
+    })
+    .collect()
 }
 
 /// Turn the classification flags (+ the resolved two-valued suspect set) into the
 /// under-constraint verdict list, in var-id order — byte-identical to
 /// `analyze_underconstrained_cp`'s output on the same circuit.
-fn assemble_underconstrained(
+fn assemble_underconstrained<'a>(
     flags: &[std::sync::atomic::AtomicU8],
-    vars: &[Var],
+    vars: impl Iterator<Item = (u32, Option<&'a str>)>,
     keep_extra: &std::collections::BTreeSet<u32>,
     two_valued: &std::collections::BTreeSet<u32>,
 ) -> Vec<crate::solver::UnderConstrained> {
-    use crate::primitive::VarRole;
     use std::sync::atomic::Ordering;
-    vars.iter()
-        .filter(|var| matches!(var.role, VarRole::Derived))
-        .filter_map(|var| {
-            let v = var.id;
-            let f = flags[v as usize].load(Ordering::Relaxed);
-            let reason = if f & F_SEEN == 0 {
-                // Unreferenced: the flat analyzer only sees vars that survive the
-                // expand-time prune (kept only for an explicit advice-keep).
-                if keep_extra.contains(&v) {
-                    "no constraint references this variable"
-                } else {
-                    return None;
-                }
-            } else if f & F_PINNED != 0 {
-                return None; // linearly pinned → uniquely determined
-            } else if f & F_RESTRICTED == 0 {
-                "variable's coefficient is zero in every referencing constraint (free)"
-            } else if two_valued.contains(&v) {
-                "a different value also satisfies all its constraints (two-valued)"
+    vars.filter_map(|(v, name)| {
+        let f = flags[v as usize].load(Ordering::Relaxed);
+        let reason = if f & F_SEEN == 0 {
+            // Unreferenced: the flat analyzer only sees vars that survive the
+            // expand-time prune (kept only for an explicit advice-keep).
+            if keep_extra.contains(&v) {
+                "no constraint references this variable"
             } else {
-                return None; // restricted, single-valued → fine
-            };
-            Some(crate::solver::UnderConstrained {
-                var: v,
-                name: var.name.clone(),
-                reason: reason.into(),
-            })
+                return None;
+            }
+        } else if f & F_PINNED != 0 {
+            return None; // linearly pinned → uniquely determined
+        } else if f & F_RESTRICTED == 0 {
+            "variable's coefficient is zero in every referencing constraint (free)"
+        } else if two_valued.contains(&v) {
+            "a different value also satisfies all its constraints (two-valued)"
+        } else {
+            return None; // restricted, single-valued → fine
+        };
+        Some(crate::solver::UnderConstrained {
+            var: v,
+            name: name.map_or_else(|| format!("v{v}"), str::to_owned),
+            reason: reason.into(),
         })
-        .collect()
+    })
+    .collect()
 }
 
 /// **Streaming under-constraint analyzer** — the soundness twin of
@@ -1654,6 +1696,141 @@ pub fn stream_solve_verify(
         return Err("a constraint is unsatisfied".to_string());
     }
     Ok((crate::solver::slots_into_map(assign), out))
+}
+
+/// Reuse the immutable BN254 witness and row programs for one circuit artifact.
+/// Every invocation solves and checks a new witness with request-local state.
+pub struct PreparedStreamSolver {
+    inputs: Vec<Var>,
+    keep_extra: std::collections::BTreeSet<u32>,
+    num_vars: usize,
+    modulus: num_bigint::BigUint,
+    witness: eval::WProgram,
+    rows: eval::Compiled,
+}
+
+impl PreparedStreamSolver {
+    /// Decode and compile a trusted circuit artifact before admitting requests.
+    pub fn new(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.get(..6) != Some(b"XBC\0\x02\x00") {
+            return Err("expected a version 2 XBC artifact".into());
+        }
+        let CompactCore {
+            field,
+            inputs,
+            defs,
+            top_c,
+            top_w,
+            keep_extra,
+            num_vars,
+        } = catch_quietly(|| decode_core(bytes))
+            .map_err(|()| "malformed function artifact (XBC decode failed)".to_string())?;
+        let modulus = num_bigint::BigUint::parse_bytes(field.modulus_decimal.as_bytes(), 10)
+            .ok_or_else(|| "bad modulus".to_string())?;
+        if !crate::solver::is_bn254(&modulus) {
+            return Err("prepared streaming solver requires BN254".into());
+        }
+        let (witness, rows) = catch_quietly(|| {
+            (
+                eval::WProgram::compile(&defs, &top_w),
+                eval::compile(&defs, &top_c),
+            )
+        })
+        .map_err(|()| "malformed function artifact (XBC compile failed)".to_string())?;
+        Ok(Self {
+            inputs,
+            keep_extra,
+            num_vars,
+            modulus,
+            witness,
+            rows,
+        })
+    }
+
+    pub fn input_vars(&self) -> &[Var] {
+        &self.inputs
+    }
+
+    /// Solve a request and check every compiled row. Circuit under-constraint
+    /// analysis remains available through `solve_verify` for circuit audits;
+    /// proof generation requires satisfaction of the fixed circuit relation.
+    pub fn solve_satisfied(
+        &self,
+        inputs: &BTreeMap<u32, String>,
+    ) -> Result<BTreeMap<u32, crate::solver::Fp>, String> {
+        use rayon::prelude::*;
+
+        let mut assign = eval::solve_witness(
+            eval::WitnessProgram::Compiled(&self.witness),
+            self.input_vars(),
+            self.num_vars,
+            &self.modulus,
+            inputs,
+        )
+        .map(bn254_witness_slots)
+        .map(SatisfiedSlots)
+        .map_err(|e| format!("solve: {e:?}"))?;
+        let sat_ok = {
+            let z = bn254_values(&assign.0);
+            self.rows
+                .top
+                .par_iter()
+                .map(|item| {
+                    let mut ok = true;
+                    eval::eval(
+                        &self.rows,
+                        item,
+                        &eval::TOP,
+                        &z,
+                        [true; 3],
+                        &mut |[a, b, c]| ok &= a * b == c,
+                    );
+                    ok
+                })
+                .reduce(|| true, |a, b| a && b)
+        };
+        if !sat_ok {
+            return Err("a constraint is unsatisfied".to_string());
+        }
+        Ok(crate::solver::slots_into_map(std::mem::take(&mut assign.0)))
+    }
+
+    /// Run the same full row and under-constraint analysis as [`stream_solve_verify`].
+    pub fn solve_verify(
+        &self,
+        inputs: &BTreeMap<u32, String>,
+    ) -> Result<
+        (
+            BTreeMap<u32, crate::solver::Fp>,
+            Vec<crate::solver::UnderConstrained>,
+        ),
+        String,
+    > {
+        let assign = eval::solve_witness(
+            eval::WitnessProgram::Compiled(&self.witness),
+            self.input_vars(),
+            self.num_vars,
+            &self.modulus,
+            inputs,
+        )
+        .map(bn254_witness_slots)
+        .map_err(|e| format!("solve: {e:?}"))?;
+        let program = RowProgram::Compiled(&self.rows);
+        let (flags, sat_ok, quadratic) =
+            classify_and_check(program, &assign, &self.modulus, self.num_vars, true);
+        if !sat_ok {
+            return Err("a constraint is unsatisfied".to_string());
+        }
+        let derived = || derived_vars_with_implicit_suffix(&self.inputs, self.num_vars);
+        let suspects = select_suspects(&flags, derived().map(|(id, _)| id));
+        let two_valued = if suspects.is_empty() {
+            std::collections::BTreeSet::new()
+        } else {
+            two_valued_satisfied(program, &assign, &self.modulus, &suspects, &quadratic)
+        };
+        let out = assemble_underconstrained(&flags, derived(), &self.keep_extra, &two_valued);
+        Ok((crate::solver::slots_into_map(assign), out))
+    }
 }
 
 /// Count the R1CS constraints by **streaming** them out of the compact bytecode
@@ -2003,13 +2180,23 @@ fn solve_streamed(
         })
         .map_err(|e| format!("solve: {e:?}"));
     }
-    let w = eval::solve_witness(defs, top_w, vars, n, modulus, inputs)
-        .map_err(|e| format!("solve: {e:?}"))?;
-    Ok(w.vals
+    eval::solve_witness(
+        eval::WitnessProgram::Symbolic(defs, top_w),
+        vars,
+        n,
+        modulus,
+        inputs,
+    )
+    .map(bn254_witness_slots)
+    .map_err(|e| format!("solve: {e:?}"))
+}
+
+fn bn254_witness_slots(mut w: eval::Witness) -> Vec<Option<crate::solver::Fp>> {
+    std::mem::take(&mut w.vals)
         .into_iter()
-        .zip(w.set)
+        .zip(std::mem::take(&mut w.set))
         .map(|(v, set)| set.then_some(crate::solver::Fp::Bn254(v)))
-        .collect())
+        .collect()
 }
 
 thread_local! {
@@ -3003,11 +3190,39 @@ mod eval {
         e
     }
 
-    struct WProgram {
+    pub(super) struct WProgram {
         defs: Vec<Vec<WItem>>,
         /// Per template: [`escapes`].
         escapes: Vec<bool>,
         top: Vec<WItem>,
+    }
+
+    pub(super) enum WitnessProgram<'a> {
+        Symbolic(&'a [GDef], &'a [super::WItem]),
+        Compiled(&'a WProgram),
+    }
+
+    impl WProgram {
+        pub(super) fn compile(defs: &[GDef], top: &[super::WItem]) -> Self {
+            // Chunk boundaries only forgo carrying a Bit input over.
+            use rayon::prelude::*;
+            let defs: Vec<Vec<WItem>> = defs
+                .par_iter()
+                .map(|d| w_items(&d.w_items, Some(d)))
+                .collect();
+            let top = top
+                .par_chunks(256)
+                .map(|c| w_items(c, None))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .flatten()
+                .collect();
+            let mut memo = vec![None; defs.len()];
+            let escapes = (0..defs.len())
+                .map(|d| escapes(&defs, d, &mut memo))
+                .collect();
+            Self { defs, escapes, top }
+        }
     }
 
     /// A BN254 witness: values by var id, and which ids an input or an op
@@ -3015,6 +3230,30 @@ mod eval {
     pub struct Witness {
         pub vals: Vec<Fr>,
         pub set: Vec<bool>,
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        static DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+    }
+
+    impl Drop for Witness {
+        fn drop(&mut self) {
+            use zeroize::Zeroize;
+            #[cfg(test)]
+            let had_secret = self.vals.iter().any(|value| !value.is_zero());
+            self.vals.zeroize();
+            self.set.zeroize();
+            #[cfg(test)]
+            DROP_CHECK.with(|check| {
+                if check.get().is_some() {
+                    check.set(Some((
+                        had_secret,
+                        self.vals.iter().all(Zero::is_zero) && self.set.iter().all(|set| !set),
+                    )));
+                }
+            });
+        }
     }
 
     impl Witness {
@@ -3041,6 +3280,50 @@ mod eval {
         /// The plugs' values, when nothing the call writes can change them and
         /// it writes only its own internals (always, at the top level).
         vals: Option<Vec<Fr>>,
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        static FRAME_DROP_CHECK: std::cell::Cell<Option<(bool, bool)>> = const { std::cell::Cell::new(None) };
+    }
+
+    impl Drop for WFrame {
+        fn drop(&mut self) {
+            use zeroize::Zeroize;
+            #[cfg(test)]
+            let had_secret = self.plugs.iter().any(|plug| !plug.k.is_zero())
+                || self
+                    .vals
+                    .as_ref()
+                    .is_some_and(|vals| vals.iter().any(|value| !value.is_zero()));
+            for plug in &mut self.plugs {
+                plug.k.zeroize();
+                for (_, coefficient) in &mut plug.terms {
+                    coefficient.zeroize();
+                }
+            }
+            if let Some(vals) = &mut self.vals {
+                vals.zeroize();
+            }
+            #[cfg(test)]
+            FRAME_DROP_CHECK.with(|check| {
+                if check.get().is_some() {
+                    check.set(Some((
+                        had_secret,
+                        self.plugs.iter().all(|plug| {
+                            plug.k.is_zero()
+                                && plug
+                                    .terms
+                                    .iter()
+                                    .all(|(_, coefficient)| coefficient.is_zero())
+                        }) && self
+                            .vals
+                            .as_ref()
+                            .is_none_or(|vals| vals.iter().all(Zero::is_zero)),
+                    )));
+                }
+            });
+        }
     }
 
     const ONE: Fr = ark_ff::MontFp!("1");
@@ -3190,9 +3473,8 @@ mod eval {
     /// witness as `solve_witness_streamed_dense` over [`super::expand_w_visit`]:
     /// the ops run in the same order, and a plug's expression or a carried `Bit`
     /// input has the value the substituted op would read.
-    pub fn solve_witness(
-        defs: &[GDef],
-        top: &[super::WItem],
+    pub(super) fn solve_witness(
+        program: WitnessProgram<'_>,
         vars: &[Var],
         n: usize,
         modulus: &BigUint,
@@ -3211,38 +3493,110 @@ mod eval {
                 w.put(var.id, v.as_bn254_fr().expect("BN254 modulus"));
             }
         }
-        // Compiling is per template and per top-level item, so it runs in
-        // parallel; a chunk boundary only forgoes carrying a `Bit` input over.
-        use rayon::prelude::*;
-        let defs: Vec<Vec<WItem>> = defs
-            .par_iter()
-            .map(|d| w_items(&d.w_items, Some(d)))
-            .collect();
-        let top: Vec<WItem> = top
-            .par_chunks(256)
-            .map(|c| w_items(c, None))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .flatten()
-            .collect();
-        let mut memo = vec![None; defs.len()];
-        let escapes = (0..defs.len())
-            .map(|d| escapes(&defs, d, &mut memo))
-            .collect();
-        let p = WProgram { defs, escapes, top };
+        let owned;
+        let program = match program {
+            WitnessProgram::Compiled(program) => program,
+            WitnessProgram::Symbolic(defs, top) => {
+                owned = WProgram::compile(defs, top);
+                &owned
+            }
+        };
         let top = WFrame {
             base: 0,
             plugs: Vec::new(),
             vals: Some(Vec::new()),
         };
-        run(&p, &p.top, &top, &mut w, modulus, &mut Vec::new())?;
+        run(
+            program,
+            &program.top,
+            &top,
+            &mut w,
+            modulus,
+            &mut Vec::new(),
+        )?;
         Ok(w)
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn missing_later_input_wipes_partial_dense_witness() {
+        let vars = [
+            Var {
+                id: 0,
+                name: "first".into(),
+                role: VarRole::PrivateInput,
+            },
+            Var {
+                id: 1,
+                name: "missing".into(),
+                role: VarRole::PrivateInput,
+            },
+        ];
+        let inputs = BTreeMap::from([(0, "123456789".into())]);
+        let modulus = BigUint::from_bytes_le(&Fr::MODULUS.to_bytes_le());
+        DROP_CHECK.with(|check| check.set(Some((false, false))));
+        let err = solve_witness(
+            WitnessProgram::Symbolic(&[], &[]),
+            &vars,
+            2,
+            &modulus,
+            &inputs,
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(err, SolveError::MissingInput(1)));
+        assert_eq!(
+            DROP_CHECK.with(|check| check.replace(None)),
+            Some((true, true))
+        );
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn call_frame_wipes_witness_derived_plug_and_value() {
+        let w = Witness {
+            vals: vec![Fr::from(7_u64)],
+            set: vec![true],
+        };
+        let parent = WFrame {
+            base: 0,
+            plugs: Vec::new(),
+            vals: Some(vec![Fr::from(7_u64)]),
+        };
+        let plugs = [Lc {
+            k: Fr::zero(),
+            terms: vec![(VRef::Plug(0), ONE)],
+        }];
+        let frame = parent.call(VRef::Global(1), &plugs, false, &w);
+        assert_eq!(frame.plugs[0].k, Fr::from(7_u64));
+        assert_eq!(frame.vals.as_ref().unwrap()[0], Fr::from(7_u64));
+        FRAME_DROP_CHECK.with(|check| check.set(Some((false, false))));
+        drop(frame);
+        assert_eq!(
+            FRAME_DROP_CHECK.with(|check| check.replace(None)),
+            Some((true, true))
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn satisfied_slots_wipe_when_row_evaluation_unwinds() {
+        SATISFIED_SLOT_DROP_CHECK.with(|check| check.set(Some((false, false))));
+        let unwind = std::panic::catch_unwind(|| {
+            let _slots = SatisfiedSlots(vec![Some(crate::solver::Fp::Bn254(ark_bn254::Fr::from(
+                7u64,
+            )))]);
+            panic!("row evaluator panic");
+        });
+        assert!(unwind.is_err());
+        SATISFIED_SLOT_DROP_CHECK.with(|check| {
+            assert_eq!(check.replace(None), Some((true, true)));
+        });
+    }
 
     fn row(a: u32, b: u32, c: u32) -> R1csRow {
         R1csRow {
@@ -3364,18 +3718,52 @@ mod tests {
         let flags = |f: &[std::sync::atomic::AtomicU8]| -> Vec<u8> {
             f.iter().map(|a| a.load(Ordering::Relaxed)).collect()
         };
-        let (gf, gok, gq) = classify_and_check(&defs, &top_c, &assign, &m, n, true, None);
+        let symbolic = RowProgram::Symbolic(&defs, &top_c);
+        let (gf, gok, gq) = classify_and_check(symbolic, &assign, &m, n, true);
         let compiled = eval::compile(&defs, &top_c);
-        let (cf, cok, _) = classify_and_check(&defs, &top_c, &assign, &m, n, true, Some(&compiled));
+        let numeric = RowProgram::Compiled(&compiled);
+        let (cf, cok, _) = classify_and_check(numeric, &assign, &m, n, true);
         assert_eq!((flags(&gf), gok), (flags(&cf), cok));
         assert!(flags(&gf).iter().any(|&f| f & F_PINNED != 0));
         // Pass 2 over the same kept rows (`gq`: which row lands first varies between
         // runs), every var a suspect: the compiled rows reject the same candidates.
         assert!(gq.iter().filter(|q| q.get().is_some()).count() > 100);
         let all: std::collections::BTreeSet<u32> = (0..n as u32).collect();
-        let generic = two_valued_satisfied(&defs, &top_c, &assign, &m, &all, &gq, None);
-        let compiled = two_valued_satisfied(&defs, &top_c, &assign, &m, &all, &gq, Some(&compiled));
+        let generic = two_valued_satisfied(symbolic, &assign, &m, &all, &gq);
+        let compiled = two_valued_satisfied(numeric, &assign, &m, &all, &gq);
         assert_eq!(generic, compiled);
+    }
+
+    #[test]
+    fn implicit_derived_suffix_preserves_names_and_diagnostic_order() {
+        use std::sync::atomic::AtomicU8;
+        let signature = vec![
+            Var {
+                id: 0,
+                name: "request".into(),
+                role: VarRole::PublicInput,
+            },
+            Var {
+                id: 1,
+                name: "named_hint".into(),
+                role: VarRole::Derived,
+            },
+        ];
+        let flags =
+            [F_SEEN, F_SEEN, F_SEEN | F_RESTRICTED, 0, F_SEEN | F_PINNED].map(AtomicU8::new);
+        let keep = [3].into_iter().collect();
+        let derived = || derived_vars_with_implicit_suffix(&signature, flags.len());
+        let suspects = select_suspects(&flags, derived().map(|(id, _)| id));
+        assert_eq!(suspects, [2].into_iter().collect());
+        let report = assemble_underconstrained(&flags, derived(), &keep, &suspects);
+        assert_eq!(
+            report
+                .iter()
+                .map(|row| (row.var, row.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "named_hint"), (2, "v2"), (3, "v3")],
+        );
+        assert_eq!(report[2].reason, "no constraint references this variable");
     }
 
     // ---- streaming under-constraint analyzer equivalence ----
@@ -3403,7 +3791,7 @@ mod tests {
         for r in rows {
             apply_row_flags(r, assign, modulus, &flags, &quadratic);
         }
-        let suspects = select_suspects(&flags, vars);
+        let suspects = select_suspects(&flags, named_derived_vars(vars).map(|(id, _)| id));
         let mut polys: std::collections::BTreeMap<u32, Vec<(Fp, Fp, Fp)>> =
             suspects.iter().map(|&v| (v, Vec::new())).collect();
         for r in rows {
@@ -3429,7 +3817,7 @@ mod tests {
                 "one-candidate pass disagrees"
             );
         }
-        assemble_underconstrained(&flags, vars, keep_extra, &two_valued)
+        assemble_underconstrained(&flags, named_derived_vars(vars), keep_extra, &two_valued)
     }
 
     fn bn254_modulus() -> num_bigint::BigUint {
